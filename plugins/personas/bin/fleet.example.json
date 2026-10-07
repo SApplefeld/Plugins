@@ -1,0 +1,47 @@
+[
+  {
+    "name": "steward",
+    "workdir": "D:/personas/steward",
+    "permissionMode": "bypassPermissions",
+    "rundir": "D:/personas/steward/run",
+    "channelName": "steward",
+    "model": "sonnet",
+    "controllerTickMs": 300000,
+    "jevMode": "shadow",
+    "coordinatorPersona": "steward",
+    "architectPersona": "architect",
+    "fleetRoster": "D:/personas/fleet.json",
+    "enabled": true
+  },
+  {
+    "name": "architect",
+    "workdir": "D:/personas/architect",
+    "permissionMode": "bypassPermissions",
+    "rundir": "D:/personas/architect/run",
+    "channelName": "architect",
+    "model": "fable",
+    "effort": "high",
+    "controllerTickMs": 60000,
+    "coordinatorPersona": "steward",
+    "architectPersona": "architect",
+    "enabled": true
+  },
+  {
+    "name": "aios",
+    "workdir": "D:/ai-os",
+    "permissionMode": "bypassPermissions",
+    "rundir": "D:/personas/aios/run",
+    "coordinatorPersona": "steward",
+    "architectPersona": "architect",
+    "enabled": true
+  },
+  {
+    "name": "dev",
+    "workdir": "D:/agent_persona",
+    "permissionMode": "bypassPermissions",
+    "model": "opus",
+    "coordinatorPersona": "steward",
+    "architectPersona": "architect",
+    "enabled": true
+  }
+]

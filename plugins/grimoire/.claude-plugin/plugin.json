@@ -1,0 +1,8 @@
+{
+  "name": "grimoire",
+  "description": "A personal Claude Code kit: brainstorm/execute/finish workflow skills, eight review agents, C# and T-SQL style guides, and session-recovery hooks that re-anchor a run on its plan doc after any session boundary.",
+  "author": {
+    "name": "Scott Applefeld",
+    "email": "scott@applefeld.com"
+  }
+}

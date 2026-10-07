@@ -1,0 +1,30 @@
+{
+  "name": "applefeld",
+  "owner": {
+    "name": "Scott Applefeld",
+    "email": "scott@applefeld.com"
+  },
+  "description": "Scott Applefeld's personal plugin marketplace.",
+  "plugins": [
+    {
+      "name": "grimoire",
+      "source": "./plugins/grimoire",
+      "description": "Workflow skills (brainstorm/execute/finish), eight review agents, C# and T-SQL style guides, and compaction-recovery hooks."
+    },
+    {
+      "name": "personas",
+      "source": "./plugins/personas",
+      "description": "PIANO-esque cognitive layer: persona-keyed state, heartbeat liveness, controller with classify/actuate. The passive supervisor's own runtime."
+    },
+    {
+      "name": "relay",
+      "source": "./plugins/relay/plugins/relay",
+      "description": "Connects a session to a Discord thread through a broker on the host."
+    },
+    {
+      "name": "wiki",
+      "source": "./plugins/wiki",
+      "description": "The knowledge-base engine, set up from its installed folder."
+    }
+  ]
+}

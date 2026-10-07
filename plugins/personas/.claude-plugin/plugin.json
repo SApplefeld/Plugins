@@ -1,0 +1,158 @@
+{
+  "name": "personas",
+  "description": "PIANO-esque cognitive layer: persona-keyed state, heartbeat liveness, controller with classify/actuate",
+  "author": { "name": "Dreamed up by Scott Applefeld, built by Claude" },
+  "types": "./hooks/personas.d.ts",
+  "userConfig": {
+    "persona": {
+      "type": "string",
+      "default": "default",
+      "title": "Persona",
+      "description": "Which persona this session claims at start (e.g. 'default', 'dev'). Defaults to 'default' when unset."
+    },
+    "heartbeatMs": {
+      "type": "number",
+      "default": 30000,
+      "title": "Heartbeat interval (ms)",
+      "description": "How often the owner refreshes its heartbeat (ms). Default 30s."
+    },
+    "staleAfterMs": {
+      "type": "number",
+      "default": 90000,
+      "title": "Stale threshold (ms)",
+      "description": "How long before a heartbeat is considered stale (ms). Default 90s."
+    },
+    "memoryGateDiscardPercent": {
+      "type": "number",
+      "default": 90,
+      "title": "Memory gate discard floor (percent)",
+      "description": "The confidence floor, 50 to 100, at which Jev's own discard probability skips the memory-kind Haiku classify and distill calls outright, on a dev-split turn. Acts only where memory-kind is named in jevLive; otherwise this setting does nothing. Default 90."
+    },
+    "controllerTickMs": {
+      "type": "number",
+      "default": 30000,
+      "title": "Controller tick (ms)",
+      "description": "How often the controller evaluates the goal (ms). Default 30s."
+    },
+    "nudgeFloorMs": {
+      "type": "number",
+      "default": 300000,
+      "title": "Nudge floor (ms)",
+      "description": "Minimum time between nudges (ms). Default 5min."
+    },
+    "nudgeIdleMs": {
+      "type": "number",
+      "default": 120000,
+      "title": "Nudge idle gate (ms)",
+      "description": "Session must be idle this long before a nudge is eligible (ms). Default 2min."
+    },
+    "healthTimeoutMs": {
+      "type": "number",
+      "default": 60000,
+      "title": "Health timeout (ms)",
+      "description": "Timeout for the health probe (ms). Default 60s, cap 120s."
+    },
+    "gitProbeMs": {
+      "type": "number",
+      "default": 120000,
+      "title": "Git probe interval (ms)",
+      "description": "How often the git probe runs (ms). Default 120s, cap 300s."
+    },
+    "askOperatorWaitMs": {
+      "type": "number",
+      "default": 3600000,
+      "title": "Ask timeout (ms)",
+      "description": "How long before an unanswered ask times out and the controller walks on to the next plan (ms). Default 60min."
+    },
+    "askReraiseWindowMs": {
+      "type": "number",
+      "default": 900000,
+      "title": "Ask re-raise window (ms)",
+      "description": "How long after opening an ask before re-raising it to the operator's thread (ms). Default 15min."
+    },
+    "askReaskSuppressMs": {
+      "type": "number",
+      "default": 600000,
+      "title": "Ask re-ask suppress window (ms)",
+      "description": "How long after closing an ask before the classifier can re-open the same question (ms). Default 10min."
+    },
+    "channelRecordWindow": {
+      "type": "number",
+      "default": 50,
+      "title": "Channel record window (count)",
+      "description": "How many closed inbox/reply records the shared store keeps per persona before rolling the rest to .agentic-channel.jsonl. Open asks are never rolled by this window. Default 50."
+    },
+    "arming": {
+      "type": "string",
+      "default": "off",
+      "title": "Arming tier",
+      "description": "off, reader or owner. off registers no tool, timer or claim (a plain chat session). reader registers agentic_identity/agentic_say/agentic_inbox/fleet_status only, with no goal-tree tool and no ownership. owner is the full worker/coordinator shape. A supervisor launch always sets owner."
+    },
+    "coordinatorPersona": {
+      "type": "string",
+      "default": "coordinator",
+      "title": "Coordinator persona name",
+      "description": "The one persona name the inbox gates treat as the coordinator: its owner may address any persona, and any named persona owner may address it. A configured name of 'default' is refused and falls back to 'coordinator'."
+    },
+    "architectPersona": {
+      "type": "string",
+      "default": "",
+      "title": "Architect persona name",
+      "description": "The persona name this file offers as the architect: the design seat the coordinator routes design asks to, and the seat whose own launch receives the architect charter. The supervisor reads it to build that charter and the coordinator's design clause. The plugin reads it for the inbox gates: any named persona owner may address it, and its owner may answer a persona whose owner's record to it is delivered or answered, an answer that is delivered even if the architect resolves that record after sending it. The plugin reads a name of 'default', or the coordinator's own name, as no architect. Where this file names no architect, the fleet has none, no design-escalation clause is built, and both of those inbox lines stay closed."
+    },
+    "liaisonPersona": {
+      "type": "string",
+      "default": "",
+      "title": "Liaison persona name",
+      "description": "The persona name this file offers as the liaison: the seat several people talk with in one thread, which shapes their asks into briefs for the architect and relays status from the coordinator, and whose own launch receives the liaison charter. The supervisor reads it to build that charter and the coordinator's clause answering the liaison's status asks. The plugin reads nothing from it, since the liaison sends as a named persona and is reached as one. The supervisor refuses a name of 'default', the coordinator's or the architect's own name, and a liaison named in a file that names no architect. Where this file names no liaison, the fleet has none and neither text is built."
+    },
+    "fleetRoster": {
+      "type": "string",
+      "default": "",
+      "title": "Fleet roster path",
+      "description": "The roster file the fleet reading uses: a JSON array of persona entries, each naming a persona, its working directory, optionally its run directory, and whether the fleet runs it. The fleet_status tool reads it on demand, and the coordinator persona's controller tick reads it every tick to watch each roster persona's health class. Left unset, fleet_status reports that it has no roster to read and the tick's watcher stays silent."
+    },
+    "jevMode": {
+      "type": "string",
+      "default": "shadow",
+      "title": "Jev shadow mode",
+      "description": "off or shadow, and shadow is the default. shadow has the decision seam put each closed question the plugin already asks Haiku to Jev as well, beside it, and write the answer to the decision journal, acting on nothing it gets back. off makes no such call and writes no journal line. The supervisor refuses any other value rather than writing it, so a typo stops that launch instead of quietly disabling the seam."
+    },
+    "jevLive": {
+      "type": "string",
+      "default": "",
+      "title": "Jev live questions",
+      "description": "Comma-separated question-set ids, each one of PROMOTABLE_SET_IDS, naming which question may read Jev's live answer through liveAsk instead of always shadowing it. Empty by default: no question is live. An id outside the promotable set is dropped, logged as one jev_live_invalid decision naming it."
+    },
+    "restartRecap": {
+      "type": "string",
+      "default": "auto",
+      "title": "Automatic restart recap",
+      "description": "auto or skill, and auto is the default. auto runs bin/restart-recap.mjs at the supervisor's priming turn and injects its digest as a [RESTART RECAP] block, only where the previous session's last record is under 24 hours old and either the persona has an active goal or the operator wrote within 6 hours. skill runs nothing at launch, leaving the recap to the restart-recap skill. Any other value reads as auto at the plugin's own read. A supervisor launch given RESTART_RECAP outside that pair stops rather than writing it."
+    },
+    "reconcileEveryMs": {
+      "type": "number",
+      "default": 14400000,
+      "title": "Reconciliation cadence (ms)",
+      "description": "How long between the [RECONCILE] prompts the coordinator persona's controller tick submits, which are the only trigger for the kit Coordinator seat's reconciliation pass. Default 4 hours, that seat's own cadence: the claim probe's window is one full cadence and the registry prune's staleness test is twice it, so a shorter run of either could fire nothing a four-hourly run misses. A value at or below zero takes the default, since it would otherwise be satisfied by every tick."
+    },
+    "supervisorMailbox": {
+      "type": "string",
+      "default": "",
+      "title": "Supervisor mailbox path",
+      "description": "The mailbox file the supervisor that launched this session writes, <rundir>/mailbox.jsonl. The controller tick reads it and writes mailbox.ack.jsonl beside it: a probe is acknowledged with no turn spent, and a shutdown request is delivered once as a turn opening [SUPERVISOR id=<id>]. The supervisor writes this; left unset, as in an interactive session, the tick reads no mailbox."
+    },
+    "heartbeatPath": {
+      "type": "string",
+      "default": "",
+      "title": "Heartbeat sidecar path",
+      "description": "The absolute path of the working directory's heartbeat sidecar, the record of which session holds each persona. The supervisor writes the same path it reads, so the session stamps that file wherever its shell has moved. Left unset, the session stamps .agentic-heartbeat.json in the directory it was launched in."
+    },
+    "supervisorHeartbeatPath": {
+      "type": "string",
+      "default": "",
+      "title": "Own heartbeat file path",
+      "description": "The heartbeat file only this session writes, <rundir>/heartbeat.json, stamped with its session id, lastSeen and turnStartedAt on every heartbeat tick. It is the heartbeat the supervisor's liveness verdict reads. The supervisor writes this; left unset, no such file is written."
+    }
+  }
+}

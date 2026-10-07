@@ -1,0 +1,20 @@
+# Starting or Resuming a Run
+
+Part of the executing-work skill: what a session does before its first section, on a resume, and after any compaction.
+
+## Before Starting or Resuming
+
+Read the plan doc in full, **including all Chapters**, which are the state. After a compaction or a visible truncation notice, and before touching any file, take the reload the doctrine's durable-artifacts bullet states, re-invoking `executing-work` through the Skill tool.
+
+**Never stop to ask whether a plan handed to you was approved.** A plan handed on the operator's own channel, or by a chain handoff inside the bounds the peer-sessions skill states, is approved as written. So is one whose `## Dispatch Authorization` section covers this session, a section the curating-docs skill defines. A plan past those bounds holds for the operator's word. Set a `Status:` header reading anything but `In Progress` or `Complete` to `In Progress` on starting, and record any change, old value and new, in the run's first Chapter, since the header sits inside the approval fingerprint. Never flip `Complete`, which would overwrite a close-out's record: a run starting a plan marked finished takes the blocker set's contradiction path. The curating-docs skill's machine contract owns the `Status:` values. A worker under an external engine (the stand-down below) leaves the header to its engine.
+
+**Then run the intake gap check on the plan doc.** List what each section leaves unstated that its implementer needs. Route each gap after the memory recall below, which is one of its sources, and before its section is dispatched. A material gap, the spec-does-not-cover decision, is a `BLOCKED:` on an unattended run and a decision ask on an attended one. A run is unattended when it is a persona session with no operator at the keyboard. A non-material gap, answered under route (a) from a cited source or under route (b) by a declared low-blast reversible default, goes on that section's Chapter `Assumptions:` line in brainstorming's declared-assumption format, dated today with `, section N` in the parenthetical. The dispatch brief carries the answer, not the gap. Never append it to the plan doc's `## Assumptions` section, which freezes at approval inside the fingerprint the external engine reads.
+
+**Then run `memq recall`, once, before the first section.** It returns the whole memory store as one bounded digest, and the memory-system skill owns how to read and act on it. Carry forward what bears on the sections ahead. Re-run it on a resume and at a boundary taking that skill's hand walk, never trusting a recollection of an earlier pass. When a recalled record changes what you build, stamp it that turn with `memq touch <name> --applied`.
+
+Run it from the project root, a worktree of it, or any directory inside the project. The memory-system skill's resolver rule (`skills/memory-system/SKILL.md` under the kit plugin root) says which store resolves. Two tells mean a different, empty store resolved: a `git worktree repair` note on stderr, and coverage lines all reading zero on a project you know has memories.
+
+**External-engine stand-down.** Where a driving directive says an external engine owns continuation by spawning a fresh worker per section, or the environment carries `KIT_EXTERNAL_ENGINE`, run the section loop for the directed section only. The marker binds as the directive's own words, not as a mechanism. The **worker runs this skill**, orchestrating, dispatching implementers and writing Chapters as any session would, never absorbing implementation inline for being headless.
+
+**Workspace and siblings.** A worktree on a feature branch that concurrency put you in is your workspace, and finishing-work handles integration and teardown. Own a disjoint set of files from sibling sessions in the same repo. Their uncommitted work takes the doctrine's Scope and Safety rules, so never stage it or carry it in a commit of yours. A branch whose pull request is based on another branch takes that base in before its first section, by the Branch-and-PR bullet of the section loop's step 7 in `references/closing.md`.
+
