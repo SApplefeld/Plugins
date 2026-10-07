@@ -213,7 +213,8 @@ The installer:
   first and preserves every hook, rule, and setting that is not this project's,
 - hardens the access control lists on the whole execution surface: `hooks/`, `relay/`, `wrapper/`,
   `install/`, and `broker/` as directories, the bot token file, and the state root,
-- runs `npm ci`, which installs the reviewed lockfile rather than resolving newer dependencies.
+- runs `npm ci`, which installs the reviewed lockfile rather than resolving newer dependencies and
+  fails the run on any download whose checksum differs from the lockfile's `integrity` hash.
 
 Directories are hardened as containers rather than file by file, because a hardened file in a
 directory that permits delete-child can be deleted and re-created with a clean access control list.
