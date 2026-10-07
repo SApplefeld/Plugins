@@ -1,0 +1,3129 @@
+// Rendering for the two passive Discord surfaces: the thread name and the starter-message card.
+//
+// Everything here is pure text and every input is untrusted. A session name and a tool name come
+// from a local process that may announce itself as anything at all, so neutralization happens here,
+// at the render site, rather than at intake: intake owns storage safety (bounded, no control
+// characters) and the renderer owns display safety. Suppressing pings is the transport's half of
+// the same job, via `allowed_mentions`.
+import { fit, sliceCodePoints, visible, withoutInvisible } from "../sanitize.ts";
+// Re-exported for the callers that already read `fit` from the render site. The implementation
+// lives in `../sanitize.ts` so the storage layer can reach it without importing this module.
+export { fit } from "../sanitize.ts";
+import { MAX_PLAN_CHARS } from "../board/events.ts";
+import { modelRank } from "../registry.ts";
+import type { BackgroundTask, ModelFallback } from "../registry.ts";
+import type { SessionView, SurfaceState } from "./state.ts";
+
+/**
+ * The five-state vocabulary of the session card, which is the surface carrying the full state.
+ *
+ * Glyph first on the card's heading, so a channel scrolled at speed reads as a column of states.
+ * Exported so it is claimed in one place, and every test asserting a card title reads its glyph
+ * from this table rather than repeating a literal. One test pins the literals, and it is the only
+ * thing that has to change when a state's glyph does.
+ *
+ * The vocabulary is graded by how much the state wants from the operator, so the glyph alone
+ * carries that much when truncation eats the rest: a gear is running, a pause is doing nothing, a
+ * stop-square is halted on you, and a warning triangle is over. The no-entry sign is a run stopped
+ * on the operator with nothing left to try: heavier than the stop-square as a glyph, because a
+ * permission prompt is one verdict away from moving while a blocked run needs a decision made.
+ *
+ * Glyph weight is not precedence. `blocked` is ranked below `needs you` in `deriveSurfaceState`,
+ * where the two never stand at once anyway, and the key order here follows that derivation order
+ * rather than the weight of the drawing.
+ */
+export const GLYPHS: Record<SurfaceState, string> = {
+  working: "⚙",
+  "needs you": "⏹",
+  blocked: "⛔",
+  idle: "⏸",
+  exited: "⚠",
+};
+
+/**
+ * The states a thread title names, which are only the two that ask something of the operator.
+ *
+ * Every rename writes a notice into the thread that nothing can remove, so the title is spent only
+ * on a change the operator has to act on: a session halted on them. Working, idle and exited carry
+ * no title state, and a thread in any of them carries the resting title: the resting mark, then the
+ * session's name. Liveness is read from the card, the typing line, the restart line, and the
+ * archive on exit where the host keeps it on, so a supervised session at rest that exits and
+ * restarts writes no rename notice at all.
+ *
+ * Blocked earns a title state, and so earns a rename and its irremovable notice, because it is
+ * precisely the halted-on-the-operator class the title exists to surface: a run that has stopped
+ * and will not move until they answer is the one thing a thread list must be able to say.
+ */
+export type TitleState = "needs you" | "blocked";
+
+/**
+ * The title's glyphs, the card's own for the same two states.
+ *
+ * Glyph first in a title, because the channel's thread list truncates hard on mobile and the
+ * actionable bit has to survive truncation.
+ */
+export const TITLE_GLYPHS: Record<TitleState, string> = {
+  "needs you": "⏹",
+  blocked: "⛔",
+};
+
+/**
+ * The mark a resting title opens with. A session's own name is untrusted text, and a /rename can
+ * spell out a broker title down to the glyph, so every title the broker composes opens with a mark
+ * of its own: this one at rest, a state glyph when the thread asks for something. A name that
+ * begins with a state glyph therefore composes behind this mark, never as a broker title. One test
+ * pins the literal, and it is the only thing that has to change when the mark does.
+ */
+export const RESTING_MARK = "•";
+
+/** The card's state as the thread list sees it, or null for a state the title does not name. */
+export function titleState(state: SurfaceState): TitleState | null {
+  return state === "needs you" || state === "blocked" ? state : null;
+}
+
+/** Separates the name from the state in a thread title. */
+const SEPARATOR = "·";
+
+/** Discord's ceiling on a thread name. */
+export const MAX_THREAD_NAME_LENGTH = 100;
+
+/**
+ * The ceiling this renderer holds a card to, below Discord's 2000-character message limit. The
+ * card is assembled from fields that are individually capped at intake, so this is the second
+ * bound rather than the first, and it is stated here so the two caps are not a coupling that has
+ * to be discovered by exceeding it.
+ */
+export const MAX_CARD_LENGTH = 1_900;
+
+// Display syntax that would otherwise let a name change the shape of the card around it. The
+// angle bracket is in here with the markdown because Discord's chip syntax lives inside it:
+// `<t:...:R>` renders as a live relative timestamp, which would spoof the heartbeat this card
+// exists to carry, and `<@id>`, `<#id>`, and `<:name:id>` render as a mention or an emoji.
+const MARKDOWN = /[\\`*_~|<>#[\]()]/g;
+
+/**
+ * Untrusted text for the body of a message: visible, and with markdown escaped so it renders as
+ * the characters it contains rather than as syntax. `@everyone` and `@here` survive as text on
+ * purpose; the transport's `allowed_mentions` is what stops them pinging anyone.
+ */
+export function inertText(value: string): string {
+  return visible(value).replace(MARKDOWN, (character) => `\\${character}`);
+}
+
+/**
+ * Display syntax a table cell drawn outside a fence may not carry, which is `MARKDOWN` less the
+ * emphasis marks.
+ *
+ * Emphasis is what the model wrote the cell in, and the per-row rendering is the one table shape
+ * with no fence to make it inert by position, so escaping it there reaches the operator as a visible
+ * asterisk in front of every bold word a comparison table contains. Every character that can draw a
+ * chip, a quote bar, a spoiler, a heading, or a fence is still escaped; what is given up is that a
+ * cell can compose text reading like the bold heading this rendering draws around a row. That is the
+ * trade `inertMessage` already makes for mirrored prose, on its own reasoning: what the escape stops
+ * is content that renders as a broker surface, not content that reads like one. A cell is the same
+ * class of text as the prose around it, so it is held to the same line.
+ */
+const CELL_MARKDOWN = /[\\`|<>#[\]()]/g;
+
+/**
+ * Untrusted text for a table cell drawn outside a fence: visible, and escaped everywhere the shape
+ * of the surface could be changed, but not where only its emphasis could.
+ */
+function inertCell(value: string): string {
+  return visible(value).replace(CELL_MARKDOWN, (character) => `\\${character}`);
+}
+
+/**
+ * Untrusted text for a thread name. Thread names render no markdown, so escaping it there would
+ * only put backslashes in front of ordinary characters.
+ */
+export function inertName(value: string): string {
+  return visible(value);
+}
+
+/**
+ * Untrusted text for a message component's label or description, bounded to what that field
+ * accepts.
+ *
+ * The third escape beside `inertText` and `inertName`, and the distinction is what the surface
+ * renders. A component's label and description are plain text: Discord draws no markdown and
+ * resolves no chip inside them, so the markdown escape would reach the operator as a visible
+ * backslash in front of every underscore and asterisk an option label contains. What is stripped is
+ * the invisible class, which can reorder or hide text with no visual trace on any surface, and the
+ * length, because Discord refuses the whole message when one field is over its field limit.
+ */
+export function inertLabel(value: string, limit: number): string {
+  return fit(visible(value), limit);
+}
+
+/**
+ * Untrusted text for a line of message content, escaped and bounded.
+ *
+ * The pairing `inertLabel` is not: content is markdown, so a field composed into it goes through
+ * the full escape, and the bound is applied to the escaped text because that is what the reader
+ * sees and what the message's budget is spent on.
+ */
+export function inertField(value: string, limit: number): string {
+  return fit(inertText(value), limit);
+}
+
+/**
+ * What a backtick becomes inside a fenced block, since no escape of one holds there.
+ *
+ * A plain apostrophe rather than a modifier letter or a zero-width character: it renders in every
+ * client and every font, it is not in the invisible class `visible` strips, and it is the closest
+ * thing to a backtick that cannot be part of a fence delimiter.
+ */
+const BLOCK_BACKTICK = "'";
+
+/** Every backtick, whatever it sits beside. None of them reaches a fenced body. */
+const BLOCK_FENCE = /`/g;
+
+/**
+ * Untrusted text for a line inside a fenced block.
+ *
+ * A fence renders no markdown, resolves no chip, and honors no quote marker, so the full escape
+ * would reach the operator as a visible backslash in front of every underscore and asterisk a
+ * real tool name contains. `visible` is what keeps a field from composing a body line of its own:
+ * the newline is in the invisible class it strips, and any whitespace run left over collapses to
+ * one space.
+ *
+ * One character needs handling, and escaping is not what handles it.
+ *
+ * A fenced block honors no backslash escape, which is a property of the client rather than of
+ * Markdown generally and is why nothing here escapes anything: a backslash is drawn as itself and
+ * consumes nothing after it, so a Windows path reads as the path that was written, while a doubled
+ * one would reach the operator doubled. That matters most on the tool input of a permission prompt,
+ * where the characters on screen are the thing being approved.
+ *
+ * A backtick is therefore replaced rather than escaped, since an escape of one would arrive as a
+ * backslash and a live backtick. Every backtick becomes the substitute above, so a fenced body
+ * carries none at all, and that is the only bound here that cannot be composed around. A longer
+ * opening fence is not an alternative: a block opens on exactly three backticks and reads a fourth
+ * as content, so an inner triple closes a four-backtick fence too.
+ */
+export function inertBlock(value: string): string {
+  return visible(value).replace(BLOCK_FENCE, BLOCK_BACKTICK);
+}
+
+/** The `inertField` pairing for a fenced line: block-inert, and bounded on the escaped text. */
+export function inertBlockField(value: string, limit: number): string {
+  return fit(inertBlock(value), limit);
+}
+
+/** Discord's ceiling on a message, less room for the cut marker this renderer adds. */
+export const MAX_MESSAGE_LENGTH = 1_900;
+
+/**
+ * Text for a message this broker composes and posts into a thread: a notice, a permission prompt,
+ * or a message a caller has already neutralized.
+ *
+ * Unlike a card, this keeps markdown, and it keeps the chip syntax too. Both are load-bearing on
+ * this path: the permission prompt and the question alert deliberately mention someone, and
+ * escaping their `<@id>` would render the mention as characters and drop the ping a parked session
+ * is waiting to be answered through. That is safe only because every string arriving here is either
+ * composed by this renderer, with each untrusted field already through `inertText`, or neutralized
+ * by its caller. Text a model or a session authored reaches Discord through `renderAnswer` or
+ * `renderMirror` instead, and both of those neutralize the chip and quote syntax before it gets
+ * here. What is still stripped is the invisible class, which can reorder or hide text with no
+ * visual trace at all, and which no message has a use for.
+ *
+ * Whitespace is left exactly as it arrived, apart from the trim: a reply is multi-line by nature
+ * and a code block in one carries meaning in its indentation, so collapsing runs of spaces would
+ * mangle the most useful thing a reply can contain.
+ */
+export function inertMessage(value: string): string {
+  return fit(withoutInvisible(value).trim(), MAX_MESSAGE_LENGTH);
+}
+
+/**
+ * What a mirrored message carries: the operator's console prompt, the turn's final assistant
+ * reply, or a mid-turn chunk of assistant text the transcript tailer read while the turn is
+ * still running.
+ *
+ * Named here rather than in the routing layer that delivers it, because the attribution and the
+ * splitting below are what the distinction is for, and one definition is what keeps the router
+ * asking for a kind this renderer knows how to draw.
+ */
+export type MirrorKind = "prompt" | "reply" | "interim";
+
+/**
+ * What every mirrored message opens with, composed here and by nothing else. It rides on every
+ * message of a split reply, not only the first: a message scrolled to on a phone carries its own
+ * attribution or it carries none.
+ *
+ * **A quoted message is the operator's text and an unquoted one is Claude's**, which is the whole
+ * distinction at a scrolling glance, so the quoting is a property of the renderer rather than of
+ * what the text happens to contain.
+ *
+ * A prompt opens with `>>>`, which quotes every line after it in the message rather than one line.
+ * A single `>` would quote the body only until Discord found a reason to stop, and a blank line or a
+ * code fence is such a reason, so a multi-paragraph paste would arrive half quoted. A reply's marker
+ * carries no quote syntax at all, so nothing in a reply opens with a quote bar.
+ *
+ * The quote marker is also the one piece of syntax mirrored content cannot draw: `<` and `>` are
+ * escaped out of mirrored text, so a `>` arriving in a prompt or a reply reaches Discord as `\>`,
+ * the character rather than the marker. That is what stops a reply from drawing a block that reads
+ * as the operator having typed something. It is the operator-attributed block that needs to be
+ * unforgeable; content reproducing the reply marker inside a reply claims nothing it is not already.
+ */
+const ATTRIBUTION: Record<MirrorKind, string> = {
+  prompt: ">>> ⌨ typed at the console\n",
+  reply: "✨ Claude\n",
+  // Mid-turn narration: Claude's own text like a reply, so unquoted like a reply, and marked
+  // `working` so a reader scrolling later can tell narration from the turn's final word.
+  interim: "✨ Claude · working\n",
+};
+
+/**
+ * What a reply tool message opens with, on every message of a split one.
+ *
+ * Kept apart from the mirror's two kinds, and worded and glyphed apart from them, because the two
+ * are different acts: a mirrored reply is the turn's final text repeated for someone away from the
+ * keyboard, and this is Claude addressing the operator in the thread on purpose. A bare message with
+ * no line of its own reads as a continuation of whatever sits above it.
+ *
+ * Unquoted, like the mirror's reply marker and for the same reason: the quoted block is what a
+ * reader takes for the operator's own typing, and it is that block alone that has to be unforgeable.
+ * This line is Claude-authored text opening a Claude-authored message, so content reproducing it
+ * claims nothing the message does not already say.
+ */
+const ANSWER_ATTRIBUTION = "📣 Claude · answer\n";
+
+/**
+ * The glyph both directions of peer traffic are marked with, which is what lets a reader scanning a
+ * thread find every exchange this session was party to by one symbol. One glyph for the class, with
+ * the direction carried by the names around the arrow rather than by a second glyph, because the
+ * question a scroll answers first is whether a line is peer traffic at all.
+ */
+const PEER_GLYPH = "📡";
+
+/**
+ * How this session is named in a peer attribution, standing opposite the counterparty.
+ *
+ * Bold, and the bold is the load-bearing part rather than the emphasis. Every counterparty on this
+ * surface is itself a Claude session, and the reader hands over whatever display name arrived, so a
+ * peer named `Claude` draws the same two words this side does and the direction, which is the one
+ * fact the line exists to state, becomes unrecoverable. A name goes through `inertField`'s full
+ * markdown escape, so a name of `**Claude**` arrives with its asterisks escaped and renders as the
+ * characters that were typed: the bold form is a token only this renderer can compose.
+ */
+const PEER_SELF = "**Claude**";
+
+/** Which way the message travelled, drawn between the two names. */
+const PEER_TOWARD = "→";
+
+/**
+ * The most of a counterparty's display name a peer attribution draws, measured on the escaped text
+ * in code points and in UTF-16 units alike, since `fit` holds the tighter of the two counts.
+ *
+ * The transcript reader refuses a name over its own bound whole and substitutes a readable fallback,
+ * on the reasoning that half a display name names a counterparty nobody can look up. This bound is
+ * what keeps that rule true on this side of the seam: a name the reader admitted is drawn whole
+ * here, never cut to the half-name the reader would have refused.
+ *
+ * Twice the reader's 120, because the reader counts code points on the raw name and this counts both
+ * counts on the escaped text, and each of those two differences can double one admitted code point:
+ *
+ * - The escape writes a backslash in front of every `MARKDOWN` character, so one raw code point can
+ *   become two drawn ones, in code points and in UTF-16 units alike.
+ * - An astral character is two UTF-16 units, so one raw code point can cost two of the unit count.
+ *
+ * The two never compound on one character, which is what makes the factor two rather than four:
+ * every character `MARKDOWN` matches is ASCII, so a character that is escaped is one UTF-16 unit
+ * before its backslash and two after, and a character that is astral is never escaped.
+ * `inertText`'s whitespace collapse and trim only ever shorten, so neither adds to the worst case.
+ * The reader's bound is not imported to derive the number, because the reader imports this module
+ * and the edge back would be a cycle; the pin that keeps the two in step is driven from the reader's
+ * exported bound in this module's tests.
+ *
+ * Bounded at all because the splitter charges the whole prefix against every message's budget and
+ * floors the room a hard cut takes at `MIN_HARD_CUT`: an unbounded name would compose a prefix that
+ * pushes a message past `MAX_MESSAGE_LENGTH`, which Discord refuses outright. At this value the
+ * prefix costs under 260 units against that ceiling, so the floor is never the binding constraint.
+ *
+ * That 260 is spent a second time by `MAX_PEER_SUBTEXT_LINE_LENGTH`, which sets the chatter line
+ * bound in the room this bound leaves. Raising this one narrows that headroom by the same amount.
+ */
+const MAX_PEER_NAME_DRAWN = 240;
+
+/**
+ * The most of a message's text a one-line peer rendering carries, measured on the escaped text in
+ * code points and in UTF-16 units alike, since `fit` holds the tighter of the two counts.
+ *
+ * The brief form's whole point is one line per message, so the bound is what makes it one: a line
+ * this long already reads as a summary, and the attribution and the text together sit far inside the
+ * message ceiling, which is what keeps the brief form a single message whatever it is handed.
+ *
+ * Exported so the promise is pinned where it is made. A bound this size raised to a paragraph's
+ * worth would leave the brief mode drawing what the whole mode draws, with nothing but the number
+ * saying otherwise.
+ *
+ * Read by the oversized whole-mode form too, through `peerLine`, since its teaser is the same one
+ * bounded line drawn above a spoiler. So this number is charged against every message of that form's
+ * budget as a reserve on the first one, and raising it narrows the room a wrapped line has by the
+ * same amount, exactly as `MAX_PEER_NAME_DRAWN` does.
+ */
+export const MAX_PEER_BRIEF_LENGTH = 200;
+
+/**
+ * What a drawn line of a peer body opens with: Discord's subtext marker, which renders its line in
+ * small grey type.
+ *
+ * Two places draw it. Every line of a body small enough to be drawn as subtext carries one, and so
+ * does the one teaser line the oversized form draws above its spoiler. A spoilered body carries it
+ * on no line of its own, which is the register holding rather than lapsing: what a collapsed spoiler
+ * shows is nothing at all, so there is no drawn line there to mark.
+ *
+ * The register the whole chatter rendering rests on. Session-to-session traffic is machine text the
+ * operator scans rather than reads, and drawn at reading size it is indistinguishable from a line
+ * addressed to them, so the audience of a line has to be re-read off its header every few lines.
+ * Small grey type answers that question from the typography, which is what a phone scroll can use.
+ *
+ * Per line rather than per message, because that is Discord's own rule for the marker, and it is why
+ * chatter has a body assembly of its own: nothing else this renderer draws needs a prefix inside the
+ * body. The trailing space is part of the marker as Discord reads it, and the marker sits at absolute
+ * line start, in front of whatever indentation the peer wrote, since anything at all before it stops
+ * it being a marker.
+ *
+ * What the register promises, stated at its exact width: no peer-authored character of a **body**
+ * reaches a thread's collapsed reading at full size. The counterparty's display name is peer-chosen
+ * and is drawn full size on the attribution line of every message, which is the deliberate exception
+ * rather than a gap: the name is the routing information the header exists to carry, and it goes
+ * through `inertField` and `MAX_PEER_NAME_DRAWN` before it is drawn. A claim any wider than this one
+ * is false on line one of every chatter message. A spoilered body sits inside the same promise: it
+ * draws nothing until it is tapped, and the tap is the operator choosing to read.
+ */
+const PEER_SUBTEXT = "-# ";
+
+/**
+ * The most of one chatter line drawn before the line is broken in two, in UTF-16 units, measured on
+ * the escaped text.
+ *
+ * Measured behind the escapes rather than in front of them, where the paste cap above is measured in
+ * front of its own: this bound exists to keep the splitter's hard cut out of reach, and what the
+ * splitter budgets is the escaped text it is handed, so a bound measured before the escape would let
+ * a line dense with `<` reach it at twice the length this promised. The break lands on a code point
+ * boundary, so no astral character is halved across two lines.
+ *
+ * The number itself is a reading comfort and the headroom under it is the correctness. A chatter
+ * message is charged the attribution prefix, which `MAX_PEER_NAME_DRAWN` holds under 260 units, plus
+ * the three units of the subtext marker, plus the one unit a piece opening with the peer's own marker
+ * costs to neutralize, plus one wrapped line; at this value that is about 1,464 against
+ * `MAX_MESSAGE_LENGTH`, so a wrapped line always fits a message whole and the splitter's hard cut is
+ * unreachable for chatter. That cut is what the headroom is bought against: it opens the next message
+ * with the tail of a line and no marker in front of it, which is peer text at full size. Past about
+ * 1,600 the cut comes back into reach, so the tuning room is downward.
+ *
+ * The oversized form wraps to this same bound and buys the same headroom out of a different budget:
+ * it spends no marker and instead charges the spoiler pair, plus the teaser line on the first
+ * message, which is at most 209 units all told and leaves 1,434. The conclusion is the one
+ * above, so a body drawn behind a spoiler cannot reach the hard cut either.
+ */
+export const MAX_PEER_SUBTEXT_LINE_LENGTH = 1_200;
+
+/**
+ * The most of a chatter body drawn as subtext before the whole body moves behind a spoiler instead,
+ * in code points, measured on the capped body before any escape.
+ *
+ * Measured where `peerCapped` measures and in the same currency, deliberately: those are the two
+ * bounds a peer body meets in front of the escapes, and a threshold measured behind them would move
+ * with how much markdown the peer happened to write rather than with how much they said. A body of
+ * ordinary prose and a body of the same prose full of angle brackets are the same size to a reader,
+ * and the question this bound asks is a reader's question.
+ *
+ * The question it asks is whether anyone will scan the body at all. Below the bound a message is
+ * something an operator reads down the side of a thread in small grey type; above it, it is a wall
+ * nobody scans, and drawing it as subtext costs the whole scroll for nothing. So the oversized form
+ * collapses it behind a spoiler and leaves one bounded teaser line drawn, which is the part of a
+ * long message worth reading in a scroll.
+ *
+ * A tunable, and the knob a one-word adjustment reaches. Raising it draws more long bodies out in
+ * the open; lowering it collapses more of them. Neither direction touches the register, because both
+ * forms hold the collapsed reading: nothing here is a correctness bound the way the line bound above
+ * is.
+ */
+export const MAX_PEER_SUBTEXT_LENGTH = 2_000;
+
+/**
+ * Discord's spoiler delimiter, which the oversized form composes around a body so a scroll shows the
+ * teaser and a tap shows the rest.
+ *
+ * Renderer-composed vocabulary, exactly as the attribution and the subtext marker are, and therefore
+ * a delimiter a peer body may not draw: `withoutPipes` neutralizes every pipe in a chatter body so
+ * the only pair Discord can read in a posted message is the pair this file put there. Two units each
+ * side, charged against the message budget by the splitter rather than taken out of the slack under
+ * Discord's own ceiling.
+ */
+const PEER_SPOILER = "||";
+
+/**
+ * What a peer message opens with, composed here and by nothing else, on every message of a split
+ * one.
+ *
+ * Unquoted, like the reply and answer markers and for the same reason: **a quoted message is the
+ * operator's text**, and it is that block alone that has to be unforgeable. Peer traffic is machine
+ * text arriving in the operator's thread, so drawing it inside the operator's register would say
+ * something false about who typed it, which is exactly the misattribution this rendering exists to
+ * end.
+ *
+ * The counterparty's name is peer-chosen text and takes the card-title escape: the full markdown
+ * set, which includes the angle brackets Discord builds its chip syntax from and the asterisks the
+ * self side is drawn with, whitespace collapsed so a name carrying a newline cannot compose a body
+ * line of its own, and bounded on the escaped text. Nothing is rejected here, and nothing is
+ * substituted: a name that neutralizes to nothing has its side of the arrow left out, so the line is
+ * well formed rather than carrying a doubled or a trailing space, and the arrow stays because the
+ * direction is still true. Making an absent name readable is the reader's job, not this one's, and a
+ * fallback word here would be a second answer to a question already answered.
+ */
+function peerAttribution(name: string, direction: "in" | "out"): string {
+  const peer = inertField(name, MAX_PEER_NAME_DRAWN);
+  const sides = direction === "in" ? [peer, PEER_TOWARD, PEER_SELF] : [PEER_SELF, PEER_TOWARD, peer];
+  return `${[PEER_GLYPH, ...sides.filter((side) => side !== "")].join(" ")}\n`;
+}
+
+/**
+ * The line a blocked alert opens with.
+ *
+ * Named beside the other attributions rather than written into the alert, because it is one of the
+ * openers a peer body may not draw and the set below is derived from these constants rather than
+ * listed by hand.
+ */
+const BLOCKED_ATTRIBUTION = "⛔ **Blocked**";
+
+/**
+ * The line a finished background task is announced with.
+ *
+ * Named here for the same reason `BLOCKED_ATTRIBUTION` is: it opens a line this renderer composes in
+ * the channel the operator answers permission prompts in, so it is one of the openers a peer body may
+ * not draw, and the set below is derived from these constants rather than listed by hand.
+ */
+const TASK_ATTRIBUTION = "📨 background task finished";
+
+/** The line an open question is announced with, past the mention that may precede it. */
+const QUESTION_ATTRIBUTION = "❓ **Waiting on you**";
+
+/** The line a model change is announced with, past the mention that may precede it. */
+const MODEL_CHANGE_ATTRIBUTION = "🔀 **Model changed**";
+
+/**
+ * The line a lineage rebind is announced with: a system-style notice attributed to neither party,
+ * since a restart is neither the operator's turn nor the session's. See item 3 of
+ * docs/plans/channels_thread-rebinding_spec_v1.md.
+ */
+const RESTART_ATTRIBUTION = "↻ supervisor restarted";
+
+/**
+ * The glyph an attribution opens its line with, past the quote marker a prompt leads with, which is
+ * already neutralized wherever untrusted text could carry it.
+ */
+function openingGlyph(attribution: string): string {
+  return [...attribution.replace(/^[>\s]+/, "")][0] ?? "";
+}
+
+/**
+ * Every whitespace character except the line break: what can sit between the start of a line and a
+ * marker while leaving that marker the thing which opens the line.
+ *
+ * A class source rather than a compiled pattern, because three separate readings need it and one of
+ * them is itself composed from a template. The space and the tab are not the class Discord draws a
+ * line with, and reading only those two is how a marker walks past a guard: a no-break space, an en
+ * quad, and an ideographic space each sit in front of a marker and leave it opening the line as
+ * surely as a tab does. The line break is the one whitespace character excluded, because every
+ * reading this feeds is made per line, and a class that swallowed a newline would let a match open
+ * on one line and land on the next.
+ */
+const LINE_SPACE = "[^\\S\\n]";
+
+/**
+ * Every glyph this renderer opens an attributed line with, matched where it opens a line, leading
+ * whitespace tolerated because Discord tolerates it when it draws the line.
+ *
+ * Derived from the attributions themselves rather than listed, so a vocabulary added later joins the
+ * set without anyone having to remember this. The characters are dropped into a class, escaped for
+ * the two positions a class gives meaning to, so a future opener that happens to be punctuation is
+ * matched as itself.
+ *
+ * The derivation reaches only constants, which is the whole reason the notice openers below are
+ * constants: a glyph written inline in the function that draws it is a line this renderer composes
+ * and a line this set does not know about, and the gap reads as covered because the set is derived.
+ */
+const ATTRIBUTION_OPENERS = new RegExp(
+  `^(${LINE_SPACE}*)([${[
+    ...new Set(
+      [
+        ...Object.values(ATTRIBUTION),
+        ANSWER_ATTRIBUTION,
+        PEER_GLYPH,
+        BLOCKED_ATTRIBUTION,
+        TASK_ATTRIBUTION,
+        QUESTION_ATTRIBUTION,
+        MODEL_CHANGE_ATTRIBUTION,
+        RESTART_ATTRIBUTION,
+      ].map(openingGlyph),
+    ),
+  ]
+    .join("")
+    .replace(/[\\\]^-]/g, "\\$&")}])`,
+  "gmu",
+);
+
+// Discord's chip syntax lives inside the angle brackets: `<@id>` draws a mention pill, `<t:...:R>`
+// a live relative timestamp, `<#id>` a channel link. Escaped, each renders as the characters that
+// were typed. That is what stops a mirrored prompt or reply from drawing a convincing copy of a
+// permission prompt or a broker notice inside the one channel the operator answers prompts in;
+// `allowed_mentions` stops those chips pinging anyone but not from rendering. It is also what makes
+// the attribution above unforgeable, since the quote marker is an escaped character too. Every
+// other piece of markdown survives, because a reply is prose with code blocks and lists in it and
+// escaping all of it would trade the whole readability of the surface away. What this does not stop
+// is content writing bold text that reads like a notice; what it does stop is content that renders
+// as one.
+//
+// The escape's contract is that it covers every character Discord can build a chip or a quote from
+// outside a fenced code block, and that it leaves the inside of a fence exactly as it was written.
+// Two reasons for the exemption. Discord shows a fence's contents as the characters they are, so
+// text there is not the surface a chip or a quoted line can be drawn on. And an escape there would
+// be visible: Discord processes no escapes inside a fence, so every arrow, generic, and comparison
+// in mirrored code would carry a backslash, which is most of what a mirrored reply is made of.
+//
+// Where the fence is, is `scanFences` below, and it is the same reading the splitter uses to
+// re-open an interrupted block. One model, deliberately: a second one beside it could disagree with
+// it, and the disagreement would be an unescaped chip in a region one of them thought was code.
+const CHIPS = /[<>]/g;
+
+/**
+ * The cap on a mirrored prompt, in code points. Beyond it the prompt is shortened and says so.
+ *
+ * The one capped mirrored surface. A prompt is frequently a paste of a log or a file, and the
+ * argument against truncating protects the assistant's replies, which are written to be read, not
+ * the operator's own dumps of text they already have. A reply is never cut at any length.
+ */
+export const MAX_MIRRORED_PROMPT_LENGTH = 16_384;
+
+/** What a shortened prompt carries in place of the tail, so the cut is visible rather than silent. */
+const SHORTENED = "(long paste shortened in mirror)";
+
+/** The code fence delimiter, and what closing and re-opening one across a boundary costs. */
+const FENCE = "```";
+
+/**
+ * How much of a fence's info string is carried across a message boundary before it is dropped.
+ *
+ * Derived from the message ceiling, and small: an info string is a language token, and what gets
+ * re-opened on every message of a split block has to leave that message room to carry code. An
+ * info string longer than this is carried as a bare fence rather than truncated, because half a
+ * language name is not the language. The bound is what keeps a crafted one out of the per-message
+ * overhead, where an unbounded one would leave no room for content and turn one reply into a
+ * message per character.
+ */
+const MAX_FENCE_INFO_LENGTH = Math.floor(MAX_MESSAGE_LENGTH / 100);
+
+/**
+ * The fewest code points a hard cut takes, whatever the per-message overhead works out to.
+ *
+ * Unreachable as the numbers stand. The overhead is the attribution, at most 257 units; the fence
+ * lines a split block re-opens and closes, at most 27; and the oversized chatter form's teaser and
+ * spoiler pair, at most 209. That is 493 with all three charged at once, which no message can
+ * actually be, since chatter carries no live fence: against a ceiling of `MAX_MESSAGE_LENGTH` it
+ * leaves a cut of about 1,400. It is here because the failure it forecloses is not proportionate: an
+ * overhead that swallowed the ceiling would emit a message per code point, which
+ * renders nothing and spends the event loop and the write budget doing it.
+ */
+const MIN_HARD_CUT = Math.floor(MAX_MESSAGE_LENGTH / 8);
+
+/**
+ * Room for the two untrusted halves of a permission prompt.
+ *
+ * They are cut here, before the message is assembled, rather than left to the whole message's cap.
+ * The cap truncates the tail, and the tail is where a long tool input would push the mention, the
+ * request ID, and the instructions for answering off the end of the one message in this system
+ * that exists to be answered.
+ */
+export const MAX_TOOL_NAME_LENGTH = 100;
+const MAX_DESCRIPTION_LENGTH = 300;
+
+/**
+ * Room for the tool input, which is the field the operator actually reads before approving.
+ *
+ * Larger than the other two because it is the one carrying the thing being approved, and because it
+ * is drawn in a fenced block whose lines are wrapped rather than run on. The three caps together sit
+ * inside the message ceiling with the mention, the request ID, the answering instructions, and the
+ * fence's own lines still in front of them, which is what the cap is for: the tail is what a message
+ * truncates, and the tail is where the way to answer lives.
+ */
+const MAX_PREVIEW_LENGTH = 1_200;
+
+/** What a field renders as when the tool supplied nothing for it. */
+const NOTHING = "(none)";
+
+/**
+ * The card's room for a tool-input preview, in code points.
+ *
+ * Small on purpose. The preview answers one question, what the running tool is working on, and it
+ * is drawn in a block of its own on a surface read at a glance on a phone. A budget large enough to
+ * carry a whole command would spend several lines of the card on one tool call, where a real path,
+ * which is what the preview usually is, fits inside this.
+ */
+export const MAX_TOOL_INPUT_PREVIEW = 100;
+
+/**
+ * The most of a model name this renderer carries, in code points. A real model string is a short
+ * id, decorated at most the way `claude-opus-5[1m]` is, so anything longer is not a name worth
+ * showing: the tailer treats one past this bound as absent rather than truncating it, because half
+ * an id names nothing, and the bound is what keeps a crafted one out of the card's own ceiling,
+ * where the final fit() would drop the heartbeat instead.
+ *
+ * Exported because the transcript reader holds transcript-sourced model strings to it: one bound in
+ * one place, so what is stored and what is drawn cannot disagree about what a name is.
+ */
+export const MAX_MODEL_NAME_LENGTH = 64;
+
+/**
+ * The most of a downgrade record's own short words this renderer carries: the refusal category
+ * (measured `cyber`) and the consent answer (measured `cancelled`). Shorter than a model name for
+ * the same reason the id bound exists, and applied at the reader too, where an over-long value
+ * reads as absent.
+ */
+export const MAX_MODEL_DETAIL_LENGTH = 32;
+
+/**
+ * True while `model` runs below the model the session opened with, which is what the card marks.
+ * The rank is the registry's own, so the marker and the downgrade record the registry attaches to
+ * a change cannot disagree about what a family is.
+ *
+ * An unrankable name on either side answers false: the direction is unknown, and a marker drawn on
+ * a guess would tell the operator a session is degraded when it may have been switched up by hand.
+ * Same family answers false too, which is what makes the upward direction, the operator's own
+ * switch-back, render plainly.
+ */
+function isBelowModel(model: string, openingModel: string): boolean {
+  const now = modelRank(model);
+  const opened = modelRank(openingModel);
+  if (now === null || opened === null) return false;
+  return now > opened;
+}
+
+/**
+ * A context size in thousands, which is the figure at the width the card has for it: `348k`.
+ *
+ * Rounded rather than exact because nothing a reader decides from this line turns on the last three
+ * digits, and it is drawn in a fixed-width row. A size below a thousand is drawn as itself, since
+ * there is nothing to round it to.
+ */
+function compactTokens(value: number): string {
+  const whole = Math.max(Math.trunc(value), 0);
+  return whole < 1_000 ? String(whole) : `${Math.round(whole / 1_000)}k`;
+}
+
+/**
+ * One untrusted prompt field: neutralized, cut to its budget, and told apart from a whole one.
+ *
+ * The cut is named in the label rather than left to the ellipsis. A tool input is attacker
+ * influenced, so it can front-load harmless content and push the part worth refusing past the cut,
+ * and an operator approving from a phone would be approving a view they had no way to know was
+ * partial. The cap itself stays: it is what keeps the request ID and the instructions for answering
+ * inside the message at all.
+ */
+function promptField(label: string, value: string, limit: number): string {
+  const whole = inertText(value);
+  const shown = fit(whole, limit);
+  if (shown === "") return `${label}: ${NOTHING}`;
+  return shown === whole ? `${label}: ${shown}` : `${label} (cut): ${shown}`;
+}
+
+/**
+ * The tool input, drawn in a fenced block under its label.
+ *
+ * Monospace because this field is a command, a path, or a patch, and read at a glance before it is
+ * approved. Drawn whole, on one line, and never broken here: a Discord client wraps a fenced line
+ * itself rather than scrolling it sideways, and it wraps to the rendered width of the window it is
+ * read in, not to any column count. There is therefore no break this renderer could insert that is
+ * right for the reader, only one narrower than theirs, and it would be a break the command does not
+ * have on the field whose exact characters are the thing being approved.
+ *
+ * Block-inert rather than markdown-inert, since the text sits inside a fence: that is the escape
+ * that reaches a backtick, which is the one character a fence still gives meaning to. The cut is
+ * named in the label exactly as the unfenced fields name theirs, because an operator approving from
+ * a phone must not be reading a partial command without being told it is partial.
+ */
+function promptPreview(label: string, value: string, limit: number): string {
+  const whole = inertBlock(value);
+  const shown = fit(whole, limit);
+  if (shown === "") return `${label}: ${NOTHING}`;
+  return [shown === whole ? `${label}:` : `${label} (cut):`, fenced([shown])].join("\n");
+}
+
+/**
+ * The mention every broker-written ping opens with: each operator's ID as `<@id>`, in roster order,
+ * joined by single spaces and followed by one, or nothing at all for an empty list, which is the
+ * quiet tier. The only place a renderer composes mention syntax, so every mentioning message spells
+ * its mentions the same way.
+ */
+export function mentionPrefix(operatorIds: readonly string[]): string {
+  return operatorIds.length === 0 ? "" : `${operatorIds.map((id) => `<@${id}>`).join(" ")} `;
+}
+
+/**
+ * The permission prompt: one of the two messages this broker writes that deliberately mention
+ * someone, the question alert below being the other.
+ *
+ * The mentions are composed here from the operators' own IDs, and every untrusted field goes
+ * through `inertText`, which escapes the angle brackets Discord's mention syntax lives inside. So
+ * the only mentions this message can contain are the ones written on this line, and the transport
+ * names those same IDs as the only ones it will resolve. An empty list composes the same prompt
+ * with no mention at all.
+ *
+ * `description` and `input_preview` come from a tool call, which anything the session has read can
+ * steer. They are rendered last and as inert text, because this message pings a phone and asks a
+ * yes-or-no question: text that reads like an instruction, or that spoofs a second prompt, is the
+ * attack this ordering and this escaping are against.
+ */
+export function renderPermissionRequest(input: {
+  operatorIds: readonly string[];
+  requestId: string;
+  toolName: string;
+  description: string;
+  inputPreview: string;
+}): string {
+  const id = input.requestId;
+  const mention = mentionPrefix(input.operatorIds);
+  // The field caps leave room for one operator's mention. Each further one is taken from the
+  // preview, the longest field, so the prompt stays one message and its cut is the labelled one
+  // rather than the writer's silent cut through the closing fence.
+  const extraMention = mention.length - mentionPrefix(input.operatorIds.slice(0, 1)).length;
+  return [
+    `${mention}**Permission needed** ${SEPARATOR} \`${id}\``,
+    `Reply \`y ${id}\` to allow or \`n ${id}\` to deny.`,
+    promptField("Tool", input.toolName, MAX_TOOL_NAME_LENGTH),
+    promptField("What", input.description, MAX_DESCRIPTION_LENGTH),
+    promptPreview("Input", input.inputPreview, Math.max(MAX_PREVIEW_LENGTH - extraMention, 0)),
+  ].join("\n");
+}
+
+/**
+ * The most of a task id the notice below will carry, in code points. A real id is a short token,
+ * so anything longer is not an id worth showing: it is treated as absent rather than truncated,
+ * because half an id identifies nothing, and the bound is what keeps a crafted pair from turning
+ * the one-line notice into a message-length paste.
+ */
+const MAX_TASK_ID_LENGTH = 64;
+
+/**
+ * The first `<task-id>…</task-id>` pair's content in a wake prompt. Bounded lazily so the scan
+ * costs one pass over the text; the length bound above is applied to what it captures.
+ */
+const TASK_ID = /<task-id>([\s\S]*?)<\/task-id>/;
+
+/**
+ * The one-line notice a background task's wake prompt compresses to: broker-composed text with a
+ * single neutralized untrusted field, following `renderPermissionRequest`'s pattern.
+ *
+ * `text` is the whole injected prompt, untrusted conversation content that arrives untruncated
+ * (the mirror route drops an oversized body whole rather than cutting it, so no pair here can be
+ * the front half of a cut). The scan runs on the invisible-stripped text, the same reading the
+ * wake recognizer matches the prompt on, so the two cannot disagree about one message: an
+ * invisible character inside the tag literals would otherwise hide a pair from this scan that the
+ * recognizer's reading still saw. The id is the only part of the prompt this notice repeats, and
+ * it goes through `inertText` because the notice lands in the one channel the operator answers
+ * permission prompts in: an id is attacker-influenceable text, and one that could draw a chip or
+ * a quote would spoof exactly the surface this line exists to keep quiet. An id that is absent,
+ * empty once trimmed, or over the length bound leaves the bare line, never a throw: whatever the
+ * prompt carries, the notice composes.
+ */
+/**
+ * Item 3 (docs/plans/channels_thread-rebinding_spec_v1.md): the one line a lineage rebind posts,
+ * naming the lineage that reattached. `lineage` is launcher-set config rather than Discord content,
+ * but it still reaches this render site as a string from outside, and every field this renderer
+ * draws is neutralized regardless of its usual source - consistency here costs nothing and a
+ * lineage name embedding a chip or a quote marker draws exactly as typed rather than as itself.
+ */
+export function renderRestartNotice(lineage: string): string {
+  const shown = inertText(lineage);
+  return shown === "" ? RESTART_ATTRIBUTION : `${RESTART_ATTRIBUTION} ${SEPARATOR} ${shown}`;
+}
+
+export function renderTaskNotice(text: string): string {
+  const line = TASK_ATTRIBUTION;
+  const match = TASK_ID.exec(withoutInvisible(text));
+  if (match === null) return line;
+  const id = match[1].trim();
+  if (id === "" || [...id].length > MAX_TASK_ID_LENGTH) return line;
+  const shown = inertText(id);
+  return shown === "" ? line : `${line} ${SEPARATOR} ${shown}`;
+}
+
+/**
+ * The structured fields of one harness `api_error` transcript line, as the status reader validated
+ * them. Every field is a number or a flag, apart from `rateLimitType`, which is only ever looked up
+ * in `HARNESS_LIMIT_PHRASES` and never drawn itself. Null marks a field the line did not carry or
+ * carried in a shape the reader refused, and a null field drops its clause from the notice.
+ */
+export type HarnessErrorFields = {
+  /** True when the line carried a `rateLimits` object, which is what makes the error a rate limit. */
+  rateLimited: boolean;
+  /** The raw `rateLimits.rateLimitType`, a lookup key only. */
+  rateLimitType: string | null;
+  /** An HTTP status, an integer from 100 to 599. */
+  status: number | null;
+  /** When the harness retries, in epoch milliseconds: the line's own timestamp plus `retryInMs`. */
+  retryAt: number | null;
+  /** When the rate limit resets, in epoch milliseconds. */
+  resetsAt: number | null;
+};
+
+/** The line a harness error episode closes with, once the session produces output again. */
+export const HARNESS_RESUMED = "Resumed.";
+
+/**
+ * What each known `rateLimitType` reads as. A fixed map rather than a transform of the value,
+ * because the value comes off a transcript line: an unknown one reads as `HARNESS_LIMIT_FALLBACK`
+ * and is never echoed, so no character of it can reach the thread or the card.
+ */
+const HARNESS_LIMIT_PHRASES: Readonly<Record<string, string>> = {
+  five_hour: "five-hour limit",
+  seven_day: "seven-day limit",
+  seven_day_overage_included: "seven-day limit",
+};
+
+/** What an unknown or missing `rateLimitType` reads as. */
+const HARNESS_LIMIT_FALLBACK = "usage limit";
+
+/**
+ * A clock time as `1:16 PM`, in `timeZone` when given and the broker host's own zone otherwise.
+ * Composed from the formatter's parts rather than taken whole, because the whole string separates
+ * the day period with a narrow no-break space on current ICU builds, which reads as a different
+ * character in a phone's search and copy.
+ */
+function clockTime(ms: number, timeZone: string | undefined): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone,
+  }).formatToParts(new Date(ms));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((entry) => entry.type === type)?.value ?? "";
+  return `${part("hour")}:${part("minute")} ${part("dayPeriod")}`;
+}
+
+/** True for a number a `Date` can draw. */
+function drawableInstant(ms: number | null): ms is number {
+  return ms !== null && Number.isFinite(ms) && Math.abs(ms) <= 8.64e15;
+}
+
+/**
+ * The thread notice for a harness error, in fixed wording built from structured fields alone. A
+ * rate limit reads `Rate-limited (five-hour limit). Retrying at 1:16 PM, limit resets 3:00 AM.`, and
+ * any other error reads `API error (status 529). Retrying at 1:16 PM.`. A clause whose field is
+ * missing or invalid is dropped rather than drawn with a placeholder.
+ *
+ * Every character of the output is either written here or is a digit of a validated number: the
+ * error's own message text is never an input, and the limit type is a lookup key, never a value. So
+ * no escape is needed, and nothing a session or an upstream service wrote can reach the thread
+ * through this line. The fields are re-checked here as well as at the read, so a caller handing in
+ * an unvalidated number still cannot draw one.
+ *
+ * Times are the broker host's local zone unless `timeZone` names another; the operator reads them
+ * against the clock on the machine the sessions run on.
+ */
+export function renderHarnessNotice(fields: HarnessErrorFields, timeZone?: string): string {
+  const status =
+    fields.status !== null && Number.isInteger(fields.status) && fields.status >= 100 && fields.status <= 599
+      ? fields.status
+      : null;
+  const clauses: string[] = [];
+  if (drawableInstant(fields.retryAt)) clauses.push(`retrying at ${clockTime(fields.retryAt, timeZone)}`);
+  let head: string;
+  if (fields.rateLimited) {
+    const phrase =
+      fields.rateLimitType !== null && Object.hasOwn(HARNESS_LIMIT_PHRASES, fields.rateLimitType)
+        ? HARNESS_LIMIT_PHRASES[fields.rateLimitType]
+        : HARNESS_LIMIT_FALLBACK;
+    head = `Rate-limited (${phrase}).`;
+    if (drawableInstant(fields.resetsAt)) {
+      clauses.push(`limit resets ${clockTime(fields.resetsAt, timeZone)}`);
+    }
+  } else {
+    head = status === null ? "API error." : `API error (status ${String(status)}).`;
+  }
+  if (clauses.length === 0) return head;
+  const tail = clauses.join(", ");
+  return `${head} ${tail.charAt(0).toUpperCase()}${tail.slice(1)}.`;
+}
+
+/**
+ * Room for the untrusted parts of a question notice: the question itself, its header, and each
+ * option label. Cut here, before the message is assembled, for `renderPermissionRequest`'s
+ * reason: no single field may crowd out the mention and the line saying a question is open. The
+ * per-field cuts alone do not hold the whole notice inside one message (four capped questions
+ * compose past the ceiling); `renderQuestionNotice`'s own whole-message bound below owns that.
+ * The cut is left to `fit`'s ellipsis rather than labelled, because nothing here is approved from
+ * a partial view: the notice only sends the operator to the console, where the whole question is.
+ */
+const MAX_QUESTION_LENGTH = 500;
+const MAX_QUESTION_HEADER_LENGTH = 100;
+export const MAX_OPTION_LABEL_LENGTH = 100;
+
+/**
+ * Room for an option's description inside a select menu, Discord's own ceiling on that field. A
+ * message carrying one field over its limit is refused whole, so the cap is a wire requirement
+ * rather than a readability choice.
+ *
+ * It bounds the menu and nothing else. The description a reader keeps is `MAX_HELD_DESCRIPTION_LENGTH`
+ * below, because the message body draws the same text with no such ceiling over it.
+ */
+export const MAX_OPTION_DESCRIPTION_LENGTH = 100;
+
+/**
+ * The most of an option's description the reader keeps, in code points.
+ *
+ * Far above the select field's own ceiling, and that gap is the point: a description is where an
+ * option says what choosing it costs, so it is the field the operator actually decides on. Bounding
+ * it at the menu's limit would mean the text was gone before any surface could choose to draw more,
+ * and the body has room for it. An anti-abuse bound on what a held entry and the digest taken over
+ * it can carry, not a layout bound, and it is set roomily enough that any field one message can
+ * carry arrives whole. The reader cuts to it through `fit`, so a description this bound shortens
+ * reaches every surface already marked: nothing downstream of the reader can tell a text it was
+ * handed whole from one that was cut, so the cut says so itself. The real distribution of
+ * `AskUserQuestion` calls runs far below it, with the longest measured description under 700 code
+ * points.
+ */
+export const MAX_HELD_DESCRIPTION_LENGTH = 1_500;
+
+/**
+ * One option of an `AskUserQuestion` question: the label the answer is given as, and the short
+ * gloss the tool wrote beside it. Both are untrusted conversation content.
+ *
+ * The label is held verbatim, because it is the string an answer is submitted as and Claude Code
+ * matches it against the option the call declared; a bounded copy would submit an answer the picker
+ * never offered. The description is bounded at the reader too, but generously, at
+ * `MAX_HELD_DESCRIPTION_LENGTH` rather than at any one surface's field limit: two surfaces draw it
+ * at two different widths, so the reader's bound is what keeps an unbounded one out of the held
+ * entries and the digests taken over them, and each surface cuts to its own room. Null when the call
+ * carried none.
+ */
+export type AskedOption = {
+  label: string;
+  description: string | null;
+};
+
+/**
+ * One question an `AskUserQuestion` call is holding a session on: bounded structured data parsed
+ * from the question's `PreToolUse` hook post at emission, or from the session's own transcript at
+ * resolution, both through the tailer's one bounded reader, because the console's picker is
+ * otherwise invisible from the thread. Defined here rather than in the tailer, the `MirrorKind`
+ * pattern: this renderer owns the vocabulary it knows how to draw, and the tailer imports the
+ * type alone. Every string in it is untrusted conversation content.
+ */
+export type AskedQuestion = {
+  question: string;
+  /** The tool's short topic label for the question; null when the call carried none. */
+  header: string | null;
+  multiSelect: boolean;
+  /** The options, in the tool's order. */
+  options: readonly AskedOption[];
+};
+
+/** What a cut notice ends with, naming how many questions the console holds beyond the cut. */
+function moreQuestionsTail(count: number): string {
+  return `(+${count} more question${count === 1 ? "" : "s"} at the console)`;
+}
+
+/**
+ * The open-question alert: the second message this broker writes that deliberately mentions
+ * someone, beside the permission prompt, and safe for the same reason: the mentions are composed
+ * here from the operators' own IDs, and every untrusted field goes through `inertText`, which
+ * escapes the angle brackets Discord's mention syntax lives inside. An empty `operatorIds` composes
+ * the same notice with no mention at all: the quiet tier for a thread already pinged past a
+ * person's reading pace.
+ *
+ * Unlike the permission prompt, this message asks for nothing in the thread: it carries enough of
+ * the question for the operator to decide what to do about it, and nothing to do it with. It is
+ * what every question gets first, and what a question the thread cannot answer keeps; the
+ * interactive message `renderQuestionPrompt` draws replaces it by edit once the components that
+ * answer the hold exist.
+ *
+ * The headline names no surface, because at the moment this is composed there is none to name. A
+ * held `PreToolUse` hook response blinds the console for as long as it is held, so a notice
+ * pointing at a console picker is untrue for exactly the window this message is the only thing in
+ * the thread; and the paths that leave this notice standing all release the hold, which renders
+ * that picker a moment later. Saying a question is open is true under both.
+ *
+ * The whole notice is bound to one message, because the per-field cuts alone cannot do that: four
+ * questions at their caps compose past four thousand units, and leaving the overflow to the
+ * writer's own whole-message cut would eat the tail silently. Questions are appended whole, each
+ * with its lines, and the first that would not leave room for the closing tail ends the message
+ * with a line naming how many the console still holds. The first question always fits by
+ * arithmetic: the alert line is at most about 80 units with one operator mentioned, each further
+ * operator adding at most 24, a Q line at most 620 (3 + a 100-unit header + 2 + a 500-unit
+ * question + a 15-unit suffix), an Options line at most 418 (9 + four 100-unit labels + three
+ * separators), and the tail at most 34, about 1,160 in all against the 1,900 ceiling, so the notice
+ * never degenerates to a bare tail on a roster of up to thirty operators. Measured in UTF-16 units,
+ * the larger of the two counts a length could mean, so holding it holds the code point count too.
+ *
+ * A question with no options renders without an Options line rather than as an error: the console
+ * always offers a free-form "Other" answer, so an empty list is a shape this tool really
+ * produces. A header or a label that neutralizes to nothing renders as absent, and an empty
+ * questions array still composes the alert line: whatever the call carried, the notice composes,
+ * never a throw.
+ */
+export function renderQuestionNotice(input: {
+  operatorIds: readonly string[];
+  questions: readonly AskedQuestion[];
+}): string {
+  const mention = mentionPrefix(input.operatorIds);
+  const lines = [`${mention}${QUESTION_ATTRIBUTION} ${SEPARATOR} a question is open`];
+  let used = lines[0].length;
+  for (const [index, asked] of input.questions.entries()) {
+    const header = asked.header === null ? "" : fit(inertText(asked.header), MAX_QUESTION_HEADER_LENGTH);
+    const prefix = header === "" ? "" : `${header}: `;
+    const suffix = asked.multiSelect ? " (multi-select)" : "";
+    const held = [`Q: ${prefix}${fit(inertText(asked.question), MAX_QUESTION_LENGTH)}${suffix}`];
+    const labels = asked.options
+      .map((option) => fit(inertText(option.label), MAX_OPTION_LABEL_LENGTH))
+      .filter((label) => label !== "");
+    if (labels.length > 0) held.push(`Options: ${labels.join(` ${SEPARATOR} `)}`);
+    // Each line costs its own length plus the newline that joins it. The tail's room is reserved
+    // on every question, the last included: one rule with no branch to get wrong, at the price of
+    // at most one tail's width of unused room on a notice that fills to the brim.
+    const cost = held.reduce((sum, line) => sum + 1 + line.length, 0);
+    const remaining = input.questions.length - index;
+    if (used + cost + 1 + moreQuestionsTail(remaining).length > MAX_MESSAGE_LENGTH) {
+      lines.push(moreQuestionsTail(remaining));
+      return lines.join("\n");
+    }
+    lines.push(...held);
+    used += cost;
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The label a session is known by, which is the session's own title when a `custom-title`
+ * transcript line has set one (a launch `--name` or an in-session `/rename`), the launch name the
+ * hook header carries when it has not, and a stub built from the session ID when neither exists.
+ * A session launched without the wrapper carries no name.
+ *
+ * Exported because every surface that names a session has to name it the same way: the thread
+ * title, the session's own card, and the fleet card's session rows all read this one fallback, so
+ * a session with no name cannot be "session 0f3c9d21" on one surface and blank on another.
+ *
+ * The output is stripped but not escaped, unlike the neutralizers above it: a thread name renders no
+ * markdown, which is the surface this was written for. A caller composing it into message content
+ * has to put it through `inertText` or `inertField` first, or a session names itself in bold.
+ */
+export function displayName(view: SessionView): string {
+  // The title, from a `custom-title` transcript line, outranks the launch name: it is what an
+  // in-session `/rename` set, and the launch name is only ever what the wrapper set at start. Each
+  // source is neutralized before the emptiness check, so a title that is nothing but the invisible
+  // class falls through to the name rather than drawing as a blank thread. A title made only of
+  // printable-blank characters (the Hangul filler, the Braille blank pattern) is not caught by
+  // this: neither `isInvisible` nor the whitespace collapse reaches them, so such a title survives
+  // and draws as an empty-looking name. Accepted rather than fixed, on `docs/security-model.md`'s
+  // own record: the invisible class is deliberately shared with the render site and the model-input
+  // path, and widening it here alone would put the two out of step.
+  const titled = view.title === null ? "" : inertName(view.title);
+  if (titled !== "") return titled;
+  const named = view.name === null ? "" : inertName(view.name);
+  // The session ID is a payload field from the same untrusted process as the name, so the fallback
+  // is neutralized before it is cut rather than after: a slice of raw text can end mid-override.
+  return named === "" ? `session ${inertName(view.sessionId).slice(0, 8)}` : named;
+}
+
+/**
+ * The state as a reader sees it, which for a session waiting on dispatched work is the state plus
+ * how many tasks it is waiting on.
+ *
+ * The count rides the state rather than sitting elsewhere on the card because the five states
+ * cannot express waiting on agents at all: without it a session blocked on a fan-out reads as
+ * ordinary work, and the operator has no way to tell a turn that is thinking from one that is
+ * waiting on eleven agents. It is counted rather than listed here because the roster below it is
+ * where the entries are, and the state line is read at a glance. The word is "tasks" rather than
+ * "agents" because the count covers both kinds the table reports, and a session waiting on two
+ * backgrounded shells is not waiting on two agents.
+ *
+ * `blocked` carries the count on the same terms as `working`. The card draws its Tasks block for
+ * either state, so a state line that dropped the count would deny a roster the card is showing two
+ * lines below it, and a roster the record still holds is still true of a run that has stopped.
+ *
+ * The card is the only surface this reaches: the thread title carries the coarser title state, or
+ * none.
+ */
+function stateLabel(view: SessionView, state: SurfaceState): string {
+  const waiting = view.backgroundTasks.length;
+  if ((state !== "working" && state !== "blocked") || waiting === 0) return state;
+  return `${state} ${SEPARATOR} ${waiting} task${waiting === 1 ? "" : "s"}`;
+}
+
+/**
+ * `<glyph> <session-name> <separator> <title state>` for a state the title names, and
+ * `<resting mark> <session-name>`, the resting title, for every other state. Every title opens with
+ * a broker-owned mark: the resting mark at rest, a state glyph when the thread asks for something.
+ *
+ * Working, idle and exited all compose the same resting title, so moving between them spends no
+ * rename. The name is what gets shortened when the whole thing is too long: the mark, the glyph and
+ * the title state are the parts a truncating list view must not eat.
+ */
+export function threadName(view: SessionView, state: SurfaceState): string {
+  const title = titleState(state);
+  if (title === null) {
+    const mark = `${RESTING_MARK} `;
+    return `${mark}${fit(displayName(view), MAX_THREAD_NAME_LENGTH - mark.length)}`;
+  }
+  const prefix = `${TITLE_GLYPHS[title]} `;
+  const suffix = ` ${SEPARATOR} ${title}`;
+  const room = MAX_THREAD_NAME_LENGTH - prefix.length - suffix.length;
+  return `${prefix}${fit(displayName(view), room)}${suffix}`;
+}
+
+/**
+ * The width a fenced card body is held to, in characters.
+ *
+ * A Discord client wraps a fenced line to the rendered width of the window rather than scrolling it,
+ * so the cost of a line past this width is not a drag but a wrap, and a wrap is what scrambles a
+ * block whose whole purpose is a column of values sitting under each other. This bound is therefore
+ * set below the narrowest window a card is read in: measured on the operator's own devices the wrap
+ * falls at roughly 51 columns on a folded phone, 62 unfolded, and 83 on a desktop. Both cards read
+ * this one bound, so neither can be readable at a glance while the other is not.
+ */
+export const MAX_BLOCK_WIDTH = 46;
+
+/**
+ * The glyph a card's filled bar cells are drawn in.
+ *
+ * U+2014 is a typographic character rather than a box-drawing one, so whether consecutive ones tile
+ * into an unbroken line or leave hairline gaps between them is a property of the font the reader's
+ * client draws with, and only a real client settles it. `─` (U+2500) is the swap where they do not
+ * tile. It lives here, beside the width bound, because every card that draws a bar reads this one
+ * constant: the swap is one edit, and no card can be drawn in a glyph the others are not.
+ */
+export const BAR_GLYPH = "—";
+
+/**
+ * The widest a label column grows, whatever sits in it.
+ *
+ * The column is padded to the longest label a body actually carries, and this is what keeps one
+ * long label from taking the room every value on the card is drawn in: a per-model window names
+ * itself out of another program's cache, at whatever length that program wrote.
+ */
+const MAX_LABEL_WIDTH = 10;
+
+/**
+ * One line of a fenced body: a label and the value drawn beside it, or a whole-width line of its
+ * own when the label is null, which is what a heading, a note, and a session row are.
+ */
+export type BlockRow = { label: string | null; value: string };
+
+/** What a fenced body costs beyond its own lines: the two delimiter lines and their newlines. */
+export const FENCE_COST = 2 * (FENCE.length + 1);
+
+/**
+ * A body inside one fenced block.
+ *
+ * Discord renders no markdown inside one, so nothing composed into these lines may rely on any:
+ * emphasis there reaches the reader as the asterisks it is written with, and a mention as its raw
+ * id. What the fence buys instead is a monospace grid, which is what lets a column of values line
+ * up. Untrusted text still goes through this module's escaping before it gets here, because an
+ * unescaped run of backticks would close the block early and put the rest of the card outside it.
+ */
+export function fenced(lines: readonly string[]): string {
+  return [FENCE, ...lines, FENCE].join("\n");
+}
+
+/** The room a value has beside a label column of this width. */
+function valueRoom(width: number): number {
+  return MAX_BLOCK_WIDTH - width - 1;
+}
+
+/** The column a body's labelled rows are padded to: the longest label present, bounded. */
+export function columnWidth(rows: readonly BlockRow[]): number {
+  const widths = rows.flatMap((row) => (row.label === null ? [] : [[...row.label].length]));
+  return Math.min(Math.max(0, ...widths), MAX_LABEL_WIDTH);
+}
+
+/**
+ * A body's rows as its lines: every label padded to the column so the values start in one place,
+ * every value cut to the room the column leaves, and every whole-width line wrapped to the bound.
+ *
+ * No glyph is ever drawn inside the run of spaces that does the aligning. A glyph leads a value or
+ * leads a whole-width line instead, because an emoji is not one column wide in a monospace font:
+ * one sitting in the padding would push that line's value out of the column every other line shares,
+ * which is the whole thing the fence is here to provide. Leading a line, the same glyph costs at
+ * most the one column it is wider than the character count measured here.
+ */
+export function alignedRows(rows: readonly BlockRow[], width: number): string[] {
+  const room = valueRoom(width);
+  return rows.flatMap((row) => {
+    if (row.label === null) return wrapped(row.value);
+    const label = fit(row.label, width);
+    const padded = `${label}${" ".repeat(Math.max(width - [...label].length, 0))}`;
+    return [`${padded} ${fit(row.value, room)}`.trimEnd()];
+  });
+}
+
+/**
+ * A line of prose broken into lines that fit the block's width.
+ *
+ * Prose is wrapped rather than cut because none of it is decoration: the footer names why the
+ * numbers above it are held, and a cut there would drop the reason rather than shorten it. Broken
+ * on spaces, and mid-word for a word wider than the whole block, so that every line of a card sits
+ * inside the one width its aligned rows are padded to. What this avoids is the client wrapping the
+ * line where it chooses, which would put a fragment of prose under a column and read as a value.
+ */
+export function wrapped(text: string): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/).filter((part) => part !== "")) {
+    if (line === "") line = word;
+    else if ([...line].length + 1 + [...word].length <= MAX_BLOCK_WIDTH) line = `${line} ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+    while ([...line].length > MAX_BLOCK_WIDTH) {
+      lines.push(sliceCodePoints(line, MAX_BLOCK_WIDTH));
+      line = [...line].slice(MAX_BLOCK_WIDTH).join("");
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines;
+}
+
+/**
+ * What separates two columns of a fenced table, and the whole of what a gap between them costs.
+ */
+const TABLE_SEPARATOR = " | ";
+
+/**
+ * The room one fenced table has, in UTF-16 units.
+ *
+ * A message carries an attribution line beside the block, and the widest of the fixed ones is what
+ * this reserves. Every attribution a drawn table can appear under is one of those fixed lines: the
+ * transform runs only on mirrored and answered text, since chatter skips it outright rather than put
+ * fence lines inside a per-line register. So the bound is measured against the whole set of prefixes
+ * that can reach it. Nothing rests on it being exact anyway: the splitter measures the real prefix
+ * before it places any chunk, so a block that does not fit beside its attribution is split across
+ * messages, each one re-opening the fence, rather than posted over the ceiling.
+ *
+ * A table over the bound is left as the Markdown the model wrote rather than cut: a block cut
+ * mid-row reads as a complete table that says something different from what was written, where raw
+ * text reads as raw text.
+ */
+const MAX_TABLE_LENGTH =
+  MAX_MESSAGE_LENGTH -
+  Math.max(...[ANSWER_ATTRIBUTION, ...Object.values(ATTRIBUTION)].map((line) => line.length));
+
+/** Where a column's cells sit in their padding, as the delimiter row's markers declare it. */
+type ColumnAlignment = "left" | "right" | "center";
+
+/** A delimiter row's cell: dashes, with a colon on the side or sides the column aligns to. */
+const DELIMITER_CELL = /^:?-+:?$/;
+
+/**
+ * How many lines the table transform has parsed as candidate rows, counted so a test can hold the
+ * transform to a cost linear in the text it is given.
+ *
+ * This is the one thing here that runs over a whole reply, and a reply has no length cap, on the
+ * single event loop every hook, heartbeat, and permission prompt shares. A pipe-heavy reply that
+ * cost more than one parse per line would stall all of them for as long as it took. Wall clock
+ * cannot express that bound in a test, since a loaded machine moves it by an order of magnitude,
+ * where a parse count is the same number on any machine.
+ */
+export const tableParses = { count: 0 };
+
+/**
+ * How many rows the table transform has neutralized and measured for drawing, counted on the same
+ * reasoning as `tableParses` and for the same kind of test.
+ *
+ * Reading a run cheaply is only half the bound. A run whose every line is a well-formed row clears
+ * the shape checks from every one of its starts, so drawing before judging whether the result could
+ * fit would spend the whole run's padding once per start no matter how few lines were ever parsed.
+ */
+export const tableRowsDrawn = { count: 0 };
+
+/**
+ * One row's cells, or `null` when the line is not a row at all.
+ *
+ * A row is recognized by carrying a pipe, and one leading and one trailing pipe are dropped, which
+ * is the GFM shape with the optional outer pipes either present or absent.
+ */
+function tableCells(line: string): string[] | null {
+  tableParses.count += 1;
+  if (!line.includes("|")) return null;
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+/**
+ * The width each column is padded to, given what its cells want and the room they share.
+ *
+ * Every column that fits under a common cap keeps its natural width, and the ones past that cap are
+ * held to it, so the room a narrow column does not need goes to the columns that do. A cap below
+ * what a column's cells want is what routes a table out of the grid entirely, since a grid drawn
+ * there would have to cut a cell.
+ */
+function columnCaps(widths: readonly number[], budget: number): number[] {
+  let cap = Math.max(...widths);
+  const spent = (limit: number): number =>
+    widths.reduce((total, width) => total + Math.min(width, limit), 0);
+  while (cap > 1 && spent(cap) > budget) cap -= 1;
+  return widths.map((width) => Math.min(width, cap));
+}
+
+/**
+ * One cell drawn in its column: padded to the column's width, and held to it. A grid is only drawn
+ * where every column is as wide as its cells want, so the bound is a guard rather than a cut.
+ */
+function paddedCell(cell: string, width: number, alignment: ColumnAlignment): string {
+  const shown = fit(cell, width);
+  const room = Math.max(width - [...shown].length, 0);
+  if (alignment === "right") return `${" ".repeat(room)}${shown}`;
+  if (alignment === "left") return `${shown}${" ".repeat(room)}`;
+  const before = Math.floor(room / 2);
+  return `${" ".repeat(before)}${shown}${" ".repeat(room - before)}`;
+}
+
+/**
+ * The widest a column header grows before its table is left as the text it was written as.
+ *
+ * A header is drawn once per body row, so its length is spent as many times as the table is tall.
+ * The headers a table carries name their columns and run to about twenty characters, so a cell
+ * past this one is prose rather than a column name, and a table headed by prose is not one worth
+ * drawing a block per row.
+ */
+const MAX_ROW_LABEL_WIDTH = 40;
+
+/**
+ * How much longer than the text it replaces a per-row rendering may be.
+ *
+ * The shape costs text by design: a heading and a label are drawn where the source wrote a pipe,
+ * which on most tables is a fraction more and on a tall one of one-character cells reaches about
+ * five times the source. Past this the growth is no longer the shape's own cost, and the Markdown
+ * the model wrote is what ships.
+ */
+const MAX_ROW_TABLE_GROWTH = 8;
+
+/**
+ * The most text one per-row rendering may draw, in UTF-16 units.
+ *
+ * Fifty messages is past where the shape is a reading aid, whatever made it that long, and this
+ * bound holds whether or not the growth bound above is the right number.
+ */
+const MAX_ROW_TABLE_LENGTH = 50 * MAX_MESSAGE_LENGTH;
+
+/**
+ * The room the rows being redrawn take as Markdown: every cell, the pipe and the spaces around it
+ * each cell is written between, and a newline a row. The delimiter row is not among them, and the
+ * cells are read as they were written where the output is measured after the escape, so this reads
+ * a little under what the model actually wrote, which holds the growth bound on the tight side
+ * rather than the loose one.
+ */
+function tableSourceLength(rows: readonly string[][]): number {
+  return rows.reduce(
+    (total, row) => total + row.reduce((sum, cell) => sum + cell.length, 0) + 3 * row.length + 1,
+    0,
+  );
+}
+
+/**
+ * A table drawn as one block per row: the row's first cell as its heading, and every other column
+ * as a `label: value` line under it, the label being that column's header. `null` when the rows
+ * compose nothing at all, when a header is too long to be drawn under every row, or when what they
+ * compose is out of proportion to the text it replaces, each of which leaves the table as the text
+ * it was written as.
+ *
+ * Nothing here is inert by position, because none of it is inside a fence. So nothing reaches the
+ * output unneutralized, and what stops a cell drawing a mention, a quote bar, a spoiler, a heading,
+ * or a fence is the same escape in both cases. The whitespace collapse is the other half of it: a
+ * cell cannot compose a line of its own, so it cannot forge a label line either.
+ *
+ * Where the two escapes differ is emphasis, and the split is structure against content. A value is
+ * content and keeps the bold or the italics the model wrote it in, through `inertCell`, because that
+ * is most of what a comparison table says and it is wrapped in no markup of this rendering's. A
+ * heading and every label are structure and take the full escape: the heading is composed inside
+ * emphasis this rendering writes, where a surviving mark would close the wrapper early, and a label
+ * is redrawn on every row, where one would flip the parity of the composed marks once per row. What
+ * a value can still do is leave its own emphasis unbalanced, which re-attributes bold within the one
+ * message it is in; that is the line mirrored prose already sits on, and narrower, since prose keeps
+ * its spoilers and masked links live where a cell keeps neither.
+ *
+ * A cell that neutralizes to nothing draws no line, because a label standing on its own reads as a
+ * value that went missing rather than one that was never written, and a row whose first cell is
+ * empty draws no heading. A single-column table has no labels to draw, so its rows are drawn as the
+ * lines of text they are, the header row among them: there is no second column for it to name.
+ *
+ * The heading carries its own column's header too, so a table drawn this way loses no word the
+ * model wrote. Every other column names itself on its line, and a first column that named itself
+ * nowhere would be the one dimension the reader had to infer, in a shape whose whole purpose is
+ * that nothing is dropped.
+ */
+function perRowTable(rows: readonly string[][]): string | null {
+  const header = rows[0] ?? [];
+  // Labels take the full escape, unlike the values beside them, because a label is structure rather
+  // than content: the first names the row inside the emphasis this rendering composes, and every
+  // other is redrawn on every row of the table. An emphasis mark surviving in one would therefore
+  // break that wrapper, or flip the parity of the composed marks once per row.
+  const labels = header.map((cell) => inertText(cell));
+  // Only where the labels are drawn: a single-column table names no column, so its first row is a
+  // line of text like the rest and is drawn once however long it is.
+  if (labels.length > 1 && labels.some((label) => [...label].length > MAX_ROW_LABEL_WIDTH)) {
+    return null;
+  }
+  const blocks =
+    labels.length <= 1
+      ? rows.map((row) => inertCell(row[0] ?? ""))
+      : rows.slice(1).map((row) => {
+          // The one cell this rendering wraps in emphasis of its own, so the one cell that may not
+          // carry any: a mark surviving here would close the wrapper early and leave the rest of the
+          // heading outside the bold the row is drawn in. A value below is wrapped in nothing, which
+          // is what lets it keep the emphasis the model wrote it with.
+          const heading = inertText(row[0] ?? "");
+          const named = labels[0] === "" || heading === "" ? heading : `${labels[0] ?? ""}: ${heading}`;
+          const lines = heading === "" ? [] : [`**${named}**`];
+          for (const [column, cell] of row.entries()) {
+            if (column === 0) continue;
+            const value = inertCell(cell);
+            if (value === "") continue;
+            const label = labels[column] ?? "";
+            lines.push(label === "" ? value : `${label}: ${value}`);
+          }
+          return lines.join("\n");
+        });
+  const drawn = blocks.filter((block) => block !== "").join("\n\n");
+  if (drawn === "") return null;
+  if (drawn.length > MAX_ROW_TABLE_LENGTH) return null;
+  return drawn.length > tableSourceLength(rows) * MAX_ROW_TABLE_GROWTH ? null : drawn;
+}
+
+/**
+ * A run of pipe-carrying lines drawn as a table, or `null` when it is not a whole one.
+ *
+ * Two shapes, and which one is drawn is decided by whether the grid could carry the text: a table
+ * whose columns all fit the block's width is drawn as one fenced block, and one that would have to
+ * cut a cell to fit is drawn a block per row instead, or left as raw text where the rows compose
+ * more than the row rendering is worth. A cut cell is the whole of what the row said gone, which is
+ * the same argument the length bound below already makes for leaving an over-long table as raw
+ * text: one axis refusing to lie while the other lied quietly is what the two shapes here settle.
+ *
+ * Whole means all of it: a header row, a delimiter row of dashes under it, at least one body row,
+ * and the same cell count on every one of them. What a block is gets decided from the whole block,
+ * so a ragged or half-written table is left as the text the model wrote rather than drawn as a
+ * table that quietly dropped a column.
+ *
+ * Cells are neutralized before they are measured and padded, never after: the fence-inert form is
+ * what the reader sees, so it is what the columns have to line up on, and a backslash doubled after
+ * the padding would push its row a character wider than the block it sits in.
+ *
+ * The run arrives already parsed, and `start` names which of its rows the candidate opens on, so
+ * one run judged from several starts is parsed once rather than once per start. The judge that can
+ * reject on two rows runs before anything reads the rest of them, which is what keeps a long run
+ * that is no table from costing more than a walk over it.
+ */
+function tableBlock(rows: readonly (string[] | null)[], start: number): string | null {
+  if (rows.length - start < 3) return null;
+  const header = rows[start];
+  const delimiter = rows[start + 1];
+  if (header === null || header === undefined || delimiter === null || delimiter === undefined) {
+    return null;
+  }
+  const columns = header.length;
+  if (columns === 0) return null;
+  if (delimiter.length !== columns || !delimiter.every((cell) => DELIMITER_CELL.test(cell))) {
+    return null;
+  }
+  // The smallest block these rows could possibly draw, which is enough to refuse an over-long one
+  // before a character of it is padded. Every row but the delimiter is drawn, each row's cells are
+  // joined by a separator whose pipe and leading space no trailing trim can reach, and the fence
+  // costs its two lines plus a newline between every line. Those are ASCII, so the floor is in the
+  // UTF-16 units the finished block is measured in, and anything a cell actually carries only moves
+  // the real block further past it: a block refused here is one the length check below would refuse
+  // too. Judging first is what keeps a long run of well-formed rows from drawing the whole of
+  // itself once per candidate start and throwing all of it away.
+  const height = rows.length - start - 1;
+  const leastRow = Math.max(TABLE_SEPARATOR.length * (columns - 1) - 1, 0);
+  if (FENCE.length * 2 + height + 1 + height * leastRow > MAX_TABLE_LENGTH) return null;
+
+  const body = rows.slice(start + 2);
+  if (body.some((row) => row === null || row.length !== columns)) return null;
+
+  const alignments: ColumnAlignment[] = delimiter.map((cell) => {
+    const leads = cell.startsWith(":");
+    const trails = cell.endsWith(":");
+    if (leads && trails) return "center";
+    return trails ? "right" : "left";
+  });
+  tableRowsDrawn.count += body.length + 1;
+  const cells = [header, ...body].map((row) => row ?? []);
+  const drawn = cells.map((row) => row.map((cell) => inertBlock(cell)));
+
+  // The separators are spent before the columns are: they are what makes the block read as a table
+  // at all, so the cells share what is left rather than the whole width.
+  const budget = MAX_BLOCK_WIDTH - (columns - 1) * TABLE_SEPARATOR.length;
+  if (budget < columns) return null;
+  const natural = Array.from({ length: columns }, (_, column) =>
+    Math.max(...drawn.map((row) => [...(row[column] ?? "")].length)),
+  );
+  const widths = columnCaps(natural, budget);
+  // A column held under what its cells want is a cell about to be cut, so the row rendering takes
+  // it. Measured on the cells as they are drawn rather than as they were written, the same reading
+  // the grid pads on, so what decides the shape is what a reader would have seen.
+  if (widths.some((width, column) => width < (natural[column] ?? 0))) return perRowTable(cells);
+
+  const block = fenced(
+    drawn.map((row) =>
+      row
+        .map((cell, column) => paddedCell(cell, widths[column] ?? 0, alignments[column] ?? "left"))
+        .join(TABLE_SEPARATOR)
+        .trimEnd(),
+    ),
+  );
+  return block.length > MAX_TABLE_LENGTH ? null : block;
+}
+
+/**
+ * Mirrored text with every Markdown table in it redrawn as the shape its width allows: a fenced
+ * aligned block where the columns fit, a block per row where they do not.
+ *
+ * Discord renders no Markdown table: the pipes and the dashes arrive as themselves, which is a
+ * shape the operator reads with effort on a phone. A fence answers that where the table is narrow
+ * enough for one: the columns line up in a monospace grid, and the cell text inside is already
+ * inert. Past that width the grid could only be had by cutting cells, so the text is kept and the
+ * grid is what is given up, and where keeping it a row at a time would cost far more text than the
+ * table is written in, the Markdown the model wrote is what ships.
+ *
+ * Only text outside an existing fence is examined, on the file's one reading of where a fence is,
+ * so a table the model wrote inside a code block stays exactly as it wrote it and nothing here can
+ * open a fence inside one.
+ */
+function withTablesBlocked(value: string): string {
+  return scanFences(null, value)
+    .runs.map((run) => (run.fenced ? run.text : blockedTables(run.text)))
+    .join("");
+}
+
+/** Every whole table in one unfenced stretch of text, redrawn; everything else left as it is. */
+function blockedTables(text: string): string {
+  const lines = text.split("\n");
+  const drawn: string[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (!(lines[index] ?? "").includes("|")) {
+      drawn.push(lines[index] ?? "");
+      index += 1;
+      continue;
+    }
+
+    // The candidate is the whole run of consecutive pipe-carrying lines, so a row the table cannot
+    // account for is inside the shape being judged rather than outside it. A run that is not a
+    // table gives up only its first line, and the line after it opens the next candidate: a table
+    // under a line of prose that happens to carry a pipe is still a table.
+    let end = index + 1;
+    while (end < lines.length && (lines[end] ?? "").includes("|")) end += 1;
+
+    // Where the run ends does not depend on which of its lines a candidate opens on, so both the
+    // boundary and the parse belong to the run, are found once, and every candidate start is an
+    // index view into that one parse. Redoing either per start is what would cost the square of a
+    // long run's length before it was rejected.
+    const rows = lines.slice(index, end).map(tableCells);
+    let block: string | null = null;
+    let start = index;
+    while (start < end && block === null) {
+      block = tableBlock(rows, start - index);
+      if (block === null) {
+        drawn.push(lines[start] ?? "");
+        start += 1;
+      }
+    }
+    if (block !== null) drawn.push(block);
+    index = end;
+  }
+  return drawn.join("\n");
+}
+
+/**
+ * Mirrored conversation text made ready for a thread: its tables redrawn, then its chip and quote
+ * syntax neutralized.
+ *
+ * One seam for both the paths mirrored text reaches Discord by, the messages a run posts and the
+ * merge that grows a narration block, so a table cannot draw one way when a chunk opens a message
+ * and another way when it grows one. The table transform runs first because it reads and writes
+ * ordinary Markdown: run after the escape, it would measure and pad cells around backslashes the
+ * fence it draws renders as themselves. The escape running second is also the second cover on
+ * unfenced cell text, which the table transform has already put through the unfenced escape itself.
+ */
+function mirrorBody(value: string): string {
+  return withoutChips(withTablesBlocked(value));
+}
+
+/**
+ * One mirrored prompt or reply, rendered as the ordered messages it takes to carry it whole.
+ *
+ * A reply is never truncated: it is among the highest-value things this system posts, and a reply
+ * cut at one message is a reply the operator has to walk to a keyboard to finish reading, which is
+ * the thing mirroring exists to avoid. So there is no ceiling on the count. A prompt is the one
+ * capped surface, above.
+ */
+export function renderMirror(kind: MirrorKind, text: string): string[] {
+  const seen = withoutInvisible(text).trim();
+  // The cap is measured on the text as it arrived, before escaping: escaping adds a character per
+  // angle bracket it neutralizes, and a cap applied after would shorten a paste by characters
+  // nobody typed.
+  const capped =
+    kind === "prompt" && [...seen].length > MAX_MIRRORED_PROMPT_LENGTH
+      ? shortened(sliceCodePoints(seen, MAX_MIRRORED_PROMPT_LENGTH))
+      : seen;
+  return attributed(capped, ATTRIBUTION[kind]);
+}
+
+/**
+ * One reply tool message, rendered as the ordered messages it takes to carry it whole.
+ *
+ * The same treatment a mirrored reply gets, from the same machinery, because it is the same kind of
+ * text arriving in the same thread: written by a model that has read whatever the session read, and
+ * landing beside mirrored messages in the one channel the operator answers permission prompts in. A
+ * second escape or a second splitter of the same shape would be two readings of where a code fence
+ * is, and what a disagreement between them costs is the chip or the forged attribution one of them
+ * believed it had removed.
+ *
+ * Uncapped at any length, like the mirror's reply: the paste cap protects the thread from the
+ * operator's own log dumps and has no business touching text written to be read.
+ */
+export function renderAnswer(text: string): string[] {
+  return attributed(withoutInvisible(text).trim(), ANSWER_ATTRIBUTION);
+}
+
+/**
+ * A message another session sent this one, rendered as the ordered messages it takes to carry it
+ * whole.
+ *
+ * Neutralized as a mirrored reply is, because it is the same class of text landing in the same
+ * thread: written by a model, untrusted, and posted into the one channel the operator answers
+ * permission prompts in. The escape's pieces are the mirror's own and the splitter is the mirror's
+ * own, assembled for this register by `chattered`, and the attribution rides every message rather
+ * than the first: a second escape or a second splitter of the same shape would be two readings of
+ * where a code fence is, and a disagreement between them is the chip or the forged attribution one of
+ * them believed it had removed.
+ *
+ * Drawn as subtext, every line of it, which is what says at a glance that the message was addressed
+ * to this session rather than to the operator reading the thread. Past `MAX_PEER_SUBTEXT_LENGTH` it
+ * is drawn behind a spoiler under one subtext teaser instead, on the reasoning that a body that long
+ * is not scanned in a scroll whatever type it is set in.
+ *
+ * Capped where a mirrored paste is capped, and shortened with the same visible marker. A reply is
+ * uncapped because it is Claude's own text, written to be read by the operator it is posted to; a
+ * pasted prompt is capped because it is input arriving from outside. A peer message is input
+ * arriving from outside, so it takes the prompt's side of that line, and the route it arrives on
+ * accepts a quarter of a megabyte, which uncapped is over a hundred posts from one message against a
+ * write budget the alert route shares.
+ *
+ * A body with nothing visible in it is no message at all rather than a bare attribution line, which
+ * is `attributed`'s contract and reads correctly here too: an attribution with nothing under it
+ * would say a peer sent silence.
+ */
+export function renderPeerIn(name: string, body: string): string[] {
+  return chattered(peerCapped(body), peerAttribution(name, "in"));
+}
+
+/**
+ * A message this session sent another, rendered as the ordered messages it takes to carry it whole.
+ *
+ * The outbound half of `renderPeerIn`, with the names either side of the arrow swapped, so one
+ * thread carries both halves of an exchange under one glyph and a reader tells the direction from
+ * the line rather than from the surrounding text. What renders is the message as it was sent; the
+ * send's summary is the brief form's material, and the address, the hop chain, and the message id
+ * render nowhere, none of them being anything an operator can act on from a thread.
+ *
+ * The same cap, the same escape, and the same register as the inbound half. What this session sent is
+ * model-composed text quoting whatever it was working with, and the thread is one surface: a rule
+ * that held on one direction and not the other would be a hole the size of one `SendMessage` call.
+ */
+export function renderPeerOut(to: string, message: string): string[] {
+  return chattered(peerCapped(message), peerAttribution(to, "out"));
+}
+
+/**
+ * A peer message's text, stripped and held to the length a mirrored paste is held to, with the
+ * marker that says it was cut.
+ *
+ * The cap is measured on the text as it arrived, before escaping, exactly as `renderMirror` measures
+ * its own and for its reason: escaping adds a character per angle bracket it neutralizes, and a cap
+ * applied afterwards would shorten a message by characters nobody wrote.
+ */
+function peerCapped(text: string): string {
+  const seen = withoutInvisible(text).trim();
+  return [...seen].length > MAX_MIRRORED_PROMPT_LENGTH
+    ? shortened(sliceCodePoints(seen, MAX_MIRRORED_PROMPT_LENGTH))
+    : seen;
+}
+
+/**
+ * The opening line of a body, which is what a one-line rendering of it carries.
+ *
+ * The line breaks are normalized before the split, so this reads a line the way the client that will
+ * draw it reads one. Three break characters end a line for Discord without ending one for this file:
+ * none is in the invisible class, so the strip above passes them through, and none is whitespace to
+ * the escape's own collapse, so nothing downstream folds them away either. Read without the
+ * normalization, "the opening line" is the opening several lines, and every one of them past the
+ * first is drawn with no marker in front of it.
+ *
+ * That matters wherever a one-line rendering is drawn outside the register's other covers: the brief
+ * forms, which draw this line and nothing else, and the oversized form's teaser, which is the one
+ * peer-authored line drawn outside the spoiler.
+ *
+ * The normalization also runs in front of the trim rather than behind it, and the order is the whole
+ * behaviour rather than a preference. None of the three break characters is whitespace to `trim`, so
+ * a body opening with one keeps it through a trim taken first, has it turned into a newline here, and
+ * yields an opening line that is empty: the brief forms then render no message at all and the send is
+ * dropped as carrying no visible text, which is false, and the oversized form loses the one line that
+ * says what its spoiler conceals. Normalized first, the break is a newline the trim removes with the
+ * rest of the leading whitespace, and the opening line is the one the peer wrote.
+ */
+function firstLine(value: string): string {
+  return newlinesOnly(withoutInvisible(value)).trim().split("\n")[0] ?? "";
+}
+
+/**
+ * Untrusted text for the one line a brief peer rendering draws: its opening line, escaped and
+ * bounded.
+ *
+ * The card-title escape rather than the mirror's, because this is one line of a composed message
+ * rather than a body of prose: markdown that would be readability in a whole mirrored message is
+ * only a way to change the shape of the line here, and the escape collapses the whitespace that
+ * would otherwise let text past the first line back onto the surface.
+ *
+ * The attribution glyphs are neutralized on top of it, because a brief line is drawn directly under
+ * the attribution and therefore opens a line of its own: this is the same forgery the whole
+ * rendering blocks, one line long.
+ *
+ * Read by the brief forms and by the whole rendering's oversized form, whose teaser is this line
+ * under the same marker. One composition for both, deliberately: what a peer message looks like
+ * reduced to one line is one question, and two answers to it could come to differ in what they
+ * neutralize while both looking right.
+ *
+ * One drawn line is the contract, not a figure of speech, and `firstLine` is what holds it: the
+ * whitespace collapse inside the escape folds every break this file's line model knows about, and
+ * the three it does not are normalized to newlines before the opening line is taken.
+ */
+function peerLine(value: string): string {
+  return withoutAttributions(inertField(firstLine(value), MAX_PEER_BRIEF_LENGTH));
+}
+
+/**
+ * One inbound peer message as a single line: the attribution, and the body's opening line bounded.
+ *
+ * The volume the `brief` mode trades away is the body; the attribution is the same one the whole
+ * rendering opens with, and the one line under it carries the same subtext marker every line of the
+ * whole rendering carries, because the knob governs how much of a peer message reaches the thread and
+ * never who it is attributed to or what register it is drawn in. A body with nothing visible in it is
+ * no message, exactly as the whole rendering answers it.
+ */
+export function renderPeerInBrief(name: string, body: string): string[] {
+  const line = peerLine(body);
+  return line === "" ? [] : [`${peerAttribution(name, "in")}${PEER_SUBTEXT}${line}`];
+}
+
+/**
+ * One outbound peer message as a single line: the attribution, and the send's summary bounded.
+ *
+ * A summary carrying nothing visible falls back to the message's own opening line. The summary is
+ * optional on the sending tool, and an attribution line with nothing under it would read as this
+ * session having sent an empty message.
+ *
+ * The one line takes the subtext marker, exactly as the inbound brief form's does and as every line
+ * of the whole rendering does: the volume knob decides how much of a message is drawn, never what
+ * register it is drawn in. The marker composed here needs no neutralization pass behind it, unlike
+ * the whole rendering's: `peerLine` puts the text through `inertField`, whose escape covers `#`, so a
+ * summary opening with the two characters arrives as `-\#` and can compose no second marker.
+ */
+export function renderPeerOutBrief(to: string, summary: string | null, message: string): string[] {
+  const line = peerLine(summary ?? "") || peerLine(message);
+  return line === "" ? [] : [`${peerAttribution(to, "out")}${PEER_SUBTEXT}${line}`];
+}
+
+/**
+ * A mid-turn chunk merged into the narration message already sitting in the thread, or `null` when
+ * it will not go there.
+ *
+ * The router grows one narration block by editing that message in place, so a working stretch reads
+ * as a single message under a single attribution rather than as a header per sentence. `existing` is
+ * the exact content that message was posted with, which has been through this renderer already: it
+ * is copied into the result untouched, because escaping it a second time would write a backslash in
+ * front of the backslashes a reader is already looking at. `text` is the raw chunk, the same
+ * untrusted class `renderMirror` receives, and it goes through the same stripping and the same
+ * escape, because the attribution rule holds for text arriving by edit exactly as it does for text
+ * arriving by post.
+ *
+ * A fence the body leaves open is closed, the way the splitter closes one at the end of a message:
+ * a merged message holding a fence open renders everything posted below it as code. The body's scan
+ * starts from no open fence because every message this renderer emits closes what it opened, which
+ * is true of a split run's last message and of the result here, so it stays true of the next merge.
+ *
+ * `null` is the only refusal, and it covers both a chunk that neutralizes to nothing and a merge
+ * over the ceiling. Nothing is truncated here: a chunk that does not fit whole posts as a fresh
+ * message through the splitter instead, which is the same fallback either answer leads to.
+ */
+export function appendNarration(existing: string, text: string): string | null {
+  // The cheap half of the precondition, checked rather than assumed. Everything this renderer
+  // emits is trimmed and free of the invisible class, so a message that really was posted passes
+  // as an identity check, and an empty, padded, or invisible-carrying base is refused: a merge
+  // grown on a string Discord does not hold is a block whose remembered copy drifts from the
+  // thread with every append. The rest of the precondition, that the base is renderer output and
+  // not merely renderer-shaped, is the caller's provenance to keep.
+  if (existing === "" || existing !== withoutInvisible(existing).trim()) return null;
+  const seen = mirrorBody(withoutInvisible(text).trim());
+  if (seen === "") return null;
+  const closing = fenceAfter(null, seen) === null ? "" : `\n${FENCE}`;
+  const merged = `${existing}\n\n${seen}${closing}`;
+  // Measured in UTF-16 units, the larger of the two counts a length could mean, so holding it holds
+  // the code point count too. The message is accepted whole or not at all, so there is no cut to
+  // place and no half character to avoid placing it in.
+  return merged.length > MAX_MESSAGE_LENGTH ? null : merged;
+}
+
+/**
+ * Neutralized text, packed into the messages it takes to carry it, each one carrying `prefix`.
+ *
+ * The whole budget is `MAX_MESSAGE_LENGTH` and every part of a message is spent against it: the
+ * attribution, the fence lines a split code block needs, and the text. That is why splitting and
+ * attribution are one function rather than two: a splitter that cut to the ceiling and a caller
+ * that then prefixed anything at all would post messages over it, which Discord rejects outright.
+ *
+ * For Claude's own text, which is the mirror and the answer. Peer chatter is drawn in a register of
+ * its own and assembled by `chattered` below, which composes the same pieces in a different order.
+ */
+function attributed(seen: string, prefix: string): string[] {
+  const body = mirrorBody(seen);
+  // Nothing at all to say. Reported as no messages rather than as one empty message, which Discord
+  // refuses and which would read as the session having answered with silence.
+  if (body === "") return [];
+  return split(body, prefix);
+}
+
+/**
+ * A peer body, neutralized and drawn as the messages it takes to carry it whole: marked as subtext
+ * line by line, or, past `MAX_PEER_SUBTEXT_LENGTH`, collapsed behind a spoiler under one teaser.
+ *
+ * `attributed`'s counterpart for chatter, and composed from the same pieces rather than from a second
+ * escape or a second splitter of its own: where a fence is stays one reading in this file, since two
+ * of them could disagree and the disagreement would be a live chip or a forged attribution in a
+ * region one of them called code.
+ *
+ * `seen` arrives capped, because the cap is measured on the text as it arrived and everything here
+ * runs on escaped text. That order is load-bearing beyond the measurement: `shortened` closes a fence
+ * the cut left open, so a body capped afterwards would carry a delimiter this neutralization never
+ * saw.
+ *
+ * What differs from `mirrorBody`, and why, in the order it happens:
+ *
+ * - The line breaks are normalized first, because everything after this asks where a line starts and
+ *   the answer has to be the same for all of them.
+ * - The table transform is left out altogether. What it draws is a fenced block, and a fence is a
+ *   multi-line construct whose lines cannot each open with a subtext marker and remain a fence. What
+ *   that costs is that a coordination message's table arrives as its own raw Markdown, its pipes
+ *   escaped by the pass below rather than read as columns.
+ * - Fence delimiters are neutralized next, before the chip escape rather than after it. Run the
+ *   other way round, `withoutChips` would exempt the inside of a fence this then unfences, leaving
+ *   live chip syntax in what has become ordinary markdown.
+ * - The pipes are neutralized, which the mirror's own pipeline does not do: two live ones are a
+ *   spoiler, so a peer that keeps them can hide its own words behind a tap, and in the oversized form
+ *   the pair is this renderer's own delimiter. Every body, whatever its size, for the reasons in
+ *   `withoutPipes`.
+ * - The line-leading attribution glyphs are neutralized behind the chip escape as they always were,
+ *   as depth behind the marker rather than as the thing holding the register up: a marked line's
+ *   glyph is no longer line-leading, and the register is not left resting on one pass.
+ * - The lines are broken to fit, the peer's own subtext markers are neutralized, and the drawn ones
+ *   are marked, all of which is `subtexted`, and only then split.
+ *
+ * Past `MAX_PEER_SUBTEXT_LENGTH` the last step is the one that changes: `spoilered` breaks the same
+ * lines to the same bound and marks none of them, and the splitter draws each message's body inside
+ * one spoiler pair with the header, and on the first message the teaser, outside it. The pair is
+ * per message because a spoiler does not span messages, and it is charged against that message's
+ * budget by the splitter rather than taken out of the 100 units `MAX_MESSAGE_LENGTH` holds back
+ * from Discord's own ceiling, which is what keeps the ceiling's slack unspent.
+ */
+function chattered(seen: string, prefix: string): string[] {
+  const escaped = withoutAttributions(withoutChips(withoutPipes(withoutFences(newlinesOnly(seen)))));
+  // Nothing at all to say, answered exactly as `attributed` answers it and for the same reasons: an
+  // attribution with nothing under it would say a peer sent silence, and Discord refuses an empty
+  // message anyway. Asked before the marking, so the answer is about the body rather than about the
+  // markers this would otherwise have put on it.
+  if (escaped === "") return [];
+  // Measured on the body as it arrived rather than on the escaped copy, which is where `peerCapped`
+  // measures and in the currency it measures in: how much a peer said is a reader's question, and a
+  // threshold taken behind the escapes would move with how much markdown they happened to write.
+  if ([...seen].length <= MAX_PEER_SUBTEXT_LENGTH) return split(subtexted(escaped), prefix);
+  // The teaser is the brief form's own line, from the same function, so the one-line rendering of a
+  // peer message is one composition in this file rather than two that could come to differ. A body
+  // whose opening line neutralizes to nothing draws no teaser at all rather than a bare marker.
+  const teaser = peerLine(seen);
+  const opener = teaser === "" ? "" : `${PEER_SUBTEXT}${teaser}\n`;
+  return split(spoilered(escaped), prefix, (index) => ({
+    lead: `${index === 0 ? opener : ""}${PEER_SPOILER}`,
+    tail: PEER_SPOILER,
+  }));
+}
+
+/**
+ * A cut paste, with the marker that says it was cut.
+ *
+ * A fence the cut left open is closed first: appended inside one, the marker would render as a line
+ * of code, which is a cut saying nothing at all to whoever reads it.
+ */
+function shortened(cut: string): string {
+  const closing = fenceAfter(null, cut) === null ? "" : `\n${FENCE}`;
+  return `${cut}${closing}\n\n${SHORTENED}`;
+}
+
+/**
+ * Where the code fences are: the text split into runs that are inside one and runs that are not,
+ * and the fence still open at the end, as its info string.
+ *
+ * The one reading of fence structure in this file. The escape uses it to decide what to leave
+ * alone, and the splitter uses it to decide what to close and re-open across a message boundary,
+ * so the two cannot come to disagree about where a code block is.
+ *
+ * Scanned by delimiter rather than by line, so a fence opened and closed on one line toggles twice
+ * and leaves nothing open. A fence the text never closes stays open to the end, which is how
+ * Discord shows it: everything after an unclosed delimiter is code. The info string is the language
+ * word Discord colours by, and it is carried across a boundary because a message that re-opened a
+ * bare fence would render the code without its colours and one that re-opened nothing would render
+ * it as prose.
+ *
+ * Two things this reading does not model, and both are limits rather than oversights. A run of
+ * three or more backticks toggles, whatever its length, where Discord's own rule relates the length
+ * of a closing run to its opening one. And a delimiter is a delimiter wherever it sits on a line,
+ * including mid-line. Where either reading differs from Discord's, the cost is bounded to a chip
+ * left unescaped in a region this file called code and Discord called prose, which `allowed_mentions`
+ * still keeps from pinging anyone. It is bounded there because the one thing a difference must not
+ * cost, a mirrored line that draws the attribution, is escaped without consulting this scanner.
+ */
+function scanFences(
+  state: string | null,
+  chunk: string,
+): { open: string | null; runs: Array<{ text: string; fenced: boolean }> } {
+  const runs: Array<{ text: string; fenced: boolean }> = [];
+  let open = state;
+  let from = 0;
+  // A backslash and whatever follows it is consumed as one unit, so an escaped backtick is text
+  // rather than a delimiter, and a doubled backslash leaves the backtick after it delimiting again.
+  // The escape above never writes a backslash in front of a backtick, only in front of `<` and `>`,
+  // which is what lets the same scanner read the text before escaping and the text after it and
+  // find the fences in the same places.
+  for (const match of chunk.matchAll(/\\[\s\S]|`{3,}([^\n`]*)/g)) {
+    const info = match[1];
+    if (info === undefined) continue;
+    runs.push({ text: chunk.slice(from, match.index), fenced: open !== null });
+    from = match.index + match[0].length;
+    if (open !== null) {
+      // A closing delimiter ends the block at the delimiter. What follows it on that line is
+      // ordinary markdown to Discord, and therefore a surface a chip can be drawn on, so it goes
+      // back into the escaped stream rather than riding along as part of the fence.
+      runs.push({ text: match[0].slice(0, match[0].length - info.length), fenced: true });
+      runs.push({ text: info, fenced: false });
+      open = null;
+      continue;
+    }
+    // An opening delimiter owns its whole line: the info string is the fence's, not content.
+    runs.push({ text: match[0], fenced: true });
+    const language = info.trim().split(/\s+/)[0] ?? "";
+    open = language.length <= MAX_FENCE_INFO_LENGTH ? language : "";
+  }
+  runs.push({ text: chunk.slice(from), fenced: open !== null });
+  return { open, runs };
+}
+
+/** The fence open after `chunk`, given the one open before it. */
+function fenceAfter(state: string | null, chunk: string): string | null {
+  return scanFences(state, chunk).open;
+}
+
+/**
+ * The break characters that end a line for a client without ending one for this file.
+ *
+ * The next line, the line separator, and the paragraph separator. All three are legible break
+ * characters rather than invisible ones, so `withoutInvisible` passes them through, and all three
+ * reach Discord as themselves. What that costs the chatter register is exact: one line as this file
+ * counts lines can be several lines as the client draws them, and every drawn line past the first
+ * carries no subtext marker, which is peer text at reading size under a chatter header.
+ *
+ * Two of the three are line terminators to JavaScript's own multiline `^`, and the third is not, so
+ * leaving them alone would give this file two disagreeing readings of where a line ends before
+ * Discord is even consulted.
+ *
+ * Written as an escape and two Unicode categories rather than as the characters, which is
+ * `isInvisible`'s own rule and holds here for a sharper reason: a literal break character in source is
+ * invisible to review, and two of these three would end the source line they were written on. The two
+ * categories have one member each, the separators named above, so the class is exact rather than
+ * broad.
+ */
+const ODD_BREAKS = /[\x85\p{Zl}\p{Zp}]/gu;
+
+/**
+ * A body whose every line break is a newline.
+ *
+ * The one line model for chatter, established before anything reads a line rather than taught to
+ * each reader. Four passes downstream ask where a line starts or ends: the quote escape, the
+ * attribution escape, the marking, and the splitter. Widening each of their readings would be four
+ * chances to widen three of them, and a break one pass sees and another does not is a drawn line with
+ * no marker on it. Normalizing once leaves each of them reading `\n` and reading it correctly.
+ *
+ * Substitution rather than stripping, because these characters carry the peer's paragraphing: dropped,
+ * two sentences meet mid-line, which changes what the message says.
+ */
+function newlinesOnly(value: string): string {
+  return value.replace(ODD_BREAKS, "\n");
+}
+
+/** A run of three or more backticks, which is what `scanFences` reads as a fence delimiter. */
+const FENCE_DELIMITER = /`{3,}/g;
+
+/**
+ * Backslash-escapes every fence delimiter, leaving shorter runs of backticks alone.
+ *
+ * For chatter alone. A fence is a multi-line construct and the subtext marker is a per-line one, so a
+ * body reaching Discord with a live delimiter in it renders the lines between the delimiters as a
+ * code block: at full size, outside the register, and with the marker drawn as literal characters.
+ * The delimiter is neutralized rather than dropped, so nothing is silently taken out of the body,
+ * which is the trade `inertText` already makes for a backtick anywhere else.
+ *
+ * One delimiter reaching this was written by the renderer rather than by the peer. `shortened` closes
+ * a fence an over-cap cut left open, and that closing delimiter is neutralized here with the rest, so
+ * a cut body drawn in this register shows one delimiter the peer did not write. It is left that way:
+ * suppressing it on this path alone would take either a flag through `shortened` or a second copy of
+ * the cut marker beside it, and the file's own rule is one implementation of that marker, since two
+ * could come to disagree about what a shortened body looks like. The artifact is cosmetic and cannot
+ * reach the register, because what it renders as is characters.
+ *
+ * Nothing survives this that `scanFences` can still read as a delimiter, whatever backslashes the
+ * text already carried: a run's backticks come out of here separated by the backslashes this inserts,
+ * and the runs it leaves alone were bounded by non-backticks to begin with, so no three backticks are
+ * left adjacent anywhere. What an odd backslash in front of a run can leave is one live backtick,
+ * which opens no block.
+ *
+ * Runs of one and two are left alone so inline code inside a line still renders. Inline code cannot
+ * span a line break, so no surviving run can carry a line out of the register.
+ */
+function withoutFences(value: string): string {
+  return value.replace(FENCE_DELIMITER, (run) => run.replace(/`/g, "\\`"));
+}
+
+/**
+ * One escape pair, or one bare pipe: the two things a left-to-right reading of a body has to tell
+ * apart, since whether the escape written in front of a pipe is itself live is decided by what the
+ * peer wrote before it.
+ *
+ * Written as this alternation rather than as a run of backslashes followed by a pipe, which is the
+ * same reading and the same result: the alternation consumes the text once, where the run form asks
+ * the engine to try every length of run at every backslash and give the run back when no pipe
+ * follows. On a body of backslashes at the paste cap that is the difference between a scan and a
+ * hundred million steps of backtracking on the broker's one event loop, driven by text a peer sends.
+ */
+const PIPE = /\\[\s\S]|\|/g;
+
+/**
+ * Backslash-escapes every pipe in a chatter body.
+ *
+ * For chatter alone, and for every chatter body rather than the oversized one alone. A live pair of
+ * pipes is a spoiler, so a peer that keeps them can hide its own words behind a tap, which inverts
+ * what the register buys: a scroll is supposed to show the operator everything a peer said without
+ * asking them to tap anything. And in the oversized form the pair is this renderer's own delimiter,
+ * so a live pair in the body could close the spoiler early and put the rest of the message on the
+ * screen at full size. One pass covers both, because a body's size is not something the escape
+ * should have an opinion about.
+ *
+ * Not an invented rule: `MARKDOWN` already carries the pipe and `inertText` already escapes it, so
+ * the brief forms have neutralized pipes since they were written and this brings the whole rendering
+ * into line with them. What it costs is that a table a peer wrote arrives with a backslash in front
+ * of every pipe in the source, which Discord draws as the pipe that was typed.
+ *
+ * Chatter-only, and deliberately not folded into `withoutChips`: that pass is shared with `mirrorBody`
+ * and the operator-facing surfaces, where the table transform reads pipes as structure and escaping
+ * them would change what an operator is shown.
+ *
+ * Like the chip escape, this only ever inserts backslashes in front of a character, so it can
+ * neither create nor destroy a fence delimiter and the fence structure the splitter reads afterwards
+ * is the structure the escape read.
+ *
+ * What it promises is exact and is what the composed spoiler pair rests on: no pipe leaving here is
+ * one Discord reads as a delimiter. A backslash the peer wrote in front of a pipe would otherwise
+ * consume the one this inserts and hand the pipe back live, so that backslash is itself escaped
+ * before the pipe behind it is. That is not a corner: a body ending in such a pipe sits directly
+ * against the closing delimiter this renderer appends, and the pair Discord would read there is one
+ * pipe of the peer's and one of the broker's.
+ *
+ * Nothing the peer wrote is dropped either way. An escape pair the peer wrote in front of anything
+ * else is passed through as it stands, so the reading of what is escaped downstream of here is the
+ * reading the text arrived with.
+ */
+function withoutPipes(value: string): string {
+  return value.replace(PIPE, (token) => {
+    if (token === "|") return "\\|";
+    // The peer's own backslash in front of a pipe: escaped itself, so it consumes nothing, and the
+    // pipe behind it takes an escape of its own.
+    return token === "\\|" ? "\\\\\\|" : token;
+  });
+}
+
+/**
+ * Neutralizes the chip and quote syntax outside fenced code blocks, leaves the inside of one as it
+ * was written, and neutralizes a line-leading quote marker everywhere.
+ *
+ * The quote marker is the exception to the fence exemption, because the attribution is a quoted
+ * line and its unforgeability is the property that least deserves to rest on this file's reading of
+ * where a code block is agreeing with Discord's. Escaped in both regions, a disagreement costs a
+ * visible backslash in front of a line of code; escaped in one, it costs a mirrored reply that can
+ * draw the line saying who wrote it.
+ *
+ * Run before the text is split, and safe to run there, because it only ever inserts a backslash in
+ * front of `<`, `>`, so it can neither create nor destroy a delimiter: the fence structure the
+ * splitter reads afterwards is the structure this read.
+ *
+ * Chatter calls this directly rather than through `mirrorBody`, on text `withoutFences` has already
+ * left no fence in. The exemption then covers nothing and the escape applies uniformly, which is the
+ * reason those two run in that order: the other way round, this would exempt the inside of a fence
+ * that was about to stop being one.
+ */
+function withoutChips(value: string): string {
+  const escaped = scanFences(null, value)
+    .runs.map((run) => (run.fenced ? run.text : run.text.replace(CHIPS, (character) => `\\${character}`)))
+    .join("");
+  // The line-leading pass runs second and over everything, where it finds only the markers the
+  // first pass left inside fences: one already escaped is preceded by its backslash rather than by
+  // the start of its line.
+  return escaped.replace(/^([ \t]*)>/gm, "$1\\>");
+}
+
+/**
+ * Neutralizes this renderer's own attribution glyphs where they open a line.
+ *
+ * For remote-authored text only. A mirrored reply and an answer carry the residual instead, on the
+ * stated ground that they are Claude's own words, so a line of one reproducing a Claude marker
+ * claims nothing the message does not already say. That ground does not reach here, because the
+ * author and the party named are different: a line reading `📡 Claude → Fable` inside a peer message
+ * says this session sent something it never sent, in the one channel the operator answers permission
+ * prompts in.
+ *
+ * Line-leading only, and everywhere including inside a fence, which is `withoutChips`' own rule for
+ * the quote marker and holds for the same reason: a marker mid-line claims nothing, a marker opening
+ * a line is what draws the surface, and the property least deserving to rest on this file's reading
+ * of where a code block is agreeing with Discord's is the one about who wrote a line.
+ *
+ * A backslash is what goes in front, one for one with the `\>` treatment, and it costs the operator
+ * nothing they see: Discord consumes a backslash placed before a character its own markdown reserves
+ * and draws the character alone, the attribution glyph included, so a peer writing a bare attribution
+ * has it drawn as the glyph and the words, inert, with no mark on the line. The neutralization is
+ * therefore invisible where it fires, which is why nothing downstream may rest on a reader spotting
+ * it.
+ *
+ * Run after the escape rather than before it, because the table transform moves cell text onto lines
+ * of its own: text that becomes line-leading there has to meet this rule exactly as text that
+ * arrived that way does. Inserting a backslash creates and destroys no fence delimiter, so the fence
+ * structure the splitter reads afterwards is the structure the escape read.
+ *
+ * Chatter runs this in the same position, behind the escape and in front of the marking, though it
+ * draws no tables. It is kept there as the second cover the whole rendering's unforgeability was
+ * resting on before the marker existed: the register is not left standing on one pass.
+ *
+ * What that second cover is worth splits by form, because this pass is invisible where it fires. The
+ * marked form's subtext marker means no peer character opens a line by the time the message is
+ * posted, so type size discriminates and this pass stands behind it. The spoilered form marks no
+ * line, so here this pass is the only cover, and a cover the client consumes is not one a reader can
+ * see: a peer body can compose a line shaped like an attribution and have it drawn at reading size
+ * once a tap reveals the body. That is an accepted residual bounded by the tap, recorded in
+ * `docs/security-model.md` beside the masked link rather than closed here, since no escape available
+ * on this surface closes it.
+ */
+function withoutAttributions(value: string): string {
+  return value.replace(ATTRIBUTION_OPENERS, "$1\\$2");
+}
+
+/**
+ * The longest head of `value` fitting in `limit` UTF-16 units, never cutting a character in half.
+ *
+ * Counted in UTF-16 units because that is the larger of the two counts a length could mean, so
+ * holding it holds the code point count too, and cut on code points because half of an astral
+ * character is a lone surrogate, which is not valid UTF-8 for the request body.
+ *
+ * Both places a length is cut to fit rather than refused use this: the splitter's hard cut, and the
+ * chatter wrap that exists to keep that cut out of reach.
+ */
+function headFitting(value: string, limit: number): string {
+  let units = 0;
+  let points = 0;
+  for (const character of value) {
+    if (units + character.length > limit) break;
+    units += character.length;
+    points += 1;
+  }
+  return sliceCodePoints(value, points);
+}
+
+/**
+ * Backs a cut off the three places it must not land.
+ *
+ * The splitter's hard cut and the chatter wrap both place a break inside a line, so both come here
+ * rather than each deciding for itself: two readings of what a break may not straddle would differ
+ * exactly where it matters, and the difference is a stranded escape or half a delimiter.
+ *
+ * Inside a run of backticks: half a delimiter in one message and half in the next is a fence the
+ * text still has and neither message can see, and the escape has already decided what to neutralize
+ * on the reading where the delimiter is whole. Straight after a backslash: that is the same hazard
+ * one character wide, stranding an escape from the character it makes inert, so the next message
+ * would open with a live chip or a live quote marker. And inside a fence's info string: the
+ * delimiter is whole on both readings there, but the language word is not, so a cut through
+ * ```` ```typescript ```` leaves one message opening a block called `typ` and the next re-opening
+ * that block with `escript` as its first line of code. The whole opening line moves to the next
+ * message instead, which is where the code it introduces already is.
+ *
+ * That last pattern also matches a closing delimiter with prose after it on the same line, and
+ * moving the delimiter whole is right there too: what follows it is what the fence model already
+ * reads as ordinary markdown.
+ *
+ * The cut only ever shrinks, and never to nothing: a line of pure delimiters still has to advance,
+ * and a cut that took nothing would repeat forever. So an info string longer than a whole message
+ * is cut through rather than moved, and both messages read it as the same fence.
+ */
+function cutSafely(rest: string, head: string): string {
+  const straddles = rest.length > head.length && rest[head.length] === "`";
+  const backed = (straddles ? head.replace(/`+$/, "") : head).replace(/\\+$/, "");
+  // Measured at the cut as it now stands: a fence opening line the rest of the text continues on
+  // is in progress, where one the text ends or breaks the line after is already whole.
+  const midLine = rest.length > backed.length && rest[backed.length] !== "\n";
+  const whole = midLine ? backed.replace(/`{3,}[^\n`]*$/, "") : backed;
+  return whole === "" ? head : whole;
+}
+
+/**
+ * One escaped chatter line, broken into the pieces that each fit a message whole.
+ *
+ * This is what forecloses the splitter's hard cut for chatter, and the cut is worth naming: handed a
+ * line longer than a message, the splitter cuts it and opens the next message with the tail, which
+ * carries no subtext marker and therefore renders peer text at full size. A line the splitter never
+ * has to cut cannot reach that path, so the register rests on an arithmetic rather than on a promise.
+ *
+ * `cutSafely` places the break, which is the splitter's own reading, so a break here can no more
+ * strand a backslash from what it escapes or halve a run of backticks than one there can. A line
+ * already inside the bound is returned untouched rather than run through the cut: `cutSafely` only
+ * ever shortens, and a line ending in a backslash would come back a piece shorter for no reason.
+ *
+ * Both chatter forms wrap here, `subtexted` and `spoilered` alike, and one bound serves both: the
+ * oversized form's spoiler pair and first-message teaser cost at most 209 units, which leaves a piece
+ * this long more than 1,400 units of room against the message ceiling once the widest attribution is
+ * charged too. The hard cut is out of reach on either path, which is what the wrap is for.
+ */
+function subtextPieces(line: string): string[] {
+  const pieces: string[] = [];
+  let rest = line;
+  while (rest.length > MAX_PEER_SUBTEXT_LINE_LENGTH) {
+    // At least one code point, always, which is the splitter's own guarantee at its own cut: a bound
+    // too small for the next character would drop the rest of the line rather than break it.
+    const head = cutSafely(
+      rest,
+      headFitting(rest, MAX_PEER_SUBTEXT_LINE_LENGTH) || sliceCodePoints(rest, 1),
+    );
+    pieces.push(head);
+    rest = rest.slice(head.length);
+  }
+  // Never empty: every head above is shorter than the `rest` it was taken from, since the bound it
+  // fits is the bound `rest` exceeded, so the loop always leaves something behind.
+  pieces.push(rest);
+  return pieces;
+}
+
+/**
+ * A subtext marker where a peer wrote one at the start of a drawn line.
+ *
+ * The marker is renderer-composed vocabulary, so a peer writing one is the same forgery the
+ * attribution glyphs are neutralized for, and it is worse than those in one way: the marker this
+ * renderer puts on the line lands immediately in front of the peer's, and `-# -# text` is a doubled
+ * marker rather than a marked line. Discord's heading rule refuses a doubled marker and falls the
+ * line through to a paragraph; whether the subtext rule carries the same guard is not something this
+ * file can know, and a line that falls through is peer text drawn at reading size under a chatter
+ * header, which is the one outcome the register exists to prevent. Neutralized rather than trusted.
+ *
+ * Not in `ATTRIBUTION_OPENERS`, and it cannot join that set: the derivation there reduces each
+ * attribution to `openingGlyph`, one code point, and this marker is two characters whose meaning is
+ * in the pair. The set's promise that a vocabulary added later joins it automatically holds for the
+ * openers it is built from and stops at anything wider than a glyph, which is why this is its own
+ * pass rather than a line in that list.
+ *
+ * Matched wherever it opens a line rather than only where Discord would read it as a marker, since
+ * what Discord reads after the marker is the unknown this is guarding against. In the marked form the
+ * escape costs a reader nothing, the same as `withoutAttributions`: Discord consumes the backslash
+ * and draws the two characters the peer wrote. How it draws inside the spoilered form is not
+ * observed, and is bounded either way, since the worst it can cost is a backslash on a concealed line
+ * a reader has already chosen to open.
+ *
+ * Read by both chatter forms. In the marked form it stops a doubled marker; in the spoilered form,
+ * where this renderer marks nothing, it is the second cover that form would otherwise lack, since
+ * what holds the register there is the spoiler concealing the body rather than any marker.
+ */
+const SUBTEXT_OPENER = new RegExp(`^(${LINE_SPACE}*)-#`, "gm");
+
+/**
+ * A line-leading heading marker in a peer body, neutralized so the line cannot draw as a heading.
+ *
+ * The subtext marker this renderer prefixes does not suppress a heading marker behind it: Discord's
+ * subtext rule carries no doubled-marker guard, so `-# # x` draws `x` as a heading, at a size above
+ * the full-size text the register contract already forbids. That is the one composition capable of
+ * drawing peer text larger than an operator's own line, which is why the guard is not optional.
+ *
+ * Escaping the first `#` of the run is what breaks it, because a heading marker is read only at a
+ * line's start: behind an escaped `#` the rest of the run is no longer at a start and draws as the
+ * characters the peer wrote. Matched at any line-leading run rather than only where Discord reads a
+ * heading, on the same reasoning `SUBTEXT_OPENER` is, and at the same cost: none a reader sees in the
+ * marked form, where Discord consumes the backslash and draws the hash alone, and unobserved but
+ * bounded inside the spoilered form.
+ *
+ * Read by both chatter forms, and applied per drawn piece rather than in the escape chain, because
+ * the wrap runs after the chain and can carry a peer's mid-line hash to the start of a piece.
+ */
+const HEADING_OPENER = new RegExp(`^(${LINE_SPACE}*)#`, "gm");
+
+/**
+ * One drawn piece of a chatter body with every marker and every attribution opener the peer could
+ * open it with neutralized.
+ *
+ * Shared by both chatter forms rather than spelled out in each, because these guards are a property
+ * of the surface a piece is drawn on and not of either form that draws one: a guard added to the
+ * marked form alone would leave the spoilered form holding a register on one cover, and the drift
+ * would read as an omission nobody wrote.
+ *
+ * The attribution openers are here as well as in the escape chain, and the second pass is the one
+ * that holds. The chain runs before the wrap and reads a line start, so a peer that places an
+ * attribution glyph where the wrap will fall gets it carried to the start of a drawn piece with
+ * nothing in front of it: in the marked form this renderer's own marker still leads the line, but in
+ * the spoilered form nothing does, and a tapped-open body draws that line at reading size as a
+ * header this session never composed. Escaping per drawn piece is the same move the two markers
+ * above already make, for the same reason, and it is idempotent against the chain's own pass, since
+ * a piece the chain escaped opens with a backslash rather than a glyph.
+ */
+function withoutOwnMarkers(piece: string): string {
+  return piece
+    .replace(SUBTEXT_OPENER, "$1\\-#")
+    .replace(HEADING_OPENER, "$1\\#")
+    .replace(ATTRIBUTION_OPENERS, "$1\\$2");
+}
+
+/**
+ * An escaped chatter body with every line it draws marked as subtext, and every line too long for a
+ * message broken until it fits.
+ *
+ * The marker goes in front of whatever the peer indented with, because a marker with anything at all
+ * in front of it is not a marker. What that costs is the indentation reading as one space further in
+ * than it was written; what it buys is that no line of the body is drawn at reading size.
+ *
+ * A blank piece is emptied rather than marked or carried, which is the spoilered form's own reading
+ * of a blank piece and is shared with it deliberately. A marker in front of nothing is a composition
+ * with no observed rendering, and the whitespace itself is worse than useless: the splitter trims the
+ * end of every message, so a piece that is nothing but whitespace can be the whole buffer of a
+ * message, and that message posts as an attribution with nothing under it, which is exactly the
+ * empty-send shape three doc blocks in this file say cannot happen. Emptied, such a piece can never
+ * be the whole of a message, since the splitter emits nothing for an empty buffer, while the newline
+ * that separated it survives the join. The reading is per drawn piece rather than per source line,
+ * and that is not a detail: a wrap can hand back a piece that is nothing but whitespace from a
+ * source line that carried plenty.
+ *
+ * That last case is also the bound on what emptying preserves, so the claim is worth stating exactly
+ * rather than generously. Where the whitespace was its own source line, the peer's paragraphing
+ * survives untouched: a blank line in, a blank line out. Where the wrap produced it, the emptied
+ * piece draws as a blank line the peer did not write, so a bound-wide indent followed by content
+ * reaches the operator as an empty line above that content rather than beside it. That is a
+ * deliberate trade and not an oversight: the alternative is the whitespace-only piece surviving as
+ * the whole buffer of a message, which posts an attribution with nothing under it.
+ *
+ * The peer's own marker is neutralized here rather than in the escape chain, because the wrap runs
+ * after that chain and can put a mid-line `-#` at the start of a piece. One pass, in the one place
+ * that knows what a drawn line finally is.
+ */
+function subtexted(body: string): string {
+  return body
+    .split("\n")
+    .flatMap((line) => subtextPieces(line))
+    .map((piece) =>
+      piece.trim() === "" ? "" : `${PEER_SUBTEXT}${withoutOwnMarkers(piece)}`,
+    )
+    .join("\n");
+}
+
+/**
+ * A trailing run of backslashes made even, counting whatever whitespace follows it as nothing.
+ *
+ * The closing spoiler delimiter is appended after the text of a message, so a body ending in an odd
+ * number of backslashes would escape the first pipe of that delimiter and leave the pair the message
+ * opened with unclosed. What an unclosed pair renders as is not something this file knows, and the
+ * possibility it renders as the characters themselves is the whole body drawn at full size, which is
+ * the one outcome the register exists to prevent. One more backslash makes the run a run of escaped
+ * backslashes, which draws as the backslashes the peer wrote and consumes nothing after it.
+ *
+ * The whitespace is looked past because the splitter trims the end of every message it emits, so a
+ * backslash sitting behind trailing whitespace becomes the last character of the message it is in.
+ * Looked past in the class the trim actually reads, which is `\s`: `trimEnd` takes the whole Unicode
+ * whitespace set, the no-break space and the ideographic space among them, and a guard that counted
+ * only the space and the tab would leave the run odd, watch the trim eat the whitespace it had
+ * stopped at, and hand the closing delimiter a bare backslash. JavaScript's `\s` is precisely that
+ * set, which is what makes the two readings one reading.
+ */
+function evenEscapes(piece: string): string {
+  return piece.replace(/\\+(?=\s*$)/, (run) => (run.length % 2 === 0 ? run : `${run}\\`));
+}
+
+/**
+ * An escaped chatter body made ready to sit inside a spoiler: every line too long for a message
+ * broken until it fits, and nothing left that could eat the delimiter that closes it.
+ *
+ * `subtexted`'s counterpart for the oversized form, sharing the wrap with it, and differing in the
+ * one thing the form is: no line is marked. That skip is deliberate rather than an omission. What
+ * the register protects is the collapsed reading, and a collapsed spoiler draws nothing at all; a
+ * tapped-open spoiler is the operator having chosen to read the body, and reading is what reading
+ * size is for. `-#` inside `||` is also a composition with no observed rendering, and inventing one
+ * is not a thing to do on this surface.
+ *
+ * A whitespace-only piece is emptied rather than carried, which is `subtexted`'s own reading of a
+ * blank piece one step further: the splitter trims the end of a message, so a message whose whole
+ * buffer was whitespace would post as an attribution followed by an empty `||||`, a composition with
+ * no observed rendering standing where a body should be. Emptied, such a piece can never be the
+ * whole of a message, since the splitter emits nothing for an empty buffer.
+ *
+ * The peer's own subtext marker is neutralized here as it is in the marked form, though no line here
+ * carries one of this renderer's. Not because a marker inside a spoiler forges anything on its own,
+ * but because this form holds the register on one unverified rendering and nothing behind it: if a
+ * spoiler turns out not to span the lines of a body, what stands in the thread is the peer's lines
+ * drawing this renderer's own vocabulary. The subtext form is covered twice over and this is what
+ * gives this form its second cover. What that costs inside a spoiler is not observed; the marked
+ * form's own answer is that Discord consumes the backslash, and the worst the unobserved case can
+ * cost is a mark on a concealed line a reader has already chosen to open.
+ */
+function spoilered(body: string): string {
+  return body
+    .split("\n")
+    .flatMap((line) => subtextPieces(line))
+    .map((piece) =>
+      piece.trim() === "" ? "" : evenEscapes(withoutOwnMarkers(piece)),
+    )
+    .join("\n");
+}
+
+/**
+ * What one message of a split body carries around its text beyond the prefix: an opening string
+ * drawn in front of the body and a closing one after it.
+ *
+ * Per message index rather than per run, because the first message of an oversized chatter body
+ * carries a teaser line the rest do not, and a reserve big enough for that teaser charged against
+ * every message would spend `MAX_PEER_BRIEF_LENGTH` of each later message's budget on nothing.
+ */
+type Decoration = { lead: string; tail: string };
+
+/** What every message carries when its caller asks for no decoration: the splitter as it always was. */
+const UNDECORATED: Decoration = { lead: "", tail: "" };
+
+/**
+ * Packs a body into messages, each one prefixed and each one within `MAX_MESSAGE_LENGTH`.
+ *
+ * Paragraphs first, then lines, then a hard cut, because where a message ends is where the reader's
+ * eye stops: a break between paragraphs reads as a pause, a break mid-sentence reads as damage.
+ * A code fence open across a break is closed and re-opened, so both halves render as code rather
+ * than the second half rendering as prose with its indentation collapsed.
+ *
+ * The one splitter for both registers. Chatter arrives here already broken to lines that fit, so the
+ * hard cut below is unreachable on that path and the fence machinery has nothing to see; the subtext
+ * form's per-line markers are ordinary body characters here and are budgeted as such.
+ *
+ * What the oversized chatter form does need is `decorate`, which hands back what a message carries
+ * around its body beyond the prefix, per message index: the spoiler pair, and the teaser line the
+ * first message alone draws. It is charged inside `overhead`, so every fit test measures the message
+ * as it would be sent rather than a shorter one that is then decorated past the ceiling, and it is
+ * asked per index because a reserve big enough for the teaser charged against every message would
+ * spend the teaser's whole bound on each later one. `messages.length` is the index of the message
+ * being built, which is what makes the two readings the same reading. The default decorates nothing,
+ * so a caller that does not pass one gets the messages this function has always emitted.
+ *
+ * `tail` is appended after the trailing trim rather than before it, because the trim exists to make
+ * a message match what the transport will post and a delimiter trimmed away from its own body is a
+ * spoiler that never closes.
+ */
+function split(
+  body: string,
+  prefix: string,
+  decorate: (index: number) => Decoration = () => UNDECORATED,
+): string[] {
+  const messages: string[] = [];
+  // The fence open where the current message started, and the one open where its text currently
+  // ends. The first decides whether this message must re-open a fence, the second whether it must
+  // close one, and both are budget rather than decoration: every fit test below measures the
+  // message as it would be sent, with those lines already on it.
+  let openedAt: string | null = null;
+  let open: string | null = null;
+  let buffer = "";
+
+  const overhead = (start: string | null, end: string | null): number => {
+    // The decoration of the message being built, which is the one `flush` will draw: the count and
+    // the draw read `messages.length` at the same point, so no message is measured as one shape and
+    // posted as another.
+    const { lead, tail } = decorate(messages.length);
+    return (
+      prefix.length +
+      lead.length +
+      tail.length +
+      (start === null ? 0 : FENCE.length + start.length + 1) +
+      (end === null ? 0 : 1 + FENCE.length)
+    );
+  };
+
+  const flush = (): void => {
+    if (buffer === "") return;
+    const { lead, tail } = decorate(messages.length);
+    const opening = openedAt === null ? "" : `${FENCE}${openedAt}\n`;
+    // An unterminated fence is closed here too, on the last message: the alternative leaves the
+    // thread's final mirrored message holding a fence open over whatever is posted after it.
+    const closing = open === null ? "" : `\n${FENCE}`;
+    // Trailing whitespace goes because the writer trims before it posts, and a message that came
+    // back from the transport different from the one that was measured is a message whose length
+    // was measured against the wrong string. The decoration's tail lands after that trim, so the
+    // trim never runs between a body and the delimiter that closes it.
+    messages.push(`${prefix}${lead}${opening}${buffer}${closing}`.trimEnd() + tail);
+    openedAt = open;
+    buffer = "";
+  };
+
+  // Adds a chunk to the message being built, or reports that it does not fit. The separator is
+  // dropped when the chunk starts a message: a paragraph break falling on a message boundary is
+  // already said by the boundary.
+  const place = (chunk: string, separator: string): boolean => {
+    const candidate = buffer === "" ? chunk : `${buffer}${separator}${chunk}`;
+    const end = fenceAfter(open, chunk);
+    if (overhead(openedAt, end) + candidate.length > MAX_MESSAGE_LENGTH) return false;
+    buffer = candidate;
+    open = end;
+    return true;
+  };
+
+  // Split on the exact two-newline sequence rather than on runs of them, so joining the pieces back
+  // with the same sequence reproduces the text: a run of blank lines survives as itself.
+  for (const [index, paragraph] of body.split("\n\n").entries()) {
+    if (place(paragraph, index === 0 ? "" : "\n\n")) continue;
+    flush();
+    if (place(paragraph, "")) continue;
+
+    for (const [position, line] of paragraph.split("\n").entries()) {
+      if (place(line, position === 0 ? "" : "\n")) continue;
+      flush();
+      if (place(line, "")) continue;
+
+      // One line longer than a whole message. Cut on code points, with room reserved for the
+      // closing fence whenever one could be open at the cut: a delimiter anywhere in the line can
+      // open one, and discovering that after choosing the cut would push the message over.
+      let rest = line;
+      while (rest !== "") {
+        const end = open === null && !rest.includes(FENCE) ? null : "";
+        const room = Math.max(MAX_MESSAGE_LENGTH - overhead(openedAt, end), MIN_HARD_CUT);
+        // At least one code point, always: a room too small for the next character would otherwise
+        // drop the rest of the line silently rather than posting it in pieces.
+        const head = cutSafely(rest, headFitting(rest, room) || sliceCodePoints(rest, 1));
+        buffer = head;
+        open = fenceAfter(open, head);
+        rest = rest.slice(head.length);
+        // The tail of a line is left in the buffer rather than flushed, so whatever follows it
+        // shares the message instead of starting a new one.
+        if (rest !== "") flush();
+      }
+    }
+  }
+  flush();
+  return messages;
+}
+
+/**
+ * Age in coarse buckets. Coarse on purpose: the card is only rewritten when its text changes, so a
+ * heartbeat rendered to the second would spend an edit on every refresh.
+ */
+export function heartbeat(ageMs: number): string {
+  if (ageMs < 60_000) return "just now";
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * The labels the status card draws, which are what its column is padded to.
+ *
+ * Named here as one set because the column is measured off all of them rather than off the rows a
+ * given card happens to carry: a card whose values shift sideways as the model row comes and goes
+ * reads at a glance as a different card.
+ */
+const CARD_LABELS = {
+  host: "Host",
+  session: "Session",
+  state: "State",
+  model: "Model",
+  context: "Context",
+  from: "Down from",
+  heartbeat: "Heartbeat",
+} as const;
+
+const CARD_COLUMN = columnWidth(
+  Object.values(CARD_LABELS).map((label) => ({ label, value: "" })),
+);
+
+/**
+ * The card's title, drawn a second time as the largest heading Discord offers.
+ *
+ * The message's first line is drawn inline beside the bot's name, where it reads as chrome rather
+ * than as the card's own heading, so a channel of cards scrolls as one run of text with nothing to
+ * pick a card out by. Repeating the title at heading size on a line of its own is what gives each
+ * card a visible top edge, and the largest size is what holds that edge at a scrolling glance.
+ */
+const TITLE_HEADING = "#";
+
+/**
+ * The headers over the card's optional blocks.
+ *
+ * Outside their fences, where Discord renders the heading, exactly as the title heading sits outside
+ * the first one, and a smaller heading than that title so the card's name and its sections read as
+ * different ranks rather than as the same weight. What they head is a block rather than a labelled
+ * row, because each carries values a label column leaves no room for: a fan-out's tasks take two
+ * rows each, a real tool path is longer than a row of this width, and a goal is a sentence the
+ * operator wrote.
+ *
+ * A header sits directly against the block above it, with no blank line between them: Discord draws
+ * its own air around a fenced block, and a blank line there is spacing on top of spacing on a
+ * surface read by scrolling past several cards.
+ *
+ * Tool leads Tasks because a session usually has a tool and rarely has tasks, so the sparse block is
+ * not the one that leads. The goal keeps the position directly under the fields, which says what the
+ * session is working toward before what it is working with.
+ *
+ * A section with nothing to show is omitted, header and block together, rather than drawn with a
+ * placeholder value. What a placeholder buys is telling an empty block apart from a renderer that
+ * has stopped drawing one; what it costs is two lines saying nothing on every idle card in the
+ * channel, which is every card between fan-outs, and on a scrolled surface that noise is the more
+ * expensive of the two. The block's presence is itself the signal.
+ */
+const GOAL_HEADER = "### Goal";
+const TOOL_HEADER = "### Tool";
+const TASKS_HEADER = "### Tasks";
+
+/**
+ * How much of a session ID the card draws, in code points.
+ *
+ * The head of it, which is what a session is called everywhere else here: `displayName` falls back
+ * to the same eight characters, and the block has room for a value rather than for a 36-character
+ * identifier that would take the row and most of the width bound with it.
+ */
+const SHOWN_SESSION_ID = 8;
+
+/** What a cut tool preview is marked with, reserved out of the room before the preview is cut. */
+const CUT_MARKER = " (cut)";
+
+/**
+ * A value broken into lines that fill the block's width.
+ *
+ * Filled rather than broken on spaces, unlike `wrapped`, because what the tool block carries is a
+ * name and a path: a path holds no space to break on, so a word-wrapper would hard-break it anyway
+ * after leaving `Read ·` alone on the line above it.
+ *
+ * A break never lands straight after a backslash, which is `cutSafely`'s rule for the same hazard
+ * at a message boundary: the escape and the character it makes inert stay on one line. Backing off
+ * one always leaves the line most of its width, so the value still advances.
+ */
+function filled(value: string): string[] {
+  const lines: string[] = [];
+  let rest = [...value];
+  while (rest.length > MAX_BLOCK_WIDTH) {
+    const kept = rest[MAX_BLOCK_WIDTH - 1] === "\\" ? MAX_BLOCK_WIDTH - 1 : MAX_BLOCK_WIDTH;
+    lines.push(rest.slice(0, kept).join(""));
+    rest = rest.slice(kept);
+  }
+  if (rest.length > 0) lines.push(rest.join(""));
+  return lines;
+}
+
+/**
+ * The card's tool block: the last tool's name, and what it was called with when the input carried
+ * anything previewable, across as many lines as the two take.
+ *
+ * A block of its own rather than a row of the field block, because what the operator opens the card
+ * to read is what the session is working on: a real path is longer than a row of this width leaves
+ * after a label, so in a row it was cut essentially always. Here the value wraps instead, and every
+ * line of it is inside the same width bound the rest of the card holds.
+ *
+ * Both halves are attacker-influenceable and each is bounded on its own, so a session cannot hide
+ * what its tools are called with by naming the tool long: the name is held to a line and the
+ * preview keeps its own budget whatever the name spends. The cut is named rather than left to the
+ * ellipsis, on `promptField`'s reasoning: a tool input can front-load the harmless part, and a
+ * reader has to be able to tell a whole preview from a partial one. Whether the preview was cut is
+ * measured on the escaped text, which is what the reader sees.
+ *
+ * A preview that neutralizes to nothing draws no separator with nothing after it, and a session
+ * that has run no tool, or one whose tool name neutralizes to nothing, draws no lines at all, which
+ * is what leaves the block and its header off the card.
+ */
+function toolLines(view: SessionView): string[] {
+  const name = view.lastTool === null ? "" : inertBlockField(view.lastTool, MAX_BLOCK_WIDTH);
+  if (name === "") return [];
+  const whole = view.lastToolInput === null ? "" : inertBlock(view.lastToolInput);
+  if (whole === "") return filled(name);
+  const shown = fit(whole, MAX_TOOL_INPUT_PREVIEW);
+  if (shown === whole) return filled(`${name} ${SEPARATOR} ${shown}`);
+  const marked = fit(whole, Math.max(MAX_TOOL_INPUT_PREVIEW - CUT_MARKER.length, 0));
+  return filled(`${name} ${SEPARATOR} ${marked}${CUT_MARKER}`);
+}
+
+/**
+ * The card's goal block, as the header and the fenced line it takes, and nothing at all for a card
+ * that carries no goal.
+ *
+ * A goal is drawn only while the session is working or waiting on a person. Idle and exited both
+ * drop it, because a session that stopped working is the best evidence available that what it was
+ * working toward is done: the console need write nothing when a goal completes, so there is no line
+ * to read the end off, and a card that kept drawing one would be asserting something it cannot know.
+ */
+function goalLines(view: SessionView, state: SurfaceState): string[] {
+  if (view.goal === null || state === "idle" || state === "exited") return [];
+  const goal = inertBlockField(view.goal, MAX_BLOCK_WIDTH);
+  return goal === "" ? [] : [GOAL_HEADER, fenced([goal])];
+}
+
+/** Room for the harness notice line on the card, well past any notice `renderHarnessNotice` composes. */
+const MAX_CARD_HARNESS_NOTICE_LENGTH = 200;
+
+/**
+ * The card's harness notice: the open harness error episode's line, rendered from its latest error
+ * line (the thread is told only the opening one), drawn under the field block that carries the
+ * state, and nothing at all once the episode closes or the session has exited. Outside a fence so
+ * it wraps at phone width, and escaped like every other field drawn outside one, although the only
+ * writer composes it from fixed wording.
+ */
+function harnessNoticeLines(view: SessionView, state: SurfaceState): string[] {
+  if (view.harnessNotice === null || state === "exited") return [];
+  const notice = inertField(view.harnessNotice, MAX_CARD_HARNESS_NOTICE_LENGTH);
+  return notice === "" ? [] : [`⚠️ ${notice}`];
+}
+
+/**
+ * A duration in the compact form the cards share: `44m`, `3h 44m`, `4d 6h`. Two units at most,
+ * because the third never changes a decision and a card is read at a glance on a phone, and a space
+ * between the two because that is what stays legible at phone width.
+ *
+ * Exported and read by both cards, so a duration cannot be spelled one way on a session's own card
+ * and another on the fleet card a reader is comparing it against.
+ */
+export function span(ms: number): string {
+  const minutes = Math.floor(Math.max(ms, 0) / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+/**
+ * How many roster entries one card names before the rest are counted.
+ *
+ * Pathological rather than cosmetic: the operator reads every task a session is waiting on, and a
+ * measured fan-out session peaked at twelve concurrent agents, so twice that is a fan-out nothing
+ * here has produced. It is a backstop rather than the working bound, since the message ceiling
+ * reaches a card first at every width; what it holds on its own is the work `renderCard` spends
+ * fitting a card to one message, whatever count another program reports.
+ */
+const MAX_ROSTER_ENTRIES = 24;
+
+/** The most of a task's own prose the card carries, on `MAX_TOOL_INPUT_PREVIEW`'s reasoning. */
+const MAX_TASK_DESCRIPTION_LENGTH = 60;
+
+/**
+ * The columns a task's description row sits right of where the agent type starts on the row above
+ * it. This is what makes the description read as the entry's continuation rather than as an entry
+ * of its own; "more" or "less" indent is this one number.
+ */
+const ROSTER_DESCRIPTION_INDENT = 2;
+
+/** The most of an agent type the card carries. A real one is a short id, as a model name is. */
+const MAX_AGENT_TYPE_LENGTH = 32;
+
+/**
+ * One roster entry, as the two rows it takes: how long the task has been outstanding beside what is
+ * running it, and the task's own description under that, indented `ROSTER_DESCRIPTION_INDENT`
+ * columns past where the type starts.
+ *
+ * Two rows rather than one because at this width one row makes the age, the type and the
+ * description compete for it, and a cut reaches the description first, which is the only field that
+ * says what the work is. The type is the agent type where the harness reported one, since that is
+ * what tells a reader which of a fan-out's agents this is, and the kind itself otherwise; a shell
+ * task draws exactly like a subagent, because a long-running background command is the same class
+ * of invisible work. The description is model-authored prose from another program and is
+ * neutralized here like every other session-sourced field; a task whose description neutralizes to
+ * nothing draws its first row alone rather than an empty second one.
+ */
+function rosterEntry(task: BackgroundTask, now: number): string[] {
+  const age = span(now - task.since);
+  const named =
+    task.agentType === null ? "" : inertBlockField(task.agentType, MAX_AGENT_TYPE_LENGTH);
+  const lead = `${age} ${SEPARATOR} `;
+  const room = Math.max(MAX_BLOCK_WIDTH - [...lead].length, 0);
+  const rows = [`${lead}${fit(named === "" ? task.kind : named, room)}`];
+  const described =
+    task.description === null
+      ? ""
+      : inertBlockField(
+          task.description,
+          Math.min(MAX_TASK_DESCRIPTION_LENGTH, Math.max(room - ROSTER_DESCRIPTION_INDENT, 0)),
+        );
+  if (described === "") return rows;
+  // Indented past the lead rather than sharing its column, so the row reads as the entry's
+  // continuation rather than as an entry of its own; no separator, since it names nothing of its
+  // own to separate.
+  rows.push(`${" ".repeat([...lead].length + ROSTER_DESCRIPTION_INDENT)}${described}`);
+  return rows;
+}
+
+/**
+ * The card's tasks block: every task the session is waiting on, and a count of any the cap left
+ * out. No lines at all for a session waiting on nothing, which is every session between fan-outs,
+ * and which is what leaves the block and its header off the card.
+ *
+ * Oldest first, which is the order the tasks were dispatched in, so an entry keeps its place as the
+ * fan-out grows around it. Nothing is dropped at any size an operator will see: the whole reason
+ * the roster has a block is that the operator reads what the fan-out is doing, and a count instead
+ * of an entry says nothing about the work. The count is for the pathological fan-out alone, and it
+ * counts from the newest end, which is the same policy the channel's pin ceiling holds: the older
+ * work is what a reader has already been watching. How many are outstanding in total is on the
+ * state row, which carries that count wherever a state is drawn.
+ */
+function rosterLines(tasks: readonly BackgroundTask[], now: number, count: number): string[] {
+  // Keyed on the tasks themselves rather than on the count: a card whose ceiling has driven the
+  // count to zero is still waiting on every one of them, and the `+N more` line below is what says
+  // so, where an omitted block would report a fan-out as nothing at all.
+  if (tasks.length === 0) return [];
+  const named = tasks.slice(0, Math.max(count, 0));
+  const lines = named.flatMap((task) => rosterEntry(task, now));
+  const left = tasks.length - named.length;
+  if (left > 0) lines.push(`+${String(left)} more`);
+  return lines;
+}
+
+/**
+ * The card's model rows: what the session is running now, the context size under it, and, while the
+ * model is below what the session opened with, a row naming what it came down from.
+ *
+ * The context size has a row rather than riding the model's, because it is the figure that says how
+ * much of a session is left and it is read on its own. It is drawn for any session that has
+ * reported one, model or not: a session no transcript line has reported a model for, which is every
+ * session on a host whose tailer is off and every session before its first reading, draws neither
+ * of the other two rows.
+ *
+ * The marker stands for as long as the session is below its opening model rather than firing once
+ * at the change, because the cost of a downgrade is duration: a thread that drops model at hour one
+ * runs degraded for every hour after, and a field that reads normal at a glance is how that goes
+ * unnoticed. The category rides the second row when the downgrade record named one, and its absence
+ * is the entitlement path, which carries no category at all. Two rows rather than one sentence
+ * because the block is a fixed width: what a session came down from, and why, does not fit beside
+ * the model it is running, and cutting a row to fit would drop exactly the part that says a session
+ * is degraded.
+ */
+function modelRows(view: SessionView): BlockRow[] {
+  const model = view.model === null ? "" : inertBlockField(view.model, MAX_MODEL_NAME_LENGTH);
+  const opening =
+    view.openingModel === null ? "" : inertBlockField(view.openingModel, MAX_MODEL_NAME_LENGTH);
+  const below =
+    model !== "" &&
+    view.model !== null &&
+    view.openingModel !== null &&
+    opening !== "" &&
+    isBelowModel(view.model, view.openingModel);
+  const category =
+    view.downgrade === null || view.downgrade.category === null
+      ? ""
+      : inertBlockField(view.downgrade.category, MAX_MODEL_DETAIL_LENGTH);
+  const rows: BlockRow[] = [];
+  if (model !== "") rows.push({ label: CARD_LABELS.model, value: `${below ? "⚠ " : ""}${model}` });
+  if (view.contextTokens !== null) {
+    rows.push({ label: CARD_LABELS.context, value: compactTokens(view.contextTokens) });
+  }
+  if (below) {
+    const flagged = category === "" ? "" : ` ${SEPARATOR} flagged ${category}`;
+    rows.push({ label: CARD_LABELS.from, value: `${opening}${flagged}` });
+  }
+  return rows;
+}
+
+/**
+ * The message a model change posts into the session's own thread, on the notice tier by default and
+ * on the alert tier, with the mentions that reach a phone, when the operators' IDs are passed.
+ *
+ * The mentions are composed here from the operators' own IDs and every untrusted field goes through
+ * `inertField`, which escapes the angle brackets Discord's mention syntax lives inside, so the only
+ * mentions this message can contain are the ones written on this line. `renderQuestionNotice`'s
+ * pattern, and safe for its reason.
+ *
+ * What it carries is what upstream named and no more: the two models, the refusal category when the
+ * record carried one, and the scope, which is the session. A change whose record the reader never
+ * saw composes the same message without those clauses, because the fallback shape is upstream's and
+ * may move, and a change nobody is told about is worse than one described thinly. The entitlement
+ * path names the action that reverses it, since a consent that was dismissed means a session
+ * running on the fallback until someone consents at the console.
+ */
+export function renderModelChange(input: {
+  operatorIds: readonly string[];
+  from: string;
+  to: string;
+  downgrade: ModelFallback | null;
+}): string {
+  const mention = mentionPrefix(input.operatorIds);
+  const from = inertField(input.from, MAX_MODEL_NAME_LENGTH);
+  const to = inertField(input.to, MAX_MODEL_NAME_LENGTH);
+  const lines = [
+    `${mention}${MODEL_CHANGE_ATTRIBUTION} ${SEPARATOR} now ${to}, was ${from} ${SEPARATOR} for this session`,
+  ];
+  const downgrade = input.downgrade;
+  if (downgrade === null) return lines.join("\n");
+  const original = inertField(downgrade.originalModel, MAX_MODEL_NAME_LENGTH);
+  if (downgrade.cause === "refusal") {
+    const category =
+      downgrade.category === null ? "" : inertField(downgrade.category, MAX_MODEL_DETAIL_LENGTH);
+    lines.push(
+      category === ""
+        ? "A safeguard refusal forced it."
+        : `A safeguard refusal forced it ${SEPARATOR} flagged ${category}.`,
+    );
+    return lines.join("\n");
+  }
+  const choice = downgrade.choice === null ? "" : inertField(downgrade.choice, MAX_MODEL_DETAIL_LENGTH);
+  lines.push(
+    `The session's model requires usage credits and the consent prompt was ` +
+      `${choice === "" ? "not answered" : choice} at the console; consenting there restores ` +
+      `${original === "" ? "it" : original}.`,
+  );
+  return lines.join("\n");
+}
+
+/**
+ * The alert a block episode posts into its session's own thread, on the alert tier with the mentions
+ * that reach a phone, and without them when the volume window has gone quiet and the caller passes
+ * an empty list. `renderQuestionNotice`'s pattern, and safe for its reason: the mentions are
+ * composed here from the operators' own IDs, and the one untrusted field takes the full markdown
+ * escape (`inertText`, over the pre-escape bound the next paragraph explains), which escapes the
+ * angle brackets Discord's mention syntax lives inside, so the only mentions this message can
+ * contain are the ones written on this line.
+ *
+ * `plan` arrives from the kit's event stream, which anything with append access to the operator's
+ * home directory can write, so it is escaped and bounded here at the render site. The bound is the
+ * events reader's own `MAX_PLAN_CHARS`, imported rather than mirrored so the two cannot drift, and
+ * it is measured before the escape, on the same characters the reader measured: a plan the reader
+ * kept whole is drawn whole, the escape's backslashes cost none of the plan's budget, and a cut can
+ * never land between a backslash and the character it escapes. A plan that neutralizes to nothing
+ * drops its clause rather than drawing an empty slot, and whatever the event carried, the alert
+ * composes, never a throw.
+ */
+export function renderBlockedAlert(input: {
+  operatorIds: readonly string[];
+  plan: string;
+}): string {
+  const mention = mentionPrefix(input.operatorIds);
+  // Neutralize, bound, then escape. `visible` runs again inside `inertText` and is idempotent, so
+  // the second pass changes nothing; what the order buys is the pre-escape measurement above.
+  const plan = inertText(fit(visible(input.plan), MAX_PLAN_CHARS));
+  const stopped = "the run is stopped on you; the reason is in this thread";
+  if (plan === "") return `${mention}${BLOCKED_ATTRIBUTION} ${SEPARATOR} ${stopped}`;
+  return `${mention}${BLOCKED_ATTRIBUTION} ${SEPARATOR} ${plan} - ${stopped}`;
+}
+
+/**
+ * The starter message: the thread's detail card, edited in place forever after. Each field named,
+ * and no session field that is not one of them.
+ *
+ * A title line, that same title again as a heading, and the field block, followed by the blocks a
+ * card carries only when it has something to put in them: what the session is trying to finish, the
+ * tool it is running, and the tasks it is waiting on, each under its own header. The title, the
+ * heading and the headers stay outside a fence and everything else goes inside one. That split is
+ * what the surfaces need: Discord renders no markdown at all inside a block, and the fields are a
+ * table, for which a block is the only shape Discord gives that keeps a column of values under each
+ * other. The goal, the tool and the tasks have blocks of their own because a label column leaves
+ * none of them the room they are read for.
+ *
+ * The title is drawn twice because the two positions do different jobs. The first line is what
+ * Discord draws inline beside the bot's name, and the heading under it is the card's own top edge,
+ * which is what tells one card from the next when several are scrolled past.
+ *
+ * The goal is drawn while the session is working or waiting on a person, and dropped the moment it
+ * reads idle or exited. Whether a goal has been met is not observable, since one that clears on
+ * completion writes nothing, so the state is what stands in for it: a goal being met is precisely
+ * what lets a session stop. The failure that avoids is a card carrying a finished goal indefinitely,
+ * which is worse than no goal line at all, because it reads as current.
+ *
+ * While a harness error episode is open, its notice line sits directly under the field block, so
+ * the state and the reason the session is not moving are read together.
+ *
+ * The title is where the card gives way when it runs long, since every line of every block is
+ * already inside the width bound: the name is the one field a session sizes for itself. Past that,
+ * the roster gives way, entry by entry from the newest end, until the whole message is inside the
+ * ceiling: at two rows an entry a card carries a fan-out and its fields, but a card whose every
+ * field is at its cap and whose fan-out is at the roster cap is longer than one message, and a
+ * message Discord refuses is a card frozen at whatever it last said.
+ */
+export function renderCard(view: SessionView, state: SurfaceState, now: number): string {
+  const since = view.endedAt ?? view.lastHookAt;
+  const label = stateLabel(view, state);
+  // No roster on an exited card: the record's last report outlives the session, and a session
+  // that has exited is running nothing, so drawing it would put a waiting-on entry with growing
+  // ages under a header that says exited. Guarded here rather than cleared on the ended
+  // transitions because the death backstop's exited is derived, never written to the record, so a
+  // registry-side clear could not reach it, and a presumed-dead session that wakes gets its
+  // roster back unchanged.
+  const tasks =
+    state === "exited" ? [] : [...view.backgroundTasks].sort((left, right) => left.since - right.since);
+  const fields = fenced(
+    alignedRows(
+      [
+        { label: CARD_LABELS.host, value: inertBlock(view.host) },
+        {
+          label: CARD_LABELS.session,
+          // Sliced on the visible raw id, then neutralized: sliced after the escape, every escaped
+          // character would spend two of the eight, and two ids differing only past the escapes
+          // would draw one prefix on the surface the operator tells threads apart by.
+          value: inertBlock(sliceCodePoints(inertName(view.sessionId), SHOWN_SESSION_ID)),
+        },
+        { label: CARD_LABELS.state, value: label },
+        ...modelRows(view),
+        { label: CARD_LABELS.heartbeat, value: heartbeat(Math.max(now - since, 0)) },
+      ],
+      CARD_COLUMN,
+    ),
+  );
+  const tool = toolLines(view);
+  // Cut to one line of the block rather than wrapped, since what the operator needs at a glance is
+  // which goal is running rather than every clause of it, and neutralized as every other
+  // transcript-sourced field is. A goal that neutralizes to nothing draws no block.
+  const goal = goalLines(view, state);
+  const notice = harnessNoticeLines(view, state);
+  const title = (name: string): string => `${GLYPHS[state]} **${name}** ${SEPARATOR} ${label}`;
+  const heading = (name: string): string =>
+    `${TITLE_HEADING} ${GLYPHS[state]} ${name} ${SEPARATOR} ${label}`;
+  const compose = (count: number): string => {
+    const roster = rosterLines(tasks, now, count);
+    const body = [
+      fields,
+      ...notice,
+      ...goal,
+      ...(tool.length === 0 ? [] : [TOOL_HEADER, fenced(tool)]),
+      ...(roster.length === 0 ? [] : [TASKS_HEADER, fenced(roster)]),
+    ].join("\n");
+    // The name is drawn twice, so what the ceiling leaves after everything that is not the name is
+    // split between the two occurrences, and both are drawn from one fitted string: two cuts of
+    // different lengths would put two spellings of one session on one card. The two newlines are the
+    // ones the title, the heading and the body are joined with.
+    const spent = title("").length + heading("").length + body.length + 2;
+    const room = Math.floor(Math.max(MAX_CARD_LENGTH - spent, 0) / 2);
+    const name = fit(inertText(displayName(view)), room);
+    return `${title(name)}\n${heading(name)}\n${body}`;
+  };
+  // Measured in UTF-16 units, the larger of the two counts a length could mean, so holding it holds
+  // the code point count too.
+  let count = Math.min(tasks.length, MAX_ROSTER_ENTRIES);
+  let card = compose(count);
+  while (count > 0 && card.length > MAX_CARD_LENGTH) {
+    count -= 1;
+    card = compose(count);
+  }
+  return card;
+}

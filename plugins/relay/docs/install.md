@@ -1,0 +1,613 @@
+# Installing a host
+
+One broker per host, one Discord bot identity per host, one channel per host. A broker reaches its
+sessions over localhost, so it cannot serve another machine.
+
+`operations.md` and `security-model.md`, named in this guide, live in the source repository and
+do not ship in the public folder.
+
+The operator's own fleet runs on three hosts, called HOST-A, HOST-B and HOST-C here, and a client host is one more ("A
+client host is its own server, bot and broker" below). HOST-A and HOST-B are organization-owned; HOST-C is
+a personal Max account with no organization. Steps 1 through 4 are identical on every host. The only
+thing that differs is the channel flag the launch wrapper passes, which is decided by whether that
+host's managed settings allowlist the relay, not by which kind of account pays for the session.
+
+## 1. Create the Discord application
+
+Once per host. Each host gets its own bot so no two fleets share an identity, and so a revoked token
+takes down one machine rather than all of them.
+
+1. At <https://discord.com/developers/applications>, create an application and name it for the host.
+2. Under **Bot**, create the bot and copy the token. It is shown once.
+3. Under **Bot**, enable **Message Content Intent**. Without it the bot receives message events with
+   empty content, which reads as a silent delivery failure rather than a permission error.
+4. Under **OAuth2 > URL Generator**, select the `bot` scope and these permissions: View Channels,
+   Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message
+   History, Add Reactions. Add Reactions carries the stage marks on each person's message: without
+   it every mark is refused, logged once per five minutes and dropped, and delivery is unaffected.
+   **Pin Messages** is optional and buys one thing: the channel's pin list becomes the
+   sessions that are running. Grant it as a channel-level override on the broker's own channel
+   rather than server-wide, since it also permits deleting other people's messages. Without it the
+   pin list simply does not populate and one log line says so; nothing else changes. Note that
+   Discord's older pin route reports a missing-permission error naming Manage Messages when Pin
+   Messages is the one actually required, so that error points at the wrong grant.
+5. Open the generated URL and invite the bot to your server.
+6. Create a text channel for the host and copy its ID (right-click the channel with Developer Mode
+   on). Copy your own user ID the same way, and the ID of each other person who will write in the
+   channel. Only the accounts on the sender roster below can write into a session.
+
+**Make that channel private to the bot and the accounts on the sender roster.** The roster governs
+who can *write* into a session, not who can read. Everyone with access to the channel sees every message, and a tool
+approval prompt carries the tool's actual input: the shell command, the patch body, file contents.
+
+**The sender roster names who may write, and what each account may do.** Each account on it is an
+operator or a participant. An operator holds your authority over the host: it steers every session,
+approves tool calls, answers a session's questions and clears the inbox. A participant can talk to a
+session in its thread, and the session takes its words as conversation and never as instructions;
+its verdicts, button presses and answers count for nothing. Your own ID goes in as an operator,
+through `-AllowedUserId`. Everyone else goes in `-Senders`, one comma-separated entry per account,
+each an ID and its class:
+
+```powershell
+install\Install-All.ps1 -HostName <host> -ChannelId <channel id> -AllowedUserId <your user id> `
+    -Senders "<analyst one id>:participant,<analyst two id>:participant,<second operator id>:operator"
+```
+
+The installer writes the list to `CHANNEL_SENDERS` in `broker.env`, checks each entry the way the
+broker will, and refuses a list that gives one ID two classes or leaves the host with no operator.
+Every operator holds the whole of your authority, so name as operators only the people you would hand
+your own Discord account. A change to the roster takes a broker restart. A display name decides
+nothing: the class comes from the account's ID, and any member with Manage Nicknames can rename an
+account.
+
+**A client host is its own server, bot and broker.** Everyone who can see the channel reads every
+prompt, reply and tool approval in it, a participant included, because the roster governs who writes
+and never who reads. So a client's people must never share a channel, a server or a bot with your
+own fleet, or with another client's. Give each client a Discord server of their own, create a bot
+for it under step 1, and run a broker on a host that serves only that client's sessions. A client
+machine needs no edit to this checkout: the launch wrapper takes plain `--channels` on every machine
+unless that machine's own `CHANNEL_LAUNCH_FLAG` variable says otherwise, as [The launch
+dialog](#the-launch-dialog) describes. On a host that runs this checkout, keep it unedited, because
+`Repair-Broker.ps1 -Pull` will not update a checkout with local changes. A host installed from the
+public marketplace updates through Claude Code's marketplace update instead.
+
+**The response gate is off until you turn it on.** With several people in one thread, a session
+would otherwise take a turn on every message. `CHANNEL_RESPONSE_GATE` holds a thread's messages and
+delivers them together when someone mentions or replies to the bot, when a cap is reached, or when
+TypeSafe's classifier, the one described under "The inbox judge's key file" below, judges that the
+conversation expects a response. At `shadow` it holds nothing: each message is delivered at once,
+and the broker journals what `live` would have done. While it is at `shadow` or `live`, a gated
+thread's buffered lines are sent to TypeSafe once the thread goes quiet, and it needs the key file
+under "The inbox judge's key file" below. `operations.md` describes running it in
+`shadow` for a week to choose its threshold before going `live`.
+
+**Attachments reach a session from operators only, until you widen it.** A file attached to a
+message in a session's thread is saved on this host and the session is told where it is. A long
+paste that Discord turned into `message.txt` arrives as the words of the message instead, where it
+fits the relay's pipe. "Attachments" in `operations.md` gives that limit. Three settings in
+`broker.env` bound it. `CHANNEL_ATTACHMENTS` decides who may send a file: `operator`, the default,
+`all` to admit participants too, or `off`. `CHANNEL_ATTACHMENT_MAX_BYTES` caps one file, 10,485,760
+bytes (10 MiB) by default. `CHANNEL_ATTACHMENT_RETAIN_DAYS` decides how long a saved file is kept,
+14 days by default. Like every setting there, each takes effect when the broker restarts. Saved
+files sit in an `attachments` folder beside the broker's state file, never in a project. An
+interactive session asks permission to read one, and that prompt reaches Discord like any other.
+`operations.md` lists what is accepted and what each refusal means, and
+`security-model.md` argues the bounds.
+
+**With mirroring on, which is the default, the conversation itself leaves the machine too.** Every
+prompt typed at the console and every turn's final assistant reply reaches that session's thread in
+full, so the operator can read and steer from a phone. Discord retains all of it. A turn that closed
+through the reply tool lands one copy of its closing words rather than two, and
+`security-model.md` carries the bound on what that suppression can cost.
+
+Two switches turn it off. `CHANNEL_MIRROR=off` in `broker.env` covers every session on the host, and
+`Enter-ClaudeSession -NoMirror` covers one session while every other session keeps mirroring.
+
+**Neither switch makes a session private.** They stop the conversation being mirrored, and nothing
+else. A tool approval prompt from that session still carries the tool's actual input to Discord, as
+the paragraph above describes, because that is how the prompt is answerable at all. A session where
+the shell commands and file contents themselves are sensitive should not be answering approvals over
+the channel either. An unmirrored session's thread also keeps its receipt reactions, its typing
+line and its harness error notices. The broker reads that session's transcript for those notices,
+and what it posts is fixed wording built from the error's numbers, never text from the transcript.
+
+**Neither switch keeps a session's reply-tool answers from the inbox judge.** The inbox judge is
+an optional classifier at TypeSafe, which the operator inbox uses once you name its key file under
+"The inbox judge's key file" below. While the inbox card is on and that key file is usable, a
+reply-tool answer that carries no `ASK:` line and does not match the judge's screen for secrets
+is sent to TypeSafe, whether or not the session is mirrored. To stop that, turn the card off or
+unset `CHANNEL_INBOX_JUDGE_KEY_FILE` in `broker.env`. Either one takes a broker restart, which
+`operations.md` describes under "Turning the judge off".
+
+The per-session switch needs the hooks installed from this version of the repository: it works by a
+header the mirror hooks carry, so a host installed before the switch existed has no such header. The
+wrapper refuses to launch with `-NoMirror` against settings that lack it rather than mirroring the
+session anyway, and the fix is re-running the installer. That check covers a host whose hook owner
+is `settings`. On a `plugin` host the persona plugin sends the header, and the wrapper has no
+installed hook to check it against, as "Hook owner: settings or plugin" below describes.
+
+**The optional fleet cards send content of their own, and all three are off until you turn them
+on.** The usage card (`CHANNEL_USAGE_CARD`) carries each account's identity and headroom. The board card
+(`CHANNEL_BOARD_CARD` plus `CHANNEL_BOARD_ROSTER`, `CHANNEL_BOARD_PROJECTS` or both) puts plan
+titles, progress, and next steps in the channel. With `CHANNEL_BOARD_ROSTER` set it draws each
+worker persona the fleet roster names, with that persona's name, its queued plan titles, and the
+reason a worker wrote on a blocked entry. With
+`CHANNEL_BOARD_PROJECTS` set it sweeps plan documents under the project roots you name, and uses
+the last path segment of each root as the project name. So a root at or just under your home
+directory would put your account name there too. The inbox card (`CHANNEL_INBOX_CARD`) lists the
+sessions waiting on you, and with a judge key file named (the optional step under "Provision the
+host") it sends each unmarked session reply to TypeSafe's classifier. That classifier is the one host
+other than Discord this broker reaches, and the response gate described above uses it too. All three cards are configured in `broker.env` and
+documented in `operations.md`; a value tuned by hand there survives a re-install.
+
+Create Public Threads and Manage Threads are the two that fail quietly if missed: the broker posts a
+starter message successfully and then cannot open a thread on it.
+
+## The one-command install
+
+The host needs Node.js, npm and the `claude` CLI on PATH first. The installer checks only that
+`node` is present, not its version, though `package.json` declares Node 24 or later, and it runs
+`npm ci` and `claude plugin` commands, which fail the run if either tool is missing.
+
+Steps 2 and 3, plus the plugin install, the managed-settings file, and the `cchat` launcher, in one
+unelevated invocation from the repository root:
+
+```powershell
+install\Install-All.ps1 -HostName <host> -ChannelId <channel id> -AllowedUserId <your user id>
+```
+
+It prompts for the bot token on a first install (or takes `-BotTokenFile`, same rules as below); a
+re-run reuses the hardened token from the last install without prompting. It runs
+`Install-Host.ps1` in-process, registers this checkout as a plugin marketplace and installs the
+relay plugin through the `claude` CLI, then raises exactly one UAC prompt for
+`Install-Elevated.ps1`, which registers the broker's scheduled task, writes the managed-settings
+file described under "The launch dialog", and installs a block into the machine-wide PowerShell
+profile that dot-sources the launch wrapper and aliases it, so a new shell anywhere on the machine
+launches a watched session with `cchat <session-name>`. Every piece is idempotent; re-run it after
+moving the checkout or rotating a token. The identity arguments are needed on the first install
+only: a re-run reads `-HostName`, `-ChannelId`, `-AllowedUserId`, `-Senders`, and `-Port`
+back from the `broker.env` the last install wrote, announces each reused value as it picks it up, and refuses a
+malformed ID or port on disk naming the key. An argument you supply always wins, which is how a host is
+rebound to a different channel.
+
+A host installing from the public marketplace runs the copy of this script in the folder Claude
+Code cloned the public marketplace into, under `plugins/relay/install/`, with `-Marketplace
+applefeld`, as "The relay as a plugin" below describes.
+
+Step 1 stays manual either way (it is Discord's web console), and a host still runs the per-host
+verification checklist under "The relay as a plugin" on its first wrapped launch. The sections
+below describe what the one command does, and remain the way to run any piece alone.
+
+## 2. Provision the host
+
+From the repository root, in a plain non-elevated session:
+
+```powershell
+install\Install-Host.ps1 -HostName <host> -ChannelId <channel id> -AllowedUserId <your user id>
+```
+
+It prompts for the bot token and reads it without echoing. **Do not pass the token as plain text on
+the command line**: PowerShell's history file keeps it in the clear indefinitely, and it also lands
+in the process command line and in transcription logs. `-BotToken` accepts only a `SecureString` for
+that reason. Use `-BotTokenFile <path>` instead to read a token from a file you already placed, and
+put that file inside the state root, which is where the installer hardens permissions.
+
+Unelevated is a requirement, not a convenience: a file created by an elevated shell is owned by the
+machine's Administrators group rather than by the account, and the broker's credential guard reads
+that owner shift as a planted token file and refuses to start. Elevation belongs only to step 3.
+
+`-Port` must agree with every hook URL in `hooks/settings-fragment.json` and the literal in
+`hooks/session-start.ps1`. They are pinned together by the test suite, and the installer
+refuses a port that disagrees rather than moving one copy and silently disconnecting the hooks.
+
+The installer:
+
+- writes `broker.env` and the token file under `%LOCALAPPDATA%\sapplefeld-channels\`, outside the
+  repository, keeping any allowlisted key already in `broker.env` that this run does not itself set,
+  so a knob tuned by hand survives a re-install,
+- edits your user-level `~/.claude/settings.json` by the host's hook owner, described under "Hook
+  owner: settings or plugin" below. Under `settings`, the default, it substitutes this checkout's
+  absolute path into the `SessionStart` hook and merges the fragment's six hook entries, plus the
+  relay's one reply-tool permission rule. Under `plugin`, it removes every hook entry of this
+  project's from that file and merges the permission rule alone. Either way it backs the file up
+  first and preserves every hook, rule, and setting that is not this project's,
+- hardens the access control lists on the whole execution surface: `hooks/`, `relay/`, `wrapper/`,
+  `install/`, and `broker/` as directories, the bot token file, and the state root,
+- runs `npm ci`, which installs the reviewed lockfile rather than resolving newer dependencies.
+
+Directories are hardened as containers rather than file by file, because a hardened file in a
+directory that permits delete-child can be deleted and re-created with a clean access control list.
+The reasoning is in `security-model.md`; the short version is that every one of
+those paths is executed automatically, either by the scheduled task at startup or by Claude Code at
+the start of every session on the machine.
+
+The hooks belong in the **user-level** settings file rather than a project one, because the sessions
+being watched live in arbitrary repositories. That is also why the `SessionStart` hook names its
+script by absolute path: a hook runs with the monitored session's own project as its working
+directory. On a `settings` host, re-run the installer after moving or re-cloning the repository; the
+launch wrapper refuses to start a session when the installed hook points somewhere else, rather than
+letting every session run unwatched.
+
+The fragment as checked in names a placeholder path for that script,
+`D:\<checkout>\hooks\session-start.ps1`, which matches no checkout. The Windows file API refuses `<`
+and `>` in a folder name, and Windows PowerShell's `-File` refuses the path before running anything.
+The installer writes this checkout's own path into the copy it merges and leaves the file on disk
+unchanged. Anyone merging the fragment by hand replaces
+the placeholder with this checkout's own path first, then runs the launch wrapper's own check,
+naming the checkout's wrapper:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command ". '<checkout>\wrapper\Enter-ClaudeSession.ps1'; Assert-InstalledHookPath"
+```
+
+It prints an error when the installed hook still names the placeholder or names another checkout.
+Silence means it found no contradiction. That also covers no file at `~/.claude/settings.json`,
+the only settings file it reads, a settings file it could not parse, and one holding no
+`SessionStart` hook of this project, so read the merged file back if in doubt. A
+placeholder left in place runs nothing: the hook fails to start, every session starts unannounced,
+and the launch wrapper refuses to start a session against it.
+
+The two mirror hooks carry a 10-second timeout, pinned to that exact value by the test suite.
+They post the console prompt and the turn's final reply, which are larger than a liveness tick
+and slower to accept, and the CLI holds the turn open while the post runs, so the value is what a
+prompt pays at worst when the broker is busy rather than a cost every prompt pays. It is paid by
+every session on the machine, though, not only the ones being watched: on a `settings` host these
+hooks are installed user-level and fire for every Claude Code session on the host.
+
+A session saturated enough to blow through the timeout says so at the console, on a line
+beginning `UserPromptSubmit hook timed out after 10s`. That line on its own does not mean the
+prompt was lost: the broker answers the post once it has read the body and delivers afterwards, so
+a hook the CLI abandons after that point still reaches the thread. What the timeout costs is the
+prompt the CLI gave up on before the broker had the body. On a host running mid-turn narration that
+one is usually recovered too, because the transcript tailer reads the turn-opening prompt off the
+session's own transcript and posts it within a poll interval.
+
+That recovery has a reach and a shape, and both matter on a loaded host. Its reach is the tailer's
+read position: a session is read only from the baseline taken whenever the broker comes to hold
+both a mirror-on verdict for it and the path to its transcript, and a prompt written before that
+position is behind the tailer for good. Which prompts those are depends on when the session was
+armed, so what to know is the shape of the case rather than a count of it: a prompt typed before
+the tailer had a baseline for that session is not recovered, whether that is a session's very first
+prompt or the first after a stretch in which nothing armed it. The same position moves forward
+without reading when a transcript grows past the tailer's per-pass ceiling between two polls, and
+wherever else the tailer gives up a stretch it can no longer read, taking that stretch with it.
+
+Its shape is what the reading will accept. The recovery refuses a line carrying a console command's
+markup rather than the words typed, a prompt whose content is anything other than plain text or a
+single block of text beside images, a line missing either of the harness stamps the whole reading
+rests on, a line the harness marked as its own injection, and a prompt that would draw blank once
+invisible characters are stripped. `security-model.md` carries the same gate
+field by field, as the enumeration a reader audits the code against.
+
+With `CHANNEL_INTERIM_MIRROR` off no tailer is constructed at all and a lost prompt is simply
+gone, leaving a reply in the thread with no question above it. A run of those console lines means
+the host is oversubscribed either way.
+
+Changing the value means editing the fragment and its pin together. A timeout edited by hand in
+a host's own `~/.claude/settings.json` does not survive: the installer recognizes this project's
+hook entries by their headers, ignores their timeouts, and re-adds them from the fragment as
+written. For the same reason a host already installed keeps whatever value it was installed with
+until its next `Install-Host` run, and nothing at launch reports the difference, so a fleet host
+that has not been re-installed since a timeout change is still running the old one. All of this
+describes a `settings` host. On a `plugin` host the timeouts are whatever the persona plugin sends,
+and re-running the installer changes none of them.
+
+### Hook owner: settings or plugin
+
+A host has one hook owner, recorded as `CHANNEL_HOOK_OWNER` in `broker.env`, and it decides whether
+the installer puts this project's hooks in the settings file. Under `settings`, the default, the
+installer merges the fragment's hook entries into `~/.claude/settings.json` as described above.
+Under `plugin`, the persona plugin posts the same events itself, so the installer removes every hook
+entry of this project's from the settings file and merges none. It edits the file through the same
+backup and atomic write the merge uses, and leaves every other tool's hooks where they are. It still
+merges the reply-tool permission rule. The reply tool reaches a session through this repository's
+relay plugin under either owner, so the rule is needed either way.
+
+Three things here carry the word plugin, and they are separate. `plugin` is a value of the hook
+owner. The relay plugin, under `plugins/relay` in this repository, carries the relay's MCP server
+into a session, and it is the same under both owners. The persona plugin is a separate Claude Code
+plugin that this repository does not hold. It ships from the kit, the operator's
+separate kit repository. Its relay adapter posts this project's hook events on a
+`plugin` host, and the plugin's `relayAdapter` option turns the adapter `off` or `live`. The kit's
+core module plan names the persona plugin's README, `plugins/personas/README.md` in the kit, as
+where the steps for setting that option land.
+
+Pass `-HookOwner settings` or `-HookOwner plugin` to `Install-All.ps1` or `Install-Host.ps1`. A run
+without the switch applies the owner the last install recorded, and a host with no recorded owner
+gets `settings`. So a token rotation months later keeps a switched host switched, and returning a
+host to the settings file is a run with `-HookOwner settings`. A recorded value that is neither word
+stops the run, naming the file and the value, rather than guessing which way the operator meant.
+
+To see which owner a host is on, read the `CHANNEL_HOOK_OWNER` line in
+`%LOCALAPPDATA%\sapplefeld-channels\broker.env`. A host last installed before the switch existed has
+no such line and is on `settings`. The installer's `Provisioned` line also names the owner it
+applied.
+
+The installer also records the marketplace the relay plugin installs from as
+`CHANNEL_PLUGIN_MARKETPLACE` in the same file, and the launch wrapper reads it to name the plugin it
+loads. A host with no such line is on `sapplefeld-channels`. A re-run of `Install-All.ps1` or
+`Install-Host.ps1` that omits `-Marketplace` keeps the recorded value, and one that names a
+different marketplace than the recorded one stops, naming the file and the value.
+
+A `plugin` host gives up two things this repository otherwise checks. The launch wrapper's two
+installed-hook checks find no hook of this project's and stay silent: the one comparing the
+`SessionStart` hook's path with this checkout, and the one confirming the mirror switch header that
+`-NoMirror` relies on. And the hook timeouts and headers are whatever the plugin sends, not the
+values in `hooks/settings-fragment.json` and its pins. The fragment stays in the repository as the
+`settings` owner's template.
+
+**Switch a host only when the persona plugin is known to carry the hooks.** Removing them first
+leaves every session started afterwards unannounced, with no question answerable from Discord. The
+adapter is built by the kit's core module plan, `docs/plans/claude-kit_core-module_spec_v1.md` in
+the kit, on its `plans/core-module` branch until that branch merges. That plan closes each section
+with a Chapter appended at its end, and its section 5 Chapter is where the hook entries the adapter
+took over are recorded. Read these conditions in order:
+
+1. Keep the default `settings` until the kit's core module plan has merged and its section 5 Chapter
+   names which of the six the adapter took.
+2. Where that Chapter names all six and the adapter can read the settings file, set `relayAdapter`
+   to `live` first, and watch one round trip in a session's thread: the session announces itself,
+   and a question asked in the session is answered from Discord. While the six entries are still in
+   the settings file the adapter skips every event they cover, so this round trip comes from the
+   settings hooks. It shows the host still works with the adapter on and that nothing posts twice,
+   not that the adapter posts. Then run `Install-All.ps1 -HookOwner plugin`, or `Install-Host.ps1`
+   with the same switch, start a new session, and watch the same round trip again. That second
+   round trip is the adapter's own.
+3. Where that Chapter names fewer than six, do not switch, whatever the kit records about the
+   settings file. The entries the adapter did not take must stay in the settings file, and the
+   installer removes all six under `plugin`, so the installer needs a change first.
+4. Where that Chapter names all six and the kit's core module plan records, in its section 1 or
+   section 5 Chapter, that the adapter cannot read the settings file, so it has no way to skip an
+   event whose hook is still there, run the installer under `plugin` first and then set
+   `relayAdapter` to `live`. Between the two steps the settings file holds no hook of this
+   project's and the adapter is off.
+
+`operations.md` names that window, and the order for switching back, under
+"Switching the hook owner".
+
+### The inbox judge's key file (optional)
+
+The operator inbox (`CHANNEL_INBOX_CARD`) can send each unmarked session reply to TypeSafe's Jev
+classifier, which scores whether the reply needs something from you. That call needs a TypeSafe API
+key, and the key is read from a file rather than from `broker.env`, because a scheduled task's
+environment is readable by anything that can read the task definition. This step is optional.
+Without it the inbox still runs and holds every reply a session marks with an `ASK:` line, and
+nothing leaves the machine on this path. With it the judge also catches asks a session did not
+mark, at the cost that an unmarked reply which does not match the judge's screen for secrets has
+its text sent to TypeSafe, which `security-model.md` states in full.
+
+Create the file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside
+`discord-token.txt`, from the same plain non-elevated session step 2 requires. It holds one line,
+the key alone. Step 2 hardens the state root with the access control list the token file carries,
+granting only the owner, Administrators and SYSTEM, and a file created under that directory inherits
+the list, so a file placed there needs no hardening of its own. Then add two keys to `broker.env`:
+
+```
+CHANNEL_INBOX_CARD=on
+CHANNEL_INBOX_JUDGE_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\inbox-judge-key.txt
+```
+
+The broker checks the key file at start exactly as it checks the token file: the file and its
+directory must be owned by the broker's account or an administrative identity, must grant nobody
+beyond those three trustees, and must not be a symbolic link or junction. Where that check failing
+on the token file stops the broker, failing on this file turns the judge off, with one warning in
+the start log naming the file and the cause, and the inbox runs on `ASK:` lines alone. With
+`CHANNEL_RESPONSE_GATE` at `shadow` or `live` the broker refuses to start instead, naming the mode
+and the cause, because the gate reads the same key. A file
+that is missing, unreadable or empty, or one whose content, once leading and trailing whitespace is
+dropped, holds anything but visible ASCII with no spaces, is refused the same way. A trailing
+newline is fine. Both keys are on the installer's allowlist, so values set by hand here
+survive the next install, and `operations.md` carries the threshold and refresh
+knobs beside them.
+
+## 3. Install the service
+
+Elevated, once:
+
+```powershell
+install\Register-BrokerTask.ps1 -User <the account that ran step 2>
+```
+
+`Install-Host.ps1` prints that exact command with the account already filled in, and `-User` matters:
+the ACLs from step 2 grant the account that ran it, so a task registered under a different principal
+starts a broker that cannot read its own token file. It also scopes the logon trigger, since an
+unscoped one fires on any account's logon and a second broker cannot bind the port the first holds.
+
+The task starts the broker at system startup, thirty seconds in, and restarts it every minute on
+failure, up to 999 times, with no execution time limit. Starting at boot rather than at logon is what
+keeps a reboot from leaving the relay down until somebody signs in; the delay keeps the broker from
+racing the network stack, since it awaits its Discord login as part of starting and exits when that
+fails. A second trigger at the operator's logon is kept behind it, so a broker that died with its
+restart budget spent comes back without waiting for the next reboot. Running the script again updates the existing task in place rather than
+creating a second one. It refuses to run unelevated with a message saying so, rather than failing
+with an access error further in.
+
+## 4. Launch a session
+
+```powershell
+. .\wrapper\Enter-ClaudeSession.ps1
+Enter-ClaudeSession -Name 'host-a-warden'
+```
+
+The name is yours to choose, appears in the thread title, and may repeat across sessions: thread
+identity is the session ID, not the name. It is restricted to printable ASCII, because the name
+travels as an HTTP header and a non-ASCII one would fail in a way that silently prevents the session
+from ever being announced. It is a starting name rather than a fixed one: `/rename` inside the
+session moves the thread title afterwards, on any session that is mirrored, which
+`operations.md` covers under "Renaming a session".
+
+The wrapper refuses to launch rather than launching a session that cannot be watched. It throws when
+the hook script or the relay is missing, when the installed `SessionStart` hook in your user settings
+names a different checkout or still names the fragment's placeholder, or when the hook script has
+lost the permissions the installer set. Each message names the command that fixes it, which is
+almost always re-running `Install-Host.ps1` from this checkout. On a fresh clone where the installer
+has not run, expect the permission refusal. The installed-hook refusal needs a `SessionStart` hook
+of this project's in the settings file, so a host whose hook owner is `plugin` never meets it.
+
+Each launch also rewrites `%LOCALAPPDATA%\sapplefeld-channels\relay-mcp.json`, which is the
+`--mcp-config` that registers the relay for that one session. It is regenerated from the wrapper's
+own location every time, so unlike the installed hook path it can never come to name a checkout that
+has moved.
+
+Confirm the session registered:
+
+```powershell
+curl.exe -s http://127.0.0.1:8787/sessions
+```
+
+## The launch dialog
+
+A custom channel is not on Anthropic's approved allowlist, so it normally requires
+`--dangerously-load-development-channels` and a full-screen warning that needs a keypress at the
+terminal. Setting `allowedChannelPlugins` to include the relay replaces the Anthropic allowlist
+entirely and removes both.
+
+`channelsEnabled` and `allowedChannelPlugins` are managed settings, deliverable on Windows as a local
+file at `C:\Program Files\ClaudeCode\managed-settings.json`, a `managed-settings.d\` drop-in
+directory, or `HKLM\SOFTWARE\Policies\ClaudeCode`. All three are machine-scoped rather than
+account-scoped, so one file per host survives every account rotation, and a local file is honored
+even on a personal account with no organization behind it. That is what makes this route available on
+every host rather than only the organization-owned ones, and it is also what stops a rotation onto an
+account without `channelsEnabled` from silently killing message delivery.
+
+**Note that the replacement is total.** Once `allowedChannelPlugins` is set, any shipped channel
+plugin you also want must be listed alongside this project's.
+
+The file this project needs on a host installed from this checkout follows. A host installed from
+the public marketplace carries `applefeld` as the marketplace instead.
+
+```json
+{
+  "channelsEnabled": true,
+  "allowedChannelPlugins": [
+    { "marketplace": "sapplefeld-channels", "plugin": "relay" }
+  ]
+}
+```
+
+The wrapper launches every machine with plain `--channels` unless the machine's
+`CHANNEL_LAUNCH_FLAG` environment variable names `--dangerously-load-development-channels`, and
+that flag decides the rest of the launch line. Any other value in the variable refuses the launch,
+so a misspelt flag never quietly falls back. On `--dangerously-load-development-channels` the
+wrapper passes the generated `--mcp-config` and the entry `server:channel-relay`. On plain
+`--channels` it passes `plugin:relay@<marketplace>` and no `--mcp-config`, because the plugin
+carries the same server and registering it twice would run two relays against one session. The
+marketplace is the host's recorded `CHANNEL_PLUGIN_MARKETPLACE`, so a host with no such line
+launches `plugin:relay@sapplefeld-channels` and a public-route host `plugin:relay@applefeld`. A
+recorded value that is not a marketplace name refuses the launch rather than falling back. Plain
+`--channels` is the default because `Install-All.ps1` installs and allowlists the plugin, and an
+installed plugin's relay loads in every session regardless of route, which makes the development
+flag beside it exactly that double registration. A new host runs the verification below on its
+first wrapped launch.
+
+The variable lives in the machine's user environment, not in this checkout and not in `broker.env`.
+On a host that runs this checkout, an edit to it leaves it with local changes, which
+`Repair-Broker.ps1 -Pull` refuses to update; a public-marketplace host updates through Claude Code's
+marketplace update. The installer rewrites `broker.env` keeping only the broker's own keys and the
+metadata keys it writes itself, so a flag written there would vanish on the next install. Set it,
+then open a fresh shell:
+
+```powershell
+[Environment]::SetEnvironmentVariable('CHANNEL_LAUNCH_FLAG', '--dangerously-load-development-channels', 'User')
+```
+
+Clear it with the same call and `$null` as the value.
+
+## The relay as a plugin
+
+This repository is a plugin marketplace hosting one plugin, and that plugin provides the relay as a
+channel. `.claude-plugin/marketplace.json` names the marketplace `sapplefeld-channels` and lists
+the plugin `relay` at `./plugins/relay`; `plugins/relay/.claude-plugin/plugin.json` declares the
+channel, and `plugins/relay/.mcp.json` registers the server behind it. What the plugin route buys
+is the removal of the development flag and its launch dialog, and with it the option of an
+unattended supervisor that restarts a crashed session, which the dialog forecloses because a
+keypress at the terminal cannot be automated away.
+
+Install it on a host, from a session in any directory:
+
+```
+/plugin marketplace add <path to this checkout>
+/plugin install relay@sapplefeld-channels
+```
+
+A host with no checkout of this repository installs from the public marketplace instead:
+
+```
+/plugin marketplace add SApplefeld/plugins
+/plugin install relay@applefeld
+```
+
+The installed plugin is a cache copy without `install/`, so run the host install from the folder
+Claude Code cloned the public marketplace into, under `plugins/relay/install/`. Claude Code records
+that folder as `installLocation` under the marketplace's name in
+`%USERPROFILE%\.claude\plugins\known_marketplaces.json`, and it is usually
+`%USERPROFILE%\.claude\plugins\marketplaces\applefeld`. Run the script by its full path under that
+folder, naming the marketplace:
+
+```powershell
+& "$env:USERPROFILE\.claude\plugins\marketplaces\applefeld\plugins\relay\install\Install-All.ps1" `
+  -Marketplace applefeld -HostName <host> -ChannelId <channel id> -AllowedUserId <your user id>
+```
+
+The host runs whatever the public marketplace carries. Claude Code refreshes that folder on its own,
+and each refresh runs the new code in every account's PowerShell on this host, elevated shells
+included, with no re-install and no check. The source repository's publish job is the one path this
+project provides to the marketplace, and that job's `publish` environment is where a reviewer gate
+belongs.
+
+Under any `-Marketplace` other than the default `sapplefeld-channels`, `Install-All.ps1` registers
+no marketplace, since that folder came from one. It installs `relay@<name>`, `relay@applefeld` on
+the route above, only if `claude plugin list` does not already show it, and fails naming it if it
+still does not appear. The managed-settings allowlist entry is written under the same name, beside
+any private entry already in the file.
+
+An installed plugin is a copy of its own directory in Claude Code's plugin cache, not this
+checkout, so the plugin cannot run the relay itself: `relay/index.ts` imports sibling repository
+modules and this repository's `node_modules`, and neither exists beside a cached copy. The plugin
+ships a shim instead, `plugins/relay/launch.mjs`. It reads
+`%LOCALAPPDATA%\sapplefeld-channels\relay-mcp.json`, the registration the wrapper rewrites on every
+launch, and runs the relay named there with the MCP conversation passed straight through. The relay
+serving the channel is therefore always the one in the checkout that launched the session, and a
+checkout that moves needs no reinstall. A missing or unreadable registration makes the shim exit
+non-zero with one line on stderr naming the path it looked for, rather than registering a channel
+that is silently dead.
+
+Claude Code builds the reply tool's permission rule from the key the server arrives under, and the
+plugin route scopes that key by the plugin carrying it. `hooks/settings-fragment.json` ships one
+allow rule, `mcp__plugin_relay_channel-relay__reply`, the name a plugin-route session's tool calls
+carry on the wire. Six repository places hold that name in agreement: the fragment,
+`install/Install-Functions.ps1`'s `$script:AllowedChannelPermissionRules`,
+`relay/reply-permission.test.ts`, `install/Install-Functions.test.ts`,
+`install/Install-Host.test.ts`, and `plugins/manifest.test.ts`. The development route's rule,
+`mcp__channel-relay__reply`, is deliberately absent from all of them: every fleet host runs the
+plugin route, and a rule with no route that needs it is a standing squattable pre-approval. A host
+dropped back onto the development flag therefore parks its first reply on a permission prompt; for
+a longer stay, add that rule by hand to that host's `~/.claude/settings.json` and remove it when
+the host returns. `Install-Host.ps1` adds rules and never removes one already there, so a host
+provisioned while the fragment still shipped the development rule keeps it until the same hand
+edit removes it.
+
+**This is the one place a host can be installed into a half-working state.** A host launched with
+plain `--channels` before its plugin is installed and allowlisted has its channel refused, and then
+the session starts, the hooks announce it, the thread opens and the card ticks, and messages typed
+into the thread reach nothing. That is the same shape as the `channelsEnabled` failure
+`operations.md` describes. So verify a host on its first wrapped launch:
+
+1. Install the marketplace and the plugin on that host, and write the managed-settings file above.
+2. Make sure that host's `CHANNEL_LAUNCH_FLAG` is unset or `--channels`, and launch through the
+   wrapper, from a freshly dot-sourced shell. The wrapper is the only route worth testing: a
+   session started without it carries no process token, so it gets no thread and there is nothing
+   to answer.
+3. Check three things: no full-screen warning dialog at launch; a message typed in the session's
+   thread reaching the session; and a reply from the session landing back in the thread. The
+   in-terminal launch output looks no different on a healthy plugin-route launch, so the thread
+   round-trip is the check, not the banner.
+4. Confirm the permission rule matched. A session running with permissions bypassed raises no
+   prompt, so the direct check is the wire: after the reply lands, `curl.exe -s
+   http://127.0.0.1:8787/sessions` shows that session's `lastTool` as
+   `mcp__plugin_relay_channel-relay__reply`. A session that instead parks its reply on a permission
+   prompt is showing you the rule name Claude Code built; if it is not the shipped rule, that
+   observed name replaces the plugin-scoped one in the six places above.
+5. If any check fails, set that host's `CHANNEL_LAUNCH_FLAG` to
+   `--dangerously-load-development-channels` before working on the host again, and expect the first
+   reply there to raise a permission prompt: the development route's rule is not installed.

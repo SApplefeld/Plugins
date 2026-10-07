@@ -1,0 +1,512 @@
+# One-command host install. Runs everything scriptable from a single unelevated invocation:
+#
+#   install\Install-All.ps1 -HostName HOST-A -ChannelId <channel id> -AllowedUserId <your user id>
+#
+# It runs Install-Host.ps1 in this process (config, token, hooks, ACLs, npm ci), registers the
+# marketplace and installs the relay plugin through the claude CLI, then launches
+# Install-Elevated.ps1 exactly once through a UAC prompt for the three steps that need
+# Administrators: the scheduled task, the machine's managed-settings file, and the machine-profile
+# block that makes `cchat <name>` work from any shell.
+#
+# Unelevated is a requirement here exactly as it is for Install-Host.ps1: a file created by an
+# elevated shell is owned by Administrators, and the broker's credential guard reads that owner
+# shift on its token file as a planted credential. The elevation boundary is one child process, not
+# this script.
+#
+# What stays manual, because it lives in Discord's web console: creating the application and bot,
+# enabling Message Content Intent, inviting the bot, and creating the private channel. Step 1 of
+# docs/install.md covers those, and this script's parameters are their outputs.
+# Not marked Mandatory, because a test dot-sources this file to reach the functions and a Mandatory
+# script parameter would hang the probe on a prompt; the runner below validates them instead, and
+# Install-Host.ps1's own Mandatory parameters re-validate the values that reach it.
+param(
+    [string]$HostName,
+
+    [ValidatePattern('^(\d{17,20})?$')]
+    [string]$ChannelId,
+
+    [ValidatePattern('^(\d{17,20})?$')]
+    [string]$AllowedUserId,
+
+    # Validated entry by entry in Resolve-ChannelInstallIdentity, which names the entry it refuses.
+    [string]$Senders,
+
+    [System.Security.SecureString]$BotToken,
+
+    [string]$BotTokenFile,
+
+    [Nullable[int]]$Port,
+
+    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+
+    # Forwarded to Install-Host.ps1 only when given, so a run without it keeps the owner the last
+    # install recorded in broker.env.
+    [ValidateSet('settings', 'plugin')]
+    [string]$HookOwner,
+
+    # The marketplace the relay plugin installs from. Omitted, the value the last install recorded in
+    # broker.env applies, else 'sapplefeld-channels', this repository's own private marketplace, which
+    # this script registers from -RepoRoot. Any other name is a marketplace the folder this script
+    # runs from was already installed through, so none is registered. Forwarded to Install-Host.ps1
+    # only when given, which refuses a name that disagrees with the recorded one.
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*\z')]
+    [string]$Marketplace
+)
+
+. (Join-Path $PSScriptRoot 'Install-Functions.ps1')
+
+<#
+.SYNOPSIS
+Registers this checkout as a marketplace and installs the relay plugin, tolerating a re-run.
+Under a -Marketplace other than the default, installs relay@<name> from that existing marketplace.
+
+.DESCRIPTION
+Both claude CLI calls are idempotent in effect but not in exit code: adding a marketplace that is
+already configured, or installing a plugin that is already installed, can exit non-zero with an
+already-exists message. A re-run of this installer must not fail on that, so each call is verified
+by asking the CLI for the resulting state rather than by trusting the exit code of the mutation.
+
+A marketplace other than the default is one this checkout was itself installed from, so there is
+nothing to register: the plugin is installed only where the CLI's list does not already show it.
+
+-ClaudeCommand exists so a test can shadow the CLI.
+#>
+function Install-ChannelPlugin {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string]$ClaudeCommand = 'claude',
+        [string]$Marketplace = 'sapplefeld-channels'
+    )
+
+    # Local to this function: under an operator profile that sets $ErrorActionPreference = 'Stop',
+    # PS 5.1 turns redirected native stderr into a terminating NativeCommandError, and the
+    # already-exists message a re-run produces would kill the install the comment above promises to
+    # tolerate.
+    $ErrorActionPreference = 'Continue'
+    $plugin = "relay@$Marketplace"
+    # The list prints each id on its own line after a marker, so the whole token is matched, and
+    # case-sensitively: relay@applefeld-dev, myrelay@applefeld and relay@Applefeld are other plugins.
+    $listPattern = "(?m)(^|\s)$([regex]::Escape($plugin))(\s|$)"
+    if ($Marketplace -ceq 'sapplefeld-channels') {
+        & $ClaudeCommand plugin marketplace add $RepoRoot 2>&1 | Out-Null
+        & $ClaudeCommand plugin install $plugin 2>&1 | Out-Null
+    } else {
+        $listed = & $ClaudeCommand plugin list 2>&1 | Out-String
+        if ($listed -cnotmatch $listPattern) {
+            & $ClaudeCommand plugin install $plugin 2>&1 | Out-Null
+        }
+    }
+
+    $installed = & $ClaudeCommand plugin list 2>&1 | Out-String
+    if ($installed -cnotmatch $listPattern) {
+        $byHand = "'claude plugin install $plugin'"
+        if ($Marketplace -ceq 'sapplefeld-channels') {
+            $byHand = "'claude plugin marketplace add $RepoRoot' and " + $byHand
+        }
+        throw "Install-All: the relay plugin did not install ($plugin is not in 'claude plugin " +
+            "list'). Run $byHand by hand to see the error."
+    }
+}
+
+<#
+.SYNOPSIS
+Runs Install-Elevated.ps1 once through a UAC prompt and fails loudly if it fails.
+
+.DESCRIPTION
+The child's exit code is the only signal that crosses the elevation boundary: -Verb RunAs cannot
+redirect the child's output, so the child runs with its own console window and this waits on it.
+-User and -EnvFile are pinned from this unelevated process, which is the account that owns the
+ACLs Install-Host.ps1 just laid down; the elevated session's own identity may differ and must not
+leak into the task principal.
+
+-Marketplace is passed to the child only when given, so the private route's launch is unchanged.
+
+-Launcher exists so a test can capture the launch instead of raising a real UAC prompt.
+#>
+function Invoke-ChannelElevatedInstall {
+    param(
+        [Parameter(Mandatory)][string]$User,
+        [Parameter(Mandatory)][string]$EnvFile,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string]$Marketplace,
+        [scriptblock]$Launcher
+    )
+
+    $scriptPath = Join-Path $PSScriptRoot 'Install-Elevated.ps1'
+    # A value ending in a backslash would escape its own closing quote on the child's native
+    # command line and mangle every argument after it; doubling trailing backslashes is the
+    # native-quoting rule that keeps them literal.
+    $quote = { param($Value) '"' + ($Value -replace '(\\+)$', '$1$1') + '"' }
+    $arguments = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', (& $quote $scriptPath),
+        '-User', (& $quote $User),
+        '-EnvFile', (& $quote $EnvFile),
+        '-RepoRoot', (& $quote $RepoRoot)
+    )
+    if ($Marketplace) { $arguments += @('-Marketplace', (& $quote $Marketplace)) }
+    if (-not $Launcher) {
+        $Launcher = {
+            param($ArgumentList)
+            try {
+                $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $ArgumentList `
+                    -Verb RunAs -Wait -PassThru -ErrorAction Stop
+            } catch {
+                # Declining the UAC prompt lands here; the distinct message keeps it from reading
+                # as a failure of the elevated script, which never ran.
+                throw "Install-All: the elevation prompt was declined or the elevated launch " +
+                    "failed ($($_.Exception.Message)). Approve the prompt on a re-run, or run " +
+                    "install\Install-Elevated.ps1 from an elevated session yourself."
+            }
+            return $process.ExitCode
+        }
+    }
+    $exitCode = & $Launcher $arguments
+    if ($exitCode -ne 0) {
+        $remedy = "install\Install-Elevated.ps1 -User '$User' -EnvFile '$EnvFile'"
+        if ($Marketplace) { $remedy += " -Marketplace '$Marketplace'" }
+        throw "Install-All: the elevated install step exited $exitCode. Re-run it alone from an " +
+            "elevated session: $remedy."
+    }
+}
+
+<#
+.SYNOPSIS
+Waits until the restarted broker answers on its own HTTP endpoint, or throws.
+
+.DESCRIPTION
+The elevated child bounces the broker but runs behind a UAC prompt where nothing it prints is
+seen, so the readiness check lives here on the unelevated side, against the real signal: the
+/sessions endpoint answering. A broker that never comes up fails the install with the log path to
+read, rather than letting the completion message vouch for a dead service.
+
+-Probe exists so a test can drive both outcomes without a real broker.
+#>
+function Wait-ChannelBrokerReady {
+    param(
+        [int]$Port = 8787,
+        [int]$TimeoutSeconds = 30,
+        [scriptblock]$Probe
+    )
+
+    if (-not $Probe) {
+        $Probe = {
+            param($ProbePort)
+            try {
+                $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 `
+                    -Uri "http://127.0.0.1:$ProbePort/sessions"
+                return $response.StatusCode -eq 200
+            } catch { return $false }
+        }
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (& $Probe $Port) { return }
+        Start-Sleep -Seconds 1
+    }
+    throw "Install-All: the broker did not answer on http://127.0.0.1:$Port/sessions within " +
+        "$TimeoutSeconds seconds of the restart. Read the log in the state root " +
+        "(%LOCALAPPDATA%\sapplefeld-channels\broker.log) for why it will not start."
+}
+
+<#
+.SYNOPSIS
+Throws when this process is elevated. The seam exists so a test can drive both directions.
+#>
+function Assert-ChannelInstallUnelevated {
+    param([bool]$IsElevated = (Test-IsElevated))
+    if ($IsElevated) {
+        throw "Install-All: run this from a plain, non-elevated PowerShell session. Files created " +
+            "elevated are owned by Administrators, which the broker's credential guard reads as a " +
+            "planted token file. The steps that need elevation run in their own child through a " +
+            "UAC prompt."
+    }
+}
+
+<#
+.SYNOPSIS
+Resolves the host identity this install runs under from the arguments given and the last install's
+broker.env, throwing when a value is neither supplied nor on disk.
+
+.DESCRIPTION
+A run whose only purpose is to pick up new hooks on a host installed months ago should not have to
+retype the Discord IDs nobody remembers, and the last install already wrote every value to
+broker.env under keys it owns. So an argument that was not supplied falls back to the file, and an
+argument that was supplied always wins, which keeps rebinding a host to a different channel exactly
+what it is on a first install.
+
+A reused value is validated rather than trusted: PowerShell applies the ID ValidatePattern to a
+bound parameter and to nothing else, so a hand-edited, truncated, or partially written broker.env
+would otherwise reach Install-Host.ps1 and fail there with a message about the wrong thing. A key
+present with an empty value counts as absent, because the pattern the parameters declare admits the
+empty string and a blank reuse would be announced and passed on as if it were an identity.
+
+The sender roster is two keys the broker unions: -AllowedUserId as one operator and -Senders as a
+list of <snowflake>:operator and <snowflake>:participant entries. Either may be absent, and the
+install refuses only when the two together name no operator, since that is a broker that refuses to
+start. -Senders is validated whether it came from the argument or the file, entry by entry, with the
+same rules the broker applies, and is returned with the spacing around each entry trimmed.
+
+-EnvFile exists so a test can drive a real env file without a state root.
+#>
+function Resolve-ChannelInstallIdentity {
+    param(
+        [string]$HostName,
+        [string]$ChannelId,
+        [string]$AllowedUserId,
+        [string]$Senders,
+        [Nullable[int]]$Port,
+        [string]$EnvFile = (Join-Path (Get-ChannelStateRoot) 'broker.env')
+    )
+
+    # Get-ChannelEnvFile reads the file directly, so a first install on a host that has none is
+    # answered here rather than by a "cannot find path" from underneath the runner's Stop preference.
+    $existing = @{}
+    if (Test-Path -LiteralPath $EnvFile) { $existing = Get-ChannelEnvFile -Path $EnvFile }
+
+    $read = {
+        param($Key)
+        if (-not $existing.ContainsKey($Key)) { return '' }
+        return ([string]$existing[$Key]).Trim()
+    }
+
+    if (-not $HostName) {
+        $HostName = & $read 'CHANNEL_HOST_NAME'
+        if ($HostName) { Write-Host "Reusing -HostName $HostName from $EnvFile." }
+    }
+    # The same pattern the ChannelId and AllowedUserId parameters declare, less its optional empty
+    # alternative, which an empty value has already been read as absent for.
+    $idPattern = '^\d{17,20}$'
+    if (-not $ChannelId) {
+        $ChannelId = & $read 'CHANNEL_DISCORD_CHANNEL'
+        if ($ChannelId) {
+            if ($ChannelId -notmatch $idPattern) {
+                throw "Install-All: CHANNEL_DISCORD_CHANNEL in $($EnvFile) is not a Discord ID " +
+                    "('$ChannelId'); it must be 17 to 20 digits. Fix that line, or pass " +
+                    "-ChannelId to override the file."
+            }
+            Write-Host "Reusing -ChannelId $ChannelId from $EnvFile."
+        }
+    }
+    if (-not $AllowedUserId) {
+        $AllowedUserId = & $read 'CHANNEL_ALLOWED_USER_ID'
+        if ($AllowedUserId) {
+            if ($AllowedUserId -notmatch $idPattern) {
+                throw "Install-All: CHANNEL_ALLOWED_USER_ID in $($EnvFile) is not a Discord ID " +
+                    "('$AllowedUserId'); it must be 17 to 20 digits. Fix that line, or pass " +
+                    "-AllowedUserId to override the file."
+            }
+            Write-Host "Reusing -AllowedUserId $AllowedUserId from $EnvFile."
+        }
+    }
+    $sendersFrom = '-Senders'
+    $sendersRemedy = ''
+    if (-not $Senders) {
+        # Trimmed, so a whitespace-only line reads as unset, as the broker's own loader reads it.
+        $Senders = "$(& $read 'CHANNEL_SENDERS')".Trim()
+        $sendersFrom = "CHANNEL_SENDERS in $($EnvFile)"
+        $sendersRemedy = ' Fix that line, or pass -Senders to override the file.'
+    }
+    # Seeded with the -AllowedUserId operator, because the broker unions the two keys and refuses an
+    # id the union gives two classes, wherever each came from.
+    $classes = @{}
+    if ($AllowedUserId) { $classes[$AllowedUserId] = 'operator' }
+    if ($Senders) {
+        $normalized = foreach ($raw in ($Senders -split ',')) {
+            $entry = $raw.Trim()
+            $parts = $entry -split ':', 2
+            $id = $parts[0].Trim()
+            $class = if ($parts.Count -eq 2) { $parts[1].Trim() } else { '' }
+            # -cnotin: the broker's parse is case-sensitive, so 'Operator' is refused here too
+            # rather than installed and refused at the broker's next start.
+            if ($id -notmatch $idPattern -or $class -cnotin @('operator', 'participant')) {
+                throw "Install-All: $sendersFrom has an entry that is not a Discord ID and a " +
+                    "class ('$entry'); each entry is 17 to 20 digits, a colon, and operator or " +
+                    "participant.$sendersRemedy"
+            }
+            if ($classes.ContainsKey($id) -and $classes[$id] -cne $class) {
+                throw "Install-All: $sendersFrom names $id as $class, and it is already " +
+                    "$($classes[$id]); an ID holds one class.$sendersRemedy"
+            }
+            $classes[$id] = $class
+            "$($id):$class"
+        }
+        $Senders = @($normalized) -join ','
+        if ($sendersFrom -ne '-Senders') { Write-Host "Reusing -Senders $Senders from $EnvFile." }
+    }
+    if ($null -eq $Port) {
+        $reusedPort = & $read 'CHANNEL_BROKER_PORT'
+        if ($reusedPort) {
+            # TryParse rather than a cast: [int]'87.9' rounds to 88 and would bind the broker to a
+            # port the file never named.
+            $parsedPort = 0
+            if (-not [int]::TryParse($reusedPort, [ref]$parsedPort)) {
+                throw "Install-All: CHANNEL_BROKER_PORT in $($EnvFile) is not a whole number " +
+                    "('$reusedPort'). Fix that line, or pass -Port to override the file."
+            }
+            $Port = $parsedPort
+            Write-Host "Reusing -Port $Port from $EnvFile."
+        }
+    }
+
+    $missing = @()
+    if (-not $HostName) { $missing += '-HostName' }
+    if (-not $ChannelId) { $missing += '-ChannelId' }
+    if ($classes.Values -notcontains 'operator') {
+        $missing += '-AllowedUserId or an operator in -Senders'
+    }
+    if ($missing.Count -gt 0) {
+        throw "Install-All: -HostName, -ChannelId, and an operator in -AllowedUserId or -Senders " +
+            "are all required. The IDs come from Discord with Developer Mode on; docs/install.md " +
+            "step 1 walks through it. Not supplied and not found in $($EnvFile): " +
+            "$($missing -join ', ')."
+    }
+
+    return @{
+        HostName      = $HostName
+        ChannelId     = $ChannelId
+        AllowedUserId = $AllowedUserId
+        Senders       = $Senders
+        Port          = $Port
+    }
+}
+
+<#
+.SYNOPSIS
+Resolves the marketplace this run installs from: the one given, else the one the last install
+recorded, else 'sapplefeld-channels'.
+
+.DESCRIPTION
+The recorded value is CHANNEL_PLUGIN_MARKETPLACE in broker.env, read through Get-ChannelEnvFile like
+every other recorded value, so a bare re-run on a host installed from the public marketplace keeps
+that route. A recorded value that is no marketplace name throws, and so does a given name that
+disagrees with the recorded one, the same refusal Install-Host.ps1 makes; the runner resolves
+before it runs anything, so neither reaches a plugin install or the elevated child.
+
+-EnvFile exists so a test can drive a real env file without a state root.
+#>
+function Resolve-ChannelMarketplace {
+    param(
+        [string]$Marketplace,
+        [string]$EnvFile = (Join-Path (Get-ChannelStateRoot) 'broker.env')
+    )
+
+    $recorded = ''
+    if (Test-Path -LiteralPath $EnvFile) {
+        $values = Get-ChannelEnvFile -Path $EnvFile
+        if ($values.ContainsKey('CHANNEL_PLUGIN_MARKETPLACE')) {
+            $recorded = ([string]$values['CHANNEL_PLUGIN_MARKETPLACE']).Trim()
+            if ($recorded -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\z') {
+                throw "Install-All: CHANNEL_PLUGIN_MARKETPLACE in $($EnvFile) is '$recorded', which " +
+                    "is not a marketplace name. Fix that line, or remove it to take the default."
+            }
+        }
+    }
+    if ($Marketplace) {
+        if ($recorded -and $recorded -cne $Marketplace) {
+            throw "Install-All: CHANNEL_PLUGIN_MARKETPLACE in $($EnvFile) is '$recorded', but " +
+                "-Marketplace is '$Marketplace'. A host installs from one marketplace; re-run with " +
+                "-Marketplace $recorded or without the parameter, or edit that line to move the host."
+        }
+        return $Marketplace
+    }
+    if ($recorded) { return $recorded }
+    return 'sapplefeld-channels'
+}
+
+<#
+.SYNOPSIS
+Builds the arguments the runner splats into Install-Host.ps1 from the resolved identity.
+
+.DESCRIPTION
+Every optional argument is passed only when it is set, because Install-Host.ps1 validates each one
+and an empty value fails its pattern or its set. -HookOwner in particular is omitted when not given,
+which is what lets the owner the last install recorded in broker.env govern the run. It is not
+validated here: the runner's own parameter and Install-Host.ps1's both carry the set, and an
+unbound one arrives as the empty string, which a set would refuse.
+
+-ExistingTokenFile exists so a test can point the token reuse at a temp path rather than this
+host's state root.
+#>
+function Get-ChannelHostArguments {
+    param(
+        [Parameter(Mandatory)][hashtable]$Identity,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [System.Security.SecureString]$BotToken,
+        [string]$BotTokenFile,
+        [string]$HookOwner,
+        [string]$Marketplace,
+        [string]$ExistingTokenFile = (Join-Path (Get-ChannelStateRoot) 'discord-token.txt')
+    )
+
+    $hostArgs = @{
+        HostName  = $Identity.HostName
+        ChannelId = $Identity.ChannelId
+        RepoRoot  = $RepoRoot
+    }
+    # Passed only when set: either may be absent, and Install-Host.ps1 validates each by pattern,
+    # which an empty value fails.
+    if ($Identity.AllowedUserId) { $hostArgs.AllowedUserId = $Identity.AllowedUserId }
+    if ($Identity.Senders) { $hostArgs.Senders = $Identity.Senders }
+    if ($BotToken) { $hostArgs.BotToken = $BotToken }
+    if ($BotTokenFile) { $hostArgs.BotTokenFile = $BotTokenFile }
+    # A verify-run on an already-installed host reuses the hardened token from the last install
+    # rather than re-prompting: Install-Host.ps1's prompt is unconditional, and an operator pressing
+    # Enter through it would overwrite a working token with an empty one. Rotating the token is
+    # still just passing -BotToken or -BotTokenFile explicitly.
+    if (-not $BotToken -and -not $BotTokenFile) {
+        if (Test-Path -LiteralPath $ExistingTokenFile) { $hostArgs.BotTokenFile = $ExistingTokenFile }
+    }
+    if ($null -ne $Identity.Port) { $hostArgs.Port = $Identity.Port }
+    if ($HookOwner) { $hostArgs.HookOwner = $HookOwner }
+    if ($Marketplace) { $hostArgs.Marketplace = $Marketplace }
+    return $hostArgs
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    # Mirrors Install-Elevated.ps1's runner: a non-terminating cmdlet error anywhere in this
+    # sequence must stop the install rather than scroll past and let the completion message print
+    # over a half-provisioned host.
+    $ErrorActionPreference = 'Stop'
+
+    $identity = Resolve-ChannelInstallIdentity -HostName $HostName -ChannelId $ChannelId `
+        -AllowedUserId $AllowedUserId -Senders $Senders -Port $Port
+    Assert-ChannelInstallUnelevated
+    $effectiveMarketplace = Resolve-ChannelMarketplace -Marketplace $Marketplace
+
+    $hostArgs = Get-ChannelHostArguments -Identity $identity -RepoRoot $RepoRoot `
+        -BotToken $BotToken -BotTokenFile $BotTokenFile -HookOwner $HookOwner -Marketplace $Marketplace
+    & (Join-Path $PSScriptRoot 'Install-Host.ps1') @hostArgs
+
+    Install-ChannelPlugin -RepoRoot $RepoRoot -Marketplace $effectiveMarketplace
+
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $envFile = Join-Path (Get-ChannelStateRoot) 'broker.env'
+    $elevatedArgs = @{ User = $user; EnvFile = $envFile; RepoRoot = $RepoRoot }
+    if ($effectiveMarketplace -cne 'sapplefeld-channels') { $elevatedArgs.Marketplace = $effectiveMarketplace }
+    Invoke-ChannelElevatedInstall @elevatedArgs
+
+    $brokerPort = if ($null -ne $identity.Port) { $identity.Port } else { 8787 }
+    Wait-ChannelBrokerReady -Port $brokerPort
+    Write-Host "Broker restarted and answering on http://127.0.0.1:$brokerPort/sessions."
+
+    Write-Host ""
+    Write-Host "Install complete. Open a NEW PowerShell window (the profile block loads at shell"
+    Write-Host "start) and launch a session from any directory with:"
+    Write-Host ""
+    Write-Host "    cchat <session-name>"
+    Write-Host ""
+    Write-Host "Then verify the channel end to end:"
+    Write-Host "  1. No full-screen channel warning at launch."
+    Write-Host "  2. A message typed in the session's Discord thread reaches the session, and a"
+    Write-Host "     reply from the session lands back in the thread."
+    Write-Host "  3. curl.exe -s http://127.0.0.1:8787/sessions shows the session, and after the"
+    Write-Host "     reply, its lastTool."
+    Write-Host ""
+    Write-Host "If the thread never appears, the Discord side is the usual cause; re-check step 1"
+    Write-Host "of docs/install.md: Message Content Intent enabled on the bot, the bot invited with"
+    Write-Host "thread permissions, and the channel private to you and the bot. If this host sets"
+    Write-Host "CHANNEL_LAUNCH_FLAG to the development flag, run docs/install.md's per-host checklist"
+    Write-Host "before clearing it."
+}

@@ -1,0 +1,479 @@
+<#
+.SYNOPSIS
+Provisions this host to run the broker: config, the hook settings its hook owner calls for, and
+hardened ACLs.
+
+.DESCRIPTION
+Writes the broker's runtime configuration to %LOCALAPPDATA%\sapplefeld-channels\broker.env, outside
+the repository. Substitutes this checkout's absolute SessionStart script path into the hooks
+fragment and validates its shape. Then edits the user-level Claude Code settings file
+(~/.claude/settings.json) by the host's hook owner (-HookOwner), backing that file up first: under
+'settings' the fragment's hooks are merged into it, and under 'plugin' every hook entry of this
+project's is removed from it and none is merged. The relay's reply permission rule is merged under
+both. Hardens the ACL on the whole execution
+surface a scheduled task and a Bypass-executed hook depend on: hooks/, relay/, wrapper/, install/,
+broker/, the bot token file, and the state root that holds it, so only this process's own account,
+Administrators, and SYSTEM can read or write any of them. Every file and subdirectory under those
+trees is then read back through the broker's own protection check, and one still open to another
+account fails the install rather than being reported as provisioned.
+
+Does not register the scheduled task; run Register-BrokerTask.ps1 separately, from an elevated
+session, once this has completed.
+
+.PARAMETER HostName
+The label this host's sessions carry on every surface. Any name is valid: the launch wrapper does
+not read it, and picks its channel flag from the machine's CHANNEL_LAUNCH_FLAG variable instead.
+
+.PARAMETER ChannelId
+The Discord channel this host's threads are opened in. A snowflake (17-20 digits).
+
+.PARAMETER AllowedUserId
+A Discord user ID allowed to send this host's sessions messages and approve their permission
+prompts, as an operator. A snowflake. Stored in the same config file the broker reads, where its
+sender gate is the only thing that admits an inbound message. A broker with a Discord connection
+refuses to start without an operator, so this or an operator in -Senders is required.
+
+.PARAMETER Senders
+The host's roster of Discord users, as a comma-separated list of <snowflake>:operator and
+<snowflake>:participant entries. An operator's word is the host owner's; a participant may talk to a
+session and holds no more than that. Stored as CHANNEL_SENDERS beside CHANNEL_ALLOWED_USER_ID, and
+the broker admits the union of the two. Optional when -AllowedUserId is given. A run that omits
+either key keeps the value the last install wrote for it, so dropping an ID from the roster, or
+retiring CHANNEL_ALLOWED_USER_ID, is an edit to broker.env followed by a broker restart.
+
+.PARAMETER BotToken
+The bot token, as a SecureString rather than plain text: a plain-text parameter lands in
+PSReadLine's history file indefinitely, in the process command line for the life of the process, and
+in any transcript. Prompted for with Read-Host -AsSecureString when neither this nor -BotTokenFile is
+given. Written to a file inside the state root and hardened immediately, before this script does
+anything else with it. Mutually exclusive with -BotTokenFile.
+
+.PARAMETER BotTokenFile
+Path to an existing file already holding the bot token. Must resolve inside the state root
+(-StateRoot); a token file anywhere else is refused rather than hardened in place, because hardening
+an operator-chosen directory outside the root this installer owns is how a `-BotTokenFile D:\token.txt`
+strips a whole drive's ACL down to three entries. Mutually exclusive with -BotToken.
+
+.PARAMETER Port
+The broker's listening port. Must equal the port already baked into every http hook URL in
+hooks/settings-fragment.json, because nothing here rewrites hooks/session-start.ps1's own copy of
+that literal, and settings-fragment.test.ts pins broker/config.ts's DEFAULT_PORT against both. A
+-Port that disagreed with the fragment would open the broker on one port while every hook posts into
+another, failing silently. Defaults to the fragment's own literal.
+
+.PARAMETER RepoRoot
+This checkout's root, defaulting to the directory this script's parent lives in. Overridable so a
+test can point this at a fixture tree instead of the real checkout.
+
+.PARAMETER SettingsPath
+The Claude Code user settings file to merge into. Defaults to ~/.claude/settings.json. Overridable
+so a test never writes to the operator's real settings file.
+
+.PARAMETER StateRoot
+Where the config file, token file, and (once the broker runs) its state and log files live, and the
+root -BotTokenFile must resolve inside. Defaults to Get-ChannelStateRoot
+(%LOCALAPPDATA%\sapplefeld-channels). Overridable for the same reason as -SettingsPath.
+
+.PARAMETER SkipAcl
+Skips every ACL hardening step, and the verification that reads those paths back. Refuses to run at
+all when a token is being provisioned (from either
+-BotToken or -BotTokenFile), because a credential file this installer chose not to protect is worse
+than one it never touched. For a test run against a fixture tree with no token involved, where
+hardening the fixture's own ACL is not the thing under test.
+
+.PARAMETER SkipNpmCi
+Skips `npm ci`. For a test run, where installing the real dependency tree is not the thing under
+test and is slow to repeat.
+
+.PARAMETER HookOwner
+Who posts this project's hook events on this host: 'settings' (the default) merges them into the
+settings file from hooks/settings-fragment.json, and 'plugin' leaves them to the kit's persona plugin
+(outside this repository) and removes every entry of this project's from the settings file.
+Case-insensitive. The value applied is recorded in broker.env as CHANNEL_HOOK_OWNER, and a run that
+omits this parameter takes the recorded value, so a later re-run does not put removed hooks back.
+A recorded value other than the two fails the run rather than falling back to either.
+
+.PARAMETER Marketplace
+The marketplace the relay plugin was installed from on this host: 'sapplefeld-channels' (the default,
+this repository's private marketplace) or the public one. Recorded in broker.env as
+CHANNEL_PLUGIN_MARKETPLACE, which the launch wrapper reads to name the plugin it loads, and a run
+that omits this parameter takes the recorded value. Install-All.ps1 forwards the name only where it
+was given, and this script resolves the rest. A run that names a different marketplace than the
+recorded one fails rather than overwriting it, since the wrapper would then load a plugin the
+host's allowlist and install never covered.
+#>
+param(
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$HostName,
+
+    [Parameter(Mandatory)]
+    [ValidatePattern('^\d{17,20}$')]
+    [string]$ChannelId,
+
+    # Not Mandatory: a -Senders list naming an operator stands in for it, which the check below the
+    # parameters enforces.
+    [ValidatePattern('^\d{17,20}$')]
+    [string]$AllowedUserId,
+
+    # Case-sensitive, as the broker's own parse is: 'Operator' is not a class it recognizes.
+    [ValidatePattern('^\d{17,20}:(operator|participant)(,\d{17,20}:(operator|participant))*$',
+        Options = 'None')]
+    [string]$Senders,
+
+    [System.Security.SecureString]$BotToken,
+
+    [string]$BotTokenFile,
+
+    [Nullable[int]]$Port,
+
+    [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
+
+    [string]$SettingsPath = (Join-Path $HOME '.claude\settings.json'),
+
+    [string]$StateRoot,
+
+    [switch]$SkipAcl,
+
+    [switch]$SkipNpmCi,
+
+    # ValidateSet compares case-insensitively, so 'Plugin' binds and is lowercased below.
+    [ValidateSet('settings', 'plugin')]
+    [string]$HookOwner,
+
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*\z')]
+    [string]$Marketplace
+)
+
+. (Join-Path $PSScriptRoot 'Install-Functions.ps1')
+
+# Before anything is written or prompted for: a config with no operator is one the broker refuses
+# to start on. This checks only that an operator is named; an ID given two classes across the two
+# keys is caught by Install-All.ps1's resolver and by the broker's own startup check.
+$senderEntries = if ($Senders) { @($Senders -split ',') } else { @() }
+if (-not $AllowedUserId -and -not ($senderEntries -clike '*:operator')) {
+    throw "Install-Host: pass -AllowedUserId, or a -Senders list naming at least one " +
+        "<snowflake>:operator entry. A broker with a Discord connection and no operator refuses " +
+        "to start."
+}
+
+if ($BotToken -and $BotTokenFile) {
+    throw "Install-Host: pass -BotToken or -BotTokenFile, not both."
+}
+if ($SkipAcl -and ($BotToken -or $BotTokenFile)) {
+    throw "Install-Host: -SkipAcl cannot be combined with a token. A credential file this " +
+        "installer left unprotected is worse than one it never wrote; run without -SkipAcl, or " +
+        "without a token for a dry run against a fixture tree."
+}
+
+if (-not $StateRoot) { $StateRoot = Get-ChannelStateRoot }
+if (-not (Test-Path -LiteralPath $StateRoot)) {
+    New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
+}
+
+# The hook owner: -HookOwner where given, else the value the last install recorded, else 'settings'.
+# Resolved before the token prompt and before the settings file is touched, so a bad recorded value
+# stops the run with nothing written. A recorded value outside the two fails rather than falling back,
+# since a fallback to 'settings' would merge hooks onto a host whose operator meant to remove them.
+$envFile = Join-Path $StateRoot 'broker.env'
+if ($HookOwner) {
+    $HookOwner = $HookOwner.ToLowerInvariant()
+} else {
+    $HookOwner = 'settings'
+    if (Test-Path -LiteralPath $envFile) {
+        $recorded = Get-ChannelEnvFile -Path $envFile
+        if ($recorded.ContainsKey('CHANNEL_HOOK_OWNER')) {
+            $recordedOwner = [string]$recorded['CHANNEL_HOOK_OWNER']
+            $normalizedOwner = $recordedOwner.Trim().ToLowerInvariant()
+            if ($normalizedOwner -cnotin @('settings', 'plugin')) {
+                throw "Install-Host: CHANNEL_HOOK_OWNER in '$envFile' is '$recordedOwner', which is " +
+                    "neither 'settings' nor 'plugin'. Fix that line, or pass -HookOwner settings or " +
+                    "-HookOwner plugin to override it."
+            }
+            $HookOwner = $normalizedOwner
+        }
+    }
+}
+
+# The plugin marketplace: -Marketplace where given, else the value the last install recorded, else
+# 'sapplefeld-channels'. A recorded value is validated by the parameter's own pattern, and one that
+# disagrees with a supplied name stops the run with no file written, as the hook owner's bad value does.
+$defaultMarketplace = 'sapplefeld-channels'
+$recordedMarketplace = $null
+if (Test-Path -LiteralPath $envFile) {
+    $recordedEnv = Get-ChannelEnvFile -Path $envFile
+    if ($recordedEnv.ContainsKey('CHANNEL_PLUGIN_MARKETPLACE')) {
+        $recordedMarketplace = ([string]$recordedEnv['CHANNEL_PLUGIN_MARKETPLACE']).Trim()
+        if ($recordedMarketplace -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\z') {
+            throw "Install-Host: CHANNEL_PLUGIN_MARKETPLACE in '$envFile' is '$recordedMarketplace', " +
+                "which is not a marketplace name. Fix that line, or remove it to take the default."
+        }
+    }
+}
+if ($Marketplace) {
+    if ($recordedMarketplace -and $recordedMarketplace -cne $Marketplace) {
+        throw "Install-Host: CHANNEL_PLUGIN_MARKETPLACE in '$envFile' is '$recordedMarketplace', but " +
+            "-Marketplace is '$Marketplace'. A host installs from one marketplace; re-run with " +
+            "-Marketplace $recordedMarketplace, or edit that line to move the host."
+    }
+} elseif ($recordedMarketplace) {
+    $Marketplace = $recordedMarketplace
+} else {
+    $Marketplace = $defaultMarketplace
+}
+
+if (-not $BotToken -and -not $BotTokenFile) {
+    $BotToken = Read-Host -AsSecureString -Prompt 'Discord bot token'
+}
+
+# The token file. Written and hardened back to back, with nothing else run in between: a comment
+# claiming there is no window between the write and the guard is only true if nothing actually runs
+# there, so nothing does. A pre-existing file named by -BotTokenFile is hardened where it is, once
+# that location is confirmed to be inside the root this installer owns.
+$tokenFile = if ($BotTokenFile) { $BotTokenFile } else { Join-Path $StateRoot 'discord-token.txt' }
+if ($BotToken) {
+    # Converted to plain text only for the instant it takes to write the file. SecureString does not
+    # make the token unrecoverable in memory, but it does keep it off the command line, out of
+    # PSReadLine's history, and out of a transcript, which a [string] parameter cannot.
+    $plainToken = [System.Net.NetworkCredential]::new('', $BotToken).Password
+    try {
+        Set-Utf8NoBomFile -Path $tokenFile -Content $plainToken
+    } finally {
+        $plainToken = $null
+    }
+}
+if (-not (Test-Path -LiteralPath $tokenFile)) {
+    throw "Install-Host: token file '$tokenFile' does not exist."
+}
+
+$resolvedStateRoot = (Resolve-Path -LiteralPath $StateRoot).ProviderPath
+$tokenDirectory = Split-Path -Parent (Resolve-Path -LiteralPath $tokenFile).ProviderPath
+$insideStateRoot = $tokenDirectory -eq $resolvedStateRoot -or
+    $tokenDirectory.StartsWith("$resolvedStateRoot\", [StringComparison]::OrdinalIgnoreCase)
+if (-not $SkipAcl -and -not $insideStateRoot) {
+    throw "Install-Host: the token file '$tokenFile' is outside the state root " +
+        "'$resolvedStateRoot'. Hardening an operator-chosen directory outside the root this " +
+        "installer owns is how a token file at a drive root strips the whole drive's ACL down to " +
+        "three entries. Move the token file into the state root (or pass -StateRoot to match " +
+        "wherever it already lives) and re-run."
+}
+
+$sessionStartScript = Join-Path $RepoRoot 'hooks\session-start.ps1'
+# Claude Code runs this at the start of every session on the machine, from the user-level settings
+# file, so it is hardened alongside the hook script rather than trusted.
+$relayScript = Join-Path $RepoRoot 'relay\index.ts'
+$wrapperScript = Join-Path $RepoRoot 'wrapper\Enter-ClaudeSession.ps1'
+$hooksDir = Join-Path $RepoRoot 'hooks'
+$relayDir = Join-Path $RepoRoot 'relay'
+$wrapperDir = Join-Path $RepoRoot 'wrapper'
+$installDir = Join-Path $RepoRoot 'install'
+$brokerDir = Join-Path $RepoRoot 'broker'
+# The module holding the protection check the verification pass below runs. Resolved under
+# -RepoRoot rather than from $PSScriptRoot so a run pointed at a fixture tree uses that tree's copy.
+$credentialsScript = Join-Path $brokerDir 'discord\credentials.ts'
+foreach ($required in @($sessionStartScript, $relayScript, $wrapperScript, $credentialsScript,
+        $hooksDir, $relayDir, $wrapperDir, $installDir, $brokerDir)) {
+    if (-not (Test-Path -LiteralPath $required)) {
+        throw "Install-Host: expected path not found at '$required'. Is -RepoRoot correct?"
+    }
+}
+
+$fragmentPath = Join-Path $RepoRoot 'hooks\settings-fragment.json'
+if (-not (Test-Path -LiteralPath $fragmentPath)) {
+    throw "Install-Host: expected file not found at '$fragmentPath'. Is -RepoRoot correct?"
+}
+
+# The port every http hook in the fragment already posts to. hooks/session-start.ps1 carries the
+# same literal, hardcoded and unmoved by this installer, so -Port is validated against the fragment
+# rather than substituted into it: rewriting the fragment's copies and not the script's would
+# silently reintroduce exactly the drift settings-fragment.test.ts's port pin exists to catch.
+#
+# Every http url is read, not one of them. The broker is opened on the port this resolves to, so a
+# single url checked here would leave the other hooks free to name a different local port: whatever
+# is listening there would receive this machine's console prompts, assistant replies, and process
+# token, from a fragment that installs cleanly and a broker that runs healthy on the real port.
+$fragmentPreview = ConvertTo-OrderedHashtable (Get-Content -LiteralPath $fragmentPath -Raw | ConvertFrom-Json)
+$fragmentPort = $null
+foreach ($eventName in $fragmentPreview['hooks'].Keys) {
+    foreach ($entry in @($fragmentPreview['hooks'][$eventName])) {
+        foreach ($hook in @($entry['hooks'])) {
+            # SessionStart's is a command hook and has no url to read.
+            if ([string]$hook['type'] -ne 'http') { continue }
+            $hookPort = [int]([uri][string]$hook['url']).Port
+            if ($null -eq $fragmentPort) { $fragmentPort = $hookPort }
+            if ($hookPort -ne $fragmentPort) {
+                throw "Install-Host: the http hooks in '$fragmentPath' do not agree on a port " +
+                    "($fragmentPort and $hookPort). The broker is opened on one port, so the hooks " +
+                    "naming another would post this machine's hook traffic, and the mirror's " +
+                    "content, to whatever is listening there. Fix the fragment before installing."
+            }
+        }
+    }
+}
+if ($null -eq $fragmentPort) {
+    throw "Install-Host: '$fragmentPath' declares no http hook, so there is no port to install " +
+        "against. A fragment without them installs a session announcement and nothing that reports " +
+        "a session is alive."
+}
+if (-not $Port) { $Port = $fragmentPort }
+if ($Port -ne $fragmentPort) {
+    throw "Install-Host: -Port $Port disagrees with the port already baked into " +
+        "'$fragmentPath' ($fragmentPort). Nothing here rewrites hooks/session-start.ps1's own " +
+        "copy of that literal, so a different port here would open the broker on one port while " +
+        "every hook posts into another. Change the fragment (and session-start.ps1, and " +
+        "broker/config.ts's DEFAULT_PORT) if the port must move; do not pass a different one here."
+}
+
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCommand) {
+    throw "Install-Host: no 'node' found on PATH. install/Start-Broker.ps1 needs an absolute path " +
+        "pinned at install time, rather than resolving 'node' from PATH itself under " +
+        "-ExecutionPolicy Bypass at every logon."
+}
+$nodePath = $nodeCommand.Source
+
+if (-not $SkipAcl) {
+    # The whole execution surface a scheduled task and a Bypass-executed hook depend on: the hook
+    # script and the wrapper (Chapter 3/4), and now install/ and broker/ too, since Register-
+    # BrokerTask.ps1 points a scheduled task at install/Start-Broker.ps1, which runs broker/index.ts,
+    # and neither was hardened before. Directories are hardened as containers so a file added to
+    # either tree later inherits the same three-trustee grant rather than arriving open.
+    Protect-ChannelPath -Path $hooksDir
+    # relay/ joins them: the merged settings file names relay\index.ts as an MCP server command, so
+    # Claude Code executes it at the start of every session on the machine.
+    Protect-ChannelPath -Path $relayDir
+    Protect-ChannelPath -Path $wrapperDir
+    Protect-ChannelPath -Path $installDir
+    Protect-ChannelPath -Path $brokerDir
+    Protect-ChannelPath -Path $tokenFile
+    # The state root unconditionally, not only "the token's parent directory": with -BotTokenFile
+    # pointed elsewhere inside the root, or with no token at all, broker.env, the broker's state
+    # file, and its log file still live here and are still worth the same three-trustee grant.
+    Protect-ChannelPath -Path $resolvedStateRoot
+
+    # Hardening is read back rather than assumed, by the same check broker/discord/credentials.ts
+    # runs at every broker start. This script's last line prints success and an operator acts on it,
+    # so a path left open here is an execution surface the whole install reported as closed: hooks/
+    # is run under -ExecutionPolicy Bypass at the start of every session on the machine, and
+    # install/ and broker/ are what a scheduled task executes at every logon.
+    #
+    # Every file and subdirectory under each hardened tree, not one file standing in for its tree.
+    # Protect-ChannelPath grants a directory an inheritable list, which reaches a child only while
+    # that child still inherits: a file whose inheritance was detached keeps whatever explicit
+    # entries it carries, gains nothing from the parent's grant, and is exactly what a check of one
+    # representative per tree would miss. The files that matter are the ordinary ones, not the
+    # representatives, since Start-Broker.ps1 and Install-Functions.ps1 are what the scheduled task
+    # executes at every logon and settings-fragment.json is merged into machine-wide settings.
+    #
+    # Passed from inside each tree rather than as the tree root. The check reads a path and the
+    # directory holding it, so each entry covers its own parent, and every tree root is covered by
+    # its direct children; passing a tree root itself would instead check the checkout's root, a
+    # directory this installer does not harden and has no business hardening.
+    # The state root is verified through the token file alone, not by walking what is under it. The
+    # check's rule is owner-relative: it permits a grant to the path's own owner, to Administrators,
+    # and to SYSTEM, which is the right standard for a credential. The state root holds runtime
+    # artifacts instead, written by the broker and the launch wrapper, so each one is owned by
+    # whichever process created it. A state file owned by Administrators that correctly inherits the
+    # three-trustee list therefore reads as granting a foreign account, and refusing the install over
+    # it would be refusing a path that is exactly as protected as it should be. What the state root
+    # needs proven is its own list, and the token file's check covers that as its parent, which is
+    # also precisely the check the broker itself runs at every start.
+    $verifyTargets = @($tokenFile)
+    foreach ($tree in @($hooksDir, $relayDir, $wrapperDir, $installDir, $brokerDir)) {
+        $verifyTargets += @(Get-ChildItem -LiteralPath $tree -Recurse -Force | ForEach-Object { $_.FullName })
+    }
+    try {
+        Assert-ChannelPathProtected -Path $verifyTargets -NodePath $nodePath `
+            -CredentialsScriptPath $credentialsScript
+    } catch {
+        # The token file was written earlier in this run and holds the bot token in plain text. If
+        # this install wrote it, it is removed here rather than left behind at a path just reported
+        # as reachable by other accounts. A pre-existing file named by -BotTokenFile is the
+        # operator's and is named instead, since deleting it would destroy a credential this run did
+        # not create.
+        $residue = ''
+        if ($BotToken) {
+            Remove-Item -LiteralPath $tokenFile -Force -ErrorAction SilentlyContinue
+            $residue = " The token file this run wrote at '$tokenFile' has been deleted rather than " +
+                "left in plain text under a path this check just refused."
+        } else {
+            $residue = " The token file at '$tokenFile' holds the bot token in plain text and is " +
+                "still there; move or revoke it if the path it sits under is reachable by other " +
+                "accounts."
+        }
+        # The remedy names both shapes, because the likelier one is not the ownership case. Hardening
+        # applies to each tree's root and is inherited by what sits under it, so a child whose
+        # inheritance was detached earlier keeps its own grants and is not repaired by re-running:
+        # that path has to have its extra grants removed, or inheritance re-enabled, by hand.
+        throw "Install-Host: hardening did not hold. $($_.Exception.Message).$residue Nothing here " +
+            "is provisioned against an execution surface another account on this machine can still " +
+            "write to. If the named path is a file or directory inside one of the hardened trees, " +
+            "remove the grants it carries or re-enable inheritance on it, since re-running hardens " +
+            "the trees rather than their children. If it is a tree root, take ownership of it as " +
+            "the account running this install. Then re-run."
+    }
+    Write-Host "Verified $($verifyTargets.Count) hardened path(s) under the execution surface."
+}
+
+$envValues = [ordered]@{
+    CHANNEL_HOST_NAME          = $HostName
+    CHANNEL_BROKER_PORT        = $Port
+    CHANNEL_DISCORD_CHANNEL    = $ChannelId
+    CHANNEL_DISCORD_TOKEN_FILE = $tokenFile
+    # The broker's sender gate checks every inbound message's author against the union of these
+    # two, and refuses to start without an operator in one of them whenever Discord is configured.
+    CHANNEL_ALLOWED_USER_ID    = $AllowedUserId
+    CHANNEL_SENDERS            = $Senders
+    CHANNEL_BROKER_LOG_FILE    = (Join-Path $StateRoot 'broker.log')
+    CHANNEL_BROKER_STATE       = (Join-Path $StateRoot 'broker-state.json')
+    # Pinned rather than left to Start-Broker.ps1 to resolve from PATH under -ExecutionPolicy
+    # Bypass at every logon, where PATH is whatever the triggering logon happened to carry.
+    CHANNEL_NODE_EXE           = $nodePath
+    # The account Register-BrokerTask.ps1 is told to run the scheduled task as. Recorded here, not
+    # only passed at registration time, so a mismatch between the account that installed (and so
+    # owns every hardened path) and the account the task actually runs as is something an operator
+    # reading this file, or later code, can detect instead of the broker simply failing to read its
+    # own token file with no signal pointing back at this.
+    CHANNEL_TASK_USER          = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    # The hook owner this run applies, read back by the next run that omits -HookOwner. Installer
+    # metadata like the two above: it is not on the broker's env allowlist.
+    CHANNEL_HOOK_OWNER         = $HookOwner
+    # The marketplace the relay plugin installs from, read back by this script's next run and by the
+    # launch wrapper. Written on every run, so the key is never dropped by the rewrite. Metadata,
+    # not on the broker's env allowlist.
+    CHANNEL_PLUGIN_MARKETPLACE = $Marketplace
+}
+# A roster key this run was not given is left out rather than written empty, so the value the last
+# install wrote survives the merge instead of being blanked by a run that only passed the other one.
+foreach ($key in @('CHANNEL_ALLOWED_USER_ID', 'CHANNEL_SENDERS')) {
+    if (-not $envValues[$key]) { $envValues.Remove($key) }
+}
+Set-ChannelEnvFile -Path $envFile -Values $envValues
+
+$fragment = Get-SubstitutedFragment -FragmentPath $fragmentPath -SessionStartScriptPath $sessionStartScript
+Merge-ChannelSettingsFile -SettingsPath $SettingsPath -Fragment $fragment -HookOwner $HookOwner | Out-Null
+
+if (-not $SkipNpmCi) {
+    # Not `npm install`: an install host resolves exactly the reviewed lockfile rather than
+    # whatever a dependency's newer compatible version happens to be on install day.
+    Push-Location $RepoRoot
+    try {
+        & npm ci
+        if ($LASTEXITCODE -ne 0) { throw "Install-Host: 'npm ci' failed with exit code $LASTEXITCODE." }
+    } finally {
+        Pop-Location
+    }
+}
+
+$hooksApplied = if ($HookOwner -eq 'plugin') {
+    "hook owner 'plugin': this project's hook entries removed from '$SettingsPath' and the reply " +
+        "permission merged"
+} else {
+    "hook owner 'settings': hooks merged into '$SettingsPath'"
+}
+Write-Host "Provisioned '$HostName': config at '$envFile', $hooksApplied."
+# The env file path is printed into the command rather than left to the elevated session to resolve:
+# that session may belong to a different account, whose %LOCALAPPDATA% is a different profile, and
+# the task's broker has no user profile of its own to fall back on.
+Write-Host ("Run install\Register-BrokerTask.ps1 -User '$([Security.Principal.WindowsIdentity]::GetCurrent().Name)' " +
+    "-EnvFile '$envFile' from an elevated session to install the scheduled task.")
