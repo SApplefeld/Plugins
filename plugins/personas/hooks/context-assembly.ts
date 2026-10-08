@@ -16,7 +16,7 @@
 // which contextSourcesOf in hooks/index.ts builds.
 
 import type { AgentState, AutonomyLevel, GoalNode, TaskItem } from "./agent-state";
-import { bracketSafeText, envNotable, hasStartableWork, LINE_TERMINATOR, oneLine, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
+import { bracketSafeText, envNotable, hasStartableWork, LINE_TERMINATOR, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
 
 // What opened the prompt the blocks are for. A typed prompt carries whether
 // the record step opened a turn record for it, which selects the [NO GOAL]
@@ -60,6 +60,19 @@ export interface ContextSources {
 // The most open entries the [GOAL QUEUE] block lists one per line. It rides
 // every external prompt, so past this many the rest are named by count.
 const GOAL_QUEUE_MAX_LINES = 12;
+
+// The most open asks the [GOAL TREE] block lists one per line, newest first;
+// past this many the rest are named by count.
+const GOAL_TREE_ASK_LINES = 8;
+
+// How long an ask has stood, in the largest whole unit that fits.
+function askAgeText(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86_400)}d`;
+}
 
 // The [STANDING] block's fixed sentences: the idle order and the line naming
 // the goal tree as the queue. Each is a named literal of its own so the
@@ -140,6 +153,23 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
     // Section 3 (boundary-compaction): the active entry's plan document
     // and section, spliced right after the Path: line.
     const planLine = planDocumentLine(state, activeNode);
+    // The persona's open asks, one line each, newest first, up to
+    // GOAL_TREE_ASK_LINES and then the count of the rest: the id, how long
+    // the ask has stood, whether the work is stopped on it or proceeding on
+    // its recommendation, and the question. The recommendation and the
+    // question are the worker's own text, folded to one line and cut, the
+    // fold every other field of this block takes.
+    const now = Date.now();
+    const openAsks = openAskEntries(state).slice().sort((a, b) => b.openedAt - a.openedAt);
+    const openAskLines = openAsks.slice(0, GOAL_TREE_ASK_LINES)
+      .map((entry) => `${entry.id} · ${askAgeText(now - entry.openedAt)} · ${entry.blocking ? "blocking" : entry.recommend.trim() === "" ? "proceeding" : `proceeding on ${oneLine(entry.recommend).slice(0, 60)}`} · ${oneLine(entry.question).slice(0, 120)}\n`)
+      .join("");
+    const openAskCountLine = openAsks.length > GOAL_TREE_ASK_LINES
+      ? `and ${openAsks.length - GOAL_TREE_ASK_LINES} more\n`
+      : "";
+    const openAsksPart = openAsks.length > 0
+      ? `Open asks:\n` + openAskLines + openAskCountLine
+      : "";
     const goalBlock =
       `[GOAL TREE]\n` +
       `Active: ${activeNode.kind} ${activeNode.id}${roundText} | ${oneLine(activeNode.objective)}\n` +
@@ -147,6 +177,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       planLine +
       siblingLine +
       lastNote +
+      openAsksPart +
       `Keep working toward this objective. If the user's current request conflicts with it, follow the user.\n` +
       `Close this step with goal_done, whose description says what the call does next.`;
     contextBlocks.push(goalBlock);

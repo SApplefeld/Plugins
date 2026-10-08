@@ -184,8 +184,8 @@ export function isSelfScoringLesson(text: string): boolean {
 // sends each finding to the coordinator persona as a [FINDING] inbox record,
 // so a finding never becomes a node in the finder's own tree. Four signals,
 // each counted as discrete events from data the worker already keeps:
-//   asks_unresolved  an ask that ran out its wait (ask_timeout) or had to be
-//                    re-raised into the thread (ask_reraised)
+//   asks_unresolved  an `ask_timeout` decision, one per ask (the re-raise is
+//                    the path an ask takes to the thread, so it adds nothing)
 //   memory_quality   a self-review lesson whose first six normalized words
 //                    match another's (a paraphrase the exact-match dedupe let
 //                    through), plus a lesson the self-scoring gate refused
@@ -217,7 +217,7 @@ export const FINDING_UNROUTABLE_AFTER_MS = 24 * 60 * 60_000;
 export type KaizenSignal = "asks_unresolved" | "memory_quality" | "message_wait" | "long_turns";
 
 export interface OwnRecordInput {
-  decisions: Array<{ timestamp: number; loop: string; action: string; detail: string }>;
+  decisions: Array<{ timestamp: number; loop: string; action: string; detail: string; askId?: string }>;
   memory: MemoryEntry[];
   inbox: Array<{ at: number; deliveredAt?: number }>;
   // One entry per finding sent, from the finder's own ledger.
@@ -244,8 +244,15 @@ function collectEvents(input: OwnRecordInput): Record<KaizenSignal, KaizenEvent[
     asks_unresolved: [], memory_quality: [], message_wait: [], long_turns: [],
   };
   const decisions = [...input.decisions].sort((a, b) => a.timestamp - b.timestamp);
+  // One event per expired ask: a repeat timeout decision for an id already
+  // counted adds nothing, and a decision with no askId counts on its own.
+  const askIdsCounted = new Set<string>();
   for (const d of decisions) {
-    if (d.action === "ask_timeout" || d.action === "ask_reraised") {
+    if (d.action === "ask_timeout") {
+      if (d.askId) {
+        if (askIdsCounted.has(d.askId)) continue;
+        askIdsCounted.add(d.askId);
+      }
       out.asks_unresolved.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
     } else if (d.action === "turn_over_hour") {
       out.long_turns.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
@@ -278,8 +285,8 @@ function describe(signal: KaizenSignal, count: number, events: KaizenEvent[]): {
     case "asks_unresolved":
       return {
         title: "Kaizen: asks run out the clock",
-        objective: `${count} asks timed out or had to be re-raised before an answer came (${sample}). Find why the asks the worker opens wait unanswered (wrong channel, too generic, opened on a node the operator already parked) and change how they are opened. Proof: a harness case where the same ask shape resolves without a re-raise, and one day's decision log with no ask_timeout.`,
-        rationale: `${count} asks timed out or were re-raised unanswered; the finding asks for a change to how asks are opened.`,
+        objective: `${count} asks ran out their wait with no answer, each re-raised into the thread first unless askReraiseWindowMs is 0 or longer than the wait (${sample}). Where the operator was away, raise the askOperatorWaitMs plugin option or put the entry on paused, naming what it waits on. Only where a re-raise never reached the thread is the ask's path the subject. Proof: one day's decision log with no ask_timeout on that persona.`,
+        rationale: `${count} asks ran out their wait with no answer; the finding names askOperatorWaitMs and a paused entry as the remedies.`,
       };
     case "memory_quality":
       return {

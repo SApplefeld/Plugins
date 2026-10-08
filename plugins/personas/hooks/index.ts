@@ -75,10 +75,18 @@ import {
   recordPreviousSession,
   previousSessionsText,
   recordShownMemory,
+  openAsk,
+  closeAsk,
+  liftAsk,
+  openAskEntries,
+  openBlockingAsks,
+  pruneAsks,
+  ASK_SEED_QUESTION,
+  ASKS_OPEN_MAX,
 } from "./agent-state";
 import { readPlanRecord, resolvePlanDir } from "./plan-record";
 import type { PlanRecordReading } from "./plan-record";
-import type { AgentState, AutonomyLevel, FleetHealth, FleetHealthMemo, GoalNode, LongTermGoal, NudgeBudget, EnvGit, EnvState, SentFinding, SentPlanRecord, TaskItem, TurnRecord, TurnRecordStamp } from "./agent-state";
+import type { AgentState, AskEntry, AskOpener, AskOpenRefusal, AutonomyLevel, FleetHealth, FleetHealthMemo, GoalNode, LongTermGoal, NudgeBudget, EnvGit, EnvState, SentFinding, SentPlanRecord, TaskItem, TurnRecord, TurnRecordStamp } from "./agent-state";
 import {
   claimResource,
   readAllClaims,
@@ -117,7 +125,7 @@ import {
   listAskRecords,
   writeAskRecord,
   readAskRecord,
-  expireOpenAsks,
+  reconcileOpenAsks,
   askKey,
 } from "./operator";
 import {
@@ -1161,6 +1169,112 @@ async function compactionPassShadow(dp: any, e: { trigger: string; messages?: un
 // `test` keeps state between calls.
 const ASK_MARKER_LINE = /^ASK:\s*(.+?\?\s*Recommend:\s*.+)$/im;
 
+// The line breaks a closing text is cut at before each line is matched
+// against ASK_MARKER_LINE: the four terminators its `m` flag reads as line
+// ends, so a line read here is a line the marker's own anchors would see. A
+// VT, FF or NEL inside a line stays inside its question, which the prompts
+// that carry a question quote as a continuation line.
+const ASK_MARKER_LINE_BREAK = /\r\n|[\n\r\u2028\u2029]/u;
+
+// The most ASK: lines one closing text opens. Lines past it in the same turn
+// are refused under one ask_cap_refused decision naming their count.
+const ASK_TURN_MAX = 4;
+
+// The text after "Recommend:" in a matched ASK: line, trimmed: the choice the
+// work proceeds on while the question stands.
+function askRecommendOf(question: string): string {
+  const at = /\?\s*Recommend:\s*/i.exec(question);
+  return at ? question.slice(at.index + at[0].length).trim() : "";
+}
+
+// A fresh id for an entry on `nodeId`, in the form the ledger stores,
+// ask-<nodeId>-<ms>. Several lines parsed in one turn share a millisecond,
+// so the ms part steps up until no entry on the ledger holds the id.
+function newAskId(state: AgentState, nodeId: string, now: number): string {
+  let ms = now;
+  while (state.asks.some((entry) => entry.id === `ask-${nodeId}-${ms}`)) ms += 1;
+  return `ask-${nodeId}-${ms}`;
+}
+
+// The open entry of `opener` on `nodeId`, where one stands.
+function openAskBy(state: AgentState, opener: AskOpener, nodeId: string): AskEntry | undefined {
+  return openAskEntries(state).find((entry) => entry.opener === opener && entry.nodeId === nodeId);
+}
+
+// Whether an open blocking entry of `opener` stands on `nodeId`. Each
+// controller opener asks once per node: a second streak or cap on the same
+// node while its own question still holds the work adds nothing the operator
+// does not have. An own entry whose hold was lifted does not stand: the
+// opener withdraws it and opens a fresh one, through withdrawLiftedAskBy.
+function ownAskStands(state: AgentState, opener: AskOpener, nodeId: string): boolean {
+  const own = openAskBy(state, opener, nodeId);
+  return own !== undefined && own.blocking;
+}
+
+// Withdraws the open entry of `opener` on `nodeId` whose hold was lifted, so
+// the opener can open a fresh blocking one in its place: the condition it
+// asked about holds again, and the lifted entry no longer stops the work.
+// The entry closes as withdrawn by ask_close, since the Approach's close
+// routes name no controller route, with a note naming its successor, and its
+// commons record takes withdrawn where it is still open. The successor's id
+// is the one newAskId gives at `now`, which is the id openLedgerAsk computes
+// for the open that follows at the same `now`, because a close frees no id.
+// The close runs before that open, so the open cap never counts the
+// predecessor against its successor. Nothing happens where no lifted own
+// entry stands.
+async function withdrawLiftedAskBy(dp: any, state: AgentState, persona: string, opener: AskOpener, nodeId: string, now: number): Promise<void> {
+  const own = openAskBy(state, opener, nodeId);
+  if (own === undefined || own.blocking) return;
+  const successorId = newAskId(state, nodeId, now);
+  const store = commonsStoreOf(dp);
+  const askRecord = await readAskRecord(store, persona, own.id);
+  if (askRecord && askRecord.status === "open") {
+    askRecord.status = "withdrawn";
+    await store.set(askKey(persona, own.id), askRecord);
+  }
+  closeAsk(state, own.id, "withdrawn", "ask_close", `replaced by ${successorId}`, now);
+}
+
+// Opens one ledger entry on `nodeId` and, where the open was accepted, its
+// commons record in the same step. Returns the entry, or the refusal with
+// nothing written: the caller logs a "cap" refusal as ask_cap_refused. A
+// record write that throws undoes the open whole before the throw goes on,
+// since an entry with no record would hold the work on a question no reader
+// session can see or answer.
+async function openLedgerAsk(
+  dp: any,
+  state: AgentState,
+  persona: string,
+  ownerSessionId: string,
+  nodeId: string,
+  question: string,
+  recommend: string,
+  opener: AskOpener,
+  blocking: boolean,
+  now: number,
+): Promise<AskEntry | AskOpenRefusal> {
+  const node = state.goals.find((g) => g.id === nodeId);
+  const id = newAskId(state, nodeId, now);
+  const result = openAsk(state, {
+    id,
+    nodeId,
+    planPath: node?.planPath ?? null,
+    entryTitle: node?.title ?? "",
+    question,
+    recommend,
+    opener,
+    blocking,
+  }, now);
+  if (typeof result === "string") return result;
+  try {
+    await writeAskRecord(commonsStoreOf(dp), persona, id, nodeId, question, ownerSessionId);
+  } catch (err) {
+    state.asks = state.asks.filter((entry) => entry !== result);
+    throw err;
+  }
+  return result;
+}
+
 // The step watch asks step-drift at every this-many-th step of a turn whose
 // response carried an answer, so a long turn asks Jev a few times rather than
 // once per model response.
@@ -1630,12 +1744,15 @@ async function closeTurnRecordAtTurnEnd(
       detail: `record ${open.id} left open: ${rule}`,
     });
   };
-  if (endedOnLead) {
-    inFlight("the closing text opens with a BLOCKED: or WAITING: lead");
+  // A blocking ask is read ahead of the lead: a BLOCKED: lead with an ASK:
+  // line under it is in flight on that question, which the decision names.
+  const blockingAsks = openBlockingAsks(sess.state);
+  if (blockingAsks.length > 0) {
+    inFlight(`a blocking ask is open (${blockingAsks.map((entry) => entry.id).join(", ")})`);
     return;
   }
-  if (sess.state.pendingAskId) {
-    inFlight(`an ask is open (${sess.state.pendingAskId})`);
+  if (endedOnLead) {
+    inFlight("the closing text opens with a BLOCKED: or WAITING: lead");
     return;
   }
   if (await readLiveAgent()) {
@@ -1838,7 +1955,7 @@ async function addGoalEntry(
   const priorActiveGoalId = sess.state.activeGoalId;
   let reopenedRoot: { status: GoalNode["status"]; blockedReason: string | undefined; updatedAt: number } | null = null;
   const addDecisions: AgentState["decisions"] = [];
-  let nudgeBefore: { answers: number; resetSinceOpened: boolean; lastNudgeAt: number } | null = null;
+  let nudgeBefore: { answers: number; capRefusedFor: string | null; resetSinceOpened: boolean; lastNudgeAt: number } | null = null;
   // A node added directly under a finished root reopens the root, so the
   // tree never holds live work under a root that reads finished. A node
   // added under a plan leaves the root as it was, since a finished plan
@@ -1897,20 +2014,20 @@ async function addGoalEntry(
   // same way activateNext's DFS would refuse it - this branch never
   // activates into a closed subtree.
   //
-  // The hold check beside it is one thing: an open ask (pendingAskId)
-  // is the operator's own open question, whatever opened it, and the
-  // controller keeps no other hold. A paused node, dropped by an
-  // operator pause or left over from a plan switch, is not a hold and
-  // must not disable this branch for the rest of the session.
+  // The hold check beside it is one thing: an open blocking ask on the
+  // ledger is the operator's own open question the work is stopped on,
+  // whatever opened it, and the controller keeps no other hold. A paused
+  // node, dropped by an operator pause or left over from a plan switch, is
+  // not a hold and must not disable this branch for the rest of the session.
   if (
     !sess.state.goals.some((g) => g.status === "active") &&
-    !sess.state.pendingAskId &&
+    openBlockingAsks(sess.state).length === 0 &&
     isActivationEligible(sess.state, newNode)
   ) {
     newNode.status = "active";
     newNode.updatedAt = now;
     sess.state.activeGoalId = newNode.id;
-    nudgeBefore = { answers: sess.nudgedAnswersWithoutStatus, resetSinceOpened: countResetSinceNudgeOpened, lastNudgeAt: sess.lastNudgeAt };
+    nudgeBefore = { answers: sess.nudgedAnswersWithoutStatus, capRefusedFor: sess.nudgeCapRefusedFor, resetSinceOpened: countResetSinceNudgeOpened, lastNudgeAt: sess.lastNudgeAt };
     activate(dp, newNode.id, `${newNode.id} added with no active leaf`);
     // activate() pushes its one decision line last.
     addDecisions.push(sess.state.decisions[sess.state.decisions.length - 1]);
@@ -1955,6 +2072,7 @@ async function addGoalEntry(
     if (sess.state.activeGoalId === newNode.id) sess.state.activeGoalId = priorActiveGoalId;
     if (nudgeBefore !== null) {
       sess.nudgedAnswersWithoutStatus = nudgeBefore.answers;
+      sess.nudgeCapRefusedFor = nudgeBefore.capRefusedFor;
       countResetSinceNudgeOpened = nudgeBefore.resetSinceOpened;
       sess.lastNudgeAt = nudgeBefore.lastNudgeAt;
     }
@@ -2589,11 +2707,13 @@ async function submitExpectedTurn(dp: any, expectedTurns: ExpectedTurn[], entry:
 }
 
 /**
- * D5: handle an open ask during a tick.
- * Returns "waiting" if the ask is still open (persist and return),
- * "expired" if the wait elapsed (the ask closes, the slot clears, no
- * status moves and nothing is activated; persist, return),
- * "none" if no ask or the ask is not open (caller proceeds normally).
+ * D5: the open blocking asks during a held tick.
+ * Returns "waiting" while every open blocking entry is inside its wait
+ * (persist and return), "expired" where at least one entry's wait elapsed
+ * this tick (its hold lifts, the entry stays open, no status moves and
+ * nothing is activated; persist, return), and "none" where no open blocking
+ * entry stands (the caller proceeds normally). A non-blocking entry is read
+ * by none of this: it is never re-raised and never times out.
  */
 async function tickOpenAsk(
   dp: any,
@@ -2605,10 +2725,9 @@ async function tickOpenAsk(
   // queued as a plugin-opened turn for the stamp guard at turn.start.
   expectedTurns: ExpectedTurn[],
 ): Promise<"waiting" | "expired" | "none"> {
-  if (!state.pendingAskId) return "none";
+  const blocking = openBlockingAsks(state);
+  if (blocking.length === 0) return "none";
   const store = commonsStoreOf(dp);
-  const askRecord = await readAskRecord(store, persona, state.pendingAskId);
-  if (!askRecord || askRecord.status !== "open") return "none";
 
   const now = Date.now();
   const lastAskWaiting = state.decisions.findLast((d) => d.action === "ask_waiting");
@@ -2617,36 +2736,43 @@ async function tickOpenAsk(
       timestamp: now,
       loop: "monitor",
       action: "ask_waiting",
-      detail: `${contextId ? contextId + ": " : ""}ask ${state.pendingAskId} still open`,
+      detail: `${contextId ? contextId + ": " : ""}ask ${blocking.map((entry) => entry.id).join(", ")} still open`,
     });
   }
-  const elapsed = now - askRecord.at;
 
   // D5b (bullet 3): a quiet channel means the operator may never see the
-  // ask_waiting log line. Past a bounded window, re-raise the question into
-  // the thread once (a real turn, not a log line) rather than sit silent.
+  // ask_waiting log line. Past a bounded window, re-raise each question into
+  // the thread once (a real turn, not a log line) rather than sit silent. One
+  // turn carries every entry due this tick, each stamped on the ledger and,
+  // where its record is in the store, on the record too.
   const reraiseMs = typeof cfg.askReraiseWindowMs === "number" ? (cfg.askReraiseWindowMs as number) : 15 * 60_000;
-  if (reraiseMs > 0 && !askRecord.reraisedAt && elapsed >= reraiseMs) {
-    askRecord.reraisedAt = now;
-    await store.set(askKey(persona, state.pendingAskId), askRecord);
-    state.decisions.push({
-      timestamp: now,
-      loop: "monitor",
-      action: "ask_reraised",
-      detail: `${contextId ? contextId + ": " : ""}ask ${state.pendingAskId} re-raised after ${Math.round(elapsed / 1000)}s: ${askRecord.question.slice(0, 100)}`,
-    });
+  const due = reraiseMs > 0 ? blocking.filter((entry) => entry.reraisedAt === null && now - entry.openedAt >= reraiseMs) : [];
+  if (due.length > 0) {
+    for (const entry of due) {
+      entry.reraisedAt = now;
+      const askRecord = await readAskRecord(store, persona, entry.id);
+      if (askRecord) {
+        askRecord.reraisedAt = now;
+        await store.set(askKey(persona, entry.id), askRecord);
+      }
+      state.decisions.push({
+        timestamp: now,
+        loop: "monitor",
+        action: "ask_reraised",
+        detail: `${contextId ? contextId + ": " : ""}ask ${entry.id} re-raised after ${Math.round((now - entry.openedAt) / 1000)}s: ${entry.question.slice(0, 100)}`,
+      });
+    }
     // A refused re-raise is non-fatal: the decision log still shows the
     // re-raise, and its entry has left the list.
-    // The question is store data, so every one of its lines is quoted, the
-    // first included. The label line is the plugin's own and the only
+    // The questions are store data, so every one of their lines is quoted,
+    // the first included. The label line is the plugin's own and the only
     // unquoted one, which is the shape quoteContinuationLines documents for
     // its own first line. The label leads the turn because the Goal gives a
-    // prompt's head to its label, and "below" is true of the question
-    // because it starts on the next line rather than sharing this one. The
-    // previous shape put the instruction in front of the label, which left
-    // the question's first line riding the label line unquoted.
+    // prompt's head to its label, and "below" is true of the questions
+    // because they start on the next line rather than sharing this one.
+    const dueQuestions = due.map((entry) => entry.question).join("\n");
     const reraiseText =
-      quoteContinuationLines(`[STILL WAITING] Send the question below to the operator again through the reply tool, since it is still unanswered.\n${askRecord.question}`);
+      quoteContinuationLines(`[STILL WAITING] Send the question below to the operator again through the reply tool, since it is still unanswered.\n${dueQuestions}`);
     const reraiseEntry: ExpectedTurn = { kind: "plugin", text: reraiseText };
     expectedTurns.push(reraiseEntry);
     await submitExpectedTurn(dp, expectedTurns, reraiseEntry);
@@ -2657,33 +2783,40 @@ async function tickOpenAsk(
   // not established anywhere in this repo, so the code fallback carries its
   // own default (60 minutes, larger than the 15-minute re-raise window),
   // matching how line 123's askReraiseWindowMs fallback is written in code.
+  // A wait of 0 is no timeout.
   const waitMs = typeof cfg.askOperatorWaitMs === "number" ? (cfg.askOperatorWaitMs as number) : 3_600_000;
+  let lifted = false;
   if (waitMs > 0) {
-    if (elapsed >= waitMs) {
+    for (const entry of blocking) {
+      const elapsed = now - entry.openedAt;
+      if (elapsed < waitMs) continue;
+      // The timeout lifts the hold and nothing else: the entry stays open on
+      // the ledger and in the commons, since the question is still the
+      // operator's to answer, and the work proceeds on its recommendation.
+      // The asked entry keeps its status and no other entry is activated, so
+      // the controller's nudges resume on the entry that asked. The decision
+      // carries the id as a field, which is how the next nudge on the entry
+      // finds the question it names as timed out, and lastAskClosedAt takes
+      // this clock so the re-ask guard reads the lift as it reads a close.
       state.decisions.push({
         timestamp: now,
         loop: "monitor",
         action: "ask_timeout",
-        detail: `${contextId ? contextId + ": " : ""}ask ${state.pendingAskId} expired after ${Math.round(elapsed / 1000)}s`,
+        detail: `${contextId ? contextId + ": " : ""}ask ${entry.id} timed out after ${Math.round(elapsed / 1000)}s, work proceeds on its recommendation`,
+        askId: entry.id,
       });
-      askRecord.status = "expired";
-      await store.set(askKey(persona, state.pendingAskId), askRecord);
-      // The expiry lifts the hold and nothing else: the asked entry keeps
-      // its status and no other entry is activated, so the controller's
-      // nudges resume on the entry that asked rather than the slot moving
-      // to the next pending one with nobody having decided that. The
-      // ask_timeout decision above and lastAskClosedAt share this clock,
-      // which is how the next nudge on the entry finds the question it
-      // names as expired.
-      const askedNode = state.goals.find((n) => n.id === askRecord.nodeId);
+      liftAsk(state, entry.id);
+      const askedNode = state.goals.find((n) => n.id === entry.nodeId);
       if (askedNode) {
-        askedNode.lastAskQuestion = askRecord.question;
+        askedNode.lastAskQuestion = entry.question;
         askedNode.lastAskClosedAt = now;
       }
-      state.pendingAskId = undefined;
-      await persist(dp);
-      return "expired";
+      lifted = true;
     }
+  }
+  if (lifted) {
+    await persist(dp);
+    return "expired";
   }
   await persist(dp);
   return "waiting";
@@ -2708,22 +2841,25 @@ function shouldSuppressReask(
 }
 
 /**
- * The question of the last ask on `node` where that ask timed out and no
- * nudge on the entry has gone out since, or null. Read from state the ask
- * close already writes: the node's lastAskQuestion and lastAskClosedAt, and
- * the ask_timeout decision tickOpenAsk logs at the same clock as the close,
- * which is what tells a timeout from an answer. A nudge_sent decision on the
- * entry after that clock means a nudge already named it. The decision ring
- * is capped, so a timeout pushed past DECISIONS_MAX entries before the next
- * nudge is not named, which costs one sentence and nothing else.
+ * The questions of the open asks on `node` whose hold timed out and that no
+ * nudge on the entry has named since, joined one per line, or null where
+ * there is none. An entry's timeout is the ask_timeout decision carrying its
+ * id as askId, which tickOpenAsk logs as it clears the entry's blocking; a
+ * nudge_sent decision on the entry after that clock means a nudge already
+ * named it. The decision ring is capped, so a timeout pushed past
+ * DECISIONS_MAX entries before the next nudge is not named, which costs one
+ * sentence and nothing else.
  */
 function unnamedExpiredAskQuestion(state: AgentState, node: GoalNode): string | null {
-  if (typeof node.lastAskQuestion !== "string" || typeof node.lastAskClosedAt !== "number") return null;
-  const closedAt = node.lastAskClosedAt;
-  const timedOut = state.decisions.some((d) => d.action === "ask_timeout" && d.timestamp === closedAt);
-  if (!timedOut) return null;
-  const named = state.decisions.some((d) => d.action === "nudge_sent" && d.timestamp > closedAt && d.detail.startsWith(`${node.id}: `));
-  return named ? null : node.lastAskQuestion;
+  const unnamed: string[] = [];
+  for (const entry of openAskEntries(state)) {
+    if (entry.nodeId !== node.id || entry.blocking) continue;
+    const timeout = state.decisions.find((d) => d.action === "ask_timeout" && d.askId === entry.id);
+    if (!timeout) continue;
+    const named = state.decisions.some((d) => d.action === "nudge_sent" && d.timestamp > timeout.timestamp && d.detail.startsWith(`${node.id}: `));
+    if (!named) unnamed.push(entry.question);
+  }
+  return unnamed.length > 0 ? unnamed.join("\n") : null;
 }
 
 // Section 3 (boundary-compaction): the plan document a nudge or the
@@ -2808,6 +2944,10 @@ const sess: {
   // one count per session. turn.complete moves it; reaching
   // MAX_CONSECUTIVE_NUDGES opens the nudge cap's ask.
   nudgedAnswersWithoutStatus: number;
+  // The entry the nudge cap's refused ask was logged for, null where none
+  // is. While it names the entry and the count stays at the cap, the cap
+  // logs nothing more on later ticks. Cleared wherever the count resets.
+  nudgeCapRefusedFor: string | null;
   options: { healthTimeoutMs?: number; gitProbeMs?: number };
   controllerTickCount: number; // D4: in-session tick counter for backoff and cost_summary
   staleAfterMs: number; // F9a: single-source the staleness threshold
@@ -3013,6 +3153,7 @@ const sess: {
   yieldLogPath: ".agentic-yields.log",
   lastNudgeAt: 0,
   nudgedAnswersWithoutStatus: 0,
+  nudgeCapRefusedFor: null,
   options: {},
   controllerTickCount: 0,
   staleAfterMs: 90_000,
@@ -6456,6 +6597,11 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   // in every write it made.
   reapTurnRecords(sess.state, Date.now());
 
+  // The ask ledger's bounds run here too, at the write: a closed entry past
+  // its keep drops, and the list is cut to its cap, oldest closed first. Open
+  // entries never drop at a write; the open cap is openAsk's refusal.
+  pruneAsks(sess.state, Date.now());
+
   // Item 5 (Bounded store): cap the decision log and memory at push time,
   // not only when the file happens to be parsed at a session load - a
   // long-lived child never reloads, which is why the running worker's file
@@ -6627,6 +6773,7 @@ const dropDecision = (entry: AgentState["decisions"][number]): void => {
 // "activated" entry that says "No node to activate".
 export const activate = (dp: any, nextId: string | null, reason: string): void => {
   sess.nudgedAnswersWithoutStatus = 0;
+  sess.nudgeCapRefusedFor = null;
   countResetSinceNudgeOpened = true;
   sess.lastNudgeAt = 0;
   if (nextId) {
@@ -6680,35 +6827,41 @@ const completeRoot = async (dp: any, rootId: string, detail: string): Promise<vo
   });
   try { await dp.audio.speak("Goal complete"); } catch { /* no audio */ }
   sess.nudgedAnswersWithoutStatus = 0;
+  sess.nudgeCapRefusedFor = null;
   sess.lastNudgeAt = 0;
   try { dp.ui.status(""); } catch { /* non-fatal */ }
 };
 
-// Closes the operator ask pendingAskId names when that ask is open on
-// `nodeId`: the record's status becomes "resumed" and one ask_answered
-// decision names the tool that closed it. Returns whether it closed the ask.
-// pendingAskId itself is the caller's to clear, since goal_resume clears it
-// whatever the record says and goal_done clears it only when this closed it.
-const closeAskOnNode = async (dp: any, nodeId: string, closedBy: string): Promise<boolean> => {
-  const askId = sess.state.pendingAskId;
-  if (!askId) return false;
-  const askRecord = await readAskRecord(commonsStoreOf(dp), sess.persona, askId);
-  if (!askRecord || askRecord.status !== "open" || askRecord.nodeId !== nodeId) return false;
-  askRecord.status = "resumed";
-  await (commonsStoreOf(dp)).set(askKey(sess.persona, askId), askRecord);
-  sess.state.decisions.push({
-    timestamp: Date.now(),
-    loop: "monitor",
-    action: "ask_answered",
-    detail: `ask ${askId} closed by ${closedBy} (status: resumed)`,
-  });
-  return true;
+// Closes every open ledger entry, blocking or not, on each node `nodeIds`
+// names, as stood: the node is complete, so the choice each question stood
+// on held and the question no longer matters. Each entry's commons record
+// takes stood where it is still open, and a record that is missing or
+// already closed is left as it is. One ask_answered decision per close names
+// the id and `closedBy`, the completion that ran it. An entry on any other
+// node stays open and keeps whatever hold it has.
+const closeAsksOnCompletedNodes = async (dp: any, nodeIds: readonly string[], closedBy: string, now: number): Promise<void> => {
+  const store = commonsStoreOf(dp);
+  for (const entry of openAskEntries(sess.state)) {
+    if (!nodeIds.includes(entry.nodeId)) continue;
+    const askRecord = await readAskRecord(store, sess.persona, entry.id);
+    if (askRecord && askRecord.status === "open") {
+      askRecord.status = "stood";
+      await store.set(askKey(sess.persona, entry.id), askRecord);
+    }
+    closeAsk(sess.state, entry.id, "stood", "goal_done", "entry completed", now);
+    sess.state.decisions.push({
+      timestamp: now,
+      loop: "monitor",
+      action: "ask_answered",
+      detail: `ask ${entry.id} closed by ${closedBy} (status: stood)`,
+    });
+  }
 };
 
 // The entry an answered ask named, at the ask's close. An ask leaves its
 // entry active, so the close moves no status, demotes no other entry and
-// points activeGoalId nowhere: the open ask was the hold, and clearing the
-// slot is the lift. What it does clear is a blockedReason left on an active
+// points activeGoalId nowhere: the open blocking ask was the hold, and its
+// close or lift ends it. What it does clear is a blockedReason left on an active
 // entry, which only a store written by a controller that paused on an ask
 // carries, since an active entry has no reason to be blocked. A paused
 // entry keeps its reason, which the operator or a plan switch wrote and
@@ -7751,6 +7904,7 @@ export const register: Register = async (on, options) => {
     // rebuilds sess and the register that holds the nudged reading. The count
     // is reset here so this start opens at zero with the state it loads.
     sess.nudgedAnswersWithoutStatus = 0;
+    sess.nudgeCapRefusedFor = null;
     countResetSinceNudgeOpened = false;
     try {
       sess.mySessionId = String(await $.session.id());
@@ -7961,6 +8115,33 @@ export const register: Register = async (on, options) => {
             description: "nodeId names the entry to complete, as goal_status lists it.",
           },
         },
+      },
+    }));
+
+    await registerTool("ask_close", () => $.tool.register({
+      name: "ask_close",
+      description:
+        "Close one of your open asks to the operator by its id, as the Open asks: part of the [GOAL TREE] block lists it. " +
+        "Close an ask once the operator's word answers it, once the choice you proceeded on held and the question no longer matters, or once you no longer need the answer. " +
+        "An operator's reply closes no ask by itself: it lifts the hold on blocking asks, and the ask it answered is yours to close here. " +
+        "The result lists the ids still open. Owner only. An id that is not open is refused.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "id is the ask's id, ask-<nodeId>-<ms>.",
+          },
+          outcome: {
+            type: "string",
+            description: 'outcome is "answered" (the operator answered), "stood" (the choice you proceeded on held) or "withdrawn" (the question no longer needs an answer).',
+          },
+          note: {
+            type: "string",
+            description: "note is optional: the answer or why the ask closed, kept up to 300 characters.",
+          },
+        },
+        required: ["id", "outcome"],
       },
     }));
 
@@ -8684,19 +8865,43 @@ export const register: Register = async (on, options) => {
         const resource = `persona:${sess.persona}`;
         await claimResource(commonsStoreOf($), resource, sess.mySessionId, startAt, commonsMeta());
       } catch { /* non-fatal */ }
-      // BD3 part 3: expire open asks from prior owners. The owner that opened
-      // them is gone or restarted; its pendingAskId is gone with it.
+      // Reconcile the commons ask records with the ledger. The ledger is the
+      // owner's truth and came through the store, so an open entry's record
+      // stays open and an open ask survives the relaunch. A record whose entry
+      // is closed takes the entry's status. A record no entry names is a prior
+      // owner's, expired under ask_expired as before the ledger. Then the
+      // entries the version 8 migration seeded, known by their question: one
+      // whose record is open takes the record's question, and one whose
+      // record is not open closes as expired. That record may still exist,
+      // answered, resumed or expired while the owner was down, so the ask it
+      // stood for is settled and the ledger closes its entry to match.
       try {
-        const expired = await expireOpenAsks(commonsStoreOf($), sess.persona);
-        for (const askId of expired) {
+        const reconcileAt = Date.now();
+        const ledgerStatusOf = (askId: string) => sess.state.asks.find((entry) => entry.id === askId)?.status ?? null;
+        const reconciled = await reconcileOpenAsks(commonsStoreOf($), sess.persona, ledgerStatusOf);
+        for (const askId of reconciled.expired) {
           sess.state.decisions.push({
-            timestamp: Date.now(),
+            timestamp: reconcileAt,
             loop: "monitor",
             action: "ask_expired",
             detail: `${sess.persona}: ${askId} (owner restart)`,
           });
         }
-        if (expired.length > 0) {
+        let changed = reconciled.expired.length > 0;
+        for (const entry of sess.state.asks) {
+          if (entry.status !== "open" || entry.question !== ASK_SEED_QUESTION) continue;
+          const record = reconciled.open.find((rec) => rec.id === entry.id);
+          if (record) {
+            if (typeof record.question === "string") {
+              entry.question = record.question;
+              changed = true;
+            }
+          } else {
+            closeAsk(sess.state, entry.id, "expired", "owner_start", null, reconcileAt);
+            changed = true;
+          }
+        }
+        if (changed) {
           await persist($);
         }
       } catch { /* non-fatal */ }
@@ -8954,6 +9159,7 @@ export const register: Register = async (on, options) => {
             // The heartbeat runs with a turn open, so a nudged turn begun
             // before the yield is not added to this tree's count either.
             sess.nudgedAnswersWithoutStatus = 0;
+            sess.nudgeCapRefusedFor = null;
             countResetSinceNudgeOpened = true;
             // The store's holder, not the sidecar's, as at the session.start claim.
             recordPreviousSession(sess.state, sess.state.activeSessionId, sess.mySessionId);
@@ -9037,113 +9243,117 @@ export const register: Register = async (on, options) => {
         const allRecords = await listInboxRecords(store, persona);
         const pending = allRecords.filter((rec) => rec.status === "pending");
 
-        // D5: check for an answering record that closes the open ask (before general drain)
-        if (sess.state.pendingAskId && pending.length > 0) {
-          const askId = sess.state.pendingAskId;
-          const askRecord = await readAskRecord(store, persona, askId);
-          if (askRecord && askRecord.status === "open") {
-            const answer = pending.find((rec) => rec.answers === askId);
-            if (answer) {
-              // One claims read gates the answer and labels it. A dead
-              // writer's answer is logged here and skipped by the general
-              // drain below; an answer whose writer persona cannot sit
-              // inside the bracket, or whose id or text fails the record
-              // rule, is marked skipped here, once, so the drain never
-              // lists it.
-              const answerGround = deliveryGroundIn(await readAllClaims(store, sess.staleAfterMs), persona, answer.from, coordinatorPersona, deliveryArchitectLine(architectPersona, answer));
-              const answerProblem = deliveryRecordProblem(answer);
-              if ("refused" in answerGround && answerGround.refused === "no_claim") {
-                sess.state.decisions.push({
+        // D5: an answering record closes the open ledger entry it names,
+        // whichever open entry that is, before the general drain. A record
+        // naming a closed or unknown id is no answer here and is left to the
+        // drain below, as any other record is.
+        if (pending.length > 0) {
+          const openEntries = openAskEntries(sess.state);
+          const answer = pending.find((rec) => typeof rec.answers === "string" && openEntries.some((entry) => entry.id === rec.answers));
+          if (answer) {
+            const askId = answer.answers as string;
+            const askEntry = openEntries.find((entry) => entry.id === askId) as AskEntry;
+            const askRecord = await readAskRecord(store, persona, askId);
+            // One claims read gates the answer and labels it. A dead
+            // writer's answer is logged here and skipped by the general
+            // drain below; an answer whose writer persona cannot sit
+            // inside the bracket, or whose id or text fails the record
+            // rule, is marked skipped here, once, so the drain never
+            // lists it.
+            const answerGround = deliveryGroundIn(await readAllClaims(store, sess.staleAfterMs), persona, answer.from, coordinatorPersona, deliveryArchitectLine(architectPersona, answer));
+            const answerProblem = deliveryRecordProblem(answer);
+            if ("refused" in answerGround && answerGround.refused === "no_claim") {
+              sess.state.decisions.push({
+                timestamp: Date.now(),
+                loop: "monitor",
+                action: "operator_skipped_no_claim",
+                detail: `answer ${answer.id} from ${answer.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own${architectLegRefusal})`,
+              });
+            } else if ("refused" in answerGround || answerProblem !== null) {
+              answer.status = "skipped";
+              await store.set(answer.key, { ...answer });
+              sess.state.decisions.push("refused" in answerGround && answerGround.refused === "bad_name"
+                ? {
                   timestamp: Date.now(),
                   loop: "monitor",
-                  action: "operator_skipped_no_claim",
-                  detail: `answer ${answer.id} from ${answer.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own${architectLegRefusal})`,
+                  action: "operator_skipped_bad_name",
+                  detail: `answer at ${answer.key} would be labelled with persona ${JSON.stringify(answerGround.persona)}, which ${answerGround.problem}; marked skipped`,
+                }
+                : {
+                  timestamp: Date.now(),
+                  loop: "monitor",
+                  action: "operator_skipped_bad_record",
+                  detail: `answer at ${answer.key}: ${answerProblem}; marked skipped`,
                 });
-              } else if ("refused" in answerGround || answerProblem !== null) {
-                answer.status = "skipped";
-                await store.set(answer.key, { ...answer });
-                sess.state.decisions.push("refused" in answerGround && answerGround.refused === "bad_name"
-                  ? {
-                    timestamp: Date.now(),
-                    loop: "monitor",
-                    action: "operator_skipped_bad_name",
-                    detail: `answer at ${answer.key} would be labelled with persona ${JSON.stringify(answerGround.persona)}, which ${answerGround.problem}; marked skipped`,
-                  }
-                  : {
-                    timestamp: Date.now(),
-                    loop: "monitor",
-                    action: "operator_skipped_bad_record",
-                    detail: `answer at ${answer.key}: ${answerProblem}; marked skipped`,
-                  });
-              } else {
-                const answerLabel = answerGround.ground;
-                // The goal block, the task list, the standing text and the
-                // memory block ride ahead of the answer, the memory read
-                // judging against the record's own text. They are built
-                // before anything below is written, since the memory read
-                // runs for up to MEMQ_READ_TIMEOUT_MS and a turn can open
-                // meanwhile. Null means one did: the ask stays open and the
-                // answer pending, nothing is written, and the next quiet
-                // tick delivers it with the blocks as they stand then. The
-                // memory block's shown records and its memory_inject line
-                // are written before the submit, so a refused submit keeps
-                // them, as on the typed path.
-                const answerFollowUps: string[] = [];
-                const answerBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => !turnIsOpen() }, answer.text, contextSourcesOf($, undefined, answerFollowUps));
-                if (answerBlocks === null) return false;
-                // Close the ask
+            } else {
+              const answerLabel = answerGround.ground;
+              // The goal block, the task list, the standing text and the
+              // memory block ride ahead of the answer, the memory read
+              // judging against the record's own text. They are built
+              // before anything below is written, since the memory read
+              // runs for up to MEMQ_READ_TIMEOUT_MS and a turn can open
+              // meanwhile. Null means one did: the ask stays open and the
+              // answer pending, nothing is written, and the next quiet
+              // tick delivers it with the blocks as they stand then. The
+              // memory block's shown records and its memory_inject line
+              // are written before the submit, so a refused submit keeps
+              // them, as on the typed path.
+              const answerFollowUps: string[] = [];
+              const answerBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => !turnIsOpen() }, answer.text, contextSourcesOf($, undefined, answerFollowUps));
+              if (answerBlocks === null) return false;
+              // Close the ask on the ledger and, where its record is still
+              // open, on the record in the same step. The ledger is the
+              // owner's truth, so a record that is missing or already
+              // closed does not keep the entry open.
+              if (askRecord && askRecord.status === "open") {
                 askRecord.status = "answered";
                 await store.set(askKey(persona, askId), askRecord);
-                // D5b: remember the closed question so the classifier does
-                // not reopen it on this node right away (bullet 2).
-                const askedNodeInbox = sess.state.goals.find((n) => n.id === askRecord.nodeId);
-                if (askedNodeInbox) {
-                  askedNodeInbox.lastAskQuestion = askRecord.question;
-                  askedNodeInbox.lastAskClosedAt = Date.now();
-                }
-                // Mark the answer as delivered
-                answer.status = "delivered";
-                answer.deliveredAt = Date.now();
-                const existing = await store.get(answer.key);
-                if (existing) {
-                  const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
-                  parsed.status = "delivered";
-                  parsed.deliveredAt = answer.deliveredAt;
-                  await store.set(answer.key, parsed);
-                }
-                // Clear the pendingAskId
-                sess.state.pendingAskId = undefined;
-                // Deliver the answer as a labelled prompt.
-                // The entry is the one the ask record names, or the active
-                // entry where the record names none. The close moves no
-                // status; see reactivateAskedEntry.
-                const askRecord2 = askRecord; // from outer scope
-                const targetNode = askRecord2?.nodeId
-                  ? sess.state.goals.find((g) => g.id === askRecord2.nodeId)
-                  : null;
-                const activeNode = targetNode || (sess.state.activeGoalId
-                  ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-                  : null);
-                if (activeNode) reactivateAskedEntry(activeNode);
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "monitor",
-                  action: "ask_answered",
-                  detail: `ask ${askId} closed by record ${answer.id}`,
-                });
-                const answerText = deliveryText(answerLabel, answer.id, answer.text, { answerTo: askRecord.question });
-                const framedAnswerText = deliveryWithContext(answerBlocks, answerText);
-                const expectedAnswerTurn = expectTurn({ kind: "delivery", recordId: answer.id, ground: answerLabel, seatLead: opensWithSeatLead(answer.text), answersAsk: true, text: framedAnswerText });
-                const answerOutcome = await submitExpectedTurn($, expectedTurns, expectedAnswerTurn);
-                if (!answerOutcome.ok) {
-                  // A refused submit opens no turn, so the follow-up entries
-                  // its blocks listed list again on the next prompt.
-                  withdrawFollowUpsOffered(answerFollowUps);
-                  recordFailedDelivery(answer, answerOutcome);
-                }
-                await persist($);
-                return true;
               }
+              closeAsk(sess.state, askId, "answered", `record ${answer.id}`, answer.text, Date.now());
+              // D5b: remember the closed question so the classifier does
+              // not reopen it on this node right away (bullet 2).
+              const askedNodeInbox = sess.state.goals.find((n) => n.id === askEntry.nodeId);
+              if (askedNodeInbox) {
+                askedNodeInbox.lastAskQuestion = askEntry.question;
+                askedNodeInbox.lastAskClosedAt = Date.now();
+              }
+              // Mark the answer as delivered
+              answer.status = "delivered";
+              answer.deliveredAt = Date.now();
+              const existing = await store.get(answer.key);
+              if (existing) {
+                const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
+                parsed.status = "delivered";
+                parsed.deliveredAt = answer.deliveredAt;
+                await store.set(answer.key, parsed);
+              }
+              // Deliver the answer as a labelled prompt.
+              // The entry is the one the ledger entry names, or the active
+              // entry where it is gone from the tree. The close moves no
+              // status; see reactivateAskedEntry.
+              const targetNode = sess.state.goals.find((g) => g.id === askEntry.nodeId) ?? null;
+              const activeNode = targetNode || (sess.state.activeGoalId
+                ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
+                : null);
+              if (activeNode) reactivateAskedEntry(activeNode);
+              sess.state.decisions.push({
+                timestamp: Date.now(),
+                loop: "monitor",
+                action: "ask_answered",
+                detail: `ask ${askId} closed by record ${answer.id}`,
+              });
+              const answerText = deliveryText(answerLabel, answer.id, answer.text, { answerTo: askEntry.question });
+              const framedAnswerText = deliveryWithContext(answerBlocks, answerText);
+              const expectedAnswerTurn = expectTurn({ kind: "delivery", recordId: answer.id, ground: answerLabel, seatLead: opensWithSeatLead(answer.text), answersAsk: true, text: framedAnswerText });
+              const answerOutcome = await submitExpectedTurn($, expectedTurns, expectedAnswerTurn);
+              if (!answerOutcome.ok) {
+                // A refused submit opens no turn, so the follow-up entries
+                // its blocks listed list again on the next prompt.
+                withdrawFollowUpsOffered(answerFollowUps);
+                recordFailedDelivery(answer, answerOutcome);
+              }
+              await persist($);
+              return true;
             }
           }
         }
@@ -10136,16 +10346,17 @@ export const register: Register = async (on, options) => {
           });
           sess.state.updatedAt = streakTs;
           await persist($);
-        } else if (sess.state.pendingAskId) {
-          // The slot holds one ask, and the operator already has a question
-          // open. A second ask would strand the first record open, and
+        } else if (ownAskStands(sess.state, "error-streak", activeForStreak.id)) {
+          // The streak's own question still holds this leaf, so the
+          // operator already has it. A second one would add nothing, and
           // pausing the leaf with no ask of its own would leave nothing to
           // resume it, so the streak is logged and the leaf keeps running.
+          const openStreakAsk = openAskBy(sess.state, "error-streak", activeForStreak.id);
           sess.state.decisions.push({
             timestamp: streakTs,
             loop: "monitor",
             action: "error_streak",
-            detail: `${activeForStreak.id}: ${streakHead}; ask ${sess.state.pendingAskId} already open, no second ask`,
+            detail: `${activeForStreak.id}: ${streakHead}; ask ${openStreakAsk?.id} already open, no second ask`,
           });
           sess.state.updatedAt = streakTs;
           await persist($);
@@ -10158,17 +10369,27 @@ export const register: Register = async (on, options) => {
             action: "error_streak",
             detail: `${nodeId}: ${streakReason}`,
           });
-          // D5: write an ask record and set pendingAskId
-          const askId = `ask-${nodeId}-${Date.now()}`;
-          await writeAskRecord(commonsStoreOf($), sess.persona, askId, nodeId, streakReason, sess.mySessionId);
-          sess.state.pendingAskId = askId;
-          sess.state.decisions.push({
-            timestamp: streakTs,
-            loop: "monitor",
-            action: "ask_opened",
-            detail: `${nodeId}: error-streak: ${streakReason} (ask ${askId})`,
-          });
-          try { $.ui.toast(`Agentic: ${streakReason}`); } catch { /* non-fatal */ }
+          // D5: open the blocking entry and its ask record. A streak ask of
+          // this leaf whose hold was lifted is withdrawn first, so the fresh
+          // one replaces it rather than standing beside it.
+          await withdrawLiftedAskBy($, sess.state, sess.persona, "error-streak", nodeId, streakTs);
+          const opened = await openLedgerAsk($, sess.state, sess.persona, sess.mySessionId, nodeId, streakReason, "", "error-streak", true, streakTs);
+          if (typeof opened === "string") {
+            sess.state.decisions.push({
+              timestamp: streakTs,
+              loop: "monitor",
+              action: "ask_cap_refused",
+              detail: `${nodeId}: error-streak ask refused: ${opened === "cap" ? `the open cap of ${ASKS_OPEN_MAX}` : opened}`,
+            });
+          } else {
+            sess.state.decisions.push({
+              timestamp: streakTs,
+              loop: "monitor",
+              action: "ask_opened",
+              detail: `${nodeId}: error-streak: ${streakReason} (ask ${opened.id})`,
+            });
+            try { $.ui.toast(`Agentic: ${streakReason}`); } catch { /* non-fatal */ }
+          }
           // The open ask is the hold: the leaf stays active with no reason
           // written on it, and the idle branch reads the ask through holdOf.
           sess.state.updatedAt = streakTs;
@@ -11194,20 +11415,18 @@ export const register: Register = async (on, options) => {
       }
 
       // The hold: one read of holdOf decides whether this branch nudges. An
-      // open ask, a blocked lead or a waiting lead inside its window holds
-      // the whole branch, no classifier call and no nudge, and nothing is
-      // logged per held tick. An ask hold still runs tickOpenAsk, which
-      // records ask_waiting once a minute, re-raises the question once, and
-      // closes the ask on expiry; an ask the slot names whose record is no
-      // longer open clears the slot here, persisted at once so the cleared
-      // slot reaches disk whatever the lead then says, and the hold is read
-      // again since a lead can still hold once the ask is gone.
+      // open blocking ask, a blocked lead or a waiting lead inside its window
+      // holds the whole branch, no classifier call and no nudge, and nothing
+      // is logged per held tick. An ask hold still runs tickOpenAsk, which
+      // records ask_waiting once a minute, re-raises each question once, and
+      // lifts an entry's hold at its timeout. Both read the same ledger
+      // predicate, so "none" here is a tick on which the hold lifted between
+      // the two reads, and the hold is read again since a lead can still
+      // hold once the ask is gone.
       let hold = holdOf(sess.state, now);
       if (hold === "ask") {
         const askResult = await tickOpenAsk($, sess.state, sess.persona, cfg, g.id, expectedTurns);
         if (askResult !== "none") return;
-        sess.state.pendingAskId = undefined;
-        if (!(await persist($))) return;
         hold = holdOf(sess.state, now);
       }
       if (hold !== null) return;
@@ -11271,17 +11490,26 @@ export const register: Register = async (on, options) => {
       // Fire-and-forget: the timer callback is sync, so we schedule async work.
       Promise.resolve().then(async () => {
         try {
-          // Cap check before spending a classify call.
+          // Cap check before spending a classify call. A cap whose ask was
+          // refused on an earlier tick, with the count still at the cap, the
+          // refusal logged for this entry and the open cap still full, logs
+          // nothing more and sends no nudge. Once an entry closes and the
+          // ledger has room, the cap tries its ask again.
           if (sess.nudgedAnswersWithoutStatus >= MAX_CONSECUTIVE_NUDGES) {
+            if (sess.nudgeCapRefusedFor === g.id && openAskEntries(sess.state).length >= ASKS_OPEN_MAX) return;
             const capTs = Date.now();
             const capReason = `${sess.nudgedAnswersWithoutStatus} nudged answers carried no status line`;
-            sess.state.decisions.push({
-              timestamp: capTs,
-              loop: "monitor",
-              action: "nudge_cap_reached",
-              detail: `${g.id}: ${capReason}`,
-            });
-            try { $.ui.toast(`Agentic: ${capReason}`); } catch { /* non-fatal */ }
+            // A retry after a refusal is the same cap episode, which has
+            // already logged its cap and toasted.
+            if (sess.nudgeCapRefusedFor !== g.id) {
+              sess.state.decisions.push({
+                timestamp: capTs,
+                loop: "monitor",
+                action: "nudge_cap_reached",
+                detail: `${g.id}: ${capReason}`,
+              });
+              try { $.ui.toast(`Agentic: ${capReason}`); } catch { /* non-fatal */ }
+            }
             // The cap holds by opening an ask, the same way the cost cap
             // below does: the entry stays active with no reason written on
             // it, holdOf reads the open ask as the hold, and the ask's
@@ -11299,24 +11527,44 @@ export const register: Register = async (on, options) => {
             // promises. The floor is left alone, since the last nudge's
             // spacing still applies.
             //
-            // The record is written before the slot names it, and the count
-            // is reset only once the write returns: a write that throws
-            // leaves no slot and the count at the cap, so the cap fires
-            // again on a later tick. Defensive guard: holdOf returned null
-            // for this tick to reach here, so the slot is empty; the guard
-            // keeps the one-ask rule legible at the site that opens one.
-            if (!sess.state.pendingAskId) {
-              const askId = `ask-${g.id}-${capTs}`;
+            // The record is written as the entry opens, and the count is
+            // reset only once the write returns: a write that throws undoes
+            // the open and leaves the count at the cap, so the cap fires
+            // again on a later tick. The cap asks once per entry: while its
+            // own question still holds this entry the idle branch returns on
+            // that hold above and never reaches this check, so the cap opens
+            // no second one. An own question whose hold was lifted is
+            // withdrawn and a fresh one opened in its place. A
+            // refused open leaves the count at the cap: no question of the
+            // cap's own stands, so a reset would send the next tick's nudge
+            // as if the cap had asked. The refusal is latched on the entry
+            // instead, so the next ticks neither nudge nor log it again.
+            let capAskStands = ownAskStands(sess.state, "nudge-cap", g.id);
+            if (!capAskStands) {
               const askQuestion = nudgeCapAskText(sess.persona, g.title, sess.nudgedAnswersWithoutStatus);
-              await writeAskRecord(commonsStoreOf($), sess.persona, askId, g.id, askQuestion, sess.mySessionId);
-              sess.state.pendingAskId = askId;
+              await withdrawLiftedAskBy($, sess.state, sess.persona, "nudge-cap", g.id, capTs);
+              const opened = await openLedgerAsk($, sess.state, sess.persona, sess.mySessionId, g.id, askQuestion, "", "nudge-cap", true, capTs);
+              if (typeof opened === "string") {
+                sess.nudgeCapRefusedFor = g.id;
+                sess.state.decisions.push({
+                  timestamp: capTs,
+                  loop: "monitor",
+                  action: "ask_cap_refused",
+                  detail: `${g.id}: nudge-cap ask refused: ${opened === "cap" ? `the open cap of ${ASKS_OPEN_MAX}` : opened}`,
+                });
+              } else {
+                capAskStands = true;
+                sess.state.decisions.push({
+                  timestamp: capTs,
+                  loop: "monitor",
+                  action: "ask_opened",
+                  detail: `${g.id}: nudge-cap: ${capReason} (ask ${opened.id})`,
+                });
+              }
+            }
+            if (capAskStands) {
               sess.nudgedAnswersWithoutStatus = 0;
-              sess.state.decisions.push({
-                timestamp: capTs,
-                loop: "monitor",
-                action: "ask_opened",
-                detail: `${g.id}: nudge-cap: ${capReason} (ask ${askId})`,
-              });
+              sess.nudgeCapRefusedFor = null;
             }
             sess.state.updatedAt = capTs;
             await persist($);
@@ -11353,9 +11601,9 @@ export const register: Register = async (on, options) => {
           // written on it and the open ask is the hold. Once that ask
           // closes inside the window the refusal alone holds, no nudge and
           // no second ask, and a new window that reaches the cap latches
-          // afresh and opens one again. The slot guard inside is defensive:
-          // holdOf returned null for this tick to reach here, so no ask is
-          // open, and the guard keeps the one-ask rule legible at the site.
+          // afresh and opens one again. The cap asks once per entry: while
+          // its own question still holds this entry it opens no second, and
+          // an own question whose hold was lifted is withdrawn and replaced.
           const nudgeCapped = costEnabled && costMaxNudgesPerHour > 0 &&
             effectiveWindowCount(sess.state.monitor.cost.nudgeWindow, now) >= costMaxNudgesPerHour;
           if (nudgeCapped) {
@@ -11367,18 +11615,26 @@ export const register: Register = async (on, options) => {
                 detail: `${g.id}: nudge cap reached (${effectiveWindowCount(sess.state.monitor.cost.nudgeWindow, now)}/${costMaxNudgesPerHour} per hour), refusing nudge`,
               });
               sess.state.monitor.cost.capNoticeWindowStart = sess.state.monitor.cost.nudgeWindow.start;
-              if (!sess.state.pendingAskId) {
-                const askId = `ask-${g.id}-${tickTs}`;
+              if (!ownAskStands(sess.state, "cost-cap", g.id)) {
                 const capReason = `cost-cap: nudge budget spent (${effectiveWindowCount(sess.state.monitor.cost.nudgeWindow, now)}/${costMaxNudgesPerHour} per hour)`;
-                await writeAskRecord(commonsStoreOf($), sess.persona, askId, g.id, capReason, sess.mySessionId);
-                sess.state.pendingAskId = askId;
-                sess.state.decisions.push({
-                  timestamp: tickTs,
-                  loop: "monitor",
-                  action: "ask_opened",
-                  detail: `${g.id}: ${capReason} (ask ${askId})`,
-                });
-                try { $.ui.toast(`Agentic: ${capReason}`); } catch { /* non-fatal */ }
+                await withdrawLiftedAskBy($, sess.state, sess.persona, "cost-cap", g.id, tickTs);
+                const opened = await openLedgerAsk($, sess.state, sess.persona, sess.mySessionId, g.id, capReason, "", "cost-cap", true, tickTs);
+                if (typeof opened === "string") {
+                  sess.state.decisions.push({
+                    timestamp: tickTs,
+                    loop: "monitor",
+                    action: "ask_cap_refused",
+                    detail: `${g.id}: cost-cap ask refused: ${opened === "cap" ? `the open cap of ${ASKS_OPEN_MAX}` : opened}`,
+                  });
+                } else {
+                  sess.state.decisions.push({
+                    timestamp: tickTs,
+                    loop: "monitor",
+                    action: "ask_opened",
+                    detail: `${g.id}: ${capReason} (ask ${opened.id})`,
+                  });
+                  try { $.ui.toast(`Agentic: ${capReason}`); } catch { /* non-fatal */ }
+                }
               }
             }
             sess.state.updatedAt = tickTs;
@@ -11671,6 +11927,7 @@ export const register: Register = async (on, options) => {
                 target.updatedAt = Date.now();
                 sess.state.activeGoalId = target.id;
                 sess.nudgedAnswersWithoutStatus = 0;
+                sess.nudgeCapRefusedFor = null;
                 sess.lastNudgeAt = 0;
                 sess.state.decisions.push({
                   timestamp: Date.now(),
@@ -11804,16 +12061,17 @@ export const register: Register = async (on, options) => {
               const architectLine = architectPersona !== "" && sess.persona !== "default" && sess.persona !== architectPersona && sess.persona !== coordinatorPersona
                 ? `A design question the plan doesn't cover (a spec gap, an approach fork, a plan review or a consult) can go to the architect instead: send it with agentic_say, persona set to ${architectPersona}.\n`
                 : "";
-              // An ask on this entry that timed out with no nudge since is
-              // named once, in one sentence, so the worker knows its
-              // question went unanswered rather than reading the silence as
-              // an answer. The question is store data on a line-structured
-              // prompt, so its continuation lines are quoted the way the
-              // re-raise quotes them; the sentence's own first line stays
-              // the plugin's.
+              // An ask on this entry whose hold timed out with no nudge
+              // since is named once, in one sentence, so the worker knows
+              // its question went unanswered rather than reading the silence
+              // as an answer, and that the work goes on under the
+              // recommendation the ask stated. The question is store data on
+              // a line-structured prompt, so its continuation lines are
+              // quoted the way the re-raise quotes them; the sentence's own
+              // first line stays the plugin's.
               const expiredAskQuestion = unnamedExpiredAskQuestion(sess.state, g);
               const expiredAskLine = expiredAskQuestion !== null
-                ? `An ask on this entry, "${quoteContinuationLines(expiredAskQuestion)}", expired unanswered after its wait, so nudging resumes.\n`
+                ? `An ask on this entry, "${quoteContinuationLines(expiredAskQuestion)}", timed out unanswered after its wait; it stays open, and the work proceeds on its recommendation.\n`
                 : "";
               const nudgeText = idleGapConverted
                 ? `[GOAL] The active goal is: ${g.objective}\n` +
@@ -11822,6 +12080,7 @@ export const register: Register = async (on, options) => {
                   `The controller read this as an idle gap, not a real fork: no concrete blocking question. ` +
                   `Re-read the plan doc and DISCUSSION.md before continuing - the next concrete step should already be there.\n` +
                   `If you genuinely hold a fork the plan doesn't resolve, state it in this turn as a line: ASK: <question>? Recommend: <choice>\n` +
+                  `An ask does not stop the work: proceed on your recommendation while it stands. Open the closing text with BLOCKED: only where the next step is irreversible without the answer, or where another plan waits on it.\n` +
                   architectLine +
                   `Otherwise take the next concrete step and mark it finished with goal_done.\n` +
                   NUDGE_STATUS_LINE_TEXT +
@@ -13016,9 +13275,23 @@ export const register: Register = async (on, options) => {
       // path now that it is the only path that opens an ask from the idle
       // tick's own read of the goal). A subagent's completion opens none: its
       // answer is the subagent's report, not a line the worker wrote.
-      if (!skipped && sess.isOwner && !completesSubagentLoop && !sess.state.pendingAskId) {
-        const askMarkerMatch = e.answer.match(ASK_MARKER_LINE);
-        if (askMarkerMatch) {
+      // The closing text's status line, read once here: the ask lines below,
+      // the lead, the WORKING: clear and the nudge count all take it from
+      // this one reading.
+      const statusLine = readStatusLine(e.answer);
+      // Whether the turn ended on a BLOCKED: or WAITING: lead, the reading the
+      // record close and the compaction boundary below both take: on a lead the
+      // open record is in flight and the turn end is not durable.
+      const endedOnLead = statusLine !== null && statusLine.state !== "working";
+      // Every ASK: line of the closing text opens its own ledger entry, up
+      // to ASK_TURN_MAX in one turn, with the two guards run per line. The
+      // entries block where the same text's first line reads BLOCKED:, and
+      // are open questions the work proceeds past under any other lead or
+      // none. A line past the turn cap, or one the ledger's open cap
+      // refuses, is counted into one ask_cap_refused decision for the turn.
+      if (!skipped && sess.isOwner && !completesSubagentLoop) {
+        const askMarkerMatches = e.answer.split(ASK_MARKER_LINE_BREAK).map((line) => line.match(ASK_MARKER_LINE)).filter((m) => m !== null);
+        if (askMarkerMatches.length > 0) {
           // The outcome joiner for the ask marker. The first marker matched
           // after a controller call writes one outcome against that call and
           // clears this half of the hold, so a second marker writes none. The
@@ -13030,18 +13303,24 @@ export const register: Register = async (on, options) => {
             sess.jevAskMarkerOutcomeStampId = null;
             shadowOutcome(hostOf($), askMarkerCallStampId, "ask_marker", ASK_MARKER_VALUE);
           }
-          const question = askMarkerMatch[1].trim();
-          if (/<[^<>]+>/.test(question)) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "ask_marker_placeholder_refused",
-              detail: `worker's ASK line still carries a template placeholder, refused: ${question.slice(0, 100)}`,
-            });
-          } else {
-            const nodeId = turnLeafIdAtDelete || sess.state.activeGoalId || "unknown";
-            const askedNode = sess.state.goals.find((node) => node.id === nodeId);
-            const askReaskSuppressMs = typeof cfg.askReaskSuppressMs === "number" ? (cfg.askReaskSuppressMs as number) : 10 * 60_000;
+          const nodeId = turnLeafIdAtDelete || sess.state.activeGoalId || "unknown";
+          const askedNode = sess.state.goals.find((node) => node.id === nodeId);
+          const askReaskSuppressMs = typeof cfg.askReaskSuppressMs === "number" ? (cfg.askReaskSuppressMs as number) : 10 * 60_000;
+          const askBlocking = statusLine !== null && statusLine.state === "blocked";
+          let openedThisTurn = 0;
+          let refusedByTurnCap = 0;
+          let refusedByOpenCap = 0;
+          for (const askMarkerMatch of askMarkerMatches) {
+            const question = askMarkerMatch[1].trim();
+            if (/<[^<>]+>/.test(question)) {
+              sess.state.decisions.push({
+                timestamp: Date.now(),
+                loop: "monitor",
+                action: "ask_marker_placeholder_refused",
+                detail: `worker's ASK line still carries a template placeholder, refused: ${question.slice(0, 100)}`,
+              });
+              continue;
+            }
             if (shouldSuppressReask(askedNode, question, Date.now(), askReaskSuppressMs)) {
               sess.state.decisions.push({
                 timestamp: Date.now(),
@@ -13049,21 +13328,53 @@ export const register: Register = async (on, options) => {
                 action: "ask_reask_suppressed",
                 detail: `${nodeId}: suppressed identical question closed ${Math.round((Date.now() - (askedNode?.lastAskClosedAt || Date.now())) / 1000)}s ago: ${question.slice(0, 80)}`,
               });
-            } else {
-              const askId = `ask-${nodeId}-${Date.now()}`;
-              await writeAskRecord(commonsStoreOf($), sess.persona, askId, nodeId, question, sess.mySessionId);
-              sess.state.pendingAskId = askId;
+              continue;
+            }
+            // A question already open on this node, from an earlier turn or
+            // an earlier line of this one, is not opened again: the operator
+            // holds it once, and a restatement adds nothing to the ledger.
+            if (openAskEntries(sess.state).some((entry) => entry.nodeId === nodeId && entry.question === question)) {
               sess.state.decisions.push({
                 timestamp: Date.now(),
                 loop: "monitor",
-                action: "ask_opened",
-                detail: `${nodeId}: worker-stated fork: ${question} (ask ${askId})`,
+                action: "ask_reask_suppressed",
+                detail: `${nodeId}: the same question is already open: ${question.slice(0, 80)}`,
               });
-              try { $.ui.toast(`Agentic: ${question}`); } catch { /* non-fatal */ }
-              // The open ask is itself the hold on the idle branch, so the
-              // entry keeps its status and carries no reason; the ask record
-              // carries the question.
+              continue;
             }
+            if (openedThisTurn >= ASK_TURN_MAX) {
+              refusedByTurnCap += 1;
+              continue;
+            }
+            const opened = await openLedgerAsk($, sess.state, sess.persona, sess.mySessionId, nodeId, question, askRecommendOf(question), "worker", askBlocking, Date.now());
+            // The id is fresh and the seed question carries no "Recommend:",
+            // so the open cap is the one refusal a worker's line can meet.
+            if (typeof opened === "string") {
+              if (opened === "cap") refusedByOpenCap += 1;
+              continue;
+            }
+            openedThisTurn += 1;
+            sess.state.decisions.push({
+              timestamp: Date.now(),
+              loop: "monitor",
+              action: "ask_opened",
+              detail: `${nodeId}: worker-stated fork${askBlocking ? " (blocking)" : ""}: ${question} (ask ${opened.id})`,
+            });
+            try { $.ui.toast(`Agentic: ${question}`); } catch { /* non-fatal */ }
+            // A blocking entry is itself the hold on the idle branch, so the
+            // entry keeps its status and carries no reason; the ask record
+            // carries the question.
+          }
+          if (refusedByTurnCap > 0 || refusedByOpenCap > 0) {
+            const reasons: string[] = [];
+            if (refusedByTurnCap > 0) reasons.push(`${refusedByTurnCap} past the per-turn cap of ${ASK_TURN_MAX}`);
+            if (refusedByOpenCap > 0) reasons.push(`${refusedByOpenCap} past the open cap of ${ASKS_OPEN_MAX}`);
+            sess.state.decisions.push({
+              timestamp: Date.now(),
+              loop: "monitor",
+              action: "ask_cap_refused",
+              detail: `${nodeId}: ${refusedByTurnCap + refusedByOpenCap} ASK line(s) refused: ${reasons.join("; ")}`,
+            });
           }
         }
       }
@@ -13102,14 +13413,8 @@ export const register: Register = async (on, options) => {
       // already complete or abandoned at turn end (goal_done in the same turn)
       // takes no lead, and a subagent's completion neither sets nor clears one,
       // since its answer is the subagent's report. The ASK: marker above is
-      // handled as it is whether or not this line is present.
-      // The closing text's status line, read once here: the lead below, the
-      // WORKING: clear and the nudge count all take it from this one reading.
-      const statusLine = readStatusLine(e.answer);
-      // Whether the turn ended on a BLOCKED: or WAITING: lead, the reading the
-      // record close and the compaction boundary below both take: on a lead the
-      // open record is in flight and the turn end is not durable.
-      const endedOnLead = statusLine !== null && statusLine.state !== "working";
+      // handled as it is whether or not this line is present, and the status
+      // line is the one reading taken above the marker step.
       if (!skipped && sess.isOwner && !completesSubagentLoop && turnLeaf && isPlanEntry(sess.state, turnLeaf)) {
         const leadLine = statusLine !== null && statusLine.state !== "working" ? { state: statusLine.state, reason: statusLine.reason } : null;
         const workingLine = statusLine !== null && statusLine.state === "working";
@@ -13173,9 +13478,14 @@ export const register: Register = async (on, options) => {
         // A reader session never nudges, so it keeps no count.
       } else if (nudgeCountWorkThisTurn > 0 || wasChannelOrigin) {
         sess.nudgedAnswersWithoutStatus = 0;
+        sess.nudgeCapRefusedFor = null;
       } else if (completesNudgedTurn && !(e.isAborted === true || (e as { aborted?: boolean }).aborted === true || e.reason === "aborted" || e.reason === "error" || e.reason === "refusal")) {
-        if (statusLine !== null || countResetSinceNudgeOpened) sess.nudgedAnswersWithoutStatus = 0;
-        else sess.nudgedAnswersWithoutStatus += 1;
+        if (statusLine !== null || countResetSinceNudgeOpened) {
+          sess.nudgedAnswersWithoutStatus = 0;
+          sess.nudgeCapRefusedFor = null;
+        } else {
+          sess.nudgedAnswersWithoutStatus += 1;
+        }
       }
 
       // A subagent's completion is not scored: its answer is the subagent's
@@ -13575,13 +13885,10 @@ export const register: Register = async (on, options) => {
           detail: `${completedId}: ${cause}`,
         });
         queueMemoryCheck($, expectedTurns, completedId, holder.title, closedHere);
-        for (const id of closedHere) {
-          if (await closeAskOnNode($, id, "plan document")) {
-            sess.state.pendingAskId = undefined;
-            break;
-          }
-        }
-        if (!sess.state.pendingAskId && (!onlyWhenIdle || !sess.state.goals.some((g) => g.status === "active"))) {
+        // Every open ask on an entry this completion closed stands as
+        // goal_done's do.
+        await closeAsksOnCompletedNodes($, closedHere, "goal_done (plan document)", Date.now());
+        if (openBlockingAsks(sess.state).length === 0 && (!onlyWhenIdle || !sess.state.goals.some((g) => g.status === "active"))) {
           const nextId = activateNext(sess.state, completedId);
           activate($, nextId, `${completedId} complete`);
         } else if (sess.state.activeGoalId !== null && closedHere.includes(sess.state.activeGoalId)) {
@@ -14053,9 +14360,9 @@ export const register: Register = async (on, options) => {
       // was skipped, since an expired record's stamps are bookkeeping the turn
       // did not touch; the close itself runs only where the turn was not
       // skipped, so a skipped turn leaves the record exactly as it was. Position
-      // is load-bearing on both sides: the ask step above is what sets
-      // pendingAskId, which the close's open-ask rule reads, and the outcome
-      // loop below reads the status the close sets.
+      // is load-bearing on both sides: the ask step above is what opens a
+      // blocking ledger entry, which the close's open-ask rule reads, and the
+      // outcome loop below reads the status the close sets.
       if (completesGateTurn && sess.isOwner) {
         reapTurnRecords(sess.state, Date.now());
         settleExpiredDispositionStamps($);
@@ -14171,14 +14478,15 @@ export const register: Register = async (on, options) => {
       // is in flight. The list is read here only where every other durable
       // signal already holds, and the record close above will already have
       // read it on a turn its agent rule reached, so the two consult one
-      // reading. An ask open at the turn's end, read from pendingAskId after
-      // the marker step above that sets it, makes the turn not durable as a
-      // WAITING: lead does: the plan's Goal lists an open ask beside the lead
-      // and the live agent as what puts an open record in flight, and an
-      // outstanding ask is the waiting state reached by the ASK: line, which
-      // readStatusLine does not read as a lead. The open ask is a synchronous
-      // fact like the lead, so it gates the list read too. An open turn record
-      // with no lead, no open ask and no live agent is idle, and idle is
+      // reading. A blocking ask open at the turn's end, read off the ledger
+      // after the marker step above that opens it, makes the turn not durable
+      // as a WAITING: lead does: the plan's Goal lists an open ask beside the
+      // lead and the live agent as what puts an open record in flight, and an
+      // outstanding blocking ask is the waiting state reached by an ASK: line
+      // under a BLOCKED: lead. A non-blocking ask is a question the work
+      // proceeds past, so it holds nothing here either. The open ask is a
+      // synchronous fact like the lead, so it gates the list read too. An
+      // open turn record with no lead, no open ask and no live agent is idle, and idle is
       // durable, so a record alone never withholds the bank. It runs after the
       // plan-record read, which settles the Chapter signal. Its boundary facts
       // were read at the delete. Where a newer turn has started since, this
@@ -14187,8 +14495,8 @@ export const register: Register = async (on, options) => {
       // or logged. The count is compared after the read below, so a turn that
       // starts during that read is seen. A [MEMORY CHECK] turn's end neither
       // clears nor sets the owed bank, as at the delete above.
-      const openAsk = !!sess.state.pendingAskId;
-      const liveAgent = completesGateTurn && !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !openAsk
+      const askHolds = openBlockingAsks(sess.state).length > 0;
+      const liveAgent = completesGateTurn && !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !askHolds
         ? await readLiveAgent()
         : false;
       if (completesGateTurn && !completesMemoryCheckTurn) {
@@ -14204,7 +14512,7 @@ export const register: Register = async (on, options) => {
             && endHolder.status !== "complete" && endHolder.status !== "abandoned"
             && !(holderDoneByGoalDone && !workAfterHolderDoneAtDelete);
           const midSection = (planHolder !== undefined && !planChapterAdvanced && !planCompletedByDocument && !holderDoneByGoalDone) || endHolderOpen;
-          const durable = !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !openAsk && !midSection && !liveAgent;
+          const durable = !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !askHolds && !midSection && !liveAgent;
           pendingCompactionBank = durable ? { turnKind: turnKindAtStart } : null;
         }
       }
@@ -14439,6 +14747,7 @@ export const register: Register = async (on, options) => {
         // under the previous persona neither carry into it nor are added by
         // the answer closing this turn.
         sess.nudgedAnswersWithoutStatus = 0;
+        sess.nudgeCapRefusedFor = null;
         countResetSinceNudgeOpened = true;
         // F9: commons is the single arbiter. Claim first, then check if a live
         // earlier holder exists. Only the commons winner takes ownership.
@@ -14615,24 +14924,26 @@ export const register: Register = async (on, options) => {
         // envelope named them, cut to ASKED_BY_MAX_CHARS.
         if (currentTurnOriginKind === "channel" && currentTurnAuthor !== "") root.askedBy = currentTurnAuthor.slice(0, ASKED_BY_MAX_CHARS);
 
-        // An ask the slot names belongs to the tree being replaced, and an open
-        // one would hold goal_add's activation on the new tree. It closes the
-        // way goal_resume closes one; a slot naming no open record is cleared.
-        if (sess.state.pendingAskId) {
-          const askId = sess.state.pendingAskId;
+        // Every open ask belongs to the tree being replaced, and an open
+        // blocking one would hold goal_add's activation on the new tree. Each
+        // closes as superseded on the ledger and, where its record is still
+        // open, on the record.
+        {
           const store = commonsStoreOf($);
-          const askRecord = await readAskRecord(store, sess.persona, askId);
-          if (askRecord && askRecord.status === "open") {
-            askRecord.status = "resumed";
-            await store.set(askKey(sess.persona, askId), askRecord);
+          for (const entry of openAskEntries(sess.state)) {
+            const askRecord = await readAskRecord(store, sess.persona, entry.id);
+            if (askRecord && askRecord.status === "open") {
+              askRecord.status = "superseded";
+              await store.set(askKey(sess.persona, entry.id), askRecord);
+            }
+            closeAsk(sess.state, entry.id, "superseded", "goal_create", "tree replaced", now);
             sess.state.decisions.push({
               timestamp: now,
               loop: "monitor",
               action: "ask_answered",
-              detail: `ask ${askId} closed by goal_create (status: resumed)`,
+              detail: `ask ${entry.id} closed by goal_create (status: superseded)`,
             });
           }
-          sess.state.pendingAskId = undefined;
         }
 
         // Replace any existing tree.
@@ -14654,6 +14965,7 @@ export const register: Register = async (on, options) => {
         promoteOpenRecord(rootId, "goalId", now);
         // H2b: a new goal inherits a clean nudge budget.
         sess.nudgedAnswersWithoutStatus = 0;
+        sess.nudgeCapRefusedFor = null;
         countResetSinceNudgeOpened = true;
         sess.lastNudgeAt = 0;
 
@@ -15289,36 +15601,36 @@ export const register: Register = async (on, options) => {
           detail: `${completedId} "${completedTitle.slice(0, 50)}" marked complete${byNameId ? " by name" : ""}${note ? `: ${note.slice(0, 80)}` : ""}`,
         });
         queueMemoryCheck($, expectedTurns, completedId, completedTitle, closedIds);
-        // An open ask on an entry this call completed closes the way
-        // goal_resume closes one. Those entries are the one named and any plan
-        // completeLeaf's walk took to complete. An ask on any other entry stays
-        // open and holds activation. The ancestors the completion freed from
-        // "Child task blocked" are logged after its done line and restored
-        // before any activation below, so activateNext reads them as pending.
+        // A completion by name can finish a blocked child, so the ancestors it
+        // freed from "Child task blocked" are logged after its done line and
+        // restored before any activation below, so activateNext reads them as
+        // pending. The call with no nodeId completes the active leaf, which
+        // is not a blocked child, and runs no such walk.
         if (byNameId) {
           clearChildBlockedAncestors(completedId);
+        }
+        // Every open ask on an entry this call completed closes as stood,
+        // blocking or not, whichever branch completed it. Those entries are
+        // the target and any plan completeLeaf's walk took to complete. An ask
+        // on any other entry stays open and keeps its hold.
+        {
           const completedNow = sess.state.goals
             .filter((g) => g.status === "complete" && statusBefore.get(g.id) !== "complete")
             .map((g) => g.id);
-          for (const id of completedNow) {
-            if (await closeAskOnNode($, id, "goal_done")) {
-              sess.state.pendingAskId = undefined;
-              break;
-            }
-          }
+          await closeAsksOnCompletedNodes($, completedNow, "goal_done", Date.now());
         }
 
         // The completed entry was active: activate the next one, as the call
         // with no nodeId always does. Another entry is active: it stays so.
-        // None is active: activate the next one unless an open ask holds the
-        // tree, the one hold goal_add's no-active-leaf branch honors.
+        // None is active: activate the next one unless an open blocking ask
+        // holds the tree, the one hold goal_add's no-active-leaf branch honors.
         let nextId: string | null = null;
         let heldBy = "";
         if (wasActive) {
           nextId = activateNext(sess.state, completedId);
           activate($, nextId, `${completedId} done`);
         } else if (!otherActive) {
-          if (sess.state.pendingAskId) {
+          if (openBlockingAsks(sess.state).length > 0) {
             heldBy = "an operator ask is open";
           } else {
             nextId = activateNext(sess.state, completedId);
@@ -15391,6 +15703,75 @@ export const register: Register = async (on, options) => {
         }
         toolErrorsThisTurn++;
         return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+      }
+
+      // Serve ask_close: the owner closes one open ledger entry by id, with the
+      // outcome it names and the note as given, cut by closeAsk, and the
+      // entry's commons record takes the same status where it is still open,
+      // once the ledger is saved. Any open entry closes, whichever opener
+      // opened it. A refusal writes nothing to the ledger and no commons
+      // record. The record step is non-fatal: the ledger is the owner's
+      // truth, and the owner start's reconcile gives an open record a closed
+      // entry's status.
+      if ((e as any).tool === "mcp__personas__ask_close") {
+        if (sess.stateNotLoaded !== null) {
+          toolErrorsThisTurn++;
+          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
+        }
+        if (!sess.isOwner) {
+          toolErrorsThisTurn++;
+          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+        }
+        const askId = String((e as any).id || "").trim();
+        const outcome = String((e as any).outcome || "").trim();
+        if (outcome !== "answered" && outcome !== "stood" && outcome !== "withdrawn") {
+          toolErrorsThisTurn++;
+          return { deny: `ask_close: outcome must be "answered", "stood" or "withdrawn".` };
+        }
+        const entry = sess.state.asks.find((a) => a.id === askId);
+        if (!entry) {
+          toolErrorsThisTurn++;
+          return { deny: `ask_close: no ask on this persona's ledger has id "${askId.slice(0, 50)}".` };
+        }
+        if (entry.status !== "open") {
+          toolErrorsThisTurn++;
+          return { deny: `ask_close: ask ${entry.id} is not open; it closed as ${entry.status}.` };
+        }
+        const rawNote = (e as any).note;
+        const noteText = typeof rawNote === "string" && rawNote.trim() !== "" ? rawNote.trim() : null;
+        const closedAt = Date.now();
+        closeAsk(sess.state, entry.id, outcome, "ask_close", noteText, closedAt);
+        // The closed question is remembered on its node, as the drain's close
+        // remembers it, so the re-ask guard does not reopen it right away, and
+        // the node is reactivated as the drain's and the reply's are.
+        const askedNode = sess.state.goals.find((n) => n.id === entry.nodeId);
+        if (askedNode) {
+          askedNode.lastAskQuestion = entry.question;
+          askedNode.lastAskClosedAt = closedAt;
+          reactivateAskedEntry(askedNode);
+        }
+        sess.state.decisions.push({
+          timestamp: closedAt,
+          loop: "monitor",
+          action: "ask_closed",
+          detail: `ask ${entry.id} closed by ask_close (outcome: ${outcome})`,
+        });
+        const closeWriteOk = await persist($);
+        if (!closeWriteOk) {
+          toolErrorsThisTurn++;
+          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+        }
+        // The record follows the saved ledger, so a save that fails leaves
+        // both open and a reader can still answer the ask.
+        try {
+          const store = commonsStoreOf($);
+          const askRecord = await readAskRecord(store, sess.persona, entry.id);
+          if (askRecord && askRecord.status === "open") {
+            askRecord.status = outcome;
+            await store.set(askKey(sess.persona, entry.id), askRecord);
+          }
+        } catch { /* non-fatal: the owner start mirrors the closed entry onto the record */ }
+        return { result: JSON.stringify({ closed: entry.id, outcome, open: openAskEntries(sess.state).map((a) => a.id) }, null, 2) };
       }
 
       // Serve task_add, task_done and task_clear: the per-goal working list.
@@ -15751,6 +16132,7 @@ export const register: Register = async (on, options) => {
         target.updatedAt = Date.now();
         sess.state.activeGoalId = target.id;
         sess.nudgedAnswersWithoutStatus = 0;
+        sess.nudgeCapRefusedFor = null;
         countResetSinceNudgeOpened = true;
         sess.lastNudgeAt = 0;
         sess.state.decisions.push({
@@ -15767,10 +16149,12 @@ export const register: Register = async (on, options) => {
             detail: `${target.id}: blocked lead cleared by goal_resume`,
           });
         }
-        // AZ4: goal_resume on the ask's node closes the ask with status "resumed"
-        if (sess.state.pendingAskId) {
-          await closeAskOnNode($, target.id, "goal_resume");
-          sess.state.pendingAskId = undefined;
+        // goal_resume lifts the hold on the resumed node's asks and closes
+        // none: every open blocking entry on the node is lifted on the
+        // ledger alone, its record left open for a reader to answer. A
+        // blocking entry on another node keeps holding.
+        for (const entry of openBlockingAsks(sess.state)) {
+          if (entry.nodeId === target.id) liftAsk(sess.state, entry.id);
         }
         sess.state.updatedAt = Date.now();
         await persist($);
@@ -16494,44 +16878,48 @@ export const register: Register = async (on, options) => {
 
       // D5b (bullet 1): an open ask never silences the worker. The guard at
       // the top of this handler has already passed the plugin's own submits
-      // through, so this runs only for a genuine external turn. A prompt whose reading
-      // carries one of the operator's origin kinds and a sender class other than
-      // participant is the operator answering the open ask, whether it came from
-      // the keyboard or a Discord thread reply, and whether or not it carries
-      // the ask id: close the ask, which lifts the hold on the entry it named;
-      // the entry keeps its status. The turn does not exist yet, so the reading
-      // just built stands in for turnIsOperators. A participant's message leaves
-      // the ask open, since a question put to the operator is theirs to answer.
-      // A [SUPERVISOR-ASK prompt is not the operator either, so it leaves an
-      // open ask open.
-      // Section 4 (goal-every-turn): the entry an ask closed on this turn named,
-      // or null where this turn closed no ask. The record step below reads it as
-      // its one fixed rule that needs a fact from this block: a turn answering an
-      // open ask is about the entry that asked, so it opens a record attached to
-      // that entry and puts nothing to Jev.
+      // through, so this runs only for a genuine external turn. A prompt whose
+      // reading carries one of the operator's origin kinds and a sender class
+      // other than participant is the operator's word, from the keyboard or a
+      // Discord thread reply, and the operator has seen the thread: it lifts
+      // the hold on every open blocking ask and closes none. Which ask the
+      // message answers, if any, is the worker's to read from its turn, and
+      // the worker closes that one by id with ask_close. A lift is not a
+      // status, so no commons record changes. Each lifted entry's node takes
+      // its question and this clock as the timeout's lift writes them, so the
+      // re-ask guard reads the lift as it reads a close and a blocked lead set
+      // before the reply clears on the next tick. The turn does not exist yet,
+      // so the reading just built stands in for turnIsOperators. A
+      // participant's message lifts nothing, since a question put to the
+      // operator is theirs to answer. A [SUPERVISOR-ASK prompt is not the
+      // operator either, so it lifts nothing.
+      // Section 4 (goal-every-turn): the node of the oldest entry, by openedAt,
+      // that this reply lifted, or null where no entry was blocking. The record
+      // step below reads it as its one fixed rule that needs a fact from this
+      // block: a turn answering a held ask is about the entry that asked, so it
+      // opens a record attached to that entry and puts nothing to Jev.
       let answeredAskNodeId: string | null = null;
       const operatorsPrompt = OPERATOR_ORIGIN_KINDS.has(originReading.kind) && originReading.senderClass !== "participant";
-      if (sess.isOwner && sess.state.pendingAskId && !supervisorAskTurn && operatorsPrompt) {
-        const askId = sess.state.pendingAskId;
-        const store = commonsStoreOf($);
-        const askRecord = await readAskRecord(store, sess.persona, askId);
-        if (askRecord && askRecord.status === "open") {
-          askRecord.status = "answered";
-          await store.set(askKey(sess.persona, askId), askRecord);
-          sess.state.pendingAskId = undefined;
-          answeredAskNodeId = askRecord.nodeId;
-          originReading.answersAsk = true;
-          const askedNode = sess.state.goals.find((n) => n.id === askRecord.nodeId);
-          if (askedNode) {
-            askedNode.lastAskQuestion = askRecord.question;
-            askedNode.lastAskClosedAt = Date.now();
-            reactivateAskedEntry(askedNode);
+      if (sess.isOwner && !supervisorAskTurn && operatorsPrompt) {
+        const held = openBlockingAsks(sess.state).slice().sort((a, b) => a.openedAt - b.openedAt);
+        if (held.length > 0) {
+          const liftedAt = Date.now();
+          for (const entry of held) {
+            liftAsk(sess.state, entry.id);
+            const liftedNode = sess.state.goals.find((n) => n.id === entry.nodeId);
+            if (liftedNode) {
+              liftedNode.lastAskQuestion = entry.question;
+              liftedNode.lastAskClosedAt = liftedAt;
+              reactivateAskedEntry(liftedNode);
+            }
           }
+          answeredAskNodeId = held[0].nodeId;
+          originReading.answersAsk = true;
           sess.state.decisions.push({
-            timestamp: Date.now(),
+            timestamp: liftedAt,
             loop: "monitor",
-            action: "ask_answered_by_reply",
-            detail: `ask ${askId} closed by thread reply, no ask id typed`,
+            action: "ask_hold_lifted",
+            detail: `asks ${held.map((entry) => entry.id).join(", ")} lifted by the operator's reply, left open`,
           });
           await persist($);
         }

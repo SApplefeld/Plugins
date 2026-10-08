@@ -641,8 +641,264 @@ function isShownMemory(value: unknown): value is ShownMemory {
     && Number.isFinite(entry.shownAt);
 }
 
+// Who opened an ask: the worker's own ASK: line, or one of the three asks the
+// controller opens when the work cannot go on as it stands.
+export const ASK_OPENERS = ["worker", "error-streak", "nudge-cap", "cost-cap"] as const;
+export type AskOpener = (typeof ASK_OPENERS)[number];
+
+// How a ledger entry stands. "open" is the one live status. "answered",
+// "stood" (the assumption held and the question no longer matters),
+// "withdrawn" and "superseded" (the tree it rose from was replaced) are the
+// closes a close route writes. "expired" is written by the owner start alone,
+// for a seeded entry whose commons record is not open.
+export const ASK_ENTRY_STATUSES = ["open", "answered", "stood", "withdrawn", "superseded", "expired"] as const;
+export type AskEntryStatus = (typeof ASK_ENTRY_STATUSES)[number];
+export type AskClosedStatus = Exclude<AskEntryStatus, "open">;
+
+// The route that closed an entry: the ask_close tool, a reader's answer
+// record named by id, goal_done, goal_create, or the owner start's reconcile.
+export type AskClosedBy = "ask_close" | `record ${string}` | "goal_done" | "goal_create" | "owner_start";
+
+// One question to the operator, on the ledger the persona keeps in its state.
+// The ledger is the owner's truth about its asks; the commons record of the
+// same id is a mirror a reader session answers through. Every field is
+// present on every entry, null where it has no value yet, because the Discord
+// relay reads this file whole and lists an open entry's fields. `question` is
+// the worker's line whole, "Recommend:" included, stored as given, since the
+// relay renders it. `recommend` is the text after "Recommend:", which is the
+// assumption the work proceeds on. `blocking` is whether the work is stopped
+// on the answer; it is cleared by a lift and never set again. `answer` is a
+// note of at most ASK_ANSWER_MAX characters taken at close.
+export interface AskEntry {
+  id: string; // ask-<nodeId>-<ms>
+  nodeId: string;
+  planPath: string | null; // the node's, where it has one
+  entryTitle: string;
+  question: string;
+  recommend: string;
+  opener: AskOpener;
+  blocking: boolean;
+  openedAt: number;
+  reraisedAt: number | null;
+  status: AskEntryStatus;
+  closedAt: number | null;
+  closedBy: AskClosedBy | null;
+  answer: string | null;
+}
+
+// The most open entries the ledger holds at once; an open past it is refused.
+export const ASKS_OPEN_MAX = 16;
+// The most entries the ledger holds in all, open and closed; the persist prune
+// drops the oldest closed to meet it, and never an open one.
+export const ASKS_MAX = 64;
+// How long a closed entry stays on the ledger, so a card can show "answered"
+// for a while, before the persist prune drops it.
+export const ASK_CLOSED_KEEP_MS = 7 * 24 * 60 * 60_000;
+// The longest a close note runs.
+export const ASK_ANSWER_MAX = 300;
+
+// The question a seeded entry carries. The version 8 store held one ask id and
+// no question, since the question lived in the commons record alone, so the
+// migration seeds the entry with this text and the owner start's reconcile
+// fills the record's question in or closes the entry. The reconcile knows a
+// seeded entry by this text, so no opener may write it as a question.
+export const ASK_SEED_QUESTION = "(question held in the commons record)";
+
+// The fields an open takes. The caller builds the id, in the form the ledger
+// stores, so the sites that open an ask keep the id form they write today.
+export interface AskOpening {
+  id: string;
+  nodeId: string;
+  planPath: string | null;
+  entryTitle: string;
+  question: string;
+  recommend: string;
+  opener: AskOpener;
+  blocking: boolean;
+}
+
+// The open entries, oldest first, as the ledger holds them.
+export function openAskEntries(state: AgentState): AskEntry[] {
+  return state.asks.filter((entry) => entry.status === "open");
+}
+
+// The open entries the work is stopped on. This is the predicate the hold and
+// every reader that decides a hold take: an open entry that is not blocking is
+// a question the operator still owns, and no reason to stop.
+export function openBlockingAsks(state: AgentState): AskEntry[] {
+  return state.asks.filter((entry) => entry.status === "open" && entry.blocking);
+}
+
+function openAskEntry(state: AgentState, id: string): AskEntry | undefined {
+  return state.asks.find((entry) => entry.id === id && entry.status === "open");
+}
+
+// Why openAsk refused an opening: "cap" where ASKS_OPEN_MAX entries are
+// already open, "duplicate" where an entry of the same id already stands on
+// the ledger, open or closed, since a close finds its entry by id, and "seed"
+// where the question is ASK_SEED_QUESTION, which only the migration writes, so
+// no live ask can pass for a seeded one at the owner start.
+export type AskOpenRefusal = "cap" | "duplicate" | "seed";
+
+// Opens one entry at `now` and returns it, or returns the refusal and writes
+// nothing. The caller logs a "cap" refusal as ask_cap_refused and writes no
+// commons record for any refusal.
+export function openAsk(state: AgentState, opening: AskOpening, now: number): AskEntry | AskOpenRefusal {
+  if (openAskEntries(state).length >= ASKS_OPEN_MAX) return "cap";
+  if (state.asks.some((entry) => entry.id === opening.id)) return "duplicate";
+  if (opening.question === ASK_SEED_QUESTION) return "seed";
+  const entry: AskEntry = {
+    id: opening.id,
+    nodeId: opening.nodeId,
+    planPath: opening.planPath,
+    entryTitle: opening.entryTitle,
+    question: opening.question,
+    recommend: opening.recommend,
+    opener: opening.opener,
+    blocking: opening.blocking,
+    openedAt: now,
+    reraisedAt: null,
+    status: "open",
+    closedAt: null,
+    closedBy: null,
+    answer: null,
+  };
+  state.asks.push(entry);
+  return entry;
+}
+
+// Closes the open entry `id` names with `status`, the route that closed it and
+// a note cut to ASK_ANSWER_MAX, and returns it. Returns null and changes
+// nothing where no open entry carries that id, so a closed or unknown id is
+// never closed twice. The caller writes the same status onto the commons
+// record in the same step.
+export function closeAsk(state: AgentState, id: string, status: AskClosedStatus, closedBy: AskClosedBy, answer: string | null, now: number): AskEntry | null {
+  const entry = openAskEntry(state, id);
+  if (!entry) return null;
+  entry.status = status;
+  entry.closedAt = now;
+  entry.closedBy = closedBy;
+  entry.answer = answer === null ? null : answer.slice(0, ASK_ANSWER_MAX);
+  return entry;
+}
+
+// Clears `blocking` on the open entry `id` names and returns it, or null where
+// no open entry carries that id. The entry stays open: the question is still
+// the operator's to answer, and only the hold on the work is lifted.
+export function liftAsk(state: AgentState, id: string): AskEntry | null {
+  const entry = openAskEntry(state, id);
+  if (!entry) return null;
+  entry.blocking = false;
+  return entry;
+}
+
+// The ledger's bounds, run at every store write. A closed entry whose close
+// is ASK_CLOSED_KEEP_MS or more behind `now` drops. Then, while the list runs
+// past ASKS_MAX, the closed entry with the oldest close drops. An open entry
+// never drops here, whatever the count: the open cap is openAsk's refusal.
+export function pruneAsks(state: AgentState, now: number): void {
+  const closeOf = (entry: AskEntry): number => entry.closedAt ?? entry.openedAt;
+  let kept = state.asks.filter((entry) => entry.status === "open" || now - closeOf(entry) < ASK_CLOSED_KEEP_MS);
+  while (kept.length > ASKS_MAX) {
+    let oldest: AskEntry | undefined;
+    for (const entry of kept) {
+      if (entry.status === "open") continue;
+      if (!oldest || closeOf(entry) < closeOf(oldest)) oldest = entry;
+    }
+    if (!oldest) break;
+    kept = kept.filter((entry) => entry !== oldest);
+  }
+  state.asks = kept;
+}
+
+// Whether a value is a close route: one of the four named routes, or a
+// reader's answer record named as "record <id>".
+function isAskClosedBy(value: unknown): value is AskClosedBy {
+  return value === "ask_close" || value === "goal_done" || value === "goal_create" || value === "owner_start"
+    || (typeof value === "string" && value.startsWith("record ") && value.length > "record ".length);
+}
+
+// Whether a stored value is a ledger entry. Every field must hold a value of
+// its type, null where the field is nullable, and the close fields must agree
+// with the status: an open entry carries no close clock and no route, and a
+// closed one carries both, the route in one of the forms isAskClosedBy names.
+// An entry missing a field, carrying another type or disagreeing with itself
+// is not an entry and the load drops it.
+function isAskEntry(value: unknown): value is AskEntry {
+  const entry = value as Partial<Record<keyof AskEntry, unknown>> | null;
+  if (!entry || typeof entry !== "object") return false;
+  const stringOrNull = (v: unknown): boolean => typeof v === "string" || v === null;
+  const finiteOrNull = (v: unknown): boolean => Number.isFinite(v) || v === null;
+  const closeFieldsAgree = entry.status === "open"
+    ? entry.closedAt === null && entry.closedBy === null
+    : Number.isFinite(entry.closedAt) && isAskClosedBy(entry.closedBy);
+  return typeof entry.id === "string" && entry.id !== ""
+    && typeof entry.nodeId === "string"
+    && stringOrNull(entry.planPath)
+    && typeof entry.entryTitle === "string"
+    && typeof entry.question === "string"
+    && typeof entry.recommend === "string"
+    && (ASK_OPENERS as readonly string[]).includes(entry.opener as string)
+    && typeof entry.blocking === "boolean"
+    && Number.isFinite(entry.openedAt)
+    && finiteOrNull(entry.reraisedAt)
+    && (ASK_ENTRY_STATUSES as readonly string[]).includes(entry.status as string)
+    && finiteOrNull(entry.closedAt)
+    && stringOrNull(entry.closedBy)
+    && closeFieldsAgree
+    && stringOrNull(entry.answer);
+}
+
+// The ledger as a load fills it. A stored list keeps every value that is an
+// entry and drops the rest, and a stored value that is not a list reads as an
+// empty one, as the shown records do. A store with no asks key at all is a
+// version 8 store, which held one ask as an id in pendingAskId and its
+// question in the commons record alone: a non-empty id seeds one open blocking
+// entry of opener "worker" with ASK_SEED_QUESTION as its question, and an
+// empty slot seeds an empty list. The seed reads the slot off the stored
+// object, since AgentState carries no such field, and then drops it from the
+// object, so no store write carries a slot nothing reads. The owner start's
+// reconcile fills the seeded question from the record or closes the entry as
+// expired. A second load finds the key and seeds nothing, whatever the slot
+// holds.
+function fillAsks(state: AgentState, now: number): void {
+  const stored = (state as { asks?: unknown }).asks;
+  const slot = (state as { pendingAskId?: unknown }).pendingAskId;
+  delete (state as { pendingAskId?: unknown }).pendingAskId;
+  if (stored !== undefined) {
+    state.asks = Array.isArray(stored) ? stored.filter(isAskEntry) : [];
+    return;
+  }
+  if (typeof slot !== "string" || slot === "") {
+    state.asks = [];
+    return;
+  }
+  // The id form is ask-<nodeId>-<ms>, and a node id can itself carry hyphens,
+  // so the node is what stands between the prefix and the last run of digits.
+  const parts = /^ask-(.+)-(\d+)$/.exec(slot);
+  const nodeId = parts ? parts[1] : "unknown";
+  const openedAt = parts ? Number(parts[2]) : now;
+  const node = state.goals.find((g) => g.id === nodeId);
+  state.asks = [{
+    id: slot,
+    nodeId,
+    planPath: node?.planPath ?? null,
+    entryTitle: node?.title ?? "",
+    question: ASK_SEED_QUESTION,
+    recommend: "",
+    opener: "worker",
+    blocking: true,
+    openedAt: Number.isFinite(openedAt) ? openedAt : now,
+    reraisedAt: null,
+    status: "open",
+    closedAt: null,
+    closedBy: null,
+    answer: null,
+  }];
+}
+
 export interface AgentState {
-  version: 8;
+  version: 9;
   persona: string;
   activeSessionId: string;
   epoch: number;
@@ -657,12 +913,13 @@ export interface AgentState {
   autonomy: AutonomyLevel; // set only by goal_autonomy; see AUTONOMY_LEVELS
   monitor: MonitorState;
   nudge: NudgeBudget;
-  pendingAskId?: string; // D5: ask-operator wait
+  asks: AskEntry[]; // the ledger of asks to the operator, open and recently closed; see AskEntry
   decisions: Array<{
     timestamp: number;
     loop: "memory" | "goal" | "monitor" | "worker";
     action: string;
     detail: string;
+    askId?: string; // on ask_timeout alone: the ledger entry the timeout lifted
   }>;
   // The clock at the last [RECONCILE] prompt, for the coordinator persona
   // alone. It lives in the persisted state rather than in the session's own
@@ -750,12 +1007,14 @@ export const LEAD_WAITING_HOLD_MS = 60 * 60_000;
 
 // The one reason the controller's idle branch must not nudge, or null. The
 // set is closed at three, read in this order with the first that holds
-// returned: an open ask, whatever opened it, since the nudge cap, the cost cap,
-// the error streak and the worker's own ASK: line each hold by opening one;
-// a blocked lead on the active entry; and a waiting lead on the active entry
-// inside LEAD_WAITING_HOLD_MS of its read. The hold is computed here from the
-// ask slot and the lead and stored nowhere, so nothing can drift from it, and
-// no goal status takes part: an entry the controller holds stays active.
+// returned: an open blocking ask on the ledger, whatever opened it, since the
+// nudge cap, the cost cap, the error streak and a worker's ASK: line under a
+// BLOCKED: lead each hold by opening one, while an open ask that is not
+// blocking holds nothing; a blocked lead on the active entry; and a waiting
+// lead on the active entry inside LEAD_WAITING_HOLD_MS of its read. The hold
+// is computed here from the ledger and the lead and stored nowhere, so nothing
+// can drift from it, and no goal status takes part: an entry the controller
+// holds stays active.
 //
 // The active entry is the one activeGoalId names, the same read the tick
 // makes, and its lead is read only where the entry is a plan entry by
@@ -766,7 +1025,7 @@ export const LEAD_WAITING_HOLD_MS = 60 * 60_000;
 export type HoldReason = "ask" | "blocked" | "waiting";
 
 export function holdOf(state: AgentState, now: number): HoldReason | null {
-  if (state.pendingAskId) return "ask";
+  if (openBlockingAsks(state).length > 0) return "ask";
   const active = state.activeGoalId ? state.goals.find((g) => g.id === state.activeGoalId) : undefined;
   if (!active || active.status !== "active" || !active.lead) return null;
   if (resolvePlanPath(state, active) === undefined) return null;
@@ -812,7 +1071,7 @@ export function previousSessionsText(state: AgentState): string {
 export function createDefaultState(persona: string, sessionId: string): AgentState {
   const now = Date.now();
   return {
-    version: 8,
+    version: 9,
     persona,
     activeSessionId: sessionId,
     epoch: 1,
@@ -825,6 +1084,7 @@ export function createDefaultState(persona: string, sessionId: string): AgentSta
     activeGoalId: null,
     longTermGoals: [],
     autonomy: "propose",
+    asks: [],
     monitor: {
       sessionStart: now,
       turnCount: 0,
@@ -1272,7 +1532,7 @@ export function parseState(json: string): AgentState {
     }
 
     const state: AgentState = {
-      version: 8,
+      version: 9,
       persona: old.persona,
       activeSessionId: old.activeSessionId,
       epoch: old.epoch,
@@ -1285,6 +1545,7 @@ export function parseState(json: string): AgentState {
       activeGoalId,
       longTermGoals: [],
       autonomy: "propose",
+      asks: [],
       monitor: old.monitor ?? {
         sessionStart: now,
         turnCount: 0,
@@ -1310,8 +1571,9 @@ export function parseState(json: string): AgentState {
     // v3 to v4 migration: add env to monitor. The v4 to v5 step, the task
     // list, is the fillTasks call below, the v5 to v6 step, the turn records,
     // is the fillTurnRecords call beside it, the v6 to v7 step, the shown
-    // records, is enforceInvariants, and the v7 to v8 step is the fold the
-    // first store write runs, as the v7 to v8 step below states.
+    // records, is enforceInvariants, the v7 to v8 step is the fold the
+    // first store write runs, as the v7 to v8 step below states, and the v8
+    // to v9 step, the ask ledger, is the fillAsks call.
     const state = parsed as unknown as AgentState;
     if (!state.monitor.env) {
       state.monitor.env = {
@@ -1320,7 +1582,7 @@ export function parseState(json: string): AgentState {
         errors: { consecutiveErrorTurns: 0, toolErrorsLastTurn: 0 },
       };
     }
-    state.version = 8;
+    state.version = 9;
     if (!state.nudge) {
       state.nudge = { lastNudgeAt: 0, consecutiveNudgesWithoutOnGoal: 0 };
     }
@@ -1335,6 +1597,7 @@ export function parseState(json: string): AgentState {
     fillPreviousSessionIds(state);
     fillProposal(state);
     fillPlanRecords(state);
+    fillAsks(state, Date.now());
     applyPlanRecordOnLoad(state);
     enforceInvariants(state);
     return state;
@@ -1371,7 +1634,14 @@ export function parseState(json: string): AgentState {
     parsed.version = 8;
   }
 
-  if (parsed.version !== 8) {
+  // v8 to v9 migration: add the ask ledger, which fillAsks below seeds from
+  // the one ask slot a version 8 store held, or empty where the slot was.
+  // It runs after the v7 to v8 step, so a version 7 store takes both.
+  if (parsed.version === 8) {
+    parsed.version = 9;
+  }
+
+  if (parsed.version !== 9) {
     throw new Error(`Unsupported AgentState version: ${parsed.version}`);
   }
 
@@ -1412,6 +1682,7 @@ export function parseState(json: string): AgentState {
   fillPreviousSessionIds(state);
   fillProposal(state);
   fillPlanRecords(state);
+  fillAsks(state, Date.now());
 
   // S12: fill selfReview with defaults at the E11 site, no version bump.
   if (!state.monitor.selfReview) {

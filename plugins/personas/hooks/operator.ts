@@ -44,7 +44,8 @@ export interface ReplyRecord {
   text: string;
 }
 
-export type AskStatus = "open" | "answered" | "expired" | "resumed";
+// The record's status is the ledger entry's, mirrored.
+export type AskStatus = AskEntryStatus;
 
 export interface AskRecord {
   id: string;
@@ -71,6 +72,7 @@ const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 import type { CommonsStore, CommonsMeta, UnionedClaim } from "./commons";
 import { claimResource, releaseResource, readAllClaims, commonsWinner } from "./commons";
 import { LINE_TERMINATOR } from "./agent-state";
+import type { AskEntryStatus } from "./agent-state";
 
 // --- Key helpers ---
 
@@ -269,30 +271,51 @@ export async function writeAskRecord(
 }
 
 /**
- * Mark every open ask of a persona as expired (owner restart).
- * Returns the list of expired ask ids.
+ * What the owner start's reconcile of a persona's open records found and did:
+ * the ids it expired for having no ledger entry, the ids whose record took a
+ * closed entry's status, and the records left open because their entry is.
  */
-export async function expireOpenAsks(
+export interface AskReconcile {
+  expired: string[];
+  mirrored: string[];
+  open: AskRecord[];
+}
+
+/**
+ * Reconcile every open ask record of a persona with the ledger (owner start).
+ * `ledgerStatusOf` is the ledger's status for an id, or null where the ledger
+ * holds no entry for it. A record whose entry is open is left as it stands. A
+ * record whose entry is closed takes the entry's status. A record with no
+ * entry is expired: the owner that opened it is gone, and no ledger carried
+ * it forward.
+ */
+export async function reconcileOpenAsks(
   store: CommonsStore,
   persona: string,
-): Promise<string[]> {
+  ledgerStatusOf: (askId: string) => AskStatus | null,
+): Promise<AskReconcile> {
   const keys = await store.keys();
   const prefix = `${ASK_PREFIX}${persona}:`;
-  const ids: string[] = [];
+  const result: AskReconcile = { expired: [], mirrored: [], open: [] };
   for (const key of keys) {
     if (!key.startsWith(prefix)) continue;
-    const raw = await store.get(key);
-    if (!raw) continue;
-    const rec = (typeof raw === "string" ? JSON.parse(raw) : raw) as AskRecord;
-    if (rec.status !== "open") continue;
+    // A record that does not parse reads as absent and is skipped, so one
+    // unreadable record cannot abort the reconcile of the rest.
+    const rec = parseStoreRecord<AskRecord>(await store.get(key));
+    if (!rec || rec.status !== "open") continue;
     // BE4: fall back to the key suffix after ask:<persona>: when rec.id is undefined
     const id = rec.id ?? key.slice(prefix.length);
     rec.id = id;
-    rec.status = "expired";
+    const ledgerStatus = ledgerStatusOf(id);
+    if (ledgerStatus === "open") {
+      result.open.push(rec);
+      continue;
+    }
+    rec.status = ledgerStatus ?? "expired";
     await store.set(askKey(persona, id), rec);
-    ids.push(id);
+    (ledgerStatus === null ? result.expired : result.mirrored).push(id);
   }
-  return ids;
+  return result;
 }
 
 /**
@@ -405,7 +428,12 @@ export async function sweepExpiredRecords(
       if (isExpired) expired.push({ key, kind, record: raw });
       continue;
     }
-    if ((raw as AskRecord).at < cutoff) expired.push({ key, kind, record: raw });
+    // An open ask record is never swept, however old: the ledger keeps an ask
+    // open for days, and an open record no ledger entry names is aged out by
+    // the owner start's reconcile, which expires it. A closed record ages
+    // out here on its TTL as every other record does.
+    const ask = raw as AskRecord;
+    if (ask.status !== "open" && ask.at < cutoff) expired.push({ key, kind, record: raw });
   }
   if (expired.length > 0) {
     const sweptAt = Date.now();
@@ -428,8 +456,10 @@ export async function sweepExpiredRecords(
  * a short window of recent inbox/reply records per persona - closed records
  * beyond the window roll to an append-only log rather than staying in the
  * one JSON file forever. This never touches `ask:` keys (an open ask has
- * its own lifecycle - answered, expired, or re-raised - and TTL-based
- * `sweepExpiredRecords` above is the only thing that ages one out); it
+ * its own lifecycle - answered, expired, or re-raised - and is aged out only
+ * by the owner start's reconcile, which expires an open record no ledger
+ * entry names, while a closed ask record ages out on its TTL through
+ * `sweepExpiredRecords` above); it
  * covers `inbox:` records that are `"skipped"` or `"resolved"` and every
  * `reply:` record except one whose inbox record is present as `"delivered"`
  * or `"answered"`, combined and ordered oldest-first, keeping the newest
