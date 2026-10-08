@@ -391,6 +391,16 @@ if [ "$MEMORY_GATE_DISCARD_PERCENT" -gt 100 ]; then
   echo "ERROR: memoryGateDiscardPercent '$MEMORY_GATE_DISCARD_PERCENT' is not a whole number in the range 50 to 100" >&2
   exit 1
 fi
+# The two nudge cadences the roster carries, checked where the roster sets
+# them, so a zero, a leading zero or an overlong value stops the launch here
+# rather than reaching either settings branch. The defaults below need no
+# check. controllerTickMs takes the same rule once the library is sourced.
+for cadence in nudgeFloorMs nudgeIdleMs; do
+  if [ -n "${!cadence:-}" ] && ! positive_number "${!cadence}"; then
+    echo "ERROR: $cadence '${!cadence}' is not a whole number of milliseconds greater than zero (digits only, no leading zero, at most 9 digits)" >&2
+    exit 1
+  fi
+done
 # This one is read by the supervisor itself, not only emitted: it is the stale
 # bound the pre-launch gate hands wait_persona_free_both, and it reaches the
 # decide unit too. So it takes the same check the settings above take, rather
@@ -447,20 +457,16 @@ source "$_COMMON"
 # apply instead of being clobbered by the library's defaults.
 TICK_MS="${controllerTickMs:-10000}"
 NUDGE_IDLE_MS="${nudgeIdleMs:-45000}"
-NUDGE_FLOOR_MS="${nudgeFloorMs:-5000}"
+NUDGE_FLOOR_MS="${nudgeFloorMs:-300000}"
 GIT_PROBE_MS="${gitProbeMs:-30000}"
-# The controller tick is emitted for the plugin and also read here, since a
-# probe's window is two ticks plus the poll interval, so it takes the same
-# check the settings the script reads for itself take. The emitter's own rule
-# is skipped whenever the rundir already holds a settings file.
+# The controller tick is emitted for the plugin and is the probe window's
+# fallback below, so it takes the same check the settings the script reads
+# for itself take. The emitter's own rule is skipped whenever the rundir
+# already holds a settings file.
 if ! positive_number "$TICK_MS"; then
   echo "ERROR: controllerTickMs '$TICK_MS' is not a whole number of milliseconds greater than zero (digits only, no leading zero, at most 9 digits)" >&2
   exit 1
 fi
-# How long a probe waits for the plugin's ack before it reads silent: an idle
-# child's tick acknowledges within one tick, and the second tick and the poll
-# interval are the margin for the tick and the poll landing out of step.
-PROBE_WINDOW_MS=$(( 2 * TICK_MS + SUPERVISOR_POLL_MS ))
 
 # --- Emit settings JSON (only if not already provided) ---
 # A provided file keeps its options, and gains whichever plugin id it lacks,
@@ -505,6 +511,13 @@ else
   # a provided settings file needs the same carry-through or a roster that
   # tunes the floor would reach no persona that already has a run directory.
   if ! ensure_settings_memory_gate_discard_percent "$SETTINGS_FILE" 2>>"$LOG"; then
+    echo "ERROR: could not complete $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
+    exit 1
+  fi
+  # Same reasoning again, for the three cadences the roster carries:
+  # controllerTickMs, nudgeFloorMs and nudgeIdleMs. A roster edit to any of
+  # them would otherwise reach no persona that already has a run directory.
+  if ! ensure_settings_cadences "$SETTINGS_FILE" 2>>"$LOG"; then
     echo "ERROR: could not complete $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
     exit 1
   fi
@@ -589,6 +602,19 @@ else
     exit 1
   fi
 fi
+
+# How long a probe waits for the plugin's ack before it reads silent: an idle
+# child's tick acknowledges within one tick, and the second tick and the poll
+# interval are the margin for the tick and the poll landing out of step. The
+# tick is the one the child runs, read back from the settings file under the
+# id this launch loads, since a provided file can carry a tick this launch's
+# environment does not name. Where the file carries no whole tick from 1 to
+# 999999999 under that id, TICK_MS stands.
+if ! FILE_TICK_MS="$(read_settings_controller_tick "$SETTINGS_FILE" "$DEV_MODE" 2>>"$LOG")"; then
+  echo "ERROR: could not read controllerTickMs from $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
+  exit 1
+fi
+PROBE_WINDOW_MS=$(( 2 * ${FILE_TICK_MS:-$TICK_MS} + SUPERVISOR_POLL_MS ))
 
 # --- Helper: log a line to supervisor.log ---
 # The stamp is the shell's own clock read, so a log line starts no process.

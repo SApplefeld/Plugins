@@ -5,7 +5,8 @@
 // at the end of every pass. This hook makes it structural: the seat pushes
 // status to its own registry entry at its banked moments, which is a
 // declaration it already owes the coordinator, and this hook turns that
-// declaration into the marker the PreCompact gate honors.
+// declaration into the role-boundary marker the persona module's compaction
+// veto honors.
 //
 // Two independent legs, both keyed on the calling session's registry entry at
 // ~/.claude/coordinator/<hostname>/registry/<session-id>.md:
@@ -17,10 +18,11 @@
 //   2. The boundary. Where the entry's `Status-updated:` stamp is within
 //      STATUS_FRESH_MS of now and the project directory's tree is clean, the
 //      role-boundary marker is opened for this session. The status push is the
-//      seat's own banked declaration; this hook only makes it reach the gate.
+//      seat's own banked declaration; this hook only makes it reach the
+//      persona module.
 //      The freshness test is on the wall clock and not on the turn, so every
 //      turn ending inside that window opens the marker, and a Stop inside the
-//      window after the gate has consumed one opens it again. What that buys
+//      window after the module has consumed one opens it again. What that buys
 //      is a marker for a moment the seat declared minutes earlier rather than
 //      at this exact turn end, which is the cost the marker design already
 //      prices: a compaction landing anywhere inside the window costs a re-read
@@ -35,8 +37,8 @@
 // directory open two files and neither Stop can overwrite the other's, and a
 // seat's marker is one file however many directories it works in. The
 // payload's cwd names no marker; it answers the tree question below and is
-// the project whose scratch directory the bank ensures afterward, so the gate
-// has somewhere to record the deferrals it holds for this seat there.
+// the project whose scratch directory the bank ensures afterward: its .kit/,
+// created with its self-ignore file.
 //
 // It never blocks: nothing is written to stdout on any path, so the stop is
 // always allowed and no stop_hook_active guard is needed. Any failure exits 0,
@@ -156,15 +158,11 @@ function main() {
     if (stampIsFresh(registryField(text, 'Status-updated'), STATUS_FRESH_MS) && treeIsClean(cwd)) {
         writeRoleBoundary(sessionId);
         // The project's own scratch directory, ensured after the marker and
-        // best-effort. The marker lives under the home, so banking it no
-        // longer creates this directory as a side effect, and the gate records
-        // a decision only where it already exists: a seat in
-        // a fresh checkout would otherwise have its deferrals recorded nowhere
-        // and the deferral nudge's hold directive, which reads that record,
-        // would never fire. The directory is the payload's cwd, the one the
-        // gate's own payload names for this session's offers. The clean-tree
-        // test above ran before this create, and the ignore marker the create
-        // writes keeps the directory out of the next stop's reading of it.
+        // best-effort: the payload cwd's .kit/, created with its self-ignore
+        // file. The marker lives under the home, so banking it does not create
+        // this directory. The clean-tree test above ran before this create,
+        // and the ignore file the create writes keeps the directory out of the
+        // next stop's reading of it.
         ensureProjectScratchDir(cwd);
     }
 }

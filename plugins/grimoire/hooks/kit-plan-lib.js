@@ -4,11 +4,10 @@
 // no two of them can come to answer one question two ways: the plan-path
 // normalizer and the plan-doc kind rule every reader of a plan path answers
 // to, the Status-row readings of a plan doc's head, the session-id shape
-// test, the transcript lookup, the transcript-age phrase, the stored-path
+// test, the transcript-age phrase, the stored-path
 // clamp, the stat errno classification, and the authorization-sentence screen.
 //
-// This file requires Node core modules at load and memq.js lazily, inside
-// findTranscript, and no other kit library. That is what lets kit-read-lib.js
+// This file requires Node core modules alone, and no kit library. That is what lets kit-read-lib.js
 // and kit-compact-lib.js each destructure it at their own load:
 // a require back from here into either of them would be a cycle, and a cycle
 // resolved at load time hands one of its members a half-built exports object.
@@ -72,9 +71,9 @@ function validTranscript(value) {
 // The shape a harness session id has: a lowercase-or-uppercase UUID. It is
 // only a shape: it cannot authenticate an id, since any 36-character UUID
 // passes it. The evidence that an id belongs to a real local session is a
-// transcript file on this machine that the id names, which findTranscript
-// below locates; this test is the cheap screen in front of that lookup, so a
-// junk id never pays for a directory scan.
+// transcript file on this machine that the id names; this test is the cheap
+// screen in front of a lookup of that file, so a junk id never pays for a
+// directory scan.
 //
 // A value passing this gate is 36 printable ASCII characters, so it satisfies
 // every session-id storage rule in the kit (a string, within a 128-character
@@ -105,8 +104,7 @@ function isSessionIdShaped(value) {
 //
 // One classification, and the callers are wherever that question is asked: in
 // this library a link is resolved or refused (resolvePlanLink), and in
-// kit-compact-lib.js a file is removed or left alone (clearMarkerFile,
-// holdStampKind). The rule is what is shared rather than the list: spelled per
+// kit-compact-lib.js a file is removed or left alone (clearMarkerFile). The rule is what is shared rather than the list: spelled per
 // site instead, two callers of one rule routed ENOTDIR to opposite answers.
 function pathErrnoClass(code) {
     if (code === 'ENOENT') return 'absent';
@@ -115,12 +113,11 @@ function pathErrnoClass(code) {
 }
 
 // The size of the plan doc at a repo-relative plan path: 0 when nothing is
-// there, and null when nothing at that path can be read as a plan doc. The
-// plan-doc counterpart of the regularFileSize kit-compact-lib.js spells, and
+// there, and null when nothing at that path can be read as a plan doc. This is
 // the one kind rule every reader of a plan path takes.
 //
-// A regular file and an absent path answer exactly as regularFileSize does. The
-// difference is the one non-regular kind that is genuinely readable: a link
+// A regular file answers its size and an absent path 0. Beyond a regular file
+// there is one non-regular kind that is genuinely readable: a link
 // whose target resolves, still inside the repo, to a regular file is a plan doc.
 // Refusing it would leave a checkout that links a plan doc with no reader able
 // to open it, over a file the operator can open by hand.
@@ -140,10 +137,9 @@ function pathErrnoClass(code) {
 // The size is returned rather than judged here because a caller may hold a
 // bound of its own: planHeadText reads a fixed 2 KB head and needs none.
 //
-// The lstat is spelled here rather than borrowed from regularFileSize because
-// this function needs the distinction that helper erases: regularFileSize
-// answers null both for a kind that is not a regular file and for an lstat
-// that failed. Only the first of those may be resolved through, since a failed
+// The lstat is spelled here because this function needs a distinction a
+// single null answer would erase: a kind that is not a regular file and an
+// lstat that failed. Only the first of those may be resolved through, since a failed
 // lstat has told us nothing about the path and following it would hand back
 // the very open the check exists to withhold.
 function planFileSize(cwd, planRel) {
@@ -392,45 +388,6 @@ function safeForAuthorization(value) {
         + AUTHORIZATION_TRUNCATION_MARK;
 }
 
-// The transcript file of a session id, or null when it cannot be located. The
-// harness stores each session's transcript as <sessionId>.jsonl inside a
-// per-project directory under ~/.claude/projects, and the scan of those
-// directories is memq's own sessionTranscriptDir, delegated to rather than
-// restated, the same way the SessionStart hook's fallback delegates: one copy
-// of the lookup is what keeps every surface answering the same question the
-// same way. The shared scan applies the shape test before any filesystem
-// work, refuses a value carrying a path separator, lists through a bounded
-// reader so a filled projects root cannot become an unbounded walk, and
-// answers null for an id more than one project directory holds, since two
-// matches are an ambiguity and taking the first would let readdir order
-// decide which transcript corroborates a binding. The directory it answers
-// with holds this id's transcript as a verified regular file, which is the
-// corroboration the security model states, so the join below names that file.
-// The whole body is wrapped, and an absent or unreadable projects directory
-// yields null. The shape test is kept ahead of the delegation as a cheap
-// short-circuit, so a junk id never pays for loading memq; the require is
-// lazy for the same reason.
-//
-// Two callers. The role-boundary writer in kit-compact-lib.js
-// (writeRoleBoundary), which measures the declared moment's position on the
-// file this locates, so a session declaring from a linked worktree is measured
-// on the transcript the harness filed for it rather than on a path its shell's
-// directory would derive. And the checkpoint CLI's status report, which reads
-// that marker's moment against the same file, so the writer and the report
-// cannot disagree about which transcript a declaration is judged on.
-function findTranscript(sessionId) {
-    try {
-        if (!isSessionIdShaped(sessionId) || path.basename(sessionId) !== sessionId) {
-            return null;
-        }
-        const { sessionTranscriptDir } = require(path.join(__dirname, '..', 'scripts', 'memq.js'));
-        const dir = sessionTranscriptDir(sessionId);
-        return dir === null ? null : path.join(dir, sessionId + '.jsonl');
-    } catch {
-        return null;
-    }
-}
-
 // How long ago a transcript file was last written, as a coarse phrase
 // ('less than a minute ago', 'about N minutes ago', 'about N hours ago'), or
 // null when the path is absent, invalid per validTranscript, or unreadable.
@@ -472,4 +429,4 @@ function lastActivePhrase(transcriptPath) {
 // transcript path a hook payload names, is the untrusted-path channel
 // storablePathValue guards. A hand copy in a caller would match this file's
 // screen the day it was written and drift from it silently after.
-module.exports = { normalizePlanArg, pathErrnoClass, resolvePlanLink, planHeadText, planStatusReadings, classifyPlanStatus, isSessionIdShaped, findTranscript, lastActivePhrase, storablePathValue, safeForAuthorization };
+module.exports = { normalizePlanArg, pathErrnoClass, resolvePlanLink, planHeadText, planStatusReadings, classifyPlanStatus, isSessionIdShaped, lastActivePhrase, storablePathValue, safeForAuthorization };

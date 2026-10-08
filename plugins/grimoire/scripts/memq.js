@@ -1179,9 +1179,8 @@ const transcriptDirs = new Map();
 // shell has since wandered to.
 //
 // The scan is the kit's one copy of this lookup: the SessionStart hook's
-// ownTranscriptDir delegates its own fallback here, and hooks/kit-plan-lib.js's
-// findTranscript delegates too, so no two surfaces can come to disagree about
-// which directory a session sits in.
+// ownTranscriptDir delegates its own fallback here, so no second surface can
+// come to disagree about which directory a session sits in.
 //
 // The listing hangs off harnessProjectsRoot rather than the store root,
 // because the harness writes these files and an honored KIT_MEMORY_ROOT moves
@@ -8887,8 +8886,8 @@ const ANCHOR_TIER_UNEXAMINED = 'this tier could not be examined';
 // there rather than as a local function, and module.exports for the
 // re-export. hooks/memory-session.js's drift pass and
 // hooks/memory-frontmatter-guard.js both already hold this module and call
-// this export directly; hooks/compact-deferral-nudge.js, which does not
-// otherwise need memq, requires hooks/kit-network-lib.js directly instead.
+// this export directly; hooks/kit-compact-lib.js, which does not otherwise
+// need memq, requires hooks/kit-network-lib.js directly instead.
 
 // What a coverage line says about a tier whose anchors this digest never
 // resolves. It is the same fact `get` states per record, in the same words

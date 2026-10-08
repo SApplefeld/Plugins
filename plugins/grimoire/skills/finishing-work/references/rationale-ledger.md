@@ -4295,22 +4295,24 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: since the docs-curator's edits under `docs/` are its deliverable.
 
 ### S021
-- key: Open the finishing pass's compaction boundary on the compaction gate's own recorded deferral, which needs no count.
+- key: Open the finishing pass's compaction boundary on the persona module's boundary reminder, which needs no count.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:40
-- provenance: d6a4753 2026-08-25, boundary-gated compaction: a finishing pass adjudicating for hours produces no Chapter, so the deferral is its boundary trigger; 55c5abc 2026-09-09 added the goal read to the list of steps the pass runs.
-- verdict: keep
-- reason: The hooks report and gate but do not open the boundary, and the doctrine's checkpoint rides a section close this pass never has, so this is the pass's only boundary rule.
-- passage: The trigger is the compaction gate's own recorded deferral, which needs no count
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:66
+- provenance: d6a4753 2026-08-25, boundary-gated compaction: a finishing pass adjudicating for hours produces no Chapter, so the deferral is its boundary trigger; 55c5abc 2026-09-09 added the goal read to the list of steps the pass runs; docs/plans/claude-kit_core-compaction_spec_v1.md section 2 moved the trigger to the persona module's boundary reminder.
+- verdict: rewrite
+- landed: fa23bc4a section 2
+- reason: The module's reminder reports a hold but does not open the boundary, and the doctrine's checkpoint rides a section close this pass never has, so this is the pass's only boundary rule.
+- passage: The trigger is the persona module's boundary reminder arriving on a tool result between finishing steps, which needs no count.
 
 ### S022
-- key: The trigger is `compact-deferral-nudge.js` firing between finishing steps, or a step's adjudication finding the gate holding offers per `kit-compact-checkpoint.js status`.
+- key: The trigger is the persona module's boundary reminder arriving on a tool result between finishing steps.
 - class: mechanic
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:40
-- provenance: d6a4753 2026-08-25; 55c5abc 2026-09-09 left it unchanged.
-- verdict: keep
-- reason: The CLI reports state only when run and the nudge fires only between steps; the session reads the count as the trigger, so the instruction is not superseded by the tools it names.
-- passage: `compact-deferral-nudge.js` firing between finishing steps, or a step's adjudication finding the gate holding offers, per `kit-compact-checkpoint.js status`.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:66
+- provenance: d6a4753 2026-08-25; 55c5abc 2026-09-09 left it unchanged; docs/plans/claude-kit_core-compaction_spec_v1.md section 2 moved the trigger to the persona module's boundary reminder.
+- verdict: rewrite
+- landed: fa23bc4a section 2
+- reason: The reminder arrives only on a tool result between steps; the session reads it as the trigger, so the instruction is not superseded by the module that sends it.
+- passage: the persona module's boundary reminder arriving on a tool result between finishing steps
 
 ### S023
 - key: On that trigger, append `### Interim board N - YYYY-MM-DD` to the plan doc with the content shape executing-work names for it.

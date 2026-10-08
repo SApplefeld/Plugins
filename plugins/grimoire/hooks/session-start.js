@@ -226,8 +226,8 @@ function safeText(value, cap) {
 // its directory is this session's by construction, and the file name must be
 // this session's id for it to be taken (a payload naming another session's
 // file identifies no directory of ours). Where the payload carries no path,
-// the fallback locates <sessionId>.jsonl under the harness's transcript store,
-// as kit-plan-lib's findTranscript does for the checkpoint CLI. That fallback is a scan across
+// the fallback locates <sessionId>.jsonl under the harness's transcript store.
+// That fallback is a scan across
 // project directories, and it answers only where exactly one of them holds a
 // transcript of this session's id: two matches are an ambiguity rather than a
 // hint about either, so the scan says nothing and this function answers null,

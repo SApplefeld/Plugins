@@ -104,10 +104,8 @@ function fillBuffer(fd, position, length) {
 // Read `length` bytes from `position` and decode them as UTF-8, looping until
 // the buffer is full or the file ends. The primitive for a caller that has
 // already settled the file's kind and its own bound, and that reads a window
-// whose edges it handles itself (kit-compact-lib's gate-log tail is the one
-// such caller: it takes a byte offset into the newest bytes and drops the
-// leading fragment itself, which is the mirror image of what readFileBounded
-// drops).
+// whose edges it handles itself (jev-judge's lastOperatorMessage takes a
+// window off a transcript's end and drops the leading fragment itself).
 function readFully(fd, position, length) {
     const { buf, filled } = fillBuffer(fd, position, length);
     return buf.toString('utf8', 0, filled);
@@ -123,8 +121,8 @@ function readFully(fd, position, length) {
 // the FINAL COMPONENT, refused on both platform legs, at the open where
 // O_NOFOLLOW exists and at an lstat before it where it does not. It arrives as
 // the same null every other refusal answers with, so a caller that needs a link
-// told apart from an unreadable file asks that question itself before calling
-// (readHoldNudgesResult in kit-compact-lib.js does, and states why). Otherwise
+// told apart from an unreadable file asks that question itself before calling.
+// Otherwise
 // { text, bounded, bytesRead, boundedBy }:
 //
 //   text       the decoded content, whole lines only when bounded
@@ -165,18 +163,7 @@ function readFully(fd, position, length) {
 // rule instead, an lstat that refuses a link before the open, which NARROWS the
 // window rather than closing it. The residue is the asking caller's to bound and
 // differs with what it reads, so it is stated per caller rather than once for the
-// option. The hold-stamp read (readHoldNudgesResult in kit-compact-lib.js) is
-// the one that file's own hand-written preamble already states this residue
-// for: the window is a few microseconds per fire on a path inside a project's
-// .kit/, which an actor able to plant a link there can already write to, and
-// what a swap landing in it yields is a foreign file's bytes rebuilt field by
-// field into stamps rather than anything echoed or executed. The signpost read
-// (nudgeFloor in compact-deferral-nudge.js) reads ~/.claude/grimoire.local.json,
-// a path under the operator's own home rather than inside any repository, so
-// reaching its window needs a writer already in that directory; what rides
-// through it is one number the caller clamps to a finite non-negative value,
-// and an open that a swapped link stalls is bounded by the harness's own hook
-// timeout, which costs that hook's directive and nothing beyond it. The nudge-log
+// option. The nudge-log
 // read (readNudgeLog in memory-recognition-nudge.js) reads a file that hook
 // writes and appends to itself through an O_NOFOLLOW open, so the option is what
 // makes the reader refuse what the writer already refuses; what rides through
@@ -277,8 +264,8 @@ function containedRealPath(rootDir, filePath) {
 // flag saying whether the listing is partial: { names, bounded }. An absent
 // directory is an empty listing and not a bounded one, since nothing there is
 // nothing to miss; every other failure (a permission, a lock, a path that is
-// not a directory) leaves the listing unknown and sets the flag, which is the
-// ENOENT rule kit-compact-lib's regularFileSize answers to.
+// not a directory) leaves the listing unknown and sets the flag, so only
+// ENOENT reads as an empty answer.
 //
 // The listing is read incrementally rather than through readdirSync, because
 // readdirSync materializes the whole directory before the first entry can be

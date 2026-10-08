@@ -388,8 +388,8 @@ function inProgressPlan(cwd) {
 }
 
 // The text of a parsed transcript line where it is a human turn, else null. A
-// human turn is a `user` line the harness did not inject (the isMeta,
-// isSidechain and isCompactSummary flags kit-compact-lib screens on), whose
+// human turn is a `user` line the harness did not inject (no isMeta,
+// isSidechain or isCompactSummary flag), whose
 // content is a plain string or an array of text blocks with no tool_result
 // among them. The echo of a slash command's stdout is stripped through
 // kit-compact-lib's stripLocalCommandOutput, and a turn that holds a command's
@@ -520,10 +520,9 @@ function shownEntries(sessionId, scored, shown, nowMs) {
 
 // The shown file's list, as `{ ok: true, list }` or a named omission. An
 // absent file is an empty list. The read goes through kit-read-lib's bounded
-// reader under SHOWN_READ_BYTES with its link refusal, on the pattern
-// kit-compact-lib's readHoldNudgesResult takes for a file its own writer
-// renames into place under .kit/: the lstat answers absent and link, and the
-// descriptor answers kind and size. A link, a read that ended short, and text
+// reader under SHOWN_READ_BYTES with its link refusal, as a file its own
+// writer renames into place under .kit/ takes it: the lstat answers absent and
+// link, and the descriptor answers kind and size. A link, a read that ended short, and text
 // that does not parse are all `file unreadable`. A regular file the ceiling
 // cut is `file past the ceiling`, named apart because the writer resets it
 // where it leaves an unreadable file alone.

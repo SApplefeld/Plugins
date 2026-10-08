@@ -108,17 +108,6 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "matcher": "auto",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/kit-compact-gate.js\""
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [

@@ -10487,7 +10487,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 5 to 8 of the section loop and the Chapter format. It owns closing a section: the plan doc update, the applied-stamp adjudication and the Chapter, the commit model's application, the compaction boundary declaration, the compaction deferral in a session no `/goal` or `/loop` drives, the interim boundary a closure drought earns, and the Chapter template and its machine contract. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 5 to 8 tell a session to read it at a section's close and at an interim boundary.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c4.C054 deleted with its passage, and c4.C051, c4.C052, c4.C055, c4.C058, c4.C061, c4.C064, c4.C067, S136 and S137 rewritten to their passages as they now read. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the deferral paragraph's first two sentences and its native-trigger sentence, step 8's Review-Only sentence, and its sentence on how long a declaration holds). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 4 on 2026-10-06, which removed the pre-push whole gate: c4.C035, S097, S101 and S113 rewritten to their passages as they now read, and c4.C045, c4.C136, S098, S099, S102 and S103 retired to S097. Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 on 2026-10-06: S115 rewritten to its passage as it now reads.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c4.C054 deleted with its passage, and c4.C051, c4.C052, c4.C055, c4.C058, c4.C061, c4.C064, c4.C067, S136 and S137 rewritten to their passages as they now read. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the deferral paragraph's first two sentences and its native-trigger sentence, step 8's Review-Only sentence, and its sentence on how long a declaration holds). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 4 on 2026-10-06, which removed the pre-push whole gate: c4.C035, S097, S101 and S113 rewritten to their passages as they now read, and c4.C045, c4.C136, S098, S099, S102 and S103 retired to S097. Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 on 2026-10-06: S115 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c4.C051, c4.C058, c4.C059, c4.C061, J001 and J004 rewritten to their passages as they now read, and J002 retired to J001.
 
 ### I025
 - key: Title the reference file carrying steps 5 to 8 of the section loop, the interim boundary and the Chapter format `Closing a Section`.
@@ -10911,13 +10911,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Declare the compaction boundary once the Chapter is appended and the commit model honored.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/closing.md:22
-- provenance: 0860c1c 2026-08-15, Section 3 of the boundary-gated-compaction plan, which shipped the ritual that opens the checkpoint; the order (Chapter, then commit model, then open) was pinned by assertion after a review found a folded sentence inverting it (d6a4753 2026-08-25).
+- provenance: 0860c1c 2026-08-15, Section 3 of the boundary-gated-compaction plan, which shipped the ritual that opens the checkpoint; the order (Chapter, then commit model, then open) was pinned by assertion after a review found a folded sentence inverting it (d6a4753 2026-08-25); `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, which moved the hold to the persona module's `session.compact` handler.
 - verdict: rewrite
 - landed: 49d2dea6 section 4
 - landed: 1aa3fff5 section 4
+- landed: fa23bc4a section 2
 - reason: Executing-work owns the boundary steps per the map; the boundary's definition in this sentence is what the deferral paragraph relies on, and the interim ritual's declaration is a pointer at this call (A082 to A084).
 - proposed: Where no goal is armed, the run declares the boundary instead of opening a checkpoint: once the Chapter is appended and the commit model honored, run `node <plugin-root>/hooks/kit-compact-checkpoint.js boundary`, from whatever directory the run works in, a linked worktree included.
-- passage: Once the Chapter is appended and the commit model honored, this is a chapter boundary, where a compaction costs nothing. Tell the gate so:
+- passage: Once the Chapter is appended and the commit model honored, this is a chapter boundary, where a compaction costs nothing. Declare it:
 
 ### c4.C052
 - key: Declare the boundary by running `node <plugin-root>/hooks/kit-compact-checkpoint.js boundary`.
@@ -10942,26 +10943,28 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Resolve `<plugin-root>` by the ladder the Dispatch Brief template's style-skill bullet states, and run it from the session's own shell, since the marker it writes is keyed by the caller's session id.
 
 ### c4.C058
-- key: Take no action on a deferral noticed mid-section: declare no boundary at an unbanked moment to escape it, and do not treat it as context pressure.
+- key: Take no action on a hold noticed mid-section: declare no boundary at an unbanked moment to escape it, and do not treat it as context pressure.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/closing.md:30
-- provenance: 0860c1c 2026-08-15, Section 3 of the boundary-gated-compaction plan; the interim ritual became the gate's second boundary at d6a4753 2026-08-25.
+- provenance: 0860c1c 2026-08-15, Section 3 of the boundary-gated-compaction plan; the interim ritual became the gate's second boundary at d6a4753 2026-08-25; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, which moved the hold to the persona module's `session.compact` handler.
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - landed: 1aa3fff5 section 4
+- landed: fa23bc4a section 2
 - reason: The prohibition governs the bare reaction to a deferral and the interim ritual is the sanctioned act, as the paragraph's first sentence already says; the clause should name that carve-out so a session at the nudge does not have to reason it out. The mechanism sentences stay: they are the disclosure the compaction plan's finishing review required after the skill line overclaimed the valve (c9356bd), and the window assumption was wrong once (acc21d7) (A101 to A103).
 - proposed: Amend the prohibition to "do not clear the goal, do not touch the checkpoint other than through the interim ritual below, and do not treat it as context pressure".
 - baseline-test: yes
-- passage: A deferral noticed mid-section is the gate working: do not declare a boundary at an unbanked moment to escape it, and do not treat it as context pressure.
+- passage: A hold noticed mid-section is the veto working: do not declare a boundary at an unbanked moment to escape it, and do not treat it as context pressure.
 
 ### c4.C059
-- key: Surface to the operator a run climbing toward its context limit while compaction is still being deferred.
+- key: Surface to the operator a run nearing its context limit while compaction is still held.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/closing.md:32
-- provenance: c9356bd 2026-08-15, the boundary-gated-compaction close-out, which qualified the skill line that had told a running model a deferral is never worth acting on.
-- verdict: keep
+- provenance: c9356bd 2026-08-15, the boundary-gated-compaction close-out, which qualified the skill line that had told a running model a deferral is never worth acting on; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, which moved the hold to the persona module's `session.compact` handler.
+- verdict: rewrite
+- landed: fa23bc4a section 2
 - reason: A notice, not a stop: the Stop hook refuses a capacity-reasoned release, so this cannot collide with the doctrine's never-a-stop rule at execution, and the run on a smaller window than the valve assumes has no other signal (A104).
-- passage: A run climbing toward its limit while compaction is still deferred is the one case to surface to me.
+- passage: A run nearing its context limit with compaction still held is the one case to surface to me.
 
 ### c4.C060
 - key: Write an interim board entry once two consecutive review-round adjudications pass with no section closing, or earlier where a drought is forming.
@@ -10976,15 +10979,16 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Its floor is two consecutive review-round adjudications with no section closing, and a run that sees one forming may act earlier.
 
 ### c4.C061
-- key: Treat the compaction deferral nudge as a trigger for the interim entry, and as the more reliable of the two triggers.
+- key: Treat the persona module's boundary reminder as a trigger for the interim entry, and as the more reliable of the two triggers.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/closing.md:32
-- provenance: d6a4753 2026-08-25, which made the interim board entry the gate's second boundary directive and the nudge its signal, because the run held longest is the one producing no Chapter.
+- provenance: d6a4753 2026-08-25, which made the interim board entry the gate's second boundary directive and the nudge its signal, because the run held longest is the one producing no Chapter; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, which moved the hold to the persona module's `session.compact` handler.
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - landed: 1aa3fff5 section 4
+- landed: fa23bc4a section 2
 - reason: The trigger and its more-reliable ranking stay as rules; their reasons move to this ledger under c4.C060.
-- passage: The other trigger, and the more reliable, is `compact-deferral-nudge.js`, whose hold directive at the return of a long tool call says the gate is holding this session's offers.
+- passage: The other trigger, and the more reliable, is the persona module's boundary reminder arriving on a tool result, which says the module is holding this session's automatic compaction.
 
 ### c4.C062
 - key: At either trigger, append an interim board entry to the plan doc below `## Chapters`.
@@ -11553,23 +11557,23 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: The deep evidence behind a figure keeps the home that bullet gives it, and the Chapter cites the analysis rather than restating it.
 
 ### J001
-- key: In a session no `/goal` or `/loop` drives, expect auto-compaction to wait for a declared boundary: step 8 or the interim ritual, the seat-stop hook's clean turn end, or the operator's recorded consent.
+- key: Where the persona module loads, expect auto-compaction to wait for a declared boundary: step 8 or the interim ritual, the seat-stop hook's clean turn end, or the operator's recorded consent.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/closing.md:30
-- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which cut the gate to its interactive path and replaced the paragraph that keyed the deferral on an armed goal.
-- verdict: keep
-- landed: 1aa3fff5 section 4
-- reason: The gate's interactive path denies every automatic offer until one of those releases it (the role-boundary and operator-consent legs of `hooks/kit-compact-gate.js`), so a session unaware the deferral is by design reads it as context pressure. Naming the releases is what sends it to declare at a banked moment instead.
-- passage: **In a session no `/goal` or `/loop` drives, compaction lands at declared boundaries by design.** The PreCompact gate defers auto-compaction until this session declares a boundary at step 8 or the interim ritual below, the seat-stop hook opens one at a registered seat's clean turn end, or the checkpoint CLI's `consent` verb records my release.
+- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which cut the gate to its interactive path and replaced the paragraph that keyed the deferral on an armed goal; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, which retired the kit's PreCompact gate and moved the hold to the persona module's `session.compact` handler.
+- verdict: rewrite
+- landed: fa23bc4a section 2
+- reason: The module's handler skips every automatic offer until one of those releases it, or until the 85 percent valve, so a session unaware the hold is by design reads it as context pressure. Naming the releases is what sends it to declare at a banked moment instead.
+- passage: **Where the persona module loads, compaction lands at declared boundaries by design.** Its `session.compact` handler holds an automatic compaction until this session declares a boundary at step 8 or the interim ritual below, the seat-stop hook opens one at a registered seat's clean turn end, or the checkpoint CLI's `consent` verb records my release.
 
 ### J002
 - key: Where the transcript shows `/goal` or `/loop` driving the session, or `KIT_EXTERNAL_ENGINE` is set, expect the gate to allow every offer and the native trigger to govern.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/closing.md:30
-- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06.
-- verdict: keep
-- landed: 1aa3fff5 section 4
-- reason: The gate allows the external engine and a driven transcript before it reads any boundary (`hooks/kit-compact-gate.js`, its `external-engine` and `automation` allows), so a driven session compacts on the harness's own trigger and the declarations this file asks for cost it nothing.
+- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06; superseded by J001 on 2026-10-07 by `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, the verdict before it keep.
+- verdict: retire
+- superseded-by: J001
+- reason: The gate that allowed the external engine and a driven transcript is deleted, and the persona module's veto has no such allow, so the scope this sentence carved out is now J001's "where the persona module loads".
 - passage: Where the transcript shows `/goal` or `/loop` driving the session, or `KIT_EXTERNAL_ENGINE` is set, the gate allows every offer and the native trigger governs.
 
 ### J003
@@ -11583,14 +11587,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Under Review-Only the section's staged changes are handed to me for review, which answers the banking rule's question on worktree edits, so the boundary is still declared.
 
 ### J004
-- key: Treat a declaration as covering its own moment only: the gate stops honoring it once a new turn begins, so nothing needs clearing when work resumes.
+- key: Treat a declaration as covering its own moment only: the persona module stops honoring it once a new turn begins, so nothing needs clearing when work resumes.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/closing.md:28
-- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which removed the chapter checkpoint and with it step 0's clear.
-- verdict: keep
+- provenance: `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4, 2026-10-06, which removed the chapter checkpoint and with it step 0's clear; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, which moved the hold to the persona module's `session.compact` handler.
+- verdict: rewrite
 - landed: 1aa3fff5 section 4
-- reason: The gate honors a declared marker only while no new turn has begun in the session it names (`markerMomentHolds` in `hooks/kit-compact-lib.js`, called from the role-boundary leg of `hooks/kit-compact-gate.js`), so a run resuming work has nothing to withdraw. The sentence is what keeps a session from looking for a clear verb that no longer exists.
-- passage: The declaration covers this moment only. The gate stops honoring it once a new turn begins in this session, so nothing needs clearing when work resumes.
+- landed: fa23bc4a section 2
+- reason: The persona module honors a declared marker only while no new turn has begun in the session it names (`markerMomentHolds` in `plugins/personas/hooks/compaction.ts`, read from the module's `session.compact` handler), so a run resuming work has nothing to withdraw. The sentence is what keeps a session from looking for a clear verb that no longer exists.
+- passage: The declaration covers this moment only. The persona module stops honoring it once a new turn begins in this session, so nothing needs clearing when work resumes.
 
 ### K001
 - key: Take a stacked branch's base in by merge at the plan's start, by finishing-work's stacked-parent bullet, and never rebase onto it.

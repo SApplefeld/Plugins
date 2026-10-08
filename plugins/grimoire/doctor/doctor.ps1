@@ -1915,12 +1915,11 @@ else {
 # --- instead.
 
 # --- .kit/ exposure. The kit's project-local state lives in .kit/, and every
-# --- file it holds is machine-local by intent: compact-gate.json carries the
-# --- gate's newest verdict, compact-gate.jsonl carries a session id and a
-# --- timeline of the run's work,
-# --- one line per decision, and compact-hold-nudge.json carries a session id
-# --- per held session with its own throttle stamp, so a listing, a backup or a
-# --- git ls-files discloses the ids that have run here without opening much.
+# --- file it holds is machine-local by intent: compact-consent.json carries
+# --- the session id an operator released, and memory-recognition-nudges.jsonl
+# --- carries one line per nudge naming the record and its moment, so a
+# --- listing, a backup or a git ls-files discloses what has run here without
+# --- opening much.
 # --- (The role-boundary marker lives under the home directory's own .kit,
 # --- keyed by session, and never under a project's, so it is not in this
 # --- directory.) The posture that keeps all of it safe is the directory
@@ -2170,9 +2169,9 @@ else {
 }
 
 # --- Auto-compaction window. The boundary-gated compaction feature needs the
-# --- harness to OFFER a compaction early enough that the gate has something to
-# --- schedule: the gate can only defer an offer, never raise one. That offer
-# --- point is set by autoCompactWindow in user settings.json.
+# --- harness to OFFER a compaction early enough that the persona module's veto
+# --- has something to schedule: the veto can only hold an offer, never raise
+# --- one. That offer point is set by autoCompactWindow in user settings.json.
 #
 # The effective trigger is the configured window minus a reserve (measured,
 # not documented: a configured 100,000 fires near 64,000 and a configured
@@ -2181,9 +2180,9 @@ else {
 # carry, and against where a real run actually sits: context reaches about
 # 100,000 once tools and a plan doc have loaded, chapters rarely close below
 # 200,000, and quality holds until roughly 400,000. So the trigger belongs
-# well above the setup floor and below the point where deferring starts to
+# well above the setup floor and below the point where holding starts to
 # cost something, which puts it near 250,000 with a long runway below the
-# gate's safety valve for a chapter to close. Every displayed number is
+# module's percentage valve for a chapter to close. Every displayed number is
 # derived from $recommendedWindow and $autoCompactReserve rather than
 # restated, so changing one value cannot strand the prose beside it.
 #
@@ -2195,33 +2194,12 @@ else {
 $recommendedWindow = 285000
 $autoCompactReserve = 35000
 $recommendedTrigger = $recommendedWindow - $autoCompactReserve
-# The minimum usable band between the trigger and the valve ceiling. A band
-# thinner than a couple of large turns is inert in practice, with the valve
-# ending deferral almost as soon as the harness starts offering, so it is
-# warned on rather than only the zero-or-negative case. Sized against turns on
-# a real orchestration run (a wide git diff, a big plan-doc read, a subagent
-# report), which run far larger than the small-window probe's 20,000.
-$minUsableBand = 50000
 # The documented floor of autoCompactWindow's accepted range. Below it the
 # harness may clamp or ignore the value, so the real trigger is unknown and a
 # derived trigger number would be fiction; the check reports that state
 # instead of assessing it.
 $windowFloor = 100000
 $settingsPath = Join-Path $claudeDir "settings.json"
-# The valve ceiling is read out of the hook rather than restated here, so the
-# doctor and the gate cannot drift apart. An unreadable constant costs only
-# the trigger-versus-ceiling sub-checks, and that skip is reported below
-# rather than silent: a silent skip is indistinguishable from a healthy
-# result.
-$valveCeiling = $null
-try {
-    $gateSource = Get-Content -LiteralPath (Join-Path $pluginRoot "hooks\kit-compact-gate.js") -Raw -Encoding UTF8 -ErrorAction Stop
-    if ($gateSource -match 'SAFETY_CEILING_TOKENS\s*=\s*(\d+)') { $valveCeiling = [int]$Matches[1] }
-}
-catch {}
-if ($null -eq $valveCeiling) {
-    Report "INFO" "Auto-compaction window" @("Skipped sub-check: the gate's SAFETY_CEILING_TOKENS could not be read from hooks\kit-compact-gate.js, so the trigger-versus-ceiling comparisons are skipped this run.")
-}
 
 $configuredWindow = $null
 $configuredWindowRaw = $null
@@ -2250,22 +2228,8 @@ if (Test-Path -LiteralPath $settingsPath) {
     }
 }
 
-# The default-trigger judgment both no-window branches share: with no window
-# configured, the harness's per-model default trigger sits near the top of
-# the model window, which is above the gate's absolute safety ceiling, so the
-# valve allows every compaction and the gate defers nothing until a window is
-# configured.
-$noWindowJudgment = @()
-if ($null -ne $valveCeiling) {
-    # Stated as expectation rather than measurement: the per-model default
-    # trigger sits near the top of the window by design, which on a large-window
-    # model puts it above the ceiling, but that has not been measured on the
-    # window plan sessions actually run.
-    $noWindowJudgment = @("The default trigger sits near the top of the model window, which on a large-window model is expected to be above the gate's safety ceiling of $valveCeiling, leaving the valve to allow every compaction and the gate to defer nothing until a window is configured.")
-}
-
 if (-not (Test-Path -LiteralPath $settingsPath)) {
-    Report "INFO" "Auto-compaction window" (@("No user settings.json at $settingsPath, so no window is configured and the harness uses its per-model default.") + $noWindowJudgment)
+    Report "INFO" "Auto-compaction window" @("No user settings.json at $settingsPath, so no window is configured and the harness uses its per-model default.")
 }
 elseif (-not $settingsReadable) {
     Report "WARN" "Auto-compaction window" @("$settingsPath could not be parsed, so the configured window cannot be read.")
@@ -2278,8 +2242,7 @@ elseif ($null -ne $configuredWindowRaw) {
 }
 elseif ($null -eq $configuredWindow) {
     $detail = @(
-        "No autoCompactWindow is set, so the harness compacts at its per-model default trigger, near the top of the context window."
-    ) + $noWindowJudgment + @(
+        "No autoCompactWindow is set, so the harness compacts at its per-model default trigger, near the top of the context window.",
         "Recommended: $recommendedWindow (offers a compaction near $recommendedTrigger consumed on the ~1,000,000-token window plan sessions run)."
     )
     if ($Fix -and (Get-Consent "Set autoCompactWindow to $recommendedWindow in $settingsPath?")) {
@@ -2319,39 +2282,16 @@ else {
     # belt-and-braces against the two constants drifting.
     $displayTrigger = [Math]::Max(0, $trigger)
     $detail = @("autoCompactWindow is $configuredWindow, so a compaction is offered near $displayTrigger consumed (the trigger runs about $autoCompactReserve below the configured window).")
-    # The one direction of the gate that is not fail-open: the valve is an
-    # absolute token count assuming the model window plan sessions run on, and
-    # the PreCompact payload carries no model field to derive the real one. A
-    # trigger at or above the ceiling makes the feature inert outright, and a
-    # band thinner than a couple of large turns ($minUsableBand) is inert in
-    # practice, so both warn rather than only the zero-or-negative case.
-    if ($null -ne $valveCeiling -and ($valveCeiling - $trigger) -lt $minUsableBand) {
-        Report "WARN" "Auto-compaction window" ($detail + @(
-            "That trigger leaves less than $minUsableBand tokens of deferral band below the gate's safety ceiling of $valveCeiling, so the valve ends deferral as soon as, or before, the harness starts offering.",
-            "Lower it to $recommendedWindow to restore a usable band between the trigger and the ceiling."
-        ))
-    }
-    elseif ($configuredWindow -ne $recommendedWindow) {
+    if ($configuredWindow -ne $recommendedWindow) {
         # A usable window that is not the recommended one is stale rather than
-        # broken: its trigger is real, and it either cleared the thin-band check
-        # above or that check was skipped for an unreadable ceiling. INFO rather
-        # than WARN for that reason, so a machine that is merely un-migrated does
-        # not report yellow, and the thin-band case above takes precedence when
-        # both apply. Without this branch the recommendation could never reach a
-        # machine that already has a value, since every other branch here answers
-        # only an absent, unparseable, or below-floor one.
+        # broken: its trigger is real. INFO rather than WARN for that reason, so
+        # a machine that is merely un-migrated does not report yellow. Without
+        # this branch the recommendation could never reach a machine that
+        # already has a value, since every other branch here answers only an
+        # absent, unparseable, or below-floor one.
         $mismatchDetail = $detail + @(
             "The recommended window is $recommendedWindow, which offers a compaction near $recommendedTrigger consumed."
         )
-        # The band comparison is directional and depends on a ceiling that may
-        # not have been readable, so it is claimed only where it is true. Moving
-        # DOWN to the recommendation widens the band; moving up to it narrows
-        # one that was already wider, which is still the recommended trade but
-        # not for this reason, so no reason is offered there rather than a
-        # false one.
-        if ($null -ne $valveCeiling -and $configuredWindow -gt $recommendedWindow) {
-            $mismatchDetail += "That also widens the deferral band below the gate's safety ceiling of $valveCeiling, from $($valveCeiling - $trigger) tokens to $($valveCeiling - $recommendedTrigger)."
-        }
         # Replacing a value the operator chose is a wider act than filling in an
         # absent one, so it takes an interactive yes and is withheld from -Yes:
         # an unattended run cannot tell a deliberate window from a stale one,

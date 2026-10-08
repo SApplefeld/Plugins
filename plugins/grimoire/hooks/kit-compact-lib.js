@@ -1,37 +1,24 @@
-// Shared library for the compaction gate's release markers, its decision
-// record, and the transcript reading its consumers share.
+// Shared library for the compaction release markers, the registry stamps,
+// and the output-channel renderer the kit's writers share.
 //
 // The release markers are two small JSON files: the role-boundary marker, one
 // per session under the machine-local root roleBoundaryRoot resolves below,
 // and the operator-consent marker, one per project in the scratch directory
 // kitScratchDir resolves. Each is the signal between two programs that must
 // agree on its path and shape: the checkpoint CLI (kit-compact-checkpoint.js)
-// and the seat-stop hook write them, and the PreCompact gate
-// (kit-compact-gate.js) reads them to decide whether a pending auto-compaction
-// may land, consuming (deleting) the one that released it. Single-sourcing the
-// paths, the read/write/clear operations, and the match rule (markerMatches,
-// with its age constants) here is what keeps the writers, the gate, and the
-// status report from drifting apart.
-//
-// The gate's decision record is three project-local files in that same
-// resolved scratch directory (the state compact-gate.json, its append-only
-// compact-gate.jsonl log, and the deferral nudge's per-session hold stamps in
-// compact-hold-nudge.json), and they are here for the same single-sourcing
-// reason: the gate writes, the deferral nudge writes and reads, and the
-// checkpoint CLI's status report reads, so the paths and the shapes belong in
-// one place. The section header over that record below carries the file-by-file
-// account of which writer touches which.
-//
-// The transcript helpers (readTranscriptCapped, stripLocalCommandOutput, and
-// the automation detection) live here because the gate's automation scan and
-// the marker moment rule both read transcript text, and both must neutralize
-// local-command echoes and harness-injected lines the same way, so two
-// near-duplicate copies of those semantics would drift apart.
+// and the seat-stop hook write them, and the persona module's session.compact
+// handler reads them (plugins/personas/hooks/compaction.ts, which carries its
+// own copy of the paths, the match rule and the age bounds) to decide whether
+// an automatic compaction may run. Single-sourcing the paths and the
+// write/read/clear operations here is what keeps the two writers from
+// drifting apart; test/kit-compact-lib.test.js pins the record shape against
+// the module's reader.
 //
 // Node core modules only, CommonJS, zero third-party dependencies. Every exported function
-// that touches the filesystem is wrapped so it never throws: a filesystem
-// hiccup degrades to a null/refusal result instead of trapping the caller,
-// matching kit-plan-lib.js.
+// that touches the filesystem is wrapped so it never throws, save
+// ensureScratchDirIgnored, whose recursive create is left to throw into its
+// caller's own handling: a filesystem hiccup degrades to a null/refusal result
+// instead of trapping the caller, matching kit-plan-lib.js.
 
 'use strict';
 
@@ -39,23 +26,16 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { pathErrnoClass, findTranscript } = require('./kit-plan-lib.js');
+const { pathErrnoClass } = require('./kit-plan-lib.js');
 // The share screen every home-anchored path the kit opens takes: a home spelled
 // as a network share blocks a synchronous open for the SMB timeout, so the
 // role-boundary root below refuses one before any read or write reaches it.
 const { namesNetworkShare } = require('./kit-network-lib.js');
-// Three shared reads from kit-read-lib. The gate-log tail read below takes
-// readFully because a single readSync may legally return fewer bytes than asked
-// for, and the fill loop that closes it belongs to every hook read rather than
-// to this one. The hold-stamp read takes readFileBounded, which settles a
-// file's kind and size on the OPEN DESCRIPTOR: judging a name and then opening
-// it leaves a window a local process can swap the path inside, and off win32
-// the open is non-blocking, so a FIFO planted there is refused rather than
-// waiting for a writer that never comes. The marker directory's listing and
-// sweep take listBoundedNames, which reads a directory incrementally: readdirSync
-// materializes the whole of it before the first entry can be judged, so a cap on
-// the loop alone bounds what is kept and nothing about what was read.
-const { readFully, readFileBounded, listBoundedNames } = require('./kit-read-lib.js');
+// The marker directory's listing and sweep take kit-read-lib's
+// listBoundedNames, which reads a directory incrementally: readdirSync
+// materializes the whole of it before the first entry can be judged, so a cap
+// on the loop alone bounds what is kept and nothing about what was read.
+const { listBoundedNames } = require('./kit-read-lib.js');
 
 // The directory every project-scoped file in this library lives in, for a
 // given project directory; the role-boundary marker is the one file here that
@@ -66,9 +46,9 @@ const { readFully, readFileBounded, listBoundedNames } = require('./kit-read-lib
 // beside the work it describes. But the memory store at ~/.claude is a git
 // repository the sync pushes to a remote that reaches every machine, and a
 // seat whose project directory is the store's coordinator directory would
-// otherwise drop its gate state, its journal, and its consent marker into that
+// otherwise drop its consent marker and its other scratch files into that
 // replicated tree. None of these files is meaningful on another machine: they
-// name a session id, a local plan path, and a local clock, and a journal that
+// name a session id, a local plan path, and a local clock, and a log that
 // replicates carries one box's decisions into every other box's copy. So a
 // project directory lying inside the store resolves instead to a home-
 // anchored directory outside it, which nothing syncs, keeping the store-
@@ -76,9 +56,10 @@ const { readFully, readFileBounded, listBoundedNames } = require('./kit-read-lib
 // collide.
 //
 // The store root is the home directory's .claude, read at call time so a
-// fixture home redirects it. One resolver serves every writer here and the
-// gate's own reader, which is what keeps a marker's writer and its reader
-// agreeing on where it lives.
+// fixture home redirects it. One resolver serves every writer here, and the
+// persona module's compaction.ts carries a port of it for its consent read,
+// which is what keeps a marker's writer and its reader agreeing on where it
+// lives.
 function kitScratchDir(cwd) {
     const storeRoot = path.join(os.homedir(), '.claude');
     const rel = path.relative(storeRoot, path.resolve(cwd));
@@ -86,134 +67,6 @@ function kitScratchDir(cwd) {
     return underStore
         ? path.join(os.homedir(), '.kit', 'store', rel)
         : path.join(cwd, '.kit');
-}
-
-// The checkpoint CLI as a command a model-facing text can tell a session to
-// run. The deferral nudge's hold directive composes it, and the renderer stays
-// here rather than in that hook so a second composer takes the same guards.
-// This file ships as a plugin and runs in every project, so a repo-relative
-// path would resolve only where the kit is dogfooded in its own checkout;
-// __dirname is this module's installed location, never a payload, transcript,
-// or repo value. Forward slashes because node accepts them on Windows and a
-// backslash path does not survive every shell.
-//
-// It is read from __dirname rather than from CLAUDE_PLUGIN_ROOT the way the
-// version nudge and the doctrine refresh read theirs: those two print a
-// diagnostic about the plugin the harness says is loaded, while this value
-// hands over a line to execute, and an environment value can name a directory
-// this module was never installed in. The grammar below refuses
-// metacharacters, not a wrong directory.
-//
-// Provenance is not the whole answer here, and this is where this note
-// departs from the identically built one in kit-compact-gate.js: that one
-// reaches the operator's stderr, while this one lands in the model's context
-// as a command to run. Double quotes do not neutralize $(...) or backticks,
-// both of which are legal in a POSIX directory name, so an install path
-// carrying either would compose a line that executes something else when
-// run. The repo's own precedent is to gate a composed runnable command rather
-// than rest on the sanitizer around it (the doctor's git branch -m remedy,
-// docs/security-model.md). So the path is held to a conservative grammar, and
-// where it fails, the command clause is dropped and the rest of the text
-// still ships: the session is told what to do in prose and can find the CLI
-// itself.
-//
-// The grammar is not the whole of what this value takes on its way out.
-// __dirname on an installed kit is home-anchored, so the account name in it is
-// elided before the path is rendered, at commandClausePath below, which also
-// owns the second reading that drops the clause.
-const CHECKPOINT_CLI = __dirname.split('\\').join('/') + '/kit-compact-checkpoint.js';
-
-// The grammar: letters, digits, space, and the punctuation a real install path
-// needs (dot, dash, underscore, colon for a drive letter, forward slash, tilde
-// for an 8.3 short name, parentheses for "Program Files (x86)", plus). Every
-// metacharacter that survives double-quoting is outside it, the dollar sign and
-// the backtick above all, and so is every non-ASCII byte; the path renders
-// inside double quotes, where the parentheses, tilde and space this admits are
-// inert. The length is bounded so no pathological path reaches the context.
-//
-// Its subject is the part of the rendered command composed out of a VALUE. The
-// `$HOME` reference commandClausePath puts in front of a home-anchored install
-// path is this file's own fixed text rather than anything read from anywhere, so
-// holding it to a grammar that refuses a dollar sign would be refusing the
-// guard's own output.
-const SAFE_CLI_PATH = /^[A-Za-z0-9 _.:/~()+-]{1,256}$/;
-
-function safeCommandPath(cliPath) {
-    return typeof cliPath === 'string' && SAFE_CLI_PATH.test(cliPath);
-}
-
-// The installed CLI as the text of a runnable command, or null where no such
-// text can be composed and the caller falls back to naming the tool in prose.
-//
-// The home prefix is elided because an installed kit lives under
-// ~/.claude/plugins/cache/, so the composed command carries the OS account name
-// into the model's context on every fire otherwise. That is the floor the
-// checkpoint CLI this command names holds its own output to, and this is a
-// second producer on the same channel: the grammar above is a metacharacter
-// screen rather than an elision and admits an account name in full.
-//
-// The elision is `$HOME` rather than `~` because a rendered clause promises a
-// line to RUN. The composed line, run in either the POSIX shell or PowerShell a
-// seat has in front of it, reaches the directory os.homedir() names, while a
-// tilde inside double quotes is expanded by neither shell and would hand over a
-// command that cannot work.
-// Containment is decided by path.relative, on components rather than characters
-// and case-insensitively on win32, which is how the checkpoint CLI's own display
-// guard decides the same question.
-//
-// The grammar then runs over the TAIL alone, which is the whole of what is
-// composed here out of a value. A home directory carrying a metacharacter
-// therefore renders a safe command rather than dropping the clause, the elision
-// having already taken that text out of the line.
-//
-// A home directory that cannot be read at all answers null and drops the clause.
-// "This path is not under the home directory" and "no home directory is
-// knowable" are different facts, and only the first licenses printing an
-// absolute path into this channel; the prose fallback costs the reader a lookup
-// and costs nobody an account name.
-function commandClausePath(cliPath) {
-    if (typeof cliPath !== 'string' || cliPath === '') return null;
-    let home = '';
-    try { home = os.homedir(); } catch { home = ''; }
-    if (typeof home !== 'string' || home === '') return null;
-    let tail = cliPath;
-    let prefix = '';
-    if (path.isAbsolute(cliPath)) {
-        const rel = path.relative(home, cliPath);
-        if (path.isAbsolute(rel) || /^\.\.(?:[\\/]|$)/.test(rel)) {
-            // Somewhere else on disk, so the path carries no home prefix and is
-            // rendered as itself.
-        } else if (rel === '') {
-            // The CLI path IS the home directory, which no install produces;
-            // there is no tail to render and nothing worth guessing at.
-            return null;
-        } else {
-            prefix = '$HOME/';
-            tail = rel.split('\\').join('/');
-        }
-    }
-    return safeCommandPath(tail) ? prefix + tail : null;
-}
-
-// The one shared renderer for a checkpoint-CLI command mention. Given VERB
-// ('status' or 'boundary') and an optional CLIPATH (defaulting to
-// CHECKPOINT_CLI, so a test can inject a fixed path), it renders the runnable
-// clause `node "<path>" <verb>` where the path passes commandClausePath's
-// screen, or, where it does not, a prose clause naming the file and the verb
-// that carries no home-anchored or refused text. Every caller composes its
-// own sentence around the returned clause; none of them holds a copy of
-// either wording, so a reword of the fallback prose or the runnable shape
-// changes every call site at once.
-function checkpointCliClause(verb, cliPath) {
-    const target = (cliPath === undefined) ? CHECKPOINT_CLI : cliPath;
-    const shown = commandClausePath(target);
-    if (shown !== null) {
-        return { clause: 'node "' + shown + '" ' + verb, runnable: true };
-    }
-    return {
-        clause: "the kit's kit-compact-checkpoint.js with the " + verb + ' argument',
-        runnable: false
-    };
 }
 
 // Create DIR, a scratch directory a caller has already resolved (kitScratchDir's
@@ -268,15 +121,12 @@ function ensureScratchDirIgnored(dir) {
     return true;
 }
 
-// Make sure the project directory CWD's own scratch directory exists, marked
-// ignored, and never throw. The role-boundary marker lives under the home
-// rather than under the project, so its writers no longer create the project's
-// scratch directory as a side effect of writing it, and the gate records a
-// decision only where that directory already exists
-// (gateScratchTarget below). Without this a fresh linked worktree recorded no
-// deny-interactive and the deferral nudge's hold directive, which reads that
-// record, never fired there. The two marker writers that stand in a project
-// (the boundary verb from its shell's directory, the seat-stop hook from its
+// Make sure the project directory CWD's own scratch directory exists: create
+// the project's .kit/ (or its store-backed counterpart) with its self-ignore
+// file, and never throw. The role-boundary marker lives under the home
+// rather than under the project, so writing it does not create the project's
+// scratch directory. The two marker writers that stand in a project (the
+// boundary verb from its shell's directory, the seat-stop hook from its
 // payload's cwd) call this after the marker write, so the marker's own
 // success never turns on it.
 function ensureProjectScratchDir(cwd) {
@@ -288,55 +138,23 @@ function ensureProjectScratchDir(cwd) {
     }
 }
 
-// Skew allowance for a stored timestamp that sits in the future: a marker's
-// writtenAt, a hold record's at, a hold stamp's nudgedAt. A small clock
+// Skew allowance for a stored timestamp that sits in the future. A small clock
 // adjustment between the write and the read is tolerated, but a far-future
 // timestamp is treated as illegible rather than honored, so a clock change can
-// never mint an effectively immortal record. One constant for every reader
-// here and for kit-registry-stamp.js, which holds the registry's own stamps to
-// the same allowance.
+// never mint an effectively immortal record. kit-registry-stamp.js holds the
+// registry's own stamps to it, and the persona module holds a marker's
+// writtenAt to its own copy of the same figure.
 const CHECKPOINT_FUTURE_SKEW_MS = 2 * 60 * 1000;
 
 // Compare two session ids as opaque, case-insensitive strings (session UUIDs
 // are surfaced in mixed case across the harness). One rule for every surface
 // that has to agree on session identity, rather than a list of them: the
-// marker match rule, the PreCompact gate's landing sweep, the checkpoint CLI's
-// marker verbs, and the per-session lookups behind the deferral nudge's hold
-// path (interactiveHoldOpen and the hold stamps). False when either side is
-// missing, which is exactly the treat-as-absent handling a record carrying no
-// session needs.
-//
-// Every one of those compares a value a WRITER here stored, and each of those
-// writers stores it through gateText, so a caller looking a session up in one of
-// these files passes the id through gateText first: this rule decides case and
-// whitespace, and that one decides the spelling.
+// checkpoint CLI's marker verbs, the registry entry's own corroboration below,
+// and the session-start hook. False when either side is missing, which is
+// exactly the treat-as-absent handling a record carrying no session needs.
 function sameSessionId(a, b) {
     if (!a || !b) return false;
     return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-}
-
-// The size of the REGULAR file at this path: 0 when nothing is there, and null
-// when the path cannot be safely written through, either because something
-// other than a regular file is sitting on it (a symlink or junction, a
-// directory, a FIFO) or because its kind could not be determined at all. The
-// check is an lstat, so a link is judged as a link rather than as whatever it
-// points at.
-//
-// Only ENOENT reads as "nothing there, go ahead". Every other lstat failure
-// (EACCES, EPERM, EBUSY: a permission, a lock, a scanner holding the file) is
-// an unknown answer, and answering an unknown with the go-ahead value is the
-// mistake readGateStateResult exists to avoid. Every caller decides what an
-// unknown means for itself: endsOnLineBoundary turns this null into false, its
-// own fail-safe, so a transient failure yields a spare blank line rather than
-// the fused record a go-ahead answer would produce.
-function regularFileSize(target) {
-    let st;
-    try {
-        st = fs.lstatSync(target);
-    } catch (err) {
-        return (err && err.code === 'ENOENT') ? 0 : null;
-    }
-    return st.isFile() ? st.size : null;
 }
 
 // The temporary path an atomic write renames from, shared by every writer in
@@ -362,523 +180,11 @@ function atomicTmpPath(target) {
     return target + '.tmp.' + process.pid + '.' + crypto.randomBytes(6).toString('hex');
 }
 
-// ---------------------------------------------------------------------------
-// The gate's decision record.
-//
-// The PreCompact gate takes a verdict on every auto-compaction offer and, until
-// it writes one down, leaves no trace: a session held for an hour and a
-// safety-valve fire are indistinguishable afterwards. Three project-local
-// files under .kit/ carry that record. The STATE (compact-gate.json) is the
-// newest decision, the newest allow, and the per-session list of interactive
-// holds; it is rewritten in place, so it stays one small file. Its readers are
-// not one set: the checkpoint CLI's status report reads the decision, while
-// the per-session hold list is the deferral nudge's alone, since the question
-// it answers is whether ONE session is being held and status asks about the
-// project. The LOG (compact-gate.jsonl) is append-only and is what an operator
-// reads to answer "how often, and why" across a whole run. The HOLD STAMPS
-// (compact-hold-nudge.json) are the deferral nudge's own per-session clock,
-// which cannot live in the state because every gate write rebuilds that file
-// from a fixed key set (see HOLD_NUDGE_MAX_ENTRIES); the status report reads
-// that file too, but only to say when it is refusing the nudge's writer, which
-// is a state nothing else surfaces.
-//
-// The writers are not evenly spread across the three, and the log carries TWO
-// record classes. The state has one writer: the gate records a decision
-// (recordGateDecision, from the PreCompact hook). The stamp file has one,
-// recordHoldNudge, from the tool loop. The log has two, since the nudge
-// journals that it spoke through logHoldNudge beside the decision recorder's
-// own append. A decision line carries `verdict` and a nudge line carries
-// `event`, which is how a reader partitions the log without guessing. A
-// consumer folding every line through gateRecord() sees only decisions, since
-// that rebuilder returns null for a record with no recognized verdict: that is a
-// correct decision-only reading, not a whole-log one.
-//
-// All three files are written after the verdict, or after the emission decision,
-// is already made, and a failure to write cannot change it. recordGateDecision
-// swallows every failure and returns nothing a caller branches on, so a full
-// disk or a read-only .kit degrades to a gate that decides exactly as it did
-// before, silently. The nudge stamp is the exception and it is deliberate: a
-// stamp is not diagnostic, it IS the interval, and it is the only cross-process
-// carrier that interval has, so recordHoldNudge returns a boolean its caller
-// gates the emission on, and a failed stamp yields silence. The journal line
-// stays diagnostic on every writer. The ordering matters as much as the
-// swallowing: a path that could block (a FIFO planted at any of them) cannot
-// delay a verdict that has already been emitted.
-//
-// The record is written only in a project that is ALREADY kit-governed. An
-// existing .kit/ directory is the evidence: the gate runs on every
-// auto-compaction offer on the machine, including in repositories that have
-// nothing to do with the kit, and creating an untracked directory of session
-// ids and token readings in someone's unrelated checkout is a cost the
-// diagnostic does not earn. What makes a project kit-governed is a marker
-// write: the boundary verb and the seat-stop hook each ensure the project's
-// own scratch directory after writing their marker (ensureProjectScratchDir
-// above), so a session that has declared or banked a boundary in a project is
-// recorded there from then on, and a stranger's checkout gets nothing.
-//
-// All three files must be regular files, and .kit/ itself must be a real
-// directory rather than a link to one. A symlink, junction, or FIFO planted at
-// any of those four paths is never followed: appending through a link writes
-// into its target on every assistant turn, trimming through one lands a
-// megabyte of an arbitrary readable file inside .kit/, and a FIFO blocks a read
-// or a write forever where no try/catch can rescue it. Each check is an lstat,
-// so a link is judged as a link rather than as whatever it points at.
-//
-// Three of the four paths REFUSE on that verdict and the hold stamps REMOVE the
-// path instead, which is a difference in what a refusal costs rather than in
-// what is judged. The gate state, the log and .kit/ itself are written by the
-// decision recorder, whose refusal is a diagnostic line not written, and they
-// are read by surfaces that report absence honestly. The stamp file IS an
-// interval: refusing it silences a held session's directive, and neither a link
-// nor an oversized file ever resolves on its own, so a writer that only refused
-// would disable that interval permanently. Since neither shape is one that
-// writer can produce, neither holds a stamp to preserve, and the path is
-// unlinked before the write (recordHoldNudge). The readings that MIGHT sit over
-// a real list all refuse there exactly as they do here: a refused read, an lstat
-// that could not answer, and a read that ended short of what the descriptor
-// promised, which is a fault under the read rather than a shape, and so says
-// nothing about whose file it is. The hold stamps are read through the shared
-// bounded reader, which settles kind and size on the descriptor and follows a
-// link only when a caller does not ask otherwise, and that reader's caller here
-// asks BOTH ways: an lstat first, which is what makes a link a distinguishable
-// answer rather than one more unreadable file, and the reader's own opt-in
-// refusal, which closes the window between that lstat and the open
-// (readHoldNudgesResult).
-//
-// A HARDLINK is the member of that class these checks admit: it is a regular
-// file and passes every lstat above. What a planted one then RECEIVES is a
-// question about the WRITER rather than about the check, and the four paths do
-// not answer it alike. .kit/ itself is not of the class at all, since no
-// hardlink to a directory can be created. The state and the hold stamps are
-// published by writeJsonAtomic, which writes a temp file and renames it over
-// the name: a rename replaces the directory entry, so a hardlink planted at
-// either path is orphaned by the first write and goes on holding whatever it
-// was linked to. The LOG is the one path a write reaches through an existing
-// inode, since the decision recorder and logHoldNudge both append to the
-// name in place, so a hardlink there receives every record appended until the
-// log next crosses GATE_LOG_MAX_BYTES and trimGateLog renames a rebuilt file
-// over it, which orphans the link exactly as the other two writers do. That one
-// path is left open on purpose, and the exposure is bounded by what lands
-// there: this
-// library's own JSONL decision and nudge lines, in a project the actor can
-// already write to.
-//
-// Those checks NARROW the window rather than closing it, the same honest
-// account readTranscriptCapped gives of its own isFile() check: the path is
-// re-resolved by the open that follows, so a swap landing between the two is
-// still possible. Closing it needs a single open plus an fstat on the
-// descriptor, a restructure this diagnostic does not earn, and what rides
-// through the residual window is well-formed JSON appended to a path the actor
-// already controls. The writers that publish through a temporary file, which is
-// writeJsonAtomic for the state, the hold stamps and the markers
-// and trimGateLog for the rebuilt log, create that temporary exclusively
-// (O_EXCL) under an unpredictable name, so the one path an attacker could
-// otherwise pre-plant is not guessable and would fail the open anyway. The two
-// log APPENDERS go through no temporary file at all, the decision recorder and
-// logHoldNudge both reaching the log's name in place: what an attacker can
-// pre-plant there is the log path itself, which is the hardlink exposure the
-// paragraph above states and accepts rather than one this defence covers. The hold stamps' own read closes the kind half of that window rather
-// than narrowing it, since the shared reader it goes through settles kind and
-// size on the descriptor it consumes; what its lstat leg answers for is the link
-// question alone.
-//
-// That acceptance now has to cover callers in the TOOL LOOP as well as the
-// PreCompact one, since the nudge journals from there and a stalled tool loop
-// is the one failure that hook must never cause. It still holds, on a narrower
-// argument. Reaching the window needs a hostile writer already inside .kit/ in
-// this project, racing a path that opens for a few microseconds per fire; the
-// blocking shapes are refused by the lstat legs above; and the harness's own
-// hook timeout bounds anything that does slip through, so the worst case is one
-// dropped journal line or one timed-out hook process, never a wedged loop.
-//
-// Every value stored here that came from outside (the harness's session id, and
-// a prior state file, which is user-writable
-// like every other file under .kit/) is rebuilt field by field on the way in and
-// on the way out, so neither a forged state file nor an odd payload can grow the
-// file without bound or push control characters into an operator's terminal.
-// ---------------------------------------------------------------------------
-
-// Path to the gate's decision state for a given repo root.
-function gateStatePath(cwd) {
-    return path.join(kitScratchDir(cwd), 'compact-gate.json');
-}
-
-// Path to the gate's append-only decision log for a given repo root.
-function gateLogPath(cwd) {
-    return path.join(kitScratchDir(cwd), 'compact-gate.jsonl');
-}
-
-// The log's bound. Both record classes run a few hundred bytes or less, and
-// both writers are rare: the gate fires at most once per assistant turn, and
-// the nudge at most once per NUDGE_INTERVAL_MS per tool batch while a hold
-// stands. Their sum is still well inside 2 MB for months of dense use; past it
-// the writer keeps the newest 1 MB and drops the rest. Trimming to half the cap
-// rather than to the cap itself is what keeps the rewrite rare: at a 1-byte
-// margin every subsequent append would rewrite the whole file.
-const GATE_LOG_MAX_BYTES = 2 * 1024 * 1024;
-const GATE_LOG_KEEP_BYTES = 1 * 1024 * 1024;
-
-// How long a session's hold stands without a new denial before a reader
-// treats it as finished rather than as the hold currently in force.
-//
-// A hold's whole claim is about right now: "the gate is holding this
-// session's offers" is what makes a nudge act. Nothing on disk marks the end
-// of one, because the events that end a hold without an allow reaching this
-// file leave no trace to write: a manual /compact (the PreCompact matcher is
-// auto-only, so the gate never runs), a session that simply ends, an offer
-// that never comes again. So the newest denial's age is the only evidence of
-// whether the hold is still real, and past this window the record is history
-// rather than state.
-//
-// The floor is the longest gap there can be between two denials of one genuine
-// hold, which is one assistant turn, which is the longest tool call a session
-// makes: dispatched implementer and reviewer runs have been measured at 22,
-// 27, 67 and 73 minutes. Four hours clears the longest of those by better than
-// three times, so no real hold is ever cut short. The ceiling is that a hold
-// must not survive a break long enough to make it a different working session:
-// four hours does not survive a night, a morning off, or a day spent in
-// another project, where a stale hold would draw a directive to declare a
-// boundary nobody is waiting on.
-//
-// Both release markers' windows are defined as this value outright,
-// CONSENT_MAX_AGE_MS and ROLE_BOUNDARY_MAX_AGE_MS alike, so tuning this
-// constant retunes two windows and not one: how long an operator-consent
-// marker stays honorable, and how long a seat's declared role boundary does.
-// Those are the windows in the release design bounded by code rather than
-// prose; the derivations and their reasoning live at those constants.
-const GATE_HOLD_MAX_IDLE_MS = 4 * 60 * 60 * 1000;
-
-// The verdicts a record may carry, and the only values recordGateDecision
-// accepts: an unrecognized verdict is not written at all, because a state file
-// the CLI and the nudge read has to be legible to both.
-const GATE_VERDICTS = ['allow', 'deny-interactive'];
-
-// The reasons a record may carry: the gate clause that decided, and the two
-// release reasons a marker-driven allow journals (role-boundary,
-// operator-consent), which are how a session's compaction history states
-// which release landed it. The vocabulary is closed and this library is the
-// only thing that writes it, so a value outside it came from a hand-edited
-// state file rather than from the gate. Reason reaches the CLI's status
-// report, a channel a model reads, and the charset and length caps alone would
-// let arbitrary prose through; checking the value against the list it is drawn
-// from costs nothing and bounds it to this file's own words.
-//
-// gateRecord drops a reason outside the list to null, which would land a deny
-// with no clause on it; the list is exported so a pin can read the gate's own
-// literals and hold them against this one.
-const GATE_REASONS = [
-    'not-auto', 'external-engine', 'no-goal',
-    'automation', 'valve', 'illegible',
-    'role-boundary', 'operator-consent'
-];
-
-// A string safe to store and to print back: printable ASCII, length-capped,
-// null for anything else (an empty string included, which reads as absent
-// everywhere here). Applied to every string field on the way in and again on
-// the way out, so a state file hand-edited between the two still cannot carry
-// control characters into a terminal or megabytes into the next write.
-function gateText(value) {
-    if (typeof value !== 'string') return null;
-    const clean = value.replace(/[^\x20-\x7E]/g, '').slice(0, 128);
-    return clean === '' ? null : clean;
-}
-
-// A count safe to store and to print back: a non-negative integer, clamped.
-// The clamp is what keeps the "an integer and nothing else" bound the status
-// report claims: a planted consumed of 1e308 is a finite number, and
-// JavaScript renders it as "1e+308", which is neither an integer nor anything
-// an operator can read as a token count. A billion is past every real reading
-// (tokens per context, minutes per hold) and still renders in full digits.
-const GATE_COUNT_MAX = 1000000000;
-
-function gateCount(value) {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
-    return Math.min(Math.floor(value), GATE_COUNT_MAX);
-}
-
-// Rebuild a decision record from an arbitrary object, or null when it is not
-// one. The shape is the whole contract between the gate (writer) and the CLI
-// and nudge (readers): `at` when it was taken, `verdict`, `reason` naming the
-// clause that decided, `consumed` the token reading behind it or null, and
-// `session` the harness's id for the compacting session. A record written
-// before this shape settled may carry other keys; they are dropped on the
-// rebuild.
-function gateRecord(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    if (!GATE_VERDICTS.includes(value.verdict)) return null;
-    const reason = gateText(value.reason);
-    return {
-        at: gateText(value.at),
-        verdict: value.verdict,
-        reason: GATE_REASONS.includes(reason) ? reason : null,
-        consumed: gateCount(value.consumed),
-        session: gateText(value.session)
-    };
-}
-
-// The reason an interactive deny carries: no boundary of the session's own and
-// no operator release covered the offer. The list exists so the hold reader
-// below and the gate's own literal are held together by a pin rather than by
-// one file's spelling.
-const INTERACTIVE_HOLD_REASONS = ['no-goal'];
-
-// The gate state's third key, beside the newest decision and the newest allow:
-// one record per session, newest first, of the interactive denies this
-// project's gate has taken.
-//
-// It is a per-session list rather than a reading of the single decision slot,
-// and that is forced by the slot's writers. Every gate process in a project
-// writes lastDecision for every verdict it takes, so on a checkout carrying
-// several sessions the seats' denies alternate in it, and a hold read from
-// there is refused whenever another seat decided last. A hold is one session's
-// own fact and is stored as one.
-//
-// The cap is a backstop against an unbounded file, and it is also the only
-// bound on what the list HOLDS. The idle ceiling interactiveHoldOpen applies
-// bounds the ANSWER instead: it refuses a record it has aged out and leaves
-// that record in the list, and nothing rebuilds the list by age, gateHolds
-// keeping whatever it reads. That is where this parts from the hold-stamp list,
-// whose own reader drops a spent entry outright and whose eviction can
-// therefore only ever discard one. So an eviction here can drop a record that
-// is still live, wherever more sessions than the cap have taken an interactive
-// deny in one project since the oldest kept one; the evicted session is then
-// unheld until its own next deny, which past the compaction trigger is its next
-// assistant turn: one silence rather than a false hold, which is the direction
-// every failure here takes.
-const INTERACTIVE_HOLD_MAX_ENTRIES = 8;
-
-// The hold records a state carries, rebuilt: an array, newest first, holding at
-// most one record per session, and empty for every unusable shape (an absent
-// key, a value that is not an array, entries that are not records, and a record
-// with no session to own it).
-//
-// The walk is bounded BY INDEX at the cap, on readHoldNudgesResult's reasoning: a
-// planted array of ten thousand entries is not walked, while a bound on how
-// many VALID entries are kept would let every invalid one be examined first. A
-// second record for a session already kept is dropped rather than kept behind
-// the first, so newest-first order is what decides which record answers for a
-// session.
-function gateHolds(value) {
-    if (!Array.isArray(value)) return [];
-    const holds = [];
-    const scanned = Math.min(value.length, INTERACTIVE_HOLD_MAX_ENTRIES);
-    for (let i = 0; i < scanned; i += 1) {
-        const record = gateRecord(value[i]);
-        if (!record || !record.session) continue;
-        if (holds.some((kept) => sameSessionId(kept.session, record.session))) continue;
-        holds.push(record);
-    }
-    return holds;
-}
-
-// The interactive hold this state shows for one session RIGHT NOW, as that
-// session's own newest interactive deny, or null. A reader asking "is this
-// session being held?" asks the hold list above, and asking it here rather
-// than at the reader keeps the deny vocabulary and the two bounds in the file
-// that writes them.
-//
-// Four things must hold. The record must be a deny-interactive carrying the
-// hands-on reason, so every allow reads as no hold; the list carries only what
-// this file wrote, and those two checks are what a hand-edited state file
-// meets. It must name THIS session, which the lookup itself is, since a hold
-// is only ever one session's to act on. And its timestamp is held to the
-// four-hour idle ceiling and the future-skew allowance: past the trigger the
-// harness re-offers every assistant turn, so a decision no newer than that is
-// a finished hold rather than a standing one, and a record dated into the
-// future has an age no ceiling can exceed.
-//
-// A state file carrying no hold list rebuilds to an empty one and answers null
-// here, so the session is unheld until its own next deny records it, which past
-// the trigger is its next assistant turn. Falling back to the decision slot is
-// what this predicate exists not to do: that slot's newest record can belong to
-// any session that took an offer in the project.
-//
-// The record carries no count and no start, because a deny-interactive
-// aggregates nothing: what it does carry is `consumed`, the token reading
-// behind the decision, which is the figure the deferral nudge's floor is read
-// against.
-//
-// The session id is required rather than optional: every caller of this one
-// is deciding whether to act, so an unusable id answers null rather than
-// matching whatever the list happens to hold.
-function interactiveHoldOpen(state, nowMs, sessionId) {
-    if (typeof sessionId !== 'string' || sessionId === '') return null;
-    // Compared as the record stores it: every session field in this file goes in
-    // through gateText, so the lookup applies the same rule to the id it is
-    // handed rather than comparing a stored spelling against a raw one
-    // (holdNudgedAt states the same reasoning for the stamp file).
-    const session = gateText(sessionId);
-    if (!session) return null;
-    const holds = state ? gateHolds(state.interactiveHolds) : [];
-    const record = holds.find((entry) => sameSessionId(entry.session, session)) || null;
-    if (!record) return null;
-    if (record.verdict !== 'deny-interactive') return null;
-    if (!INTERACTIVE_HOLD_REASONS.includes(record.reason)) return null;
-    const now = (typeof nowMs === 'number' && Number.isFinite(nowMs)) ? nowMs : Date.now();
-    const at = Date.parse(record.at);
-    if (!Number.isFinite(at)) return null;
-    if (now - at > GATE_HOLD_MAX_IDLE_MS) return null;
-    if (at - now > CHECKPOINT_FUTURE_SKEW_MS) return null;
-    return record;
-}
-
-// Whole minutes between an ISO timestamp and now, or null when it does not
-// parse. Negative ages (a clock adjustment, a hand-edited file) floor at zero:
-// every surface that reports one states it as an elapsed duration, and a
-// negative duration is not a thing an operator can act on.
-function wholeMinutesSince(iso, nowMs) {
-    const at = typeof iso === 'string' ? Date.parse(iso) : NaN;
-    if (!Number.isFinite(at)) return null;
-    const now = (typeof nowMs === 'number' && Number.isFinite(nowMs)) ? nowMs : Date.now();
-    return Math.max(0, Math.floor((now - at) / 60000));
-}
-
-// The state file's read cap. The writer produces a few hundred bytes and never
-// grows: it holds two records and a list of hold records bounded at
-// INTERACTIVE_HOLD_MAX_ENTRIES, each rebuilt field by field with capped
-// strings. Anything past a quarter megabyte is not something this wrote,
-// and reading it whole on a per-offer hook path is cost with nothing to gain.
-const GATE_STATE_MAX_BYTES = 256 * 1024;
-
-// Read the gate state, distinguishing a file that is not there from one that
-// cannot be read right now. Returns { ok, state, reason }:
-//
-//   { ok: true,  state }        legible, rebuilt (state is null when the file is
-//                               absent, unparseable, or not an object: none of
-//                               those carries a hold to lose)
-//   { ok: false, state: null }  the answer is unknown, so no caller may act as
-//                               though the file were absent
-//
-// reason names which refusal produced an { ok: false }: 'kind' (something that is
-// not a regular file), 'oversized' (past the read cap), 'unreadable' (the read
-// itself was refused) or 'lstat' (the path's own kind could not be read). Every
-// decision path treats the four alike; the status report does not, because the
-// remedy it prints differs by leg and only one of the four is permanent. The
-// reason is carried out of here rather than re-derived because it cannot be
-// re-derived: an lstat run afterwards succeeds and reports an ordinary regular
-// file for the 'unreadable' leg, so a reporter re-asking that way describes a
-// scanner's lock as a corrupt file and tells the operator to delete the
-// standing hold records.
-//
-// The distinction is load-bearing on the write path. A file locked by an
-// indexer or an antivirus scanner (EBUSY, EPERM) is not an absent file, and
-// treating it as one would rewrite every session's live hold as a state
-// holding none, destroying exactly the reading this record exists to produce.
-//
-// The refusal legs come first and cover this file's own hazards: a non-regular
-// path (a FIFO here blocks the read forever, with no verdict emitted, since
-// every caller of this runs on the gate's critical path) and an oversized one.
-function readGateStateResult(cwd) {
-    const target = gateStatePath(cwd);
-    let st;
-    try {
-        st = fs.lstatSync(target);
-    } catch (err) {
-        if (err && err.code === 'ENOENT') return { ok: true, state: null };
-        return { ok: false, state: null, reason: 'lstat' };
-    }
-    if (!st.isFile()) return { ok: false, state: null, reason: 'kind' };
-    if (st.size > GATE_STATE_MAX_BYTES) return { ok: false, state: null, reason: 'oversized' };
-    let raw;
-    try {
-        raw = fs.readFileSync(target, 'utf8');
-    } catch (err) {
-        if (err && err.code === 'ENOENT') return { ok: true, state: null };
-        return { ok: false, state: null, reason: 'unreadable' };
-    }
-    let parsed;
-    try { parsed = JSON.parse(raw); } catch { return { ok: true, state: null }; }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: true, state: null };
-    return {
-        ok: true,
-        state: {
-            lastDecision: gateRecord(parsed.lastDecision),
-            lastAllow: gateRecord(parsed.lastAllow),
-            interactiveHolds: gateHolds(parsed.interactiveHolds)
-        }
-    };
-}
-
-// The gate state, or null when it is absent, refused, unreadable, or not JSON.
-// The reading surfaces take this shape because they act the same way on all
-// four: a null state and a state whose fields are null both mean no decision
-// recorded and no hold standing, and each of those is a
-// silence at the caller that asks it. A caller that must not confuse "not
-// there" with "cannot tell" takes readGateStateResult instead.
-function readGateState(cwd) {
-    return readGateStateResult(cwd).state;
-}
-
-// The state that follows a prior state and a new record. Pure: it writes
-// nothing.
-//
-// A hold belongs to the session rather than to the project, so it lives in a
-// list holding one record per session (INTERACTIVE_HOLD_MAX_ENTRIES) rather
-// than in the single decision slot every gate process in the project writes.
-// So:
-//
-//   deny-interactive  records the decision, and the hold it IS goes to the
-//                     head of the per-session hold list, replacing that
-//                     session's own prior record, which is where a reader asks
-//                     whether one session is being held.
-//   allow             records the decision as the newest allow and drops the
-//                     allower's own hold record. An allow lands a compaction
-//                     in the allower's own context, and says nothing about
-//                     the offers a different seat is still being denied, so
-//                     another session's hold is untouched.
-//
-// A decision carrying no session id joins no list: an unownable hold is one no
-// session could ever act on, so it never reaches the disk.
-//
-// What this costs, taken deliberately: a hold has no aggregate. Status reports
-// the last decision's recency but no count and no duration. The .jsonl log
-// still carries every one of those denials.
-//
-// This writer has no compare-and-set, so two gate processes in the same
-// project inside the same few milliseconds can each carry the list through
-// from a read taken before the other's write, and a record written inside that
-// gap by another session is dropped. That session is then unheld until its own
-// next deny, one assistant turn later, which is a silence rather than a false
-// hold, the direction every failure here takes.
-function nextGateState(prior, record) {
-    const lastAllow = prior ? gateRecord(prior.lastAllow) : null;
-    // The whole state is rebuilt from a fixed key set on every write, so a key
-    // this does not carry through is erased by the next decision.
-    const holds = gateHolds(prior ? prior.interactiveHolds : null);
-    if (record.verdict === 'allow') {
-        return {
-            lastDecision: record,
-            lastAllow: record,
-            // An allow lands this session's own compaction, which ends whatever
-            // hold it was under, so its record leaves the list. Another
-            // session's hold is untouched: an allow says nothing about the
-            // offers a different seat is still being denied.
-            interactiveHolds: holds.filter((h) => !sameSessionId(h.session, record.session))
-        };
-    }
-    // An interactive deny naming a session takes the head of the hold list,
-    // replacing that session's own prior record, which is what makes the hold
-    // readable per session on a checkout several sessions share.
-    const held = (record.verdict === 'deny-interactive' && record.session)
-        ? [record, ...holds.filter((h) => !sameSessionId(h.session, record.session))]
-            .slice(0, INTERACTIVE_HOLD_MAX_ENTRIES)
-        : holds;
-    return { lastDecision: record, lastAllow, interactiveHolds: held };
-}
-
 // Write JSON atomically (tmp file plus rename): a failed rename unlinks its
-// tmp so orphans do not
-// accumulate in .kit/. The containing directory is a precondition, never
-// created here (see the section header; the marker writer creates its own
-// directory before calling). Throws on failure; every caller catches.
-//
-// verifyBeforeRename is optional and runs in the last moment before the rename,
-// with the tmp file already written: returning false abandons the write and
-// unlinks the tmp, and this function returns false rather than throwing. It sits
-// here rather than in the caller because this is the only point where "still
-// true" and "now published" are adjacent; a check the caller ran before calling
-// would leave the whole tmp write inside the window it is trying to close.
-function writeJsonAtomic(target, value, verifyBeforeRename) {
+// tmp so orphans do not accumulate beside the marker. The containing directory
+// is a precondition, never created here: the marker writer creates its own
+// directory before calling. Throws on failure; every caller catches.
+function writeJsonAtomic(target, value) {
     const tmp = atomicTmpPath(target);
     let created = false;
     try {
@@ -903,10 +209,6 @@ function writeJsonAtomic(target, value, verifyBeforeRename) {
                 if (wrote) throw closeErr;
             }
         }
-        if (typeof verifyBeforeRename === 'function' && verifyBeforeRename() !== true) {
-            try { fs.unlinkSync(tmp); } catch { /* nothing to remove */ }
-            return false;
-        }
         fs.renameSync(tmp, target);
         return true;
     } catch (err) {
@@ -918,783 +220,32 @@ function writeJsonAtomic(target, value, verifyBeforeRename) {
         throw err;
     }
 }
-
-// Rewrite the log to its newest GATE_LOG_KEEP_BYTES. The tail is taken at a
-// byte offset, which lands mid-line and possibly mid-character, so everything
-// up to and including the first newline is discarded: what survives is whole
-// lines only, which is what lets a reader parse every line it finds. The
-// rewrite goes through a tmp file and a rename, so a failure leaves the old log
-// intact rather than truncated.
-//
-// A rewrite that would keep NOTHING is refused: the file is left exactly as it
-// is. That is the degenerate case of a line longer than the keep bound, which
-// nothing here writes but a hand-edited or foreign file can hold, and it
-// arrives in two shapes: a tail with no line break in it at all, and one whose
-// only break is the terminator at its very end. Both would trade the whole log
-// for an empty file, and an oversized log is a far smaller problem than a
-// destroyed one. The append that follows still lands.
-function trimGateLog(logPath, size) {
-    const fd = fs.openSync(logPath, 'r');
-    let text;
-    try {
-        text = readFully(fd, size - GATE_LOG_KEEP_BYTES, GATE_LOG_KEEP_BYTES);
-    } finally {
-        try { fs.closeSync(fd); } catch { /* already closed */ }
-    }
-    const nl = text.indexOf('\n');
-    const kept = nl === -1 ? '' : text.slice(nl + 1);
-    if (kept === '') return;
-    const tmp = atomicTmpPath(logPath);
-    let created = false;
-    try {
-        // Create and write are separate calls so created can mean "the exclusive
-        // create returned": spelled as one call, a failure in the write leg
-        // leaves the flag false with the file already on disk and the cleanup
-        // below skips it, stranding up to a megabyte of trimmed gate journal.
-        const outFd = fs.openSync(tmp, 'wx');
-        created = true;
-        let wrote = false;
-        try {
-            fs.writeFileSync(outFd, kept, 'utf8');
-            wrote = true;
-        } finally {
-            // Swallowed while the write's own error is in flight, rethrown once
-            // the write has returned: at that point the close is where a deferred
-            // write error surfaces, and dropping it publishes a torn log behind a
-            // success, the same split writeJsonAtomic takes. The descriptor is named
-            // apart from the read descriptor above it, since a leaked or
-            // mis-closed one is this writer's own failure mode.
-            try {
-                fs.closeSync(outFd);
-            } catch (closeErr) {
-                if (wrote) throw closeErr;
-            }
-        }
-        fs.renameSync(tmp, logPath);
-    } catch (err) {
-        // Only what this writer created is this writer's to remove (see
-        // atomicTmpPath).
-        if (created) {
-            try { fs.unlinkSync(tmp); } catch { /* nothing to remove, or it is the unwritable path itself */ }
-        }
-        throw err;
-    }
-}
-
-// Is this path writable, or absent? Absent is fine: the write creates it. Any
-// other refusal (a read-only file, a permission, a lock) is not, and is the
-// case a caller must be able to see BEFORE it promises anything about a record
-// landing.
-function writableOrAbsent(target) {
-    try {
-        fs.accessSync(target, fs.constants.W_OK);
-        return true;
-    } catch (err) {
-        return !!(err && err.code === 'ENOENT');
-    }
-}
-
-// The directory leg on its own: the scratch directory this project's files live
-// in exists, is a real directory rather than a link to one, and is writable.
-// Returns { ok:true, kit } or { ok:false }, and never throws.
-//
-// Split out because it is the whole precondition for a writer whose file is its
-// own, while gateStateTarget below is the precondition for writing the gate
-// STATE. A writer that takes more than it needs refuses for a condition on
-// another file: the hold stamp gated on the state's writability is silenced by a
-// read-only compact-gate.json, which disables the interval for a session whose
-// own hold was perfectly legible.
-//
-// What every caller does inherit is that the record is written only in a project
-// that is ALREADY kit-governed, the section header's rule: an existing scratch
-// directory, and nothing here creates one. An absent one refuses; a marker
-// write is what creates it (ensureProjectScratchDir), which for a project
-// lying inside the memory store is the store-backed ~/.kit/store/<rel> rather
-// than the project's own .kit/.
-function gateScratchTarget(cwd) {
-    try {
-        const kit = kitScratchDir(cwd);
-        let dir = fs.lstatSync(kit);
-        if (!dir.isDirectory()) return { ok: false };
-        // The ignore marker is attempted on every record, so a .kit/ that
-        // predates the marker gains it on the gate's next record; the create
-        // inside is a no-op on a directory already screened above.
-        ensureScratchDirIgnored(kit);
-        dir = fs.lstatSync(kit);
-        if (!dir.isDirectory() || !writableOrAbsent(kit)) return { ok: false };
-        return { ok: true, kit };
-    } catch {
-        return { ok: false };
-    }
-}
-
-// Everything that must hold before the gate STATE can be rewritten: the
-// directory leg above, plus a state path that is a regular file this process may
-// write and a state that is legible as it stands right now.
-//
-// Returns { ok:true, statePath, prior } or { ok:false }.
-//
-// It is its own function so the state's legs are spelled once, apart from the
-// log legs: the decision recorder appends to the log too, so it takes this
-// plus the log legs (gateRecordTargets below). The hold stamp writes neither
-// this file nor the log and takes the directory leg alone.
-function gateStateTarget(cwd) {
-    try {
-        if (!gateScratchTarget(cwd).ok) return { ok: false };
-        const statePath = gateStatePath(cwd);
-        if (regularFileSize(statePath) === null || !writableOrAbsent(statePath)) return { ok: false };
-        const prior = readGateStateResult(cwd);
-        if (!prior.ok) return { ok: false };
-        return { ok: true, statePath, prior: prior.state };
-    } catch {
-        return { ok: false };
-    }
-}
-
-// Everything that must hold before a DECISION can be recorded: the state legs
-// above plus the log the recorder appends to.
-//
-// Returns { ok:true, statePath, logPath, logSize, prior } or { ok:false }.
-//
-// It cannot promise the write will succeed, only that nothing already known
-// stops it: a disk that fills between here and the rename still throws, and
-// that residual is caught and swallowed like any other. What it does cover is
-// every condition that PERSISTS across offers, which is the set that turns one
-// wrong sentence into the same wrong sentence forever.
-function gateRecordTargets(cwd) {
-    try {
-        const state = gateStateTarget(cwd);
-        if (!state.ok) return { ok: false };
-        const logPath = gateLogPath(cwd);
-        const logSize = regularFileSize(logPath);
-        if (logSize === null || !writableOrAbsent(logPath)) return { ok: false };
-        return { ok: true, statePath: state.statePath, logPath, logSize, prior: state.prior };
-    } catch {
-        return { ok: false };
-    }
-}
-
-// Record one gate decision: rewrite the state and append one line to the log.
-//
-// Returns nothing, and that is the design rather than an omission. The gate
-// calls this once its verdict is already announced, and a caller able to see
-// whether the write landed is a caller able to decide differently because of
-// it; the record must never be in a position to move a compaction. Every
-// failure is swallowed for the same reason, so an unwritable .kit/ leaves the
-// verdict, the exit code, and the stderr note exactly as they would have been.
-//
-// Every refusal is gateRecordTargets'.
-//
-// The state is authoritative and the log is the journal. The state is written
-// first, and a refusal or a failure there abandons the line too, so the log
-// never records a denial the state does not know about. The reverse is NOT
-// guarded: once the state has advanced, a throw from the trim or the append
-// loses that line, so the log can undercount what the state holds. That
-// asymmetry is deliberate, and this is the direction to prefer, because an
-// operator reading the log to answer "how often" can survive a missing line,
-// while a state that disagrees with its own journal about a standing hold is
-// what every consumer decides from.
-//
-// Concurrency: two gate processes in one project both read the hold list and
-// both write its successor, so a hold can be lost from the list as well as a
-// line from the log. There is no lock. The failure is a silence, and a
-// diagnostic does not earn a lock file. The log has the matching residual: a
-// trim keeps the tail ending at a size read moments earlier and renames the
-// result over the file, so a line appended in between is dropped. The nudge
-// journals through logHoldNudge, which trims on the same rule, so two callers
-// can reach that path rather than one. Same conclusion, same reason.
-function recordGateDecision(cwd, decision) {
-    try {
-        const record = gateRecord(decision);
-        if (!record) return;
-        // The writer stamps the time, never the caller: `at` is what every age
-        // in the status report and the hold reader is measured from, so it
-        // has to come from one clock rather than from a value passed in.
-        record.at = new Date().toISOString();
-
-        const targets = gateRecordTargets(cwd);
-        if (!targets.ok) return;
-        const { statePath, logPath, logSize, prior } = targets;
-
-        writeJsonAtomic(statePath, nextGateState(prior, record));
-        if (logSize > GATE_LOG_MAX_BYTES) trimGateLog(logPath, logSize);
-        // One append of one line: a line is written whole or not at all, so a
-        // reader never meets a half-written record. A log that does not already
-        // end on a line boundary (hand-edited, or truncated by a crash) gets the
-        // break first, so the append cannot fuse two records into one line that
-        // parses as neither.
-        const prefix = endsOnLineBoundary(logPath) ? '' : '\n';
-        fs.appendFileSync(logPath, prefix + JSON.stringify(record) + '\n', 'utf8');
-    } catch { /* diagnostic only: a decision that cannot be recorded is still taken */ }
-}
-
-// One journal line for a hold directive that fired. Never throws and returns
-// nothing. It answers for the log file itself, which must be a regular file
-// this process can write, and applies the same trim bound and line-boundary
-// discipline the decision recorder uses, so a reader still meets whole lines
-// only. What it does not re-check is the .kit directory leg (a real directory
-// rather than a link to one): its caller establishes it on the same repo
-// before it calls, the hold stamp through gateScratchTarget. This is written
-// for that caller rather than as a standalone entry point.
-//
-// The record is distinguishable from a decision by shape rather than by absence:
-// it carries `event` where a decision carries `verdict`, so a reader folding the
-// log can partition it without guessing. Three fields of provenance and nothing
-// else: the time, the session the hold belongs to, and the tool whose return
-// triggered it. Each is rebuilt through gateText, so a forged or odd value
-// cannot push control characters into an operator's terminal or grow the line.
-//
-// The event value is a fixed literal, 'nudge-hold', the name the hold
-// directive's journal line has always carried, so a reader of an older log
-// partitions it the same way. The journal is read by an operator at a
-// terminal, and nothing in the kit parses this file.
-const HOLD_NUDGE_EVENT = 'nudge-hold';
-
-function logHoldNudge(cwd, sessionId, atIso, toolName) {
-    try {
-        const logPath = gateLogPath(cwd);
-        const logSize = regularFileSize(logPath);
-        if (logSize === null || !writableOrAbsent(logPath)) return;
-        if (logSize > GATE_LOG_MAX_BYTES) trimGateLog(logPath, logSize);
-        const record = {
-            at: atIso,
-            event: HOLD_NUDGE_EVENT,
-            session: gateText(sessionId),
-            tool: gateText(toolName)
-        };
-        const prefix = endsOnLineBoundary(logPath) ? '' : '\n';
-        fs.appendFileSync(logPath, prefix + JSON.stringify(record) + '\n', 'utf8');
-    } catch { /* the journal is diagnostic: a line that cannot be written is dropped */ }
-}
-
-// The deferral nudge's clock for each session's hold, kept in its own small
-// file beside the gate state.
-//
-// It cannot live in the state file, and that is a property of the state's
-// writers rather than a preference. nextGateState rebuilds the whole state from
-// a fixed key set on every write, its three keys and nothing else, so any field
-// added beside them is dropped by the next gate write, and during a
-// hold the gate writes on every offer, which past the trigger is every assistant
-// turn. A stamp there would be erased minutes after it landed and the interval
-// it exists to enforce would never engage.
-//
-// The file holds a LIST of one entry per session rather than a single stamp,
-// because a project can hold several sessions at once, which is the
-// ordinary state of a shared checkout. With one slot they would clobber each
-// other's stamps and each read would find another session's, which reads as
-// never-nudged: the interval would collapse and every one of them would be
-// nudged after every covered tool return, the unbounded repeat the nudge's own
-// header calls worse than silence.
-//
-// What keeps the list short is AGE rather than the count cap, and the split
-// matters because the two bound different failures. A stamp older than the
-// nudge's interval throttles nothing: the next call fires whether it is there or
-// not, so dropping it on read costs nothing and is what keeps a project that has
-// seen dozens of sessions over a day from carrying a cap's worth of dead
-// entries. The count cap is a backstop against an unbounded file and nothing
-// more, and it has to be, because eviction by count alone is not a bounded
-// degradation: each evicted session is a LIVE one whose next covered tool return
-// fires and evicts a third, so past the cap the whole list becomes a round robin
-// re-nudging every seat every few fires instead of every interval. With the age
-// rule in force an eviction can only ever drop a stamp that was already spent,
-// unless more sessions than the cap are held in one project inside a single
-// interval, which is the residue this leaves and the only shape the collapse
-// still has.
-const HOLD_NUDGE_MAX_ENTRIES = 8;
-
-// How long a stamp throttles anything, which is the nudge's own interval
-// (NUDGE_INTERVAL_MS in compact-deferral-nudge.js). It is spelled here rather
-// than imported because the hook requires this library and the reverse require
-// would be a cycle, so the two are held together by a cross-surface pin in
-// test/compact-deferral-nudge.test.js instead. The direction that matters is
-// one-sided: a value here SHORTER than the nudge's interval would drop stamps
-// that are still throttling and hand back the collapse above, while a longer one
-// only keeps spent entries around.
-const HOLD_NUDGE_TTL_MS = 30 * 60 * 1000;
-
-// The read cap: the writer produces a few short entries and never grows past
-// the cap above, so anything larger is not something this wrote, and reading
-// it whole inside the tool loop is cost with nothing to gain.
-const HOLD_NUDGE_MAX_BYTES = 64 * 1024;
-
-// Path to the hold-nudge stamps for a given repo root.
-function holdNudgePath(cwd) {
-    return path.join(kitScratchDir(cwd), 'compact-hold-nudge.json');
-}
-
-// The stamps still throttling something in this project, newest first,
-// distinguishing a file that carries nothing to preserve from one that is there
-// and could not be read. Returns { ok, holds, reason }, on readGateStateResult's
-// shape and for its reason:
-//
-//   { ok: true,  holds }      the reading stands: holds is what is still
-//                             throttling, and an empty one means there is
-//                             genuinely nothing here to keep (an absent file, an
-//                             empty one, JSON that does not parse or does not
-//                             carry a holds array, and entries this reader
-//                             dropped)
-//   { ok: false, holds: [] }  the file is there and its contents are unknown, so
-//                             no caller may act as though it were empty
-//
-// reason names which refusal produced an { ok: false }: 'lstat' (the path's own
-// kind could not be read), 'kind' (a link at the final component), 'unreadable'
-// (the open or the read itself was refused), 'oversized' (the file is larger than
-// HOLD_NUDGE_MAX_BYTES, so what is past the cut is unknown) or 'short-fill' (the
-// read ended short of what the descriptor promised, which is a file truncated
-// under the read or a device that stopped answering).
-//
-// The last two are one flag and two facts at the reader below, which is why they
-// are two reasons here. readFileBounded answers `bounded` for both and names the
-// bound beside it, and the difference is the whole basis of the write side's
-// heal: only 'oversized' says something about the FILE, that it is larger than
-// anything this writer produces, while 'short-fill' says only that this READ did
-// not finish, which can happen to a file full of live peer stamps.
-//
-// The distinction is load-bearing at two of this reader's three callers, and it
-// is the WRITE side that pays most for it. recordHoldNudge rebuilds this whole
-// file from what this returns and renames it into place, so an unknown reading
-// taken as an empty one erases every other held session's stamp and collapses
-// their intervals, which is the opposite of the preservation that
-// read-modify-write exists for; it also reads WHICH refusal, healing the two
-// shapes it could not have written and refusing the three that may be a lock or
-// a fault over a real list. The checkpoint CLI's status verb takes the reason as
-// well, and for the same distinction turned outward: a refusal here is a held
-// session that is never spoken to. Its line has two halves and they are two
-// different counts, so neither number stands for both. WHAT WAS READ: the five
-// reasons reach FOUR leads, 'unreadable' and 'lstat' sharing one deliberately,
-// since nothing there can tell a lock over a real list from a shape that never
-// lifts. WHAT HAPPENS NEXT: the same five draw THREE remedies, because that half
-// is composed off membership in HOLD_NUDGE_HEALABLE rather than off a reason
-// name, so 'oversized' and 'kind' take one remedy between them (the next
-// directive replaces the file), 'short-fill' takes its own (the stamps stand and
-// a read that completes takes them again), and the shared 'unreadable'/'lstat'
-// leg takes the third, which promises neither a removal nor an end to the wait.
-// The plain read-only caller (holdNudgedAt, through readHoldNudges) keeps the
-// empty answer for all of them, because there the two directions cost the same
-// one extra nudge.
-//
-// THE READER AND THE WRITER DISAGREE ABOUT ONE KIND, deliberately and per kind.
-// A link is named here because an open follows one and the lstat below is the
-// only place that question can be asked. Every OTHER non-regular kind is not:
-// a FIFO, a socket or a device node reaches readFileBounded, which refuses it on
-// the descriptor and answers the same null as a lock, so this reports it as
-// 'unreadable'. holdStampKind, which the WRITER asks, calls all of them 'other'
-// and recordHoldNudge removes the path. The asymmetry follows from what each
-// side does next. The writer's next act is an unlink of that NAME, which is safe
-// whatever kind stands there and opens nothing, so a name-settled verdict costs
-// it nothing. This reader's next act is an OPEN of that name, and a kind verdict
-// taken off a name it then opens is exactly the swap window the shared reader
-// exists to close, so the kind stays the descriptor's here. The cost is
-// diagnostic and one-directional: the status verb tells an operator that such a
-// path cannot be read and that anything standing there may not clear on its own,
-// which is weaker than the truth for a FIFO the next directive does remove, and
-// never stronger. It promises no repair that fails to come, and no wait that
-// does not end, which are the two ways that surface could mislead.
-//
-// The file is user-writable, so both fields are rebuilt through gateText exactly
-// as the journal's are, and a second entry for a session already kept is dropped
-// rather than kept behind the first, on gateHolds' reasoning: newest-first order
-// is what decides which stamp answers for a session, and a duplicate left in
-// would hold a capped slot against a live one.
-//
-// The bytes come through kit-read-lib's shared bounded reader rather than
-// through a kind check on the name followed by an open of that same name, which
-// is the guard the nudge's own signpost read takes and is a property of the
-// channel rather than of whichever caller first needed it: the kind and the
-// size are settled on the descriptor the read is about to consume, and off
-// win32 a planted FIFO is refused instead of blocking a hook that runs after
-// every covered tool return. A result the reader had to cut short is refused
-// outright rather than parsed, on the same reasoning: a truncated object is not
-// the file this reads. One property that reader deliberately does not give is
-// taken here instead, in the one line above the open: it follows a link at the
-// final component by design, so this refuses a link by name before opening,
-// which is the refusal this file's own writer applies to the same path and
-// which also keeps a link into a dead network mount from stalling the open.
-// That reader offers the same refusal as an opt-in of its own
-// (readFileBounded's refuseLink, which the deferral nudge's signpost read takes),
-// and BOTH are taken here, each for what the other cannot do. The lstat is what
-// makes a link a distinguishable answer: the option refuses with the null it
-// answers for every other refusal, and this reader's reasons must stay apart,
-// since 'kind' is a shape its writer heals by removing the path while
-// 'unreadable' is a lock it must leave alone, and the status verb words the two
-// differently. The option is what closes the window between that lstat and the
-// open, which the lstat alone only narrows: where the platform has O_NOFOLLOW
-// the refusal rides the open itself, so a link swapped in after the lstat is
-// refused rather than followed, and where it does not the reader's own lstat is
-// a second look at the name, taken later than this one. A swap landing inside
-// that window now answers 'unreadable', which is the reading it is: what is at
-// the path stopped being what the kind check saw.
-//
-// Three bounds, and none is another's. The walk is bounded BY INDEX at the
-// cap, so a planted array of ten thousand invalid entries is not walked: a
-// bound on how many valid entries are kept would let every invalid one be
-// examined first, and the byte cap above would then be the only real limit. An
-// entry older than HOLD_NUDGE_TTL_MS is dropped rather than returned, which
-// is what makes an eviction at the cap safe: a reader of this list either finds
-// a stamp that is genuinely holding a session quiet or finds nothing. And an
-// entry dated further ahead of the reader's clock than CHECKPOINT_FUTURE_SKEW_MS
-// is dropped on the other side of the same rule, the allowance being the one this
-// file's other timestamp rules take.
-//
-// THE ALLOWANCE IS THE WRITER'S DOING rather than the reader's, since for a
-// reader alone keeping a future stamp buys nothing: an age is a subtraction, so a
-// future stamp's age is negative, and the nudge's own interval rule reads a
-// negative elapsed as elapsed (intervalElapsed in compact-deferral-nudge.js) and
-// fires anyway. recordHoldNudge rebuilds this whole file from what this returns
-// and renames it into place, so an entry this reader drops is not passed over on
-// the next write, it is ERASED, and every entry in this file belongs to another
-// session, stamped by another process against its own clock. A step backwards on
-// this box, an NTP correction or a resumed VM, therefore turns every peer's stamp
-// future-dated at once, and the next write takes all of them out: each of those
-// seats loses its throttle and is nudged again, over a skew of seconds. The
-// allowance is what holds that ordinary case, and a stamp genuinely far ahead is
-// still dropped, so a fabricated date cannot sit in one of the capped slots. An
-// entry whose time cannot be parsed at all is dropped too, since a caller reads it
-// as never-nudged anyway and a slot it occupies would push a live stamp out.
-//
-// Empty reads as "this session has not been spoken to", which fires. That is the
-// same fail-open direction guard 8 of the nudge takes on an illegible nudgedAt,
-// and it is self-healing for the same reason: the fire's own stamp is written
-// through an atomic rename, so it replaces the illegible file wholesale and the
-// interval takes hold from the next tool return onward. That direction belongs
-// to the reading callers; the writer takes { ok: false } as a silence instead.
-function readHoldNudgesResult(cwd, nowMs) {
-    try {
-        const target = holdNudgePath(cwd);
-        // The one question the descriptor cannot answer, asked of the name and
-        // of nothing else: is the final component a link? An open follows one,
-        // so without this the read takes whatever the link names, where this
-        // file's own writer refuses a link at that path outright, and a link
-        // into a dead network mount would stall a hook that runs after every
-        // covered tool return. The lstat does not traverse the final component,
-        // so asking costs nothing on that path. The KIND and the SIZE stay the
-        // descriptor's below: this narrows the name check to the one property an
-        // open cannot reject, rather than handing the kind verdict back to the
-        // name. An absent file is the one failure here that is an answer: it
-        // carries nothing to preserve. Any other lstat failure, and a link, leave
-        // the contents unknown.
-        let st;
-        try {
-            st = fs.lstatSync(target);
-        } catch (err) {
-            if (err && err.code === 'ENOENT') return { ok: true, holds: [] };
-            return { ok: false, holds: [], reason: 'lstat' };
-        }
-        if (st.isSymbolicLink()) return { ok: false, holds: [], reason: 'kind' };
-        const read = readFileBounded(target, HOLD_NUDGE_MAX_BYTES, { refuseLink: true });
-        // A refused open or read, and either kind of partial read, all leave what
-        // the file holds unknown. The two partial readings are told apart because
-        // the writer's two directions differ in cost: a file past the ceiling is
-        // not this writer's output and is healed, while a read that ended short
-        // may be its own file with every peer's stamp in it. Only the bound the
-        // reader names as the ceiling takes the healing leg, so a bound it names
-        // some other way, or does not name at all, is refused. An empty file is a
-        // reading: there is nothing in it to keep.
-        if (read === null) return { ok: false, holds: [], reason: 'unreadable' };
-        if (read.bounded) {
-            return { ok: false, holds: [],
-                reason: read.boundedBy === 'ceiling' ? 'oversized' : 'short-fill' };
-        }
-        if (read.text === '') return { ok: true, holds: [] };
-        let parsed;
-        // JSON this cannot parse, and JSON carrying no holds array, are read
-        // rather than unknown: neither is something this writer produced, so
-        // neither holds a stamp to preserve, and the fire's own atomic rename
-        // replaces the file wholesale.
-        try { parsed = JSON.parse(read.text); } catch { return { ok: true, holds: [] }; }
-        if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.holds)) {
-            return { ok: true, holds: [] };
-        }
-        const now = (typeof nowMs === 'number' && Number.isFinite(nowMs)) ? nowMs : Date.now();
-        const holds = [];
-        const scanned = Math.min(parsed.holds.length, HOLD_NUDGE_MAX_ENTRIES);
-        for (let i = 0; i < scanned; i += 1) {
-            const entry = parsed.holds[i];
-            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-            const session = gateText(entry.session);
-            const nudgedAt = gateText(entry.nudgedAt);
-            if (!session || !nudgedAt) continue;
-            const at = Date.parse(nudgedAt);
-            if (!Number.isFinite(at) || now - at >= HOLD_NUDGE_TTL_MS
-                || at - now > CHECKPOINT_FUTURE_SKEW_MS) continue;
-            if (holds.some((kept) => sameSessionId(kept.session, session))) continue;
-            holds.push({ session, nudgedAt });
-        }
-        return { ok: true, holds };
-    } catch { return { ok: false, holds: [], reason: 'unreadable' }; }
-}
-
-// The stamps alone, for a caller whose two directions cost the same: an unknown
-// reading answers the empty list here, exactly as an absent file does. Both fire,
-// which is the fail-open direction the reader's header states and the one every
-// read-only caller of this list takes.
-function readHoldNudges(cwd, nowMs) {
-    return readHoldNudgesResult(cwd, nowMs).holds;
-}
-
-// When the hold nudge last spoke to this session in this project, as the stored
-// ISO string, or null when it has not, which is also the answer for a stamp the
-// reader above has already aged out or found illegible. The caller still applies
-// its own interval to the value it gets: this reader's own bound is what keeps
-// the list short, and the nudge's is what decides whether it speaks, and the two
-// agreeing is a pin rather than an assumption (HOLD_NUDGE_TTL_MS).
-//
-// nowMs is the caller's clock where it has one, so a hook that answers several
-// questions of one moment does not age this list against a different one.
-// The id is canonicalized through gateText before it is compared, which is what
-// the WRITERS store: every session field in these files goes in through gateText,
-// so an id carrying anything that rule strips is stored in one spelling and would
-// be looked up in another, and the lookup would answer never-nudged for a session
-// that has a live stamp. No id the harness issues today is changed by that pass,
-// so this decides nothing at present; it is the same rule on both sides of the
-// comparison rather than a rule on one side and a raw value on the other.
-function holdNudgedAt(cwd, sessionId, nowMs) {
-    const session = gateText(sessionId);
-    if (typeof sessionId !== 'string' || sessionId === '' || !session) return null;
-    for (const entry of readHoldNudges(cwd, nowMs)) {
-        if (sameSessionId(entry.session, session)) return entry.nudgedAt;
-    }
-    return null;
-}
-
-// What is at the hold stamp path, told apart so a caller can tell a missing
-// file from one it cannot read: 'file', 'absent', 'other' (something
-// that is not a regular file, a link at the final component included, since an
-// lstat judges a link as a link) and 'unknown' (a kind that could not be read at
-// all, or a path that can never resolve).
-//
-// regularFileSize answers null for the last two together, and here they are
-// opposite answers. 'other' is a shape this file's writer cannot have produced,
-// so removing it costs nothing and is the only thing that ever ends it, while
-// 'unknown' is a permission, a lock or an indexer over what may be a real list
-// of live stamps, which lifts on its own and must not be removed. The errno
-// split is pathErrnoClass's, the rule every caller of this question in the kit
-// answers to; only its 'absent' leg is an absence, and a 'determinate' one
-// (a file standing where .kit/ belongs, a link cycle above the final component)
-// is unknown here rather than removable, since no unlink of this path repairs
-// any of them. Never throws.
-function holdStampKind(target) {
-    try {
-        return fs.lstatSync(target).isFile() ? 'file' : 'other';
-    } catch (err) {
-        return pathErrnoClass(err && err.code) === 'absent' ? 'absent' : 'unknown';
-    }
-}
-
-// Remove the hold stamp file, and say whether the path is clear afterwards.
-//
-// The one destructive act on this path, and it is scoped by construction: the
-// argument is always holdNudgePath's answer for the project in hand, a single
-// file this nudge alone writes, never a directory and never a walk. Every
-// failure is silent and answers false, which the caller reads as a refusal to
-// write: an unlink that cannot remove what is sitting there (a directory, a
-// permission, a lock) leaves the path exactly as it found it, and the stamp is
-// then skipped, which is the silence every failure on this path takes.
-function unlinkHoldStamp(target) {
-    try {
-        fs.unlinkSync(target);
-        return true;
-    } catch (err) {
-        return !!(err && err.code === 'ENOENT');
-    }
-}
-
-// The two refusal reasons readHoldNudgesResult can give that this writer's own
-// file cannot be behind: a file past the read ceiling (its own holds at most
-// HOLD_NUDGE_MAX_ENTRIES short entries and cannot approach the cap) and a link
-// at the final component (it writes a regular file through a temp-and-rename,
-// which replaces the name rather than following what stands at it). Both are
-// healed by removing the path.
-//
-// The other three keep refusing, and the third is the one worth naming, since it
-// arrives through the same `bounded` flag as the first: 'unreadable' and 'lstat'
-// may be a transient lock over a real list, and 'short-fill' is a read that ended
-// short, which is a file truncated under the read or a device that stopped
-// answering, and says nothing about whose file it is. Healing on that reading
-// would unlink a file this writer may well have written, with every other held
-// session's live stamp in it.
-//
-// Exported because it is read on BOTH sides of the same question. This file's
-// writer heals the reasons in it, and the checkpoint CLI's status verb promises
-// an operator that a refusing file is replaced by the next directive, which is
-// true for exactly these reasons and false for the rest. Each side filtering on
-// its own copy of the literals is how a reason added here would leave that
-// promise withheld from a file the writer now heals, with both suites green;
-// test/kit-compact-gate.test.js pins the correspondence.
-const HOLD_NUDGE_HEALABLE = ['oversized', 'kind'];
-
-// Stamp the hold nudge's clock for one session, and return whether the stamp is
-// on disk. The boolean is the whole point: the stamp is not diagnostic, it IS
-// the rate limit and the only cross-process carrier the interval has, so the
-// hook emits only when this returns true and every failure here is a silence.
-//
-// The .kit/ precondition is gateScratchTarget's rather than a second copy: the
-// directory must already be there, per the section header, and be a real
-// writable directory, so a held session standing in a stranger's checkout
-// writes nothing into it. The gate STATE's own
-// legs are deliberately not among the preconditions, even though the hold this
-// stamp throttles was read out of that file: this writer never touches it, and
-// taking its legs would let a read-only or locked compact-gate.json disable the
-// interval for a session whose hold record read back perfectly, which is a
-// refusal about a different file. The stamp's own path is then held to the same
-// kind-and-writable test every other writer here applies to its target, with two
-// differences this file alone takes, both following from the same heal: a kind
-// that is not a regular file is removed rather than refused, and the writable
-// test is asked AFTER the heal rather than before it, since an unlink needs
-// permission on the directory and none on the file, so a path judged unwritable
-// before the heal is one the heal makes writable.
-//
-// The write carries no compare-and-set, because there
-// is nothing here for a concurrent writer to lose: the file is this nudge's
-// alone, no gate path reads or writes it, and the whole cost of a lost entry is
-// one extra nudge on the next tool return. What the read-modify-write does do is
-// preserve the other sessions' stamps, which is why the entries kept are
-// everything except this session's own. They are read as of this write's own
-// clock, so the spent ones are already gone by the time the cap is applied and
-// the truncation can only drop a stamp that was still throttling where more
-// sessions than the cap are held inside one interval.
-//
-// That preservation is why the read is taken through readHoldNudgesResult rather
-// than through the plain list. A rename rebuilt from an empty list is a rename
-// that erases the file, so a reading that is empty because the file could not be
-// read makes this write destroy exactly the stamps it exists to keep, collapsing
-// every other held session's interval at once and re-nudging all of them. Such a
-// reading refuses the write here instead: the hold goes unstamped, which is a
-// silence, which is the direction every failure on this path takes.
-//
-// The refusal is split by whether the reading can END, because a refusal that
-// cannot is not a silence but a disabled interval. Two of the five readings this
-// file can give are ones this writer could not have produced, a file past the
-// read ceiling and a link at the path, and nothing about either resolves with
-// time: refusing them alone would silence this session's directive for the life
-// of the file, with no age-out and no surface saying why. Those two are healed by
-// removing the path before the write (HOLD_NUDGE_HEALABLE), which costs nothing,
-// since a file this writer did not write holds no peer's stamp to preserve.
-//
-// The split is on WHOSE FILE IT IS rather than on how partial the reading was,
-// which is what keeps the heal off the third permanent-looking leg. A read that
-// ended short arrives through the same partial-read flag as the oversized one and
-// means something else entirely: the file was truncated under the read or a
-// device stopped answering, either of which can happen to this writer's own file
-// on the tool return after it wrote it. Unlinking on that reading destroys
-// exactly the peer stamps the read-modify-write exists to preserve, which is why
-// it refuses with the other two, a read that was refused and an lstat that could
-// not answer, the transient lock over a REAL list. The checkpoint CLI's status
-// verb is what reports the file that is refusing, and it words the healing legs
-// and the refusing ones apart because only the healing ones end by themselves.
-//
-// What the rebuild preserves is every entry the READER returned, which is not
-// every entry the file held: the reader drops what it will not act on, and this
-// write then erases it rather than passing over it. Two classes are dropped that
-// way, an entry past HOLD_NUDGE_TTL_MS and one dated further ahead of the clock
-// than CHECKPOINT_FUTURE_SKEW_MS, and it is that erasure rather than any property
-// of the read that the forward allowance exists for: without it a clock stepping
-// back by seconds would erase every peer's stamp in one write.
-// readHoldNudgesResult's drop rule states the whole trade.
-//
-// The journal line follows the stamp, best-effort and outside its preconditions,
-// on logHoldNudge's own terms: a locked or read-only .jsonl must never be
-// able to disable an interval.
-function recordHoldNudge(cwd, sessionId, nowMs, toolName) {
-    let stampedAt = null;
-    try {
-        const session = gateText(sessionId);
-        if (typeof sessionId !== 'string' || sessionId === '' || !session) return false;
-        const at = (typeof nowMs === 'number' && Number.isFinite(nowMs)) ? nowMs : Date.now();
-        if (!gateScratchTarget(cwd).ok) return false;
-        const target = holdNudgePath(cwd);
-        // The kind leg, asked so the two halves of regularFileSize's null are
-        // told apart: a shape this writer cannot have produced is removed, while
-        // a kind that could not be read at all refuses.
-        const kind = holdStampKind(target);
-        if (kind === 'unknown') return false;
-        if (kind === 'other' && !unlinkHoldStamp(target)) return false;
-        const iso = new Date(at).toISOString();
-        const prior = readHoldNudgesResult(cwd, at);
-        // A reading that identifies the file as one this writer cannot have
-        // produced is healed by removing the path; every other reading that left
-        // the contents unknown refuses, since the rebuild below would erase peer
-        // stamps that may really be there. A read that ended short is on the
-        // refusing side for exactly that reason: it names no shape at all, only
-        // an unfinished read. The 'kind' leg is still reachable here despite the
-        // check above, through a swap landing between the two, and takes the
-        // same heal.
-        if (!prior.ok
-            && !(HOLD_NUDGE_HEALABLE.includes(prior.reason) && unlinkHoldStamp(target))) return false;
-        // The writability of the TARGET is judged here rather than above the
-        // read, because the heal changes the answer. An unlink takes permission
-        // on the containing directory (gateScratchTarget's leg above, which has
-        // already passed) and none at all on the file, so a stamp file that is
-        // both oversized and unwritable is one the heal removes and the write
-        // then creates: asked before the heal, this leg would refuse it forever,
-        // which is the permanent silence the healable set exists to prevent and
-        // the replacement the status verb promises for that same file. Asked
-        // here, it answers for the path the write is actually about to meet, and
-        // its original subject is untouched: a legible, unwritable stamp file
-        // reads back fine, takes no heal, and refuses exactly as before.
-        if (!writableOrAbsent(target)) return false;
-        const kept = prior.holds.filter((entry) => !sameSessionId(entry.session, session));
-        const holds = [{ session, nudgedAt: iso }, ...kept].slice(0, HOLD_NUDGE_MAX_ENTRIES);
-        if (!writeJsonAtomic(target, { holds })) return false;
-        stampedAt = iso;
-    } catch { /* an unstamped hold is a silent one: the caller emits nothing */ }
-    if (stampedAt === null) return false;
-    logHoldNudge(cwd, sessionId, stampedAt, toolName);
-    return true;
-}
-
-// Does this file end on a line boundary? True for an empty or absent file,
-// which needs no separator. False when the answer cannot be established: a
-// path whose kind or size could not be read (regularFileSize's null) gets the
-// fail-safe answer rather than the go-ahead one, since a spare blank line in
-// the journal costs nothing while a fused record parses as neither of the two
-// records it ran together. Reads the final byte alone: the answer is one byte
-// long and the file can be megabytes.
-function endsOnLineBoundary(target) {
-    const size = regularFileSize(target);
-    if (size === null) return false;
-    if (size === 0) return true;
-    const fd = fs.openSync(target, 'r');
-    try {
-        const buf = Buffer.alloc(1);
-        const read = fs.readSync(fd, buf, 0, 1, size - 1);
-        return read !== 1 || buf[0] === 0x0A;
-    } finally {
-        try { fs.closeSync(fd); } catch { /* already closed */ }
-    }
-}
-
 // ---------------------------------------------------------------------------
-// Release markers. Two session-scoped marker kinds give the gate its release
-// paths: the role-boundary marker, which a session (a coordinator, expert or
-// admin seat, or any hands-on session) opens at a banked-and-empty moment so
-// the deferral can land the next offer there instead of riding to the safety
-// ceiling; and the operator-consent marker, written only on the operator's
-// explicit word, which releases one deferred compaction for the session it
-// names. The boundary marker is one FILE per session, its session id a
-// component of the file's own name, because a shared checkout carries several
-// seats at once and each declaration is one seat's own word about one moment:
-// two seats scoped only by a field inside a single file left the second
-// declaration renaming over the first, and the unmade seat deferred at its next
-// offer believing it had declared. It lives in one machine-local root keyed by
-// session rather than in any project's scratch directory, because its writer
-// and its reader do not share a working directory: the verb runs wherever the
-// session's shell stands, a linked worktree among the places, while the gate
-// reads under the directory its PreCompact payload names. A root that depends
-// on neither is what makes the two agree by construction. The consent marker is
-// one file per project, the operator writing one at a time, and it stays under
-// the project's scratch directory with the gate's record. Both release
-// SCHEDULING denials only, the verdict that means "not at this moment": no
-// marker touches an allow clause, and the no-marker case leaves every leg
-// exactly as it was.
+// Release markers. Two session-scoped marker kinds release a compaction the
+// persona module's veto is holding: the role-boundary marker, which a session
+// (a coordinator, expert or admin seat, or any hands-on session) opens at a
+// banked-and-empty moment so the next automatic compaction can land there; and
+// the operator-consent marker, written only on the operator's explicit word,
+// which releases one held compaction for the session it names. The boundary
+// marker is one FILE per session, its session id a component of the file's own
+// name, because a shared checkout carries several seats at once and each
+// declaration is one seat's own word about one moment: two seats scoped only by
+// a field inside a single file left the second declaration renaming over the
+// first. It lives in one machine-local root keyed by session rather than in any
+// project's scratch directory, because its writer and its reader do not share
+// a working directory: the verb runs wherever the session's shell stands, a
+// linked worktree among the places, while the module reads under the home
+// alone. A root that depends on no working directory is what makes the two
+// agree by construction. The consent marker is one file per project, the
+// operator writing one at a time, and it stays under the project's scratch
+// directory.
 //
-// The trust shape: a session's own banked-and-empty
-// declaration is the best boundary signal available, and the ceiling
-// force-landing is already the worst case, so honoring a self-declared
-// boundary can only move a compaction earlier onto a cleaner spot. The
-// consent marker is asserted rather than authenticated (a single-principal
-// machine); what bounds its writing is prose in the role skills, and what
-// bounds its effect is here: one session, one release, one age window.
+// The trust shape: a session's own banked-and-empty declaration is the best
+// boundary signal available, so honoring a self-declared boundary can only move
+// a compaction onto a cleaner spot. The consent marker is asserted rather than
+// authenticated (a single-principal machine); what bounds its writing is prose
+// in the role skills, and what bounds its effect is the module's match rule:
+// one session, one release, one age window.
 // ---------------------------------------------------------------------------
 
 // The directory every role-boundary marker on this machine lives in,
@@ -1712,8 +263,7 @@ function endsOnLineBoundary(target) {
 // happens to stand, and one spelled as a network share makes this machine authenticate outbound
 // and block for the connection's timeout on every read that follows. Both
 // answer null, which every reader and writer here takes as "no marker": a
-// declaration is not written, the verb refuses naming the cause, and the gate
-// reads nothing, which is the deferral direction every leg of this gate fails in.
+// declaration is not written and the verb refuses naming the cause.
 function roleBoundaryRoot() {
     const home = os.homedir();
     if (typeof home !== 'string' || home === '' || !path.isAbsolute(home) || namesNetworkShare(home)) {
@@ -1730,18 +280,15 @@ function roleBoundaryRoot() {
 // else, and every reader and writer here treats that null as "no marker" rather
 // than falling back to an unscoped name.
 //
-// The id composes the name as it is given, where the match rule below compares
-// ids case-insensitively, so on a case-sensitive filesystem two spellings of one
-// id resolve two files while the rule reads them as one session. The cost of
-// that seam is a marker the offer does not find, which is a deferral, the
-// direction every leg of this gate fails in.
+// The id composes the name as it is given, where the module's match rule
+// compares ids case-insensitively, so on a case-sensitive filesystem two
+// spellings of one id resolve two files while the rule reads them as one
+// session. The cost of that seam is a marker the offer does not find, which
+// leaves the compaction held.
 //
 // A marker left under a project's own scratch directory, where this file kept
 // them while the path was resolved from a working directory, is resolved by
-// nothing, read by nothing and swept by nothing: it is inert. It is not
-// migrated, since a declaration's own life is bounded by the age bound and by
-// the moment rule either way, and the cost of the move is at most one lapsed
-// declaration per seat.
+// nothing, read by nothing and swept by nothing: it is inert.
 function roleBoundaryPath(sessionId) {
     const id = usableSessionId(sessionId);
     if (id === null) return null;
@@ -1755,7 +302,7 @@ function consentPath(cwd) {
     return path.join(kitScratchDir(cwd), 'compact-consent.json');
 }
 
-// A session id a caller may scope a marker to, or null. The gate is charset
+// A session id a caller may scope a marker to, or null. The test is charset
 // plus a leading-character rule, not charset alone: a value that opens with a
 // dash reads as an option to any parser that meets it later, so the first
 // character must be alphanumeric however clean the rest is. Session ids as
@@ -1780,11 +327,9 @@ function usableSessionId(value) {
 // harnessProjectsRoot for the root and sanitizeProjectPath for the
 // flattening, imported rather than restated so no spelling here can disagree
 // with the store's. memq is required lazily because this is the only path
-// here that needs it and the gate's own hot path must not pay for loading it.
-// Its one consumer is the corroboration below, which asks about a NAMED
-// project directory. A session's own transcript, wherever the harness filed
-// it, is located by id alone through findTranscript instead, which is what the
-// declaring writer and the status report's moment read take.
+// here that needs it and the hooks that load this library must not pay for
+// loading it. Its one consumer is the corroboration below, which asks about a
+// NAMED project directory.
 function sessionTranscriptPath(projectDir, sessionId) {
     try {
         if (usableSessionId(sessionId) === null) return null;
@@ -1814,84 +359,31 @@ function projectHoldsSessionTranscript(projectDir, sessionId) {
     }
 }
 
-// How long each marker stays honorable. Both are the hold's idle
-// bound rather than numbers of their own, because all three answer one
-// question: how long a moment's word still describes the same working
-// session. A seat opens the boundary marker at a banked moment its runbook
-// defines, and the invariant that moment carries is that context holds
-// nothing the disk does not, so a compaction anywhere inside the window costs
-// a re-read and never state; what the window has to cover is the seat's own
-// quiet gap between banked moments, which is the same order as the idle bound
-// and far longer than one tool call. The consent marker covers the same gap
-// from the other side, an operator's release preceding the next offer by a
-// while (the offer only recurs while the context sits past the trigger).
-// Derived rather than restated so the three cannot drift; evidence that ever
-// tunes one apart turns that one's derivation into its own literal.
-const ROLE_BOUNDARY_MAX_AGE_MS = GATE_HOLD_MAX_IDLE_MS;
-const CONSENT_MAX_AGE_MS = GATE_HOLD_MAX_IDLE_MS;
-
-// The one marker match rule, shared by its two consumers (the gate's release
-// legs and the CLI's status report) so they cannot drift. A marker counts only
-// for the session it names, only while unconsumed, and only within the age
-// bound the caller passes: the two marker kinds differ in nothing but that
-// bound. The rule stays pure: it is told the subject session and the clock
-// rather than reading any state.
-//
-// Returns { ok:true, reason:null } on a match, else { ok:false, reason } with
-// reason naming the first failed clause in evaluation order:
-//   'no-marker'      marker is missing, not an object, or carries no session
-//                    string (a hand-made or torn file; the writer always
-//                    records one)
-//   'consumed'       consumed is anything but a literal false. An absent flag
-//                    reads as consumed too: the writer always records false,
-//                    so a record without it is not one of ours, and the
-//                    conservative reading is the dead one.
-//   'wrong-session'  the marker names a different session than the subject,
-//                    or the subject itself is unusable (sameSessionId is
-//                    false when either side is missing, which is exactly the
-//                    treat-as-absent handling a payload without an id needs)
-//   'no-timestamp'   writtenAt is missing or does not parse as a date
-//   'expired'        writtenAt is older than maxAgeMs, or maxAgeMs itself is
-//                    not a finite number: a caller that forgot the bound
-//                    narrows the window to nothing rather than widening it
-//   'future'         writtenAt is beyond the skew allowance every stored
-//                    timestamp here tolerates (one constant, one question)
-// Never throws on JSON-derived input: every access is guarded and Date.parse
-// returns NaN on garbage. nowMs pins the clock as it does elsewhere here.
-function markerMatches(marker, sessionId, nowMs, maxAgeMs) {
-    const now = (typeof nowMs === 'number' && Number.isFinite(nowMs)) ? nowMs : Date.now();
-    if (!marker || typeof marker !== 'object' || Array.isArray(marker)
-        || typeof marker.session !== 'string') {
-        return { ok: false, reason: 'no-marker' };
-    }
-    if (marker.consumed !== false) return { ok: false, reason: 'consumed' };
-    if (!sameSessionId(marker.session, sessionId)) return { ok: false, reason: 'wrong-session' };
-    if (typeof marker.writtenAt !== 'string') return { ok: false, reason: 'no-timestamp' };
-    const written = Date.parse(marker.writtenAt);
-    if (!Number.isFinite(written)) return { ok: false, reason: 'no-timestamp' };
-    if (typeof maxAgeMs !== 'number' || !Number.isFinite(maxAgeMs)) {
-        return { ok: false, reason: 'expired' };
-    }
-    const age = now - written;
-    if (age > maxAgeMs) return { ok: false, reason: 'expired' };
-    if (age < -CHECKPOINT_FUTURE_SKEW_MS) return { ok: false, reason: 'future' };
-    return { ok: true, reason: null };
-}
+// How long each marker stays honorable, four hours, one figure for both
+// because both answer one question: how long a moment's word still describes
+// the same working session. A seat opens the boundary marker at a banked
+// moment its runbook defines, and the invariant that moment carries is that
+// context holds nothing the disk does not, so a compaction anywhere inside the
+// window costs a re-read and never state; what the window has to cover is the
+// seat's own quiet gap between banked moments, far longer than one tool call.
+// The consent marker covers the same gap from the other side, an operator's
+// release preceding the next offer by a while. The persona module holds both
+// markers to its own copy of these figures, and the CLI prints them, so the
+// two copies are pinned equal in test/kit-compact-lib.test.js.
+const ROLE_BOUNDARY_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+const CONSENT_MAX_AGE_MS = ROLE_BOUNDARY_MAX_AGE_MS;
 
 // A marker file's read cap. The writer produces a few short fields and never
-// grows, so anything past 64 KB is not something this wrote, and reading it
-// whole on a hook path that runs before any verdict is emitted is cost with
-// nothing to gain.
+// grows, so anything past 64 KB is not something this wrote.
 const MARKER_MAX_BYTES = 64 * 1024;
 
-// Read and parse a marker file, on readGateStateResult's legs and for the same
-// reasons: the gate reads these on its deny path before any verdict is
-// emitted, so the path must be a regular file of sane size before it is opened
-// (a FIFO planted here would block forever inside readFileSync, where no
-// try/catch can rescue it, and being an lstat the check judges a link as a
-// link rather than as its target), and the status report needs the refusal
-// legs told apart because they name different remedies and cannot be
-// recovered by re-asking with a second syscall. Returns { ok, marker, reason }:
+// Read and parse a marker file. The path must be a regular file of sane size
+// before it is opened (a FIFO planted here would block forever inside
+// readFileSync, where no try/catch can rescue it, and being an lstat the check
+// judges a link as a link rather than as its target), and the refusal legs are
+// told apart because the boundary verb's retraction names a different remedy
+// for each and cannot recover them by re-asking with a second syscall. Returns
+// { ok, marker, reason }:
 //
 //   { ok: true,  marker }                     a parsed marker
 //   { ok: true,  marker: null, 'absent' }     nothing is at the path
@@ -1955,7 +447,7 @@ function isRoleBoundaryEntry(entry) {
 const ROLE_BOUNDARY_MAX_NAMES = 512;
 
 // Remove every marker file in the root older than the age bound, which is the
-// age past which markerMatches refuses one anyway: what the sweep collects is a
+// age past which the module's match rule refuses one anyway: what the sweep collects is a
 // file no reader will ever honor again. One file per session and no writer
 // that renames over a peer's is what makes this necessary, since a session that
 // declares and then ends leaves a file nothing else will ever replace, and the
@@ -1987,29 +479,6 @@ function sweepRoleBoundaryMarkers() {
     return { removed, bounded: listing.bounded };
 }
 
-function readConsentResult(cwd) {
-    return readMarkerResult(consentPath(cwd));
-}
-
-// The swallowing forms the gate takes, because every refusal leg means the
-// same thing to it: no marker releases anything. Same split as readGateState
-// over readGateStateResult.
-function readRoleBoundary(sessionId) {
-    try {
-        return readRoleBoundaryResult(sessionId).marker;
-    } catch {
-        return null;
-    }
-}
-
-function readConsent(cwd) {
-    try {
-        return readConsentResult(cwd).marker;
-    } catch {
-        return null;
-    }
-}
-
 // Write a marker atomically through writeJsonAtomic (exclusive create, atomic
 // rename, failure cleanup gated on the create having returned). Returns
 // { ok:true, session } or { ok:false, reason }; never throws.
@@ -2017,33 +486,25 @@ function readConsent(cwd) {
 // The session id is held to one storage rule (a string, non-empty, within a
 // 128-character cap, no control characters); the CLI additionally
 // charset-gates what it accepts before this is reached, so this guard is the
-// floor, not the whole gate. There is no unscoped form: a marker without a
+// floor, not the whole test. There is no unscoped form: a marker without a
 // session would release whichever session's offer arrived first, which is the
 // one shape the design forbids, so a caller with no usable id gets a refusal
 // rather than a wildcard. consumed is written as a literal false, the only
-// value the match rule reads as live. Unlike the gate's own record targets,
-// the directory is created here: the marker writers are what make a project
-// kit-governed, boundary and consent alike. The create is the same helper for
-// both kinds, so the role-boundary root under ~/.kit gains the same ignore marker
-// the store-backed scratch directory under ~/.kit/store gains: neither sits in
-// a repository, and one create for every marker directory is what keeps the
+// value the module's match rule reads as live. The directory is created here,
+// boundary and consent alike, through the same helper for both kinds, so the
+// role-boundary root under ~/.kit gains the same ignore marker the
+// store-backed scratch directory under ~/.kit/store gains: neither sits in a
+// repository, and one create for every marker directory is what keeps the
 // symlink screen that helper carries in front of every marker write.
 //
-// `declared` records provenance, and it is the field the moment rule below is
-// scoped by: true only for the boundary verb's deliberate declaration, absent
-// for every other writer, so a marker's own record says which rule governs it
-// rather than a call site restating the distinction. `position` rides with it,
-// where the transcript could be measured: the byte offset the declared moment
-// sits at and a fingerprint of what preceded it, which is what the moment rule
-// reads forward from. Both fields are machine written here and nowhere else;
-// no prose ever asks anyone to produce either.
-//
-// The pair is written together or not at all. A declaration whose transcript
-// could not be measured records no position and the moment rule lapses it,
-// which is the conservative end: a marker that cannot be vouched for buys a
-// deferral, where one honored on an unread transcript buys a compaction in the
-// middle of a turn.
-function writeMarkerFile(target, sessionId, declared, position) {
+// `declared` records provenance: true only for the boundary verb's deliberate
+// declaration, absent for every other writer. The persona module scopes its
+// moment rule by it, lapsing a declared marker once a new main-loop turn starts
+// after its writtenAt, while the seat-stop hook's turn-end marker stands on its
+// age bound alone. The field is machine written here and nowhere else; no
+// prose ever asks anyone to produce it. A record is therefore session,
+// writtenAt and consumed, plus declared on the boundary verb's path.
+function writeMarkerFile(target, sessionId, declared) {
     if (typeof sessionId !== 'string' || sessionId === '' || sessionId.length > 128
         || /[\x00-\x1F]/.test(sessionId)) {
         return { ok: false, reason: 'session id is invalid' };
@@ -2054,41 +515,20 @@ function writeMarkerFile(target, sessionId, declared, position) {
         consumed: false
     };
     // Written only on the declaring path, so the file the seat-stop hook
-    // produces is byte-identical to the one it produced before these fields
-    // existed and reads as the window-scoped marker it has always been.
-    if (declared === true) {
-        state.declared = true;
-        if (position !== null && position !== undefined) {
-            state.transcriptBytes = position.bytes;
-            state.transcriptAnchor = position.anchor;
-        }
-    }
+    // produces carries no declaration and reads as a window-scoped marker.
+    if (declared === true) state.declared = true;
     try {
         ensureScratchDirIgnored(path.dirname(target));
         writeJsonAtomic(target, state);
     } catch (err) {
         return { ok: false, reason: 'could not write marker: ' + (err && err.message ? err.message : String(err)) };
     }
-    return { ok: true, session: sessionId, positioned: declared !== true || (position !== null && position !== undefined) };
+    return { ok: true, session: sessionId };
 }
 
-// The declaring path measures the marked session's own transcript as it writes,
-// which is the file the gate later reads forward from: the position is taken
-// here rather than by the caller so no call site can declare a moment without
-// recording where it fell. `positioned` in the result says whether one was
-// taken, for a caller that reports a declaration nothing will be able to vouch
-// for.
-//
-// The transcript is located by the session id alone, through findTranscript,
-// which delegates to memq's scan of the harness's projects directory. The
-// harness files a transcript under the project key the session started in and
-// never refiles it when the session moves, so a session started in a main
-// checkout and declaring from a linked worktree is measured on the file it
-// actually has rather than on the path the shell's directory would derive,
-// which does not exist. An id the scan finds under two project directories is
-// an ambiguity the scan answers null for, and the declaration records no
-// position; the moment rule then lapses it, the conservative end, and the verb
-// says so.
+// One session's role-boundary marker, written at its own file under the home,
+// so the verb declares the same file from whatever directory the session's
+// shell stands in, a linked worktree included.
 //
 // The file is this session's own, so an id the resolver will not compose a name
 // from is refused here in the writer's own vocabulary: there is no unscoped
@@ -2110,10 +550,7 @@ function writeRoleBoundary(sessionId, declared) {
     if (target === null) {
         return { ok: false, reason: 'the home directory is unknown or names a network share, so no role-boundary marker root can be opened' };
     }
-    const position = declared === true
-        ? transcriptPosition(findTranscript(sessionId))
-        : null;
-    const result = writeMarkerFile(target, sessionId, declared, position);
+    const result = writeMarkerFile(target, sessionId, declared);
     if (result.ok) sweepRoleBoundaryMarkers();
     return result;
 }
@@ -2125,21 +562,13 @@ function writeConsent(cwd, sessionId) {
 // Delete a marker file if present: presence
 // judged by the lstat kind check rather than existsSync (a link at the path
 // reads as no marker to every reader here, so a clear that followed it would
-// report consuming something nothing read as open), a failed lstat routed by
+// report retracting something nothing read as open), a failed lstat routed by
 // pathErrnoClass, and a racing ENOENT reported as none-open rather than as a
 // failure. Returns { ok:true, cleared:true } when a file was removed,
 // { ok:true, cleared:false } when none was open, and
 // { ok:false, cleared:false, reason } when a file is there and the delete
-// failed or its kind could not be read. The gate calls these to
-// consume a marker on the allow it caused, best-effort: a failed delete
-// degrades to the gate standing open, never to a wedged session. The risk
-// that choice takes is deliberate: a consume that
-// fails to delete releases again on every later offer inside the marker's
-// age bound, with no cap here on the count, which costs an extra compaction
-// at a declared boundary (or under a standing consent), while the opposite
-// choice, refusing the allow when the delete fails, would convert a locked
-// file into a session riding to the ceiling,
-// the exact failure the release paths exist to end.
+// failed or its kind could not be read. The boundary verb's retraction is the
+// one caller.
 function clearMarkerFile(target) {
     try {
         let st;
@@ -2182,266 +611,6 @@ function clearRoleBoundary(sessionId) {
         return { ok: false, cleared: false, reason: 'could not clear marker: the home directory is unknown or names a network share, so no role-boundary marker root can be opened' };
     }
     return clearMarkerFile(target);
-}
-
-function clearConsent(cwd) {
-    return clearMarkerFile(consentPath(cwd));
-}
-
-// ---------------------------------------------------------------------------
-// The declared moment. The boundary verb's marker says the seat's context held
-// nothing the disk did not at the instant it was written. That is a statement
-// about a moment rather than a window: the instant a new turn begins in the
-// marked session, the session is working again and the declaration no longer
-// describes it, so the gate honors such a marker only while nothing has
-// arrived in that session's transcript since the write.
-//
-// The rule is scoped by provenance, and the scoping is the whole of what keeps
-// it from refusing every marker in existence. Its subject is a declaration,
-// which is the marker the boundary verb writes and stamps `declared`. The
-// seat-stop hook's turn-end bank carries no such field and is outside this
-// rule entirely, on its age bound alone: that marker is written at a turn END,
-// while a compaction offer only ever arrives inside a LATER turn, which by
-// construction began with a newer inbound line, so a moment test over the hook
-// path would lapse every marker it ever wrote. An undeclared marker is
-// therefore answered here without the transcript being opened at all.
-//
-// The evidence is the transcript's inbound lines, which are two shapes rather
-// than one. A `user` line is a tool result whenever its message content is an
-// array carrying a tool_result block, and those are the overwhelming majority
-// of user lines in a working session, the boundary command's own result among
-// them: a rule reading the last user line alone would mark every marker stale
-// the moment it was written. A genuine inbound message is a `user` line that
-// is not a tool result, whose content is a string or an array of text blocks;
-// a queued peer message additionally arrives as a `queue-operation` line,
-// which is not a `user` line at all and is the exact arrival this rule exists
-// to catch.
-//
-// Harness-injected lines are not arrivals and are excluded on the same three
-// flags the automation scan excludes them on: a meta record (a skill body,
-// a hook's own output replayed back, the session-start surfacing), a
-// compaction summary, and a sidechain turn. Without that exclusion a seat that
-// declares a boundary and then loads a skill lapses its own declaration, which
-// is the harness talking to the model rather than anyone arriving.
-//
-// What settles "since the write" is POSITION rather than time. A transcript's
-// lines are appended in order, so everything past a byte offset was written
-// after everything before it; their timestamps are not in that order, and a
-// line later in a real transcript routinely carries a stamp minutes older than
-// the line before it. So the declaration records where the transcript ended at
-// the instant it was made, and this rule reads forward from there. A rule that
-// instead inferred the read's coverage from timestamps would honor a marker
-// whose arrival sat outside the window it inspected, which is a compaction
-// landing mid-turn: the one direction this rule exists to refuse.
-//
-// Every unanswerable question is stale rather than fresh, so this leg fails
-// toward deferral the way the gate's other legs do: a declared marker carrying
-// no recorded position, an absent or unreadable transcript, a transcript that
-// no longer matches the recorded position, an appended stretch past the read
-// bound, and a line in that stretch that will not parse.
-// ---------------------------------------------------------------------------
-
-// How much of the appended stretch the moment rule reads. What the cap has to
-// cover is not the transcript, which on a held seat runs to tens of megabytes,
-// but what was appended since the declaration, which is seconds to tens of
-// seconds of one session (an offer recurs every half minute or so while a
-// compaction is being held). An arrival inside the cap is answered from what
-// was read; a stretch running past it with no arrival inside is answered as
-// unknown and lapses, rather than being read as an absence of arrivals.
-const MOMENT_APPEND_MAX_BYTES = 512 * 1024;
-
-// How much of the transcript before the recorded position is fingerprinted, so
-// a file replaced or rotated under the same path is not read as the one the
-// declaration measured. A few kilobytes are several whole records of a shape
-// nothing else produces; the offset alone would be satisfied by any file that
-// happens to be long enough.
-const MOMENT_ANCHOR_MAX_BYTES = 4 * 1024;
-
-// A hex digest of `text`, short enough to sit in a marker file and long enough
-// that two different transcripts do not collide on it.
-function momentAnchorDigest(text) {
-    return crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 32);
-}
-
-// Where a transcript ends right now, as the position a declaration records:
-// { bytes, anchor }, or null where nothing can be measured (no path, not a
-// readable regular file, or a file whose last line boundary cannot be found).
-//
-// The position is the end of the last COMPLETE line rather than the file's own
-// end, which is what makes reading forward from it parse whole records: a
-// record caught mid-append at the declaration is left on the far side of the
-// offset, so it is judged when it is whole rather than as a fragment. That is
-// also the conservative side, since a record being appended at the instant of
-// the declaration is judged as an arrival if it turns out to be one.
-function transcriptPosition(transcriptPath) {
-    try {
-        const st = fs.statSync(transcriptPath);
-        if (!st.isFile()) return null;
-        if (st.size === 0) return { bytes: 0, anchor: momentAnchorDigest('') };
-        const fd = fs.openSync(transcriptPath, 'r');
-        try {
-            const window = Math.min(st.size, MOMENT_ANCHOR_MAX_BYTES);
-            const tail = readFully(fd, st.size - window, window);
-            const lastBreak = tail.lastIndexOf('\n');
-            // No line boundary inside the window: where the window is the whole
-            // file the transcript holds no complete line yet, and where it is
-            // not, the last record is longer than the window and its start
-            // cannot be found from here. Neither can be positioned.
-            if (lastBreak === -1) return null;
-            // Measured back from the file's end rather than forward from the
-            // window's start: the window starts at an arbitrary byte, so its
-            // decoded head can open on a replacement character whose length is
-            // not the length of the bytes it stands for, while the fragment
-            // after the last newline runs to the end of the file.
-            const bytes = st.size - Buffer.byteLength(tail.slice(lastBreak + 1), 'utf8');
-            const anchorFrom = Math.max(0, bytes - MOMENT_ANCHOR_MAX_BYTES);
-            return {
-                bytes,
-                anchor: momentAnchorDigest(readFully(fd, anchorFrom, bytes - anchorFrom))
-            };
-        } finally {
-            try { fs.closeSync(fd); } catch { /* already closed */ }
-        }
-    } catch {
-        return null;
-    }
-}
-
-// What the transcript has gained since a recorded position, as
-// { text, bounded } for a readable stretch, or { reason } naming why it cannot
-// be read:
-//
-//   'unreadable'  the path is absent, is not a regular file, or the read failed
-//   'replaced'    the file is shorter than the recorded position, or the bytes
-//                 before that position no longer hash to the recorded anchor:
-//                 a truncated, rotated or different file, whose arrivals since
-//                 the declaration are unknowable
-//
-// `bounded` says the stretch runs past the read bound, so an absence of
-// arrivals inside the text is not an absence of arrivals: the caller answers a
-// found arrival from what it read and answers a bounded read with no arrival in
-// it as unknown. The read starts at the recorded position rather than at the
-// file's end, so an arrival that landed first is inside the bound however much
-// followed it.
-//
-// The isFile check is the same narrowing readTranscriptCapped applies and for
-// the same reason (a FIFO planted here would block inside the read, where no
-// try/catch can rescue it).
-function readMomentAppend(transcriptPath, from, anchor) {
-    try {
-        const st = fs.statSync(transcriptPath);
-        if (!st.isFile()) return { reason: 'unreadable' };
-        if (st.size < from) return { reason: 'replaced' };
-        const fd = fs.openSync(transcriptPath, 'r');
-        try {
-            const anchorFrom = Math.max(0, from - MOMENT_ANCHOR_MAX_BYTES);
-            if (momentAnchorDigest(readFully(fd, anchorFrom, from - anchorFrom)) !== anchor) {
-                return { reason: 'replaced' };
-            }
-            const grown = st.size - from;
-            const take = Math.min(grown, MOMENT_APPEND_MAX_BYTES);
-            return { text: readFully(fd, from, take), bounded: grown > take };
-        } finally {
-            try { fs.closeSync(fd); } catch { /* already closed */ }
-        }
-    } catch {
-        return { reason: 'unreadable' };
-    }
-}
-
-// Whether a parsed transcript entry is an inbound message, by the two shapes
-// the section header states. A `user` line whose content array carries a
-// tool_result block is the harness reporting a tool call back to the model,
-// which is not a new turn arriving; nor is anything the harness injects, which
-// is the isSidechain / isMeta / isCompactSummary triple the automation scan
-// (userTypedText below) screens on, read here on the same three flags and in
-// the same order so the two readers of this transcript cannot disagree about
-// what the harness wrote to itself.
-function entryIsInbound(entry) {
-    if (!entry || typeof entry !== 'object') return false;
-    if (entry.isSidechain || entry.isMeta === true || entry.isCompactSummary === true) return false;
-    if (entry.type === 'queue-operation') return true;
-    if (entry.type !== 'user') return false;
-    const content = entry.message && entry.message.content;
-    if (!Array.isArray(content)) return true;
-    return !content.some(block => block && typeof block === 'object' && block.type === 'tool_result');
-}
-
-// Whether a marker is the boundary verb's declaration, which is the only kind
-// the moment rule governs. The provenance decision lives here alone: a call
-// site asking whether the moment holds gets the scoping with it, so no reader
-// can apply the rule to the seat-stop hook's turn-end bank by forgetting a
-// condition.
-function markerDeclaresMoment(marker) {
-    return !!marker && typeof marker === 'object' && marker.declared === true;
-}
-
-// The transcript position a declaration recorded, or null where it carries
-// none that can be used. A declared marker without one cannot be positioned
-// and so cannot be vouched for, which its caller reads as lapsed: the writer
-// records the pair or records neither, so a marker missing it was written by
-// something other than this file's writer, or written where no transcript
-// could be measured.
-function markerMomentPosition(marker) {
-    if (!markerDeclaresMoment(marker)) return null;
-    const bytes = marker.transcriptBytes;
-    const anchor = marker.transcriptAnchor;
-    if (typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes < 0) return null;
-    if (typeof anchor !== 'string' || anchor === '') return null;
-    return { bytes, anchor };
-}
-
-// Whether the marker still describes the moment it was written in, given the
-// marked session's transcript. Returns { ok:true, reason:null } while it does,
-// which is also the answer for every marker that declares no moment, else
-// { ok:false, reason } naming the clause that refused it:
-//   'no-position'  the declaration records no usable transcript position, so
-//                  there is nowhere to read from and nothing can be vouched
-//   'unreadable'   the transcript is absent, not a regular file, or the read
-//                  failed
-//   'replaced'     the transcript is shorter than the recorded position, or
-//                  what sits before that position no longer matches what was
-//                  there: a truncated, rotated or different file
-//   'too-long'     nothing arrived inside the stretch the read covers, and
-//                  more was appended past it, so the rest is unknown
-//   'torn'         a whole line of the appended stretch will not parse, so
-//                  what it was cannot be answered
-//   'inbound'      a message arrived after the marker was written
-//
-// An arrival found inside the bounded read is an arrival whatever sits past
-// the bound, so 'inbound' is answered before 'too-long' rather than after it.
-//
-// Only the LAST line of the stretch may be a fragment and only it is passed
-// over: the gate runs while the session is live, so the record at the end of
-// the file is routinely one caught mid-append, and a bounded read ends on a
-// fragment by construction. That is also exactly where an arrival lands, so an
-// unparseable line anywhere before it is answered as unknown rather than
-// skipped.
-//
-// No timestamp is read here at all. Position is what orders a transcript's
-// lines; their stamps are not ordered, so a rule resting on them can be shown
-// an arrival it reads as predating the write.
-function markerMomentHolds(marker, transcriptPath) {
-    if (!markerDeclaresMoment(marker)) return { ok: true, reason: null };
-    const position = markerMomentPosition(marker);
-    if (position === null) return { ok: false, reason: 'no-position' };
-    const appended = readMomentAppend(transcriptPath, position.bytes, position.anchor);
-    if (appended.reason !== undefined) return { ok: false, reason: appended.reason };
-    const lines = appended.text.split('\n');
-    for (let i = 0; i < lines.length; i += 1) {
-        const line = lines[i];
-        if (line === '') continue;
-        let entry;
-        try {
-            entry = JSON.parse(line);
-        } catch {
-            if (i === lines.length - 1) continue;
-            return { ok: false, reason: 'torn' };
-        }
-        if (entryIsInbound(entry)) return { ok: false, reason: 'inbound' };
-    }
-    if (appended.bounded) return { ok: false, reason: 'too-long' };
-    return { ok: true, reason: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -3162,42 +1331,6 @@ function stampRegistryBanked(sessionId) {
 // Shared transcript reading.
 // ---------------------------------------------------------------------------
 
-// Read a transcript with a size cap: for a large file, the head plus tail. The
-// evidence the automation scan looks for can land near either end of a
-// long-running session: a /loop invocation's first user line (head) beside the
-// newest goal_status record (tail). It is the automation scan's above-ceiling
-// fallback (see readTranscriptForAutomation, which owns why the fallback is
-// not that scan's primary read). Returns '' on any error or a non-regular file, whatever the
-// size. The isFile check narrows, without closing, the window in which the
-// path could be swapped for a FIFO between the stat and the open (a blocking
-// read on a FIFO hangs, which no try/catch can rescue): both read branches
-// re-resolve the path after the stat. The residual is accepted because
-// exploiting it needs write access to the transcript's directory, which
-// already implies control of the transcript contents themselves.
-function readTranscriptCapped(transcriptPath) {
-    try {
-        const st = fs.statSync(transcriptPath);
-        if (!st.isFile()) return '';
-        const HEAD = 384 * 1024;
-        const TAIL = 128 * 1024;
-        if (st.size <= 512 * 1024) {
-            return fs.readFileSync(transcriptPath, 'utf8');
-        }
-        const fd = fs.openSync(transcriptPath, 'r');
-        try {
-            const head = Buffer.alloc(HEAD);
-            const hb = fs.readSync(fd, head, 0, HEAD, 0);
-            const tail = Buffer.alloc(TAIL);
-            const tb = fs.readSync(fd, tail, 0, TAIL, st.size - TAIL);
-            return head.toString('utf8', 0, hb) + '\n' + tail.toString('utf8', 0, tb);
-        } finally {
-            try { fs.closeSync(fd); } catch { /* already closed */ }
-        }
-    } catch {
-        return '';
-    }
-}
-
 // Remove local-command output and caveat blocks from user-slot text. When a user
 // runs a slash command the CLI echoes its stdout (and a caveat) back into the
 // user turn inside <local-command-stdout>/<local-command-caveat> wrappers; that
@@ -3205,8 +1338,8 @@ function readTranscriptCapped(transcriptPath) {
 // as an instrument the user invoked (a catted file or grep hit can echo a
 // literal <command-name> or <command-args> string as data). The deliberate
 // slash-command invocation record (<command-name>/<command-args>) is NOT
-// stripped: it is exactly how the automation scan reads a typed /goal or
-// /loop. A close tag counts only when it names the
+// stripped: it is how a reader such as scripts/jev-judge.js tells a typed
+// command from a human turn. A close tag counts only when it names the
 // same wrapper as its opener, so a coincidental mismatched-name closing tag
 // inside real output cannot terminate the strip early and leave the rest of that
 // output, or content past it, looking like ordinary typed text. The paired strip
@@ -3225,8 +1358,9 @@ function readTranscriptCapped(transcriptPath) {
 // regex: this runs on user-slot text on per-turn hook paths, and a crafted
 // entry dense with unmatched openers must cost milliseconds, not seconds (a
 // greedy-with-backreference regex restarts an O(n) backtrack at every such
-// opener, which is quadratic). The gate test suite pins both the semantics
-// (differentially, against the regex form as a reference) and the bound.
+// opener, which is quadratic). test/kit-compact-lib.test.js pins both the
+// semantics (differentially, against the regex form as a reference) and the
+// bound.
 function stripLocalCommandOutput(text) {
     // One forward pass records the LAST close tag per wrapper name, so the
     // opener loop below never rescans the text. Tags are matched
@@ -3259,252 +1393,13 @@ function stripLocalCommandOutput(text) {
     }
 }
 
-// Every <command-args>...</command-args> span in the given text, in order:
-// each span runs from an opener to the FIRST close after it, and scanning
-// resumes past that close, the same non-overlapping enumeration a global lazy
-// regex produces, but as linear literal scans (a lazy [\s\S]*? span restarts
-// an O(n) walk at every unclosed opener, which is quadratic on crafted text
-// and measured in whole seconds at the transcript read cap). Tags match
-// case-insensitively. Spans are returned raw: callers own their
-// normalization. An unclosed trailing opener contributes no span. The gate's
-// automation detection reads the first span only, and the gate test suite
-// pins this scanner against the regex form as a reference, so there is
-// exactly one scanner for any reader that next needs every span.
-function commandArgsSpans(text) {
-    const spans = [];
-    const openRe = /<command-args>/gi;
-    const closeRe = /<\/command-args>/gi;
-    let pos = 0;
-    for (;;) {
-        openRe.lastIndex = pos;
-        const o = openRe.exec(text);
-        if (!o) return spans;
-        closeRe.lastIndex = o.index + o[0].length;
-        const c = closeRe.exec(text);
-        if (!c) return spans;
-        spans.push(text.slice(o.index + o[0].length, c.index));
-        pos = c.index + c[0].length;
-    }
-}
-// ---------------------------------------------------------------------------
-// Automation detection for the PreCompact gate's interactive-deferral clause.
-//
-// The gate defers auto-compaction to the safety ceiling only when the session
-// is a human interacting directly; a session driven by native /goal or /loop
-// keeps the harness's early trigger. The transcript is the detection surface,
-// and the shapes read here are undocumented harness output, the same class as
-// the gate's other version-pinned facts: real-transcript observations, except
-// the /goal clear argument shape, which follows from the invariant command
-// markup and fails safe if wrong (an unrecognized clear leaves the newest
-// evidence at met:false and the session on the early trigger). Detection
-// errs toward "automated" only via absent evidence never arriving (a loop
-// that stops being continued classifies automated indefinitely); every read
-// or parse defect classifies as no evidence, and the gate turns that into a
-// verdict whose failure direction is the early-trigger status quo.
-// ---------------------------------------------------------------------------
-
-// The literal command-name tags a typed /goal or /loop invocation writes. The
-// FULL tag is load-bearing: a continuing ScheduleWakeup carries the loop's
-// prompt verbatim, so a bare '/loop' substring appears in every wakeup and
-// would read each one as a fresh invocation.
-const GOAL_COMMAND_TAG = '<command-name>/goal</command-name>';
-const LOOP_COMMAND_TAG = '<command-name>/loop</command-name>';
-
-// Extract the genuinely user-typed text of a user entry's message: a string
-// content, or the concatenated {type:'text'} blocks of an array content.
-// Returns null when there is none, and null for an array carrying any
-// tool_result block: tool output is the observed source of quoted command
-// markup (a file containing the literal tags, read back into the session),
-// and the harness's own /loop detector excludes exactly this shape, so the
-// whole entry is discarded rather than trusting its text blocks.
-function userTypedText(message) {
-    if (!message) return null;
-    const c = message.content;
-    if (typeof c === 'string') return c;
-    if (!Array.isArray(c)) return null;
-    let text = '';
-    for (const b of c) {
-        if (b && b.type === 'tool_result') return null;
-        if (b && b.type === 'text' && typeof b.text === 'string') text += '\n' + b.text;
-    }
-    return text;
-}
-
-// Scan transcript text for evidence that native /goal or /loop is driving the
-// session. Returns true when either is in effect by the NEWEST evidence of
-// its kind: transcripts are append-ordered, so a single forward pass letting
-// the last match of each kind win reads newest-wins for free (the real
-// end-of-loop sequence is /loop lines followed by a terminal stop, after
-// which the session continues as ordinary interactive work).
-//
-// Evidence, per instrument:
-//   /goal, surface 1: a goal_status attachment (type 'attachment', its
-//     attachment.type 'goal_status'), which the native goal system writes when /goal is invoked
-//     and at every stop evaluation. met === false means in effect; met ===
-//     true means satisfied and auto-cleared, so not. Only a strict boolean
-//     met decides; sentinel and reason are carried but decide nothing (a
-//     real record carries met:true beside sentinel:true).
-//   /goal, surface 2: a user command line whose <command-name> is exactly
-//     /goal. <command-args> trimmed and lowercased equal to 'clear' means
-//     not in effect; any other non-empty argument means in effect; a bare
-//     /goal (empty args) reads state and decides nothing.
-//   /loop: a user command line whose <command-name> is exactly /loop means
-//     in effect; an assistant ScheduleWakeup tool_use whose input.stop is
-//     strictly true means the loop ended. A continuing wakeup (delaySeconds,
-//     prompt, ...) decides nothing: every iteration of a dynamic loop
-//     re-writes its own /loop command line, so the positive evidence
-//     refreshes without it.
-//
-// Tag order in a command line is not fixed (/loop writes <command-message>
-// before <command-name>, /goal the other way), so each tag is matched by its
-// own independent regex, first tag of each kind winning within the entry.
-//
-// Exclusions, adopted from the harness's own /loop detector, each defeating
-// an observed false positive (quoted markup rides in tool output whenever a
-// file containing the tags is read into a session):
-//   - a raw line containing the quoted JSON form "tool_result" (quotes
-//     included, the same discriminator the harness's detector uses) is never
-//     a command line; the bare substring would also skip a genuine typed
-//     command whose argument text merely mentions tool_result;
-//   - a command line must be entry.type 'user', the wakeup entry.type
-//     'assistant';
-//   - isMeta, isCompactSummary, and sidechain entries are skipped;
-//   - array content holding any tool_result block discards the entry
-//     (userTypedText above);
-//   - local-command output is stripped before the tag scan (a /goal
-//     invocation's own stdout is echoed back inside <local-command-stdout>
-//     carrying the full goal condition text);
-//   - the ScheduleWakeup check is structural, never a substring (the tool
-//     listing rides in system-prompt-shaped entries, so the bare name
-//     appears in transcripts with no real invocation).
-//
-// String prefilters run before any JSON.parse so a multi-megabyte scan costs
-// milliseconds; an unparseable line is skipped, no evidence.
-function automationInEffect(text) {
-    let goalInEffect = null;
-    let loopInEffect = null;
-    const lines = text.split('\n');
-    for (const line of lines) {
-        const t = line.trim();
-        if (!t) continue;
-        const rawToolResult = t.includes('"tool_result"');
-        const mayGoalStatus = t.includes('"goal_status"');
-        const mayGoalLine = !rawToolResult && t.includes(GOAL_COMMAND_TAG);
-        const mayLoopLine = !rawToolResult && t.includes(LOOP_COMMAND_TAG);
-        const mayWakeup = t.includes('tool_use') && t.includes('ScheduleWakeup');
-        if (!mayGoalStatus && !mayGoalLine && !mayLoopLine && !mayWakeup) continue;
-        let entry;
-        try { entry = JSON.parse(t); } catch { continue; }
-        if (!entry || typeof entry !== 'object') continue;
-        if (entry.isSidechain || entry.isMeta === true || entry.isCompactSummary === true) continue;
-
-        if (mayGoalStatus && entry.type === 'attachment'
-                && entry.attachment && typeof entry.attachment === 'object'
-                && entry.attachment.type === 'goal_status') {
-            if (entry.attachment.met === false) goalInEffect = true;
-            else if (entry.attachment.met === true) goalInEffect = false;
-            continue;
-        }
-
-        if ((mayGoalLine || mayLoopLine) && entry.type === 'user') {
-            const typed = userTypedText(entry.message);
-            if (typed === null) continue;
-            const stripped = stripLocalCommandOutput(typed);
-            const nameMatch = /<command-name>([^<]*)<\/command-name>/i.exec(stripped);
-            if (!nameMatch) continue;
-            const name = nameMatch[1].trim();
-            if (name === '/loop') {
-                loopInEffect = true;
-            } else if (name === '/goal') {
-                // The first <command-args> span decides (first tag wins, the
-                // convention every command-line reader here follows); no span
-                // at all, an unclosed opener included, decides nothing.
-                const spans = commandArgsSpans(stripped);
-                const args = spans.length > 0 ? spans[0].trim().toLowerCase() : '';
-                if (args === 'clear') goalInEffect = false;
-                else if (args !== '') goalInEffect = true;
-            }
-            continue;
-        }
-
-        if (mayWakeup && entry.type === 'assistant') {
-            const content = entry.message && entry.message.content;
-            if (!Array.isArray(content)) continue;
-            for (const b of content) {
-                if (b && b.type === 'tool_use' && b.name === 'ScheduleWakeup'
-                        && b.input && typeof b.input === 'object'
-                        && b.input.stop === true) {
-                    loopInEffect = false;
-                }
-            }
-        }
-    }
-    return goalInEffect === true || loopInEffect === true;
-}
-
-// The byte ceiling on reading a transcript whole for the automation scan.
-//
-// Newest-evidence-wins only holds over bytes actually read, so the scan wants
-// the whole file: a head-plus-tail read leaves an unread middle, and a loop
-// whose terminating stop lands there shows its opening /loop line and nothing
-// that retires it, classifying a session that has been hands-on for hours as
-// automation-driven. That is the exact case the deferral exists to serve, and
-// it is the common one, because a session keeps working for as long as it
-// likes after its loop ends.
-//
-// 64 MB scans a whole multi-day session (the largest transcripts observed run
-// to 57 MB) with headroom, and the cost is linear and bounded: at that size
-// the read plus classification is roughly 150 ms and 175 MB of peak resident
-// memory in this short-lived hook process, which runs only when the harness
-// is already offering a compaction. Past the ceiling the head-plus-tail
-// reader takes over, so a runaway or hostile file costs the same 512 KB it
-// always did; the unread middle comes back with it, and the misread it can
-// produce degrades to the early trigger, never to a wedged session.
-const AUTOMATION_READ_MAX_BYTES = 64 * 1024 * 1024;
-
-// Read a transcript for the automation scan: the whole file at or below
-// AUTOMATION_READ_MAX_BYTES, the head-plus-tail read above it. Returns '' on
-// any error or a non-regular file, which classifies as no evidence. The
-// isFile check narrows the same FIFO-swap window readTranscriptCapped
-// documents, and on the same accepted residual: a blocking read on a FIFO
-// hangs where no try/catch can rescue it, and the path is re-resolved after
-// the stat either way.
-function readTranscriptForAutomation(transcriptPath) {
-    try {
-        const st = fs.statSync(transcriptPath);
-        if (!st.isFile()) return '';
-        if (st.size > AUTOMATION_READ_MAX_BYTES) return readTranscriptCapped(transcriptPath);
-        return fs.readFileSync(transcriptPath, 'utf8');
-    } catch {
-        return '';
-    }
-}
-
-// Does the transcript at this path show a native automation instrument
-// driving the session? A missing path, an unreadable or non-regular file, or
-// any escape reads as no evidence (false); the caller's valve leg reads the
-// same file, so an unreadable transcript also yields no consumed-token
-// reading and the gate's verdict on it is allow.
-function transcriptShowsAutomation(transcriptPath) {
-    try {
-        if (!transcriptPath) return false;
-        const text = readTranscriptForAutomation(transcriptPath);
-        if (!text) return false;
-        return automationInEffect(text);
-    } catch {
-        return false;
-    }
-}
-
 module.exports = {
-    checkpointCliClause,
     kitScratchDir, ensureScratchDirIgnored, ensureProjectScratchDir,
     sameSessionId, CHECKPOINT_FUTURE_SKEW_MS,
     roleBoundaryPath, consentPath, ROLE_BOUNDARY_MAX_AGE_MS, CONSENT_MAX_AGE_MS,
-    markerMatches, readRoleBoundary, readConsent, readRoleBoundaryResult, readConsentResult,
+    readRoleBoundaryResult,
     sweepRoleBoundaryMarkers, ROLE_BOUNDARY_MAX_NAMES,
-    writeRoleBoundary, writeConsent, clearRoleBoundary, clearConsent,
-    markerMomentHolds, markerDeclaresMoment, transcriptPosition,
+    writeRoleBoundary, writeConsent, clearRoleBoundary,
     stampRegistryBanked, stampRegistryEntry, stampRegistryFields, registryEntryPath,
     stepOffWholeSecond,
     coordinatorRoot, coordinatorDir, registryField,
@@ -3512,11 +1407,5 @@ module.exports = {
     shownText, BARRED_QUOTE,
     readRegistryEntryText, writeRegistryEntryAtomic, REGISTRY_ENTRY_MAX_BYTES,
     projectHoldsSessionTranscript, sessionTranscriptPath, usableSessionId,
-    gateStatePath, gateLogPath, readGateState, readGateStateResult, recordGateDecision, GATE_REASONS,
-    interactiveHoldOpen, INTERACTIVE_HOLD_REASONS, INTERACTIVE_HOLD_MAX_ENTRIES,
-    holdNudgePath, holdNudgedAt, recordHoldNudge, readHoldNudgesResult, HOLD_NUDGE_TTL_MS,
-    HOLD_NUDGE_HEALABLE,
-    wholeMinutesSince, gateCount,
-    readTranscriptCapped, stripLocalCommandOutput, commandArgsSpans,
-    automationInEffect, transcriptShowsAutomation
+    stripLocalCommandOutput
 };

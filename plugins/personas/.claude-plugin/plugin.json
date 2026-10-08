@@ -118,6 +118,12 @@
       "title": "Jev shadow mode",
       "description": "off or shadow, and shadow is the default. shadow has the decision seam put each closed question the plugin already asks Haiku to Jev as well, beside it, and write the answer to the decision journal, acting on nothing it gets back. off makes no such call and writes no journal line. The supervisor refuses any other value rather than writing it, so a typo stops that launch instead of quietly disabling the seam."
     },
+    "compactionPass": {
+      "type": "string",
+      "default": "shadow",
+      "title": "Compaction pass",
+      "description": "off, shadow or live, and shadow is the default. shadow has the module ask Jev on its heartbeat whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live is read and acts as shadow. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off the pass asks nothing, writes one compaction_pass_disabled line per armed session, and writes no line at a compaction."
+    },
     "jevLive": {
       "type": "string",
       "default": "",

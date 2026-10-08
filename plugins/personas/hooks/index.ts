@@ -185,6 +185,9 @@ import {
   STEP_DRIFT,
   STEP_DRIFT_OPTIONS,
   stepDriftStateText,
+  TOOL_RESULT_STALE,
+  TOOL_RESULT_STALE_OPTIONS,
+  toolResultStaleStateText,
   kaizenLine,
   turnScoreStateText,
   type TurnScoreTools,
@@ -198,7 +201,7 @@ import {
 // health question no classifier asks, plus the journal that records every
 // answer.
 import { ask, askAll, COMPLETE_TIMEOUT_MS, heldFailure, holdFor, HOLD_TIMEOUT, SHADOW_TIMEOUT_MS, shadowBoundMs, type ChoiceAnswer, type HoldHost, type HoldTimeout, type JevAnswer, type QuestionAsk, type QuestionResolver, type SeamFailureReason, type SeamResult, type SeamSetResult } from "./decision-seam";
-import { newStampId, segment, splitOf, writeCall, writeAnswers, writeOutcome, writeRendering, journalDirOf, JOURNAL_FILE_PATTERN, ASK_MARKER_VALUE, type JournalWrite, type OutcomeKind } from "./decision-journal";
+import { newStampId, segment, splitOf, writeCall, writeAnswers, writeOutcome, writeRendering, writeEvent, journalDirOf, JOURNAL_FILE_PATTERN, ASK_MARKER_VALUE, type JournalWrite, type OutcomeKind } from "./decision-journal";
 // The in-process recognition index the memory-recognition shadow matches.
 import { recognitionIndexOf, recognitionKeyOf, recognitionMatches, recognitionScopeOf, shellCommandOf, RECOGNITION_SCOPE_RETRY_MS, RECOGNITION_SCOPE_SCRIPT, RECOGNITION_ACT_WINDOW, type RecognitionIndex, type RecognitionMatch, type RecognitionScope, type RecognitionTier } from "./recognition";
 // The one builder of a prompt's context blocks, for a typed prompt and for a
@@ -207,6 +210,9 @@ import { assembleContext, deliveryWithContext, type ContextSources } from "./con
 // The follow-up queue a turn's end fills and the next prompt's context
 // lists, and the documentation check that is its source.
 import { docsCheckFindings, enqueueFollowUps, markFollowUpsShown, readFollowUps, settleFollowUps, unshownFollowUps, writeFollowUps, followUpId, followUpPathNames, FOLLOW_UPS_MAX, type DocsCheckFs, type FollowUpDecide, type FollowUpEntry } from "./follow-ups";
+// The compaction veto's rule, the release marker reads behind it, and the
+// texts the skip and the reminder render.
+import { COMPACT_PASS_FLOOR_PERCENT, COMPACT_PLAN_STALE_MESSAGES, COMPACT_REMINDER_INTERVAL_MS, COMPACT_VALVE_PERCENT, CONSENT_MAX_AGE_MS, ROLE_BOUNDARY_MAX_AGE_MS, applyPlan, breakdownPercentOfWindow, buildPlan, cacheExpired, checkpointCommandClause, consentPath, consumeMarker, decideCompaction, isToolVerdict, keysPrefix, markerMatches, markerMomentHolds, percentOf, planRefusal, readMarker, roleBoundaryPath, skipReasonText, surveyTranscript, targetTokensOf, tokensOf, type ApplyResult, type CachedVerdict, type CompactionFs, type CompactionPlan, type PassMessage, type PercentSource } from "./compaction";
 
 // --- Module-scope session identity ---
 // The loader requires `persist` and `activate` to be top-level functions.
@@ -422,6 +428,17 @@ function docsCheckFsOf(dp: any): DocsCheckFs {
   return {
     list: (path: string) => dp.fs.list(path),
     read: (path: string) => dp.fs.read(path),
+  };
+}
+
+// Adapter: the four $.fs calls the compaction veto's marker reads make,
+// built here for the reason docsCheckFsOf is: `$` never crosses an import.
+function compactionFsOf(dp: any): CompactionFs {
+  return {
+    exists: (path: string) => dp.fs.exists(path),
+    stat: (path: string) => dp.fs.stat(path),
+    read: (path: string) => dp.fs.read(path),
+    write: (path: string, text: string) => dp.fs.write(path, text),
   };
 }
 
@@ -864,6 +881,277 @@ function shadowOutcome(host: PluginHost, callStampId: string, kind: OutcomeKind,
   void writeOutcome(host, { persona: sess.persona, session: sess.mySessionId, callStampId, kind, value })
     .then((write) => noteJournalWrite(write, kind))
     .catch(() => { /* as in shadowAsk: nothing awaits this chain. */ });
+}
+
+// --- The compaction pass ---
+//
+// The pass judges each old tool result as keep, cut or drop through the
+// tool-result-stale question, on the heartbeat timer and never inside a
+// hook, and builds a plan the session.compact hook reads. Its rule lives in
+// hooks/compaction.ts; what sits here is the state the timer and the hook
+// share, the Jev asks through shadowAsk, and the journal lines.
+
+// The site label the pass's call lines carry. The verdict cache lives in
+// $.state under compactionVerdicts, declared in hooks/personas.d.ts, and
+// each call names that key as a literal, which the plugin validator requires.
+const COMPACTION_SITE = "compaction";
+
+// The pass option's three values. Any other value reads as off.
+type CompactionPassOption = "off" | "shadow" | "live";
+
+// The option as the configuration spells it: one of the three, or off with
+// the value that was refused, so session.start can log it once.
+function compactionPassOptionOf(value: unknown): { option: CompactionPassOption; invalid: string | null } {
+  if (value === undefined) return { option: "shadow", invalid: null };
+  if (value === "off" || value === "shadow" || value === "live") return { option: value, invalid: null };
+  return { option: "off", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
+}
+
+// The pass's state. Module state, per loaded plugin instance and so per
+// session, as sess is. The plan and the latches live in memory alone: a
+// reload loses the plan, which the next tick above the floor rebuilds from
+// the verdict cache, and the cache itself lives in $.state, which the host
+// keeps across a reload, so a result is asked about once per session.
+const compactionPass: {
+  // The plan as last built, or null before the first build.
+  plan: CompactionPlan | null;
+  // The verdict cache, read from $.state at the first tick that needs it.
+  cache: Record<string, CachedVerdict> | null;
+  // Counts up at every verdict that lands, and the count the plan was built
+  // at, so a tick folds landed verdicts into the plan without new messages.
+  cacheVersion: number;
+  planCacheVersion: number;
+  // Whether a tick's step is running, so a slow engine read never lets two
+  // overlap.
+  busy: boolean;
+  // Whether the once-per-session disabled line has been written.
+  disabledJournaled: boolean;
+  // When the last main-thread turn ended, in Date.now() milliseconds, as the
+  // meter row carries it, or 0 where none has; the cache clock runs from it.
+  lastMainTurnEndedAt: number;
+  // Whether the current idle stretch has had its cold_cache line. A turn
+  // ending opens a new stretch.
+  coldCacheJournaled: boolean;
+} = { plan: null, cache: null, cacheVersion: 0, planCacheVersion: -1, busy: false, disabledJournaled: false, lastMainTurnEndedAt: 0, coldCacheJournaled: false };
+
+// The verdict cache, read from $.state once and held. A read that fails or
+// holds no map starts an empty cache, which re-asks what the host lost.
+async function compactionVerdictCache(dp: any): Promise<Record<string, CachedVerdict>> {
+  if (compactionPass.cache !== null) return compactionPass.cache;
+  let held: unknown;
+  try {
+    held = (await dp.state.get({ plugin: "personas", key: "compactionVerdicts" })).value;
+  } catch {
+    held = undefined;
+  }
+  const cache: Record<string, CachedVerdict> = Object.create(null);
+  if (held && typeof held === "object" && !Array.isArray(held)) {
+    for (const id of Object.keys(held as Record<string, unknown>)) {
+      if (!Object.hasOwn(held as Record<string, unknown>, id)) continue;
+      const v: unknown = (held as Record<string, unknown>)[id];
+      if (v && typeof v === "object" && isToolVerdict((v as { verdict?: unknown }).verdict)) {
+        const entry = v as { verdict: string; answered?: unknown; holdout?: unknown };
+        cache[id] = { verdict: entry.verdict as CachedVerdict["verdict"], answered: typeof entry.answered === "string" ? entry.answered : entry.verdict, holdout: entry.holdout === true };
+      }
+    }
+  }
+  compactionPass.cache = cache;
+  return cache;
+}
+
+// One compaction_pass event line. The detail is flat, as the journal's
+// event line takes it.
+async function compactionPassEvent(dp: any, detail: Record<string, string | number | boolean | null>): Promise<void> {
+  noteJournalWrite(await writeEvent(hostOf(dp), {
+    persona: sess.persona,
+    session: sess.mySessionId,
+    event: "compaction_pass",
+    detail,
+  }), "compaction_pass");
+}
+
+// A plan's counts as a line carries them.
+function compactionPlanDetail(plan: CompactionPlan | null): Record<string, number | null> {
+  if (plan === null) {
+    return { keep: 0, cut: 0, drop: 0, holdout: 0, unjudged: 0, keptCount: null, keptTokens: null, droppedTokens: null, targetTokens: null, skillKept: 0, skillSuperseded: 0, planRows: null };
+  }
+  return {
+    keep: plan.counts.keep,
+    cut: plan.counts.cut,
+    drop: plan.counts.drop,
+    holdout: plan.counts.holdout,
+    unjudged: plan.unjudged,
+    keptCount: plan.keptCount,
+    keptTokens: plan.keptTokens,
+    droppedTokens: plan.droppedTokens,
+    targetTokens: plan.targetTokens,
+    skillKept: plan.skillKept.length,
+    skillSuperseded: plan.skillSuperseded,
+    planRows: plan.rowCount,
+  };
+}
+
+// The pass's tick, run from the heartbeat in every armed session, owner or
+// reader. An unarmed session starts no heartbeat, so it asks nothing and
+// holds no plan. Under off it does nothing. Where the seam's mode sends
+// nothing, no plan can exist, so it journals one disabled line per session
+// and does nothing more. With no turn open it reads the
+// context percent and, where a plan stands and the cache has expired, reads
+// the rows and journals one cold_cache line for the idle stretch if the plan
+// still covers them. Then, at or above the floor, where no plan stands, ten
+// messages have arrived since the last one, or verdicts have landed since
+// it was built, it reads both forms of the transcript, surveys them, asks
+// tool-result-stale of at most COMPACT_ASK_BATCH results that hold no
+// verdict, each through shadowAsk as its own call of site compaction, and
+// builds the plan from the cache as it stands. A verdict lands through the
+// ask's result hook, into the cache and $.state, keep where its stamp is a
+// holdout. The asks are never awaited here: the next tick folds what landed.
+// Every failure is caught and counted as one decision, since $.clock.every
+// swallows a rejection and nobody would receive it.
+async function compactionPassStep(dp: any, option: CompactionPassOption, jevMode: string, turnOpen: () => boolean, now: number): Promise<void> {
+  if (option === "off" || compactionPass.busy) return;
+  compactionPass.busy = true;
+  try {
+    if (jevMode !== "shadow") {
+      if (!compactionPass.disabledJournaled) {
+        compactionPass.disabledJournaled = true;
+        noteJournalWrite(await writeEvent(hostOf(dp), {
+          persona: sess.persona,
+          session: sess.mySessionId,
+          event: "compaction_pass_disabled",
+          detail: { option, jevMode },
+        }), "compaction_pass_disabled");
+      }
+      return;
+    }
+    if (turnOpen()) return;
+    let usage: unknown;
+    try {
+      usage = await dp.session.usage();
+    } catch {
+      usage = undefined;
+    }
+    const percent = percentOf(usage);
+    let rows: PassMessage[] | null = null;
+    const readRows = async (): Promise<PassMessage[] | null> => {
+      if (rows !== null) return rows;
+      try {
+        const read: unknown = await dp.session.messages();
+        rows = Array.isArray(read) ? (read as PassMessage[]) : null;
+      } catch {
+        rows = null;
+      }
+      return rows;
+    };
+    // The expired-cache reading, over the plan as it stands.
+    const standing = compactionPass.plan;
+    if (standing !== null && !compactionPass.coldCacheJournaled && cacheExpired(now, compactionPass.lastMainTurnEndedAt, turnOpen())) {
+      const current = await readRows();
+      if (current !== null && !turnOpen() && keysPrefix(standing.keys, current)) {
+        compactionPass.coldCacheJournaled = true;
+        await compactionPassEvent(dp, {
+          trigger: "cold_cache",
+          option,
+          plan: "covering",
+          why: null,
+          ...compactionPlanDetail(standing),
+          tokensAfter: null,
+          idleS: Math.floor((now - compactionPass.lastMainTurnEndedAt) / 1000),
+          messages: current.length,
+        });
+      }
+    }
+    // The pass.
+    if (percent === null || percent < COMPACT_PASS_FLOOR_PERCENT) return;
+    const current = await readRows();
+    if (current === null) return;
+    const cache = await compactionVerdictCache(dp);
+    // Stale where no plan stands, where ten messages arrived since it was
+    // built, where verdicts landed since, or where its keys no longer open
+    // the rows, as after a compaction that shrank the transcript.
+    const stale = standing === null
+      || current.length - standing.rowCount >= COMPACT_PLAN_STALE_MESSAGES
+      || compactionPass.planCacheVersion !== compactionPass.cacheVersion
+      || !keysPrefix(standing.keys, current);
+    if (!stale) return;
+    let api: unknown;
+    try {
+      api = await dp.session.messages({ as: "api" });
+    } catch {
+      api = [];
+    }
+    let breakdown: unknown;
+    try {
+      breakdown = await dp.session.usage({ breakdown: "summary" });
+    } catch {
+      breakdown = usage;
+    }
+    if (turnOpen()) return;
+    const survey = surveyTranscript(current, api, cache);
+    for (const candidate of survey.ask) {
+      const id = candidate.id;
+      let stampId: string | null = null;
+      stampId = shadowAsk(hostOf(dp), COMPACTION_SITE, TOOL_RESULT_STALE, TOOL_RESULT_STALE_OPTIONS, toolResultStaleStateText(candidate), jevMode, null, undefined, (result) => {
+        if (result === null || !result.ok || result.primitive !== "choice") return;
+        const answered = result.answer.choice;
+        if (!isToolVerdict(answered)) return;
+        const holdout = stampId !== null && splitOf(stampId) === "holdout";
+        cache[id] = { verdict: holdout ? "keep" : answered, answered, holdout };
+        compactionPass.cacheVersion += 1;
+        // Written through as it lands, so a reload between a verdict and the
+        // next tick re-asks nothing. A refused write costs one re-ask after a
+        // reload and nothing else.
+        void Promise.resolve()
+          .then(() => dp.state.set({ plugin: "personas", key: "compactionVerdicts" }, cache))
+          .catch(() => { /* $.state unavailable; the cache in memory still serves this session */ });
+      });
+    }
+    compactionPass.plan = buildPlan(current, survey, cache, targetTokensOf(breakdown), now);
+    compactionPass.planCacheVersion = compactionPass.cacheVersion;
+  } catch (err) {
+    sess.state.decisions.push({
+      timestamp: Date.now(),
+      loop: "monitor",
+      action: "compaction_pass_failed",
+      detail: boundedText(safeErrorText(err)),
+    });
+  } finally {
+    compactionPass.busy = false;
+  }
+}
+
+// The shadow branch, run by the session.compact hook on an allowed auto or
+// precompute compaction of the main conversation once next has resolved.
+// With a plan whose keys open the hook's messages, it applies the plan to a
+// copy and reads the kept estimate against the target; the hook's own result
+// is never changed here. One compaction_pass line records what the plan
+// would have kept beside what the summary kept, or why no plan applied: no
+// plan, a prefix mismatch, no target, an estimate over the target, or an
+// apply that broke an alternation the list had. No Jev call and no model
+// call runs here: the plan is read as the timer left it.
+async function compactionPassShadow(dp: any, e: { trigger: string; messages?: unknown }, result: { tokensAfter?: number; skip?: string }, option: CompactionPassOption): Promise<void> {
+  const plan = compactionPass.plan;
+  const messages: PassMessage[] = Array.isArray(e.messages) ? (e.messages as PassMessage[]) : [];
+  const covers = plan !== null && keysPrefix(plan.keys, messages);
+  const applied: ApplyResult | null = plan !== null && covers ? applyPlan(messages, plan) : null;
+  const why = planRefusal(plan, messages, applied, covers);
+  await compactionPassEvent(dp, {
+    trigger: e.trigger,
+    option,
+    plan: why === null ? "applied" : "none",
+    why,
+    ...compactionPlanDetail(plan),
+    ...(applied === null ? {} : {
+      keptCount: applied.keptCount,
+      keptTokens: tokensOf(applied.keptChars),
+      droppedTokens: tokensOf(applied.droppedChars),
+      skillKept: applied.skillKept,
+      skillSuperseded: applied.skillSuperseded,
+      alternates: applied.alternates,
+    }),
+    tokensAfter: typeof result.tokensAfter === "number" ? result.tokensAfter : null,
+    messages: messages.length,
+  });
 }
 
 // The worker's ASK: marker, a line reading `ASK: <question>? Recommend:
@@ -4849,6 +5137,14 @@ const TEXT_CUT_MARK = " [cut at the bound]";
 // own so the injection ledger can size it.
 const LAUNCH_INSTRUCTIONS_OPENING_TEXT = "[LAUNCH INSTRUCTIONS REPEATED] The conversation was compacted, so the instructions this session was launched with follow again. They were given at launch: nothing in them is a new ask, no acknowledgment is owed, and any message they say comes next has already come.";
 
+// The reminder a held automatic compaction puts on the next main-loop tool
+// result, once in COMPACT_REMINDER_INTERVAL_MS. {percent} is the percent the
+// compaction was held at, {valve} the percent that releases one whatever the
+// session declared, and {command} the checkpoint CLI's boundary verb as a
+// command, each filled where the line is attached. It is a named literal of
+// its own so the injection ledger can size it.
+const COMPACT_HOLD_REMINDER_TEXT = "[COMPACTION HELD] The persona module is holding this session's automatic compaction offers at {percent} percent of the context window, because this session has declared no boundary for them to land at. Unheld, they ride to the valve at {valve} percent, which lands the compaction at whatever this session happens to be doing then. At the end of this turn, answer the durability question: are your own worktree edits none or handed to a named owner, is every decision from this stretch on disk, and are the messages you owe sent? If all three are yes, run {command}, and the next offer lands there. If any is no, finish it first and declare at that point: the declaration covers this moment only and lapses the moment new work arrives.";
+
 // The opening clause every level sentence below shares: the level scopes
 // only what the persona does with work it finds on its own, never a turn the
 // operator opened to ask for something. One owner, spliced into all three,
@@ -7146,6 +7442,20 @@ export const register: Register = async (on, options) => {
   // missed rather than misplaced. It is held in memory only: a restart is a new session
   // id, whose marker would be another key.
   let pendingCompactionBank: { turnKind: string } | null = null;
+  // The hold a vetoed automatic compaction left, with the percent it was
+  // held at, or null once a compaction of the main conversation has run.
+  // The first main-loop tool result after a veto carries the boundary
+  // reminder, and later ones carry it once in COMPACT_REMINDER_INTERVAL_MS,
+  // measured from compactionReminderAt. Both live in memory only: a restart
+  // shows the reminder once early, which costs one line and withholds none.
+  let compactionHeld: { percent: number } | null = null;
+  let compactionReminderAt = 0;
+  // When the latest main-loop turn started, in Date.now() milliseconds, or 0
+  // where none has. A declared role-boundary marker written before it has
+  // outlived its moment: new work arrived in the main conversation, so the
+  // veto's marker read lapses it. The engine's turn.start is the main
+  // conversation's alone; a subagent's loop starts none.
+  let lastTurnStartAt = 0;
   // Every turn.start this module has seen, counted up and never reset, so a
   // completion can tell whether a newer turn started while it settled.
   // sess.state.monitor.turnCount is not that count: a state load or a new
@@ -7255,15 +7565,20 @@ export const register: Register = async (on, options) => {
   // like the Reviewer's: only agentic_identity/agentic_say/agentic_inbox and
   // fleet_status register, with no goal-tree tool, no controller tick, and no claim on
   // any owner-only claim site. "off" is a plain chat session: it registers
-  // nothing but the session.start hook, whose first lines log the tier and
-  // return, and register() itself returns right after that hook is
+  // the session.start hook, whose first lines log the tier, read the session
+  // id and the working directory and return, and the compaction veto's two
+  // hooks: session.compact, whose veto decides an automatic compaction in
+  // every session the module loads in, and turn.start, which in this tier
+  // stamps the moment the veto's declared-marker rule reads and nothing
+  // else. register() itself returns right after those three are
   // installed. The option reads between here and that hook run for every
   // tier; they touch only the module's own state. An absent or unrecognized
   // value reads as "off"; an unrecognized one is remembered so the log line
   // can name it. The loader judges the compiled module statically and
   // refuses the whole file when one event is registered twice without a
-  // matcher, so the off tier cannot install a session.start hook of its
-  // own: this file registers each event exactly once.
+  // matcher, so the off tier cannot install a session.start, session.compact
+  // or turn.start hook of its own: this file registers each event exactly
+  // once, and a hook that serves two tiers branches on `arming` inside.
   const armingRaw = typeof cfg.arming === "string" ? cfg.arming.trim() : "";
   let armingUnrecognized: string | null = null;
   let arming: "off" | "reader" | "owner";
@@ -7377,6 +7692,14 @@ export const register: Register = async (on, options) => {
   // folds any value outside "off" and "shadow" to "off" on its own.
   const jevMode = typeof cfg.jevMode === "string" ? cfg.jevMode : "shadow";
 
+  // The compaction pass's switch: off, shadow or live, shadow by default for
+  // jevMode's reason. live is read as live and acts as shadow. Any other
+  // value reads as off, and session.start logs the refused value once, where
+  // a state exists to log against.
+  const compactionPassRead = compactionPassOptionOf(cfg.compactionPass);
+  const compactionPassOption: CompactionPassOption = compactionPassRead.option;
+  let compactionPassInvalid: string | null = compactionPassRead.invalid;
+
   // jevLive names, by question-set id, which of PROMOTABLE_SET_IDS's
   // questions may read Jev's live answer through liveAsk instead of always
   // shadowing it. filterJevLive holds the filter itself; what it drops is
@@ -7401,6 +7724,27 @@ export const register: Register = async (on, options) => {
     if (arming === "off") {
       const suffix = armingUnrecognized ? `; unrecognized value '${armingUnrecognized}'` : "";
       $.ui.log(`Agentic: arming off, no persona tools or claims in this session${suffix}`);
+      // The compaction veto below runs in this session too, and its marker
+      // reads are keyed by the session id and the working directory: the
+      // role-boundary marker is named for the session, and the consent
+      // marker sits under the working directory's scratch directory. Both
+      // are read here, into the module's own state, and nothing else of the
+      // armed start runs.
+      try {
+        sess.mySessionId = String(await $.session.id());
+      } catch {
+        // $.session.id unavailable; the marker read is for "pending"
+      }
+      try {
+        if (typeof e.cwd === "string" && e.cwd.length > 0) {
+          sess.workdir = e.cwd;
+        } else {
+          const cwd = await $.session.cwd();
+          if (typeof cwd === "string") sess.workdir = cwd;
+        }
+      } catch {
+        // cwd unavailable; no consent path resolves
+      }
       return next(e);
     }
     // session.start fires again on a reload of the plugin's code, which
@@ -8262,6 +8606,19 @@ export const register: Register = async (on, options) => {
       memoryGateDiscardPercentClamped = null;
     }
 
+    // The compaction pass option was read at registration too, so a refused
+    // value is logged here on the same pattern and cleared the same way. The
+    // value is configuration text, folded and bounded before it rides a line.
+    if (compactionPassInvalid !== null) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "monitor",
+        action: "setting_clamped",
+        detail: `compactionPass ${bracketSafeText(oneLine(compactionPassInvalid)).slice(0, 50)} is not off, shadow or live; using off`,
+      });
+      compactionPassInvalid = null;
+    }
+
     if (startPersonaProblem !== null) {
       sess.state.decisions.push({
         timestamp: Date.now(),
@@ -8373,6 +8730,12 @@ export const register: Register = async (on, options) => {
         // checks below can return from the tick and never awaited, so a host
         // that stalls never delays this session's yield.
         try { meterDrainStep($, at); } catch { /* the meter never fails a tick */ }
+        // The compaction pass's step, for every armed session, owner or
+        // reader: this timer is the one registered before the reader gate
+        // the controller tick sits behind. It awaits engine reads alone and
+        // fires its Jev asks without awaiting them, so it holds the stamps
+        // below for the engine's own answer time and never for the vendor.
+        try { await compactionPassStep($, compactionPassOption, jevMode, turnIsOpen, at); } catch { /* the step counts its own failures */ }
         // The heartbeat tick verifies ownership BEFORE stamping.
         // If the store's (sessionId, epoch) no longer matches this session,
         // another session has claimed the persona and this one must yield
@@ -11655,17 +12018,280 @@ export const register: Register = async (on, options) => {
     return next(e);
   });
 
-  // An "off" session installs nothing past the session.start hook above:
-  // no turn hooks, no tool.call guard, no prompt hook.
-  if (arming === "off") return;
+  // --- session.compact: veto an automatic compaction the session has no durable point for, and carry the shown records and the launch instructions through one that runs ---
+  // The hook has three jobs: the veto on the way down, then the two every
+  // compaction that runs takes, one on the way down and one on the way up.
+  //
+  // The veto. A compaction of the main conversation on the `auto` trigger,
+  // or its `precompute`, runs only where one of these holds, each a named
+  // reason in this order: the session declared a boundary since its last
+  // compaction, which is the module's own bank (pendingCompactionBank) or a
+  // live role-boundary marker for this session, read under the kit's own
+  // match rule and moment rule in compaction.ts, so a declared marker
+  // written before the latest main-loop turn started has lapsed; the
+  // operator's consent marker under the working directory's scratch
+  // directory; the context percent $.session.usage() reports is at or past
+  // COMPACT_VALVE_PERCENT; or that call rejects or answers no percent, which
+  // it does until the first response of a fresh or just-compacted window,
+  // and a veto the module cannot bound would hold the session to its death.
+  // A compaction none of those releases takes one more engine reading,
+  // $.session.usage({ breakdown: "summary" }), since the bare call's percent
+  // is the last response's input side and an `auto` the engine runs for a
+  // prompt too long can arrive under the valve by that figure; the valve is
+  // then decided on the larger of the two percents, and the line names which
+  // it read. Otherwise the hook returns a skip whose one line names the
+  // boundary verb and the percent, which the engine prints, and next is
+  // never called. An allowed `auto` consumes what released it once the
+  // compaction has run: it clears the bank, or writes the marker or the
+  // consent back consumed, never deleting either. Core runs any classic
+  // PreCompact hook inside next and answers its block as a skip, so
+  // a release is spent only once the compaction stands, and a skip or an
+  // empty result from next leaves it for the offer that follows. A
+  // `precompute` installs nothing, so it reads both and consumes neither;
+  // the compaction it was computed for still has to pass. A subagent's own
+  // compaction and a `manual` or `plugin` one pass down as they arrived.
+  // Every decision, on every trigger, is one compaction_gate event line in
+  // the decision journal, with the trigger, the verdict, the reason, the
+  // percent and which reading it came from, what was released and what each
+  // marker read answered; the in-state decisions ring is not its surface. A
+  // skip also arms the boundary reminder the next
+  // main-loop tool result carries, and a compaction of the main conversation
+  // that runs disarms it. The owning session and a reader both decide and
+  // both write the line, since the journal is per session.
+  //
+  // The hook is registered ahead of the arming return below, so it runs in
+  // an "off" session too: the veto, its skip line, the valve, the illegible
+  // allow, the marker and consent reads with their consumption, and the
+  // journal line all need nothing an armed session builds, and a session
+  // with no veto compacts mid-work. What the off tier never has, the veto
+  // reads as absent there: the bank, which turn.complete sets, stays null.
+  // The moment rule holds there as it does armed, since the off tier's
+  // turn.start stamps lastTurnStartAt and nothing else, so a declared marker
+  // written before the latest turn start has lapsed. The boundary reminder is armed but
+  // never carried, since tool.call is not installed, so the engine's print
+  // of the skip line is the one text an off session receives. The shadow
+  // pass and the launch-instruction re-injection below run in an armed
+  // session only: the plan is the controller tick's and the kept text is
+  // prompt.submit's, and the off tier installs neither.
+  //
+  // On the way down, a compaction of the main conversation, whatever its
+  // trigger, tells the summarizer the names of the records shown under the
+  // active goal, so the summary the worker resumes from still carries what
+  // the goal's [MEMORY CHECK] will ask about. The sentence is the
+  // instructions where none arrived, and follows the instructions that did
+  // after one space. The names are store text, so each is folded to one line
+  // and passes through bracketSafeText. A subagent's own compaction, and one
+  // with no records shown under the active goal, passes down unchanged. The
+  // shown list is only read here.
+  //
+  // On the way up, the conversation as the compaction left it gains one user
+  // message directly after the summary, which is the first message: the
+  // opening line, then the launch instructions prompt.submit kept from the
+  // supervisor's priming prompt. So the persona's role is in the conversation
+  // again before the next model step, whatever the summary kept of it. The
+  // result returns as it resolved where any of these holds: the compaction
+  // is a subagent's or a fork's own, which carries an agentId; it resolved
+  // to a skip, or with no messages and so no summary to follow; the $.state
+  // read fails or holds no kept text; or a message's whole text already is
+  // the opening line and the kept text, as a compaction computed ahead of
+  // time may pass this hook twice. Only the whole text counts, so a summary
+  // or a kept message that merely opens with the line, which text the
+  // session reads can steer, never stands in for the instructions. Each
+  // added message logs one decision with the kept text's length, the
+  // trigger and none of its words. A precompute pass logs when it computes,
+  // so its decision stands for a result the engine may later discard. Only
+  // the owning session logs it, since a reader's store write saves nothing,
+  // and a reader's compaction gains the message all the same. A $.state
+  // failure is caught here, since a throw from this hook fails the
+  // compaction.
+  on("session.compact", async ($, e, next) => {
+    const goalId = sess.state.activeGoalId ?? null;
+    const subagent = typeof e.agentId === "string" && e.agentId.length > 0;
+    const gated = !subagent && (e.trigger === "auto" || e.trigger === "precompute");
+
+    // The percent for the gate and for the line: null where the call rejects
+    // or answers none. A subagent's compaction reads none, since the main
+    // conversation's fill says nothing about its transcript. percentSource
+    // names the engine reading it is, the bare usage call's unless a held
+    // compaction's breakdown reading below proves larger.
+    let percent: number | null = null;
+    let percentSource: PercentSource = "usage";
+    if (!subagent) {
+      try {
+        percent = percentOf(await $.session.usage());
+      } catch {
+        percent = null;
+      }
+    }
+    const journal = async (verdict: "allow" | "skip", reason: string, release: string | null, marker: string | null, consent: string | null) => {
+      noteJournalWrite(await writeEvent(hostOf($), {
+        persona: sess.persona,
+        session: sess.mySessionId,
+        event: "compaction_gate",
+        detail: { trigger: e.trigger, verdict, reason, percent, percentSource, release, marker, consent },
+      }), "compaction_gate");
+    };
+    // What an allowed `auto` compaction consumes once it has run, or null
+    // where nothing released it or the trigger consumes nothing.
+    let consume: (() => Promise<void>) | null = null;
+
+    if (subagent) {
+      await journal("allow", "subagent", null, null, null);
+    } else if (!gated) {
+      await journal("allow", "trigger", null, null, null);
+    } else {
+      const fs = compactionFsOf($);
+      let home: unknown;
+      try {
+        home = await hostOf($).getHome();
+      } catch {
+        home = undefined;
+      }
+      const now = Date.now();
+      // Both markers are read on every gated compaction, so the line says
+      // what each answered whichever clause decided. A read that found no
+      // record names why; a record that did not match names the clause. The
+      // two reads are independent and run together, so the hook pays one
+      // file's latency rather than two.
+      const markerPath = roleBoundaryPath(home, sess.mySessionId);
+      const consentFile = consentPath(home, sess.workdir);
+      const [markerRead, consentRead] = await Promise.all([readMarker(fs, markerPath), readMarker(fs, consentFile)]);
+      // The match rule, then the moment rule: a declared marker that matched
+      // releases nothing once a main-loop turn started after it was written,
+      // and the line names that clause. The consent marker declares no
+      // moment, so the match rule alone decides it.
+      const matched = markerMatches(markerRead.marker, sess.mySessionId, now, ROLE_BOUNDARY_MAX_AGE_MS);
+      const marker = matched.ok ? markerMomentHolds(markerRead.marker, lastTurnStartAt) : matched;
+      const consent = markerMatches(consentRead.marker, sess.mySessionId, now, CONSENT_MAX_AGE_MS);
+      const bankSet = pendingCompactionBank !== null;
+      let decision = decideCompaction({ bankSet, marker, consent, percent });
+      if (decision.verdict === "skip") {
+        // The hold is checked against the engine's live estimate before it
+        // stands: one breakdown reading, taken only here so an allowed
+        // compaction pays nothing, and the valve decided on the larger
+        // percent. The live percent is the breakdown's totalTokens against
+        // the model's window, the base the bare percent is on, never the
+        // breakdown's own percentage, which is against the compaction
+        // window. A rejected call, an absent breakdown, a non-finite
+        // totalTokens or a window that is not a positive number leaves the
+        // decision on the bare call's percent.
+        let fromBreakdown: number | null = null;
+        try {
+          fromBreakdown = breakdownPercentOfWindow(await $.session.usage({ breakdown: "summary" }));
+        } catch {
+          fromBreakdown = null;
+        }
+        if (fromBreakdown !== null && fromBreakdown > decision.percent) {
+          percent = fromBreakdown;
+          percentSource = "breakdown";
+          decision = decideCompaction({ bankSet, marker, consent, percent });
+        }
+      }
+      await journal(decision.verdict, decision.reason, decision.release,
+        markerRead.marker === null ? markerRead.reason : marker.reason,
+        consentRead.marker === null ? consentRead.reason : consent.reason);
+      if (decision.verdict === "skip") {
+        compactionHeld = { percent: decision.percent };
+        return { skip: skipReasonText(decision.percent) };
+      }
+      if (e.trigger === "auto") {
+        if (decision.release === "bank") consume = async () => { pendingCompactionBank = null; };
+        else if (decision.release === "marker" && markerPath !== null) consume = () => consumeMarker(fs, markerPath, markerRead.marker).then(() => undefined);
+        else if (decision.release === "consent" && consentFile !== null) consume = () => consumeMarker(fs, consentFile, consentRead.marker).then(() => undefined);
+      }
+    }
+
+    const names = goalId === null || subagent ? [] : shownNamesUnder([goalId]);
+    let down = e;
+    if (names.length > 0) {
+      const sentence = `Records shown during the current goal, to be asked about at its close: ${names.map((name) => bracketSafeText(oneLine(name))).join(", ")}.`;
+      const instructions = typeof e.instructions === "string" && e.instructions !== "" ? `${e.instructions} ${sentence}` : sentence;
+      down = { ...e, instructions };
+    }
+    const result = await next(down);
+
+    // A compaction of the main conversation that ran, which is a result with
+    // no skip and at least one message, ends the hold, since the context the
+    // reminder spoke of is gone, and spends what released it. The reminder
+    // clock goes with the hold, so the next hold is a new one and its first
+    // tool result carries the reminder at once. A skip from next, core's
+    // answer to a classic PreCompact hook's block among them, or an empty
+    // result leaves the bank, the marker and the consent as they were. A
+    // precompute installs nothing, so it ends no hold and consume is null
+    // for it.
+    const ran = !subagent && result.skip === undefined && Array.isArray(result.messages) && result.messages.length > 0;
+    if (ran && e.trigger !== "precompute") {
+      compactionHeld = null;
+      compactionReminderAt = 0;
+    }
+    if (ran && consume !== null) await consume();
+
+    // The shadow pass, on an allowed compaction of the main conversation on
+    // auto or precompute that ran: the plan the timer built is applied to a
+    // copy and journaled beside the summary, and the result stands as it
+    // resolved. A skip or an empty result ran nothing, so it journals
+    // nothing. Under a seam mode that sends nothing no plan can exist, and
+    // the timer's one disabled line is the whole record. Nothing here calls
+    // Jev or a model. A failure in the branch is caught, since a throw from
+    // this hook fails the compaction. An off session holds no plan, since
+    // the tick that builds one is not installed, so it journals no pass line.
+    if (arming !== "off" && gated && ran && compactionPassOption !== "off" && jevMode === "shadow") {
+      try {
+        await compactionPassShadow($, e, result, compactionPassOption);
+      } catch { /* the pass line is lost; the compaction stands */ }
+    }
+    // The plan was built over the transcript the compaction replaced, so it
+    // goes with it: the next tick above the floor builds one over the new
+    // rows, and the expired-cache reading holds no dead plan to read against.
+    if (ran && e.trigger !== "precompute") compactionPass.plan = null;
+
+    if (subagent || result.skip !== undefined || !Array.isArray(result.messages) || result.messages.length === 0) return result;
+    // The kept launch instructions are prompt.submit's, which an off session
+    // never installs, so its compaction stands as it resolved and no $.state
+    // read is made for it.
+    if (arming === "off") return result;
+    let kept: unknown;
+    try {
+      kept = (await $.state.get({ plugin: "personas", key: "launchInstructions" })).value;
+    } catch {
+      // $.state unavailable; the compaction stands without the instructions
+      return result;
+    }
+    if (typeof kept !== "string" || kept.length === 0) return result;
+    const addedText = `${LAUNCH_INSTRUCTIONS_OPENING_TEXT}\n\n${kept}`;
+    if (result.messages.some((m) => m.text === addedText)) return result;
+    const [summary, ...rest] = result.messages;
+    const added = { role: "user" as const, text: addedText, toolUses: [] };
+    if (sess.isOwner) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "monitor",
+        action: "launch_instructions_reinjected",
+        detail: `launch instructions of ${kept.length} characters repeated after the summary; trigger ${e.trigger}`,
+      });
+      try { await persist($); } catch { /* persist could not read or write the store; the decision waits in memory */ }
+    }
+    return { ...result, messages: [summary, added, ...rest] };
+  });
 
   // --- turn.start: track turn ---
   on("turn.start", async ($, e, next) => {
+    // An off session stamps the moment and nothing else. The stamp is the
+    // input of the compaction veto's declared-marker rule, which lapses a
+    // declared boundary once a main-loop turn starts after it was written;
+    // the armed path below stamps it first with the same instant. No turn
+    // entry opens, no liveness file or store entry is written and no line is
+    // logged, since nothing in an off session reads them.
+    if (arming === "off") {
+      lastTurnStartAt = Date.now();
+      return next(e);
+    }
     // One instant for this start: the open-turn entry and every liveness file
     // the beat below stamps carry it.
     const at = Date.now();
     sess.state.monitor.turnCount += 1;
     turnStartSeq += 1;
+    lastTurnStartAt = at;
     sess.state.monitor.lastTurnId = e.turnId;
     // The turn is open from here until a completion carrying this same id.
     openTurns.set(e.turnId, at);
@@ -11916,6 +12542,11 @@ export const register: Register = async (on, options) => {
     return next(e);
   });
 
+  // An "off" session installs nothing past the session.start, session.compact
+  // and turn.start hooks above: no turn.step or turn.complete hook, no
+  // tool.call guard, no prompt hook.
+  if (arming === "off") return;
+
   // --- turn.step: the step watch ---
   // Runs on every model response of every turn, so it holds nothing: every
   // chunk passes up as it arrived, the result returned is the one next(e)
@@ -12096,6 +12727,11 @@ export const register: Register = async (on, options) => {
       if (!completesSubagentLoop) {
         jevTurnCalls = 0;
         jevTurnLatencyMs = 0;
+        // The compaction pass's cache clock runs from this end, the last
+        // main-thread response, and a turn ending opens a new idle stretch
+        // for the cold_cache line.
+        compactionPass.lastMainTurnEndedAt = meterEndedAt;
+        compactionPass.coldCacheJournaled = false;
       }
       // A [MEMORY CHECK] turn names records shown under a closed goal and does
       // no work, so it leaves the owed bank as it found it. That turn runs at
@@ -13493,7 +14129,7 @@ export const register: Register = async (on, options) => {
       // The owed bank was cleared at the delete, so here it is only set, where
       // that turn stopped at a durable point, and the first main-loop tool call
       // of a later turn runs the kit's boundary command, which records the
-      // marker its compaction gate honors. A turn that made no tool call
+      // marker the module's own session.compact handler honors. A turn that made no tool call
       // therefore never carries a stale bank into a later turn that ended
       // mid-work or on a lead, even where this handler throws before reaching
       // this step. A background subagent's completion inside the open turn, or
@@ -13642,76 +14278,6 @@ export const register: Register = async (on, options) => {
     }
   });
 
-  // --- session.compact: carry the shown records and the launch instructions through a compaction ---
-  // The hook has one job on the way down and one on the way up.
-  //
-  // On the way down, a compaction of the main conversation, whatever its
-  // trigger, tells the summarizer the names of the records shown under the
-  // active goal, so the summary the worker resumes from still carries what
-  // the goal's [MEMORY CHECK] will ask about. The sentence is the
-  // instructions where none arrived, and follows the instructions that did
-  // after one space. The names are store text, so each is folded to one line
-  // and passes through bracketSafeText. A subagent's own compaction, and one
-  // with no records shown under the active goal, passes down unchanged. The
-  // shown list is only read here.
-  //
-  // On the way up, the conversation as the compaction left it gains one user
-  // message directly after the summary, which is the first message: the
-  // opening line, then the launch instructions prompt.submit kept from the
-  // supervisor's priming prompt. So the persona's role is in the conversation
-  // again before the next model step, whatever the summary kept of it. The
-  // result returns as it resolved where any of these holds: the compaction
-  // is a subagent's or a fork's own, which carries an agentId; it resolved
-  // to a skip, or with no messages and so no summary to follow; the $.state
-  // read fails or holds no kept text; or a message's whole text already is
-  // the opening line and the kept text, as a compaction computed ahead of
-  // time may pass this hook twice. Only the whole text counts, so a summary
-  // or a kept message that merely opens with the line, which text the
-  // session reads can steer, never stands in for the instructions. Each
-  // added message logs one decision with the kept text's length, the
-  // trigger and none of its words. A precompute pass logs when it computes,
-  // so its decision stands for a result the engine may later discard. Only
-  // the owning session logs it, since a reader's store write saves nothing,
-  // and a reader's compaction gains the message all the same. A $.state
-  // failure is caught here, since a throw from this hook fails the
-  // compaction.
-  on("session.compact", async ($, e, next) => {
-    const goalId = sess.state.activeGoalId ?? null;
-    const subagent = typeof e.agentId === "string" && e.agentId.length > 0;
-    const names = goalId === null || subagent ? [] : shownNamesUnder([goalId]);
-    let down = e;
-    if (names.length > 0) {
-      const sentence = `Records shown during the current goal, to be asked about at its close: ${names.map((name) => bracketSafeText(oneLine(name))).join(", ")}.`;
-      const instructions = typeof e.instructions === "string" && e.instructions !== "" ? `${e.instructions} ${sentence}` : sentence;
-      down = { ...e, instructions };
-    }
-    const result = await next(down);
-
-    if (subagent || result.skip !== undefined || !Array.isArray(result.messages) || result.messages.length === 0) return result;
-    let kept: unknown;
-    try {
-      kept = (await $.state.get({ plugin: "personas", key: "launchInstructions" })).value;
-    } catch {
-      // $.state unavailable; the compaction stands without the instructions
-      return result;
-    }
-    if (typeof kept !== "string" || kept.length === 0) return result;
-    const addedText = `${LAUNCH_INSTRUCTIONS_OPENING_TEXT}\n\n${kept}`;
-    if (result.messages.some((m) => m.text === addedText)) return result;
-    const [summary, ...rest] = result.messages;
-    const added = { role: "user" as const, text: addedText, toolUses: [] };
-    if (sess.isOwner) {
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "monitor",
-        action: "launch_instructions_reinjected",
-        detail: `launch instructions of ${kept.length} characters repeated after the summary; trigger ${e.trigger}`,
-      });
-      try { await persist($); } catch { /* persist could not read or write the store; the decision waits in memory */ }
-    }
-    return { ...result, messages: [summary, added, ...rest] };
-  });
-
   // --- tool.call: serve tools, enforce constraints ---
   on("tool.call", async ($, e, next) => {
     // The budget this hook hands down to the calls it makes, live until
@@ -13777,10 +14343,14 @@ export const register: Register = async (on, options) => {
       // session should bank. bankCompactionBoundary never throws, and its one
       // decision is saved the way this handler's other bookkeeping lines are.
       const modelMadeCall = next.origin?.plugin === "engine";
+      // Whether this call ran the boundary verb, so the hold reminder below
+      // does not tell the session to run what this call just ran.
+      let bankedOnThisCall = false;
       if (modelMadeCall && !inSubagent && pendingCompactionBank !== null) {
         const owedBank = pendingCompactionBank;
         pendingCompactionBank = null;
         if (sess.isOwner) {
+          bankedOnThisCall = true;
           await bankCompactionBoundary($, owedBank.turnKind);
           try { await persist($); } catch { /* persist could not read or write the store; the decision waits in memory */ }
         }
@@ -15678,13 +16248,47 @@ export const register: Register = async (on, options) => {
         return { deny: "Bash is not allowed by the current goal" };
       }
 
-      const r = await next(e);
+      let r = await next(e);
       if ((r as { isError?: boolean }).isError === true) toolErrorsThisTurn++;
       // The recognition shadow, on the after side of a main-loop call that ran:
       // a synchronous match against the in-process index and an unawaited ask
       // per matched record. It reads the call and never the result, which goes
       // on below as it came.
       if (!inSubagent) recognitionShadow($, e.tool, (e as { command?: unknown }).command, jevMode, hookBudget);
+
+      // The boundary reminder a held compaction armed, on the next tool
+      // result the model reads: a main-loop call the model made, at most
+      // once in COMPACT_REMINDER_INTERVAL_MS, since a vetoed offer recurs
+      // every turn and the session needs telling once rather than at every
+      // call. A subagent's result and a plugin-raised call's carry none and
+      // spend nothing: the engine drops a plugin call's context, and the
+      // reminder is for the main loop whose context is held. The call that
+      // ran the boundary verb above carries none and spends nothing either,
+      // since the reminder would ask for what it just did. The command names
+      // the kit's install path where installed_plugins.json resolves one,
+      // with the home directory spelled $HOME, and the bare verb where it
+      // does not; compaction.ts composes the clause under its own grammar,
+      // and it is folded to one bracket-safe line here as every other context
+      // line this module writes is. The fills are function replacements, so
+      // no dollar sequence in a value is read as a replacement pattern.
+      if (modelMadeCall && !inSubagent && !bankedOnThisCall && compactionHeld !== null && Date.now() - compactionReminderAt >= COMPACT_REMINDER_INTERVAL_MS) {
+        compactionReminderAt = Date.now();
+        const located = await kitInstallPathOf($);
+        let home: unknown;
+        try {
+          home = await hostOf($).getHome();
+        } catch {
+          home = undefined;
+        }
+        const command = checkpointCommandClause("installPath" in located ? located.installPath : null, home).clause;
+        const held = compactionHeld.percent;
+        const line = COMPACT_HOLD_REMINDER_TEXT
+          .replace("{percent}", () => String(held))
+          .replace("{valve}", () => String(COMPACT_VALVE_PERCENT))
+          .replace("{command}", () => bracketSafeText(oneLine(command)));
+        const prior = Array.isArray(r.context) ? r.context : [];
+        r = { ...r, context: [...prior, line] } as typeof r;
+      }
 
       // Plan item 8.3: a record from a writer that may reach this persona
       // (deliveryGroundIn over one claims read, the tick's own rule) reaches

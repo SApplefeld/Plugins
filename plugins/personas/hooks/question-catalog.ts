@@ -252,12 +252,26 @@ export const MEMORY_RECOGNITION_STATE_DESCRIPTION = "description";
 export const STEP_DRIFT = "step-drift";
 export const STEP_DRIFT_OPTIONS: readonly string[] = Object.freeze(["on-goal", "drift"]);
 
+// --- The compaction pass's set ---
+//
+// Asked on the module's timer, never inside a hook, of each tool result older
+// than the tail the pass keeps whole, over toolResultStaleStateText's state:
+// the tool, the head of its input, the head and size of its result, whether
+// it errored, how many messages old it is, and whether a later message names
+// a path or identifier from its input. No Haiku counterpart asks it and no
+// live list may name it: its verdicts are Jev's alone, cached per result and
+// applied by the pass, in shadow until the operator's ruling. A verdict on a
+// holdout stamp is journaled and applied as keep.
+export const TOOL_RESULT_STALE = "tool-result-stale";
+export const TOOL_RESULT_STALE_OPTIONS: readonly string[] = Object.freeze(["keep", "cut", "drop"]);
+
 export const QUESTION_SET_IDS: readonly string[] = Object.freeze([
   CONTROLLER_DECISION, PLAN_SWITCH, TURN_SCORE, MEMORY_KIND,
   BLOCK_OWNER,
   TURN_OPEN, TURN_DISPOSITION,
   MEMORY_VALUE, MEMORY_RECALL, MEMORY_RECOGNITION,
   STEP_DRIFT,
+  TOOL_RESULT_STALE,
 ]);
 
 // The sets asked at a plan entry's turn end, in the order the request
@@ -286,13 +300,14 @@ export const MAX_OPTIONS = 255;
 // read into a branch by option id. The three memory sets are here on the
 // block owner's ground: each set's ids are its caller's one constant, and a
 // load reads that column as a closed vocabulary. The step watch's set is here
-// on the same ground. The plan switch is absent
+// on the same ground, and so is the compaction pass's set, whose verdict the
+// pass reads into an apply by option id. The plan switch is absent
 // because its option ids are the caller's pending plan ids rather than the
 // catalog's.
 export const FIXED_OPTION_SETS: readonly string[] = Object.freeze([
   CONTROLLER_DECISION, TURN_SCORE, MEMORY_KIND, BLOCK_OWNER, TURN_OPEN, TURN_DISPOSITION,
   MEMORY_VALUE, MEMORY_RECALL, MEMORY_RECOGNITION,
-  STEP_DRIFT,
+  STEP_DRIFT, TOOL_RESULT_STALE,
 ]);
 
 // A Score's levels are positions rather than names, so what an override of
@@ -467,6 +482,22 @@ export const SHIPPED_QUESTIONS: Readonly<Record<string, ResolvedQuestion>> = {
       "drift": "The response has gone elsewhere: it works on something unrelated to the objective, sets the objective aside with no instruction to, or waits on work that serves a different plan.",
     },
   },
+  // Asked over toolResultStaleStateText's state, one old tool result's facts.
+  // Each option is what the pass does to that result at the next automatic
+  // compaction, and each description carries the nearest cases that are
+  // still this option or that belong to a neighbour.
+  [TOOL_RESULT_STALE]: {
+    id: TOOL_RESULT_STALE,
+    version: SHIPPED_VERSION,
+    overrideRefused: null,
+    primitive: "choice",
+    instructions: "An autonomous session's conversation is about to be compacted. `Tool` was called `Messages since` messages ago with `Input head`, and the other fields describe its result. Does the session still need this result in its context as it is, only a note that the call happened, or neither?",
+    options: {
+      "keep": "The result is still load-bearing: the session is likely to read its exact content again or act on it soon, such as a file it is still editing, an answer no later message restates, or an error it has not yet resolved.",
+      "cut": "That the call happened still matters but its content does not: a later message already names the same path or restates what it found, so one line naming the tool and its input is enough and the content can go.",
+      "drop": "Neither the call nor its result matters any more: a listing, a search, a build or test run, or a read of a file the session has since rewritten or finished with, with nothing later depending on it.",
+    },
+  },
 };
 
 // What the resolver hands back for a question set id it does not know. Its
@@ -589,6 +620,39 @@ export const STEP_DRIFT_ANSWER_MAX = 1200;
 export function stepDriftStateText(objective: string, answer: string): string {
   return `Goal objective: ${stateValue(objective)}\n\n` +
     `Step answered: ${stateValue(answer).slice(0, STEP_DRIFT_ANSWER_MAX)}`;
+}
+
+// --- The tool-result-stale state ---
+//
+// The state tool-result-stale is asked over: seven labelled parts, a blank
+// line between each, and no question sentence. The tool name, the input head
+// and the result head are text the model or a tool wrote, so each goes
+// through stateValue and the two heads are cut at their bounds, counted on
+// the collapsed value, so no value can write an eighth part or carry a
+// result's bulk to the vendor. The counts and the two yes-or-no readings are
+// the pass's own.
+export const TOOL_RESULT_STALE_INPUT_MAX = 200;
+export const TOOL_RESULT_STALE_RESULT_MAX = 400;
+
+// What the pass knows about one old tool result when it asks.
+export type ToolResultStaleFacts = {
+  tool: string;
+  inputHead: string;
+  resultHead: string;
+  resultChars: number;
+  errored: boolean;
+  messagesOld: number;
+  referencedLater: boolean;
+};
+
+export function toolResultStaleStateText(facts: ToolResultStaleFacts): string {
+  return `Tool: ${stateValue(facts.tool)}\n\n` +
+    `Input head: ${stateValue(facts.inputHead).slice(0, TOOL_RESULT_STALE_INPUT_MAX)}\n\n` +
+    `Result head: ${stateValue(facts.resultHead).slice(0, TOOL_RESULT_STALE_RESULT_MAX)}\n\n` +
+    `Result size: ${Math.max(0, Math.floor(facts.resultChars))} characters\n\n` +
+    `Errored: ${facts.errored ? "yes" : "no"}\n\n` +
+    `Messages since: ${Math.max(0, Math.floor(facts.messagesOld))}\n\n` +
+    `Named later: ${facts.referencedLater ? "yes" : "no"}`;
 }
 
 // --- The controller state ---

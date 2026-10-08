@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// CLI entry for the compaction gate's release markers and its status report.
+// CLI entry for the compaction release markers.
 //
 // Subcommands:
-//   kit-compact-checkpoint.js status    report the release markers, the gate
-//                                       state, and any hold stamps refusing
-//                                       the deferral nudge
 //   kit-compact-checkpoint.js boundary [--cancel]
 //                                       open the role-boundary marker for the
 //                                       calling session, or retract the one it
@@ -13,6 +10,10 @@
 //                                       record the operator's release for the
 //                                       caller's session, or the named one, in
 //                                       the caller's directory or a named one
+//
+// The persona module's session.compact handler reads both markers: where it
+// loads, it holds an automatic compaction until the session declares a
+// boundary, holds consent, or passes its percentage valve.
 //
 // `boundary` opens the role-boundary marker for a session (coordinator,
 // expert, admin, or any hands-on seat) at its own banked-and-empty moment,
@@ -25,20 +26,15 @@
 // registry entry, the run stamps that entry's `Banked:` line, a record of the
 // declaration rather than a precondition for it: an absent directory or entry
 // is a silent no-op and the marker opens either way. What this verb writes is
-// stamped as a declaration, and that field is what puts it under the gate's
+// stamped as a declaration, and that field is what puts it under the module's
 // moment rule, where the hook's turn-end marker stands on its age bound alone.
 // The marker is keyed by session under the machine-local root
-// ~/.kit/role-boundary (roleBoundaryPath in kit-compact-lib.js), and the
-// declared moment is measured on the transcript the harness filed for this
-// session, located by its id alone, so the verb runs from whatever directory
-// the session works in, a linked worktree included: the working directory
-// names neither the marker nor the transcript. An id the harness's projects
-// directory holds under two project directories cannot be positioned, and the
-// verb says so. `status` reports the calling session's own marker and no
-// other's, since the root holds every session on the machine.
+// ~/.kit/role-boundary (roleBoundaryPath in kit-compact-lib.js), so the verb
+// runs from whatever directory the session works in, a linked worktree
+// included: the working directory does not name the marker.
 // `boundary --cancel` retracts this session's own marker; nothing depends on it
-// being run, since the gate stops honoring a declared marker the moment a new
-// turn begins in the session it names.
+// being run, since the module stops honoring a declared marker once a new turn
+// begins in the session it names.
 //
 // The verb refuses a caller whose own session id cannot be resolved, the id
 // being what scopes the marker it writes: an unscoped marker whichever
@@ -59,33 +55,28 @@
 // ordinary case of an operator releasing a session that is not the one their
 // shell stands in; a named project the session left no transcript under is
 // refused, since a marker written there would be read by nobody.
-// Both markers are consumed by the gate on the allow they cause, single-shot.
+// The module consumes either marker on the compaction it releases, single-shot.
 //
 // All filesystem work is delegated to kit-compact-lib.js; this file is only
 // argument parsing and output formatting.
 
 'use strict';
 
-// The kit libraries this CLI is written against, bound here and LOADED inside
+// The kit library this CLI is written against, bound here and LOADED inside
 // the guarded region at the foot of this file rather than required at module
 // scope. A require that throws (a damaged or partially written plugin cache)
 // throws before any guard this file installs, and what Node prints for it is its
 // own trace, whose `Require stack:` lines carry the absolute module path of
-// every file on that stack, home-anchored on an installed plugin. Loading them
-// inside the try is what puts that failure back on this file's own channel. The
-// sibling hook compact-deferral-nudge.js defers its kit requires into the guards
-// that use them for the same failure mode.
-let findTranscript;
+// every file on that stack, home-anchored on an installed plugin. Loading it
+// inside the try is what puts that failure back on this file's own channel.
+//
 // The shared output renderer, bound under this file's own names: `sanitize` for
 // one repo-controlled value, displayPath for a value known to be a path, scrub
 // for a whole composed line, and homeElisionsKnown for the floor note below.
 let sanitize, displayPath, scrub, homeElisionsKnown;
-let readGateStateResult, gateStatePath,
-    readHoldNudgesResult, holdNudgePath, HOLD_NUDGE_HEALABLE,
-    wholeMinutesSince, gateCount,
-    readRoleBoundaryResult, readConsentResult,
+let readRoleBoundaryResult,
     writeRoleBoundary, writeConsent, clearRoleBoundary, sameSessionId,
-    markerMatches, markerMomentHolds, markerDeclaresMoment, stampRegistryBanked,
+    stampRegistryBanked,
     projectHoldsSessionTranscript, usableSessionId, ensureProjectScratchDir,
     ROLE_BOUNDARY_MAX_AGE_MS, CONSENT_MAX_AGE_MS;
 
@@ -94,22 +85,15 @@ let readGateStateResult, gateStatePath,
 // The rounding is exact only while the constants stay whole hours: a 90-minute
 // bound would print as "2 hours" against a rule enforcing one and a half, so a
 // change to either constant that leaves whole units is what keeps these
-// honest. The two marker bounds both render in hours because both are the same
-// quantity: rendering one of them in minutes would print two different-looking
-// figures for one window in a single `status` report, which reads as two rules
-// rather than one. They are derived with the libraries loaded rather than at
-// module scope, the constants arriving with them.
+// honest. They are derived with the library loaded rather than at module
+// scope, the constants arriving with it.
 let BOUNDARY_HOURS, CONSENT_HOURS;
 
 function loadKitLibraries() {
-    ({ findTranscript } = require('./kit-plan-lib.js'));
     ({
-        readGateStateResult, gateStatePath,
-        readHoldNudgesResult, holdNudgePath, HOLD_NUDGE_HEALABLE,
-        wholeMinutesSince, gateCount,
-        readRoleBoundaryResult, readConsentResult,
+        readRoleBoundaryResult,
         writeRoleBoundary, writeConsent, clearRoleBoundary, sameSessionId,
-        markerMatches, markerMomentHolds, markerDeclaresMoment, stampRegistryBanked,
+        stampRegistryBanked,
         projectHoldsSessionTranscript, usableSessionId, ensureProjectScratchDir,
         ROLE_BOUNDARY_MAX_AGE_MS, CONSENT_MAX_AGE_MS,
         sanitizeForOutput: sanitize, displayPath, scrub, homeElisionsKnown
@@ -153,7 +137,7 @@ function elided(text) {
 // argument through the shared elision, so a line composed anywhere in this file
 // carries the guard by reaching the channel here rather than by its author
 // having remembered it. What keeps a print site from reaching a descriptor
-// directly is the source-side pin in test/kit-compact-gate.test.js, which reads
+// directly is the source-side pin in test/kit-compact-lib.test.js, which reads
 // this file's own text; a sentence here could not.
 function emitOut(text) {
     process.stdout.write(floorNote() + elided(text));
@@ -164,8 +148,7 @@ function emitErr(text) {
 }
 
 function usage() {
-    emitErr('usage: kit-compact-checkpoint.js status'
-        + ' | boundary [--cancel]'
+    emitErr('usage: kit-compact-checkpoint.js boundary [--cancel]'
         + ' | consent [--session <id>] [--project <path>]\n');
     process.exitCode = 1;
 }
@@ -220,23 +203,18 @@ function cmdBoundary(rest) {
         cancelBoundary(session);
         return;
     }
-    // Written as a declaration, which is the field the gate's moment rule is
+    // Written as a declaration, which is the field the module's moment rule is
     // scoped by: this verb is a seat's deliberate word about one instant, where
     // the seat-stop hook's turn-end marker is a standing window it rewrites
     // every turn. The tool writes the field; nothing asks a model to. The
-    // marker is keyed by the session alone and the moment is measured on the
-    // transcript located by that id, so no directory is passed: the verb
-    // declares the same file from wherever the session's shell stands.
+    // marker is keyed by the session alone, so no directory is passed: the
+    // verb declares the same file from wherever the session's shell stands.
     const result = writeRoleBoundary(session, true);
     if (result.ok) {
         // The project's own scratch directory, ensured after the marker and
-        // best-effort. The marker lives under the home, so writing it no
-        // longer creates this directory as a side effect, and the gate records
-        // a decision only where the directory already exists:
-        // a fresh linked worktree would otherwise record no deny and the
-        // deferral nudge's hold directive, which reads that record, would never
-        // fire there. The directory is the shell's, which is where a declaring
-        // run works and where the gate's payload names its cwd.
+        // best-effort, as the seat-stop hook's bank does: the shell's .kit/,
+        // created with its self-ignore file. The marker lives under the home,
+        // so writing it does not create this directory.
         ensureProjectScratchDir(process.cwd());
         // The registry record of the declaration, best-effort and after the
         // marker: a seat the registry does not carry declares exactly as well
@@ -262,23 +240,11 @@ function cmdBoundary(rest) {
         // what the rule does not do.
         // The moment clause is stated beside the age bound because the two
         // bound the marker together, and the shorter one is the one a seat
-        // will meet: the gate stops honoring this marker the moment a new turn
+        // will meet: the module stops honoring this marker once a new turn
         // begins in this session.
         emitOut('  role-boundary marker open for session ' + sanitize(session)
-            + ' (that session\'s next deferred auto-compaction lands at this boundary,'
+            + ' (releases that session\'s next held auto-compaction,'
             + ' until a new turn begins there; it ages out in ' + BOUNDARY_HOURS + ' hours)\n');
-        // A declaration the gate cannot position is one it will never honor, so
-        // it is said here rather than left to look like a marker that works.
-        // The transcript is located by the session id alone, so the miss is
-        // the lookup's: no project directory under the harness's projects root
-        // holds a transcript of this id, or more than one does, which the
-        // shared scan answers as no transcript rather than picking one.
-        if (result.positioned === false) {
-            emitErr('kit-compact-checkpoint: no transcript for this session id could be located'
-                + ' (the harness\'s projects directory holds none for it, or holds one under more than'
-                + ' one project directory), so the gate has nothing to read the moment against and will'
-                + ' treat this marker as lapsed\n');
-        }
         process.exitCode = 0;
     } else {
         emitErr('kit-compact-checkpoint: ' + sanitize(result.reason) + '\n');
@@ -291,9 +257,10 @@ function cmdBoundary(rest) {
 // reach one. What the file at this session's name holds is still read before
 // anything is removed, since the name is composed from an environment variable
 // nothing authenticates and whatever sits there may be a peer's: a record naming
-// another session is left standing, exactly as the gate leaves one it does not
-// match. Nothing in the design depends on this being run, the moment rule above
-// retiring a marker that outlived its lull with no act from anyone; this is the
+// another session is left standing, exactly as the module's match rule leaves
+// one it does not match. Nothing in the design depends on this being run, the
+// module's moment rule retiring a marker that outlived its lull with no act
+// from anyone; this is the
 // explicit retraction, for an operator at a shell and for a session withdrawing
 // a declaration it has just made.
 //
@@ -425,7 +392,7 @@ function cmdConsent(rest) {
     const result = writeConsent(target, session);
     if (result.ok) {
         emitOut('  operator-consent marker recorded for session ' + sanitize(session)
-            + ' (releases that session\'s next deferred auto-compaction once, within '
+            + ' (releases that session\'s next held auto-compaction once, within '
             + CONSENT_HOURS + ' hours)\n');
         process.exitCode = 0;
     } else {
@@ -434,397 +401,9 @@ function cmdConsent(rest) {
     }
 }
 
-// Why a marker on disk gates nothing, per markerMatches reason code: every
-// message states plainly that
-// the gate treats the file as absent. The 'no-marker' and 'wrong-session'
-// codes have no entry because this report all but never produces them (a
-// shapeless file takes the illegible leg below, and the marker is judged
-// for the session it itself names). One hand-made shape reaches
-// 'wrong-session' anyway: an empty-string session passes the shape guard
-// below, being a string, and then compares unequal to itself. That code and
-// any unknown future one fall back to the bare treats-as-absent clause
-// rather than printing nothing, which is why the fallback is here rather
-// than an assertion. 'expired' is built at
-// the call site, because it names the bound that applied and the two marker
-// kinds carry different bounds.
-const MARKER_DEAD_REASONS = {
-    'consumed': 'already consumed, so the gate treats it as absent',
-    'no-timestamp': 'its written timestamp is missing or unreadable, so the gate treats it as absent',
-    'future': 'its written timestamp is in the future, so the gate treats it as absent'
-};
-
-// Why a live marker no longer describes the moment it declared, per
-// markerMomentHolds reason code. A declaration is about a moment, so a marker
-// lapses the instant a new turn begins in the session it names, and every
-// question the rule cannot answer lapses it too, which is the direction that
-// keeps the gate deferring rather than landing a compaction mid-turn. An
-// unknown future code falls back to the bare lapsed clause.
-const MARKER_LAPSED_REASONS = {
-    'inbound': 'lapsed: a message arrived in that session after it was declared',
-    'no-position': 'lapsed: the declaration records no place in that session\'s transcript, so nothing can vouch for the moment',
-    'unreadable': 'lapsed: that session\'s transcript cannot be read, so nothing can vouch for the moment',
-    'replaced': 'lapsed: that session\'s transcript no longer matches what was there when the boundary was declared',
-    'too-long': 'lapsed: that session\'s transcript has grown past what the read covers, so what arrived since is unknown',
-    'torn': 'lapsed: a line of that session\'s transcript cannot be read, so what arrived since is unknown'
-};
-
-// One marker's line in the status report, on the same legs as the gate-state
-// report's: the read refusals are told apart by the reader's own reason (a second
-// lstat here could not see the 'unreadable' leg at all), a present marker is
-// judged by the same markerMatches rule the gate decides by, and a dead one
-// is flagged with why, so the file's presence is never misreported as a live
-// release. `verb` is how presence is phrased ("open" for a declared boundary,
-// "present" for a recorded consent), and `boundPhrase` names the age bound
-// that applies to this kind.
-//
-// The marker is judged for the session it itself names, deliberately: a shell
-// running status is not the offering session, so the wrong-session leg is not
-// this report's question to answer. What it answers is whether the marker
-// would release the session it names, and it prints that session so the
-// operator can judge the scoping half themselves. One call is one marker, so
-// the boundary kind takes a call per open declaration in the project and the
-// consent kind, one file per project, takes exactly one.
-//
-// `momentRead` says whether the moment rule is read for this kind: true for the
-// marker kind that can carry a declaration (a role-boundary marker) and false
-// for the one that cannot (a consent is the operator's word rather than a
-// seat's moment). Within that kind the rule still applies only to the boundary
-// verb's declared marker, which markerDeclaresMoment decides, and the
-// transcript it is read against is the one the harness filed for the marker's
-// session, located by that id alone through findTranscript, the same lookup the
-// verb measured it on. A marker the moment rule has retired is reported as
-// lapsed rather than as live: it is still on disk, the gate ignores it, and the
-// next marker write sweeps it once it passes its age bound, which is exactly
-// the state an operator has no other way to see.
-//
-// `named` is the session the marker's own FILE NAME carries, the caller's own
-// id for the boundary kind, and null where the report has no name to hold the
-// record against. Two things turn on it. It names whose file a refusal is
-// about. And it is checked against the record inside, because the gate resolves
-// a marker by name and then requires the record to agree: a file at one
-// session's name recording another releases neither, and reporting it as live
-// for the session it records would describe a marker the gate can never reach.
-function reportMarker(read, label, verb, maxAgeMs, boundPhrase, momentRead, named) {
-    const marker = read.marker;
-    const whose = (typeof named === 'string' && named !== '')
-        ? ' for session ' + sanitize(named)
-        : '';
-    if (!marker || typeof marker !== 'object' || Array.isArray(marker)
-        || typeof marker.session !== 'string') {
-        const reason = marker === null ? read.reason : 'illegible';
-        if (reason === 'illegible') {
-            emitOut('an illegible ' + label + ' marker file is present' + whose + ' '
-                + '(the gate treats it as absent); the next ' + label + ' write replaces it\n');
-        } else if (reason === 'oversized') {
-            emitOut('a ' + label + ' marker file past the size the reader accepts '
-                + 'is present' + whose + ' (the gate treats it as absent); the next ' + label
-                + ' write replaces it\n');
-        } else if (reason === 'kind') {
-            emitOut('something that is not a ' + label + ' marker file is sitting '
-                + 'at its path' + whose + ' (the gate treats it as absent); move it aside by hand\n');
-        } else if (reason === 'unreadable' || reason === 'lstat') {
-            // Scoped to now: a lock lifts, and absence must not be asserted
-            // over it.
-            emitOut('the ' + label + ' marker path' + whose + ' cannot be read right now, '
-                + 'so the gate treats it as absent while that lasts\n');
-        } else if (reason === 'no-session') {
-            // The resolver composed no path, so no file was read and nothing is
-            // being asserted about the directory: its own fact, said as itself
-            // rather than folded into either an absence or a bad file.
-            emitOut('no ' + label + ' marker file name composes from that session id'
-                + whose + ', so none was read\n');
-        } else if (reason === 'no-root') {
-            // The root rather than the id is what composed no path: the home
-            // directory is unknown or a network share, which the marker root
-            // refuses before any read, so nothing was read here either.
-            emitOut('the home directory is unknown or names a network share, so no ' + label
-                + ' marker root can be opened and none was read' + whose + '\n');
-        } else {
-            // Absent at the path the caller's own id resolves, or at the one
-            // consent path: a genuine none-open, named for the session where
-            // the report is scoped to one.
-            emitOut('no ' + label + ' marker is ' + verb + whose + '\n');
-        }
-        return;
-    }
-    if (whose !== '' && !sameSessionId(marker.session, named)) {
-        // The gate finds a marker by name and then holds the record to the same
-        // session, so this file releases neither: not the session naming it,
-        // whose read of this path finds a record for someone else, and not the
-        // session recorded, whose own offer resolves a different path entirely.
-        emitOut('  a ' + label + ' marker file' + whose + ' records session '
-            + sanitize(marker.session) + ', so the gate reaches it for neither session; '
-            + 'move it aside by hand\n');
-        return;
-    }
-    // File-derived values print indented, never at column zero, keeping
-    // sanitized untrusted data visually subordinate in a channel a model reads.
-    let line = '  ' + label + ' marker ' + verb + ' for session ' + sanitize(marker.session);
-    line += (typeof marker.writtenAt === 'string')
-        ? ' (written ' + sanitize(marker.writtenAt) + ')'
-        : ' (no written timestamp recorded)';
-    const verdict = markerMatches(marker, marker.session, Date.now(), maxAgeMs);
-    // The moment rule governs a declared marker only, so a hook-written one is
-    // reported on its age bound alone and no transcript is read for it.
-    const declares = markerDeclaresMoment(marker) && momentRead === true;
-    // The moment is read only where the match rule has already passed, since a
-    // marker the gate treats as absent is not one any transcript can speak for,
-    // and the line below reports the read rather than the marker's provenance:
-    // one condition governs the call and the report of it, so the report can
-    // never assert a read that did not happen.
-    const reads = declares && verdict.ok;
-    const transcript = reads ? findTranscript(marker.session) : null;
-    const moment = reads
-        ? markerMomentHolds(marker, transcript)
-        : { ok: true, reason: null };
-    if (!verdict.ok) {
-        line += ' - ' + (verdict.reason === 'expired'
-            ? 'expired (past the ' + boundPhrase + ' bound), so the gate treats it as absent'
-            : (MARKER_DEAD_REASONS[verdict.reason] || 'the gate treats it as absent'));
-    } else if (!moment.ok) {
-        line += ' - ' + (MARKER_LAPSED_REASONS[moment.reason] || 'lapsed')
-            + ', so the gate treats it as absent; declare again at the next real boundary';
-    } else {
-        line += ' - the gate honors it once for that session\'s next deferred auto-compaction, '
-            + 'within the ' + boundPhrase + ' bound';
-    }
-    emitOut(line + '\n');
-    // Which transcript answered the moment question, named rather than left to
-    // be assumed. This report locates the file by the session id, the same
-    // lookup the verb measured the declaration on; the gate reads the path its
-    // own PreCompact payload carries. The two are one file for a session the
-    // harness filed under exactly one project directory, and a miss here is the
-    // lookup's own (no transcript of that id, or one under more than one project
-    // directory), said as such rather than as a contradiction of the gate.
-    if (reads) {
-        emitOut('    moment read against ' + (transcript === null
-            ? '(no transcript is located by that session id: the harness\'s projects directory holds'
-                + ' none for it, or holds one under more than one project directory)'
-            : displayPath(transcript))
-            + ', the transcript located by that session\'s id\n');
-    }
-}
-
-// The compaction gate's own record: what it decided last. An operator reads
-// this to tell a gate that is working from one that has recorded nothing,
-// which is the question the state file exists to answer; the full history is
-// the .jsonl log beside it, and the per-session holds the deferral nudge reads
-// are not printed, since they carry session ids this report has no reason to
-// put on a terminal.
-function reportGateState(cwd) {
-    const result = readGateStateResult(cwd);
-    if (!result.ok) {
-        // A state file the reader refuses is not an absent one, and reporting it
-        // as absent would describe a project recording nothing as a fresh one.
-        // The refusal legs do not all mean the same thing, though, and the
-        // message names a remedy: removing the file discards every session's
-        // standing hold record, so it is advice worth giving over a file that
-        // will never resolve and worth withholding over a scanner's lock that
-        // lifts in seconds.
-        //
-        // Which leg it was comes from the reader's own refusal. Re-asking with
-        // an lstat here cannot see the leg where the read was refused: that
-        // lstat succeeds and reports an ordinary regular file, so the
-        // destructive advice would print over exactly the transient case it is
-        // withheld for.
-        //
-        // Both remedies name the file at the path the reader itself used rather
-        // than at a spelling written out here: the scratch directory is
-        // resolved (kitScratchDir in kit-compact-lib.js), and a project
-        // directory inside the memory store keeps its gate state outside the
-        // project, so a hard-coded `.kit/` remedy would send an operator to
-        // inspect a file that is not there. It is a value known to be a path, so
-        // it takes displayPath, since a project under the operator's home carries
-        // the OS account name into a channel a model reads.
-        const statePath = displayPath(gateStatePath(cwd));
-        if (result.reason === 'oversized') {
-            // The file is legible and was refused on size, which is not the
-            // same fact as a read that failed, and one refusal answered two
-            // ways is what the shared-spelling rule exists to stop.
-            emitOut('a compaction gate state file past the size the reader accepts is present, '
-                + 'so the gate is recording nothing; removing ' + statePath + ' lets the next '
-                + 'decision rebuild it\n');
-        } else if (result.reason === 'kind') {
-            emitOut('something that is not the gate state file is sitting at '
-                + statePath + ', so the gate is recording nothing; move it aside by hand '
-                + '(a delete cannot remove it)\n');
-        } else {
-            emitOut('the compaction gate state file cannot be read right now, so the gate '
-                + 'is recording nothing while that lasts; try again once whatever holds it lets go\n');
-        }
-        return;
-    }
-    const state = result.state;
-    const last = state && state.lastDecision;
-    if (!last) {
-        emitOut('the compaction gate has recorded no decisions in this project\n');
-    } else {
-        // File-derived values print indented, never at column zero, keeping
-        // sanitized untrusted data visually subordinate in a channel a model
-        // reads.
-        let line = '  last compaction gate decision: ' + sanitize(last.verdict);
-        if (last.reason) line += ' (' + sanitize(last.reason) + ')';
-        // Clamped: `at` comes out of a file anyone can write, and an unclamped
-        // one renders a twelve-digit minute count on a surface a model reads.
-        const age = gateCount(wholeMinutesSince(last.at));
-        if (age !== null) line += ', ' + age + (age === 1 ? ' minute ago' : ' minutes ago');
-        emitOut(line + '\n');
-    }
-}
-
-// The deferral nudge's hold stamps, reported only when the file is refusing the
-// writer, which is the one thing about it an operator can neither see nor infer
-// from anywhere else.
-//
-// The stamp file is that nudge's clock for each held session,
-// and the directive is emitted only when the stamp lands, so a file the writer
-// refuses is a session being held and never spoken to. Two of the five refusals
-// end by themselves, since the next directive removes a file this writer cannot
-// have produced (an oversized one, or a link at the path) and rebuilds it. The
-// other three do not: a refused open, an lstat that could not answer, and a read
-// that ended short of the file all leave the path exactly as it was, over
-// contents that may be a real list of live stamps. They are worded apart on
-// the rule every report here takes, that a leg drawing destructive advice or
-// promising self-repair must be
-// one where that is true, and the promise of a replacement therefore rides
-// membership in the library's own healable set rather than a reading's name.
-//
-// Two of those three are stated as of now rather than as a standing shape, and
-// deliberately without a claim either way: a lock or a scanner lifts on its own,
-// while something that is not a regular file at the path never does, and this
-// report cannot tell them apart, since the reader answers both with the same
-// refused open. So the line names the path to look at rather than promising the
-// wait ends, which is what keeps it from telling an operator to wait out a
-// directory.
-//
-// A reading that stands prints nothing, which is where this parts from the
-// reports above. What they answer is whether a marker is in effect and what
-// the gate last decided, which is a state an operator asks about; the stamps answer only when
-// each held session was last spoken to, which is the nudge's own bookkeeping and
-// carries session ids this report has no reason to put on a terminal.
-//
-// The reason comes from the reader's own refusal rather than from a second
-// syscall here, for the reason reportGateState states: an lstat asked afterwards
-// cannot see the leg where the READ was refused, so the two would be reported as
-// one. The path is composed rather than written out, since a project inside the
-// memory store keeps these files outside the project (kitScratchDir), and it
-// rides this file's display guard on the way out; it is the only value
-// interpolated, the five reasons being this library's own fixed words with
-// nothing file-derived reaching the line.
-//
-// WHICH readings promise a replacement is not decided here. That authority is
-// the library's HOLD_NUDGE_HEALABLE, the same list the writer heals by, so the
-// two sides cannot come to disagree about one file: a reason added there gains
-// the promise on this surface in the same edit, and one removed loses it.
-// Spelling the reason names again here is what would let the writer start
-// healing a file this verb still describes as standing.
-function reportHoldStamps(cwd) {
-    const result = readHoldNudgesResult(cwd, Date.now());
-    if (result.ok) return;
-    const stampPath = displayPath(holdNudgePath(cwd));
-
-    // What was read, worded per reading, since the legs name different things
-    // about the same path. The per-reason wordings below are genuinely
-    // per-reason and are spelled by name for that reason. What is NOT decided by
-    // name is the healable-versus-refusing split: the fallback that catches a
-    // reading with no wording of its own forks on the same HOLD_NUDGE_HEALABLE
-    // membership the remedy below rides, so a sixth healable reason added to the
-    // library's set cannot land on the refusing wording and print "cannot be
-    // read" beside a promise that the next directive replaces it. That
-    // self-contradicting pair is exactly what spelling the set's members again
-    // on this side would produce.
-    let lead;
-    if (result.reason === 'oversized') {
-        lead = 'the deferral nudge\'s hold stamps at ' + stampPath
-            + ' are past the size the reader accepts';
-    } else if (result.reason === 'kind') {
-        lead = 'something that is not the deferral nudge\'s hold stamp file is sitting at ' + stampPath;
-    } else if (result.reason === 'short-fill') {
-        // The reading that ended short of the file. Nothing here identifies the
-        // file as one the nudge did not write, so nothing removes it.
-        lead = 'the read of the deferral nudge\'s hold stamps at ' + stampPath + ' ended short of the file';
-    } else if (HOLD_NUDGE_HEALABLE.includes(result.reason)) {
-        // A healable reading with no wording of its own: the set says the writer
-        // identified this file as one it could not have produced and removes it,
-        // so the line says that much and leaves the shape unnamed rather than
-        // borrowing the refusing leg's claim that nothing can be told about the
-        // path. Nothing reaches this branch today, the set's two members both
-        // having their own wording above; it is what a sixth member lands on.
-        lead = 'the deferral nudge\'s hold stamp file at ' + stampPath
-            + ' is not one that writer produced';
-    } else {
-        // 'unreadable' and 'lstat' together: both may be a lock over a file
-        // holding live stamps, and both may equally be a directory or another
-        // shape at the path that never lifts, so this leg claims nothing about
-        // what is there. What the operator can act on is the path, which is
-        // named.
-        //
-        // One shape lands here that the writer does in fact remove: a FIFO or a
-        // socket, which the reader refuses on the descriptor and cannot tell
-        // from a lock, while the writer's own lstat calls it a kind it unlinks.
-        // readHoldNudgesResult states why the two sides are asked differently.
-        // What that costs is bounded to this line being weaker than the truth
-        // for those kinds rather than wrong about them, since it promises
-        // neither a repair nor an end to the wait.
-        lead = 'the deferral nudge\'s hold stamp file at ' + stampPath + ' cannot be read';
-    }
-
-    // What happens next, decided by membership in the healable set rather than
-    // by the reason's name. The promise is CONDITIONAL because the repair it
-    // names is: the heal is an unlink, which takes permission on the scratch
-    // directory itself, so under a read-only .kit/ the next directive refuses
-    // and the file stands. An unconditional promise there tells an operator to
-    // wait out a replacement that never comes, which is the same failure the
-    // refusing legs are worded to avoid.
-    const remedy = HOLD_NUDGE_HEALABLE.includes(result.reason)
-        ? 'the next hold directive replaces it, so long as the directory holding it is writable'
-        : (result.reason === 'short-fill'
-            ? 'the stamps are left as they are and a read that completes takes them again'
-            : 'a lock or a scanner over it clears on its own, while anything else standing at '
-                + 'that path does not');
-
-    emitOut(lead + ', so a held session cannot be stamped and its directive stays '
-        + 'silent; ' + remedy + '\n');
-}
-
-// The calling session's own role-boundary declaration, one line. The root
-// holds one file per session for every session on the machine, so a report
-// that listed it would print every session's id into whichever session ran
-// it; the question this report answers is therefore what is open for ME,
-// scoped by the caller's own id from the environment, and a shell with no
-// usable id is told the report cannot be scoped rather than shown everyone's.
-//
-// The marker is judged against the caller's id as the file name the resolver
-// composes from it, which is what lets a file at that name recording a
-// different session be reported as one the gate cannot reach rather than as
-// that session's live release.
-function reportOwnRoleBoundaryMarker() {
-    const caller = callerSessionId();
-    if (caller === null) {
-        emitOut('no usable session id in this shell (CLAUDE_CODE_SESSION_ID is unset or not id-shaped),'
-            + ' so the role-boundary marker report cannot be scoped to a session and none is shown:'
-            + ' the markers are keyed by session under the home directory, and this report shows only'
-            + ' the calling session\'s own\n');
-        return;
-    }
-    reportMarker(readRoleBoundaryResult(caller), 'role-boundary', 'open',
-        ROLE_BOUNDARY_MAX_AGE_MS, BOUNDARY_HOURS + '-hour', true, caller);
-}
-
-function cmdStatus() {
-    const cwd = process.cwd();
-    reportOwnRoleBoundaryMarker();
-    reportMarker(readConsentResult(cwd), 'operator-consent', 'present',
-        CONSENT_MAX_AGE_MS, CONSENT_HOURS + '-hour', false, null);
-    reportGateState(cwd);
-    reportHoldStamps(cwd);
-    process.exitCode = 0;
-}
-
 function main() {
     const [cmd] = process.argv.slice(2);
-    if (cmd === 'status') cmdStatus();
-    else if (cmd === 'boundary') cmdBoundary(process.argv.slice(3));
+    if (cmd === 'boundary') cmdBoundary(process.argv.slice(3));
     else if (cmd === 'consent') cmdConsent(process.argv.slice(3));
     else usage();
 }

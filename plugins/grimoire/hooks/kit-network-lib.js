@@ -12,17 +12,14 @@
 // This is its own module, holding these two path checks and nothing else, because scripts/memq.js is
 // 11,880 lines and a hot hook path cannot afford to pay to load it just to
 // answer this one question: the warm require cost of the whole file measures
-// 8.7-11.4ms, and hooks/compact-deferral-nudge.js's guard 4 runs on every
-// covered PostToolUse return, so a lazy require of memq.js there for this
-// predicate alone would pay that cost on that same hot path. This module is
-// cheap enough to require there instead.
+// 8.7-11.4ms. This module is cheap enough to require on a hook path instead.
 //
 // scripts/memq.js requires this module and re-exports the predicate under
 // its own name, so a caller that already holds memq for other reasons
 // (hooks/memory-session.js, hooks/memory-frontmatter-guard.js) keeps calling
 // memq.namesNetworkShare unchanged. A caller that does not otherwise need
-// memq (hooks/compact-deferral-nudge.js) requires this module directly
-// instead.
+// memq (hooks/kit-compact-lib.js, hooks/capacity-read.js) requires this
+// module directly instead.
 //
 // Exactly one expression decides the question, here (Standing Amendment 2):
 // every caller above reaches this file's answer rather than re-deriving it.

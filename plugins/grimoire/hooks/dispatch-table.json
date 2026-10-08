@@ -76,15 +76,6 @@
         ]
       },
       {
-        "matcher": "Agent|TaskOutput|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/compact-deferral-nudge.js\""
-          }
-        ]
-      },
-      {
         "matcher": "Read",
         "hooks": [
           {

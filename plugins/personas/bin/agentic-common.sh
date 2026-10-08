@@ -7,6 +7,7 @@
 #           ensure_settings_plugin_ids, ensure_settings_arming,
 #           ensure_settings_jev_mode, ensure_settings_jev_live,
 #           ensure_settings_memory_gate_discard_percent,
+#           ensure_settings_cadences, read_settings_controller_tick,
 #           jev_live_to_csv, settings_path_json,
 #           read_settings_coordinator_persona,
 #           read_settings_architect_persona,
@@ -404,7 +405,7 @@ emit_settings_json() {
   # absent from the engine's type file, and options under the other id are
   # ignored without an error, so the same options are written under both.
   # test-personas/settings-plugin-key-test.sh pins both ids against the two manifests.
-  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-5000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roster_opt$supervisor_opts}"
+  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roster_opt$supervisor_opts}"
   # autoContinue is the harness's own setting, at the top level rather than
   # under a plugin id. Off, a child that trips a usage limit ends its turn and
   # sits idle rather than parking until the limit resets, and the supervisor's
@@ -742,6 +743,137 @@ try {
   fail("could not be rewritten: " + e.message);
 }
 ' "$1" "$AGENTIC_PLUGIN_DEV_ID" "$AGENTIC_PLUGIN_INSTALLED_ID" "$memoryGateDiscardPercent"
+}
+
+# --- ensure_settings_cadences ---
+# Usage: ensure_settings_cadences <settings-file>
+# Sibling to ensure_settings_memory_gate_discard_percent for the three plugin
+# cadences the roster carries: controllerTickMs, nudgeFloorMs and nudgeIdleMs.
+# Keyed on those three raw roster variables, and not on TICK_MS, NUDGE_FLOOR_MS
+# and NUDGE_IDLE_MS, the defaulted values bin/supervise.sh reads for itself:
+# those are always set, so keying on them would overwrite a value the operator
+# wrote into the file by hand with a default on every launch whose roster
+# names none. Each key whose variable is set and non-empty is written as a
+# number under both plugin ids, creating pluginConfigs, the id entry and its
+# options object where absent, and every other option is left as written. A
+# key whose variable is unset or empty is left as the file holds it, with one
+# exception: where the roster names no nudgeFloorMs, an id's options holding
+# nudgeFloorMs exactly 5000, the value earlier launchers emitted by default,
+# are rewritten to the plugin's 300000 default. Any other floor value, and a
+# missing one, is kept, and the correction creates no structure. A rewrite
+# that makes the correction prints one line to stderr naming the file, which
+# bin/supervise.sh sends to its log. Where nothing changes the file stays
+# byte-identical. With none of the three set, a file the correction cannot
+# read, or whose pluginConfigs, id entry or options is not an object, is left
+# untouched and the call exits 0 without a word, since a correction is no
+# reason to fail a launch. A correction whose rewrite fails also exits 0, with
+# a WARNING line to stderr, and the file keeps its old value. Every set value
+# is held, before node runs, to the shared numeric rule bin/supervise.sh's
+# positive_number holds its millisecond settings to: digits only, no leading
+# zero, at most 9 digits, at least 1. The rule is written out here because
+# this library cannot call a function defined in its caller. bin/supervise.sh
+# also checks all three at startup, controllerTickMs always and nudgeFloorMs
+# and nudgeIdleMs where the roster sets them, so this check is the library's
+# own guard rather than the launch's first. A value outside the rule is
+# refused with an ERROR line naming the key and the rule, and no file is
+# touched, because a value the plugin cannot run on would otherwise sit in
+# the file for every later launch. The file is replaced by rename, same as its
+# siblings, so an interrupted write never leaves it truncated.
+ensure_settings_cadences() {
+  local key
+  for key in controllerTickMs nudgeFloorMs nudgeIdleMs; do
+    [ -z "${!key:-}" ] && continue
+    case "${!key}" in
+      *[!0-9]*|0*|??????????*)
+        echo "ERROR: ensure_settings_cadences: $key '${!key}' is not a whole number of milliseconds greater than zero (digits only, no leading zero, at most 9 digits)" >&2
+        return 1
+        ;;
+    esac
+  done
+  node -e '
+const fs = require("fs");
+const [file, devId, installedId, tick, floor, idle] = process.argv.slice(1);
+const values = [["controllerTickMs", tick], ["nudgeFloorMs", floor], ["nudgeIdleMs", idle]].filter(([, v]) => v !== "");
+// With no cadence set the only possible change is the floor correction, which
+// never creates structure and never fails the launch.
+const correctOnly = values.length === 0;
+const fail = (msg) => { if (correctOnly) process.exit(0); console.error("ERROR: ensure_settings_cadences: " + file + " " + msg); process.exit(1); };
+const plain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+let s;
+try { s = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch (e) { fail("is not valid JSON: " + e.message); }
+if (!plain(s)) fail("is not a JSON object");
+let changed = false;
+let corrected = false;
+if (s.pluginConfigs === undefined) { if (correctOnly) process.exit(0); s.pluginConfigs = {}; changed = true; }
+const pc = s.pluginConfigs;
+if (!plain(pc)) fail("has a pluginConfigs value that is not an object");
+for (const id of [devId, installedId]) {
+  if (pc[id] === undefined) { if (correctOnly) continue; pc[id] = {}; changed = true; }
+  if (!plain(pc[id])) fail("has a " + id + " entry that is not an object");
+  if (pc[id].options === undefined) { if (correctOnly) continue; pc[id].options = {}; changed = true; }
+  const opts = pc[id].options;
+  if (!plain(opts)) fail("has " + id + " options that are not an object");
+  for (const [key, value] of values) {
+    const n = Number(value);
+    if (opts[key] !== n) { opts[key] = n; changed = true; }
+  }
+  if (floor === "" && opts.nudgeFloorMs === 5000) { opts.nudgeFloorMs = 300000; changed = true; corrected = true; }
+}
+if (!changed) process.exit(0);
+const tmp = file + ".tmp-" + process.pid;
+try {
+  fs.writeFileSync(tmp, JSON.stringify(s));
+  fs.renameSync(tmp, file);
+} catch (e) {
+  try { fs.unlinkSync(tmp); } catch (_) {}
+  if (correctOnly) {
+    console.error("WARNING: ensure_settings_cadences: " + file + " could not be rewritten to correct nudgeFloorMs 5000: " + e.message);
+    process.exit(0);
+  }
+  fail("could not be rewritten: " + e.message);
+}
+if (corrected) console.error("ensure_settings_cadences: " + file + " nudgeFloorMs 5000 corrected to 300000");
+' "$1" "$AGENTIC_PLUGIN_DEV_ID" "$AGENTIC_PLUGIN_INSTALLED_ID" "${controllerTickMs:-}" "${nudgeFloorMs:-}" "${nudgeIdleMs:-}"
+}
+
+# --- read_settings_controller_tick ---
+# Usage: read_settings_controller_tick <settings-file> [dev_mode: 0|1, default 1]
+# Prints the controllerTickMs a settings file carries under the plugin id the
+# launch loads, picked by dev_mode exactly as in
+# read_settings_coordinator_persona, so bin/supervise.sh sizes its probe window
+# from the tick the child runs rather than from its own environment. A value
+# is printed only where it is a whole number from 1 to 999999999, the range
+# positive_number admits in bin/supervise.sh, so the window is sized from no
+# tick the launch's own check would refuse. Anything
+# else, a missing key under the loaded id included, prints nothing, and the
+# caller keeps its own tick. Returns 1 on the same shapes
+# read_settings_coordinator_persona refuses (not JSON, not an object, a
+# pluginConfigs, id entry or options value that is not an object), with the
+# same error-line shape, and prints nothing then.
+read_settings_controller_tick() {
+  local dev_mode="${2:-1}"
+  local id="$AGENTIC_PLUGIN_INSTALLED_ID"
+  if [ "$dev_mode" -eq 1 ]; then
+    id="$AGENTIC_PLUGIN_DEV_ID"
+  fi
+  node -e '
+const fs = require("fs");
+const [file, id] = process.argv.slice(1);
+const fail = (msg) => { console.error("ERROR: read_settings_controller_tick: " + file + " " + msg); process.exit(1); };
+const plain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+let s;
+try { s = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch (e) { fail("is not valid JSON: " + e.message); }
+if (!plain(s)) fail("is not a JSON object");
+const pc = s.pluginConfigs === undefined ? {} : s.pluginConfigs;
+if (!plain(pc)) fail("has a pluginConfigs value that is not an object");
+let value;
+if (pc[id] !== undefined) {
+  if (!plain(pc[id])) fail("has a " + id + " entry that is not an object");
+  if (pc[id].options !== undefined && !plain(pc[id].options)) fail("has " + id + " options that are not an object");
+  if (plain(pc[id].options)) value = pc[id].options.controllerTickMs;
+}
+if (Number.isInteger(value) && value >= 1 && value <= 999999999) console.log(String(value));
+' "$1" "$id"
 }
 
 # --- read_settings_coordinator_persona ---

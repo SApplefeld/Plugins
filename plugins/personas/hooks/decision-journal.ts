@@ -6,12 +6,14 @@
 // A file per day bounds the read-and-rewrite an append costs, and a file per
 // session means no two processes ever share one.
 //
-// Four line kinds and no others: `call` records the request, `answer` records
+// Five line kinds and no others: `call` records the request, `answer` records
 // what came back beside what Haiku said, `outcome` records a signal the
-// plugin produced later, and `rendering` records what the recall shadow would
-// have put in front of a prompt, one line per prompt. Every field is present
-// on every line of its kind, and a value that does not apply is null, so a
-// load can read a column per field without a per-line shape test.
+// plugin produced later, `rendering` records what the recall shadow would
+// have put in front of a prompt, one line per prompt, and `event` records a
+// fact the plugin observed on its own, under a name from a closed set, with
+// no question behind it. Every field is present on every line of its kind,
+// and a value that does not apply is null, so a load can read a column per
+// field without a per-line shape test.
 //
 // No `import $` and no side effects at load. The engine's loader follows `$`
 // only into functions declared in hooks/index.ts and refuses the whole module
@@ -705,6 +707,76 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
     rendering: omitted ? "" : rendering,
     skipped: textOrNull(record.skipped),
     skippedFor: countOf(record.skippedFor),
+  };
+  return writeLines(host, path, at, [JSON.stringify(line) + "\n"]);
+}
+
+// The closed set of event names. A `compaction_gate` is one decision the
+// session.compact hook made on a compaction of the main conversation: its
+// detail carries the trigger, the verdict, the reason and the context
+// percent the engine reported, so a reader counts compactions by trigger and
+// verdict without a decision ring to parse. A `compaction_pass` is one
+// reading of the compaction pass: at an allowed automatic compaction or its
+// precompute, what the pass's plan would have kept beside what the engine's
+// summary kept, or why no plan applied; on the timer, with trigger
+// `cold_cache`, the same counts at the moment the prompt cache is read as
+// expired. A `compaction_pass_disabled` says once per session that the pass
+// option is on while the seam's mode sends nothing, so no plan can exist.
+//
+// The union and the array carry the same members in the same order: a member
+// in the union alone compiles and is refused by writeEvent at runtime.
+export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled";
+export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled"];
+
+// A value an event's detail may carry: a string, a number, a boolean or null.
+export type EventDetailValue = string | number | boolean | null;
+
+// A fact the plugin observed, with no call line to join to. `detail` is a
+// flat map whose keys and values the caller chose; this boundary bounds them.
+export type EventRecord = {
+  persona: string;
+  session: string;
+  event: EventName;
+  detail: Readonly<Record<string, unknown>>;
+};
+
+// The detail map as a line carries it: prototype-free, for probabilitiesOf's
+// reason, with every key and every string through the clamp. A finite number
+// and a boolean ride as themselves; any other value, an undefined or an
+// object among them, rides as null, since a column a load reads holds one of
+// the four journal types or nothing.
+function detailOf(from: unknown): Record<string, EventDetailValue> {
+  const out: Record<string, EventDetailValue> = Object.create(null);
+  if (typeof from !== "object" || from === null) return out;
+  for (const [key, value] of Object.entries(from as Record<string, unknown>)) {
+    out[journalText(key)] = typeof value === "string" ? journalText(value)
+      : typeof value === "boolean" ? value
+      : finiteOf(value);
+  }
+  return out;
+}
+
+// One `event` line. A name outside the closed set is refused rather than
+// written, before the host is asked anything and without touching the latch,
+// as writeOutcome refuses a kind: the caller is wrong, not the file.
+export async function writeEvent(host: JournalHost, record: EventRecord): Promise<JournalWrite> {
+  const at = Date.now();
+  if (!EVENT_NAMES.includes(record.event)) return { ok: false, firstFailureToday: false };
+  let path: string | null;
+  try {
+    path = await journalPath(host, record.persona, record.session, at);
+  } catch {
+    path = null;
+  }
+  if (path === null) return failed(at);
+  const line = {
+    lineKind: "event",
+    stampId: newStampId(record.persona, record.session),
+    at: new Date(at).toISOString(),
+    persona: journalText(record.persona),
+    session: journalText(record.session),
+    event: record.event,
+    detail: detailOf(record.detail),
   };
   return writeLines(host, path, at, [JSON.stringify(line) + "\n"]);
 }

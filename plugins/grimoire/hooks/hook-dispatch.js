@@ -74,7 +74,6 @@ const FALLBACK_TABLE = {
     ],
     PostToolUse: [
         ['Edit|MultiEdit|Write', 'format-on-edit.js'],
-        ['Agent|TaskOutput|Bash|PowerShell', 'compact-deferral-nudge.js'],
         ['Read', 'memory-usage-stamp.js'],
         ['*', 'memory-recognition-nudge.js']
     ]

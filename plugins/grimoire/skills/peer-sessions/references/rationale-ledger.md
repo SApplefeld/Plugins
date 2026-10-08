@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document governs how a session discovers, addresses, messages, and answers other live Claude sessions through the `ListAgents` and `SendMessage` tools. It owns the messaging surface's contract facts (roster rows, addressing by name, send outcomes, queue and size limits, the idle-notification subscription), the screening of any directory-sourced path that arrives over the channel, the standing an inbound message carries (the sending seat's, inside its mandate and the blast-radius tests) and the trace a receiver performs before taking on a plan a peer points it at, the reply vocabulary and record-keeping for a dispatched handoff, the scope line separating independent peers from a session's own dispatched subagents, the rule that nothing agreed over messaging is real until it lands in a durable artifact, the four sanctioned messaging patterns plus the four recorded seat-specific exceptions with their pricing, and the rule that a run never waits on a peer's silence. A session loads it before reading the roster, before sending or replying to a peer message, before acting on one, and on a compaction-boundary or consent-release or `notify_when_idle` moment; load class: `named-trigger`.
 
-Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 (`skills.peer-sessions.c2.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (the entries amended in place naming it). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (`Y` entries below: Y001, with c2.C069 retired to it and c2.C064 amended in place). Redrafted on 2026-09-26 by section 7 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1cb08b7f` with its fix round at `edc86d52`, so every live entry's `passage:` line quotes the text at `edc86d52` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with W003, W004 and W005 retired to them). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and its Leashed Peers section: c2.C070, c2.C106, c2.C107, c2.C110 to c2.C115, c2.C118, c2.C119, c2.C121 and c2.C159 deleted with their passages; c1.C005, c1.C012, c1.C074, c2.C016, c2.C017, c2.C019, c2.C031, c2.C071, c2.C075, c2.C096, c2.C117, c2.C130 and W006 rewritten to their passages as they now read; and the keys or reasons of c1.C045, c1.C050, c1.C053, c1.C054, c1.C055, c1.C058, c1.C061, c1.C062, c1.C073, c1.C082, c1.C100 and B002 reworded where they stated the leash as present. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C057 rewritten to its passage as it now reads, and the keys of c2.C011, c2.C020 and c2.C042 reworded from appending to filing.
+Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 (`skills.peer-sessions.c2.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (the entries amended in place naming it). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (`Y` entries below: Y001, with c2.C069 retired to it and c2.C064 amended in place). Redrafted on 2026-09-26 by section 7 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1cb08b7f` with its fix round at `edc86d52`, so every live entry's `passage:` line quotes the text at `edc86d52` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with W003, W004 and W005 retired to them). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and its Leashed Peers section: c2.C070, c2.C106, c2.C107, c2.C110 to c2.C115, c2.C118, c2.C119, c2.C121 and c2.C159 deleted with their passages; c1.C005, c1.C012, c1.C074, c2.C016, c2.C017, c2.C019, c2.C031, c2.C071, c2.C075, c2.C096, c2.C117, c2.C130 and W006 rewritten to their passages as they now read; and the keys or reasons of c1.C045, c1.C050, c1.C053, c1.C054, c1.C055, c1.C058, c1.C061, c1.C062, c1.C073, c1.C082, c1.C100 and B002 reworded where they stated the leash as present. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C057 rewritten to its passage as it now reads, and the keys of c2.C011, c2.C020 and c2.C042 reworded from appending to filing. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c2.C071, c2.C077 and c2.C078 rewritten to their passages as they now read.
 
 ### c1.C001
 - key: Treat the plan doc, memory, or a commit as the record and a message only as an interrupt pointing at it; never let a message be content's only home.
@@ -1695,16 +1695,17 @@ Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 
 - reason: The rule this stated is reversed: the marker is keyed by session under the home directory's `.kit`, the gate reads it wherever the session works, and the moment is measured on the transcript located by the session id, so no working directory can put a declaration where the gate does not read it. Y001 states the rule as it stands.
 
 ### c2.C071
-- key: Read the marker's age-bound figure from the CLI's `status` rather than any number restated here.
+- key: Read the marker's age-bound figure from what the boundary verb prints rather than any number restated here.
 - class: pointer
 - source: plugins/grimoire/skills/peer-sessions/SKILL.md:105
-- provenance: f0cb6ce 2026-08-28.
+- provenance: f0cb6ce 2026-08-28; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, which moved the hold to the persona module's `session.compact` handler.
 - verdict: rewrite
 - landed: d521dfd section 25
 - landed: 1aa3fff5 section 4
+- landed: fa23bc4a section 2
 - reason: The one place to read a figure that retunes with a constant. Flipped from keep to rewrite at section 25's close: c2.C153's retire took the age-bound equality and gap-order clause the passage followed after a colon, so it stands as its own sentence, and the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: The CLI's `status` prints the marker's age-bound figure, which is the one place to read it rather than a number restated here.
-- passage: Both paths release only the gate's hands-on `deny-interactive` leg, for a session no native `/goal` or `/loop` drives. The CLI's `status` prints the marker's age bound.
+- passage: Both paths release the persona module's hold on the next automatic compaction, and the verb prints the marker's age bound.
 
 ### c2.C072
 - key: A verb-declared marker's life ends at whichever arrives first, the age bound or the new turn; for a seat that is woken or messaged it is the new turn every time.
@@ -1757,22 +1758,24 @@ Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 
 - passage: A seat this list does not name banks when its work product is on disk and its context holds nothing that is not.
 
 ### c2.C077
-- key: Run `node <plugin-root>/hooks/kit-compact-checkpoint.js consent` from the named session's own project directory to release one deferred compaction for it, naming another with `--session`.
+- key: Run `node <plugin-root>/hooks/kit-compact-checkpoint.js consent` from the named session's own project directory to release one held compaction for it, naming another with `--session`.
 - class: mechanic
-- source: plugins/grimoire/skills/peer-sessions/SKILL.md:102
-- provenance: 8dd5b87 2026-08-26; f0cb6ce 2026-08-28 made the verb refuse when the named session has no transcript there.
-- verdict: keep
-- reason: The CLI performs the release only when invoked; which directory and which session are the reader's act.
-- passage: `node <plugin-root>/hooks/kit-compact-checkpoint.js consent` releases one deferred compaction for the caller's session or the one named with `--session`. It acts in that session's own project, named with `--project` when run elsewhere, since the gate reads the marker where that session works.
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:107
+- provenance: 8dd5b87 2026-08-26; f0cb6ce 2026-08-28 made the verb refuse when the named session has no transcript there; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, moved the marker's reader from the kit's PreCompact gate to the persona module.
+- verdict: rewrite
+- landed: fa23bc4a section 2
+- reason: The CLI performs the release only when invoked; which directory and which session are the reader's act. The marker's reader is the persona module, so the passage names it.
+- passage: `node <plugin-root>/hooks/kit-compact-checkpoint.js consent` releases one held compaction for the caller's session or the one named with `--session`. It acts in that session's own project, named with `--project` when run elsewhere, since the persona module reads the marker where that session works.
 
 ### c2.C078
-- key: Write the consent marker only on an explicit operator instruction to release that session's deferred compaction, arriving over a warranted channel, never on your own judgment.
+- key: Write the consent marker only on an explicit operator instruction to release that session's held compaction, arriving over a warranted channel, never on your own judgment.
 - class: rule
-- source: plugins/grimoire/skills/peer-sessions/SKILL.md:102
-- provenance: 8dd5b87 2026-08-26, "bounded by prose alone, deliberately, and the prose is now written to carry that weight".
-- verdict: keep
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:107
+- provenance: 8dd5b87 2026-08-26, "bounded by prose alone, deliberately, and the prose is now written to carry that weight"; `docs/plans/claude-kit_core-compaction_spec_v1.md` section 2, 2026-10-07, reworded the deferral as the persona module's hold.
+- verdict: rewrite
+- landed: fa23bc4a section 2
 - reason: Blast-radius gate on an irreversible act against another session with no machinery screening the write; the channel list is by pointer at the coordinator, which owns it.
-- passage: A session writes it only on an explicit operator instruction to release that session's deferred compaction, over a warranted channel on the coordinator skill's closed list, and never on its own judgment.
+- passage: A session writes it only on an explicit operator instruction to release that session's held compaction, over a warranted channel on the coordinator skill's closed list, and never on its own judgment.
 
 ### c2.C079
 - key: Where such an instruction rides the artifact channel, act only where the artifact's grant traces to the operator and names this release.
