@@ -61,6 +61,7 @@ import {
   isAutonomyLevel,
   AWAITING_YES_REASON,
   awaitingEntryAtOrAbove,
+  blockedAncestorsToFree,
   reapCompletedGoalTasks,
   MAX_TASKS_PER_GOAL,
   TASK_LIST_MAX_LINES,
@@ -1606,8 +1607,8 @@ function turnDispositionStateText(activeGoal: string, asked: string, finalMessag
 }
 
 // Whether a failed $.agent.list() read has been logged this session. The read
-// runs at every own turn end, so a host without the method would fail at
-// every one, and one decision per session says what a line per turn would say
+// runs at every own turn end and on every eligible idle tick, so a host
+// without the method would fail at every one, and one decision per session says what a line per turn would say
 // while leaving the capped decision ring for the turns themselves.
 let agentListFailureLogged = false;
 
@@ -1654,6 +1655,27 @@ async function liveTopLevelAgentRunning(dp: any): Promise<boolean> {
     return status === "running" && (typeof parentId !== "string" || parentId.length === 0);
   });
 }
+
+// How often a standing agent hold writes its idle_hold_agent_held line.
+const AGENT_HOLD_REPORT_MS = 60 * 60_000;
+
+// The controller's idle branch's hold on a running agent, or null where none
+// stands. `entryId` is the active entry the hold began on, and a held tick on
+// another entry begins a fresh hold. `since` is the clock of the first held
+// tick, set before any write and never moved by a failed one, and the hourly
+// line reads its age from it. `beginLogged` marks the idle_hold_agent line
+// and `hourLogged` the latest whole hour whose idle_hold_agent_held line was
+// written, 0 before the first. Each mark is set before its write's await, so
+// a tick overlapping it, which $.clock.every does not prevent, writes
+// nothing, and a write that fails or yields takes back its own decision and
+// mark so a later tick retries the line. The hold is cleared on an idle tick
+// that returns at the idle gate or on a lead or ask hold before the agent
+// read, and on a tick that reads no agent, so the next hold after any break
+// begins afresh and logs again.
+let agentHold: { entryId: string; since: number; beginLogged: boolean; hourLogged: number } | null = null;
+const clearAgentHold = (): void => {
+  agentHold = null;
+};
 
 // Joins one next_prompt_kind value onto every turn-disposition call still
 // pending on a record, and drops the list as the lines are written, which is
@@ -6479,9 +6501,8 @@ const RECONCILE_TEXT = "[RECONCILE] Run the kit Coordinator seat's reconciliatio
 // nudge count counts.
 const NUDGE_STATUS_LINE_TEXT = "Open your closing text with one status line: WORKING: and what you are doing, WAITING: and what will wake you, or BLOCKED: and what you need from someone else.";
 
-// The sentence a nudge on a plan entry adds after the status-line request.
-// Leads are read on plan entries alone, so the hold it names exists only
-// there, and a nudge on a task entry does not carry it.
+// The sentence every nudge adds after the status-line request. Leads are
+// read on every entry, so the hold it names exists wherever a nudge goes.
 const NUDGE_LEAD_HOLD_TEXT = "On this entry a WAITING: or BLOCKED: line holds the controller's nudges.";
 
 // The question the nudge cap's ask puts to the operator once the count
@@ -6949,8 +6970,8 @@ const LEAD_REASON_MAX = 300;
 // `Working:`, `BLOCKED x`, the marker on a later line and the word inside a
 // sentence all read as no status line. Never throws: a text that is not a
 // string reads as none. The nudge asks for this line, the nudge count reads
-// its presence on a nudged turn, and a `BLOCKED:` or `WAITING:` line on a
-// plan entry is the worker's lead.
+// its presence on a nudged turn, and a `BLOCKED:` or `WAITING:` line on any
+// entry is the worker's lead.
 function readStatusLine(text: unknown): { state: "working" | "blocked" | "waiting"; reason: string } | null {
   if (typeof text !== "string") return null;
   const found = text.split(/\r?\n/).find((line) => line.trim() !== "");
@@ -7042,6 +7063,58 @@ async function readPlanDocument(dp: any, planPath: string): Promise<{ reading: P
   const planFs = { exists: (p: string) => dp.fs.exists(p), read: (p: string) => dp.fs.read(p) };
   const planDir = await resolvePlanDir(planFs, liveDir, planPath);
   return { reading: await readPlanRecord(planFs, planDir, planPath), liveDir, planDir };
+}
+
+// How long the git read under a plan document's directory may run before
+// $.process.run kills it and rejects. git status on one checkout answers well
+// inside this, and the bound keeps a hung git from holding the turn end.
+const PLAN_CHECKOUT_TIMEOUT_MS = 5_000;
+
+// The checkout holding a plan document, read by `git status --porcelain=v1 -b`
+// with `dir` as its working directory: whether the branch line names an
+// upstream (`branch...upstream`), how many commits the bracket after it says
+// the branch is ahead, and how many non-empty lines follow the branch line.
+// An upstream marked `gone`, as after a merged branch is deleted, counts as
+// set. git prints no ahead count on it, so a second read in `dir`,
+// `git rev-list --count HEAD --not --remotes`, counts the commits HEAD holds
+// that no remote-tracking branch holds, and that count is the ahead count.
+// null where a read cannot be used: a run rejects (a timeout or a failed
+// start), its exit code is not 0, the status read's first non-empty line is
+// not a `## ` branch line, or the count is not a whole number. Each argv is
+// fixed and no shell runs, so `dir` reaches git only as a working directory.
+// Never throws.
+async function readPlanCheckout(dp: any, dir: string): Promise<{ upstream: boolean; ahead: number; dirty: number } | null> {
+  // The stdout of one git read in `dir`, or null where it rejects or exits
+  // other than 0.
+  const read = async (argv: string[]): Promise<string | null> => {
+    let res: any;
+    try {
+      res = await dp.process.run(argv, { cwd: dir, timeoutMs: PLAN_CHECKOUT_TIMEOUT_MS });
+    } catch {
+      return null;
+    }
+    const exitCode = res && typeof res.exitCode === "number" ? res.exitCode : null;
+    if (exitCode !== 0) return null;
+    return typeof res.stdout === "string" ? res.stdout : "";
+  };
+  const stdout = await read(["git", "status", "--porcelain=v1", "-b"]);
+  if (stdout === null) return null;
+  const lines = stdout.split(LINE_TERMINATOR).filter((line: string) => line.trim() !== "");
+  if (lines.length === 0 || !lines[0].startsWith("## ")) return null;
+  const branchLine = lines[0];
+  const aheadMatch = branchLine.match(/\[[^\]]*\bahead (\d+)/);
+  let ahead = aheadMatch ? parseInt(aheadMatch[1], 10) : 0;
+  if (/\[[^\]]*\bgone\b/.test(branchLine)) {
+    const counted = await read(["git", "rev-list", "--count", "HEAD", "--not", "--remotes"]);
+    const count = counted === null ? "" : counted.trim();
+    if (!/^\d+$/.test(count)) return null;
+    ahead = parseInt(count, 10);
+  }
+  return {
+    upstream: branchLine.includes("..."),
+    ahead,
+    dirty: lines.length - 1,
+  };
 }
 
 // The objective a plan's closing leaf carries, exactly, with the plan's own
@@ -7625,6 +7698,12 @@ export const register: Register = async (on, options) => {
   // one plan_record_dir_resolved decision. A read under the live directory
   // itself re-arms the entry, so a later move below the checkout logs again.
   const planRecordDirResolvedLogged = new Set<string>();
+  // The plan holders whose document completion a checkout that is not clean
+  // and pushed has held, each mapped to the reason text of the one
+  // plan_complete_held decision it last logged. A different reason logs again,
+  // and a completion re-arms the entry, so a close spanning several turns
+  // logs one line per checkout state rather than one per turn.
+  const planCompleteHeldLogged = new Map<string, string>();
 
   // M8: planning reentrancy guard.
   let planningInFlight = false;
@@ -8070,16 +8149,18 @@ export const register: Register = async (on, options) => {
           },
           kind: {
             type: "string",
-            description: 'kind is "task" (default) or "plan". "plan" is only allowed under the root.',
+            description:
+              'kind is "task" (default) or "plan". "plan" is only allowed under the root, ' +
+              "requires planPath and takes no maxRounds.",
           },
           maxRounds: {
             type: "number",
-            description: "maxRounds is the round budget. Default 10.",
+            description: 'maxRounds is the round budget of kind "task". Default 10. It is refused on kind "plan", which has no round budget.',
           },
           planPath: {
             type: "string",
             description:
-              'planPath is only allowed on kind "plan". Its plan document\'s path: ' +
+              'planPath is required on kind "plan" and only allowed there. Its plan document\'s path: ' +
               '"docs/plans/<name>.md", project-relative, no subdirectories.',
           },
           taskId: {
@@ -8157,7 +8238,7 @@ export const register: Register = async (on, options) => {
     await registerTool("goal_resume", () => $.tool.register({
       name: "goal_resume",
       description:
-        "Resume a paused goal leaf and reset its nudge budget. A different active node is paused first, with the reason " +
+        "Resume a paused goal leaf and reset its nudge budget. A nodeId naming a leaf blocked with \"Max rounds reached\" releases it and restarts its round count. A different active node is paused first, with the reason " +
         "recorded on it. Owner only. An entry awaiting the operator's yes, or a node under one, is refused outside a turn the operator or the coordinator persona started, " +
         "and a call with nodeId omitted passes over them there. A resume allowed in such a turn clears the entry's wait.",
       inputSchema: {
@@ -8165,7 +8246,7 @@ export const register: Register = async (on, options) => {
         properties: {
           nodeId: {
             type: "string",
-            description: "nodeId names the paused node to resume. Optional, defaulting to the most recently paused node.",
+            description: "nodeId names the paused node to resume, or the node blocked on its round budget to release. Optional, defaulting to the most recently paused node.",
           },
         },
       },
@@ -11395,13 +11476,16 @@ export const register: Register = async (on, options) => {
         ? now - sess.state.monitor.lastTurnComplete
         : now - sess.state.monitor.sessionStart;
       const eligible = idleMs >= nudgeIdleMs;
-      if (!eligible) return;
+      if (!eligible) {
+        clearAgentHold();
+        return;
+      }
 
-      // A blocked lead on a plan entry whose ask closed after the lead was
-      // set, answered by the operator or the coordinator or expired, is
+      // A blocked lead on the active entry whose ask closed after the lead
+      // was set, answered by the operator or the coordinator or expired, is
       // cleared before the hold is read: the ask settled what the block
       // waited on, so an answered ask on a BLOCKED: worker lifts the hold.
-      if (g.lead && g.lead.state === "blocked" && isPlanEntry(sess.state, g)
+      if (g.lead && g.lead.state === "blocked"
         && typeof g.lastAskClosedAt === "number" && g.lastAskClosedAt > g.lead.at) {
         g.lead = null;
         g.updatedAt = now;
@@ -11426,20 +11510,87 @@ export const register: Register = async (on, options) => {
       let hold = holdOf(sess.state, now);
       if (hold === "ask") {
         const askResult = await tickOpenAsk($, sess.state, sess.persona, cfg, g.id, expectedTurns);
-        if (askResult !== "none") return;
+        if (askResult !== "none") {
+          clearAgentHold();
+          return;
+        }
         hold = holdOf(sess.state, now);
       }
-      if (hold !== null) return;
+      if (hold !== null) {
+        clearAgentHold();
+        return;
+      }
+
+      // The agent hold: any running agent with no parentId on $.agent.list(),
+      // whether the worker or a plugin started it, holds the branch as a
+      // waiting lead does, on any entry, for as long as the agent runs: no
+      // classifier call, no nudge, no completion, nothing spent. It has no
+      // time bound, since a nudge into a turn awaiting its own agent is the
+      // fault this hold exists to prevent. It is read after holdOf so the host
+      // call is made only on a tick that would otherwise go on to nudge. The
+      // hold is keyed to the active entry it began on, and its clock is the
+      // first held tick's, set before any write. One idle_hold_agent line is
+      // logged as it begins, and one idle_hold_agent_held line carrying its
+      // age in whole minutes on the first tick at or past each further hour,
+      // a tick that crosses several hours writing one line for the latest.
+      // Each line's mark is set before its write so an overlapping tick
+      // writes nothing, and a write that fails or yields takes back the line
+      // and its mark, never the clock, so a later tick retries it. A list
+      // that cannot be read is no agent, and the branch goes on as
+      // liveTopLevelAgentRunning states.
+      if (await liveTopLevelAgentRunning($)) {
+        if (agentHold === null || agentHold.entryId !== g.id) {
+          agentHold = { entryId: g.id, since: now, beginLogged: false, hourLogged: 0 };
+        }
+        const held = agentHold;
+        if (!held.beginLogged) {
+          held.beginLogged = true;
+          const begun: AgentState["decisions"][number] = {
+            timestamp: now,
+            loop: "goal",
+            action: "idle_hold_agent",
+            detail: `${g.id}: a running background agent holds the idle branch until it ends`,
+          };
+          sess.state.decisions.push(begun);
+          await persistOrRollBack($, () => {
+            dropDecision(begun);
+            held.beginLogged = false;
+          });
+          return;
+        }
+        const hour = Math.floor((now - held.since) / AGENT_HOLD_REPORT_MS);
+        if (hour >= 1 && hour > held.hourLogged) {
+          const previousHour = held.hourLogged;
+          held.hourLogged = hour;
+          const ageMinutes = Math.floor((now - held.since) / 60_000);
+          const report: AgentState["decisions"][number] = {
+            timestamp: now,
+            loop: "goal",
+            action: "idle_hold_agent_held",
+            detail: `${g.id}: the agent hold has stood ${ageMinutes} minutes with an agent still running`,
+          };
+          sess.state.decisions.push(report);
+          await persistOrRollBack($, () => {
+            dropDecision(report);
+            if (held.hourLogged === hour) held.hourLogged = previousHour;
+          });
+        }
+        return;
+      }
+      clearAgentHold();
 
       // L6: print seconds below one minute, minutes otherwise
       const idleDisplay = idleMs < 60_000 ? `${Math.floor(idleMs / 1000)}s` : `${Math.floor(idleMs / 60_000)}min`;
       const last5 = g.scores.slice(-5).map((s) => s.result).join(", ") || "none";
       const onGoalCount = g.scores.filter((s) => s.result === "on-goal").length;
 
-      // R6: switch is offered only when at least one pending plan exists, and
-      // the state names each pending plan by id and title on its own line.
+      // R6: switch is offered on a task entry alone, and only when at least
+      // one pending plan exists, since the idle controller never moves a plan
+      // entry off the active slot. The state names each pending plan by id
+      // and title on its own line.
       const pendingPlans = sess.state.goals.filter((x) => x.kind === "plan" && x.status === "pending");
-      const hasSwitch = pendingPlans.length > 0;
+      const planEntry = isPlanEntry(sess.state, g);
+      const hasSwitch = pendingPlans.length > 0 && !planEntry;
 
       // C7: Environment line only when env.git or env.health is non-null.
       const env = sess.state.monitor.env;
@@ -11457,9 +11608,9 @@ export const register: Register = async (on, options) => {
       const envLine = envText === null ? "" : `Environment: ${envText}\n`;
 
       // The ids in force this tick: complete on a task entry alone, since a
-      // plan entry's done is read from its plan document, and switch only
-      // where a pending plan exists.
-      const classifyLabels: readonly string[] = controllerLabelsOf(!isPlanEntry(sess.state, g), hasSwitch);
+      // plan entry's done is read from its plan document, and switch on a task
+      // entry alone where a pending plan exists.
+      const classifyLabels: readonly string[] = controllerLabelsOf(!planEntry, hasSwitch);
 
       // The controller's state's inputs, read here in the synchronous region
       // so they are this tick's readings: the facts, the last answer where
@@ -12029,9 +12180,9 @@ export const register: Register = async (on, options) => {
               if (nudgeCapped) {
                 return;
               }
-              // The hold sentence rides on a plan entry's nudge alone, the
-              // one kind of entry whose leads are read.
-              const leadHoldLine = isPlanEntry(sess.state, g) ? " " + NUDGE_LEAD_HOLD_TEXT : "";
+              // The hold sentence rides on every nudge, since every entry's
+              // leads hold the idle branch.
+              const leadHoldLine = " " + NUDGE_LEAD_HOLD_TEXT;
               // Section 3 (boundary-compaction): the active entry's plan
               // document and section, spliced into both arms right after
               // the [GOAL] line so a nudged worker knows which document to
@@ -12042,8 +12193,8 @@ export const register: Register = async (on, options) => {
               const planLine = planDocumentLine(sess.state, g);
               // R8: nudge text appends goal_done instruction, and both arms
               // close with NUDGE_STATUS_LINE_TEXT, the status line the
-              // nudge count reads at the nudged turn's end, followed on a
-              // plan entry by leadHoldLine. Item 8.2
+              // nudge count reads at the nudged turn's end, followed by
+              // leadHoldLine. Item 8.2
               // (Round 36): the idle-gap nudge has its own text - re-read
               // the plan and the discussion file, and only state a fork as
               // a literal marker line if one truly exists, since the
@@ -13400,8 +13551,8 @@ export const register: Register = async (on, options) => {
 
       // Section 3 (plan-health-from-the-record): the worker's lead, read from
       // the first non-blank line of the closing text for the entry that was
-      // active at turn start, when it is a plan entry, at the end of every
-      // turn whatever opened it. A BLOCKED: or WAITING: line writes the lead
+      // active at turn start, whatever its kind, at the end of every turn
+      // whatever opened it. A BLOCKED: or WAITING: line writes the lead
       // fresh (state, reason, and the clock now, which is what the waiting
       // hold measures from). A WORKING: line sets no lead and clears a waiting
       // one. Any other first line clears a lead when the turn made at least one
@@ -13409,13 +13560,13 @@ export const register: Register = async (on, options) => {
       // clears nothing. lead_set and lead_cleared are logged once
       // per change: a turn re-reading the same state and reason logs nothing.
       // The entry's status, the nudge count and the active entry are not
-      // touched here, and a task entry's closing text sets no lead. An entry
+      // touched here. An entry
       // already complete or abandoned at turn end (goal_done in the same turn)
       // takes no lead, and a subagent's completion neither sets nor clears one,
       // since its answer is the subagent's report. The ASK: marker above is
       // handled as it is whether or not this line is present, and the status
       // line is the one reading taken above the marker step.
-      if (!skipped && sess.isOwner && !completesSubagentLoop && turnLeaf && isPlanEntry(sess.state, turnLeaf)) {
+      if (!skipped && sess.isOwner && !completesSubagentLoop && turnLeaf) {
         const leadLine = statusLine !== null && statusLine.state !== "working" ? { state: statusLine.state, reason: statusLine.reason } : null;
         const workingLine = statusLine !== null && statusLine.state === "working";
         const previous = turnLeaf.lead ?? null;
@@ -13705,6 +13856,13 @@ export const register: Register = async (on, options) => {
               } else if (!planEntry && g.completedRounds >= g.maxRounds) {
                 // R7: round budget → leaf blocked, toast once, then activateNext.
                 // Never for a plan entry, whose maxRounds is not read.
+                // blockedReason stays the literal the load-time recovery in
+                // agent-state.ts matches. The detail and the toast name the
+                // entry's kind, and an entry of kind "plan" here has no plan
+                // document, so they also name how a plan entry is added.
+                const kindNote = g.kind === "plan"
+                  ? "(kind plan with no plan document; a plan entry is added with planPath)"
+                  : "(kind task)";
                 g.status = "blocked";
                 g.blockedReason = "Max rounds reached";
                 g.updatedAt = Date.now();
@@ -13712,9 +13870,9 @@ export const register: Register = async (on, options) => {
                   timestamp: Date.now(),
                   loop: "goal",
                   action: "block",
-                  detail: `${g.id}: Max rounds reached`,
+                  detail: `${g.id}: Max rounds reached ${kindNote}`,
                 });
-                try { $.ui.toast(`Agentic: ${g.id} blocked: max rounds reached`); } catch { /* non-fatal */ }
+                try { $.ui.toast(`Agentic: ${g.id} blocked: max rounds reached ${kindNote}`); } catch { /* non-fatal */ }
                 const nextId = activateNext(sess.state, g.id);
                 activate($, nextId, `${g.id} blocked`);
                 try { $.ui.status(""); } catch { /* non-fatal */ }
@@ -13786,8 +13944,13 @@ export const register: Register = async (on, options) => {
       // (a header Status: Complete, or the document moved to an archive place)
       // completes the holder with the same steps the scorer's complete label
       // runs: completeLeaf, runHealth, a complete decision naming the document,
-      // activateNext, activate. A Chapter count above the stored one stores the
-      // new count and logs plan_progress; an
+      // activateNext, activate. That completion waits for the checkout holding
+      // the document: git status runs in planDir, and a branch with an
+      // upstream, no commit ahead and no other line lets it run. Any other
+      // answer leaves the entry active and logs one plan_complete_held
+      // decision per holder per checkout state. A git read that cannot be used
+      // completes as before and logs nothing. A Chapter count above the
+      // stored one stores the new count and logs plan_progress; an
       // unchanged count logs nothing. A read document also sets the holder's
       // sectionCount and nextSection, silently. An unreadable or archived
       // document writes neither of those two. An unreadable document changes
@@ -13822,6 +13985,32 @@ export const register: Register = async (on, options) => {
       // one of the two is true; an unreadable document sets neither.
       let planChapterAdvanced = false;
       let planCompletedByDocument = false;
+      // Whether the checkout holding `holder`'s document, read in `planDir`,
+      // holds its completion: true where git answers a branch line with no
+      // upstream, a commit ahead, or any line after it. A held entry logs one
+      // plan_complete_held decision naming the holder, the document, the
+      // directory, the dirty count, the ahead count and whether an upstream is
+      // set, again only when that reason text changes. A read that cannot be
+      // used, or no planDir, holds nothing, so the completion runs as it does
+      // for a tree git cannot see. Not holding re-arms the log.
+      const heldByCheckout = async (holder: GoalNode, docPath: string, planDir: string | null): Promise<boolean> => {
+        const checkout = planDir === null ? null : await readPlanCheckout($, planDir);
+        if (planDir === null || checkout === null || (checkout.upstream && checkout.ahead === 0 && checkout.dirty === 0)) {
+          planCompleteHeldLogged.delete(holder.id);
+          return false;
+        }
+        const reason = `dirty ${checkout.dirty}, ahead ${checkout.ahead}, upstream ${checkout.upstream ? "set" : "none"}`;
+        if (planCompleteHeldLogged.get(holder.id) !== reason) {
+          planCompleteHeldLogged.set(holder.id, reason);
+          sess.state.decisions.push({
+            timestamp: Date.now(),
+            loop: "goal",
+            action: "plan_complete_held",
+            detail: `${holder.id}: ${docPath.slice(0, 150)}: held until the checkout at ${planDir.slice(0, 200)} is clean and pushed: ${reason}`,
+          });
+        }
+        return true;
+      };
       // Completes `holder` on a document reading Complete or archived.
       // The document is the record for the holder's whole subtree, so its live
       // descendants (pending, active or paused, a task the worker added under
@@ -13953,7 +14142,8 @@ export const register: Register = async (on, options) => {
               }
             }
             const documentComplete = reading.kind === "archived" || reading.complete;
-            if (documentComplete && holder.status !== "complete" && holder.status !== "abandoned") {
+            if (documentComplete && holder.status !== "complete" && holder.status !== "abandoned"
+              && !(await heldByCheckout(holder, planPath, planDir))) {
               await completeByDocument(holder, planPath, reading, false);
               planCompletedByDocument = true;
             }
@@ -13979,7 +14169,9 @@ export const register: Register = async (on, options) => {
       // the holder, and the fold takes it at its next write. The turn's own
       // holder was read above and is not read twice. A reading short of
       // Complete, or unreadable, changes nothing and logs nothing, since such
-      // a plan is read at every turn end until it closes. One read per such
+      // a plan is read at every turn end until it closes. A Complete reading
+      // waits for the checkout holding the document as the holder's does, with
+      // the same once-per-state plan_complete_held log. One read per such
       // plan; the owner alone reads, as for the holder, and a subagent's
       // completion, which is not the persona's own turn end, reads none.
       if (sess.isOwner && !completesSubagentLoop) {
@@ -13992,9 +14184,10 @@ export const register: Register = async (on, options) => {
         });
         for (const plan of leftOpen) {
           try {
-            const { reading } = await readPlanDocument($, plan.planPath!);
+            const { reading, planDir } = await readPlanDocument($, plan.planPath!);
             if (reading.kind === "unreadable" || (reading.kind === "read" && !reading.complete)) continue;
             if (plan.status === "complete" || plan.status === "abandoned") continue;
+            if (await heldByCheckout(plan, plan.planPath!, planDir)) continue;
             await completeByDocument(plan, plan.planPath!, reading, true);
           } catch (err) {
             sess.state.decisions.push({
@@ -15043,21 +15236,47 @@ export const register: Register = async (on, options) => {
         //
         // Absent means undefined or null, and nothing else. A present but
         // empty or whitespace-only value is a caller that meant to pass a path
-        // and passed nothing, so it goes through both rules like any other
-        // value rather than being silently read as absent: on a task it is the
-        // kind refusal, and on a plan it fails the pattern and is refused by
-        // the form rule.
+        // and passed nothing, so on a task it is the kind refusal like any
+        // other value.
+        //
+        // A plan entry is one with a plan document, judged from that document
+        // rather than from a count of turns, so an add of kind "plan" must
+        // name one. An absent, empty or whitespace-only value names none and
+        // is refused by the no-path rule, whose message opens with the rule
+        // and closes with the required form; a value that names something is
+        // held to the pattern by the form rule. A plan entry has no round
+        // budget either, so maxRounds on kind "plan" is refused once the path
+        // is settled, and an add both rules would refuse reads the no-path
+        // refusal alone. Present for maxRounds means neither undefined nor
+        // null, as for planPath, so a string or a zero is refused too.
         const rawPlanPath = (e as any).planPath;
         let planPath: string | undefined;
-        if (rawPlanPath !== undefined && rawPlanPath !== null) {
-          const trimmed = String(rawPlanPath).trim();
-          if (kind !== "plan") {
+        if (rawPlanPath !== undefined && rawPlanPath !== null && kind !== "plan") {
+          toolErrorsThisTurn++;
+          return { deny: 'planPath is only allowed on kind "plan". ' + PLAN_PATH_REQUIRED_FORM };
+        }
+        if (kind === "plan") {
+          const trimmed = rawPlanPath === undefined || rawPlanPath === null ? "" : String(rawPlanPath).trim();
+          if (trimmed === "") {
             toolErrorsThisTurn++;
-            return { deny: 'planPath is only allowed on kind "plan". ' + PLAN_PATH_REQUIRED_FORM };
+            return {
+              deny:
+                "A plan entry names its plan document, and an entry without one runs on a round budget, " +
+                "so goal_add of a plan requires planPath. " + PLAN_PATH_REQUIRED_FORM,
+            };
           }
           if (!PLAN_PATH_PATTERN.test(trimmed)) {
             toolErrorsThisTurn++;
             return { deny: PLAN_PATH_REQUIRED_FORM };
+          }
+          const rawMaxRounds = (e as any).maxRounds;
+          if (rawMaxRounds !== undefined && rawMaxRounds !== null) {
+            toolErrorsThisTurn++;
+            return {
+              deny:
+                "A plan entry has no round budget: it is judged from its plan document. " +
+                'maxRounds is for kind "task"; add this plan without it.',
+            };
           }
           planPath = trimmed;
         }
@@ -16068,9 +16287,14 @@ export const register: Register = async (on, options) => {
         // Outside those turns a call naming one is refused, and a call naming
         // none passes over them to the other paused entries.
         const mayResumeAwaiting = turnMayStartEffort("goal_resume_awaiting");
+        // A call naming an entry the round budget blocked releases it: the
+        // literal "Max rounds reached" is the one blocked reason it lifts, and
+        // the entry's round count restarts below. Any other blocked entry, and
+        // every entry for the call naming none, stays out of reach.
         let target: GoalNode | undefined;
         if (nodeId) {
-          target = sess.state.goals.find((g) => g.id === nodeId && g.status === "paused");
+          target = sess.state.goals.find((g) => g.id === nodeId
+            && (g.status === "paused" || (g.status === "blocked" && g.blockedReason === "Max rounds reached")));
           if (target && awaitingEntryAtOrAbove(sess.state, target) && !mayResumeAwaiting) {
             toolErrorsThisTurn++;
             return { deny: AWAITING_YES_RESUME_REFUSED_TEXT };
@@ -16107,6 +16331,7 @@ export const register: Register = async (on, options) => {
         }
         // M10: clear blockedReason on resume.
         const pausedReason = target.blockedReason || "unknown";
+        const budgetRelease = target.status === "blocked";
         // An allowed resume at or under an entry awaiting the operator's yes is
         // that word on the entry, so the entry's flag goes, and its awaiting
         // reason with it. An entry above the resumed node stays paused.
@@ -16122,6 +16347,17 @@ export const register: Register = async (on, options) => {
         target.blockedReason = undefined;
         target.awaitingYes = undefined;
         target.status = "active";
+        // A released entry left at its maxRounds would re-block on its next
+        // scored round, so its count restarts. Its scores stay.
+        if (budgetRelease) target.completedRounds = 0;
+        // completeLeaf's walk blocked each plan above the released entry with
+        // "Child task blocked", and activateNext never descends into a blocked
+        // plan, so a release that left them would strand their pending work.
+        // blockedAncestorsToFree decides the chain as the load-time recovery
+        // does, and undefined is an ancestor in a state it cannot explain,
+        // which leaves every ancestor as it is and is named in the decision.
+        const releaseChain = budgetRelease ? blockedAncestorsToFree(sess.state, target) : [];
+        const chainNote = releaseChain === undefined ? "; ancestors left as they are, one above in a state the release does not free" : "";
         // A resume lifts a blocked lead whatever paused the entry, since the
         // lead would otherwise hold the idle branch until a working turn that
         // may never come. A worker still blocked restates BLOCKED: at its next
@@ -16139,8 +16375,29 @@ export const register: Register = async (on, options) => {
           timestamp: Date.now(),
           loop: "goal",
           action: "resume",
-          detail: `Node ${target.id} resumed (paused: ${pausedReason}${admittedBy})`,
+          detail: budgetRelease
+            ? `Node ${target.id} resumed (blocked: ${pausedReason}; round budget restarted${chainNote}${admittedBy})`
+            : `Node ${target.id} resumed (paused: ${pausedReason}${admittedBy})`,
         });
+        // From the nearest ancestor up, one is freed only while its reason is
+        // exactly "Child task blocked" and no child of it is still blocked:
+        // the released entry is active and a lower ancestor freed here is
+        // pending. A pending or active ancestor is passed over, as the helper
+        // passes it. The first blocked ancestor that fails ends the walk,
+        // leaving it and everything above it as they are.
+        for (const ancestor of releaseChain ?? []) {
+          if (ancestor.blockedReason !== "Child task blocked"
+            || sess.state.goals.some((g) => g.parentId === ancestor.id && g.status === "blocked")) break;
+          ancestor.status = "pending";
+          ancestor.blockedReason = undefined;
+          ancestor.updatedAt = Date.now();
+          sess.state.decisions.push({
+            timestamp: Date.now(),
+            loop: "goal",
+            action: "unblocked",
+            detail: `${ancestor.id}: returned to pending, goal_resume's release of ${target.id} cleared "Child task blocked"`,
+          });
+        }
         if (liftedLead) {
           sess.state.decisions.push({
             timestamp: Date.now(),
@@ -16158,7 +16415,7 @@ export const register: Register = async (on, options) => {
         }
         sess.state.updatedAt = Date.now();
         await persist($);
-        return { result: `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.` };
+        return { result: `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.${budgetRelease ? " Round budget restarted." : ""}` };
       }
 
       // Serve memory_add.

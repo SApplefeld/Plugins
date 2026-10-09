@@ -56,7 +56,8 @@ import { bracketSafeText, LINE_TERMINATOR } from "./agent-state";
 // controller acts on, each named for the action it selects, in the order the
 // state's option list and the classify call carry them. The superset.
 // `complete` is offered only on a task entry, since a plan entry's done is
-// read from its plan document, and `switch` only where a pending plan exists.
+// read from its plan document, and `switch` only on a task entry where a
+// pending plan exists.
 export const CONTROLLER_OPTIONS: readonly string[] = Object.freeze(["nudge", "idle-gap-nudge", "complete", "switch"]);
 // The ids in force for one tick: the superset less the options the entry
 // does not offer. A fresh frozen array per call, so a hook mutating what the

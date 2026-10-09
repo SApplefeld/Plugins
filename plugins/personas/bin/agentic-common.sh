@@ -13,7 +13,7 @@
 #           read_settings_architect_persona,
 #           read_settings_liaison_persona,
 #           read_settings_fleet_roster,
-#           valid_persona_name,
+#           valid_persona_name, set_aside_store,
 #           find_global_store, list_installed_stores,
 #           plugin_store_file_name, migrate_global_store,
 #           installed_id_cutover_done, poll_decisions, poll_heartbeat.
@@ -25,7 +25,12 @@
 # race, treated as "live" (or "not ready"), never an abort. The timeout is the only
 # exit. refuse_if_persona_live is the one exception: it is a start-only check with
 # no later poll to recover on, so it fails closed on a read error after its re-reads
-# instead of waiting it out.
+# instead of waiting it out. The three gate readers of the commons store,
+# refuse_if_persona_live, wait_persona_free_both and wait_persona_free, apply
+# one rule to a store that fails to parse: one last
+# written longer ago than the stale bound has no live writer, so it is set aside
+# under a .corrupt-<time> name beside it and the path reads as free, while one
+# written inside the bound is a possible mid-write and keeps the read-error reading.
 
 # --- Plugin ids ---
 # The two ids pluginConfigs is keyed by: --plugin-dir load, and installed load.
@@ -1383,6 +1388,14 @@ console.log("YES installed_plugins.json lists " + currentId + " and no longer li
 # T9/V3: pre-gate - wait until no live persona claim exists in the commons store.
 # Fails closed on a read error (V3). Prints live=/oldest_age= per poll (V3).
 # W2: a read error is a transient mid-write race, not an abort.
+# A store that fails to parse is aged by its modification time: past the 90 s
+# stale bound it is set aside by set_aside_store and the gate passes, and
+# inside the bound it reads as a transient error and polls to the timeout.
+# The bound reaches the program as an argument, not as spliced text.
+# A store path with no file at it, at the start or at a later poll, reads as
+# free with one line naming the path as absent: the live runner's start check
+# sets a stale store aside before the first gate, so an absent path means a
+# set-aside, not a store that was never there.
 # Usage: wait_persona_free <store-path> [timeout-seconds]
 wait_persona_free() {
   local store="${1:-.agentic-personas.json}"
@@ -1390,22 +1403,45 @@ wait_persona_free() {
   local n=0
   local store_w
   store_w=$(cygpath -m "$store" 2>/dev/null || echo "$store")
-  [ -f "$store" ] || { echo "pre-gate FAIL: store not found: $store" >&2; return 1; }
   echo "pre-gate: waiting for no live persona claim (store: $store, timeout: ${timeout}s)..."
   while true; do
     local line live rc
+    if [ ! -e "$store" ]; then
+      echo "pre-gate: commons store absent at $store, read as free"
+      echo "pre-gate passed (no live claims)"
+      return 0
+    fi
     line=$(node -e "
 const fs = require('fs');
-let s;
+const stale = Number(process.argv[2]);
+let text;
 try {
-  s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  text = fs.readFileSync(process.argv[1], 'utf8');
 } catch (e) {
   console.log('ERROR: ' + e.message);
   process.exit(2);
 }
+let s;
+try {
+  s = JSON.parse(text);
+} catch (e) {
+  let mtimeMs;
+  try {
+    mtimeMs = fs.statSync(process.argv[1]).mtimeMs;
+  } catch (se) {
+    console.log('ERROR: ' + se.message);
+    process.exit(2);
+  }
+  const ageMs = Date.now() - mtimeMs;
+  if (ageMs > stale) {
+    console.log('UNREADABLE-STALE ' + Math.round(ageMs / 1000) + ' ' + Math.round(stale / 1000));
+    process.exit(3);
+  }
+  console.log('UNREADABLE-FRESH ' + Math.round(ageMs / 1000));
+  process.exit(2);
+}
 const keys = Object.keys(s).filter(k => k.startsWith('commons:'));
 const now = Date.now();
-const stale = 90000;
 let live = 0, oldest = 0;
 for (const key of keys) {
   const e = s[key];
@@ -1416,8 +1452,13 @@ for (const key of keys) {
   }
 }
 console.log('live=' + live + ' oldest_age=' + (oldest ? Math.round((now - oldest) / 1000) : 0) + 's');
-" "$store_w")
+" "$store_w" 90000)
     rc=$?
+    if [ $rc -eq 3 ]; then
+      set_aside_store "$store" "$line" || return 1
+      echo "pre-gate passed (no live claims)"
+      return 0
+    fi
     if [ $rc -ne 0 ] || echo "$line" | grep -q '^ERROR'; then
       # W2: a read error is a transient mid-write race, not an abort.
       # Treat as live=1 for this poll and let the timeout be the only exit.
@@ -1439,18 +1480,51 @@ console.log('live=' + live + ' oldest_age=' + (oldest ? Math.round((now - oldest
   done
 }
 
+# --- set_aside_store ---
+# The set-aside step the three store readers share. A commons store that fails to
+# parse and was last written longer ago than the stale bound has no live
+# writer, so it is renamed to <path>.corrupt-<epoch ms> beside itself, never
+# deleted, and the caller reads the path as free. Takes the reader's verdict
+# line, "UNREADABLE-STALE <age-seconds> <bound-seconds>". Prints one line
+# either way. A rename that fails with no file left at the path returns 0,
+# and the caller reads the path as free. The usual cause is another reader
+# that set the same file aside first. A rename that fails with the file still
+# in place returns 1, so the caller fails closed on a file it could not move
+# rather than reading it as free.
+# Usage: set_aside_store <store-path> <verdict-line>
+set_aside_store() {
+  local store="$1" verdict="$2" age bound aside err
+  age=$(echo "$verdict" | sed -n 's/^UNREADABLE-STALE \([^ ]*\) .*/\1/p')
+  bound=$(echo "$verdict" | sed -n 's/^UNREADABLE-STALE [^ ]* \(.*\)/\1/p')
+  aside="$store.corrupt-$(date +%s%3N)"
+  if err=$(mv -- "$store" "$aside" 2>&1); then
+    echo "store set aside: $store -> $aside (unreadable, last written ${age}s ago, past the ${bound}s stale bound)"
+    return 0
+  fi
+  if [ ! -e "$store" ]; then
+    echo "store already set aside by another reader: $store"
+    return 0
+  fi
+  echo "store set-aside failed: could not rename $store -> $aside${err:+: $err}"
+  return 1
+}
+
 # --- refuse_if_persona_live ---
 # Start-only refuse-at-start check, beside wait_persona_free's own wait.
 # Reads every given store path once, with no polling, and refuses the moment
 # any store holds a live persona: claim of any name (a commons: key whose
 # lastSeen is within stale_after_ms, holding a claim whose resource starts
 # with "persona:"). A store path that does not exist is skipped (installed
-# mode may never have run on this machine). A store whose read fails is
-# re-read up to two more times, with no sleep between reads, before it
-# counts as a failure: the failure is either a mid-write race by a live
-# session or a corrupt file, and a start-only check has no later poll to
-# tell the two apart or recover on, so after three reads it fails closed
-# the same way a live claim does. A stale bound that is not a positive
+# mode may never have run on this machine). A store that fails to parse and
+# was last written longer ago than stale_after_ms has no live writer: it is
+# set aside under a .corrupt-<time> name beside it, with one line saying so,
+# and counts as read and free. A rename that fails with the file still in
+# place is a refusal. A store whose read fails, or that fails to parse and was
+# written inside the bound, is re-read up to two more times,
+# with no sleep between reads, before it counts as a failure: the failure may
+# be a mid-write race by a live session, and a start-only check has no later
+# poll to recover on, so after three reads it fails closed the same way a
+# live claim does. A stale bound that is not a positive
 # number is refused immediately, on the first read, with no re-read (a
 # malformed bound reads the same way every time). Reading zero stores end
 # to end is itself a refusal, since a check that read nothing proved
@@ -1477,11 +1551,30 @@ if (!Number.isFinite(staleAfterMs) || !(staleAfterMs > 0)) {
   console.log('ERROR: stale bound is not a positive number: ' + process.argv[2]);
   process.exit(2);
 }
-let s;
+let text;
 try {
-  s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  text = fs.readFileSync(process.argv[1], 'utf8');
 } catch (e) {
   console.log('ERROR: ' + e.message);
+  process.exit(2);
+}
+let s;
+try {
+  s = JSON.parse(text);
+} catch (e) {
+  let mtimeMs;
+  try {
+    mtimeMs = fs.statSync(process.argv[1]).mtimeMs;
+  } catch (se) {
+    console.log('ERROR: ' + se.message);
+    process.exit(2);
+  }
+  const ageMs = Date.now() - mtimeMs;
+  if (ageMs > staleAfterMs) {
+    console.log('UNREADABLE-STALE ' + Math.round(ageMs / 1000) + ' ' + Math.round(staleAfterMs / 1000));
+    process.exit(3);
+  }
+  console.log('UNREADABLE-FRESH ' + Math.round(ageMs / 1000));
   process.exit(2);
 }
 const keys = Object.keys(s).filter(k => k.startsWith('commons:'));
@@ -1512,7 +1605,18 @@ console.log('CLEAN');
       if [ $rc -eq 0 ] && ! echo "$line" | grep -q '^ERROR'; then
         break
       fi
+      # A stale unreadable store reads the same way every time, so it takes
+      # no re-read.
+      [ $rc -eq 3 ] && break
     done
+    if [ $rc -eq 3 ]; then
+      if set_aside_store "$store" "$line"; then
+        checked=$((checked + 1))
+        continue
+      fi
+      echo "refuse-check FAIL: store unreadable and could not be set aside: $store"
+      return 1
+    fi
     if [ $rc -ne 0 ] || echo "$line" | grep -q '^ERROR'; then
       echo "refuse-check FAIL: store could not be read after 3 attempts (a mid-write race or a corrupt file): $store ($line)"
       return 1
@@ -1550,12 +1654,24 @@ wait_persona_free_both() {
   local global_store="$5"
   local n=0
   local heartbeat_path="$workdir/.agentic-heartbeat.json"
-  
+  local absent_logged=false
+
   echo "pre-gate: waiting for persona '$persona' free in commons AND heartbeat (timeout: ${timeout}s)..."
-  
+
   while true; do
     # Check 1: commons store (machine-global)
     local commons_ok=false
+    # A non-empty store path with no file at it holds no claim and reads as
+    # free, logged on the first poll that finds it so. A set-aside leaves its
+    # path that way for the rest of the gate's polls. An empty store argument
+    # names no path and stays not free.
+    if [ -n "$global_store" ] && [ ! -e "$global_store" ]; then
+      commons_ok=true
+      if ! $absent_logged; then
+        echo "commons store absent at $global_store, read as free"
+        absent_logged=true
+      fi
+    fi
     if [ -n "$global_store" ] && [ -f "$global_store" ]; then
       local line live rc
       # The persona and the stale bound are passed as arguments rather than
@@ -1563,18 +1679,42 @@ wait_persona_free_both() {
       # the program reads instead of code it runs. A bound that is not a
       # number reads as NaN, which the program takes as no bound at all and
       # counts every claim as live, so the gate waits rather than passing on
-      # a bad bound.
+      # a bad bound. A store that fails to parse is aged by its modification
+      # time: past the bound it exits 3 and is set aside, and inside the bound
+      # it exits 2 and reads as not free. A store whose read fails exits 2
+      # with no aging, since a file being replaced can fail to open while it
+      # still carries an old modification time. Under a bound that is not a number
+      # the age comparison is false, so an unreadable store reads as not free.
       line=$(node -e "
 const fs = require('fs');
-let s;
+const staleAfterMs = Number(process.argv[3]);
+let text;
 try {
-  s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+  text = fs.readFileSync(process.argv[1], 'utf8');
 } catch (e) {
   console.log('ERROR: ' + e.message);
   process.exit(2);
 }
+let s;
+try {
+  s = JSON.parse(text);
+} catch (e) {
+  let mtimeMs;
+  try {
+    mtimeMs = fs.statSync(process.argv[1]).mtimeMs;
+  } catch (se) {
+    console.log('ERROR: ' + se.message);
+    process.exit(2);
+  }
+  const ageMs = Date.now() - mtimeMs;
+  if (ageMs > staleAfterMs) {
+    console.log('UNREADABLE-STALE ' + Math.round(ageMs / 1000) + ' ' + Math.round(staleAfterMs / 1000));
+    process.exit(3);
+  }
+  console.log('UNREADABLE-FRESH ' + Math.round(ageMs / 1000));
+  process.exit(2);
+}
 const persona = process.argv[2];
-const staleAfterMs = Number(process.argv[3]);
 const bounded = !Number.isNaN(staleAfterMs);
 const keys = Object.keys(s).filter(k => k.startsWith('commons:'));
 const now = Date.now();
@@ -1590,7 +1730,9 @@ for (const key of keys) {
 console.log('live=' + live);
 " "$global_store" "$persona" "$stale_after_ms" 2>/dev/null)
       rc=$?
-      if [ $rc -eq 0 ] && ! echo "$line" | grep -q '^ERROR'; then
+      if [ $rc -eq 3 ]; then
+        set_aside_store "$global_store" "$line" && commons_ok=true
+      elif [ $rc -eq 0 ] && ! echo "$line" | grep -q '^ERROR'; then
         live=$(echo "$line" | sed -n 's/.*live=\([0-9]*\).*/\1/p')
         if [ "${live:-1}" = "0" ]; then
           commons_ok=true

@@ -1017,18 +1017,18 @@ export const LEAD_WAITING_HOLD_MS = 60 * 60_000;
 // holds stays active.
 //
 // The active entry is the one activeGoalId names, the same read the tick
-// makes, and its lead is read only where the entry is a plan entry by
-// resolvePlanPath's ancestor rule, since only a plan entry's turns write or
-// clear a lead and a stale lead on a task entry would otherwise hold forever.
-// A blocked lead an ask has since settled is the caller's to clear before
-// this read (the tick logs lead_cleared for it).
+// makes, and its lead is read whatever the entry's kind, since every entry's
+// turns write and clear a lead by the same rules. A blocked lead an ask has
+// since settled is the caller's to clear before this read (the tick logs
+// lead_cleared for it). A running top-level agent, whoever started it, is the
+// caller's to read after this one, since the agent list is a host call and
+// this read is a pure read of the store.
 export type HoldReason = "ask" | "blocked" | "waiting";
 
 export function holdOf(state: AgentState, now: number): HoldReason | null {
   if (openBlockingAsks(state).length > 0) return "ask";
   const active = state.activeGoalId ? state.goals.find((g) => g.id === state.activeGoalId) : undefined;
   if (!active || active.status !== "active" || !active.lead) return null;
-  if (resolvePlanPath(state, active) === undefined) return null;
   if (active.lead.state === "blocked") return "blocked";
   if (active.lead.state === "waiting" && now - active.lead.at < LEAD_WAITING_HOLD_MS) return "waiting";
   return null;
@@ -1148,7 +1148,9 @@ export function serializeState(state: AgentState): string {
 // at its maxRounds re-blocks on its first scored round. The ancestor rule
 // rather than kind is what it keys on: the scorer blocks the active LEAF and
 // a plan node with children is never the active leaf, so the frozen entry is
-// usually a task under a plan node, and no goal tool reopens a blocked entry.
+// usually a task under a plan node. goal_resume by id reopens an entry
+// blocked with this literal, and goal_done's walk reopens a "Child task
+// blocked" ancestor.
 // resolvePlanPath is the same ancestor walk Section 2's reader uses, so both
 // sides of "has a plan" agree.
 //
@@ -1192,7 +1194,7 @@ export function serializeState(state: AgentState): string {
 // refuses the whole recovery, and the chain is decided before any of it is
 // mutated, so a refusal high in the chain cannot leave the lower half
 // cleared.
-function blockedAncestorsToFree(state: AgentState, node: GoalNode): GoalNode[] | undefined {
+export function blockedAncestorsToFree(state: AgentState, node: GoalNode): GoalNode[] | undefined {
   const toFree: GoalNode[] = [];
   let current = node;
   // The walk is bounded by the node count, the same guard isActivationEligible

@@ -212,7 +212,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
         (open.length > listed.length ? `...and ${open.length - listed.length} more open ${open.length - listed.length === 1 ? "entry" : "entries"}.\n` : "");
       const queueClose = hasStartableWork(state)
         ? `The next pending entry starts on the controller's next tick; do not start it by hand.`
-        : `Nothing here starts by itself: every open entry is paused, blocked or out of the controller's reach. Ask the operator or the coordinator which to release. On the operator's or the coordinator's word, resume a paused one with goal_resume or drop one with goal_edit.`;
+        : `Nothing here starts by itself: every open entry is paused, blocked or out of the controller's reach. Ask the operator or the coordinator which to release. On the operator's or the coordinator's word, resume a paused one, or release one blocked with Max rounds reached, with goal_resume by its id, or drop one with goal_edit.`;
       const queueBlock =
         `[GOAL QUEUE]\n` +
         queueLines +
