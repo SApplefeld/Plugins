@@ -513,7 +513,7 @@ function snapshotIndexPath() {
 }
 
 // The most rows one section of index.json keeps, the recognition nudge's own
-// per-tier take (INDEX_RECORDS_MAX in hooks/memory-recognition-nudge.js). The
+// per-tier take (RECOGNITION_ROWS_MAX in plugins/personas/hooks/recognition.ts). The
 // writer keeps a section's rows in name order and cuts it here, so every file
 // it writes is one its own reader's ceiling below admits.
 const SNAPSHOT_SECTION_ROWS_MAX = 512;

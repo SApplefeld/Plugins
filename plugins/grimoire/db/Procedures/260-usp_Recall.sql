@@ -31,7 +31,7 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_Recall
 		AUTHOR:		Scott Applefeld
 		DATE:		October 6th, 2026
-		VERSION:	v1.0
+		VERSION:	v1.1
 	*********************************************************************************************
 		NOTES:		v1.0 - 10/06/2026 - SCOTT APPLEFELD
 							The candidate records for one prompt, by three passes fused
@@ -114,6 +114,11 @@ BEGIN	-- PROCEDURE
 							[bodyHead] its first 600 of them, one fewer where the 600th is
 							the first half of a surrogate pair. No row carries the whole
 							body.
+
+					v1.1 - 10/10/2026 - SCOTT APPLEFELD
+							The rule cited above now lives in
+							plugins/personas/hooks/recognition.ts, the persona module's port
+							of the retired recognition hook.
 	*********************************************************************************************
 	********************************************************************************************/
 

@@ -297,11 +297,9 @@ const PROBE_STORE_ENV = {
 //
 // The dispatcher is handed the built probe environment with the throwaway
 // store signals, exactly as the frontmatter guard's probes are, because every
-// Bash-routed PreToolUse hook runs inside it: the grant hook and the
-// recognition nudge both resolve the store, and nothing a session-start probe
-// sends may reach the operator's real one. The payload carries no session_id
-// on purpose: the recognition nudge keys its marker file on it and stands down
-// without one, so the probe reads nothing from the store and writes no marker.
+// Bash-routed PreToolUse hook runs inside it: the grant hook resolves the
+// store, and nothing a session-start probe sends may reach the operator's real
+// one. The payload carries no session_id, since no routed hook reads one.
 const DISPATCH_PROBES = [
     {
         hook: 'hook-dispatch.js',
@@ -729,9 +727,8 @@ function cacheSuppliesMemq(root) {
 // typeof each caller needs. It is wired in no hooks.json command, so the load
 // checks above never reach it, and every caller fails open when it cannot answer:
 // the read-only agent guard stops classifying a seat and allows every command it
-// would have denied, the docs-write guard stops reading a caller's type and
-// allows every docs/ write it would have refused, and the recognition nudge
-// stops standing down at a read-only seat's dispatch. A cache one version
+// would have denied, and the docs-write guard stops reading a caller's type and
+// allows every docs/ write it would have refused. A cache one version
 // behind, or one rolled back mid-update, supplies exactly that: a module that
 // loads and exports the wrong set.
 const SHARED_LIBS = [

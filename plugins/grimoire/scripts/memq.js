@@ -13,6 +13,7 @@
 //   memq recent [--since <n>d|<n>h]
 //   memq unstamped [--since <n>d|<n>h]
 //   memq touch <name> --applied [--type|--type=<type>|--operator]
+//   memq stamp-read <path>
 //   memq anchor <name> <path>... [--operator]
 //   memq triggers <name> <type>:<pattern>... [--type|--type=<type>|--operator]
 //   memq triggers <name> [<type>:<pattern>...] --replace
@@ -48,8 +49,8 @@
 // to it.
 //
 // Used-tracking is the database's too. `touch` stamps a record applied, `get`
-// stamps the body it serves read, and the PostToolUse stamp hook
-// (hooks/memory-usage-stamp.js) stamps a Read of a tier file read; each stamp
+// stamps the body it serves read, and the persona module's read stamp runs
+// the `stamp-read` verb to stamp a Read of a tier file read; each stamp
 // is a usage row on the local queue, delivered to mem.usp_AppendUsage by the
 // next drain, and no usage.jsonl line is written. `touch --type` and
 // `touch --operator` are what let the applied signal reach a shared-tier
@@ -5877,6 +5878,7 @@ function usage(problem) {
         + '       memq recent [--since <n>d|<n>h]\n'
         + '       memq unstamped [--since <n>d|<n>h]\n'
         + '       memq touch <name> --applied [--type|--type=<type>|--operator]\n'
+        + '       memq stamp-read <path>\n'
         + '       memq anchor <name> <path>... [--operator]\n'
         + '       memq triggers <name> <type>:<pattern>... [--type|--type=<type>|--operator]\n'
         + '       memq triggers <name> [<type>:<pattern>...] --replace\n'
@@ -10841,6 +10843,35 @@ async function cmdUnstamped(argv, options) {
     }
     if (reachable.size > 0) out.push(stampReminder(reachable));
     process.stdout.write(out.join('\n') + '\n');
+}
+
+// memq stamp-read: the read half of used-tracking, for a session that has
+// opened a memory file. The path names the file the session read; the stamp
+// lands where the file is a memory file by the store's own definition
+// (isMemoryFilename on its base name), sits in a tier directory tierDirFor
+// recognises, and exists as a file, since a stamp claims the file was opened
+// and a failed read opens nothing. The stamp is deliverStamp's `read` row on
+// the local queue, keyed to the project of the working directory this verb
+// runs in, which is what keys a project stamp to its fleet-wide store.
+//
+// It is silent and exits 0 on every path past its one argument: a path the
+// store does not own is no error, the caller is an after hook that reads no
+// answer, and a stamp is never worth disturbing the read that produced it.
+function cmdStampRead(argv) {
+    if (argv.length !== 1 || argv[0] === '' || argv[0].startsWith('--')) {
+        return usage('stamp-read takes one <path>');
+    }
+    try {
+        const resolved = path.resolve(argv[0]);
+        const name = path.basename(resolved);
+        if (!isMemoryFilename(name)) return;
+        const tierDir = tierDirFor(resolved);
+        if (tierDir === null) return;
+        let st = null;
+        try { st = fs.statSync(resolved); } catch { return; }
+        if (!st.isFile()) return;
+        deliverStamp(tierDir, name, 'read', { cwd: process.cwd() });
+    } catch { /* a read stamp is never worth a failed command */ }
 }
 
 // memq touch: the self-report half of used-tracking. The stamp hook records
@@ -16582,6 +16613,7 @@ function main() {
     }
     else if (cmd === 'applied') cmdApplied(rest);
     else if (cmd === 'touch') cmdTouch(rest);
+    else if (cmd === 'stamp-read') cmdStampRead(rest);
     else if (cmd === 'anchor') cmdAnchor(rest);
     else if (cmd === 'triggers') cmdTriggers(rest);
     // The two authoring verbs are async for the neighbours block they print

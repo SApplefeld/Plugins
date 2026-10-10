@@ -86,7 +86,7 @@
       "type": "string",
       "default": "off",
       "title": "Arming tier",
-      "description": "off, reader or owner. off registers no tool, timer or claim (a plain chat session). reader registers agentic_identity/agentic_say/agentic_inbox/fleet_status only, with no goal-tree tool and no ownership. owner is the full worker/coordinator shape. A supervisor launch always sets owner."
+      "description": "off, reader or owner. off registers the guards and after hooks and no tool, timer or claim (a plain chat session). reader registers agentic_identity/agentic_say/agentic_inbox/fleet_status only, with no goal-tree tool and no ownership. owner is the full worker/coordinator shape. A supervisor launch always sets owner."
     },
     "coordinatorPersona": {
       "type": "string",
@@ -123,6 +123,12 @@
       "default": "shadow",
       "title": "Compaction pass",
       "description": "off, shadow or live, and shadow is the default. shadow has the module ask Jev on its heartbeat whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live is read and acts as shadow. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off the pass asks nothing, writes one compaction_pass_disabled line per armed session, and writes no line at a compaction."
+    },
+    "guards": {
+      "type": "string",
+      "default": "shadow",
+      "title": "Before-tool guards",
+      "description": "off, shadow or live, and shadow is the default. shadow has the module's tool.call hook run every registered before-tool guard on each call, write each verdict to the decision journal as a guard_verdict line beside the kit command hook's verdict for the same call as a guard_shadow line, and let the call run. live returns a guard's deny as the call's result and refuses a call whose guard failed, naming the guards the call matched. off runs no guard. The after-call hooks run whatever the value. Any other value is read as off, with one decision saying so."
     },
     "jevLive": {
       "type": "string",

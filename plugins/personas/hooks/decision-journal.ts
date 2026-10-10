@@ -722,11 +722,23 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
 // `cold_cache`, the same counts at the moment the prompt cache is read as
 // expired. A `compaction_pass_disabled` says once per session that the pass
 // option is on while the seam's mode sends nothing, so no plan can exist.
+// The guard seam's handlers in hooks/index.ts write three: a `guard_verdict`
+// is one before-tool guard's verdict on one call, with the guard, the tool,
+// `deny` or `allow`, the deny's reason and the guard's own milliseconds, and
+// for the memq grant on tool.check `allow` or `silent`; a `guard_shadow` sets
+// a guard's verdict beside the kit command hook's for the same call, with the
+// call's id as `call`, `module` and `command` each `deny` or `allow` and
+// `agree`; a `guard_error` is a guard's or an after hook's own failure, with
+// the guard, the phase (`before`, `after`, `catch`, or `check` for the
+// grant) and the failure's text. A
+// `recognition_nudge` is one record the memory-recognition nudge pointed at,
+// with the record's name, its tier, the trigger type (`anchor` for a file
+// anchor), the pattern as printable ASCII and the boundary it fired at.
 //
 // The union and the array carry the same members in the same order: a member
 // in the union alone compiles and is refused by writeEvent at runtime.
-export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled";
-export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled"];
+export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge";
+export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge"];
 
 // A value an event's detail may carry: a string, a number, a boolean or null.
 export type EventDetailValue = string | number | boolean | null;

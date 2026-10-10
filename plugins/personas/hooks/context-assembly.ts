@@ -6,9 +6,10 @@
 // A record the plugin delivers from the persona's inbox is a prompt the
 // plugin submits itself, and such a submit carries no context of its own
 // (PromptSubmitArgs omits `context` in .claude/types/claude-code.d.ts). So
-// the delivery takes five of these blocks, the goal block, the task list,
-// the standing text, the memory block and the follow-up block, inside its
-// submitted text, framed by deliveryWithContext below.
+// the delivery takes six of these blocks, the goal block, the task list,
+// the standing text, the memory block, the memory-recognition block and the
+// follow-up block, inside its submitted text, framed by deliveryWithContext
+// below.
 //
 // The engine's loader follows `$` only into a function declared in
 // hooks/index.ts (hooks/host.ts says why), so nothing here takes `$`. What
@@ -43,7 +44,12 @@ export type ContextTrigger =
 // `followUpsShown` records the entries a block listed, once the blocks are
 // built, so the next prompt does not list them again. A prompt that never
 // runs, a dropped typed prompt or a refused delivery, has its caller
-// withdraw them in hooks/index.ts.
+// withdraw them in hooks/index.ts. `recognition` matches the situation
+// against the stored records' triggers and anchors, as hooks/recognition.ts
+// holds them, and answers a function that claims the matched records against
+// the session's dedup marker and gives their pointer block, already folded
+// bracket-safe, or null where nothing matched; it writes nothing until that
+// function is called.
 export interface ContextSources {
   state: AgentState;
   log(line: string): void;
@@ -55,6 +61,7 @@ export interface ContextSources {
   judged(situation: string): Promise<{ exitCode: number | null; stdout: string } | null>;
   followUps(): Promise<readonly { id: string; text: string; subject: string }[]>;
   followUpsShown(entries: readonly { id: string; subject: string }[]): void;
+  recognition(situation: string): Promise<(() => Promise<string | null>) | null>;
 }
 
 // The most open entries the [GOAL QUEUE] block lists one per line. It rides
@@ -344,10 +351,11 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
   // opening with the token `fleet` names its record second, and each such
   // name joins the shown list under the active goal.
   //
-  // The follow-up entries are read here, ahead of the memory read, so the
-  // delivery's quiet check after it covers both awaits; their block is the
-  // last one, below.
+  // The follow-up entries and the recognition match are read here, ahead of
+  // the memory read, so the delivery's quiet check after it covers every
+  // await that reads; their blocks are the last two, below.
   const followUps = await sources.followUps();
+  const recognitionClaim = await sources.recognition(situation);
   const judged = await sources.judged(situation);
   if (trigger.kind === "delivery" && !trigger.stillQuiet()) return null;
   state = sources.state;
@@ -373,6 +381,18 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       detail: `memory_inject: ${judgedLines.length} records`,
     });
     try { log(`Agentic: [MEMORY] injected (${judgedLines.length} entries)`); } catch { /* non-fatal */ }
+  }
+
+  // --- Memory-recognition block: the pointer lines for the stored records
+  // whose triggers or anchors the situation names, on a typed prompt and a
+  // delivery alike, claimed only once the delivery's quiet check has passed,
+  // so a delivery not sent marks nothing as pointed at.
+  if (recognitionClaim !== null) {
+    const recognitionBlock = await recognitionClaim();
+    if (recognitionBlock !== null) {
+      contextBlocks.push(recognitionBlock);
+      try { log(`Agentic: [RECOGNITION] injected`); } catch { /* non-fatal */ }
+    }
   }
 
   // --- [FOLLOW-UP] block: what this session's turn ends observed, one line

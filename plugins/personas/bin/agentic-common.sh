@@ -226,6 +226,22 @@ emit_settings_json() {
     esac
     jev_opts=",\"jevMode\":\"$JEV_MODE\""
   fi
+  # guards is the before-tool guard seam's switch: off runs no guard, shadow
+  # journals each verdict and lets the call run, live returns a guard's deny.
+  # An unset or empty GUARDS omits the key, and the plugin reads a missing key
+  # as shadow. A set value outside the three is refused the way JEV_MODE's is,
+  # rather than reaching the child where the seam would fold it to off.
+  local guards_opts=""
+  if [ -n "${GUARDS:-}" ]; then
+    case "$GUARDS" in
+      off|shadow|live) ;;
+      *)
+        echo "ERROR: emit_settings_json: GUARDS '$GUARDS' must be 'off', 'shadow' or 'live'" >&2
+        return 1
+        ;;
+    esac
+    guards_opts=",\"guards\":\"$GUARDS\""
+  fi
   # restartRecap switches the automatic [RESTART RECAP] block at the priming
   # turn: auto runs the recap script there, skill leaves the recap to the
   # skill alone. An unset or empty RESTART_RECAP omits the key, and the plugin
@@ -413,7 +429,7 @@ emit_settings_json() {
   # absent from the engine's type file, and options under the other id are
   # ignored without an error, so the same options are written under both.
   # test-personas/settings-plugin-key-test.sh pins both ids against the two manifests.
-  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roster_opt$supervisor_opts}"
+  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$guards_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roster_opt$supervisor_opts}"
   # autoContinue is the harness's own setting, at the top level rather than
   # under a plugin id. Off, a child that trips a usage limit ends its turn and
   # sits idle rather than parking until the limit resets, and the supervisor's

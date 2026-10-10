@@ -246,13 +246,13 @@ const ESCAPED_QUOTE = /\\["']/;
 const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 
 // The verbs a prompt-free allow covers, which is memq's own subcommand list
-// minus the twelve this grant does not extend to. memq dispatches log, find,
-// get, recall, judged, recent, unstamped, touch, anchor, triggers, add-type,
-// add-operator, put, forget, delete-type, delete-operator, decay-scan,
-// decay-prune, decay-done, db-sync, db-refresh, db-promote, db-curate,
-// jev-calibration and meter-drain, and the twelve absent here are the two
-// shared-tier deletes, find, anchor, triggers, db-sync, db-refresh,
-// db-promote, db-curate, jev-calibration, forget and meter-drain.
+// minus the thirteen this grant does not extend to. memq dispatches log, find,
+// get, recall, judged, recent, unstamped, touch, stamp-read, anchor, triggers,
+// add-type, add-operator, put, forget, delete-type, delete-operator,
+// decay-scan, decay-prune, decay-done, db-sync, db-refresh, db-promote,
+// db-curate, jev-calibration and meter-drain, and the thirteen absent here are
+// the two shared-tier deletes, find, anchor, triggers, db-sync, db-refresh,
+// db-promote, db-curate, jev-calibration, forget, meter-drain and stamp-read.
 //
 // anchor is the fourth, and it is withheld on what it authors rather than on
 // what it destroys: it rewrites a record of the project tier in place, at a
@@ -308,6 +308,10 @@ const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 // folder to the memory database, and the persona plugin's own timer runs it
 // as a process of its own, never through a worker's shell, so no fleet
 // worker's task asks for it.
+//
+// stamp-read is withheld on meter-drain's account: the persona module's read
+// stamp runs it as a process of its own after a Read of a memory file, never
+// through a worker's shell, so no fleet worker's task asks for it.
 //
 // db-promote and db-curate are the seventh and eighth, and they are withheld
 // on whose act they are. Both run under the curator login alone, the one

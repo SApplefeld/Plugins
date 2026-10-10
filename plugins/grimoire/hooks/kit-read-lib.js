@@ -163,12 +163,7 @@ function readFully(fd, position, length) {
 // rule instead, an lstat that refuses a link before the open, which NARROWS the
 // window rather than closing it. The residue is the asking caller's to bound and
 // differs with what it reads, so it is stated per caller rather than once for the
-// option. The nudge-log
-// read (readNudgeLog in memory-recognition-nudge.js) reads a file that hook
-// writes and appends to itself through an O_NOFOLLOW open, so the option is what
-// makes the reader refuse what the writer already refuses; what rides through
-// the window is one hook's own observability window, and a refusal reads there as
-// a log that could not be opened.
+// option.
 function readFileBounded(filePath, ceilingBytes, options) {
     if (typeof filePath !== 'string' || filePath === '') return null;
     if (typeof ceilingBytes !== 'number' || !(ceilingBytes > 0)) return null;

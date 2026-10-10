@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // hook-dispatch.js - one process per tool-call event.
 //
-// hooks.json wires this file alone on PreToolUse and PostToolUse, as
+// hooks.json wires this file alone on PreToolUse, as
 //     node "${CLAUDE_PLUGIN_ROOT}/hooks/hook-dispatch.js" <event>
 // and dispatch-table.json, in hooks.json's own shape, names the hooks each
 // event routes to and the matcher each is scoped by. The dispatcher reads the
@@ -69,13 +69,7 @@ const FALLBACK_TABLE = {
         ['Bash|PowerShell', 'pr-docs-guard.js'],
         ['Bash|PowerShell', 'merged-pr-push-guard.js'],
         ['Bash|PowerShell', 'readonly-agent-guard.js'],
-        ['Bash', 'memq-grant.js'],
-        ['*', 'memory-recognition-nudge.js']
-    ],
-    PostToolUse: [
-        ['Edit|MultiEdit|Write', 'format-on-edit.js'],
-        ['Read', 'memory-usage-stamp.js'],
-        ['*', 'memory-recognition-nudge.js']
+        ['Bash', 'memq-grant.js']
     ]
 };
 

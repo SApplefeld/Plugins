@@ -17,7 +17,7 @@ BEGIN
 		SCRIPT:		mem.udf_TriggerGlobMatchesPath
 		AUTHOR:		Scott Applefeld
 		DATE:		October 6th, 2026
-		VERSION:	v1.0
+		VERSION:	v1.1
 	*********************************************************************************************
 		NOTES:		v1.0 - 10/06/2026 - SCOTT APPLEFELD
 							Whether a glob trigger's pattern matches a path, the rule
@@ -46,6 +46,11 @@ BEGIN
 							character escaped, and a slash appended to both sides, a
 							character no segment holds, so a trailing space LIKE would
 							otherwise ignore still has to match.
+
+					v1.1 - 10/10/2026 - SCOTT APPLEFELD
+							The rule cited above now lives in
+							plugins/personas/hooks/recognition.ts, the persona module's port
+							of the retired recognition hook.
 	*********************************************************************************************
 	********************************************************************************************/
 

@@ -9,12 +9,17 @@
 // tool result judged this session, by tool_use_id: the verdict the pass
 // applies, the option Jev answered, and whether the stamp fell on the
 // journal's holdout split, where the applied verdict is keep.
+// recognitionNudgeMarker is the memory-recognition nudge's dedup marker:
+// the keys of the records it pointed at this session, tool and prompt keys
+// in `fired` and a started subagent's in `firedDispatch`, and the start and
+// spend of the tool window and the prompt window its caps count in.
 declare module "claude-code" {
   interface PluginState {
     "personas": {
       memqLaunchDir: string;
       launchInstructions: string;
       compactionVerdicts: Record<string, { verdict: "keep" | "cut" | "drop"; answered: string; holdout: boolean }>;
+      recognitionNudgeMarker: { fired: Record<string, 1>; firedDispatch: Record<string, 1>; windowStart: number; windowCount: number; promptStart: number; promptCount: number };
     };
   }
 }
