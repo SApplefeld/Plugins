@@ -15,15 +15,18 @@
 #
 # By default the child is also directly reachable from Discord (plan item
 # 5: the native channel, no proxy session): --channels loads the relay
-# plugin (D:\discord-channels), CHANNEL_SESSION names the thread (stable
-# across restarts so the whole supervisor lifetime is one conversation),
-# and a fresh CHANNEL_PROCESS_TOKEN is minted per child. Pass --no-channel
-# to skip this (a scratch/proof run with no Discord side effects).
+# plugin installed as relay@$AGENTIC_MARKETPLACE, and the launch refuses
+# where installed_plugins.json lists no such entry. CHANNEL_SESSION names
+# the thread (stable across restarts so the whole supervisor lifetime is
+# one conversation), and a fresh CHANNEL_PROCESS_TOKEN is minted per
+# child. Pass --no-channel to skip this (a scratch/proof run with no
+# Discord side effects).
 #
 # Exit codes:
 #   0 = shutdown_requested honored
-#   1 = usage, a setting refused at startup, or a store migration that did
-#       not complete before the gate
+#   1 = usage, a setting refused at startup, a store migration that did
+#       not complete before the gate, or a relay not installed under the
+#       public marketplace
 #   2 = no commons store for the load mode, or pre-launch gate timeout
 #   3 = crash loop
 #   4 = restart budget exhausted
@@ -4634,6 +4637,21 @@ while true; do
       fi
     fi
 
+    # The launch refuses, and does not warn, where installed_plugins.json
+    # lists no relay for this marketplace: a persona with no thread works
+    # invisibly, and one that fails to launch is noticed. It runs in dev mode
+    # too, since the relay loads as an installed plugin there, and is skipped
+    # under --no-channel, where no channel is requested. The script runs under
+    # pipefail (set above), so the if reads relay_installed_check's status
+    # through the tee and not tee's. An absent or unreadable
+    # installed_plugins.json skips the check.
+    if [ "$NO_CHANNEL" -ne 1 ]; then
+      if ! relay_installed_check "$AGENTIC_MARKETPLACE" 2>&1 | tee -a "$LOG"; then
+        echo "ERROR: the relay channel is not installed for this marketplace; fix: claude plugin install relay@$AGENTIC_MARKETPLACE, and see the relay-check line in $LOG for any other relay to uninstall" | tee -a "$LOG" >&2
+        exit 1
+      fi
+    fi
+
     # --- D3: Pre-launch gate (AD2: check both commons AND heartbeat) ---
     GLOBAL_STORE=$(find_global_store "$DEV_MODE")
     if [ -z "$GLOBAL_STORE" ]; then
@@ -4714,14 +4732,15 @@ while true; do
 
     # Plan item 5: attach the Discord channel directly to this child (no proxy
     # session, no polling) unless --no-channel was given. --channels loads the
-    # relay's installed-plugin entry. CHANNEL_SESSION is the stable thread key;
-    # CHANNEL_PROCESS_TOKEN is minted fresh for this one child. CHANNEL_LINEAGE
-    # carries the same stable $CHANNEL_NAME across every child this supervisor
-    # launches, restarts included, so the registry rebinds to the one thread.
+    # relay's installed-plugin entry under the public marketplace.
+    # CHANNEL_SESSION is the stable thread key; CHANNEL_PROCESS_TOKEN is minted
+    # fresh for this one child. CHANNEL_LINEAGE carries the same stable
+    # $CHANNEL_NAME across every child this supervisor launches, restarts
+    # included, so the registry rebinds to the one thread.
     CHANNEL_ARGS=()
     CHANNEL_ENV=(CHANNEL_LINEAGE="$CHANNEL_NAME")
     if [ "$NO_CHANNEL" -ne 1 ]; then
-      CHANNEL_ARGS=(--name "$CHANNEL_NAME" --channels "plugin:relay@sapplefeld-channels")
+      CHANNEL_ARGS=(--name "$CHANNEL_NAME" --channels "plugin:relay@$AGENTIC_MARKETPLACE")
       CHILD_PROCESS_TOKEN=$(node -e "console.log(require('crypto').randomUUID())")
       CHANNEL_ENV+=(CHANNEL_SESSION="$CHANNEL_NAME" CHANNEL_PROCESS_TOKEN="$CHILD_PROCESS_TOKEN" CHANNEL_SESSION_MIRROR=off)
     fi

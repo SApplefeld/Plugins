@@ -35,7 +35,10 @@
 # --- Plugin ids ---
 # The two ids pluginConfigs is keyed by: --plugin-dir load, and installed load.
 AGENTIC_PLUGIN_DEV_ID="personas"
-AGENTIC_PLUGIN_INSTALLED_ID="personas@applefeld"
+# The public marketplace every host installs from. The installed id below and
+# the relay id supervise.sh passes to --channels both derive from it.
+AGENTIC_MARKETPLACE="applefeld"
+AGENTIC_PLUGIN_INSTALLED_ID="personas@$AGENTIC_MARKETPLACE"
 # The installed id before the plugin moved into the applefeld marketplace.
 # ensure_settings_plugin_ids carries options written under it to the current
 # id, and migrate_global_store copies the store file written under it forward.
@@ -1335,6 +1338,23 @@ console.log(records === 0 && claims === 0 ? "EMPTY" : "HELD " + records + " inbo
   return 1
 }
 
+# The JavaScript prologue installed_id_cutover_done and relay_installed_check
+# share: it reads the file named by argv[1], strips a BOM, parses it, requires a
+# plugins object, and defines listed(id), true for an id with at least one
+# install record. It prints "NO <reason>" and exits 0 where the file cannot be
+# read, is not JSON, or has no plugins object. The rest of argv is args.
+_AGENTIC_INSTALLED_PLUGINS_JS='const fs = require("fs");
+const file = process.argv[1];
+const args = process.argv.slice(2);
+const no = (why) => { console.log("NO " + why); process.exit(0); };
+let text;
+try { text = fs.readFileSync(file, "utf8"); } catch (e) { no(e && e.code === "ENOENT" ? "installed_plugins.json is absent" : "installed_plugins.json could not be read: " + String(e && e.message).slice(0, 150)); }
+let s;
+try { s = JSON.parse(text.replace(/^\uFEFF/, "")); } catch (e) { no("installed_plugins.json is not JSON"); }
+const plugins = s !== null && typeof s === "object" && !Array.isArray(s) ? s.plugins : undefined;
+if (plugins === null || typeof plugins !== "object" || Array.isArray(plugins)) no("installed_plugins.json has no plugins object");
+const listed = (id) => Object.prototype.hasOwnProperty.call(plugins, id) && Array.isArray(plugins[id]) && plugins[id].length > 0;'
+
 # --- installed_id_cutover_done ---
 # Usage: installed_id_cutover_done
 # Reads $HOME/.claude/plugins/installed_plugins.json, the engine's record of
@@ -1354,17 +1374,8 @@ console.log(records === 0 && claims === 0 ? "EMPTY" : "HELD " + records + " inbo
 installed_id_cutover_done() {
   local file="$HOME/.claude/plugins/installed_plugins.json" file_w line
   file_w=$(cygpath -m "$file" 2>/dev/null || echo "$file")
-  line=$(node -e '
-const fs = require("fs");
-const [file, currentId, formerId] = process.argv.slice(1);
-const no = (why) => { console.log("NO " + why); process.exit(0); };
-let text;
-try { text = fs.readFileSync(file, "utf8"); } catch (e) { no(e && e.code === "ENOENT" ? "installed_plugins.json is absent" : "installed_plugins.json could not be read: " + String(e && e.message).slice(0, 150)); }
-let s;
-try { s = JSON.parse(text.replace(/^\uFEFF/, "")); } catch (e) { no("installed_plugins.json is not JSON"); }
-const plugins = s !== null && typeof s === "object" && !Array.isArray(s) ? s.plugins : undefined;
-if (plugins === null || typeof plugins !== "object" || Array.isArray(plugins)) no("installed_plugins.json has no plugins object");
-const listed = (id) => Object.prototype.hasOwnProperty.call(plugins, id) && Array.isArray(plugins[id]) && plugins[id].length > 0;
+  line=$(node -e "$_AGENTIC_INSTALLED_PLUGINS_JS"'
+const [currentId, formerId] = args;
 if (!listed(currentId)) no("installed_plugins.json does not list " + currentId);
 if (listed(formerId)) no("installed_plugins.json still lists " + formerId + ", which loads ahead of " + currentId + " until it is uninstalled");
 console.log("YES installed_plugins.json lists " + currentId + " and no longer lists " + formerId);
@@ -1381,6 +1392,52 @@ console.log("YES installed_plugins.json lists " + currentId + " and no longer li
     *)
       echo "store-migration: skipped, installed_plugins.json could not be checked ($line)"
       return 1
+      ;;
+  esac
+}
+
+# --- relay_installed_check ---
+# Usage: relay_installed_check <marketplace>
+# Reads $HOME/.claude/plugins/installed_plugins.json through the same reader as
+# installed_id_cutover_done and prints one relay-check line saying whether the
+# file lists relay@<marketplace> with at least one install record. Returns 0
+# where it does. The relay channel a persona is launched with names its plugin
+# by that id, so a host that lists no such id gives the persona no thread and
+# raises no error; bin/supervise.sh refuses the launch on a return of 1. The
+# line then names the fix, claude plugin install relay@<marketplace>, and each
+# other key the file holds that starts with relay@, taken from the file at run
+# time, with the uninstall for it. An absent file, one that cannot be read or
+# parsed, or one with no plugins object returns 0 with the reason on the line,
+# the side on which the launch goes on, so a host with no such file is
+# untouched.
+relay_installed_check() {
+  local marketplace="$1" file="$HOME/.claude/plugins/installed_plugins.json" file_w line
+  file_w=$(cygpath -m "$file" 2>/dev/null || echo "$file")
+  line=$(node -e "$_AGENTIC_INSTALLED_PLUGINS_JS"'
+const [marketplace] = args;
+const want = "relay@" + marketplace;
+if (listed(want)) { console.log("YES " + want); process.exit(0); }
+const others = Object.keys(plugins).filter((id) => id.startsWith("relay@") && id !== want && listed(id));
+let why = "installed_plugins.json lists no " + want + ", so a persona launched on this host gets no relay thread; fix: claude plugin install " + want;
+if (others.length > 0) why += "; it lists " + others.join(", ") + " instead, so uninstall each with " + others.map((id) => "claude plugin uninstall " + id).join(" and ");
+console.log("MISSING " + why);
+' "$file_w" "$marketplace")
+  case "$line" in
+    YES\ *)
+      echo "relay-check: installed_plugins.json lists ${line#YES }"
+      return 0
+      ;;
+    MISSING\ *)
+      echo "relay-check: ${line#MISSING }"
+      return 1
+      ;;
+    NO\ *)
+      echo "relay-check: skipped, ${line#NO }"
+      return 0
+      ;;
+    *)
+      echo "relay-check: skipped, installed_plugins.json could not be checked ($line)"
+      return 0
       ;;
   esac
 }

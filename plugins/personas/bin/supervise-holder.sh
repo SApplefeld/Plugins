@@ -26,9 +26,9 @@
 # launches it from the workdir it launches the child from.
 #
 # The priming and goal text this process writes is sized by
-# .kit/injection-ledger.mjs, which reads the *_INSTRUCTION assignments, the
+# test-personas/injection-ledger.mjs, which reads the *_INSTRUCTION assignments, the
 # three PRIMING_BODY branches, GOAL_PROMPT_FRAMING and the [SUPERVISOR-PRIMING]
-# marker from this file. .kit/channel-reply-instruction-test.sh reads the same
+# marker from this file. test-personas/channel-reply-instruction-test.sh reads the same
 # text from this file.
 #
 # Usage: supervise-holder.sh <holder-pid-file> <child-stdout> <child-pid-file>
@@ -559,11 +559,11 @@ holder_ask_file_whole() {  # <file> <first line as read>
   # every child but the architect's and the liaison's regardless of
   # `NO_CHANNEL`, reaches this one too.
   if [ -n "$PROMPT_FILE" ] && [ -f "$PROMPT_FILE" ]; then
-    PRIMING_BODY="Your task from the operator arrives in the next message. Reply now with one short line acknowledging you are ready, then act on it when it arrives."
+    PRIMING_BODY="Your task from the operator arrives in the next message. When the task needs a plugin change live and your role does not keep you out of repositories, you may publish a build and restart onto it under the role skill's self-publish grant, as the passage 'Publish a build and restart onto it' in plugins/personas/README.md of the kit's source repository states. Reply now with one short line acknowledging you are ready, then act on it when it arrives."
   elif [ "$NO_CHANNEL" -ne 1 ]; then
-    PRIMING_BODY="You are the passive supervisor. If a goal tree holds open entries, resume the tree from goal_status whether or not an entry is active, and leave a paused entry for the operator or the coordinator to release; otherwise wait for a goal or a steering message from the operator. Reply now with one short line acknowledging you are ready, then carry on."
+    PRIMING_BODY="You are the passive supervisor. If a goal tree holds open entries, resume the tree from goal_status whether or not an entry is active, and leave a paused entry for the operator or the coordinator to release; otherwise wait for a goal or a steering message from the operator. When a goal or the operator needs a plugin change live and your role does not keep you out of repositories, you may publish a build and restart onto it under the role skill's self-publish grant, as the passage 'Publish a build and restart onto it' in plugins/personas/README.md of the kit's source repository states. Reply now with one short line acknowledging you are ready, then carry on."
   else
-    PRIMING_BODY="You are the passive supervisor. If a goal tree holds open entries, resume the tree from goal_status whether or not an entry is active, and leave a paused entry for the operator or the coordinator to release; otherwise wait for a goal. No channel is attached, so no steering message arrives here. Reply now with one short line acknowledging you are ready, then resume or wait."
+    PRIMING_BODY="You are the passive supervisor. If a goal tree holds open entries, resume the tree from goal_status whether or not an entry is active, and leave a paused entry for the operator or the coordinator to release; otherwise wait for a goal. No channel is attached, so no steering message arrives here. When a goal needs a plugin change live and your role does not keep you out of repositories, you may publish a build and restart onto it under the role skill's self-publish grant, as the passage 'Publish a build and restart onto it' in plugins/personas/README.md of the kit's source repository states. Reply now with one short line acknowledging you are ready, then resume or wait."
   fi
   # Write the priming turn to stdout, which is the pipe to the child. The
   # [SUPERVISOR-PRIMING] marker is read by hooks/index.ts's turn.complete

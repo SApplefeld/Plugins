@@ -8056,7 +8056,8 @@ export const register: Register = async (on, options) => {
     // any throw, not only an Error, and rethrows nothing.
     // Each call site keeps its own register call with the object literal
     // inline and hands it in as a thunk, because
-    // .kit/tool-description-length-test.mjs and .kit/injection-ledger.mjs
+    // test-personas/tool-description-length-test.mjs and
+    // test-personas/injection-ledger.mjs
     // read every registration out of this file by that literal call shape,
     // and the name is passed beside it for the refusal to carry.
     const refusedRegistrations: { name: string; text: string }[] = [];
