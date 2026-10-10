@@ -14,7 +14,9 @@
 # this script.
 #
 # What stays manual, because it lives in Discord's web console: creating the application and bot,
-# enabling Message Content Intent, inviting the bot, and creating the private channel. Step 1 of
+# enabling Message Content Intent, inviting the bot, and creating the private channel. A host that
+# turns the voice on also invites the bot with the Connect and Speak permissions; the broker requests
+# the GuildVoiceStates intent itself, which is not privileged and has no switch to enable. Step 1 of
 # docs/install.md covers those, and this script's parameters are their outputs.
 # Not marked Mandatory, because a test dot-sources this file to reach the functions and a Mandatory
 # script parameter would hang the probe on a prompt; the runner below validates them instead, and
@@ -506,7 +508,9 @@ if ($MyInvocation.InvocationName -ne '.') {
     Write-Host ""
     Write-Host "If the thread never appears, the Discord side is the usual cause; re-check step 1"
     Write-Host "of docs/install.md: Message Content Intent enabled on the bot, the bot invited with"
-    Write-Host "thread permissions, and the channel private to you and the bot. If this host sets"
+    Write-Host "thread permissions, and the channel private to you and the bot. With CHANNEL_VOICE on,"
+    Write-Host "the bot also needs the Connect and Speak permissions, and the broker requests the"
+    Write-Host "GuildVoiceStates intent, which is not privileged and has no switch. If this host sets"
     Write-Host "CHANNEL_LAUNCH_FLAG to the development flag, run docs/install.md's per-host checklist"
     Write-Host "before clearing it."
 }

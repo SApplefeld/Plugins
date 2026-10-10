@@ -7,8 +7,8 @@
 // verdict approves a tool call in a running session.
 //
 // Behind the gate, the paths that consume a message as the operator's act key on the sender's
-// class and never on the author's name: a verdict, a held question's typed answer, and the inbox
-// clears run only for an operator. A participant's message, whatever its shape, is delivered as
+// class and never on the author's name: a verdict and a held question's typed answer
+// run only for an operator. A participant's message, whatever its shape, is delivered as
 // the text it is.
 //
 // The response gate, where a host turns it on, is the last thing before the pipe: a message that
@@ -157,22 +157,56 @@ function bounded(text: string): { text: string; truncated: boolean } {
   };
 }
 
+/** The two thread commands that put the bot in a voice channel and take it out. */
+export type VoiceCommand = "on" | "off";
+
 /**
- * The operator inbox's clearing seam. What reaches it is only what an operator wrote: everything
- * here sits behind the sender gate, and the router calls it for an operator's message alone.
+ * The voice command a message is, or null. Whole-line and case-insensitive over the visible text, so
+ * `Voice On` is the command and `voice on please` is words for the session.
  */
-export type InboundInbox = {
-  /**
-   * An operator's message reached a live or stale session at `at`. A message landing mid-turn may
-   * fire no prompt hook, so the delivery is itself the operator answering that session.
-   */
-  clear: (sessionId: string, at: number) => void;
-  /**
-   * An operator wrote in an ended session's thread at `at`. Nothing is delivered, and the post is
-   * still the operator having seen that session's last word.
-   */
-  clearEnded: (sessionId: string, at: number) => void;
+export function voiceCommand(text: string): VoiceCommand | null {
+  const line = text.toLowerCase();
+  if (/^voice[ \t]+on$/.test(line)) return "on";
+  if (/^voice[ \t]+off$/.test(line)) return "off";
+  return null;
+}
+
+/**
+ * The voice module's command seam, present only while `CHANNEL_VOICE` is on. What reaches it is an
+ * operator's command in the thread of a live session, and what it answers is the one notice the
+ * thread is told, or null for none.
+ */
+export type InboundVoice = {
+  command: (input: {
+    threadId: string;
+    sessionId: string;
+    senderId: string;
+    command: VoiceCommand;
+  }) => Promise<string | null>;
 };
+
+/**
+ * What a voice command is answered with while the voice is on but its module is not running: in
+ * the moment between the gateway's login and the module's start, and once the broker is stopping.
+ * Here rather than beside the module's own notices, so the broker reaches it without loading the
+ * voice library.
+ */
+export const VOICE_NOT_READY_NOTICE =
+  "The voice is not ready yet, so nothing was joined or left. Try again in a moment.";
+
+/**
+ * The command seam for a voice module that exists only part of the broker's life: each command
+ * goes to the module `current` returns, and with none running is answered with the not-ready
+ * notice rather than dropped in silence.
+ */
+export function voiceWhenReady(current: () => InboundVoice | null): InboundVoice {
+  return {
+    command: async (input) => {
+      const voice = current();
+      return voice === null ? VOICE_NOT_READY_NOTICE : voice.command(input);
+    },
+  };
+}
 
 /**
  * The response gate as the broker configures it. The router builds the gate from these rather than
@@ -222,12 +256,6 @@ export type InboundRouterOptions = {
   /** Writes a notice back into the thread a message could not be delivered from. */
   writer: ThreadWriter;
   /**
-   * The operator inbox, present only while it is on. A message consumed as a permission verdict or
-   * a held question's answer never reaches it: each answers a prompt the session is parked on, not
-   * whatever the session last asked in its reply.
-   */
-  inbox?: InboundInbox;
-  /**
    * The response gate's mode, caps and judge. Absent, or in any mode but `live`, every admitted
    * message is delivered at once, which is the path a host with one account takes; in
    * `shadow` the gate runs beside that delivery and journals what it would have done.
@@ -250,6 +278,11 @@ export type InboundRouterOptions = {
    * a path restored from the buffers file may point.
    */
   attachments?: AttachmentIntake;
+  /**
+   * The voice module, present only while it is on. Absent, `voice on` and `voice off` are text like
+   * any other and reach the session.
+   */
+  voice?: InboundVoice;
 };
 
 export type InboundRouter = {
@@ -258,7 +291,7 @@ export type InboundRouter = {
   /**
    * Drops the held buffer, and its timer, of every thread whose session has ended or left the
    * registry, delivering nothing. Called with the full record set on every registry mutation, the
-   * seam the inbox reconciles on, because a session ends on several paths and that is the one
+   * seam a session's end reaches, because a session ends on several paths and that is the one
    * that sees them all. A no-op with the gate off. Never throws.
    */
   reconcile: (sessions: readonly SessionRecord[]) => void;
@@ -283,6 +316,12 @@ export type InboundRouter = {
    * window a relay has to come back. A no-op with the gate off or in shadow. Never throws.
    */
   armRestored: () => void;
+  /**
+   * The session's reply reached its thread. Hands the reply to the gate, which sends the judge
+   * its end beside the held lines. A no-op with the gate off or the session holding no thread.
+   * Never throws.
+   */
+  noteReply: (sessionId: string, text: string) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -622,20 +661,6 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
   }
 
   /**
-   * Hands one clear to the inbox. A throw behind it is caught here, since the message it rides on
-   * has already been routed and must not read as failed; the line names the session and never the
-   * error, whose owner reports its own.
-   */
-  function toInbox(clear: (inbox: InboundInbox) => void, sessionId: string): void {
-    if (options.inbox === undefined) return;
-    try {
-      clear(options.inbox);
-    } catch {
-      log(`routing: the inbox could not take a message to session ${sessionId}`);
-    }
-  }
-
-  /**
    * Posts a notice through the writer's per-thread floor and says what became of it: written,
    * floored, or failed, the last logged here. Most callers post and move on; a caller whose notice
    * is the only in-thread record of a loss reads the outcome to log a floored one.
@@ -821,8 +846,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
 
   /**
    * Delivers the buffers the gate released, on a message's own act or on the timer, and announces
-   * each cut they carried. The inbox is not cleared here: an operator's message cleared it when
-   * the buffer took it, since the operator had answered the session either way.
+   * each cut they carried.
    *
    * Every event is written first, back to back with nothing awaited between, and only then is
    * anything posted or logged. The gateway does not await a delivery, so a message posted during
@@ -1065,7 +1089,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
 
   /**
    * Hands one admitted message to the session, or to its thread's buffer where the gate is live,
-   * and returns what follows the write: the receipts, the inbox clear, the cut announcement and
+   * and returns what follows the write: the receipts, the cut announcement and
    * the refusal notice. Everything up to the pipe write runs before this returns, with nothing
    * awaited, which is what lets the caller close the thread's turn on the write.
    */
@@ -1073,7 +1097,6 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     record: SessionRecord,
     message: InboundMessage,
     buffered: BufferedMessage,
-    operator: boolean,
     addressed: { mentionsBot: boolean; repliesToBot: boolean },
     refusals: readonly NoticeRefusal[],
   ): Promise<void> {
@@ -1094,9 +1117,6 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       return (async () => {
         if (await written) {
           options.receipts?.delivered(message.threadId, message.messageId, deliveredAt);
-          if (operator) {
-            toInbox((inbox) => inbox.clear(record.sessionId, deliveredAt), record.sessionId);
-          }
           // Announced only here, after the truncated text reached a live session.
           if (buffered.truncated) await announceCut(message.threadId);
         }
@@ -1106,14 +1126,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
 
     // The gate is live, so the message joins its thread's buffer rather than going down at once.
     //
-    // An operator's message clears the inbox item now, whether or not the buffer delivers on it:
-    // the item is the session waiting on an operator, and the operator has answered by writing
-    // in the thread, however long the gate holds the words. A rate-dropped message never reaches
-    // here, so it joins no buffer and counts toward no cap.
-    if (operator) {
-      const admittedAt = now();
-      toInbox((inbox) => inbox.clear(record.sessionId, admittedAt), record.sessionId);
-    }
+    // A rate-dropped message never reaches here, so it joins no buffer and counts toward no cap.
     const deliveries = gate.admit(message.threadId, record.sessionId, buffered, addressed);
     // Held, when there are none. Nothing is announced then, a cut included: the announcement
     // belongs to a delivery, and this one has not happened yet. A refused file is announced
@@ -1150,9 +1163,9 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         log(`routing: refused a message from ${message.senderId}, who is not the allowed sender`);
         return;
       }
-      // Whether this message can be the operator's act: a verdict, a held question's answer, or the
-      // inbox clear. A participant talks to the session and answers nothing on the operator's
-      // behalf, so every one of those paths is skipped for them and their message flows on as text.
+      // Whether this message can be the operator's act: a verdict or a held question's answer. A
+      // participant talks to the session and answers nothing on the operator's behalf, so every
+      // one of those paths is skipped for them and their message flows on as text.
       const operator = senderClass === "operator";
 
       const { text, truncated } = bounded(message.text);
@@ -1197,6 +1210,40 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       }
 
       const record = sessionForThread(options.registry.list(), options.threadFor, message.threadId);
+
+      // `voice on` and `voice off` from an operator in a session's thread are the voice module's
+      // commands, consumed as a verdict is: the operator wrote them to the broker, not to the
+      // session. The guards are the verdict's and the typed answer's: never a participant's line,
+      // which is words for the session like any other; never a truncated message, which the
+      // operator did not send as written; never a message with no typed text. `voice on` needs a
+      // live session, since the voice is bound to it, and in a thread whose session has ended it
+      // takes the text path below. `voice off` is the command whatever the session's state: a voice
+      // joined from this thread outlives its session, and until the idle window closes it meters the
+      // channel, so the operator must be able to end it from the thread that started it. Ahead of
+      // the typed answer, so a held question is never answered with a command meant for the broker.
+      const voice = options.voice;
+      const command = voice === undefined || !operator || truncated ? null : voiceCommand(text);
+      if (
+        voice !== undefined &&
+        command !== null &&
+        record !== null &&
+        (command === "off" || record.state !== "ended")
+      ) {
+        let reply: string | null = null;
+        try {
+          reply = await voice.command({
+            threadId: message.threadId,
+            sessionId: record.sessionId,
+            senderId: message.senderId,
+            command,
+          });
+        } catch (error) {
+          log(`routing: the voice command in thread ${message.threadId} failed: ${String(error)}`);
+        }
+        if (reply !== null) await notice(message.threadId, reply);
+        await refuseConsumed(message.threadId, files);
+        return;
+      }
 
       // A message typed while this session's question is held is that question's answer, in the
       // operator's own words, for the whole ask. It is consumed here and not also delivered, for
@@ -1251,12 +1298,6 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       if (record === null) return;
 
       if (record.state === "ended") {
-        const endedAt = now();
-        // The inbox item is the session waiting on an operator, so only an operator's post clears
-        // it, here and on the delivered path below.
-        if (operator) {
-          toInbox((inbox) => inbox.clearEnded(record.sessionId, endedAt), record.sessionId);
-        }
         log(
           `routing: a message reached the ended session ${record.sessionId}, rejecting it in-thread`,
         );
@@ -1299,7 +1340,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         if (buffered.text === "" && (buffered.attachments?.length ?? 0) === 0) {
           return { after: announceRefusals(message.threadId, refusals) };
         }
-        return { after: deliverTaken(record, message, buffered, operator, addressed, refusals) };
+        return { after: deliverTaken(record, message, buffered, addressed, refusals) };
       });
       await after;
     },
@@ -1341,6 +1382,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     armRestored() {
       if (gate === null || buffersFile === null || settings?.buffers === undefined) return;
       gate.armRestored(settings.buffers.graceMs);
+    },
+
+    noteReply(sessionId, text) {
+      if (gate === null) return;
+      const threadId = options.threadFor(sessionId);
+      if (threadId !== null) gate.noteReply(threadId, sessionId, text);
     },
   };
 }

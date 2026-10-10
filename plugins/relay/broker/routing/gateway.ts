@@ -12,7 +12,8 @@
 // (inbound.ts). The one decision made here is the delete, because it belongs to a message that
 // reaches no session at all: it is a system message this bot wrote, and the facts it turns on are
 // the library's own.
-import { Client, Events, GatewayIntentBits, MessageType } from "discord.js";
+import { ChannelType, Client, Events, GatewayIntentBits, MessageType } from "discord.js";
+import type { InternalDiscordGatewayAdapterCreator } from "discord.js";
 import { describe } from "../discord/rest.ts";
 import { boundedAuthor } from "../sanitize.ts";
 import type { CallOutcome } from "../discord/transport.ts";
@@ -31,7 +32,67 @@ export type MessageSource = {
    * life.
    */
   guildId: () => string | null;
+  /** What the voice module reads off this connection, or null while `CHANNEL_VOICE` is off. */
+  voice: VoiceGateway | null;
 };
+
+/** One account's voice-channel move in the configured channel's guild, by channel id. */
+export type VoiceStateChange = { userId: string; before: string | null; after: string | null };
+
+/**
+ * The voice module's view of the gateway connection, read from the voice-state cache the
+ * `GuildVoiceStates` intent fills. Every lookup is in the configured channel's guild, so two brokers
+ * sharing a client library never see each other's guilds. Typed with no voice library in it, so the
+ * gateway loads none.
+ */
+export type VoiceGateway = {
+  /** The configured channel's guild, or null until the channel cache holds it. */
+  guildId: () => string | null;
+  /** The guild's voice adapter, through which a voice connection signals over this gateway. */
+  adapterCreator: () => InternalDiscordGatewayAdapterCreator | null;
+  /** The voice channel the account sits in, or null for none or for a stage channel. */
+  channelOf: (userId: string) => string | null;
+  /** This bot's own account, or null while the connection has not identified yet. */
+  selfId: () => string | null;
+  /** Every account sitting in the voice channel. */
+  membersOf: (channelId: string) => readonly string[];
+  /**
+   * The name an account in the guild's voice-state cache is attributed to, by `authorName`, or
+   * null for an account the cache does not hold.
+   */
+  nameOf: (userId: string) => string | null;
+  /** Calls `listener` on every voice-state change in the guild, until the returned function runs. */
+  onVoiceState: (listener: (change: VoiceStateChange) => void) => () => void;
+};
+
+/**
+ * The voice channel an account's voice state places it in, offered only where that channel is an
+ * ordinary voice channel. A stage channel answers null, so `voice on` from a stage gets the
+ * no-channel notice: the bot would join a stage as an audience member and could not speak.
+ */
+export function voiceChannelOf(
+  state: { channelId: string | null; channel: { type: ChannelType } | null } | undefined,
+): string | null {
+  if (state === undefined || state.channelId === null) return null;
+  return state.channel?.type === ChannelType.GuildVoice ? state.channelId : null;
+}
+
+/**
+ * The gateway intents this broker requests. Guilds gives the client its channel cache, which is what
+ * makes a thread's parent readable without a REST call per message. MessageContent is privileged and
+ * must be enabled on the application, or every message arrives with an empty body and the channel
+ * looks silently dead. GuildVoiceStates is requested only with the voice on: it fills the
+ * voice-state cache that says which channel an operator sits in.
+ */
+export function gatewayIntents(voice: boolean): GatewayIntentBits[] {
+  const intents = [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ];
+  if (voice) intents.push(GatewayIntentBits.GuildVoiceStates);
+  return intents;
+}
 
 /**
  * How long a refused delete waits before the same line may be written again.
@@ -293,21 +354,14 @@ export type GatewayOptions = {
    * channel fills with notices about pins that are no longer held.
    */
   deleteMessage: (input: { messageId: string }) => Promise<CallOutcome<null>>;
+  /** Whether `CHANNEL_VOICE` is on, which adds the voice intent and the voice surface. */
+  voice?: boolean;
   log?: (message: string) => void;
 };
 
 export function createGatewayMessageSource(options: GatewayOptions): MessageSource {
   const log = options.log ?? ((): void => {});
-  // Guilds gives the client its channel cache, which is what makes a thread's parent readable
-  // without a REST call per message. MessageContent is privileged and must be enabled on the
-  // application, or every message arrives with an empty body and the channel looks silently dead.
-  const client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
-    ],
-  });
+  const client = new Client({ intents: gatewayIntents(options.voice === true) });
 
   const cleanNotice = createSystemNoticeCleaner({
     deleteMessage: options.deleteMessage,
@@ -419,6 +473,64 @@ export function createGatewayMessageSource(options: GatewayOptions): MessageSour
     log(`gateway: ${describe(error)}`);
   });
 
+  // Looked up fresh on every call rather than latched once: `channels.cache` costs no REST call
+  // either way, and a value read once at `ClientReady` can stay null for the process's life, since
+  // that event fires once discord.js's own guild wait times out even while a guild is still
+  // unavailable. A channel not in the cache yet, or one that is not a guild channel (only a
+  // guild-scoped channel type carries `guildId`), answers null on the calls it misses and heals on
+  // the first call after the cache catches up.
+  const guildId = (): string | null => {
+    const channel = client.channels.cache.get(options.channelId);
+    const resolved = channel !== undefined && "guildId" in channel ? channel.guildId : null;
+    return typeof resolved === "string" ? resolved : null;
+  };
+
+  let voice: VoiceGateway | null = null;
+  if (options.voice === true) {
+    const guild = () => {
+      const id = guildId();
+      return id === null ? null : (client.guilds.cache.get(id) ?? null);
+    };
+    const listeners = new Set<(change: VoiceStateChange) => void>();
+    client.on(Events.VoiceStateUpdate, (before, after) => {
+      if (after.guild.id !== guildId()) return;
+      const change = { userId: after.id, before: before.channelId, after: after.channelId };
+      for (const listener of listeners) {
+        try {
+          listener(change);
+        } catch (error) {
+          log(`gateway: a voice-state listener failed: ${describe(error)}`);
+        }
+      }
+    });
+    voice = {
+      guildId,
+      adapterCreator: () => guild()?.voiceAdapterCreator ?? null,
+      channelOf: (userId) => voiceChannelOf(guild()?.voiceStates.cache.get(userId)),
+      selfId: () => client.user?.id ?? null,
+      membersOf: (channelId) =>
+        [...(guild()?.voiceStates.cache.values() ?? [])]
+          .filter((state) => state.channelId === channelId)
+          .map((state) => state.id),
+      nameOf: (userId) => {
+        const member = guild()?.voiceStates.cache.get(userId)?.member ?? null;
+        if (member === null) return null;
+        return authorName({
+          id: userId,
+          nickname: member.nickname,
+          globalName: member.user.globalName,
+          username: member.user.username,
+        });
+      },
+      onVoiceState: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+  }
+
   return {
     start: async () => {
       await client.login(options.token);
@@ -427,16 +539,7 @@ export function createGatewayMessageSource(options: GatewayOptions): MessageSour
     stop: async () => {
       await client.destroy();
     },
-    // Looked up fresh on every call rather than latched once: `channels.cache` costs no REST call
-    // either way, and a value read once at `ClientReady` can stay null for the process's life, since
-    // that event fires once discord.js's own guild wait times out even while a guild is still
-    // unavailable. A channel not in the cache yet, or one that is not a guild channel (only a
-    // guild-scoped channel type carries `guildId`), answers null on the calls it misses and heals on
-    // the first call after the cache catches up.
-    guildId: () => {
-      const channel = client.channels.cache.get(options.channelId);
-      const resolved = channel !== undefined && "guildId" in channel ? channel.guildId : null;
-      return typeof resolved === "string" ? resolved : null;
-    },
+    guildId,
+    voice,
   };
 }

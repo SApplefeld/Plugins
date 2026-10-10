@@ -21,6 +21,9 @@ takes down one machine rather than all of them.
 2. Under **Bot**, create the bot and copy the token. It is shown once.
 3. Under **Bot**, enable **Message Content Intent**. Without it the bot receives message events with
    empty content, which reads as a silent delivery failure rather than a permission error.
+   The voice, off unless `CHANNEL_VOICE=on`, also uses the **Guild Voice States** intent, which is
+   not privileged: there is nothing to enable here, and the broker requests it only while the voice
+   is on. It is how the broker sees which voice channel you are sitting in.
 4. Under **OAuth2 > URL Generator**, select the `bot` scope and these permissions: View Channels,
    Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message
    History, Add Reactions. Add Reactions carries the stage marks on each person's message: without
@@ -31,6 +34,9 @@ takes down one machine rather than all of them.
    pin list simply does not populate and one log line says so; nothing else changes. Note that
    Discord's older pin route reports a missing-permission error naming Manage Messages when Pin
    Messages is the one actually required, so that error points at the wrong grant.
+   **Connect** and **Speak** are needed only for the voice. Without Connect the join fails and the
+   thread is told so; without Speak the bot joins but is never heard. The text channel is unaffected
+   either way.
 5. Open the generated URL and invite the bot to your server.
 6. Create a text channel for the host and copy its ID (right-click the channel with Developer Mode
    on). Copy your own user ID the same way, and the ID of each other person who will write in the
@@ -42,7 +48,7 @@ approval prompt carries the tool's actual input: the shell command, the patch bo
 
 **The sender roster names who may write, and what each account may do.** Each account on it is an
 operator or a participant. An operator holds your authority over the host: it steers every session,
-approves tool calls, answers a session's questions and clears the inbox. A participant can talk to a
+approves tool calls and answers a session's questions. A participant can talk to a
 session in its thread, and the session takes its words as conversation and never as instructions;
 its verdicts, button presses and answers count for nothing. Your own ID goes in as an operator,
 through `-AllowedUserId`. Everyone else goes in `-Senders`, one comma-separated entry per account,
@@ -74,12 +80,13 @@ public marketplace updates through Claude Code's marketplace update instead.
 **The response gate is off until you turn it on.** With several people in one thread, a session
 would otherwise take a turn on every message. `CHANNEL_RESPONSE_GATE` holds a thread's messages and
 delivers them together when someone mentions or replies to the bot, when a cap is reached, or when
-TypeSafe's classifier, the one described under "The inbox judge's key file" below, judges that the
-conversation expects a response. At `shadow` it holds nothing: each message is delivered at once,
-and the broker journals what `live` would have done. While it is at `shadow` or `live`, a gated
-thread's buffered lines are sent to TypeSafe once the thread goes quiet, and it needs the key file
-under "The inbox judge's key file" below. `operations.md` describes running it in
-`shadow` for a week to choose its threshold before going `live`.
+TypeSafe's classifier, the one described under "The Jev key file" below, judges that the
+people have said enough to be worth answering. At `shadow` it holds nothing: each message is
+delivered at once, and the broker journals what `live` would have done. While it is at `shadow` or
+`live`, a gated thread's buffered lines, with the end of the session's last reply there, are sent
+to TypeSafe once the thread goes quiet, and it needs the key file under "The Jev key file" below.
+Its default threshold is a measured one, and `operations.md` describes running it in `shadow` for a
+week to measure a host's own.
 
 **Attachments reach a session from operators only, until you widen it.** A file attached to a
 message in a session's thread is saved on this host and the session is told where it is. A long
@@ -111,14 +118,6 @@ the channel either. An unmirrored session's thread also keeps its receipt reacti
 line and its harness error notices. The broker reads that session's transcript for those notices,
 and what it posts is fixed wording built from the error's numbers, never text from the transcript.
 
-**Neither switch keeps a session's reply-tool answers from the inbox judge.** The inbox judge is
-an optional classifier at TypeSafe, which the operator inbox uses once you name its key file under
-"The inbox judge's key file" below. While the inbox card is on and that key file is usable, a
-reply-tool answer that carries no `ASK:` line and does not match the judge's screen for secrets
-is sent to TypeSafe, whether or not the session is mirrored. To stop that, turn the card off or
-unset `CHANNEL_INBOX_JUDGE_KEY_FILE` in `broker.env`. Either one takes a broker restart, which
-`operations.md` describes under "Turning the judge off".
-
 The per-session switch needs the hooks installed from this version of the repository: it works by a
 header the mirror hooks carry, so a host installed before the switch existed has no such header. The
 wrapper refuses to launch with `-NoMirror` against settings that lack it rather than mirroring the
@@ -134,10 +133,13 @@ worker persona the fleet roster names, with that persona's name, its queued plan
 reason a worker wrote on a blocked entry. With
 `CHANNEL_BOARD_PROJECTS` set it sweeps plan documents under the project roots you name, and uses
 the last path segment of each root as the project name. So a root at or just under your home
-directory would put your account name there too. The inbox card (`CHANNEL_INBOX_CARD`) lists the
-sessions waiting on you, and with a judge key file named (the optional step under "Provision the
-host") it sends each unmarked session reply to TypeSafe's classifier. That classifier is the one host
-other than Discord this broker reaches, and the response gate described above uses it too. All three cards are configured in `broker.env` and
+directory would put your account name there too. The decisions card (`CHANNEL_DECISIONS_CARD`,
+which needs `CHANNEL_BOARD_ROSTER`) lists every open ask the roster's personas hold, and posts each
+ask's question, up to 1,000 code points and as its worker wrote it, to the card's thread. TypeSafe's classifier, reached
+under the optional step "The Jev key file" below, is the one host other than Discord this broker
+reaches unless the voice is on, and the response gate described above sends it a gated thread's
+lines. The voice, when on, ranks its spoken turns with the same key and also reaches Deepgram,
+Anthropic and the speech service, as "The voice's key files and commands" below describes. All three cards are configured in `broker.env` and
 documented in `operations.md`; a value tuned by hand there survives a re-install.
 
 Create Public Threads and Manage Threads are the two that fail quietly if missed: the broker posts a
@@ -366,40 +368,80 @@ took over are recorded. Read these conditions in order:
 `operations.md` names that window, and the order for switching back, under
 "Switching the hook owner".
 
-### The inbox judge's key file (optional)
+### The Jev key file (optional)
 
-The operator inbox (`CHANNEL_INBOX_CARD`) can send each unmarked session reply to TypeSafe's Jev
-classifier, which scores whether the reply needs something from you. That call needs a TypeSafe API
-key, and the key is read from a file rather than from `broker.env`, because a scheduled task's
-environment is readable by anything that can read the task definition. This step is optional.
-Without it the inbox still runs and holds every reply a session marks with an `ASK:` line, and
-nothing leaves the machine on this path. With it the judge also catches asks a session did not
-mark, at the cost that an unmarked reply which does not match the judge's screen for secrets has
-its text sent to TypeSafe, which `security-model.md` states in full.
+The response gate and the voice each ask TypeSafe's Jev classifier a question. The gate asks whether
+the people in a thread have said enough to be worth answering, and the voice ranks each spoken
+turn. Those calls need a TypeSafe API key, and the key is read from a file rather than from
+`broker.env`, because a scheduled task's environment is readable by anything that can read the task
+definition. This step is optional while the gate is `off` and the voice is off, and without the
+file nothing leaves the machine on this path.
 
 Create the file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside
 `discord-token.txt`, from the same plain non-elevated session step 2 requires. It holds one line,
 the key alone. Step 2 hardens the state root with the access control list the token file carries,
 granting only the owner, Administrators and SYSTEM, and a file created under that directory inherits
-the list, so a file placed there needs no hardening of its own. Then add two keys to `broker.env`:
+the list, so a file placed there needs no hardening of its own. Then name it in `broker.env`:
 
 ```
-CHANNEL_INBOX_CARD=on
-CHANNEL_INBOX_JUDGE_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\inbox-judge-key.txt
+CHANNEL_JEV_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\jev-key.txt
 ```
+
+A `broker.env` that still names the file under its older key, `CHANNEL_INBOX_JUDGE_KEY_FILE`, keeps
+working: the broker reads the same file and logs one warning at start naming `CHANNEL_JEV_KEY_FILE`.
+Rename the key when you next edit the file.
 
 The broker checks the key file at start exactly as it checks the token file: the file and its
 directory must be owned by the broker's account or an administrative identity, must grant nobody
 beyond those three trustees, and must not be a symbolic link or junction. Where that check failing
-on the token file stops the broker, failing on this file turns the judge off, with one warning in
-the start log naming the file and the cause, and the inbox runs on `ASK:` lines alone. With
+on the token file stops the broker, failing on this file is warned once in the start log, naming the
+file and the cause, and the voice then sends every spoken turn to the session unranked. With
 `CHANNEL_RESPONSE_GATE` at `shadow` or `live` the broker refuses to start instead, naming the mode
-and the cause, because the gate reads the same key. A file
+and the cause, because the gate cannot run without the key. A file
 that is missing, unreadable or empty, or one whose content, once leading and trailing whitespace is
 dropped, holds anything but visible ASCII with no spaces, is refused the same way. A trailing
-newline is fine. Both keys are on the installer's allowlist, so values set by hand here
-survive the next install, and `operations.md` carries the threshold and refresh
-knobs beside them.
+newline is fine. The key is on the installer's allowlist, so a value set by hand here survives the
+next install.
+
+### The voice's key files and commands (optional)
+
+The voice lets an operator talk to a session from a Discord voice channel. It is off unless `CHANNEL_VOICE=on`, and this step is optional: without it nothing of the voice runs, and no audio leaves the machine. Step 1 covers the Discord side, the Guild Voice States intent and the Connect and Speak permissions.
+
+Three key files serve it. Each holds one line, the key alone.
+
+- `CHANNEL_VOICE_STT_KEY_FILE` names the file holding the Deepgram key that transcribes the operator's audio. Without it the bot joins and is deaf.
+- `CHANNEL_VOICE_FAST_KEY_FILE` names the file holding the Anthropic key the fast model answers under. Without it no turn is answered by the fast model, and every turn goes to the session.
+- `CHANNEL_SPEECH_TOKEN_FILE` names the file holding the bearer token for the speech service, which turns the persona's words into audio and is addressed by `CHANNEL_SPEECH_URL`. The two are named together or not at all. Without them the bot is mute and answers stay in the thread.
+
+Create each file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside `discord-token.txt`, from the same plain non-elevated session step 2 requires. A file created under that directory inherits the access control list step 2 set. None of the keys goes in `broker.env`, only the paths.
+
+The broker checks each of the three files at start exactly as it checks the token file: the file and its directory must be owned by the broker's account or an administrative identity, must grant nobody beyond the owner, Administrators and SYSTEM, and must not be a symbolic link or junction. Each path must also sit inside the state root, the directory holding the broker's state file, and a path equal to the root or outside it is refused before the file is opened. Unlike the Jev key file, a named file that fails any of this stops a broker with the voice on, naming the file and the cause, as an unusable token file does. A file that is missing, unreadable or empty, or whose content holds anything but visible ASCII with no spaces, is refused the same way. A trailing newline is fine.
+
+The voice also ranks each spoken turn with the Jev key file, `CHANNEL_JEV_KEY_FILE`, from the step above. It is read whenever the voice is on, and the voice needs no other TypeSafe key. With no usable Jev key every spoken turn goes to the session unranked. A turn is ranked only where the fast key file and the speech service are also named, since without either no answer could follow the ranking. A named Jev key file that cannot be used is warned once and does not stop the broker, unless `CHANNEL_RESPONSE_GATE` is `shadow` or `live`, which refuses as the step above says.
+
+Add the keys to `broker.env`:
+
+```
+CHANNEL_VOICE=on
+CHANNEL_VOICE_STT_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\deepgram-key.txt
+CHANNEL_VOICE_FAST_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\anthropic-key.txt
+CHANNEL_SPEECH_URL=http://<private address>:<port>
+CHANNEL_SPEECH_TOKEN_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\speech-token.txt
+```
+
+The speech address may use plain http only to `localhost`, a loopback address, a private-range address or an IPv6 unique-local address. Every other host needs https. It may carry no user name, password, query or fragment, and a broker whose address breaks a rule refuses to start, naming the rule. The broker never resolves a name to decide, so a hostname other than `localhost` needs https. Over plain http the token, the persona's words, the recent spoken lines and the operator's latest turn with its audio cross the network in the clear, which `security-model.md` states under T8.
+
+The other voice settings have defaults and need no entry: the loopback and eager switches, both off, the idle window, the end-of-turn thresholds, the short-turn word count, the two ranking thresholds, the fast model, the memory length, the spoken-word bound, the turn-audio length, the answer settle, the two holding-line waits, the speech voice name and the speech timeout. `operations.md` carries each one's range in its tunables table. All twenty-two voice keys are on the installer's allowlist, so values set by hand here survive the next install.
+
+To turn the voice on and join a channel:
+
+1. Restart the broker with `.\install\Repair-Broker.ps1` from an elevated prompt at the checkout root. Every setting takes effect at a restart. The start log then reads `the voice is on`, and says whether the channel will be deaf or mute and whether the Jev and fast keys are read.
+2. Join an ordinary voice channel in the server. A stage channel is not supported.
+3. In the thread of a live session, type `voice on` from an operator account. The bot joins the channel you are sitting in. If you are in no voice channel, the thread gets one notice saying so.
+4. Talk. A simple question is answered by the fast model. A question that needs the session is handed to it. Where the reply is slow the persona fills the wait, first with a short thinking line and then, if the reply is slower still, a still-looking line, and the session's reply is spoken when it returns. Speak over the persona to stop it; a "mm-hm" lets it carry on. Every spoken line is mirrored into the thread as text, unless `CHANNEL_MIRROR=off`. "Talking to a session aloud" in `operations.md` describes each of these in full.
+5. Type `voice off` in the same thread to end it, which works after the session has ended too. The bot also leaves when the last operator leaves the channel and after `CHANNEL_VOICE_IDLE_MS` with no operator audio, so an empty channel is not metered.
+
+The two commands are whole-line and not case-sensitive, and only an operator's are commands. From a participant, `voice on` is words for the session and the bot does not join. One voice runs per broker: from another session's thread, `voice on` and `voice off` are told the voice is in use. `voice on` needs a live session; in a thread whose session has ended it is handled as any message to an ended session is, while `voice off` there still ends the voice. The bot hears operator accounts only; a participant's voice is dropped before anything reads it. With `CHANNEL_VOICE` off, `voice on` and `voice off` are ordinary text for the session.
 
 ## 3. Install the service
 

@@ -24,19 +24,38 @@ import type { Registry } from "../registry.ts";
 import { crossSessionDelivery } from "../tail.ts";
 import type { EchoMemory, EchoSlot, PeerTraffic, PromptSource } from "../tail.ts";
 import type { ThreadWriter } from "./writer.ts";
+import type { CallOutcome } from "../discord/transport.ts";
 
 /**
- * The operator inbox's tap: where a session's reply is shown the inbox once its text is on the
- * session's thread. Only a reply is ever shown to it. A prompt is the operator's own words, and a
- * narration chunk and a peer message are neither the session's reply nor its ask.
+ * The ask tap: where a session's reply is shown once its text is on the session's thread, for a
+ * reader of the `ASK:` lines in it. Only a reply is ever shown to it. A prompt is the operator's
+ * own words, and a narration chunk and a peer message are neither the session's reply nor its ask.
  */
-export type OutboundInbox = {
+export type OutboundAskTap = {
   /**
    * A reply's text reached the session's thread. `postedAt` is this router's clock as the reply
    * arrived, read before its run, and `messageId` is the reply's last message where the writer
    * returned one.
    */
   reply: (sessionId: string, text: string, postedAt: number, messageId: string | null) => void;
+};
+
+/**
+ * The voice bridge's tap: where a session's reply is shown the voice once its text is on the
+ * session's thread, on exactly the paths the ask tap is shown it. The bridge speaks it where a
+ * voice hand-off is pending and ignores it otherwise.
+ */
+export type OutboundVoice = {
+  reply: (sessionId: string, text: string) => void;
+};
+
+/**
+ * The response gate's tap: where a session's reply is shown the gate once its text is on the
+ * session's thread, on exactly the paths the ask tap and the voice tap are shown it, so the gate's
+ * judge can read the reply the people in the thread are answering.
+ */
+export type OutboundGate = {
+  reply: (sessionId: string, text: string) => void;
 };
 
 export type OutboundRouterOptions = {
@@ -115,14 +134,24 @@ export type OutboundRouterOptions = {
    */
   peerMessages?: "full" | "brief" | "off";
   /**
-   * The operator inbox, present only while it is on. Told after a reply-tool post lands whole, after
+   * The ask tap, present only while its reader is on. Told after a reply-tool post lands whole, after
    * a reply mirror lands whole, and where a reply mirror is dropped because the tailer already
    * narrated the same text, since narration itself is never shown to it. A reply mirror dropped as
    * the reply tool's echo is not shown again: the reply tool's own post already was. The calls are
    * synchronous and made after the post has settled, so nothing here waits on them, and a throw out
    * of one is caught and logged without the text.
    */
-  inbox?: OutboundInbox;
+  askTap?: OutboundAskTap;
+  /**
+   * The voice bridge, present only while the voice is on. Shown every reply the ask tap is shown,
+   * beside the ask tap and never behind it, so a host with the ask tap off still speaks.
+   */
+  voice?: OutboundVoice;
+  /**
+   * The response gate, shown every reply the ask tap is shown, beside it and never behind it, so a
+   * host with the ask tap off still tells the gate.
+   */
+  gate?: OutboundGate;
   log?: (message: string) => void;
   /**
    * The clock this router reads: the drop log's window, and what a paced run's reactive waits are
@@ -205,6 +234,54 @@ const BLIND_RETRY_MS = 5_000;
  * is what turns the cap into a bound on the number of attempts as well as on their duration.
  */
 const MIN_REACTIVE_WAIT_MS = 1_000;
+
+/** The clock a paced post waits on. Injected so a test drives the waits without sleeping. */
+export type PostClock = { now: () => number; sleep: (ms: number) => Promise<void> };
+
+/**
+ * Makes one post through `post`, waiting out each rate-limited refusal and going again with the
+ * same call, under the cap on how long one run's waiting may total. Rate limiting is the one
+ * refusal class where nothing landed and the same call will be accepted later, so the retry cannot
+ * double-post. Answers the first outcome that is not such a refusal, with `waited`, the run's
+ * waiting so far, grown by what the retries cost, or a null outcome for a refusal whose wait would
+ * pass the cap, with `waited` as it stood. Every path that posts to a thread under the writer's
+ * pacing goes through here, the router's runs and the voice's lines alike, so the wait, the floor
+ * and the cap cannot drift between them.
+ */
+export async function postThroughRateLimits<T>(
+  post: () => Promise<CallOutcome<T>>,
+  waited: number,
+  clock: PostClock,
+): Promise<{ outcome: Exclude<CallOutcome<T>, { status: "rate-limited" }> | null; waited: number }> {
+  let outcome = await post();
+  while (outcome.status === "rate-limited") {
+    const reported = outcome.rate.retryAfterMs;
+    // A wait this run can act on is a finite positive number of milliseconds, floored so that
+    // a refusal naming a sliver of one is a pause rather than a request storm. Anything else
+    // is sat out blind. The finiteness reading is defense in depth rather than the only guard:
+    // every producer of this field bounds it already, the transport where the wire's value
+    // crosses into the process and the writer where its own refusal computes one. What it
+    // covers is a producer added later, because a `NaN` reaching this loop is a wait that
+    // passes the positive test, defeats the cap below (every comparison against it is false),
+    // and sleeps for no time at all.
+    const wait =
+      reported !== null && Number.isFinite(reported) && reported > 0
+        ? Math.max(reported, MIN_REACTIVE_WAIT_MS)
+        : BLIND_RETRY_MS;
+    // Stopping rather than waiting past the cap: the caller decides what a post it could not make
+    // means for the rest of its run.
+    if (waited + wait > MAX_RUN_WAIT_MS) return { outcome: null, waited };
+    const before = clock.now();
+    await clock.sleep(wait);
+    // The greater of what the wait asked for and what it actually cost. The request alone
+    // would bound how many retries a run takes and not how long they hold the thread's chain,
+    // so a run whose waits overrun would sit past the cap; the elapsed time alone would
+    // advance nothing against a clock that does not move. Both together bound both.
+    waited += Math.max(clock.now() - before, wait);
+    outcome = await post();
+  }
+  return { outcome, waited };
+}
 
 /** How long a run of the same drop line for the same session is aggregated before its next flush. */
 const DROP_WINDOW_MS = 60_000;
@@ -707,35 +784,19 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       // whether or not the previous message had to be waited out: a reactive wait is evidence the
       // bucket emptied, not a reason for the next post to skip the spacing that keeps it full.
       if (landed > 0) await sleep(RUN_PACE_MS);
-      let outcome = await options.mirrorWriter.reply(threadId, message);
-      while (outcome.status === "rate-limited") {
-        const reported = outcome.rate.retryAfterMs;
-        // A wait this run can act on is a finite positive number of milliseconds, floored so that
-        // a refusal naming a sliver of one is a pause rather than a request storm. Anything else
-        // is sat out blind. The finiteness reading is defense in depth rather than the only guard:
-        // every producer of this field bounds it already, the transport where the wire's value
-        // crosses into the process and the writer where its own refusal computes one. What it
-        // covers is a producer added later, because a `NaN` reaching this loop is a wait that
-        // passes the positive test, defeats the cap below (every comparison against it is false),
-        // and sleeps for no time at all.
-        const wait =
-          reported !== null && Number.isFinite(reported) && reported > 0
-            ? Math.max(reported, MIN_REACTIVE_WAIT_MS)
-            : BLIND_RETRY_MS;
-        // Stopping rather than waiting past the cap. The run reports the count it reached, which
-        // is what the callers log, and the messages it did not reach are dropped.
-        if (waited + wait > MAX_RUN_WAIT_MS) {
-          return { landed, error: "rate limited", lastMessageId: null };
-        }
-        const before = now();
-        await sleep(wait);
-        // The greater of what the wait asked for and what it actually cost. The request alone
-        // would bound how many retries a run takes and not how long they hold the thread's chain,
-        // so a run whose waits overrun would sit past the cap; the elapsed time alone would
-        // advance nothing against a clock that does not move. Both together bound both.
-        waited += Math.max(now() - before, wait);
-        outcome = await options.mirrorWriter.reply(threadId, message);
+      // The waiting is the run's: what one message's refusals cost counts against the next's.
+      const attempt = await postThroughRateLimits(
+        () => options.mirrorWriter.reply(threadId, message),
+        waited,
+        { now, sleep },
+      );
+      waited = attempt.waited;
+      // Stopped rather than waiting past the cap. The run reports the count it reached, which is
+      // what the callers log, and the messages it did not reach are dropped.
+      if (attempt.outcome === null) {
+        return { landed, error: "rate limited", lastMessageId: null };
       }
+      const outcome = attempt.outcome;
       if (outcome.status !== "ok") {
         return { landed, error: outcome.error, lastMessageId: null };
       }
@@ -769,14 +830,13 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   }
 
   /**
-   * Shows the inbox one reply whose text is on the thread. `postedAt` is this router's clock as the
-   * reply arrived, read before its run was dispatched rather than after it landed: a run paces its
-   * posts and can wait out a rate limit, and a console answer typed while it lands stamps the
+   * Shows the ask tap one reply whose text is on the thread. `postedAt` is this router's clock as
+   * the reply arrived, read before its run was dispatched rather than after it landed: a run paces
+   * its posts and can wait out a rate limit, and a console answer typed while it lands stamps the
    * registry inside that gap. Stamped at landing, the reply would read as newer than the answer to
-   * it and open an item the operator has already dealt with. Caught here for the reason every seam
-   * into the inbox is: the post has already settled, and a failure behind the inbox must not turn
-   * it into a reported failure. The line carries the session and never the text or the error, which
-   * can quote it.
+   * it. Caught here for the reason every seam into the tap is: the post has already settled, and a
+   * failure behind the tap must not turn it into a reported failure. The line carries the session
+   * and never the text or the error, which can quote it.
    */
   function tapReply(
     sessionId: string,
@@ -784,11 +844,37 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
     postedAt: number,
     messageId: string | null,
   ): void {
-    if (options.inbox === undefined) return;
+    if (options.askTap === undefined) return;
     try {
-      options.inbox.reply(sessionId, text, postedAt, messageId);
+      options.askTap.reply(sessionId, text, postedAt, messageId);
     } catch {
-      log(`routing: the inbox could not take a reply from session ${sessionId}`);
+      log(`routing: the ask tap could not take a reply from session ${sessionId}`);
+    }
+  }
+
+  /**
+   * The voice bridge's tap, called beside `tapReply` at each of its call sites and bounded the same
+   * way: a throw behind it is logged with the session and never the text.
+   */
+  function tapVoice(sessionId: string, text: string): void {
+    if (options.voice === undefined) return;
+    try {
+      options.voice.reply(sessionId, text);
+    } catch {
+      log(`routing: the voice could not take a reply from session ${sessionId}`);
+    }
+  }
+
+  /**
+   * The response gate's tap, called beside `tapReply` and `tapVoice` at each of their call sites
+   * and bounded the same way: a throw behind it is logged with the session and never the text.
+   */
+  function tapGate(sessionId: string, text: string): void {
+    if (options.gate === undefined) return;
+    try {
+      options.gate.reply(sessionId, text);
+    } catch {
+      log(`routing: the response gate could not take a reply from session ${sessionId}`);
     }
   }
 
@@ -1070,6 +1156,8 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         // arriving seconds later says nothing the thread does not already show.
         options.echo?.noteAnswer(located.sessionId, text);
         tapReply(located.sessionId, text, arrivedAt, run.lastMessageId);
+        tapVoice(located.sessionId, text);
+        tapGate(located.sessionId, text);
         options.receipts?.answered(located.threadId, arrivedAt);
         return { status: "sent" };
       }
@@ -1188,10 +1276,12 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
           );
           // This mirror's arrival, the instant both records below are stamped with.
           const arrivedAt = now();
-          // Shown to the inbox here, because narration never is: without this, a turn whose final
-          // reply the tailer narrated first would reach the thread and never the inbox. No message
+          // Shown to the ask tap here, because narration never is: without this, a turn whose final
+          // reply the tailer narrated first would reach the thread and never the ask tap. No message
           // ID rides it, since the narration message is the tailer's and not this post's.
           tapReply(located.sessionId, text, arrivedAt, null);
+          tapVoice(located.sessionId, text);
+          tapGate(located.sessionId, text);
           // The tailer's narration already carries this reply on the thread, but nothing told the
           // receipt tracker so: without this, every message waiting on this turn stays at 👀
           // forever, since the ordinary answered() call below is the one path this branch returns
@@ -1373,6 +1463,8 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       if (run.error === null) {
         if (kind === "reply") {
           tapReply(located.sessionId, text, arrivedAt, run.lastMessageId);
+          tapVoice(located.sessionId, text);
+          tapGate(located.sessionId, text);
           options.receipts?.answered(located.threadId, arrivedAt);
         }
         return { status: "sent" };
@@ -1397,6 +1489,8 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
           if (retry.error === null) {
             if (kind === "reply") {
               tapReply(located.sessionId, text, arrivedAt, retry.lastMessageId);
+              tapVoice(located.sessionId, text);
+              tapGate(located.sessionId, text);
               options.receipts?.answered(located.threadId, arrivedAt);
             }
             return { status: "sent" };

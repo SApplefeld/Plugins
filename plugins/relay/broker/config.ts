@@ -1,6 +1,7 @@
 // Broker configuration, resolved entirely from the environment so an installed service can be
 // pointed at a different port or state file without editing source.
 import { readFileSync } from "node:fs";
+import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { comparablePath, defaultEventsPath } from "./board/events.ts";
@@ -152,23 +153,30 @@ export type BrokerConfig = {
    */
   boardRosterPath: string;
   /**
-   * Whether the broker keeps the operator inbox: the one place a session's reply that needs
-   * something from the operator is held until the operator answers that session. Off by default,
-   * and off is the absence of the machinery rather than a check inside it: no item is held, no
-   * snapshot is written, the judge's key file is never read, and no reply goes to TypeSafe.
+   * The file the Jev key is read from, or null when none is named. The response gate and the
+   * voice's ranking share it; null with the gate on refuses the start, and with the voice alone it
+   * leaves every spoken turn to the persona's session. The key itself is never a setting: a
+   * scheduled task's environment is readable by anything that can read the task definition, and a
+   * file can be locked to one account. `CHANNEL_JEV_KEY_FILE` names it; the earlier name
+   * `CHANNEL_INBOX_JUDGE_KEY_FILE` names the same file where the new one is unset.
    */
-  inboxCard: boolean;
+  jevKeyFile: string | null;
   /**
-   * The file the inbox judge's TypeSafe key is read from, or null when none is named. Null leaves
-   * the judge off and the inbox running on `ASK:` lines alone. The key itself is never a setting:
-   * a scheduled task's environment is readable by anything that can read the task definition, and
-   * a file can be locked to one account.
+   * Whether the old name `CHANNEL_INBOX_JUDGE_KEY_FILE` is set to anything, whether or not the new
+   * name overrides it. The broker warns once at startup so the operator moves the line.
    */
-  inboxJudgeKeyFile: string | null;
-  /** The judge score at or above which an unmarked reply opens an item, from 0.4 to 0.95. */
-  inboxThreshold: number;
-  /** How often the inbox card is re-rendered. An edit is spent only when it changed. */
-  inboxCardRefreshMs: number;
+  jevKeyFileOldName: boolean;
+  /**
+   * Whether the broker keeps the fleet decisions card: one line per open ask across the roster
+   * personas' ask ledgers, with each ask's question posted into the card's thread. Off by default,
+   * and off is the absence of the machinery rather than a check inside it: no ledger is read, no
+   * sighting is kept and no thread is opened. The card also needs `CHANNEL_BOARD_ROSTER`, since the
+   * roster names the ledgers it reads; on without a roster builds nothing, with one warning.
+   */
+  decisionsCard: boolean;
+  /** How often the decisions card re-reads the ledgers and is re-rendered. An edit is spent only
+   * when it changed. */
+  decisionsCardRefreshMs: number;
   /**
    * Whether a thread's messages are held and delivered to its session together. `off` delivers
    * each admitted message at once, which is how a host with one account runs. `shadow`
@@ -200,6 +208,93 @@ export type BrokerConfig = {
   attachmentMaxBytes: number;
   /** A saved attachment older than this many days, by its modified time, is deleted by the daily pass. */
   attachmentRetainDays: number;
+  /**
+   * Whether the broker can join a voice channel on an operator's `voice on`. Off by default, and off
+   * is the absence of the machinery: no voice module is loaded and no voice intent is requested.
+   */
+  voice: boolean;
+  /** The bot leaves its voice channel once no operator's audio has arrived for this long. */
+  voiceIdleMs: number;
+  /**
+   * A development knob: with the bot joined, each operator's own audio is played back to the
+   * channel two seconds later, which proves the receive and play paths on a real channel.
+   */
+  voiceLoopback: boolean;
+  /**
+   * The file the transcription key is read from, or null when none is named. The key itself is
+   * never a setting, for the reason the Jev key's is not. Null with the voice on leaves the
+   * channel deaf: the bot joins and plays, and no audio goes to Deepgram.
+   */
+  voiceSttKeyFile: string | null;
+  /** Flux's end-of-turn threshold, from 0.5 to 0.9. */
+  voiceEotThreshold: number;
+  /**
+   * Flux's eager end-of-turn threshold, from 0.3 to 0.9, sent only with `voiceEager` on. With it on,
+   * a value above `voiceEotThreshold` is refused, since Flux refuses that pair.
+   */
+  voiceEagerThreshold: number;
+  /** Whether Flux's eager end of turn ends a turn early, withdrawn again if the speaker carries on. */
+  voiceEager: boolean;
+  /** A turn that interrupts the persona with fewer words than this lets it carry on, from 1 to 10. */
+  voiceShortTurnWords: number;
+  /**
+   * The speech service's base URL, an `http:` or `https:` address on the LAN, or null where the voice
+   * is off or no service is named. Null with the voice on leaves the voice mute: the bot hears and
+   * the thread keeps working, and nothing is spoken.
+   */
+  speechUrl: string | null;
+  /**
+   * The file the speech service's token is read from, inside the state root, or null where the voice
+   * is off or no service is named. Named exactly when `speechUrl` is.
+   */
+  speechTokenFile: string | null;
+  /** The voice the speech service speaks in. */
+  speechVoice: string;
+  /**
+   * How long the speech service may take to answer, and to go quiet between two chunks of audio,
+   * before the answer is posted to the thread instead, from one to thirty seconds.
+   */
+  speechTimeoutMs: number;
+  /** A turn whose need for the session scores at or above this hands off, from 0.3 to 0.9. */
+  voiceHandoffThreshold: number;
+  /** Otherwise, a turn whose answerability scores at or above this is answered, from 0.3 to 0.9. */
+  voiceAnswerThreshold: number;
+  /**
+   * The file the fast tier's Anthropic key is read from, or null when none is named. The key itself
+   * is never a setting. Null with the voice on hands every turn to the session.
+   */
+  voiceFastKeyFile: string | null;
+  /** The Claude model the fast tier answers with. */
+  voiceFastModel: string;
+  /** How many spoken lines the fast tier remembers, from 2 to 64. */
+  voiceMemoryTurns: number;
+  /**
+   * How many words of a session's reply are spoken before the rest is left to the thread, from
+   * 20 to 600. The whole reply reaches the thread whatever this is.
+   */
+  voiceMaxSpokenWords: number;
+  /**
+   * How many seconds of the operator's newest audio are held to cut the latest turn from for the
+   * speech service, from 0 to 60. Each request carries at most the last twenty seconds of that turn.
+   * Zero holds and sends nothing.
+   */
+  voiceTurnAudioSeconds: number;
+  /**
+   * How long an operator's answer to a spoken question is held after an eager end of its turn, in
+   * case the operator carries on, before it is handed to the session, from 500 to 5000 ms. A final
+   * end hands it off at once.
+   */
+  voiceEagerSettleMs: number;
+  /**
+   * How long after a hand-off the thinking line waits for the session's reply before it is spoken,
+   * from 0 to 10000 ms. Zero speaks it at the hand-off.
+   */
+  voiceHoldFirstMs: number;
+  /**
+   * How long after a hand-off the still-looking line waits for the reply, from 1000 to 30000 ms,
+   * and greater than `voiceHoldFirstMs`.
+   */
+  voiceHoldSecondMs: number;
 };
 
 /**
@@ -324,16 +419,15 @@ const MAX_USAGE_CARD_REFRESH_MS = 60 * 60 * 1000;
 const DEFAULT_BOARD_CARD_REFRESH_MS = 60 * 1000;
 const MIN_BOARD_CARD_REFRESH_MS = 5 * 1000;
 const MAX_BOARD_CARD_REFRESH_MS = 60 * 60 * 1000;
-// The inbox card draws ages in minutes as the board card does, so its refresh takes the board
+// The decisions card draws ages in minutes as the board card does, so its refresh takes the board
 // card's default and bounds, for the board card's reasons.
-const DEFAULT_INBOX_CARD_REFRESH_MS = DEFAULT_BOARD_CARD_REFRESH_MS;
-const MIN_INBOX_CARD_REFRESH_MS = MIN_BOARD_CARD_REFRESH_MS;
-const MAX_INBOX_CARD_REFRESH_MS = MAX_BOARD_CARD_REFRESH_MS;
-// The calibrated threshold. The floor keeps a typo from flagging most replies, and the ceiling
-// keeps one from flagging almost none while still reading as on.
-const DEFAULT_INBOX_THRESHOLD = 0.7;
-const MIN_INBOX_THRESHOLD = 0.4;
-const MAX_INBOX_THRESHOLD = 0.95;
+const DEFAULT_DECISIONS_CARD_REFRESH_MS = DEFAULT_BOARD_CARD_REFRESH_MS;
+const MIN_DECISIONS_CARD_REFRESH_MS = MIN_BOARD_CARD_REFRESH_MS;
+const MAX_DECISIONS_CARD_REFRESH_MS = MAX_BOARD_CARD_REFRESH_MS;
+// The gate threshold's bounds: the floor keeps a typo from delivering on most verdicts, and the
+// ceiling keeps one from delivering on almost none while still reading as on.
+const MIN_RESPONSE_GATE_THRESHOLD = 0.4;
+const MAX_RESPONSE_GATE_THRESHOLD = 0.95;
 // The size cap defaults to the inbound rate ceiling, as many messages as one session may be handed
 // in a minute. It counts messages and has no upper bound; what bounds a delivery's size at any
 // value is the gate's event budget, which delivers a buffer early rather than grow it past what
@@ -347,13 +441,12 @@ const DEFAULT_RESPONSE_GATE_MAX_WAIT_MS = 10 * 60 * 1000;
 const MAX_RESPONSE_GATE_MAX_WAIT_MS = 2_147_483_647;
 // The quiet window is a typing pause: five seconds is long enough that a second line of the same
 // thought lands inside it and short enough that an ask is not held for its own sake. It is a
-// setTimeout delay too, so it takes the age cap's ceiling. The threshold takes the inbox
-// threshold's bounds, for the same reasons: the floor keeps a typo from delivering on most
-// verdicts, and the ceiling keeps one from delivering on almost none while still reading as on.
-// Both are starting values rather than measured ones; the shadow journal and the scoring tool
-// are what move them.
+// setTimeout delay too, so it takes the age cap's ceiling. The quiet window is a starting value
+// rather than a measured one. The threshold takes the bounds stated above, and its default is the
+// value measured for the gate's question in
+// `docs/archive/plans/channels_gate-question-retune_spec_v1.md`.
 const DEFAULT_RESPONSE_GATE_QUIET_MS = 5 * 1000;
-const DEFAULT_RESPONSE_GATE_THRESHOLD = 0.6;
+const DEFAULT_RESPONSE_GATE_THRESHOLD = 0.65;
 // One list, one entry per project root. A semicolon rather than a colon or a comma because a Windows
 // path carries a drive letter and a colon with it, and a comma is a legal character in a directory
 // name.
@@ -366,6 +459,86 @@ const DEFAULT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 // Two weeks: long enough that a session resumed after a weekend still finds what it was told to
 // open, short enough that the store does not become an archive of every file ever attached.
 const DEFAULT_ATTACHMENT_RETAIN_DAYS = 14;
+// Ten minutes of no operator audio ends a voice session, so an empty room is not held open. The
+// floor keeps a typo from dropping the bot mid-pause, and the two-hour ceiling keeps a forgotten
+// session from holding the channel for a day.
+const DEFAULT_VOICE_IDLE_MS = 10 * 60 * 1000;
+const MIN_VOICE_IDLE_MS = 30 * 1000;
+const MAX_VOICE_IDLE_MS = 2 * 60 * 60 * 1000;
+// Flux's own default and its accepted ranges: Deepgram takes an end-of-turn threshold from 0.5 and
+// an eager one from 0.3, so a value below either floor would pass here and fail at the socket. The
+// 0.9 ceilings keep a typo from waiting out nearly every turn on the end-of-turn timeout. Flux also
+// refuses an eager threshold above the end-of-turn threshold, so with eager on `loadConfig` refuses
+// that pair; with eager off the eager threshold is never sent and the pair is not checked. Source:
+// https://developers.deepgram.com/docs/flux/configuration
+const DEFAULT_VOICE_EOT_THRESHOLD = 0.7;
+const MIN_VOICE_EOT_THRESHOLD = 0.5;
+const MAX_VOICE_EOT_THRESHOLD = 0.9;
+const DEFAULT_VOICE_EAGER_THRESHOLD = 0.5;
+const MIN_VOICE_EAGER_THRESHOLD = 0.3;
+const MAX_VOICE_EAGER_THRESHOLD = 0.9;
+// Two words: a cough or a "mm-hm" lets the persona carry on, and "wait, stop" does not. The ceiling
+// keeps a typo from letting a whole sentence talk under the persona without stopping it.
+const DEFAULT_VOICE_SHORT_TURN_WORDS = 2;
+const MIN_VOICE_SHORT_TURN_WORDS = 1;
+const MAX_VOICE_SHORT_TURN_WORDS = 10;
+// The speech service's voice for Scott Plus. A voice name rides the request body to the service, so
+// it is held to a plain lowercase slug.
+const DEFAULT_SPEECH_VOICE = "scott-plus";
+const SPEECH_VOICE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// Eight seconds of silence from the speech service, and the answer is posted to the thread instead.
+// The floor keeps a typo from failing every request, and the thirty-second ceiling keeps a stalled
+// service from holding a reply for minutes.
+const DEFAULT_SPEECH_TIMEOUT_MS = 8 * 1000;
+const MIN_SPEECH_TIMEOUT_MS = 1000;
+const MAX_SPEECH_TIMEOUT_MS = 30 * 1000;
+// The fast tier's two thresholds over Jev's answers. A turn whose need for the session scores at or
+// above the hand-off threshold goes to the session; otherwise one whose answerability scores at or
+// above the answer threshold is answered by the small model, and anything else goes to the session.
+// Both are starting values rather than measured ones. The ranges keep a typo from handing off every
+// turn or answering nearly every one.
+const DEFAULT_VOICE_HANDOFF_THRESHOLD = 0.6;
+const DEFAULT_VOICE_ANSWER_THRESHOLD = 0.7;
+const MIN_VOICE_RANK_THRESHOLD = 0.3;
+const MAX_VOICE_RANK_THRESHOLD = 0.9;
+// The small model that answers a spoken turn. Haiku by default for its speed; `claude-sonnet-5-5`
+// is the documented alternative. A model name rides the request body, so it is held to the shape
+// of a Claude model id.
+const DEFAULT_VOICE_FAST_MODEL = "claude-haiku-4-5-20251001";
+const VOICE_FAST_MODEL = /^claude-[a-z0-9.-]{1,64}$/;
+// Sixteen spoken lines, eight exchanges, is what the fast tier answers from and what a hand-off
+// can carry. The floor keeps one exchange in memory, and the ceiling bounds what each model call
+// sends.
+const DEFAULT_VOICE_MEMORY_TURNS = 16;
+const MIN_VOICE_MEMORY_TURNS = 2;
+const MAX_VOICE_MEMORY_TURNS = 64;
+// About a minute of speech. The floor keeps a spoken answer worth hearing, and the ceiling keeps a
+// reply from holding the channel for many minutes when the thread has it whole anyway.
+const DEFAULT_VOICE_MAX_SPOKEN_WORDS = 120;
+const MIN_VOICE_MAX_SPOKEN_WORDS = 20;
+const MAX_VOICE_MAX_SPOKEN_WORDS = 600;
+// Twenty seconds of the operator's latest turn by default. Zero turns the audio off. The ceiling keeps
+// one channel's window under six megabytes; a request carries at most the last twenty seconds.
+const DEFAULT_VOICE_TURN_AUDIO_SECONDS = 20;
+const MIN_VOICE_TURN_AUDIO_SECONDS = 0;
+const MAX_VOICE_TURN_AUDIO_SECONDS = 60;
+// A second and a half after an eager end before an answer to a spoken question goes to the session,
+// so an answer the operator carries on with arrives whole. The floor keeps a typo from handing off
+// before a resume can land, and the ceiling keeps an answer from waiting long after the operator
+// has stopped.
+const DEFAULT_VOICE_EAGER_SETTLE_MS = 1500;
+const MIN_VOICE_EAGER_SETTLE_MS = 500;
+const MAX_VOICE_EAGER_SETTLE_MS = 5000;
+// Two and a half seconds of silence after a hand-off before the thinking line, so a quick reply is
+// heard with no holding line at all, and nine before the still-looking line, so a slow one is not
+// met with silence. Zero speaks the thinking line at the hand-off. The ceilings keep a long wait
+// from reading as a dropped turn.
+const DEFAULT_VOICE_HOLD_FIRST_MS = 2500;
+const MIN_VOICE_HOLD_FIRST_MS = 0;
+const MAX_VOICE_HOLD_FIRST_MS = 10000;
+const DEFAULT_VOICE_HOLD_SECOND_MS = 9000;
+const MIN_VOICE_HOLD_SECOND_MS = 1000;
+const MAX_VOICE_HOLD_SECOND_MS = 30000;
 const DEFAULT_RETAIN_TERMINAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 500;
 const DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024;
@@ -635,6 +808,97 @@ function rosterPath(env: NodeJS.ProcessEnv): string {
   return configured;
 }
 
+/** The speech service's voice name: a lowercase slug, since it rides the request body. */
+function speechVoice(raw: string | undefined): string {
+  const value = raw?.trim();
+  if (value === undefined || value === "") return DEFAULT_SPEECH_VOICE;
+  if (!SPEECH_VOICE.test(value)) {
+    throw new Error(
+      `CHANNEL_SPEECH_VOICE expects a lowercase name of letters, digits and hyphens, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return value;
+}
+
+/** The fast tier's model name: the shape of a Claude model id. The refusal never echoes the value. */
+function voiceFastModel(raw: string | undefined): string {
+  const value = raw?.trim();
+  if (value === undefined || value === "") return DEFAULT_VOICE_FAST_MODEL;
+  if (!VOICE_FAST_MODEL.test(value)) {
+    throw new Error(
+      "CHANNEL_VOICE_FAST_MODEL expects a Claude model id: claude- followed by 1 to 64 lowercase " +
+        "letters, digits, dots and hyphens",
+    );
+  }
+  return value;
+}
+
+/**
+ * The speech service's address and token file, read only with the voice on. Both unset is the mute
+ * voice. One without the other is refused, naming the missing key, since neither is any use alone.
+ * The URL must parse with the `http:` or `https:` scheme, carry no credentials, query or fragment,
+ * and use plain http only to a private host. Each refusal names its rule and never echoes the URL,
+ * which can carry credentials and reaches the log.
+ */
+function speechService(env: NodeJS.ProcessEnv): { url: string | null; tokenFile: string | null } {
+  const url = env.CHANNEL_SPEECH_URL?.trim() || null;
+  const tokenFile = env.CHANNEL_SPEECH_TOKEN_FILE?.trim() || null;
+  if (url === null && tokenFile === null) return { url: null, tokenFile: null };
+  if (url === null) throw new Error("CHANNEL_SPEECH_TOKEN_FILE is set without CHANNEL_SPEECH_URL");
+  if (tokenFile === null) throw new Error("CHANNEL_SPEECH_URL is set without CHANNEL_SPEECH_TOKEN_FILE");
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("CHANNEL_SPEECH_URL expects an http or https URL, the value does not parse");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("CHANNEL_SPEECH_URL expects an http or https URL");
+  }
+  // fetch refuses to send a request to a URL carrying credentials, so such a URL could never speak.
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error("CHANNEL_SPEECH_URL must not carry a user name or password");
+  }
+  // The client appends the request path to the base, so a query or fragment, even an empty one,
+  // would swallow it.
+  if (parsed.search !== "" || parsed.hash !== "" || /[?#]/.test(url)) {
+    throw new Error("CHANNEL_SPEECH_URL must not carry a query or fragment");
+  }
+  // The token and the persona's words cross the wire in the clear over http, so http is allowed
+  // only to a host that names this machine or a private network outright. A hostname is never
+  // resolved: what it would resolve to is not known here, so any name but localhost needs https.
+  if (parsed.protocol === "http:" && !isPrivateHost(parsed.hostname)) {
+    throw new Error(
+      "CHANNEL_SPEECH_URL may use http only to localhost, a loopback address or a private-range " +
+        "address; any other host needs https",
+    );
+  }
+  return { url, tokenFile };
+}
+
+/**
+ * Whether a URL's host is literally `localhost`, an IPv4 loopback (127.0.0.0/8) or RFC 1918 address
+ * (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), the IPv6 loopback `::1`, or an IPv6 unique-local
+ * address (fc00::/7). Takes `URL.hostname`, which brackets an IPv6 address and writes it in its
+ * shortest form.
+ */
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[(.*)\]$/, "$1").toLowerCase();
+  if (host === "localhost") return true;
+  const family = isIP(host);
+  if (family === 4) {
+    const [a, b] = host.split(".").map(Number);
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  if (family === 6) {
+    if (host === "::1") return true;
+    // fc00::/7 is every address whose first 16-bit group is fc00 to fdff. A first group written with
+    // fewer than four digits has leading zeros, so it lies below fc00.
+    return /^f[cd][0-9a-f]{2}:/.test(host);
+  }
+  return false;
+}
+
 /**
  * The state file lives outside the repository by default: the broker is installed as a service
  * and its runtime state is not source.
@@ -645,7 +909,7 @@ function defaultStateFile(env: NodeJS.ProcessEnv): string {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
-  return {
+  const config: BrokerConfig = {
     // Zero is legal only here, where it means "any free port" and is what the tests bind. Every
     // other knob would be degenerate at zero: a zero sweep interval is a busy loop, a zero stale
     // timeout marks every session stale, and a zero body cap refuses every post.
@@ -729,23 +993,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     // Read here for the same reason: the roster is opened in broker/board/roster.ts, and the
     // allowlist pin only sees a knob this file names itself.
     boardRosterPath: rosterPath(env),
-    // Off by default: with the judge's key file named, the inbox sends reply text to a third party,
-    // and that belongs on a host that asked for it.
-    inboxCard: strictFlag(env.CHANNEL_INBOX_CARD, false),
-    // The path alone. The file is read only where the inbox is built, by `readInboxJudgeKey`, so a
-    // broker with the card off never opens it.
-    inboxJudgeKeyFile: env.CHANNEL_INBOX_JUDGE_KEY_FILE?.trim() || null,
-    inboxThreshold: boundedFraction(
-      env.CHANNEL_INBOX_THRESHOLD,
-      MIN_INBOX_THRESHOLD,
-      MAX_INBOX_THRESHOLD,
-      DEFAULT_INBOX_THRESHOLD,
-    ),
-    inboxCardRefreshMs: bounded(
-      env.CHANNEL_INBOX_CARD_REFRESH_MS,
-      MIN_INBOX_CARD_REFRESH_MS,
-      MAX_INBOX_CARD_REFRESH_MS,
-      DEFAULT_INBOX_CARD_REFRESH_MS,
+    // The paths alone. The file is read where the gate or the voice is built, by `readJevKey`, so a
+    // broker with both off never opens it. The new name wins where both are set.
+    jevKeyFile: env.CHANNEL_JEV_KEY_FILE?.trim() || env.CHANNEL_INBOX_JUDGE_KEY_FILE?.trim() || null,
+    jevKeyFileOldName: (env.CHANNEL_INBOX_JUDGE_KEY_FILE?.trim() ?? "") !== "",
+    // Off by default: on, the card posts each worker's question into the channel, and that belongs
+    // on a host that asked for it.
+    decisionsCard: strictFlag(env.CHANNEL_DECISIONS_CARD, false),
+    decisionsCardRefreshMs: bounded(
+      env.CHANNEL_DECISIONS_CARD_REFRESH_MS,
+      MIN_DECISIONS_CARD_REFRESH_MS,
+      MAX_DECISIONS_CARD_REFRESH_MS,
+      DEFAULT_DECISIONS_CARD_REFRESH_MS,
     ),
     // Off by default: on, the gate holds messages back from a running session, and that belongs
     // on a host that asked for it. The caps are read whatever the mode, so a host turning the gate
@@ -771,8 +1030,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     ),
     responseGateThreshold: boundedFraction(
       env.CHANNEL_RESPONSE_GATE_THRESHOLD,
-      MIN_INBOX_THRESHOLD,
-      MAX_INBOX_THRESHOLD,
+      MIN_RESPONSE_GATE_THRESHOLD,
+      MAX_RESPONSE_GATE_THRESHOLD,
       DEFAULT_RESPONSE_GATE_THRESHOLD,
     ),
     // The operator alone by default, which is the bar the operator asked to start at and expects to
@@ -781,25 +1040,142 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     attachments: attachmentMode(env.CHANNEL_ATTACHMENTS),
     attachmentMaxBytes: integerAtLeast(env.CHANNEL_ATTACHMENT_MAX_BYTES, 1, DEFAULT_ATTACHMENT_MAX_BYTES),
     attachmentRetainDays: integerAtLeast(env.CHANNEL_ATTACHMENT_RETAIN_DAYS, 1, DEFAULT_ATTACHMENT_RETAIN_DAYS),
+    // Off by default: on, the broker hears the operator's voice, and that belongs on a host that
+    // asked for it. The idle window and the loopback are read whatever the flag, so a bad value
+    // refuses the restart that writes it rather than the one that turns the voice on.
+    voice: strictFlag(env.CHANNEL_VOICE, false),
+    voiceIdleMs: bounded(env.CHANNEL_VOICE_IDLE_MS, MIN_VOICE_IDLE_MS, MAX_VOICE_IDLE_MS, DEFAULT_VOICE_IDLE_MS),
+    voiceLoopback: strictFlag(env.CHANNEL_VOICE_LOOPBACK, false),
+    // The path alone. The file is read where the voice is built, by `readVoiceSttKey`, so a broker
+    // with the voice off never opens it.
+    voiceSttKeyFile: env.CHANNEL_VOICE_STT_KEY_FILE?.trim() || null,
+    voiceEotThreshold: boundedFraction(
+      env.CHANNEL_VOICE_EOT_THRESHOLD,
+      MIN_VOICE_EOT_THRESHOLD,
+      MAX_VOICE_EOT_THRESHOLD,
+      DEFAULT_VOICE_EOT_THRESHOLD,
+    ),
+    voiceEagerThreshold: boundedFraction(
+      env.CHANNEL_VOICE_EAGER_THRESHOLD,
+      MIN_VOICE_EAGER_THRESHOLD,
+      MAX_VOICE_EAGER_THRESHOLD,
+      DEFAULT_VOICE_EAGER_THRESHOLD,
+    ),
+    voiceEager: strictFlag(env.CHANNEL_VOICE_EAGER, false),
+    voiceShortTurnWords: bounded(
+      env.CHANNEL_VOICE_SHORT_TURN_WORDS,
+      MIN_VOICE_SHORT_TURN_WORDS,
+      MAX_VOICE_SHORT_TURN_WORDS,
+      DEFAULT_VOICE_SHORT_TURN_WORDS,
+    ),
+    // Set below, and only with the voice on: a broker with the voice off reads and refuses nothing
+    // about the speech service.
+    speechUrl: null,
+    speechTokenFile: null,
+    // Read whatever the flag, like the voice's other knobs, so a bad value refuses the restart that
+    // writes it.
+    speechVoice: speechVoice(env.CHANNEL_SPEECH_VOICE),
+    speechTimeoutMs: bounded(
+      env.CHANNEL_SPEECH_TIMEOUT_MS,
+      MIN_SPEECH_TIMEOUT_MS,
+      MAX_SPEECH_TIMEOUT_MS,
+      DEFAULT_SPEECH_TIMEOUT_MS,
+    ),
+    // The fast tier's knobs, read whatever the flag for the same reason. The key file is the path
+    // alone: the file is read where the voice is started, by `readVoiceFastKey`, so a broker with
+    // the voice off never opens it.
+    voiceHandoffThreshold: boundedFraction(
+      env.CHANNEL_VOICE_HANDOFF_THRESHOLD,
+      MIN_VOICE_RANK_THRESHOLD,
+      MAX_VOICE_RANK_THRESHOLD,
+      DEFAULT_VOICE_HANDOFF_THRESHOLD,
+    ),
+    voiceAnswerThreshold: boundedFraction(
+      env.CHANNEL_VOICE_ANSWER_THRESHOLD,
+      MIN_VOICE_RANK_THRESHOLD,
+      MAX_VOICE_RANK_THRESHOLD,
+      DEFAULT_VOICE_ANSWER_THRESHOLD,
+    ),
+    voiceFastKeyFile: env.CHANNEL_VOICE_FAST_KEY_FILE?.trim() || null,
+    voiceFastModel: voiceFastModel(env.CHANNEL_VOICE_FAST_MODEL),
+    voiceMemoryTurns: bounded(
+      env.CHANNEL_VOICE_MEMORY_TURNS,
+      MIN_VOICE_MEMORY_TURNS,
+      MAX_VOICE_MEMORY_TURNS,
+      DEFAULT_VOICE_MEMORY_TURNS,
+    ),
+    voiceMaxSpokenWords: bounded(
+      env.CHANNEL_VOICE_MAX_SPOKEN_WORDS,
+      MIN_VOICE_MAX_SPOKEN_WORDS,
+      MAX_VOICE_MAX_SPOKEN_WORDS,
+      DEFAULT_VOICE_MAX_SPOKEN_WORDS,
+    ),
+    voiceTurnAudioSeconds: bounded(
+      env.CHANNEL_VOICE_TURN_AUDIO_SECONDS,
+      MIN_VOICE_TURN_AUDIO_SECONDS,
+      MAX_VOICE_TURN_AUDIO_SECONDS,
+      DEFAULT_VOICE_TURN_AUDIO_SECONDS,
+    ),
+    voiceEagerSettleMs: bounded(
+      env.CHANNEL_VOICE_EAGER_SETTLE_MS,
+      MIN_VOICE_EAGER_SETTLE_MS,
+      MAX_VOICE_EAGER_SETTLE_MS,
+      DEFAULT_VOICE_EAGER_SETTLE_MS,
+    ),
+    voiceHoldFirstMs: bounded(
+      env.CHANNEL_VOICE_HOLD_FIRST_MS,
+      MIN_VOICE_HOLD_FIRST_MS,
+      MAX_VOICE_HOLD_FIRST_MS,
+      DEFAULT_VOICE_HOLD_FIRST_MS,
+    ),
+    voiceHoldSecondMs: bounded(
+      env.CHANNEL_VOICE_HOLD_SECOND_MS,
+      MIN_VOICE_HOLD_SECOND_MS,
+      MAX_VOICE_HOLD_SECOND_MS,
+      DEFAULT_VOICE_HOLD_SECOND_MS,
+    ),
   };
+  if (config.voice) {
+    const service = speechService(env);
+    config.speechUrl = service.url;
+    config.speechTokenFile = service.tokenFile;
+  }
+  // Flux refuses an eager threshold above the end-of-turn threshold, so the pair is refused here
+  // rather than at the socket. With eager off the eager threshold is never sent, and the pair is
+  // not checked.
+  if (config.voiceEager && config.voiceEagerThreshold > config.voiceEotThreshold) {
+    throw new Error(
+      `expected CHANNEL_VOICE_EAGER_THRESHOLD (${String(config.voiceEagerThreshold)}) at or below ` +
+        `CHANNEL_VOICE_EOT_THRESHOLD (${String(config.voiceEotThreshold)}) with CHANNEL_VOICE_EAGER on`,
+    );
+  }
+  // The still-looking line follows the thinking line, so a second moment at or before the first
+  // would speak it over the thinking line or ahead of it. Checked whatever the voice flag, like the
+  // two knobs themselves.
+  if (config.voiceHoldSecondMs <= config.voiceHoldFirstMs) {
+    throw new Error(
+      `expected CHANNEL_VOICE_HOLD_SECOND_MS (${String(config.voiceHoldSecondMs)}) above ` +
+        `CHANNEL_VOICE_HOLD_FIRST_MS (${String(config.voiceHoldFirstMs)})`,
+    );
+  }
+  return config;
 }
 
 /**
- * The inbox judge's key, read from the file `CHANNEL_INBOX_JUDGE_KEY_FILE` names, or null where the
- * judge is to stay off.
+ * The Jev key, read from the file `CHANNEL_JEV_KEY_FILE` names, or null where none is named.
  *
  * Held to the Discord token file's protection check, since the key is a bearer credential of the
  * same kind: readable means anyone on the machine can spend it, and writable means the broker can
  * be handed someone else's. Where the two differ is what a failure costs. A token file that cannot
  * be used stops the broker, because without it nothing reaches Discord at all; this key only adds a
- * second reading of unmarked replies, so a file that is unprotected, missing, unreadable or empty
- * turns the judge off with one warning and the inbox runs on `ASK:` lines alone. So does a key
+ * judged reading of messages, so a file that is unprotected, missing, unreadable or empty yields
+ * null with one warning, and the caller decides whether that stops the start. So does a key
  * carrying anything outside printable ASCII, since it rides an HTTP header and an interior line
  * break would make every request throw. No file named is the ordinary off state and warns nothing.
  *
- * Never throws. A warning names the judge's key file and the cause, never the contents.
+ * Never throws. A warning names the key file and the cause, never the contents.
  */
-export function readInboxJudgeKey(
+export function readJevKey(
   file: string | null,
   warn: (message: string) => void,
   // Injectable so a test reaches each refusal without a spawn or a hardened file; the default is
@@ -807,20 +1183,132 @@ export function readInboxJudgeKey(
   protect: (file: string) => void = assertTokenFileIsProtected,
 ): string | null {
   if (file === null) return null;
-  const off = (cause: string): null => {
-    warn(`broker: the inbox judge is off, its key file ${file} ${cause}`);
+  try {
+    return readKeyFile(file, protect);
+  } catch (error) {
+    warn(`broker: the Jev key file ${file} ${(error as Error).message}`);
     return null;
-  };
+  }
+}
+
+/**
+ * The transcription key, read from the file `CHANNEL_VOICE_STT_KEY_FILE` names, or null where none
+ * is named.
+ *
+ * The file must sit inside the state root, under the rule `readSpeechToken` states, and is refused
+ * before it is opened otherwise. Past that it is held to the Discord token file's protection check
+ * and refused the way that file is: a named file that is unprotected, missing, unreadable, empty or
+ * holds a character a request header cannot carry throws, and the broker refuses to start, since a
+ * named key the voice cannot use is a configuration error rather than an off state. The refusal
+ * names the file and the cause, never the contents.
+ */
+export function readVoiceSttKey(
+  file: string | null,
+  stateRoot: string,
+  // Injectable so a test reaches each refusal without a hardened file; the default is the check
+  // the token file is held to.
+  protect: (file: string) => void = assertTokenFileIsProtected,
+): string | null {
+  if (file === null) return null;
+  if (!isInside(file, stateRoot)) {
+    throw new Error(`the transcription key file ${file} is outside the state root ${stateRoot}`);
+  }
+  try {
+    return readKeyFile(file, protect);
+  } catch (error) {
+    throw new Error(`the transcription key file ${file} ${(error as Error).message}`);
+  }
+}
+
+/**
+ * The speech service's token, read from the file `CHANNEL_SPEECH_TOKEN_FILE` names, or null where
+ * none is named.
+ *
+ * The file must sit inside the state root, the directory holding the broker's state file. At the
+ * default location that is the directory the installer provisions and hardens. A
+ * `CHANNEL_BROKER_STATE` set elsewhere moves the root to a directory the installer never hardened.
+ * A path equal to the root or outside it, a `..` escape included, is refused before it is opened.
+ * Past that it is held to the Discord token file's protection check and refused the way the
+ * transcription key is: a named file the voice cannot use throws, and the broker refuses to start.
+ * The refusal names the file and the cause, never the contents.
+ */
+export function readSpeechToken(
+  file: string | null,
+  stateRoot: string,
+  // Injectable so a test reaches each refusal without a hardened file; the default is the check
+  // the token file is held to.
+  protect: (file: string) => void = assertTokenFileIsProtected,
+): string | null {
+  if (file === null) return null;
+  if (!isInside(file, stateRoot)) {
+    throw new Error(`the speech token file ${file} is outside the state root ${stateRoot}`);
+  }
+  try {
+    return readKeyFile(file, protect);
+  } catch (error) {
+    throw new Error(`the speech token file ${file} ${(error as Error).message}`);
+  }
+}
+
+/**
+ * The fast tier's Anthropic key, read from the file `CHANNEL_VOICE_FAST_KEY_FILE` names, or null
+ * where none is named.
+ *
+ * The file must sit inside the state root, under the rule `readSpeechToken` states, and is refused
+ * before it is opened otherwise. Past that it is held to the Discord token file's protection check
+ * and refused the way the speech token is: a named file the voice cannot use throws, and the broker
+ * refuses to start. The refusal names the file and the cause, never the contents.
+ */
+export function readVoiceFastKey(
+  file: string | null,
+  stateRoot: string,
+  // Injectable so a test reaches each refusal without a hardened file; the default is the check
+  // the token file is held to.
+  protect: (file: string) => void = assertTokenFileIsProtected,
+): string | null {
+  if (file === null) return null;
+  if (!isInside(file, stateRoot)) {
+    throw new Error(`the fast tier key file ${file} is outside the state root ${stateRoot}`);
+  }
+  try {
+    return readKeyFile(file, protect);
+  } catch (error) {
+    throw new Error(`the fast tier key file ${file} ${(error as Error).message}`);
+  }
+}
+
+/**
+ * Whether `file` resolves to a path strictly inside `root`, compared as resolved paths. On Windows
+ * `path.relative` compares without regard to case, as the file system does, and a path on another
+ * drive comes back absolute.
+ */
+function isInside(file: string, root: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(file));
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+/**
+ * A bearer key from a protected file. Throws with the cause as a phrase that follows the file's
+ * name: "cannot be used: ...", "is empty", or "holds a character a request header cannot carry".
+ * A key outside printable ASCII is refused here because it rides an HTTP header, where an interior
+ * line break would make every request throw.
+ */
+function readKeyFile(file: string, protect: (file: string) => void): string {
   let key: string;
   try {
     protect(file);
     key = readFileSync(file, "utf8").trim();
   } catch (error) {
     // The protection check's own message names the path as a token file, which is what it was
-    // written for; the prefix above is what says this one is the judge's.
-    return off(`cannot be used: ${String(error)}`);
+    // written for; the caller's prefix is what says whose key file this one is.
+    throw new Error(`cannot be used: ${String(error)}`);
   }
-  if (key === "") return off("is empty");
-  if (!/^[\x21-\x7e]+$/.test(key)) return off("holds a character a request header cannot carry");
+  if (key === "") throw new Error("is empty");
+  if (!/^[\x21-\x7e]+$/.test(key)) throw new Error("holds a character a request header cannot carry");
   return key;
 }

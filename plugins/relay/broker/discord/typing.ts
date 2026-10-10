@@ -53,7 +53,8 @@ export type TypingKeeper = {
    * Drives the kept timers to match `typing`: the threads that should show the indicator right
    * now. A thread newly in the set gets one call at once and then one every `TYPING_PERIOD_MS`; a
    * thread no longer in it has its timer cleared at once. Each thread's `until` is recorded, and
-   * replaces the one a thread already kept was holding. A no-op once the keeper has stopped,
+   * replaces the one a thread already kept was holding, unless a live `hold` on the thread runs
+   * later, which stands. A no-op once the keeper has stopped,
    * whether through `stop()` or a fatal outcome on the typing route itself.
    */
   reconcile: (typing: readonly TypingThread[]) => void;
@@ -63,6 +64,13 @@ export type TypingKeeper = {
    * by then.
    */
   release: (threadId: string) => void;
+  /**
+   * Keeps one thread's indicator on from now until `until`, or until the returned release runs,
+   * whether or not the surface's typing set names the thread: the voice bridge holds it from a
+   * spoken turn's end to the first frame of the answer, when no session turn is open yet. A
+   * reconcile keeps a held thread, and a release leaves a thread the set still wants to the set.
+   */
+  hold: (threadId: string, until: number) => () => void;
   /**
    * Forgets everything held for a thread the surface has stopped tracking: its timer, its budget,
    * and its dropped mark, so a retired thread holds no memory for the life of the broker.
@@ -138,6 +146,11 @@ export function createTypingKeeper(options: TypingKeeperOptions): TypingKeeper {
   // and `start` do nothing, which is what keeps a surface pass already in flight when the latch
   // trips from restarting timers it just cleared.
   let stopped = false;
+  // Threads held by `hold`, each with its deadline, merged into every reconcile's set.
+  const holds = new Map<string, number>();
+  // The threads the last reconcile's set named, so a release knows whether the set still wants
+  // the thread it is letting go of.
+  let wanted = new Set<string>();
 
   function budgetFor(threadId: string): Budget {
     let budget = budgets.get(threadId);
@@ -166,6 +179,7 @@ export function createTypingKeeper(options: TypingKeeperOptions): TypingKeeper {
     for (const threadId of [...kept.keys()]) clear(threadId);
     budgets.clear();
     dropped.clear();
+    holds.clear();
   }
 
   /** This thread's run of permanent or missing refusals has reached the cap: stop retrying it. */
@@ -250,6 +264,13 @@ export function createTypingKeeper(options: TypingKeeperOptions): TypingKeeper {
     reconcile(typing) {
       if (stopped) return;
       const typingSet = new Map(typing.map((thread) => [thread.threadId, thread.until]));
+      wanted = new Set(typingSet.keys());
+      // A held thread the set also wants keeps the later of the two deadlines, so a set whose turn
+      // went quiet never cuts a hold short.
+      for (const [threadId, until] of holds) {
+        if (now() > until) holds.delete(threadId);
+        else typingSet.set(threadId, Math.max(until, typingSet.get(threadId) ?? until));
+      }
       for (const threadId of [...kept.keys()]) {
         if (!typingSet.has(threadId)) clear(threadId);
       }
@@ -267,10 +288,25 @@ export function createTypingKeeper(options: TypingKeeperOptions): TypingKeeper {
     release(threadId) {
       clear(threadId);
     },
+    hold(threadId, until) {
+      if (stopped) return () => {};
+      holds.set(threadId, until);
+      const entry = kept.get(threadId);
+      // A thread already kept takes the later deadline, so a hold outlasting the set's own turn
+      // keeps the indicator to the hold's end.
+      if (entry !== undefined) entry.until = Math.max(entry.until, until);
+      else if (!dropped.has(threadId)) start(threadId, until);
+      return () => {
+        if (holds.get(threadId) !== until) return;
+        holds.delete(threadId);
+        if (!wanted.has(threadId)) clear(threadId);
+      };
+    },
     forget(threadId) {
       clear(threadId);
       budgets.delete(threadId);
       dropped.delete(threadId);
+      holds.delete(threadId);
     },
     stop() {
       halt();

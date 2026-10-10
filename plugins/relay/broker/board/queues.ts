@@ -495,7 +495,7 @@ type FailureClass = "unreadable" | "oversized" | "unparseable" | "not an object"
 
 /** What one held file's state is between ticks: the last good reading with the stat it was read at,
  * the stat one failed tick observed, when the hold began, and the last line logged about it. */
-type HeldFile<T> = {
+export type HeldFile<T> = {
   held: { stat: PlanStat; value: T } | null;
   /**
    * The modification time and size a tick failed at, with the class it failed as and whether that
@@ -551,7 +551,7 @@ type PersonaState = {
   failures: Map<string, PlanFailureHold>;
 };
 
-function freshHeld<T>(): HeldFile<T> {
+export function freshHeld<T>(): HeldFile<T> {
   return { held: null, failedAt: null, heldSince: null, loggedLine: null };
 }
 
@@ -576,8 +576,13 @@ function freshState(): PersonaState {
  *
  * Only the class of a failure is logged, and only when the line changes, so a broker pointed at a
  * folder with no store does not write that line on every tick for as long as it runs.
+ *
+ * The store, the heartbeat and the ask ledger reader in `broker/decisions/ledger.ts` all read through
+ * this one function. `subject` carries the caller's whole log prefix, such as `fleet queue: persona
+ * store`. `statOf` is the one stat it performs and defaults to the regular-file stat. Only the ledger
+ * reader injects it, so a test can count the stats a pass costs.
  */
-function readHeldFile<T>(
+export function readHeldFile<T>(
   file: string,
   slot: HeldFile<T>,
   subject: string,
@@ -585,12 +590,13 @@ function readHeldFile<T>(
   now: () => number,
   log: (message: string) => void,
   readFile: (file: string, maxBytes: number) => CappedRead,
+  statOf: (file: string) => PlanStat | null = statFile,
 ): T | null {
   const note = (cls: FailureClass, keepsHeld: boolean): void => {
     const line =
       cls === null
         ? null
-        : `fleet queue: ${subject} ${cls}, ` +
+        : `${subject} ${cls}, ` +
           (keepsHeld ? "keeping the last good reading" : "nothing read this tick");
     if (line !== slot.loggedLine) {
       if (line !== null) log(line);
@@ -633,7 +639,7 @@ function readHeldFile<T>(
     return clear(cls);
   };
 
-  const stat = statFile(file);
+  const stat = statOf(file);
   // A file that cannot be stat'd at all is not opened either, so there is nothing here to spare and
   // no stat to record the failure under.
   if (stat === null) return fail("unreadable");
@@ -920,7 +926,7 @@ export function createQueueReader(options: QueueReaderOptions = {}): QueueReader
         const store = readHeldFile(
           path.join(persona.workdir, STORE_FILE_NAME),
           state.store,
-          "persona store",
+          "fleet queue: persona store",
           (value) => storeReading(value, persona.name),
           now,
           log,
@@ -929,7 +935,7 @@ export function createQueueReader(options: QueueReaderOptions = {}): QueueReader
         const heartbeat = readHeldFile(
           path.join(persona.workdir, HEARTBEAT_FILE_NAME),
           state.heartbeat,
-          "worker heartbeat",
+          "fleet queue: worker heartbeat",
           (value) => heartbeatReading(value, persona.name),
           now,
           log,

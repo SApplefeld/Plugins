@@ -8,13 +8,16 @@ import {
   RELAY_RESTART_GRACE_MS,
   REPLY_HEARTBEAT_MS,
   loadConfig,
-  readInboxJudgeKey,
+  readJevKey,
+  readSpeechToken,
+  readVoiceFastKey,
+  readVoiceSttKey,
 } from "./config.ts";
 import type { BrokerConfig } from "./config.ts";
 import { createHandler } from "./intake.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
-import { createRegistry } from "./registry.ts";
+import { createRegistry, liveByLineage } from "./registry.ts";
 import type { ModelChange, Registry, SessionRecord } from "./registry.ts";
 import { loadSessions, saveSessions } from "./persistence.ts";
 import { loadDiscordConfig } from "./discord/config.ts";
@@ -36,7 +39,7 @@ import {
   renderQuestionPrompt,
 } from "./discord/question-message.ts";
 import type { ActionRow } from "./discord/question-message.ts";
-import { toView } from "./discord/state.ts";
+import { toView, typingDeadline } from "./discord/state.ts";
 import { createBlockedDesk } from "./discord/blocked.ts";
 import type { BlockedDesk } from "./discord/blocked.ts";
 import { loadBindings, saveBindings } from "./discord/bindings.ts";
@@ -46,13 +49,20 @@ import { loadUsageBinding, saveUsageBinding } from "./usage/binding.ts";
 import { createBoardCard } from "./board/thread.ts";
 import type { BoardCardOptions } from "./board/thread.ts";
 import { loadBoardBinding, saveBoardBinding } from "./board/binding.ts";
-import { excerptOf, findAskLine, hasStewardAsk } from "./inbox/ask.ts";
-import { createJudge } from "./inbox/judge.ts";
-import type { JudgeFetch } from "./inbox/judge.ts";
-import { createInboxStore, loadInboxSnapshot, saveInboxSnapshot } from "./inbox/store.ts";
-import type { InboxItem } from "./inbox/store.ts";
-import { createInboxCard } from "./inbox/thread.ts";
-import { loadInboxBinding, saveInboxBinding } from "./inbox/binding.ts";
+import { createRosterReader } from "./board/roster.ts";
+import { createLedgerReader } from "./decisions/ledger.ts";
+import { createSightings } from "./decisions/sightings.ts";
+import type { SightingSession, Sightings } from "./decisions/sightings.ts";
+import { createDecisionsCard } from "./decisions/thread.ts";
+import type { DecisionsCard } from "./decisions/thread.ts";
+import { createRepeatLog } from "./repeat-log.ts";
+import type { RepeatLogSurface } from "./repeat-log.ts";
+import {
+  loadAskRecords,
+  loadDecisionsBinding,
+  saveAskRecords,
+  saveDecisionsBinding,
+} from "./decisions/binding.ts";
 import { NO_RATE_INFO } from "./discord/transport.ts";
 import type { CallOutcome, DiscordTransport, ThreadMessenger } from "./discord/transport.ts";
 import {
@@ -85,18 +95,20 @@ import { createStatusReader } from "./status-reader.ts";
 import type { StatusReader } from "./status-reader.ts";
 import { createRelayHub } from "./routing/relays.ts";
 import { attachmentsRoot, createAttachmentIntake, pruneAttachments } from "./routing/attachments.ts";
-import { createInboundRouter } from "./routing/inbound.ts";
-import type { InboundInbox, InboundRouter } from "./routing/inbound.ts";
+import { createInboundRouter, voiceWhenReady } from "./routing/inbound.ts";
+import type { InboundRouter } from "./routing/inbound.ts";
 import { createResponseGateJournal } from "./routing/response-gate.ts";
 import { createInteractionRouter } from "./routing/interactions.ts";
 import { createOutboundRouter } from "./routing/outbound.ts";
-import type { OutboundInbox, ReplyResult } from "./routing/outbound.ts";
+import type { ReplyResult } from "./routing/outbound.ts";
 import { createReceiptTracker } from "./routing/receipts.ts";
 import type { ReceiptTracker } from "./routing/receipts.ts";
 import { createRelayRoutes } from "./routing/http.ts";
 import { createThreadWriter } from "./routing/writer.ts";
 import type { ThreadWriter } from "./routing/writer.ts";
 import type { MessageSource } from "./routing/gateway.ts";
+import type { VoiceBridge } from "./voice/bridge.ts";
+import type { Voice } from "./voice/connection.ts";
 
 export type Broker = {
   server: Server;
@@ -105,8 +117,6 @@ export type Broker = {
   port: number;
   /** The rotating-file logger this broker started with, so the caller can log a line beside it. */
   logger: Logger;
-  /** The operator inbox's item set, read-only, or null while `CHANNEL_INBOX_CARD` is off. */
-  inbox: Pick<Inbox, "items"> | null;
   stop: () => Promise<void>;
 };
 
@@ -718,172 +728,69 @@ export function boardCardWiring(options: {
 }
 
 /**
- * The operator inbox as the routers and the registry reach it: the outbound router's tap, the
- * inbound router's clears, the registry's prompt clear and its reconcile, and the card's read.
+ * How long one reason for a failed decisions-card save waits before it is logged again. The save
+ * runs once per refresh pass, and a disk that keeps refusing would otherwise write the same line
+ * every pass, on the sibling cards' own window.
  */
-export type Inbox = OutboundInbox &
-  InboundInbox & {
-    /** Drops every item whose session the registry no longer holds. */
-    reconcile: (sessions: readonly SessionRecord[]) => void;
-    /** Every open item, oldest opened first. */
-    items: () => InboxItem[];
-  };
+const DECISIONS_SAVE_REPEAT_WINDOW_MS = 5 * 60 * 1000;
 
 /**
- * Builds the operator inbox, or nothing when `CHANNEL_INBOX_CARD` is off: no item store, no
- * snapshot read or written, no judge key read, and no judge, so no reply text goes to TypeSafe.
- *
- * Assembled here rather than inline for the reason the card wirings are: `startBroker` builds its
- * inbox from this function and from nothing else, so the seam a test reaches is the one production
- * runs.
- *
- * What a tapped reply does, in order. A reply for a session the registry no longer holds opens
- * nothing, and a late verdict for it is dropped, since a session the registry does not hold is not
- * one the operator can answer. The two differ in what has already happened: a reply refused at the
- * tap is never submitted, while a late verdict is one whose reply was submitted before the session
- * was pruned, so its text had already left. Otherwise a reply with an `ASK:` line opens or refreshes
- * a marked item and is never judged. That item carries the steward flag where the session is
- * supervised (its record carries a lineage) and the line the excerpt came from is shaped as the
- * persona plugin's ask of a worker's steward. Another line of the reply never raises it. The flag
- * records that line's shape and the record's lineage, and not whether the plugin read the line,
- * which nothing here observes. Otherwise the reply goes to the judge where the judge is on, and
- * nowhere when it is off. That holds for a steward-shaped line the mark rule refuses too, such as a
- * lowercase `ask:` or one inside a fence. Whether the session mirrors its console is not read here,
- * since the mirror switches govern what the session's thread carries rather than what reaches the
- * vendor. `docs/security-model.md` owns which switches do.
- *
- * The snapshot lives beside the registry snapshot and the card bindings. It restores only items
- * whose session record restored, and it is written on every change, which is a human rate: an item
- * opens on a flagged reply and leaves on the operator's answer.
+ * The repeat log for the decisions card's ask-map save, keyed by the fixed phrase naming the file;
+ * the error's own text rides beside it, so the first line of a run still says why.
  */
-export function inboxWiring(options: {
-  config: Pick<BrokerConfig, "stateFile" | "inboxCard" | "inboxThreshold">;
+export const DECISIONS_SAVE_REPEAT_LOG: RepeatLogSurface<[detail: string]> = {
+  windowMs: DECISIONS_SAVE_REPEAT_WINDOW_MS,
+  firstLine: (reason, detail) => `${reason}: ${detail}`,
+  countLine: (reason, suppressed) =>
+    `${reason} occurred ${String(suppressed)} more time(s) in the last ` +
+    `${String(DECISIONS_SAVE_REPEAT_WINDOW_MS / 60_000)} minutes`,
+};
+
+/**
+ * The decisions card's session seam: the live session carrying a persona's lineage, with its thread,
+ * as the sightings resolve a ledger entry's link through it. Resolved once per persona per pass
+ * rather than once per entry: `beginPass` opens a fresh memo, and `session` reads through it, so a
+ * registry listing is taken at most once per persona between two passes. Read outside a pass, the
+ * seam answers from the last pass's memo, which is the state the card last drew.
+ */
+export function decisionsSessionSeam(options: {
   registry: Pick<Registry, "list">;
-  /**
-   * The judge's key as `readJudgeKey` read it, or null where the judge is to stay off. Read once
-   * at startup for this and the response gate, which share the one file.
-   */
-  judgeKey: string | null;
-  /** The judge's request, injected so a test drives it without a network. Global fetch otherwise. */
-  fetch?: JudgeFetch;
-  log: (message: string) => void;
-  onError: (message: string) => void;
-}): Inbox | null {
-  if (!options.config.inboxCard) return null;
-  const file = path.join(path.dirname(options.config.stateFile), "inbox-items.json");
-  const store = createInboxStore({
-    items: loadInboxSnapshot(file, {
-      liveSessionIds: new Set(options.registry.list().map((record) => record.sessionId)),
-      log: options.log,
-    }),
-    onChange: () => {
-      // Caught here, since a change reaches this from a post, a prompt stamp or a delivery, and a
-      // lost save costs the next restart this change rather than costing the caller anything now.
-      try {
-        saveInboxSnapshot(file, store.items());
-      } catch (error) {
-        options.onError(`broker: cannot write the inbox snapshot to ${file}: ${String(error)}`);
-      }
-    },
-  });
-
-  /** The session's record, or undefined once the registry has pruned it. */
-  function recordOf(sessionId: string): SessionRecord | undefined {
-    return options.registry.list().find((held) => held.sessionId === sessionId);
-  }
-  function holds(sessionId: string): boolean {
-    return recordOf(sessionId) !== undefined;
-  }
-
-  const judge =
-    options.judgeKey === null
-      ? null
-      : createJudge({
-          apiKey: options.judgeKey,
-          threshold: options.config.inboxThreshold,
-          ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-          log: options.log,
-          // Handed over whole and uncast: the judge's flag type is checked against the store's here,
-          // so a field one side adds and the other lacks fails the build at this line.
-          onVerdict: (sessionId, flag) => {
-            if (!holds(sessionId)) return;
-            store.flag(sessionId, flag);
-          },
-        });
-  options.log(
-    judge === null
-      ? "broker: the operator inbox is on, reading ASK: lines alone with the judge off"
-      : "broker: the operator inbox is on, and the judge reads unmarked replies",
-  );
-
+  threadFor: (sessionId: string) => string | null;
+}): { session: (lineage: string) => SightingSession | undefined; beginPass: () => void } {
+  let memo = new Map<string, SightingSession | undefined>();
   return {
-    reply(sessionId, text, postedAt, messageId) {
-      const record = recordOf(sessionId);
-      if (record === undefined) return;
-      const shown = messageId === null ? {} : { messageId };
-      const line = findAskLine(text);
-      if (line !== null) {
-        // The excerpt and the flag both read the marked line alone. The flag takes it untrimmed, so
-        // an indented line fails the matcher's first-character anchor as it does in the plugin.
-        const excerpt = excerptOf(line);
-        const stewardAsk = record.lineage !== null && hasStewardAsk(line);
-        store.flag(sessionId, { source: "marked", postedAt, excerpt, stewardAsk, ...shown });
-        return;
-      }
-      // Every reply with no mark goes to the judge while the judge is on.
-      if (judge !== null) {
-        judge.submit(sessionId, { text, postedAt, ...shown });
-      }
+    beginPass: () => {
+      memo = new Map();
     },
-    clear(sessionId, at) {
-      store.clear(sessionId, at);
+    session: (lineage) => {
+      if (memo.has(lineage)) return memo.get(lineage);
+      const record = liveByLineage(options.registry.list(), lineage);
+      const resolved =
+        record === null
+          ? undefined
+          : { sessionId: record.sessionId, threadId: options.threadFor(record.sessionId) };
+      memo.set(lineage, resolved);
+      return resolved;
     },
-    clearEnded(sessionId, at) {
-      store.clearEnded(sessionId, at);
-    },
-    reconcile(sessions) {
-      const live = new Set(sessions.map((record) => record.sessionId));
-      store.reconcile(live);
-    },
-    items: () => store.items(),
   };
 }
 
 /**
- * The lineage takeover's caller-side act: the departed session's inbox item leaves at the same
- * moment its thread passes to the successor, and the restart notice still posts.
+ * The lineage takeover's caller-side act: the restart notice posts to the thread that passes to the
+ * successor, and the thread's receipts are restored.
  *
- * The clear runs first and the post second, and neither depends on the other landing. A throw out
- * of `clearEnded` is caught here, on `toInbox`'s shape in `broker/routing/inbound.ts`. There a
- * message already routed must not read as failed. Here a rebind already under way must not stop the
- * notice. The one log line names the departed session rather than the error, whose owner reports
- * its own.
- * The clear runs whether or not the thread is open yet, because the rebind happened either way. The
- * post is skipped on a null thread ID, since there is nowhere to post into and the very next pass
- * opens the thread.
+ * The post is skipped on a null thread ID, since there is nowhere to post into and the very next
+ * pass opens the thread.
  * The thread's receipts are restored too. The status reader closes an error episode through the
  * session's thread, and the departed session no longer has one, so its ⚠️ mark would otherwise stay
  * on the thread for every later message.
  */
 export function rebindHandling(options: {
-  /** Null when `CHANNEL_INBOX_CARD` is off, which leaves the clear a no-op. */
-  inbox: Pick<Inbox, "clearEnded"> | null;
   /** Absent for a caller with no receipt tracker, which leaves the restore a no-op. */
   receipts?: Pick<ReceiptTracker, "restore"> | null;
   post: (input: { threadId: string; text: string }) => Promise<CallOutcome<{ messageId: string | null }>>;
-  now: () => number;
-  log: (message: string) => void;
 }): (event: { lineage: string; fromSessionId: string; toSessionId: string; threadId: string | null }) => void {
   return (event) => {
-    if (options.inbox !== null) {
-      try {
-        options.inbox.clearEnded(event.fromSessionId, options.now());
-      } catch {
-        options.log(
-          `broker: the inbox could not clear session ${event.fromSessionId}'s item on its rebind`,
-        );
-      }
-    }
     if (event.threadId === null) return;
     options.receipts?.restore(event.threadId);
     void options.post({ threadId: event.threadId, text: renderRestartNotice(event.lineage) });
@@ -891,45 +798,53 @@ export function rebindHandling(options: {
 }
 
 /**
- * The Jev key both the inbox judge and the response gate use, read once from the one file
- * `CHANNEL_INBOX_JUDGE_KEY_FILE` names, or null where neither needs it or the file is unusable
- * and only the inbox judge wanted it.
+ * The Jev key the response gate and the voice's ranking use, read once from the one file
+ * `CHANNEL_JEV_KEY_FILE` names, or null where neither needs it or the file is unusable and only the
+ * voice wanted it. The earlier name `CHANNEL_INBOX_JUDGE_KEY_FILE` names the same file, and a host
+ * still setting it gets one warning naming the new name, whichever consumers are on.
  *
- * The two consumers fail differently. The inbox judge is an extra reading of unmarked replies, so
- * an unusable key turns it off with the one warning `readInboxJudgeKey` writes and the inbox runs
- * on `ASK:` lines. The gate, in `shadow` or `live`, has asked for every message in a gated thread
- * to be judged, and a broker that silently could not judge would deliver on the age cap alone in
- * `live` and journal nothing in `shadow`, a week of shadow rows that never existed: so it refuses
- * to start. The refusal names the mode, the variable and the cause, never the file's contents.
- * The inbox judge's own warning is written only where the inbox card is on, since it says that
- * judge is off, which is no news on a host that never turned it on.
+ * The two consumers fail differently. The gate, in `shadow` or `live`, has asked for every message
+ * in a gated thread to be judged, and a broker that silently could not judge would deliver on the
+ * age cap alone in `live` and journal nothing in `shadow`, a week of shadow rows that never
+ * existed: so it refuses to start. The refusal names the mode, the variable and the cause, never
+ * the file's contents. The voice ranks spoken turns with the key; without one every spoken turn
+ * goes to the persona's session, which the voice-on log line says, so the voice alone never
+ * refuses. A named file it cannot use is warned once, by the voice's name with the cause; an unset
+ * file is the ordinary off state and warns nothing.
  */
 export function readJudgeKey(
-  config: Pick<BrokerConfig, "inboxCard" | "responseGate" | "inboxJudgeKeyFile">,
+  config: Pick<BrokerConfig, "responseGate" | "jevKeyFile" | "jevKeyFileOldName" | "voice">,
   warn: (message: string) => void,
   // Injectable so a test reaches the refusal without a hardened file; the default is the check
   // the token file is held to.
   protect?: (file: string) => void,
 ): string | null {
-  if (!config.inboxCard && config.responseGate === "off") return null;
+  if (config.jevKeyFileOldName) {
+    warn(
+      "broker: CHANNEL_INBOX_JUDGE_KEY_FILE is the old name of CHANNEL_JEV_KEY_FILE, " +
+        "move the path to CHANNEL_JEV_KEY_FILE and remove the old line",
+    );
+  }
+  if (config.responseGate === "off" && !config.voice) return null;
+  const prefix = "broker: the Jev key file ";
   let problem: string | null = null;
-  const key = readInboxJudgeKey(
-    config.inboxJudgeKeyFile,
+  const key = readJevKey(
+    config.jevKeyFile,
     (line) => {
       problem = line;
-      if (config.inboxCard) warn(line);
     },
     protect,
   );
+  if (key === null && problem !== null && config.responseGate === "off") {
+    warn((problem as string).replace(prefix, "broker: the voice ranks no turn, its key file "));
+  }
   if (key !== null || config.responseGate === "off") return key;
   const cause =
     problem === null
-      ? "CHANNEL_INBOX_JUDGE_KEY_FILE is unset"
-      : "the file CHANNEL_INBOX_JUDGE_KEY_FILE names " +
-        (problem as string).replace(/^broker: the inbox judge is off, its key file /, "");
-  throw new Error(
-    `the response gate is ${config.responseGate} and needs the inbox judge's key, but ${cause}`,
-  );
+      ? "CHANNEL_JEV_KEY_FILE is unset"
+      : (config.jevKeyFileOldName ? "the Jev key file " : "the file CHANNEL_JEV_KEY_FILE names ") +
+        (problem as string).replace(prefix, "");
+  throw new Error(`the response gate is ${config.responseGate} and needs the Jev key, but ${cause}`);
 }
 
 export async function startBroker(config: BrokerConfig): Promise<Broker> {
@@ -946,12 +861,24 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     logger.warn(message);
   };
 
-  // Read once, for the inbox judge and the response gate alike, and before anything is opened or
-  // bound, so a host whose gate cannot judge fails at once with the reason on disk: under the
-  // scheduled task there is no console for the throw to reach.
+  // Read once, for the response gate and the voice alike, and before anything is opened or bound,
+  // so a host whose gate cannot judge fails at once with the reason on disk: under the scheduled
+  // task there is no console for the throw to reach.
   let judgeKey: string | null;
+  // The transcription key is read on the same terms, and only where the voice is on: a named file
+  // the voice cannot use refuses the start, as an unusable Discord token file does, and so does one
+  // outside the state root, the directory holding the state file.
+  let sttKey: string | null;
+  // So is the speech service's token, under the same state-root rule.
+  let speechToken: string | null;
+  // And the fast tier's Anthropic key, under the same rule.
+  let fastKey: string | null;
   try {
     judgeKey = readJudgeKey(config, warn);
+    const stateRoot = path.dirname(config.stateFile);
+    sttKey = config.voice ? readVoiceSttKey(config.voiceSttKeyFile, stateRoot) : null;
+    speechToken = config.voice ? readSpeechToken(config.speechTokenFile, stateRoot) : null;
+    fastKey = config.voice ? readVoiceFastKey(config.voiceFastKeyFile, stateRoot) : null;
   } catch (error) {
     const message = `broker: refusing to start: ${String(error)}`;
     console.error(message);
@@ -959,11 +886,10 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     throw error;
   }
 
-  // The operator inbox, mutable for the reason `threadFor` below is: it is built from the sessions
-  // the registry restored, so it can only exist once the registry does, and the registry's own
-  // seams into it read it through this closure. Null while the card is off, which leaves each of
-  // those seams a no-op.
-  let inbox: Inbox | null = null;
+  // The decisions card's sightings, mutable for the reason `threadFor` below is: the registry's
+  // mutate seam reaches them through this closure so a pruned session's sightings leave with it.
+  // Null while the card is off or no roster is configured, which leaves that seam a no-op.
+  let sightings: Sightings | null = null;
   // The inbound router, mutable on the same terms: it exists only once Discord is configured below,
   // and the registry's mutate seam reaches it through this closure so a session's end drops the
   // buffer its thread was holding. Null on a host with no Discord, which leaves that seam a no-op.
@@ -989,18 +915,19 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
         console.error(message);
         logger.error(message);
       }
-      // The mutate signal is also how a pruned record's inbox item leaves. Caught for the reason
+      // The mutate signal is also how a pruned session's ask sightings leave. Caught for the reason
       // the write above is: a throw here would surface out of the sweep's interval or a hook post.
       try {
-        inbox?.reconcile(sessions);
+        sightings?.reconcile(new Set(sessions.map((record) => record.sessionId)));
       } catch (error) {
-        const message = `broker: the inbox could not reconcile against the registry: ${String(error)}`;
+        const message =
+          `broker: the decisions card could not reconcile against the registry: ${String(error)}`;
         console.error(message);
         logger.error(message);
       }
       // The mutate signal is also how a thread's held buffer leaves with its session: a session
       // ends on several paths, and this is the one that sees them all. Caught for the reason the
-      // inbox's is: a throw here would surface out of the sweep's interval or a hook post.
+      // write above is: a throw here would surface out of the sweep's interval or a hook post.
       try {
         inbound?.reconcile(sessions);
       } catch (error) {
@@ -1010,25 +937,12 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
         logger.error(message);
       }
     },
-    // An operator prompt answers the session it was typed to, which is what clears its inbox item.
-    onPrompt: (sessionId, at) => inbox?.clear(sessionId, at),
   });
 
   const note = (message: string): void => {
     console.log(message);
     logger.info(message);
   };
-
-  inbox = inboxWiring({
-    config,
-    registry,
-    judgeKey,
-    log: note,
-    onError: (message) => {
-      console.error(message);
-      logger.error(message);
-    },
-  });
 
   // The Discord half of message routing is only wired when Discord is configured, but the relay
   // half is not: a session's relay attaches, holds its session out of the staleness sweep, and
@@ -1068,8 +982,8 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
   let fleetCard: () => string | null = () => null;
   // The fleet board card's own message, on the same terms and for the same reason.
   let boardCardMessage: () => string | null = () => null;
-  // The inbox card's own message, on the same terms and for the same reason.
-  let inboxCardMessage: () => string | null = () => null;
+  // The decisions card's own message, on the same terms and for the same reason.
+  let decisionsCardMessage: () => string | null = () => null;
   // The blocked-state desk, mutable for the reason `threadFor` is: it is built inside the Discord
   // block below, because its alerts need the sender gate's operator ID and the surface's threads,
   // and the refresh timer that ticks it starts before that block finishes. Without Discord it is
@@ -1084,9 +998,31 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
   // and each named only while it has a message to name. A card a knob left unbuilt, and one Discord
   // has reported gone until it is rebuilt, hold no slot at all.
   const permanentCards = (): string[] =>
-    [fleetCard(), boardCardMessage(), inboxCardMessage()].filter(
+    [fleetCard(), boardCardMessage(), decisionsCardMessage()].filter(
       (messageId): messageId is string => messageId !== null,
     );
+  // The decisions card's sightings, under the knob and a roster: the roster names the ledgers the
+  // card reads, so on without one builds nothing and says so once. Built here, before the outbound
+  // router, because the router's one ask tap is what feeds them; the card itself needs a channel and
+  // is built after the Discord block below. The session seam behind the
+  // sightings is the card's own, so each pass resolves a persona's session once.
+  const decisionsSessions = decisionsSessionSeam({
+    registry,
+    threadFor: (sessionId) => threadFor(sessionId),
+  });
+  if (config.decisionsCard) {
+    if (config.boardRosterPath === "") {
+      warn(
+        "broker: CHANNEL_DECISIONS_CARD is on but CHANNEL_BOARD_ROSTER is unset, " +
+          "the decisions card is not built",
+      );
+    } else {
+      sightings = createSightings({
+        session: decisionsSessions.session,
+        guildId: () => (gateway === null ? null : gateway.guildId()),
+      });
+    }
+  }
   let messenger: ThreadMessenger = {
     postToThread: async () => ({
       status: "failed",
@@ -1145,6 +1081,9 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
         promptClaimMs: Math.max(DEFAULT_PROMPT_CLAIM_MS, config.interimPollMs * 3),
       })
     : null;
+  // The bridge of the channel the voice sits in, set by each join and cleared by its leave, so
+  // the outbound router's voice tap below reaches whichever bridge is current and none between.
+  let voiceBridge: VoiceBridge | null = null;
   const outbound = createOutboundRouter({
     registry,
     threadFor: (sessionId) => threadFor(sessionId),
@@ -1153,7 +1092,11 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     peerMessages: config.peerMessages,
     log: note,
     ...(echo === null ? {} : { echo }),
-    ...(inbox === null ? {} : { inbox }),
+    ...(sightings === null ? {} : { askTap: sightings }),
+    voice: { reply: (sessionId, text) => voiceBridge?.reply(sessionId, text) },
+    // Read through the closure for the reason the registry's seam reads it: the inbound router,
+    // which builds the response gate, exists only once Discord is configured below.
+    gate: { reply: (sessionId, text) => inbound?.noteReply(sessionId, text) },
     // Read through the closure for the reason `threadFor` is: the tracker is built inside the
     // Discord block below, once the transport it paints reactions through exists.
     receipts: {
@@ -1476,6 +1419,11 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       : {
           turns: {
             opened: (sessionId: string) => {
+              // The same prompt signal is where a voice hand-off binds to the turn that takes it,
+              // and the Stop below is where that turn's replies stop being spoken. The bridge reads
+              // first, because it asks the registry whether the turn this signal interrupts has
+              // gone quiet, and the stamp just below would answer that it has not.
+              voiceBridge?.turnOpened(sessionId);
               registry.noteTurnOpened(sessionId);
               // Any credited prompt submission closes an open error episode, a queued message injected
               // mid-turn included: an interrupted or abandoned failing turn writes no output line, and
@@ -1485,6 +1433,7 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
             closed: (sessionId: string) => {
               const threadId = threadFor(sessionId);
               if (threadId !== null) typingKeeper?.release(threadId);
+              voiceBridge?.turnClosed(sessionId);
             },
           },
         }),
@@ -1555,6 +1504,10 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
   let refresh: NodeJS.Timeout | null = null;
   let inFlight: Promise<void> = Promise.resolve();
   let gateway: MessageSource | null = null;
+  // The voice module, built after the gateway starts and only where `CHANNEL_VOICE` is on. The
+  // inbound router's command seam reaches it through this closure, since the router is built
+  // before the gateway it needs.
+  let voice: Voice | null = null;
   // The typing keeper's own timers run outside `refresh`, one per typing thread rather than one for
   // the whole reconcile pass, so clearing `refresh` alone leaves them running. Every site that tears
   // `refresh` down calls `typingKeeper?.stop()`, which also latches the keeper, so a late `release`
@@ -1626,24 +1579,15 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
         logger.info(message);
       },
       onFatal,
-      // Item 3: the reconciler itself never posts (see ThreadMessenger's own comment on why), so
-      // this is the caller that turns a rebind into the one-line notice the thread gets and clears
-      // the departed session's inbox item, guarded so neither a failure in the clear nor a missing
-      // thread can stop the other. A rebind with no thread ID yet (the surface has posted the
-      // starter message but has not opened the thread on it) has nowhere to post into; the very
+      // The reconciler itself never posts (see ThreadMessenger's own comment on why), so this is
+      // the caller that turns a rebind into the one-line notice the thread gets. A rebind with no
+      // thread ID yet (the surface has posted the starter message but has not opened the thread on
+      // it) has nowhere to post into; the very
       // next pass opens it, and there is nothing here worth retrying for, since the notice is a
       // courtesy line, not state anything depends on.
       onRebind: rebindHandling({
-        inbox,
         receipts: { restore: (threadId) => receipts?.restore(threadId) },
         post: (input) => messenger.postToThread(input),
-        now: Date.now,
-        // A failed clear leaves an ask stuck on the card, so it logs at the level the inbox's
-        // other failures do.
-        log: (message) => {
-          console.error(message);
-          logger.error(message);
-        },
       }),
     });
     // The channel's pin list, driven from the same timer the surfaces are. Its own budgets and its
@@ -1861,7 +1805,7 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       now: Date.now,
       log: note,
     });
-    // Beside the registry snapshot and the card bindings, as the inbox snapshot is: one row per
+    // Beside the registry snapshot and the card bindings: one row per
     // gate decision, written only where the mode is `shadow` or `live`.
     const responseGateJournalFile = path.join(path.dirname(config.stateFile), "response-gate.jsonl");
     // Beside the journal: the buffers the gate holds, written on every change in `live` alone and
@@ -1885,7 +1829,6 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       questions: { answerTyped: questionDesk.answerTyped },
       threadFor: (sessionId) => surface.threadFor(sessionId),
       writer: steeringWriter,
-      ...(inbox === null ? {} : { inbox }),
       // The mode, caps, judge and journal. The router builds the gate, whose timers deliver into
       // the router's own pipe; the real clock and the real fetch are the defaults it takes. The
       // journal sits beside the state file and rotates as the broker log does.
@@ -1923,6 +1866,12 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
         maxBytes: config.attachmentMaxBytes,
         stateDir: path.dirname(config.stateFile),
       }),
+      // The voice commands, only where the voice is on: off, `voice on` is text for the session.
+      // Before the module starts and once the broker is stopping, a command is told the voice is
+      // not ready yet.
+      ...(config.voice
+        ? { voice: voiceWhenReady(() => voice) }
+        : {}),
     });
     inbound = router;
     if (config.responseGate === "live") {
@@ -1958,11 +1907,149 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       // are pinned, and this removes the system message Discord writes into the channel behind
       // each pin.
       deleteMessage: transport.deleteMessage,
+      voice: config.voice,
       log: note,
     });
     // Awaited: a login failure belongs to startup, where it is reported, rather than surfacing
     // later as messages that silently never arrive.
     await gateway.start();
+
+    // The voice module, started after the gateway whose voice adapter it joins through. Imported
+    // here, behind the knob, so a broker with the voice off never loads the voice library or the
+    // Opus codec.
+    if (config.voice && gateway.voice !== null) {
+      const { createVoice } = await import("./voice/connection.ts");
+      const { createFlux } = await import("./voice/flux.ts");
+      const { transcriptionHooks } = await import("./voice/transcription.ts");
+      const { ANSWER_TIMEOUT_MS, createFastTier } = await import("./voice/fast.ts");
+      const { JEV_TIMEOUT_MS } = await import("./jev/client.ts");
+      const { createSpeechService } = await import("./voice/speech-service.ts");
+      const { voiceJoin } = await import("./voice/join.ts");
+      const key = sttKey;
+      const voiceGateway = gateway.voice;
+      const speechUrl = config.speechUrl;
+      const speechCredential = speechToken;
+      // The session bound to a thread, the live one over an ended one, as the inbound router
+      // resolves a thread's message.
+      const sessionBoundTo = (threadId: string): SessionRecord | null => {
+        let ended: SessionRecord | null = null;
+        for (const record of registry.list()) {
+          if (threadFor(record.sessionId) !== threadId) continue;
+          if (record.state !== "ended") return record;
+          ended = record;
+        }
+        return ended;
+      };
+      // The transcriber lives exactly as long as the joined channel: opened on the join, closed on
+      // the leave, so no audio reaches Deepgram while the bot is in no channel. The voice's own
+      // stop leaves the channel, which closes it. The bridge, the fast tier and the speaker live
+      // exactly as long, built by `attach` on the join and released by its detach on the leave.
+      voice = createVoice({
+        gateway: voiceGateway,
+        gate,
+        idleMs: config.voiceIdleMs,
+        loopback: config.voiceLoopback,
+        ...transcriptionHooks({
+          key,
+          shortTurnWords: config.voiceShortTurnWords,
+          turnAudioSeconds: config.voiceTurnAudioSeconds,
+          create: (stt) =>
+            createFlux({
+              key: stt,
+              eotThreshold: config.voiceEotThreshold,
+              eagerThreshold: config.voiceEagerThreshold,
+              eager: config.voiceEager,
+              log: note,
+            }),
+          attach: voiceJoin({
+            gate,
+            sessionBoundTo,
+            sessionName: (threadId) => {
+              const record = sessionBoundTo(threadId);
+              return record === null ? null : displayName(toView(record));
+            },
+            nameOf: (senderId) => voiceGateway.nameOf(senderId),
+            // The typing keeper's own reading of a turn that has gone quiet, so a hand-off turn
+            // that ended without a Stop closes on the same window the typing line stops at.
+            quiet: (sessionId) => {
+              const record = registry.list().find((held) => held.sessionId === sessionId);
+              if (record === undefined) return true;
+              const until = typingDeadline(toView(record), discord.idleAfterMs);
+              return until === null || Date.now() > until;
+            },
+            deliver: (processToken, event) => relays.deliver(processToken, event),
+            writer: mirrorWriter,
+            mirror: config.mirror,
+            maxSpokenWords: config.voiceMaxSpokenWords,
+            eagerSettleMs: config.voiceEagerSettleMs,
+            hold: (id, until) => typingKeeper?.hold(id, until) ?? ((): void => {}),
+            // The longest the path from a turn's end to its first frame can run: the ranking's
+            // timeout, then the fast model's, then the speech service's.
+            holdMs: JEV_TIMEOUT_MS + ANSWER_TIMEOUT_MS + config.speechTimeoutMs,
+            tier: ({ names, speaker, player, handOff, forget, turnAudio }) =>
+              createFastTier({
+                names,
+                thresholds: { handoff: config.voiceHandoffThreshold, answer: config.voiceAnswerThreshold },
+                memoryTurns: config.voiceMemoryTurns,
+                holdFirstMs: config.voiceHoldFirstMs,
+                holdSecondMs: config.voiceHoldSecondMs,
+                judge: judgeKey === null ? null : { apiKey: judgeKey },
+                fast: fastKey === null ? null : { apiKey: fastKey, model: config.voiceFastModel },
+                speaker,
+                player,
+                handOff,
+                forget,
+                turnAudio,
+                log: note,
+              }),
+            speaker:
+              speechUrl === null || speechCredential === null
+                ? null
+                : ({ player, fallback }) =>
+                    createSpeechService({
+                      url: speechUrl,
+                      token: speechCredential,
+                      voice: config.speechVoice,
+                      timeoutMs: config.speechTimeoutMs,
+                      player,
+                      fallback,
+                      log: note,
+                    }),
+            attached: (bridge) => {
+              voiceBridge = bridge;
+            },
+            detached: (bridge) => {
+              if (voiceBridge === bridge) voiceBridge = null;
+            },
+            log: note,
+          }),
+          log: note,
+        }),
+        log: note,
+      });
+      note(
+        `broker: the voice is on, an operator's voice on joins their channel, which is left after ` +
+          `${String(config.voiceIdleMs)}ms with no operator audio` +
+          (config.voiceLoopback ? ", and the development loopback is on" : "") +
+          (key === null
+            ? "; CHANNEL_VOICE_STT_KEY_FILE is unset, so the channel is deaf and the thread keeps working"
+            : `; operator audio is transcribed by Deepgram Flux while the bot is in a channel` +
+              (config.voiceEager ? ", with eager end of turn" : "")) +
+          (speechToken === null
+            ? "; CHANNEL_SPEECH_URL is unset, so the voice is mute and answers stay in the thread"
+            : `; the speech service is configured, in the voice ${config.speechVoice}`) +
+          // The fast tier's keys as read at this start, each named by what it is for: the Jev key
+          // the response gate and the voice share is the fast tier's ranking key, and the fast key
+          // with its model is its answering key. The line says what is read and nothing of what is
+          // done with it.
+          (judgeKey === null
+            ? "; no Jev key is read for the fast tier's ranking"
+            : "; the Jev key is read for the fast tier's ranking") +
+          (fastKey === null
+            ? ", and CHANNEL_VOICE_FAST_KEY_FILE is unset, so no fast tier key is read"
+            : `, and the fast tier's key is read, for ${config.voiceFastModel}`),
+      );
+    }
 
     const participants =
       gate.participantIds.length > 0
@@ -1988,6 +2075,9 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       if (refresh !== null) clearInterval(refresh);
       refresh = null;
       typingKeeper?.stop();
+      // Ahead of the gateway, whose client the voice connection signals through.
+      if (voice !== null) void voice.stop().catch(() => {});
+      voice = null;
       // The gateway logs in before the listener binds, so a port conflict would otherwise leave a
       // connected bot behind in a process that is about to throw: the bot would show online, and a
       // second broker starting later would have two of them reading the same channel.
@@ -2086,51 +2176,74 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     );
   }
 
-  // The inbox card, under both of its conditions: the knob (which is what `inbox` being non-null
-  // already reflects, since `inboxWiring` returns null when `CHANNEL_INBOX_CARD` is off) and a
-  // configured channel. Off either way means the machinery is absent rather than idle, so nothing
-  // opens a thread and nothing runs on a timer.
-  const inboxCardBindingFile = path.join(path.dirname(config.stateFile), "inbox-card.json");
-  const inboxCard =
-    inbox !== null && cardTransport !== null
-      ? createInboxCard({
-          items: inbox.items,
-          session: (sessionId) => {
-            const record = registry.list().find((held) => held.sessionId === sessionId);
-            if (record === undefined) return undefined;
-            return {
-              title: displayName(toView(record)),
-              threadId: threadFor(sessionId),
-              ended: record.state === "ended",
-            };
-          },
-          guildId: () => (gateway === null ? null : gateway.guildId()),
-          transport: cardTransport,
-          binding: () => loadInboxBinding(inboxCardBindingFile, { log: note }),
-          onBind: (binding) => {
-            try {
-              saveInboxBinding(inboxCardBindingFile, binding);
-            } catch (error) {
-              const message =
-                `broker: cannot write the inbox card binding to ${inboxCardBindingFile}: ` +
-                String(error);
-              console.error(message);
-              logger.error(message);
-            }
-          },
-          refreshMs: config.inboxCardRefreshMs,
-          log: note,
-        })
-      : null;
-  if (inboxCard !== null) {
+  // The decisions card, under its three conditions: the knob and a roster (which is what `sightings`
+  // being non-null already reflects) and a configured channel. Off any way means the machinery is
+  // absent rather than idle, so no ledger is read, nothing opens a thread and nothing runs on a
+  // timer. The roster and the ledgers are read on this card's own pass, as the board card reads them
+  // on its own: each card reads the file under the one capped, last-good-reading read.
+  const decisionsCardBindingFile = path.join(path.dirname(config.stateFile), "decisions-card.json");
+  const decisionsAsksFile = path.join(path.dirname(config.stateFile), "decisions-asks.json");
+  let decisionsCard: DecisionsCard | null = null;
+  if (sightings !== null && cardTransport !== null) {
+    const held = sightings;
+    const roster = createRosterReader(config.boardRosterPath, { log: note });
+    const ledgers = createLedgerReader({ log: note });
+    const decisionsSaveFailures = createRepeatLog(
+      DECISIONS_SAVE_REPEAT_LOG,
+      (message) => {
+        console.error(message);
+        logger.error(message);
+      },
+      Date.now,
+    );
+    decisionsCard = createDecisionsCard({
+      ledgers: () => ledgers.read(roster.read()),
+      // The pass opens a fresh session memo, so every link it resolves reads the registry once per
+      // persona, and the sightings' own resolver does the rest.
+      links: () => {
+        decisionsSessions.beginPass();
+        return held.linkFor;
+      },
+      transport: cardTransport,
+      messenger,
+      binding: () => loadDecisionsBinding(decisionsCardBindingFile, { log: note }),
+      onBind: (binding) => {
+        try {
+          saveDecisionsBinding(decisionsCardBindingFile, binding);
+        } catch (error) {
+          const message =
+            `broker: cannot write the decisions card binding to ${decisionsCardBindingFile}: ` +
+            String(error);
+          console.error(message);
+          logger.error(message);
+        }
+      },
+      asks: () => loadAskRecords(decisionsAsksFile, { log: note }),
+      // Reports whether the write landed, so a map the file does not hold yet is handed over again
+      // on the next pass rather than lost until the next change. A disk that keeps refusing is
+      // reported through the repeat log rather than once per pass.
+      onAsks: (records) => {
+        try {
+          saveAskRecords(decisionsAsksFile, records);
+          return true;
+        } catch (error) {
+          decisionsSaveFailures(`broker: cannot write the decisions card asks to ${decisionsAsksFile}`, String(error));
+          return false;
+        }
+      },
+      refreshMs: config.decisionsCardRefreshMs,
+      log: note,
+    });
+  }
+  if (decisionsCard !== null) {
+    const started = decisionsCard;
     // The third card the channel keeps pinned permanently. Read through the card rather than from
     // the binding file, so a card Discord reported gone stops being pinned until it is rebuilt.
-    inboxCardMessage = () => inboxCard.cardMessage();
-    // Started after the listener is bound, for the reason the usage and board cards are: a broker
-    // that never bound leaves no timer editing a Discord thread on behalf of a process that is
-    // about to throw.
-    inboxCard.start();
-    note(`broker: the fleet inbox card refreshes every ${config.inboxCardRefreshMs}ms`);
+    decisionsCardMessage = () => started.cardMessage();
+    // Started after the listener is bound, for the reason the other cards are: a broker that never
+    // bound leaves no timer editing a Discord thread on behalf of a process that is about to throw.
+    decisionsCard.start();
+    note(`broker: the fleet decisions card refreshes every ${config.decisionsCardRefreshMs}ms`);
   }
 
   async function stop(): Promise<void> {
@@ -2151,10 +2264,16 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     // for a broker that has already dropped its gateway. What it returns is the drain, awaited
     // beside the others.
     const cardDrain = usageCard === null ? null : usageCard.stop();
-    // The board and inbox cards' timers go down in the same synchronous block, and for the same
+    // The board and decisions cards' timers go down in the same synchronous block, and for the same
     // reason.
     const boardDrain = boardCard === null ? null : boardCard.stop();
-    const inboxDrain = inboxCard === null ? null : inboxCard.stop();
+    const decisionsDrain = decisionsCard === null ? null : decisionsCard.stop();
+    // The voice leaves its channel in the same synchronous block, its handle cleared so no command
+    // reaches it again, and a join still in flight is awaited before the gateway goes: the voice
+    // connection signals through the gateway's client and is destroyed with it.
+    const voiceDrain = voice === null ? null : voice.stop();
+    voice = null;
+    if (voiceDrain !== null) await voiceDrain;
     if (gateway !== null) await gateway.stop();
     // A retention pass already running is waited for, so shutdown does not race it still reading the folder.
     await pruneInFlight;
@@ -2171,7 +2290,7 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     // call's return.
     if (cardDrain !== null) await cardDrain;
     if (boardDrain !== null) await boardDrain;
-    if (inboxDrain !== null) await inboxDrain;
+    if (decisionsDrain !== null) await decisionsDrain;
     // The broker going down is not a session dying, so the pipes are dropped without ending
     // anything. The relays reconnect; the sessions behind them keep working either way.
     relays.closeAll();
@@ -2192,7 +2311,6 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     registry,
     port,
     logger,
-    inbox: inbox === null ? null : { items: inbox.items },
     stop,
   };
 }

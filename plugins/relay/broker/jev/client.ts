@@ -1,9 +1,9 @@
-// The Jev client: the one way the broker sends text to a host other than Discord.
+// The Jev client: the one way the broker sends text to TypeSafe.
 //
-// Two callers ask TypeSafe's Jev classifier yes-or-no questions about text. The inbox judge asks
-// about a session's final reply, and the response gate asks about a thread's buffered
-// conversation. Each supplies its own questions, the state they are asked about, the threshold it
-// reads the answer against and the two lines its failures are logged on. What they share is here,
+// Two callers ask TypeSafe's Jev classifier yes-or-no questions about text. The response gate asks
+// about a thread's buffered conversation, and the voice's ranking asks about a spoken turn. Each
+// supplies its own questions, the state they are asked about, the threshold it reads the answer
+// against and the two lines its failures are logged on. What they share is here,
 // and none of it is an argument: the host, the model and the timeout are constants, so nothing a
 // caller passes can send a text anywhere else, and this module reads no setting and no environment
 // variable.

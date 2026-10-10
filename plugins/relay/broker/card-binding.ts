@@ -1,4 +1,4 @@
-// The one binding module every standing card (board, usage, inbox) persists its own thread
+// The one binding module every standing card (board, usage, decisions) persists its own thread
 // through, so a broker restart edits the card it already owns instead of opening a second
 // "Fleet: <card>" thread beside the first one.
 //

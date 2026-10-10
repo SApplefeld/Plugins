@@ -349,14 +349,6 @@ export type RegistryOptions = {
   fallbackAttachMs?: number;
   /** Called after any mutation, with the full record set, so the caller can persist. */
   onMutate?: (sessions: SessionRecord[]) => void;
-  /**
-   * Told each operator prompt `engage` stamps, with the stamp's own clamped instant: the prompts a
-   * person typed, on every path one reaches this registry by. The other writers of
-   * `lastEngagementAt`, a `SessionStart` and a completed tool call, never reach it, since neither
-   * is the operator answering the session. A throw out of it is swallowed, so a failure behind it
-   * can never cost the stamp or the post that carried the prompt; its owner reports its own.
-   */
-  onPrompt?: (sessionId: string, at: number) => void;
   sessions?: SessionRecord[];
 };
 
@@ -824,13 +816,6 @@ export function createRegistry(options: RegistryOptions): Registry {
     // all, which is a silent no-op where the absent case wants the read clock.
     const stamp = at == null ? clock : Math.min(at, clock);
     record.lastEngagementAt = Math.max(record.lastEngagementAt, stamp);
-    // The stamp rather than the field: the field is a high-water mark, and what the listener
-    // compares is when this prompt was typed.
-    try {
-      options.onPrompt?.(sessionId, stamp);
-    } catch {
-      // Swallowed rather than logged: the registry holds no log, and the listener logs its own.
-    }
     // Persisted, unlike the relay heartbeat: the router calls this for prompts a person typed and
     // for nothing else, the harness's own wake injections included, so the write rate is a human
     // one rather than a per-second one. A restart that read back a stale engagement stamp would
@@ -1107,4 +1092,20 @@ export function createRegistry(options: RegistryOptions): Registry {
     relaySeen,
     relayClosed,
   };
+}
+
+/**
+ * The session currently carrying a lineage: the record not yet ended whose `lineage` equals it,
+ * the newest by `startedAt` where several do, or null where none does. Newest wins because only a
+ * newer session takes a lineage over, the rule the surface rebinds a thread by. A stale record
+ * still counts, since staleness is a lapse in hook traffic and the session still owns its thread.
+ * Where two records share the newest `startedAt`, the one listed first wins.
+ */
+export function liveByLineage(records: readonly SessionRecord[], lineage: string): SessionRecord | null {
+  let found: SessionRecord | null = null;
+  for (const record of records) {
+    if (record.state === "ended" || record.lineage !== lineage) continue;
+    if (found === null || record.startedAt > found.startedAt) found = record;
+  }
+  return found;
 }

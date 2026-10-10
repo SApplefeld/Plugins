@@ -102,12 +102,30 @@ export const MAX_CARD_LENGTH = 1_900;
 const MARKDOWN = /[\\`*_~|<>#[\]()]/g;
 
 /**
- * Untrusted text for the body of a message: visible, and with markdown escaped so it renders as
- * the characters it contains rather than as syntax. `@everyone` and `@here` survive as text on
- * purpose; the transport's `allowed_mentions` is what stops them pinging anyone.
+ * A surrogate with no partner: a high one not followed by a low, or a low one not preceded by a
+ * high. Matched on UTF-16 units, which is what a regular expression without the `u` flag walks.
+ *
+ * Written out rather than called as `String.prototype.toWellFormed`, for the reason `isWellFormed`
+ * in `../sanitize.ts` gives: the method is typed only from the `es2024` library, and moving the
+ * compiler target for one call is a larger change than this replacement is worth.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Untrusted text for the body of a message: visible, with every lone surrogate replaced by U+FFFD,
+ * and with markdown escaped so it renders as the characters it contains rather than as syntax.
+ * `@everyone` and `@here` survive as text on purpose; the transport's `allowed_mentions` is what
+ * stops them pinging anyone.
+ *
+ * The surrogate replacement is here, at the one escape every card's text crosses, rather than in
+ * whichever renderer first met one: a lone surrogate cannot be encoded as the UTF-8 a request body
+ * is sent as, nothing downstream refuses it, and a guard on what reaches the channel belongs to the
+ * channel's boundary rather than to one producer.
  */
 export function inertText(value: string): string {
-  return visible(value).replace(MARKDOWN, (character) => `\\${character}`);
+  return visible(value)
+    .replace(LONE_SURROGATE, "\uFFFD")
+    .replace(MARKDOWN, (character) => `\\${character}`);
 }
 
 /**
@@ -1689,6 +1707,26 @@ export function renderMirror(kind: MirrorKind, text: string): string[] {
  */
 export function renderAnswer(text: string): string[] {
   return attributed(withoutInvisible(text).trim(), ANSWER_ATTRIBUTION);
+}
+
+/** Whose spoken line a voice post carries: the operator's, or the persona's own. */
+export type VoiceLineRole = "operator" | "persona";
+
+/**
+ * One line spoken in the thread's voice channel, rendered as the ordered messages it takes to carry
+ * it whole: `<name> (operator, voice): <text>` for the operator's turn and `<name> (voice): <text>`
+ * for the persona's, the forms the voice conversation is read back in.
+ *
+ * The same treatment a mirrored reply gets, from the same machinery, because it is the same class
+ * of text landing in the same thread: a transcript of what a person said, or an answer a model
+ * wrote, posted into the one channel the operator answers permission prompts in. The attribution is
+ * composed after the escape and spent against every message's budget as the mirror's is, so a
+ * spoken line can neither open a quoted block nor draw a chip. The name is a display name the
+ * channel or the session chose, so it takes the escape and the bound a peer's name takes.
+ */
+export function renderVoiceLine(role: VoiceLineRole, name: string, text: string): string[] {
+  const slot = role === "operator" ? "operator, voice" : "voice";
+  return attributed(withoutInvisible(text).trim(), `${inertField(name, MAX_PEER_NAME_DRAWN)} (${slot}): `);
 }
 
 /**

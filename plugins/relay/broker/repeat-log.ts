@@ -1,8 +1,8 @@
 // The one rate-limited repeat logger the broker's log surfaces write a repeating line through: the
-// tailer, the question desk, the interaction router, the inbox judge, the pin keeper and the three
-// standing cards. Each surface owns its window, its key cap and its text, which operators and
-// memory records grep for, so each hands this module a description of its own two lines and this
-// module owns only the counting.
+// tailer, the question desk, the interaction router, the pin keeper and the standing cards. Each
+// surface owns its window, its key cap and its text, which operators and memory records grep for,
+// so each hands this module a description of its own two lines and this module owns only the
+// counting.
 //
 // Two limiters with the same core stay local to their own layers: the intake's refusal limiter
 // writes through a Logger's warn level, and the router's drop limiter folds the count into the line
