@@ -25,24 +25,24 @@ const PREAMBLE =
   "The `conversation` is the newest part of a spoken exchange between a person and an AI " +
   "assistant, one line per spoken turn, oldest first, the person's lines written as " +
   "`<name> (operator): <text>` and the assistant's as `<name> (voice): <text>`. `turn` is " +
-  "what the person just said, which the assistant must now answer. The assistant has a small " +
-  "model that answers at once from general knowledge and the conversation alone, and a full " +
-  "session behind it with the person's files, tools, projects and other assistants, which takes " +
-  "longer.";
+  "what the person just said, which the assistant must now answer. The assistant speaks as one " +
+  "speaker. A small model is its social half, answering a greeting, thanks, an acknowledgment, a " +
+  "goodbye or a light question offhand. A full session behind it, with the person's files, " +
+  "tools, projects and other assistants, works out every real answer and takes longer.";
 
 /**
- * The two questions, yes-or-no (`noul`), keyed by the name each answer comes back under. The text
- * is a first wording rather than a tuned one.
+ * The two questions, yes-or-no (`noul`), keyed by the name each answer comes back under. The
+ * wording is untuned.
  */
 export const RANK_QUESTIONS: Readonly<Record<RankQuestion, JevQuestion>> = {
   answer_now: {
     type: "noul",
     instructions:
-      `${PREAMBLE} Can the small model answer the turn well from general knowledge and the ` +
-      "conversation alone? Count a greeting, a factual question, a definition, a short " +
-      "explanation, a clarification of something already said, and small talk. A turn that " +
-      "needs anything the person owns, anything that happened recently, or any action taken does " +
-      "not count.",
+      `${PREAMBLE} Can the small model answer the turn well offhand, from the conversation ` +
+      "alone? Count a greeting, thanks, an acknowledgment, a goodbye, small talk, and a light " +
+      "question that asks for no fact. A technical question, a question about a setting, a " +
+      "state, a fact, a number, a date or a name, and a turn that needs anything the person " +
+      "owns, anything that happened recently, or any action taken does not count.",
     criteria: {
       true: "Yes, the small model can answer the turn well on its own.",
       false: "No, the small model cannot answer the turn well on its own.",
@@ -54,8 +54,9 @@ export const RANK_QUESTIONS: Readonly<Record<RankQuestion, JevQuestion>> = {
       `${PREAMBLE} Does answering the turn need the full session: the person's files, projects, ` +
       "plans or tools, something that happened recently, an action to be taken, or another " +
       "assistant? Count a request to do, check, change, run, send, look up or remember something " +
-      "of the person's, and a question about the person's own work or state. A question the " +
-      "small model can answer from general knowledge alone does not count.",
+      "of the person's, a question about the person's own work or state, a technical question, " +
+      "and a question about a setting, a state or a fact. A light or social turn the small model " +
+      "can answer offhand does not count.",
     criteria: {
       true: "Yes, the turn needs the full session.",
       false: "No, the turn does not need the full session.",

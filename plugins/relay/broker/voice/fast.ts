@@ -41,6 +41,7 @@ import type { Player } from "./player.ts";
 import { STILL_LOOKING_LINES, THINKING_LINES, systemPrompt } from "./prompt.ts";
 import { RANK_QUESTIONS, RANK_REPEAT_LOG, decide, rankState } from "./rank.ts";
 import type { LineNames, RankQuestion, RankThresholds } from "./rank.ts";
+import { replyKind } from "./reply-check.ts";
 import type { SpokenLine, SpokenTurn } from "./speaker.ts";
 import type { TurnEvent } from "./transcriber.ts";
 
@@ -557,6 +558,15 @@ export function createFastTier(options: FastTierOptions): FastTier {
     if (turn.cancelled) return;
     if (!result.ok) {
       log(`voice: the fast answer failed (${result.kind}), so the turn is handed off`);
+      handOff(turn);
+      return;
+    }
+    // A reply that is the hand-off token, or that speaks about its own reach or takes back an earlier
+    // line, is discarded unspoken and unremembered, and the turn goes to the session. The log names
+    // the kind alone, never the reply.
+    const held = replyKind(result.text);
+    if (held !== null) {
+      log(`voice: the fast answer was held back (${held}), so the turn is handed off`);
       handOff(turn);
       return;
     }
