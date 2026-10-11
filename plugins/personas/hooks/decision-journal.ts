@@ -1,10 +1,17 @@
 // decision-journal.ts: the append-only record of every shadow question this
 // plugin puts to Jev, in the row shape a later bulk load into SQL reads.
 //
-// One file per persona per UTC day per session:
-//   <home>/.claude/agentic-decisions/<persona>/<YYYY-MM-DD>-<session>.jsonl
-// A file per day bounds the read-and-rewrite an append costs, and a file per
-// session means no two processes ever share one.
+// One journal per persona per UTC day per session, written as a numbered
+// series of segment files:
+//   <home>/.claude/agentic-decisions/<persona>/<YYYY-MM-DD>-<session>.<NNNN>.jsonl
+// The engine offers no append, so an append reads its file whole and writes it
+// back, and the engine refuses a read or a write over 4 MiB. A segment is
+// capped at JOURNAL_SEGMENT_MAX_BYTES, which bounds the read-and-rewrite an
+// append costs and keeps every file below that refusal: a segment passes the
+// cap by at most its last line, which the write itself refuses past 4 MiB. A journal
+// per session means no two processes ever share one. A file named with no number,
+// `<YYYY-MM-DD>-<session>.jsonl`, is a journal from before the segments: every
+// reader reads it and nothing writes it again.
 //
 // Five line kinds and no others: `call` records the request, `answer` records
 // what came back beside what Haiku said, `outcome` records a signal the
@@ -17,7 +24,7 @@
 //
 // No `import $` and no side effects at load. The engine's loader follows `$`
 // only into functions declared in hooks/index.ts and refuses the whole module
-// where `$` crosses an import, so this file takes a JournalHost instead: four
+// where `$` crosses an import, so this file takes a JournalHost instead: five
 // members of the PluginHost that hooks/index.ts builds over `$` in its
 // top-level hostOf adapter.
 //
@@ -79,9 +86,10 @@ import type { SeamResult, SeamSetResult } from "./decision-seam";
 import { QUESTION_PRIMITIVES } from "./decision-seam";
 import { fnv1aHash } from "./cost-ledger";
 
-// What the journal needs from the host: the home directory and the three file
-// calls an append costs.
-export type JournalHost = Pick<PluginHost, "getHome" | "writeFile" | "readFile" | "fileExists">;
+// What the journal needs from the host: the home directory, the three file
+// calls an append costs, and the folder listing the first append on a journal
+// reads to find where its series stands.
+export type JournalHost = Pick<PluginHost, "getHome" | "writeFile" | "readFile" | "fileExists" | "listDir">;
 
 export const JOURNAL_DIR = ".claude/agentic-decisions";
 
@@ -91,8 +99,8 @@ export const JOURNAL_DIR = ".claude/agentic-decisions";
 export const HOLDOUT_EVERY = 5;
 
 // The longest a free text field the journal did not author may be. An append
-// reads the whole file and rewrites it, so one unbounded message would grow
-// that cost for every later line of the day. Every such field is cut to this
+// reads the whole segment and rewrites it, so one unbounded message would grow
+// that cost for every later line of the segment. Every such field is cut to this
 // rather than refused: a truncated detail still names what happened.
 export const FREE_TEXT_MAX = 512;
 
@@ -276,7 +284,7 @@ function utcDay(at: number): string {
 }
 
 // The folder one persona's journal files sit in under a home directory. The
-// persona passes through segment, as at journalPath below, since this is where
+// persona passes through segment, as at journalOf below, since this is where
 // a persona name becomes part of a path. Exported for hooks/index.ts's daily
 // outcome pass, which lists this folder to read the calls it answers, so the
 // writer and that reader name one folder.
@@ -284,16 +292,33 @@ export function journalDirOf(home: string, persona: string): string {
   return joined(home, JOURNAL_DIR, segment(persona));
 }
 
-// The journal file name a line of one UTC day and one session lands in, read
-// back by the daily outcome pass to tell a journal file from anything else in
-// the folder: the day, a dash, a session segment, then `.jsonl`.
-export const JOURNAL_FILE_PATTERN = /^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+\.jsonl$/;
+// The journal file names the daily outcome pass reads, told from anything else
+// in the folder: the day, a dash, a session segment, then either `.jsonl`
+// alone, the unnumbered name a journal from before the segments carries, or a
+// dot, a segment number of four or more digits and `.jsonl`. A session segment
+// never carries a dot, so the number splits off without ambiguity, and the
+// day is the name's first ten characters either way.
+export const JOURNAL_FILE_PATTERN = /^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+(?:\.\d{4,})?\.jsonl$/;
 
-// The file this session's lines for this UTC day belong in, or null where the
-// host could not name a home directory. Both segments are sanitized: a persona
-// name and a session id are the caller's strings, and this is the one place
-// either one becomes part of a path.
-async function journalPath(host: JournalHost, persona: string, session: string, at: number): Promise<string | null> {
+// The largest a segment grows before a line opens the next number, the channel
+// log's segment bound. A line is measured in UTF-8 bytes with its newline and
+// any separator the file needs, and a line that would take a segment already
+// holding bytes strictly past the bound lands in the next number instead. A
+// line alone larger than the bound still lands, in a segment of its own, so no
+// segment holds more than the bound plus one line.
+export const JOURNAL_SEGMENT_MAX_BYTES = 1_048_576;
+
+// One session's journal for one UTC day: the folder it sits in and the file
+// name stem every one of its segments shares. `key` is the stem under its
+// folder with no segment number, which is what the write chain and the
+// current-number table are keyed by.
+type Journal = { key: string; dir: string; stem: string };
+
+// The journal this session's lines for this UTC day belong in, or null where
+// the host could not name a home directory. Both caller-supplied parts are
+// sanitized: a persona name and a session id are the caller's strings, and
+// this is the one place either one becomes part of a path.
+async function journalOf(host: JournalHost, persona: string, session: string, at: number): Promise<Journal | null> {
   let home: unknown;
   try {
     home = await host.getHome();
@@ -301,24 +326,88 @@ async function journalPath(host: JournalHost, persona: string, session: string, 
     home = undefined;
   }
   if (typeof home !== "string" || home.trim().length === 0) return null;
-  return `${journalDirOf(home.trim(), persona)}/${utcDay(at)}-${segment(session)}.jsonl`;
+  const dir = journalDirOf(home.trim(), persona);
+  const stem = `${utcDay(at)}-${segment(session)}`;
+  return { key: `${dir}/${stem}`, dir, stem };
+}
+
+// The file one segment of a journal is: the stem, a dot, the number padded to
+// at least four digits, then `.jsonl`. A number past four digits keeps all of
+// them.
+function segmentPathOf(journal: Journal, n: number): string {
+  return `${journal.dir}/${journal.stem}.${String(n).padStart(4, "0")}.jsonl`;
+}
+
+// The segment number a listing entry names for this journal, or 0 where it
+// names none: an entry that is not an object, is not a file, carries no
+// string name, belongs to another day or session, carries no number of four
+// or more digits, or carries one too large to read exactly. The name is only
+// read. What later becomes part of a path is the number parsed from it, never
+// the name.
+function segmentNumberOf(journal: Journal, entry: unknown): number {
+  if (entry === null || typeof entry !== "object") return 0;
+  const { name, kind } = entry as { name?: unknown; kind?: unknown };
+  if (kind !== "file" || typeof name !== "string") return 0;
+  const prefix = `${journal.stem}.`;
+  const suffix = ".jsonl";
+  if (!name.startsWith(prefix) || !name.endsWith(suffix)) return 0;
+  const digits = name.slice(prefix.length, name.length - suffix.length);
+  if (!/^\d{4,}$/.test(digits)) return 0;
+  const n = Number(digits);
+  return Number.isSafeInteger(n) ? n : 0;
+}
+
+// UTF-8 bytes, the measure the segment bound is stated in.
+function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length;
 }
 
 // --- The write chain and the failure latch ---
 
-// One promise chain per path, so two writes started together both land: the
-// append reads the whole file and rewrites it, and two of those interleaved
-// would drop a line. A Map rather than an object literal because its keys are
-// paths built from a caller's strings.
+// One promise chain per journal, so two writes started together both land:
+// the append reads the whole segment and rewrites it, and two of those
+// interleaved would drop a line. It is keyed by the journal rather than the
+// segment, so the choice of segment is made inside the chain and two appends
+// at the bound cannot each open one. A Map rather than an object literal
+// because its keys are paths built from a caller's strings.
 const chains = new Map<string, Promise<void>>();
 
-function chained(path: string, work: () => Promise<boolean>): Promise<boolean> {
-  const prior = chains.get(path) ?? Promise.resolve();
+function chained(key: string, work: () => Promise<boolean>): Promise<boolean> {
+  const prior = chains.get(key) ?? Promise.resolve();
   const next = prior.then(work, work);
   // The chain's own tail swallows both settlements, so one failed write never
   // leaves the next one waiting on a rejected promise.
-  chains.set(path, next.then(() => undefined, () => undefined));
+  chains.set(key, next.then(() => undefined, () => undefined));
   return next;
+}
+
+// The segment number each journal's lines currently land in. In memory, and
+// read from the folder listing at the first append on a journal in a module
+// instance, so a plugin reload continues the series rather than starting it
+// over. A Map for the chain registry's reason.
+const segmentNumbers = new Map<string, number>();
+
+// Where a journal's series stands at its first append in this module
+// instance: the highest numbered segment for its day and session, else 1. A
+// folder that does not exist holds no segment, so it starts the series at 1
+// with no listing taken. Null where neither can be known: an existence answer
+// that is neither true nor false, or a listing that is not a list. A listing
+// that rejects reaches the append's own catch. Either way the write fails
+// with no file touched, since a line placed without knowing the series could
+// overwrite a segment. The unnumbered name from before the segments never
+// sets the number.
+async function firstSegmentNumber(host: JournalHost, journal: Journal): Promise<number | null> {
+  const folder: unknown = await host.fileExists(journal.dir);
+  if (folder === false) return 1;
+  if (folder !== true) return null;
+  const entries: unknown = await host.listDir(journal.dir);
+  if (!Array.isArray(entries)) return null;
+  let highest = 0;
+  for (const entry of entries) {
+    const n = segmentNumberOf(journal, entry);
+    if (n > highest) highest = n;
+  }
+  return highest > 0 ? highest : 1;
 }
 
 // The UTC day the last reported failure fell on. In memory, so a restart lets
@@ -335,47 +424,85 @@ function failed(at: number): JournalWrite {
 
 const LANDED: JournalWrite = { ok: true, firstFailureToday: false };
 
-// The append itself, run inside the chain. A file that exists and cannot be
-// read is left alone rather than rewritten: a write built on an unreadable
-// read would replace the day's lines with one. A line already carrying its
+// One line waiting for its segment. `fit` is the form carrying the line's
+// state, and `build` is the line as written into a candidate segment, which a
+// call line may shorten to a reference. The fit test measures the larger of
+// the two, since a reference can run longer than a short state. `landed` runs
+// once the line is in the file, still inside the chain.
+type PendingLine = {
+  fit: string;
+  build: (segmentPath: string) => string;
+  landed?: (segmentPath: string) => void;
+};
+
+// A line whose every form is the same text, which is every line but a call's.
+function plain(line: string): PendingLine {
+  return { fit: line, build: () => line };
+}
+
+// The append itself, run inside the journal's chain. It reads the current
+// segment and tests the line's fit there. Where the segment holds bytes and
+// those bytes, a separator where the file lacks a final newline, and the line
+// with its newline would pass JOURNAL_SEGMENT_MAX_BYTES, it moves to the next
+// number and runs the same read and test on that file, in case a file by that
+// name exists, rather than overwriting it. A segment that is absent or empty
+// takes the line whatever its size. A file that exists and cannot be read is
+// left alone rather than rewritten: a write built on an unreadable read would
+// replace the segment's lines with one. A line already carrying its
 // terminator keeps the one it has.
-async function appendLine(host: JournalHost, path: string, line: string): Promise<boolean> {
+async function appendLine(host: JournalHost, journal: Journal, pending: PendingLine): Promise<boolean> {
   try {
-    // Read as unknown for the same reason the body below is: a hook above the
-    // caller may answer this op event with a value of its own. An answer that
-    // is neither true nor false says nothing about the file, and falling
-    // through on one would rewrite the day's lines as a single line. The
-    // stronger failure is guarded here and the weaker one below.
-    const exists: unknown = await host.fileExists(path);
-    if (exists !== true && exists !== false) return false;
-    let existing = "";
-    if (exists === true) {
-      const read: unknown = await host.readFile(path);
-      if (typeof read !== "string") return false;
-      existing = read;
+    let n = segmentNumbers.get(journal.key) ?? await firstSegmentNumber(host, journal);
+    if (n === null) return false;
+    const terminated = (line: string) => (line.endsWith("\n") ? line : line + "\n");
+    const fitBytes = utf8Bytes(terminated(pending.fit));
+    for (;;) {
+      const path = segmentPathOf(journal, n);
+      // Read as unknown for the same reason the body below is: a hook above
+      // the caller may answer this op event with a value of its own. An
+      // answer that is neither true nor false says nothing about the file,
+      // and falling through on one would rewrite the segment's lines as a
+      // single line. The stronger failure is guarded here and the weaker one
+      // below.
+      const exists: unknown = await host.fileExists(path);
+      if (exists !== true && exists !== false) return false;
+      let existing = "";
+      if (exists === true) {
+        const read: unknown = await host.readFile(path);
+        if (typeof read !== "string") return false;
+        existing = read;
+      }
+      const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+      const line = terminated(pending.build(path));
+      const lineBytes = Math.max(fitBytes, utf8Bytes(line));
+      if (existing.length > 0 && utf8Bytes(existing) + sep.length + lineBytes > JOURNAL_SEGMENT_MAX_BYTES) {
+        n += 1;
+        continue;
+      }
+      segmentNumbers.set(journal.key, n);
+      await host.writeFile(path, existing + sep + line);
+      pending.landed?.(path);
+      return true;
     }
-    const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
-    await host.writeFile(path, existing + sep + (line.endsWith("\n") ? line : line + "\n"));
-    return true;
   } catch {
     return false;
   }
 }
 
-// Every writer's one path to the file: queue each line on that path's chain
-// and report. Nothing here rejects.
+// Every writer's one path to the journal: queue each line on the journal's
+// chain and report. Nothing here rejects.
 async function writeLines(
   host: JournalHost,
-  path: string,
+  journal: Journal,
   at: number,
-  lines: readonly string[],
+  lines: readonly PendingLine[],
 ): Promise<JournalWrite> {
   if (lines.length === 0) return LANDED;
   let allLanded = true;
   for (const line of lines) {
     let landed = false;
     try {
-      landed = await chained(path, () => appendLine(host, path, line));
+      landed = await chained(journal.key, () => appendLine(host, journal, line));
     } catch {
       landed = false;
     }
@@ -434,10 +561,14 @@ export type CallRecord = {
   result: SeamResult | SeamSetResult;
 };
 
-// The last state written per site, per file, so a run of calls on an unchanged
-// state stores it once. Held in memory rather than read back from the file: a
-// restart re-writes the state once per site per file, which is the same shape
-// the failure latch has. A Map for the same reason the chain registry is one.
+// The last state written per site, per segment, so a run of calls on an
+// unchanged state stores it once. Keyed by the segment file rather than the
+// journal, so every segment is self-contained: the first call line per site in
+// a segment carries its state whole, and a `stateRef` only ever names a line
+// in the same file. Held in memory rather than read back from the file: a
+// restart re-writes the state once per site per segment, which is the same
+// shape the failure latch has. A Map for the same reason the chain registry
+// is one.
 const lastState = new Map<string, { stateHash: number; stampId: string }>();
 
 // One `call` line: the request as it was made and how it ended.
@@ -451,24 +582,18 @@ export async function writeCall(host: JournalHost, record: CallRecord): Promise<
   const state = typeof result.state === "string" ? result.state : null;
   const stateHash = state === null ? null : fnv1aHash(state);
 
-  let path: string | null;
+  let journal: Journal | null;
   try {
-    path = await journalPath(host, record.persona, record.session, at);
+    journal = await journalOf(host, record.persona, record.session, at);
   } catch {
-    path = null;
+    journal = null;
   }
-  if (path === null) return failed(at);
+  if (journal === null) return failed(at);
 
-  // The state rides the line only where this site's last state on this file
-  // differed. Otherwise the line points at the stamp id that carries it.
   const stampId = journalText(record.stampId);
-  const siteKey = `${path}\u0000${record.site}`;
-  const prior = lastState.get(siteKey);
-  // A null state is never a repeat: there is no measured text for a later line
-  // to point back at, so such a line carries a null reference like the first.
-  const repeat = stateHash !== null && prior !== undefined && prior.stateHash === stateHash;
-
-  const line = {
+  // The line in either of its two forms: carrying the state, or pointing at
+  // the stamp id of the line in the same segment that carries it.
+  const lineWith = (lineState: string | null, stateRef: string | null): string => JSON.stringify({
     // The closed set of line kinds, which an outcome line's own `kind` field
     // does not name: that one is the closed set of outcome kinds.
     lineKind: "call",
@@ -484,8 +609,8 @@ export async function writeCall(host: JournalHost, record: CallRecord): Promise<
     // it. Unreachable through newStampId, which two segment cuts already bound.
     split: splitOf(stampId),
     stateHash,
-    state: repeat ? null : state,
-    stateRef: repeat && prior !== undefined ? prior.stampId : null,
+    state: lineState,
+    stateRef,
     // Null on a call that made no request, which is what the seam's own null
     // latency already says.
     inputTokens: result.ok ? countOf(result.usage.input_tokens) : null,
@@ -495,14 +620,32 @@ export async function writeCall(host: JournalHost, record: CallRecord): Promise<
     // Built from a message the host or the resolver produced, so bounded by
     // neither until it crosses this boundary.
     detail: result.ok ? null : textOrNull(result.detail),
-  };
-  const written = await writeLines(host, path, at, [JSON.stringify(line) + "\n"]);
-  // The reference is recorded only once the line carrying the state is in the
-  // file. A line that never landed is one no later stateRef may name, or a
-  // repeat would point at a stamp id no load can find and the state would be
-  // lost for the rest of the day.
-  if (written.ok && !repeat && stateHash !== null) lastState.set(siteKey, { stateHash, stampId });
-  return written;
+  }) + "\n";
+  const whole = lineWith(state, null);
+
+  // Each candidate segment's last state for the site is read as the line is
+  // built for it: the state rides the line only where it differed, and
+  // otherwise the line points at the stamp id that carries it. The segment is
+  // chosen against the larger of that line and the form carrying the state.
+  let repeat = false;
+  return writeLines(host, journal, at, [{
+    fit: whole,
+    build: (segmentPath) => {
+      const prior = lastState.get(`${segmentPath}\u0000${record.site}`);
+      // A null state is never a repeat: there is no measured text for a later
+      // line to point back at, so such a line carries a null reference like
+      // the first.
+      repeat = stateHash !== null && prior !== undefined && prior.stateHash === stateHash;
+      return repeat && prior !== undefined ? lineWith(null, prior.stampId) : whole;
+    },
+    // The reference is recorded only once the line carrying the state is in
+    // the file. A line that never landed is one no later stateRef may name, or
+    // a repeat would point at a stamp id no load can find and the state would
+    // be lost for the rest of the segment.
+    landed: (segmentPath) => {
+      if (!repeat && stateHash !== null) lastState.set(`${segmentPath}\u0000${record.site}`, { stateHash, stampId });
+    },
+  }]);
 }
 
 // One answer as it came back, beside the value Haiku gave for the same
@@ -538,13 +681,13 @@ export async function writeAnswers(host: JournalHost, record: AnswersRecord): Pr
   const at = Date.now();
   const answers = Array.isArray(record.answers) ? record.answers : [];
   if (answers.length === 0) return LANDED;
-  let path: string | null;
+  let journal: Journal | null;
   try {
-    path = await journalPath(host, record.persona, record.session, at);
+    journal = await journalOf(host, record.persona, record.session, at);
   } catch {
-    path = null;
+    journal = null;
   }
-  if (path === null) return failed(at);
+  if (journal === null) return failed(at);
   const lines = answers.map((answer) => {
     // Agreement is decided on the values as they arrived, before the clamp,
     // so two option ids that differ only past the cut are not recorded as
@@ -573,7 +716,7 @@ export async function writeAnswers(host: JournalHost, record: AnswersRecord): Pr
       agrees: rawValue !== null && rawHaiku !== null ? rawValue === rawHaiku : null,
     }) + "\n";
   });
-  return writeLines(host, path, at, lines);
+  return writeLines(host, journal, at, lines.map(plain));
 }
 
 // A signal the plugin produced after the call, joined to it by the call's
@@ -597,13 +740,13 @@ export async function writeOutcome(host: JournalHost, record: OutcomeRecord): Pr
   // rather than the file being unwritable. Arming it here would silence the
   // day's first real write failure.
   if (!OUTCOME_KINDS.includes(record.kind)) return { ok: false, firstFailureToday: false };
-  let path: string | null;
+  let journal: Journal | null;
   try {
-    path = await journalPath(host, record.persona, record.session, at);
+    journal = await journalOf(host, record.persona, record.session, at);
   } catch {
-    path = null;
+    journal = null;
   }
-  if (path === null) return failed(at);
+  if (journal === null) return failed(at);
   const line = {
     lineKind: "outcome",
     stampId: newStampId(record.persona, record.session),
@@ -614,7 +757,7 @@ export async function writeOutcome(host: JournalHost, record: OutcomeRecord): Pr
     value: record.kind === "ask_marker" ? ASK_MARKER_VALUE : textOrNull(record.value),
     at: new Date(at).toISOString(),
   };
-  return writeLines(host, path, at, [JSON.stringify(line) + "\n"]);
+  return writeLines(host, journal, at, [plain(JSON.stringify(line) + "\n")]);
 }
 
 // The rendering text a `rendering` line carries whole: one under this many
@@ -623,10 +766,9 @@ export async function writeOutcome(host: JournalHost, record: OutcomeRecord): Pr
 // rendered length, so a scoring pass rebuilds the text from the names
 // through `memq get --no-stamp` and checks the rebuild against the counts.
 // The bound sits on this channel rather than on the module that renders,
-// since an append rewrites the day's file and the engine refuses a read or a
-// write over 4 MiB, past which every later line of the day fails to land: a
-// row that could fill the file would silence every question's shadow rows
-// for the rest of that day.
+// since every append rewrites its whole segment: a row of unbounded text
+// would grow that cost for every later line of the segment and fill segments
+// with one prompt's text.
 export const RENDERING_TEXT_MAX = 2_000;
 
 // What the recall shadow would have shown for one prompt, written once per
@@ -669,13 +811,13 @@ export type RenderingRecord = {
 // otherwise, with `textOmitted` saying which.
 export async function writeRendering(host: JournalHost, record: RenderingRecord): Promise<JournalWrite> {
   const at = Date.now();
-  let path: string | null;
+  let journal: Journal | null;
   try {
-    path = await journalPath(host, record.persona, record.session, at);
+    journal = await journalOf(host, record.persona, record.session, at);
   } catch {
-    path = null;
+    journal = null;
   }
-  if (path === null) return failed(at);
+  if (journal === null) return failed(at);
   const names = (list: readonly string[] | null) => (Array.isArray(list) ? list.map(journalText) : null);
   // Prototype-free for probabilitiesOf's reason: the keys are record names
   // that reach here from store text.
@@ -708,7 +850,7 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
     skipped: textOrNull(record.skipped),
     skippedFor: countOf(record.skippedFor),
   };
-  return writeLines(host, path, at, [JSON.stringify(line) + "\n"]);
+  return writeLines(host, journal, at, [plain(JSON.stringify(line) + "\n")]);
 }
 
 // The closed set of event names. A `compaction_gate` is one decision the
@@ -774,13 +916,13 @@ function detailOf(from: unknown): Record<string, EventDetailValue> {
 export async function writeEvent(host: JournalHost, record: EventRecord): Promise<JournalWrite> {
   const at = Date.now();
   if (!EVENT_NAMES.includes(record.event)) return { ok: false, firstFailureToday: false };
-  let path: string | null;
+  let journal: Journal | null;
   try {
-    path = await journalPath(host, record.persona, record.session, at);
+    journal = await journalOf(host, record.persona, record.session, at);
   } catch {
-    path = null;
+    journal = null;
   }
-  if (path === null) return failed(at);
+  if (journal === null) return failed(at);
   const line = {
     lineKind: "event",
     stampId: newStampId(record.persona, record.session),
@@ -790,5 +932,5 @@ export async function writeEvent(host: JournalHost, record: EventRecord): Promis
     event: record.event,
     detail: detailOf(record.detail),
   };
-  return writeLines(host, path, at, [JSON.stringify(line) + "\n"]);
+  return writeLines(host, journal, at, [plain(JSON.stringify(line) + "\n")]);
 }

@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's brainstorming skill: it governs the collaborative design conversation that precedes any new feature, project, or non-trivial change, and it ends by producing a written spec in `docs/plans/` that the executing-work skill runs on. It owns these moments: the pre-design memory and backlog recall, the scope check that splits an oversized request into sub-project specs, the one-question-at-a-time design dialog, the offer of the design council at a hard fork, the contract-surface scout sweep that derives files in scope, the plan sketch, the spec write and its indexing, the spec self-review with its blind read and plan review, the choice of commit model, the per-section model tier and locus assignment, the `Tests:` and document-review lines, the Fable-usage rules, and the frozen spec format and header contract. A session loads it as a `named-trigger`: the frontmatter says to use it when the operator wants to think through a problem before building, or on any substantial new effort without an existing spec, with phrases like "let's think through", "help me design", or "spec this out".
 
-Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below).
+Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band).
 
 ### C001
 - key: Explore the problem space in conversation with the operator, then capture the agreement as a spec for executing-work to run.
@@ -1143,31 +1143,34 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: Tier picks the model. Briefability picks the locus (dispatch versus main thread).
 
 ### C114
-- key: Assign haiku only to pure transcription: an exact sibling to clone with substitutions, single-responsibility scope, and a self-surfacing gate, such as renames, sweeps, mirrored config or DTO additions, test data, and pin-test count updates.
+- key: Assign haiku to well-bounded work on an established shape: a clear contract, a named sibling file to follow, single-responsibility scope, low integration risk and a self-surfacing gate that a build or existing test provides, such as new procs, services, mappings, DTOs, tests, CRUD surfaces, renames and sweeps, and only where the section text names both the sibling and the gate, never to a security-sensitive surface.
 - class: mechanic
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
-- provenance: 20cf885 2026-07-03, the haiku transcription tier added as cost structure ahead of a heavy-usage week, tracked as a provisional experiment.
-- verdict: keep
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:47
+- provenance: 20cf885 2026-07-03, the haiku tier added as cost structure ahead of a heavy-usage week, tracked as a provisional experiment; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which widened the band from cloning one sibling to following a named sibling pattern; its finishing pass added the security-surface clause.
+- verdict: rewrite
+- landed: eb49fcb2 finishing
 - reason: The bound and the sonnet fallback were installed together and the fallback adds the judgment-call clause; no machinery assigns tiers (A037).
-- passage: **haiku:** pure transcription: an exact sibling to clone with substitutions, single-responsibility scope, and a self-surfacing gate, a build or existing test that fails loudly on wrong output. Renames and sweeps, config or DTO additions mirroring a named sibling, test data, pin-test count updates. Assign it only where the section text names both the sibling and the gate.
+- passage: **haiku:** well-bounded work on an established shape: a clear contract, a named sibling to follow, single-responsibility scope, low integration risk and a self-surfacing gate, a build or existing test that fails loudly on wrong output. New procs, services, mappings, DTOs, tests, CRUD surfaces, renames, sweeps. Assign it only where the section text names both the sibling and the gate, and never to a security-sensitive surface. A sibling is a file, never a style skill's convention.
 
 ### C115
-- key: Assign `sonnet` instead of haiku to any section that leaves the sibling or the gate to be found, or that contains any judgment call.
+- key: Assign `sonnet` instead of haiku to any section that leaves the sibling or the gate unnamed, spans more file shapes than its sibling, or holds a judgment call.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
-- provenance: 20cf885 2026-07-03, installed with the haiku tier as where a failed haiku assignment lands.
-- verdict: keep
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:48
+- provenance: 20cf885 2026-07-03, installed with the haiku tier as where a failed haiku assignment lands; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which moved the fallback into the sonnet bullet and added the file-shape bound.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: Names the fallback tier and the judgment-call exclusion the bound does not; the compress proposals are taste (A039).
-- passage: A section that leaves either to be found, or holds any judgment call, is `sonnet`.
+- passage: whose section leaves the sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call.
 
 ### C116
-- key: Assign sonnet to mechanical or well-bounded work: clear contract, existing sibling pattern, single-responsibility scope, low integration risk, such as new procs or services, mappings, DTOs, tests, and CRUD surfaces.
+- key: Assign sonnet to mechanical or well-bounded work with a clear contract and low integration risk.
 - class: mechanic
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:39
-- provenance: 9e124f7 2026-06-11, the original sonnet band.
-- verdict: keep
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:48
+- provenance: 9e124f7 2026-06-11, the original sonnet band; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which moved the sibling-pattern examples to the haiku bullet.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: Describes dispatched work; the inline case takes C124's specific rule, so the two do not contend (A040).
-- passage: **sonnet:** mechanical or well-bounded: a clear contract, an existing sibling pattern, single-responsibility scope, low integration risk. New procs or services on an established shape, mappings, DTOs, tests, CRUD surfaces.
+- passage: **sonnet:** mechanical or well-bounded work with a clear contract and low integration risk
 
 ### C117
 - key: Assign opus to moderate complexity: multi-file coordination, nuanced refactors, performance-sensitive logic, or mild ambiguity within a clear design.

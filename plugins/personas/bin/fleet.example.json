@@ -22,6 +22,7 @@
     "model": "fable",
     "effort": "high",
     "controllerTickMs": 60000,
+    "journalRetentionDays": 120,
     "coordinatorPersona": "steward",
     "architectPersona": "architect",
     "enabled": true

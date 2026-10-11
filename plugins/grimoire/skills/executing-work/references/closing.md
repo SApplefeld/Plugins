@@ -38,7 +38,7 @@ Append to the plan doc's `## Chapters` section:
 ```markdown
 ### Chapter N - YYYY-MM-DD
 Completed: <N. section title, the bare section number leading; one section per Chapter>
-Implemented By: <main session | implementer-haiku | implementer-sonnet | implementer-opus | implementer-fable, plus any escalation>
+Implemented By: <main session | implementer-haiku (the model id its transcript's assistant lines name) | implementer-sonnet | implementer-opus | implementer-fable, plus any escalation>
 Metrics: <review rounds <n>, closed <clean | claim-exit | major-closed>; provenance <s> spec-traceable, <f> fix-introduced, <r> new-requirement, rulings (<a> refused, <b> declared, <c> asked); advisory: <v> findings, <w> fixed, <d> deferred, <e> refused; NEEDS_CONTEXT count; escalations; consults <n>, counting consultant dispatches alone; `closed` is read off the last round that carried findings: `major-closed` where it carried an owed Major, `claim-exit` where it carried a claim finding and no such Major, else `clean`>
 Recap: <finishing Chapter only: the plain-language recap whose parts and order finishing-work's step 6 owns>
 Decisions / Surprises: <the section's add-decision lines, verbatim and line by line, from `.kit/scratch/<plan-slug>/add-decisions-section-<n>.md`, its own open first, or on the finishing Chapter from the interim board entry `finishing-work` writes them to; then anything resolved or discovered, or "none"; in the kit's own repository, one line for the probe pair reading writing-skills' RED and GREEN step calls for, with its moment-pin, or the state that step names instead, or that no scenario turned on or no shape file was named, none of which is recorded as clean>

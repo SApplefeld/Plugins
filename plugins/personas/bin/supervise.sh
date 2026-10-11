@@ -248,6 +248,10 @@ SUPERVISOR_STOP_RETRY_BUDGET_S="${supervisorStopRetryBudgetS:-30}"
 # How many whole days a channel log file in the work directory is kept after
 # its last write before the channel log sweep removes it. Two weeks.
 CHANNEL_LOG_RETENTION_DAYS="${channelLogRetentionDays:-14}"
+# How many whole days a decision journal file under the home directory is kept
+# after its last write before the journal sweep removes it. Ninety days, which
+# covers the memory-value pass and the recall reading with room to spare.
+JOURNAL_RETENTION_DAYS="${journalRetentionDays:-90}"
 # v2 spec Section 0 item 3 Part B (operator decision, DISCUSSION.md Round
 # 136 addendum): the worker's own main thread - where PR #17's kill path
 # was actually written - defaults to opus at medium effort, not sonnet.
@@ -371,6 +375,10 @@ if ! positive_number "$SUPERVISOR_PS_WAIT_STEP_MS" || [ "$SUPERVISOR_PS_WAIT_STE
 fi
 if ! positive_number "$CHANNEL_LOG_RETENTION_DAYS"; then
   echo "ERROR: channelLogRetentionDays '$CHANNEL_LOG_RETENTION_DAYS' is not a whole number of days greater than zero (digits only, no leading zero, at most 9 digits)" >&2
+  exit 1
+fi
+if ! positive_number "$JOURNAL_RETENTION_DAYS"; then
+  echo "ERROR: journalRetentionDays '$JOURNAL_RETENTION_DAYS' is not a whole number of days greater than zero (digits only, no leading zero, at most 9 digits)" >&2
   exit 1
 fi
 
@@ -4440,6 +4448,50 @@ sweep_channel_log_segments() {
   return 0
 }
 
+# --- Journal retention ---
+# Removes a persona's decision journal files whose last write is older than a
+# number of whole days. The plugin keeps them in
+# <home>/.claude/agentic-decisions/<persona>, where the persona is sanitized as
+# decision-journal.ts's segment does: every character outside A-Z, a-z, 0-9,
+# underscore and hyphen becomes an underscore, the result is cut to 64
+# characters, and an empty result becomes one underscore. Only the folder's own
+# files at depth one named <YYYY-MM-DD>-<session>.jsonl or
+# <YYYY-MM-DD>-<session>.<digits>.jsonl, with a digit run four to eighteen
+# digits long, are candidates, so no other file is ever touched. The session
+# part holds only the characters the sanitizer leaves. A journal is read for
+# its days rather than written for its latest segment, so no segment is exempt.
+# A missing folder, or a home that is empty, removes nothing. The persona
+# reaching this function has already passed the check near the top of the
+# script that refuses any name outside letters, digits, underscore and hyphen,
+# so the character replacement changes nothing for a persona the supervisor
+# accepts. The 64-character cut and the empty fallback still apply, as the
+# writer's do.
+# One log line names the count where at least one file was removed, and
+# nothing is logged where none was. A removal that fails is logged and the
+# sweep carries on: it always returns 0, since the launch it precedes is the
+# work.
+# Usage: sweep_journal_files <home> <persona> <days>
+sweep_journal_files() {
+  local home="$1" persona="$2" days="$3" folder name path removed=0
+  [ -n "$home" ] || return 0
+  name="${persona//[^A-Za-z0-9_-]/_}"
+  name="${name:0:64}"
+  [ -n "$name" ] || name="_"
+  folder="$home/.claude/agentic-decisions/$name"
+  [ -d "$folder" ] || return 0
+  while IFS= read -r path; do
+    if rm -f -- "$path"; then
+      removed=$((removed + 1))
+    else
+      log "JOURNAL SWEEP: could not remove $path"
+    fi
+  done < <(find "$folder" -mindepth 1 -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9]{4}-[0-9]{2}-[0-9]{2}-[A-Za-z0-9_-]+(\.[0-9]{4,18})?\.jsonl' -mmin +$((days * 1440)) 2>/dev/null)
+  if [ "$removed" -ge 1 ]; then
+    log "JOURNAL SWEEP: removed $removed file(s) older than $days day(s)"
+  fi
+  return 0
+}
+
 # --- Main loop ---
 CHILD_INDEX=0
 LAST_CHANNEL_SWEEP_S=0  # epoch seconds of the last channel log sweep, 0 before the first
@@ -4473,6 +4525,12 @@ if [ -n "$PROFILE_ROOT" ]; then
   PROFILE_ROOT="$(cygpath -w "$PROFILE_ROOT" 2>/dev/null || echo "$PROFILE_ROOT")"
 fi
 WORKDIR_WINDOWS="$(cygpath -w "$WORKDIR" 2>/dev/null || echo "$WORKDIR")"
+# The journal sweep reaches the same profile through find and rm, which want
+# the POSIX form. An unknown profile leaves the sweep with nothing to remove.
+JOURNAL_HOME="$PROFILE_ROOT"
+if [ -n "$JOURNAL_HOME" ]; then
+  JOURNAL_HOME="$(cygpath -u "$JOURNAL_HOME" 2>/dev/null || echo "$JOURNAL_HOME")"
+fi
 
 # The persona store the poll reads, one path for the whole run.
 STORE="$WORKDIR/.agentic-personas.json"
@@ -4665,8 +4723,10 @@ while true; do
     log "GATE PASSED: no live persona claims (commons and heartbeat both free)"
 
     # Every launch and relaunch sweeps the work directory's old channel log
-    # files first, and the poll loop's daily sweep counts from here.
+    # files and the persona's old journal files first, and the poll loop's
+    # daily sweep counts from here.
     sweep_channel_log_segments "$WORKDIR" "$CHANNEL_LOG_RETENTION_DAYS"
+    sweep_journal_files "$JOURNAL_HOME" "$PERSONA" "$JOURNAL_RETENTION_DAYS"
     printf -v LAST_CHANNEL_SWEEP_S '%(%s)T' -1
 
     # The child index is allocated only now, past the gate, and never on an
@@ -4892,6 +4952,7 @@ while true; do
     printf -v poll_now_s '%(%s)T' -1
     if [ $(( poll_now_s - LAST_CHANNEL_SWEEP_S )) -ge 86400 ]; then
       sweep_channel_log_segments "$WORKDIR" "$CHANNEL_LOG_RETENTION_DAYS"
+      sweep_journal_files "$JOURNAL_HOME" "$PERSONA" "$JOURNAL_RETENTION_DAYS"
       printf -v LAST_CHANNEL_SWEEP_S '%(%s)T' -1
     fi
     POLL_COUNT=$((POLL_COUNT + 1))

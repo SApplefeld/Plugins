@@ -277,6 +277,7 @@ function hostOf(dp: any): PluginHost {
     readFile: (path: string) => dp.fs.read(path),
     writeFile: (path: string, text: string) => dp.fs.write(path, text),
     fileExists: (path: string) => dp.fs.exists(path),
+    listDir: (path: string) => dp.fs.list(path),
     fetch: (url: string, init?: HttpInit) => dp.http.fetch(url, init),
     sleep: (ms: number, signal?: AbortSignal) => dp.clock.sleep(ms, { signal }),
   };

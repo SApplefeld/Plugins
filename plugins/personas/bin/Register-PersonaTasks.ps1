@@ -2,8 +2,8 @@
 # the roster.
 #
 #   .\bin\Register-PersonaTasks.ps1 [-Roster <path>] [-EnvFile <path>] [-RepoRoot <path>]
-#       [-User <name>] [-Credential <pscredential>] [-StartupDelay <ISO 8601 duration>]
-#       [-Prune] [-Start] [-WhatIf]
+#       [-LauncherRoot <path>] [-User <name>] [-Credential <pscredential>]
+#       [-StartupDelay <ISO 8601 duration>] [-Prune] [-Start] [-WhatIf]
 #
 # Requires an elevated PowerShell session, the same requirement
 # D:/discord-channels/install/Register-BrokerTask.ps1 carries for the same reason: registering a
@@ -30,6 +30,14 @@
 # operator runs this script from `<checkout>/plugins/personas` in the repository checkout and wrong from a worktree,
 # since a task pointed at a worktree breaks when that worktree is removed.
 #
+# -LauncherRoot runs the fleet from the installed personas plugin instead of a checkout. The script
+# copies bin/Start-InstalledPersona.ps1 into that folder and points each task's action at the copy,
+# which runs the installed plugin's current version from a snapshot under <LauncherRoot>\runtime
+# (the launcher's own header says how). It is the route for a machine that has the plugin and no
+# repository: run this script from the installed plugin's folder, whose bin holds both scripts. A
+# folder inside the plugin folder or the plugin cache is refused, since a plugin update replaces
+# both. -WhatIf prints the copy it would make and makes none.
+#
 # -StartupDelay holds every persona task back after its boot trigger fires, so the channel
 # broker's own boot task (D:/discord-channels/install/Register-BrokerTask.ps1, which fires at
 # PT30S) has started node and logged in to Discord before any persona child attaches its channel.
@@ -54,6 +62,7 @@ param(
     [string]$Roster = 'D:/personas/fleet.json',
     [string]$EnvFile = 'D:/personas/keeper.env',
     [string]$RepoRoot,
+    [string]$LauncherRoot,
     [string]$User = [Security.Principal.WindowsIdentity]::GetCurrent().Name,
     [pscredential]$Credential,
     [string]$StartupDelay,
@@ -225,7 +234,11 @@ function Get-PersonaTaskDefinitions {
         [Parameter(Mandatory)][string]$Roster,
         [Parameter(Mandatory)][string]$EnvFile,
         [Parameter(Mandatory)][string]$User,
-        [string]$StartupDelay = $KeeperDefaultStartupDelay
+        [string]$StartupDelay = $KeeperDefaultStartupDelay,
+        # Set, the action runs <LauncherRoot>\Start-InstalledPersona.ps1 rather than
+        # <RepoRoot>\bin\Start-Persona.ps1. Register-PersonaTasks copies the launcher there before
+        # it writes a task, so what must exist at this point is the launcher's source under RepoRoot.
+        [string]$LauncherRoot
     )
     # Checked here, where the operator is watching, rather than left for Register-ScheduledTask to
     # refuse at the write or for the task engine to misread at boot. Uppercase PT, then hours,
@@ -236,6 +249,11 @@ function Get-PersonaTaskDefinitions {
             "duration of hours, minutes and seconds, such as PT2M or PT1M30S."
     }
     $startScript = Join-Path (Join-Path $RepoRoot 'bin') 'Start-Persona.ps1'
+    $sourceScript = $startScript
+    if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+        $sourceScript = Join-Path (Join-Path $RepoRoot 'bin') 'Start-InstalledPersona.ps1'
+        $startScript = Join-Path $LauncherRoot 'Start-InstalledPersona.ps1'
+    }
     # A bare drive root ("D:\" or "D:/") is exempt from the trailing-separator refusal for
     # -RepoRoot and for nothing else. Resolve-AbsolutePath puts that trailing separator back on
     # purpose, since .NET reads a drive letter with none as the current directory on that drive
@@ -263,8 +281,24 @@ function Get-PersonaTaskDefinitions {
                 "would escape the task action's closing quote and merge two arguments into one."
         }
     }
-    if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
-        throw "Get-PersonaTaskDefinitions: '$startScript' does not exist; -RepoRoot must name " +
+    if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+        if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) {
+            throw "Get-PersonaTaskDefinitions: '$sourceScript' does not exist; -RepoRoot must name " +
+                "a personas plugin folder whose bin holds the launcher -LauncherRoot installs."
+        }
+        # The launcher root must outlive every plugin update, and the plugin folder and the plugin
+        # cache are exactly what an update replaces or cleans up. Each path is compared in its
+        # canonical form with a separator appended, so a sibling sharing a name prefix is no match.
+        $launcherFull = [IO.Path]::GetFullPath($LauncherRoot).TrimEnd('\', '/') + '\'
+        $repoFull = [IO.Path]::GetFullPath($RepoRoot).TrimEnd('\', '/') + '\'
+        if ($launcherFull.StartsWith($repoFull, [StringComparison]::OrdinalIgnoreCase) -or
+            $launcherFull -match '(?i)[\\/]plugins[\\/]cache[\\/]') {
+            throw "Get-PersonaTaskDefinitions: -LauncherRoot '$LauncherRoot' sits inside the " +
+                "plugin folder or the plugin cache, which a plugin update replaces. Name a folder " +
+                "outside both, such as one under the account's profile."
+        }
+    } elseif (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) {
+        throw "Get-PersonaTaskDefinitions: '$sourceScript' does not exist; -RepoRoot must name " +
             "the root checkout, since a task pointed at a worktree breaks when that worktree is removed."
     }
     if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
@@ -439,7 +473,8 @@ function Register-PersonaTasks {
         [switch]$WhatIf,
         [bool]$IsElevated = (Test-IsElevated),
         [string[]]$ExistingTaskNames,
-        [string]$StartupDelay = $KeeperDefaultStartupDelay
+        [string]$StartupDelay = $KeeperDefaultStartupDelay,
+        [string]$LauncherRoot
     )
 
     if (-not $WhatIf -and -not $IsElevated) {
@@ -469,7 +504,7 @@ function Register-PersonaTasks {
     }
 
     $definitions = Get-PersonaTaskDefinitions -Entries $Entries -RepoRoot $RepoRoot -Roster $Roster `
-        -EnvFile $EnvFile -User $User -StartupDelay $StartupDelay
+        -EnvFile $EnvFile -User $User -StartupDelay $StartupDelay -LauncherRoot $LauncherRoot
     $definitionsByTaskName = @{}
     foreach ($definition in $definitions) { $definitionsByTaskName[$definition.TaskName] = $definition }
 
@@ -492,6 +527,22 @@ function Register-PersonaTasks {
         $existing = @($existingTasks | ForEach-Object { $_.TaskName })
     } else {
         $existing = @($ExistingTaskNames)
+    }
+
+    # The launcher is copied after every check above and the read of the existing tasks, and before
+    # the first task is written, so a run refused before any write leaves the launcher root as it
+    # found it, and no task names a launcher that is not there yet. The copy overwrites an older
+    # launcher, which is how a re-registration from a newer plugin version updates it.
+    if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+        $launcherSource = Join-Path (Join-Path $RepoRoot 'bin') 'Start-InstalledPersona.ps1'
+        $launcherTarget = Join-Path $LauncherRoot 'Start-InstalledPersona.ps1'
+        if ($WhatIf) {
+            Write-Output "would install launcher $launcherTarget"
+        } else {
+            [void][System.IO.Directory]::CreateDirectory($LauncherRoot)
+            Copy-Item -LiteralPath $launcherSource -Destination $launcherTarget -Force -ErrorAction Stop
+            Write-Output "installed launcher $launcherTarget"
+        }
     }
 
     $rosterTaskNames = @($Entries | ForEach-Object { "AgentPersona-$($_.name)" })
@@ -602,6 +653,14 @@ if ($MyInvocation.InvocationName -ne '.') {
         } catch {
             throw "Register-PersonaTasks: -EnvFile '$EnvFile' could not be resolved: $($_.Exception.Message)"
         }
+        $launcherRootResolved = $null
+        if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+            try {
+                $launcherRootResolved = Resolve-AbsolutePath -Path $LauncherRoot
+            } catch {
+                throw "Register-PersonaTasks: -LauncherRoot '$LauncherRoot' could not be resolved: $($_.Exception.Message)"
+            }
+        }
 
         $entries = Read-PersonaRoster -Path $rosterResolved
 
@@ -623,7 +682,7 @@ if ($MyInvocation.InvocationName -ne '.') {
 
         Register-PersonaTasks -Entries $entries -RepoRoot $repoRootResolved -Roster $rosterResolved `
             -EnvFile $envFileResolved -User $User -Credential $Credential -StartupDelay $StartupDelay `
-            -Prune:$Prune -Start:$Start -WhatIf:$WhatIf
+            -LauncherRoot $launcherRootResolved -Prune:$Prune -Start:$Start -WhatIf:$WhatIf
     } catch {
         # Console.Error.WriteLine, not Write-Error: Write-Error under $ErrorActionPreference =
         # 'Stop' raises a terminating error of its own, which skips the exit 1 below entirely (the

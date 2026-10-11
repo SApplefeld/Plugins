@@ -12,7 +12,7 @@
 // Built at each call site rather than cached in session state: `$` is
 // rebuilt on a plugin reload and a cached closure set would hold the old one.
 
-import type { HttpInit, HttpResponse } from "claude-code";
+import type { FsEntry, HttpInit, HttpResponse } from "claude-code";
 
 export interface PluginHost {
   // $.env.get("TYPESAFE_API_KEY"): the Jev bearer key, undefined where unset.
@@ -26,6 +26,9 @@ export interface PluginHost {
   writeFile(path: string, text: string): Promise<void>;
   // $.fs.exists(path): never rejects.
   fileExists(path: string): Promise<boolean>;
+  // $.fs.list(path): one { name, kind, size, isLink } per entry of the
+  // directory, by name, each entry as it stands.
+  listDir(path: string): Promise<FsEntry[]>;
   // $.http.fetch(url, init): resolves { status, ok, headers, text } once the
   // body is read. Takes no timeout, so a caller races it against sleep.
   fetch(url: string, init?: HttpInit): Promise<HttpResponse>;

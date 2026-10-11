@@ -6147,7 +6147,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 0, 1 and 2 of the section loop and the rules for delegating to subagents. It owns closing the previous boundary, confirming a section's approach, the Dispatch Brief template and tier routing, the capacity reading, the implementer status and escalation ladder, awaiting a dispatched agent and stopping one before replacing it, the evidence check of step 2 and its promises check, and the orchestrator's delegation rules, the disjoint-files rule and scout banding among them. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 0 to 2 tell a session to read it before a section opens and before any implementer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop).
 
 ### I019
 - key: Title the reference file carrying steps 0, 1 and 2 of the section loop and the rules for delegating to subagents `Implementing a Section`.
@@ -6796,21 +6796,22 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: A grant failing either screen is narrowed, or returned to the main thread with the reason, rather than written
 
 ### c2.C095
-- key: For a haiku dispatch, name the exact sibling to clone and the self-surfacing gate command in the brief.
+- key: For a haiku dispatch, name the sibling pattern to follow and the self-surfacing gate command in the brief.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:133
-- provenance: 20cf885 2026-07-03 installed the haiku transcription tier; 7dafcdb 2026-07-15 moved the field into the template and pinned the charters' lists to it.
-- verdict: keep
-- reason: The charter's matching line is the reader half of a writer/reader pin, not a duplicate.
-- passage: - [haiku only] The exact sibling to clone and the self-surfacing gate command;
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:125
+- provenance: 20cf885 2026-07-03 installed the haiku tier; 7dafcdb 2026-07-15 moved the field into the template and pinned the charters' lists to it; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which named the sibling pattern to follow in place of an exact sibling to clone.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
+- reason: The charter's matching line is a deliberate copy for the receiving agent, which inherits no skill body, not a duplicate. No test pins the two lines together, so an edit to one is carried to the other by hand.
+- passage: - [haiku only] The sibling pattern to follow and the self-surfacing gate command;
 
 ### c2.C096
-- key: If either the exact sibling or the self-surfacing gate command cannot be named, dispatch at sonnet instead.
+- key: If either the sibling pattern or the self-surfacing gate command cannot be named, dispatch at sonnet instead.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:134
-- provenance: 20cf885 2026-07-03.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:126
+- provenance: 20cf885 2026-07-03; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
 - verdict: keep
-- reason: No finding; a transcription tier without a sibling to transcribe from is mis-banded by definition.
+- reason: No finding; a haiku section with no named sibling to follow is mis-banded by definition.
 - passage: if either cannot be named, dispatch at sonnet
 - flag: weak-reason
 
@@ -7553,13 +7554,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Implementation that touches shared state stays single-agent-per-worktree, and the long integration suites follow the doctrine's sequencing bullet.
 
 ### R007
-- key: Re-dispatch a haiku-tier section at implementer-sonnet immediately after one failed round, carrying the failure evidence in the brief.
+- key: Re-dispatch a haiku-tier section at implementer-sonnet immediately after one failed round, a refusal stop counting as one, where a refusal stop is a returned final message declining the work with none of the four statuses, never a stall.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:147
-- provenance: 20cf885 2026-07-03, the haiku transcription tier, tracked as a provisional experiment; the merge commit 9f1ed1b touched the line without changing this sentence.
-- verdict: keep
-- reason: Carries c2.C117. A transcription tier that produced a Critical was mis-banded, and one round is the cheapest place to learn that; the bullet's structural split (A041) leaves the sentence's words as they are.
-- passage: A `haiku`-tier section gets one round: a correctness-lens Critical or a second NEEDS_CONTEXT re-dispatches it at `implementer-sonnet` at once.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:139
+- provenance: 20cf885 2026-07-03, the haiku tier, tracked as a provisional experiment; the merge commit 9f1ed1b touched the line without changing this sentence; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which added the refusal stop.
+- verdict: rewrite
+- landed: 58bfe803 section 2
+- reason: Carries c2.C117. A haiku-tier section that produced a Critical was mis-banded, and one round is the cheapest place to learn that. A refusal stop is the model's safety classifier declining the work, so a re-dispatch at the same tier meets the same classifier. The definition sets it apart from the wedge hallmark and the synthetic-only fault in the environment-fault sub-bullet below, which are stalls the environment-fault rule re-attempts, because a refusal is a message the agent returned.
+- passage: A `haiku`-tier section gets one round: a correctness-lens Critical, a refusal stop or a second NEEDS_CONTEXT re-dispatches it at `implementer-sonnet` at once.
+- passage: A refusal stop is a returned final message that declines the work and carries none of the four statuses, so it is a failed round and never a stall.
 
 ### R009
 - key: From sonnet up, escalate a tier when a dispatched section fails review twice with Criticals from a correctness lens or returns NEEDS_CONTEXT twice on the same question.
@@ -11088,13 +11091,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Completed: <N. section title, the bare section number leading; one section per Chapter>
 
 ### c4.C108
-- key: Write an `Implemented By:` line naming the main session or the implementer tier used, plus any escalation.
+- key: Write an `Implemented By:` line naming the main session or the implementer tier used, a Haiku entry with its transcript's model id, plus any escalation.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/closing.md:43
-- provenance: 9e124f7 2026-06-11, subagent model direction; 0e47170 added implementer-haiku to the enum.
-- verdict: keep
+- source: plugins/grimoire/skills/executing-work/references/closing.md:41
+- provenance: 9e124f7 2026-06-11, subagent model direction; 0e47170 added implementer-haiku to the enum; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 3 2026-10-10.
+- verdict: rewrite
+- landed: af59843c section 3
 - reason: No finding.
-- passage: Implemented By: <main session | implementer-haiku | implementer-sonnet | implementer-opus | implementer-fable, plus any escalation>
+- passage: Implemented By: <main session | implementer-haiku (the model id its transcript's assistant lines name) | implementer-sonnet | implementer-opus | implementer-fable, plus any escalation>
 - flag: weak-reason
 
 ### c4.C111
@@ -22115,7 +22119,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-opus.md`). Amended b
 
 ## plugins/grimoire/agents/implementer-sonnet.md
 
-This document is the charter for the Sonnet-tier scoped implementation agent: it tells a dispatched agent how to build exactly one Section of Work from an approved spec that is mechanical or well-bounded (clear contract, an existing sibling to mimic, low integration risk). It owns the moments between that agent's dispatch and its final report: reading and validating the dispatch brief, reading the spec section and the named style skills, reading in-scope files and their siblings (including when to outline versus read whole), implementing surgically within section scope, writing comments that state current state, verifying with a real build and targeted tests run to completion inside the turn, leaving all changes unstaged, and choosing and shaping exactly one of the four end-of-report statuses (DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, BLOCKED). Load class: `plan-run` - the charter is loaded by the agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template.
+This document is the charter for the Sonnet-tier scoped implementation agent: it tells a dispatched agent how to build exactly one Section of Work from an approved spec that is mechanical or well-bounded (clear contract, low integration risk) and leaves its sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call. It owns the moments between that agent's dispatch and its final report: reading and validating the dispatch brief, reading the spec section and the named style skills, reading in-scope files and their siblings (including when to outline versus read whole), implementing surgically within section scope, writing comments that state current state, verifying with a real build and targeted tests run to completion inside the turn, leaving all changes unstaged, and choosing and shaping exactly one of the four end-of-report statuses (DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, BLOCKED). Load class: `plan-run` - the charter is loaded by the agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template.
 
 Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C059 and C060 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A006 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `397071e7` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags.
 
@@ -22129,13 +22133,14 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended
 - passage: name: implementer-sonnet
 
 ### C002
-- key: Take dispatch only to implement a single well-defined, mechanical or well-bounded Section of Work from an approved spec, escalating ambiguity rather than guessing.
+- key: Take dispatch only to implement a single well-defined, mechanical or well-bounded Section of Work from an approved spec that leaves its sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call, escalating ambiguity rather than guessing.
 - class: mechanic
 - source: plugins/grimoire/agents/implementer-sonnet.md:3
-- provenance: a5e184b 2026-08-25, the kaizen review round that replaced the description's transcribed brief-field list with a pointer at the executing-work Dispatch Brief template, after a neighbouring round found transcribed field lists silently falsifying the surfaces that count them.
-- verdict: keep
+- provenance: a5e184b 2026-08-25, the kaizen review round that replaced the description's transcribed brief-field list with a pointer at the executing-work Dispatch Brief template, after a neighbouring round found transcribed field lists silently falsifying the surfaces that count them; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which moved named-sibling sections to the haiku tier.
+- verdict: rewrite
+- landed: 04eb0ce6 finishing
 - reason: The description is what the dispatching session reads when choosing a tier, and it now points at the template rather than copying its fields, which is the shape that stopped drifting.
-- passage: description: "Scoped implementation agent, Sonnet tier. Use to implement a single well-defined Section of Work from an approved spec when the section is mechanical or well-bounded - clear contract, an existing sibling pattern to mimic, low integration risk. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing.
+- passage: description: "Scoped implementation agent, Sonnet tier. Use to implement a single well-defined Section of Work from an approved spec when the section is mechanical or well-bounded - clear contract, low integration risk - and leaves its sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing.
 
 ### C003
 - key: Work using only the Read, Grep, Glob, Edit, Write and Bash tools.
@@ -22729,9 +22734,9 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended
 
 ## plugins/grimoire/agents/implementer-haiku.md
 
-This document is the agent charter for `implementer-haiku`, a scoped Haiku-tier implementation agent that builds exactly one pure-transcription Section of Work from an approved spec by cloning an exact sibling file with the section's substitutions. It owns the moments in which that dispatched agent reads its brief and the named style skills, mirrors the sibling, confines its edits to the section, runs the self-surfacing gate commands to completion inside its own turn, leaves its work unstaged, and closes with exactly one of the four statuses DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT or BLOCKED. It governs escalation over guessing: any judgment call, missing brief field, or oversized or mismatched sibling is reported rather than resolved. Load class: `plan-run` - the charter is loaded by the dispatched agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template with its haiku-only fields filled.
+This document is the agent charter for `implementer-haiku`, a scoped Haiku-tier implementation agent that builds exactly one well-bounded Section of Work from an approved spec on the shape of a sibling file its brief names. It owns the moments in which that dispatched agent reads its brief, the spec's Approach and the named style skills, follows the sibling's pattern, confines its edits to the section, runs the self-surfacing gate commands to completion inside its own turn, leaves its work unstaged, and closes with exactly one of the four statuses DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT or BLOCKED. It governs escalation over guessing: any judgment call, missing brief field, or oversized or mismatched sibling is reported rather than resolved. Load class: `plan-run` - the charter is loaded by the dispatched agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template with its haiku-only fields filled.
 
-Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C056 and C057 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A007 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c9128f85`, so every live entry's `passage:` line quotes the text at `c9128f85` and the `flag:` lines record that pass's flags.
+Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C056 and C057 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A007 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c9128f85`, so every live entry's `passage:` line quotes the text at `c9128f85` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C002, C007, C008, C011, C016, C019, C020, C026, C029, C049 and C055 below, amended in place for the widened band, with C026 and C029 each taking the sentence step 3 or step 4 gained).
 
 ### C001
 - key: Dispatch this agent under the name `implementer-haiku`.
@@ -22743,13 +22748,14 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: name: implementer-haiku
 
 ### C002
-- key: Use this agent to implement a single pure-transcription Section of Work from an approved spec, at the Haiku tier.
+- key: Use this agent to implement a single well-bounded Section of Work from an approved spec on an established shape, at the Haiku tier.
 - class: mechanic
 - source: plugins/grimoire/agents/implementer-haiku.md:3
-- provenance: 20cf885 2026-07-03 installed the description with the tier; a5e184b 2026-08-25 reworded its brief clause to point at the owning template.
-- verdict: keep
-- reason: This is the dispatch criterion the orchestrator reads out of the agent catalog, and the pure-transcription bound is what keeps judgment-bearing sections off this tier.
-- passage: Use to implement a single pure-transcription Section of Work from an approved spec
+- provenance: 20cf885 2026-07-03 installed the description with the tier; a5e184b 2026-08-25 reworded its brief clause to point at the owning template; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
+- reason: This is the dispatch criterion the orchestrator reads out of the agent catalog, and the established-shape bound is what keeps judgment-bearing sections off this tier.
+- passage: Use to implement a single well-bounded Section of Work from an approved spec on an established shape
 
 ### C003
 - key: Dispatch this agent with a brief built from the executing-work skill's Dispatch Brief template with its haiku-only fields filled.
@@ -22790,21 +22796,23 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 ### C007
 - key: Implement exactly one Section of Work from an approved spec.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:8
-- provenance: 20cf885 2026-07-03, the tier's creation.
-- verdict: keep
+- source: plugins/grimoire/agents/implementer-haiku.md:9
+- provenance: 20cf885 2026-07-03, the tier's creation; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: A dispatched agent loads only its own charter, inherits no skills and can resolve no pointer, which the kit's own parity suite states twice (test/doctrine-parity.test.js:3562, :4996). The identical opening in a sibling charter is a deliberate copy, and the ownership map's remedy for a shared moment is a copy under a parity pin rather than a pointer.
-- passage: You implement exactly one Section of Work from an approved spec as a transcriber, not a designer: the spec owns the design, so reproduce it and the sibling pattern your brief names faithfully, with only the section's substitutions.
+- passage: You implement exactly one Section of Work from an approved spec on an established shape: the spec owns the design and the sibling your brief names owns the shape, so build what the section's contract names and design nothing.
 - flag: stale
 
 ### C008
-- key: Act as a transcriber rather than a designer, reproducing the spec and the named sibling pattern faithfully with only the section's substitutions.
+- key: Build what the section's contract names on the shape of the sibling your brief names, and design nothing.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:8
-- provenance: 20cf885 2026-07-03; 7dafcdb 2026-07-15 records the transcriber framing as a preserved tier variant.
-- verdict: keep
+- source: plugins/grimoire/agents/implementer-haiku.md:9
+- provenance: 20cf885 2026-07-03; 7dafcdb 2026-07-15 records the transcriber framing as a preserved tier variant; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which replaced the transcriber framing with the established-shape bound.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: This is the tier discriminator: the sibling charters confine judgment to execution quality while this one holds none at all. Compressing it away would erase the only line separating the two tiers.
-- passage: You implement exactly one Section of Work from an approved spec as a transcriber, not a designer: the spec owns the design, so reproduce it and the sibling pattern your brief names faithfully, with only the section's substitutions.
+- passage: You implement exactly one Section of Work from an approved spec on an established shape: the spec owns the design and the sibling your brief names owns the shape, so build what the section's contract names and design nothing.
 
 ### C009
 - key: Read before you write, assuming you know nothing beyond what the brief tells you or the files show you.
@@ -22818,7 +22826,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 ### C010
 - key: Read the Dispatch Brief template in the executing-work skill's Section loop step 1 for the brief's field list.
 - class: pointer
-- source: plugins/grimoire/agents/implementer-haiku.md:12
+- source: plugins/grimoire/agents/implementer-haiku.md:13
 - provenance: a5e184b 2026-08-25, which replaced the charter's own enumerated field list with this pointer so the template owns the list alone.
 - verdict: rewrite
 - landed: 2b427ac section 4
@@ -22827,13 +22835,14 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: Your brief is an instance of the executing-work skill's Dispatch Brief template.
 
 ### C011
-- key: Treat the exact sibling file to clone and the self-surfacing gate command as the two haiku-only brief fields this tier cannot work without.
+- key: Treat the sibling pattern to follow and the self-surfacing gate command as the two haiku-only brief fields this tier cannot work without.
 - class: mechanic
-- source: plugins/grimoire/agents/implementer-haiku.md:12
-- provenance: a5e184b 2026-08-25 stated the two fields on the agent's side; 20cf885 2026-07-03 made them the tier's precondition.
-- verdict: keep
+- source: plugins/grimoire/agents/implementer-haiku.md:13
+- provenance: a5e184b 2026-08-25 stated the two fields on the agent's side; 20cf885 2026-07-03 made them the tier's precondition; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: Two actors, not one rule twice: executing-work tells the dispatcher what to write and when to re-band to sonnet, this line tells the receiving agent what it cannot start without.
-- passage: This tier cannot work without its two haiku-only fields: the exact sibling file to clone and the self-surfacing gate command.
+- passage: This tier cannot work without its two haiku-only fields: the sibling pattern to follow and the self-surfacing gate command.
 
 ### C012
 - key: Treat the section's `Tests:` line as a floor over the named contracts: extend it with what implementation reveals and never shrink it.
@@ -22878,15 +22887,15 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: If something you need is missing, especially the sibling, report NEEDS_CONTEXT immediately rather than improvising.
 
 ### C016
-- key: Read the spec section in full first.
+- key: Read the spec section in full first, and the spec's Approach for design intent.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:16
-- provenance: 7dafcdb 2026-07-15, the dispatch-brief template and implementer re-pin, which preserved the tier variants deliberately.
+- source: plugins/grimoire/agents/implementer-haiku.md:23
+- provenance: 7dafcdb 2026-07-15, the dispatch-brief template and implementer re-pin, which preserved the tier variants deliberately; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which added the Approach clause from the sonnet charter's step 1.
 - verdict: rewrite
-- landed: 2b427ac section 4
-- reason: The haiku form drops the sibling charters' Approach-section clause on purpose, because a transcription section carries no design intent to read, and that tier variant stands. Ruling 17's third pick splits step 1's read sentence, so the spec read is its own sentence. Lands at the corpus-rewrite follow-up plan's section 4 as the proposal.
-- proposed: **Read the spec section in full**.
-- passage: **Read the spec section in full**.
+- landed: d4d1d5d8 section 2
+- reason: The haiku form carries the sibling charters' Approach clause, because a section built on an established shape still needs the design intent the Approach carries. Ruling 17's third pick splits step 1's read sentence, so the spec read and the Approach clause form one sentence, apart from the Goal and Intent read that follows it.
+- proposed: **Read the spec section in full**, and the spec's Approach for design intent.
+- passage: **Read the spec section in full**, and the spec's Approach for design intent.
 
 ### C017
 - key: Read the style skill files named in your brief, such as csharp-style or sql-style.
@@ -22910,23 +22919,25 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: Honor each style skill's precedence rule.
 
 ### C019
-- key: Read the sibling named in your brief, read it whole, and mirror it exactly.
+- key: Read the sibling named in your brief, read it whole, and follow its pattern.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:18
-- provenance: ddd6c72 2026-08-23, the outline-first plan, which set the doctrine's outline bullet and each charter's counter-rule in one commit.
-- verdict: keep
+- source: plugins/grimoire/agents/implementer-haiku.md:25
+- provenance: ddd6c72 2026-08-23, the outline-first plan, which set the doctrine's outline bullet and each charter's counter-rule in one commit; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: The whole read is the tier's job, and the parity pin that holds the outline chain names the sonnet, opus and fable charters and excludes this one by name because this one says the opposite (test/doctrine-parity.test.js:3954-3956).
-- passage: **Read the sibling named in your brief whole, and mirror it exactly.**
+- passage: **Read the sibling named in your brief whole, and follow its pattern.**
 - flag: stale
 
 ### C020
-- key: Match the sibling's layout, failure-mode breadth (catch scope, regex generality), and error and delete semantics, changing only the substitutions the section calls for.
+- key: Match the sibling's layout, failure-mode breadth (catch scope, regex generality), and error and delete semantics while building what the section's contract names.
 - class: mechanic
-- source: plugins/grimoire/agents/implementer-haiku.md:18
-- provenance: ddd6c72 2026-08-23; the mirroring precondition dates from 20cf885 2026-07-03.
-- verdict: keep
+- source: plugins/grimoire/agents/implementer-haiku.md:25
+- provenance: ddd6c72 2026-08-23; the mirroring precondition dates from 20cf885 2026-07-03; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: The named dimensions are what this tier is actually for, and "follow its layout exactly" in the fable charter does not carry them. The executing-work lines that look like duplicates address the dispatcher writing the brief, not the agent executing it.
-- passage: Match its layout, failure-mode breadth (catch scope, regex generality), and error and delete semantics, changing only the substitutions the section calls for.
+- passage: Match its layout, failure-mode breadth (catch scope, regex generality), and error and delete semantics while building what the section's contract names.
 
 ### C021
 - key: Never substitute an outline for reading the sibling whole at this tier.
@@ -22976,15 +22987,16 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: **Implement only the section**, touching what the section requires and nothing else:
 
 ### C026
-- key: Add no scope expansion, no abstraction, no improvements to adjacent code, and no placeholder logic.
+- key: Add no scope expansion, no abstraction, no improvements to adjacent code, and no placeholder logic, and mention a feature, document or refactor nobody asked for before the report's status line instead of building it.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:20
-- provenance: 20cf885 2026-07-03.
+- source: plugins/grimoire/agents/implementer-haiku.md:27
+- provenance: 20cf885 2026-07-03; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which added the unasked-for-work sentence from Anthropic's coding-agent guidance for Haiku 5.5.
 - verdict: rewrite
-- landed: 2b427ac section 4
-- reason: The haiku form drops "speculative" on purpose: this tier may add no abstraction at all, which is a real widening of the sibling bar. The words stand; the list now follows C025's colon, so it opens in lowercase. Lands at the corpus-rewrite follow-up plan's section 4 as the proposal.
+- landed: 58bfe803 section 2
+- reason: The haiku form drops "speculative" on purpose: this tier may add no abstraction at all, which is a real widening of the sibling bar. The words stand; the list now follows C025's colon, so it opens in lowercase. Lands at the corpus-rewrite follow-up plan's section 4 as the proposal. The second passage gives the model a place for work it would otherwise add, the cure the vendor's guidance names for that habit.
 - proposed: no scope expansion, no abstraction, no "improvements" to adjacent code, no placeholder logic.
 - passage: no scope expansion, no abstraction, no "improvements" to adjacent code, no placeholder logic.
+- passage: Mention a feature, document or refactor nobody asked for before your status line instead of building it.
 
 ### C027
 - key: Update every pin test your brief named to its new expected values.
@@ -23005,13 +23017,15 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: A comment states what the code does now and why, for a reader who never saw the work, never the session, the task, the fix, or the prior version.
 
 ### C029
-- key: Run the gate commands from your brief and verify with evidence.
+- key: Run the gate commands from your brief and verify with evidence, where a syntax-only check or a gate that failed to start is not the gate and a gate that cannot run is named instead of reporting DONE.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:22
-- provenance: 86461d1 2026-08-07 rewrote step 4 across all four implementers after a live incident; the evidence duty dates from 20cf885 2026-07-03.
-- verdict: keep
-- reason: Running the brief's named gate commands rather than choosing targeted tests is the tier's whole point, so the sibling charters' wording is not interchangeable with this one.
+- source: plugins/grimoire/agents/implementer-haiku.md:29
+- provenance: 86461d1 2026-08-07 rewrote step 4 across all four implementers after a live incident; the evidence duty dates from 20cf885 2026-07-03; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which added the two gate-validity sentences from Anthropic's coding-agent guidance for Haiku 5.5.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
+- reason: Running the brief's named gate commands rather than choosing targeted tests is the tier's whole point, so the sibling charters' wording is not interchangeable with this one. A gate is the only evidence this tier's report carries, so a check that proves only syntax, or a command that never started, cannot stand in for one.
 - passage: Run the gate commands from your brief.
+- passage: A syntax-only check, or a gate command that failed to start, is not the gate. Where no real gate can run, name the one not run and why instead of reporting DONE.
 
 ### C030
 - key: Ensure the build passes and carry the output that proves done in your report.
@@ -23196,13 +23210,14 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: **Do not guess.** A wrong guess costs a review round; a question costs one message, and no amount of confidence in an answer transfers the authority to decide it.
 
 ### C049
-- key: Report the mis-banding itself when a decision-shaped question arrives in a transcription section.
+- key: Report the mis-banding itself when a decision-shaped question arrives in a section at this tier.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:32
-- provenance: 1d9c467 2026-08-15, which kept haiku's mis-banding rule and re-grounded it on the question's shape.
-- verdict: keep
+- source: plugins/grimoire/agents/implementer-haiku.md:39
+- provenance: 1d9c467 2026-08-15, which kept haiku's mis-banding rule and re-grounded it on the question's shape; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
+- verdict: rewrite
+- landed: d4d1d5d8 section 2
 - reason: This is the tier's feedback loop: a decision-shaped question is evidence the banding decision was wrong, and the orchestrator only learns that if the agent says so.
-- passage: A decision-shaped question in a transcription section means the section was mis-banded, its tier set too low for the work, so report the mis-banding too.
+- passage: A decision-shaped question in a section at this tier means the section was mis-banded, its tier set too low for the work, so report the mis-banding too.
 
 ### C050
 - key: State the question in four parts: the decision, the options you see, the evidence, and your lean as an instinct to test rather than a call you made.
@@ -23256,13 +23271,13 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 ### C055
 - key: Treat the design as the spec's, so that no design change is yours to make.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:8
-- provenance: the sonnet charter's design sentence, which ruling 17's second pick adds to this charter; the corpus-rewrite follow-up plan's section 4 landed it here.
+- source: plugins/grimoire/agents/implementer-haiku.md:9
+- provenance: the sonnet charter's design sentence, which ruling 17's second pick adds to this charter; the corpus-rewrite follow-up plan's section 4 landed it here; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10.
 - verdict: rewrite
-- landed: 2b427ac section 4
+- landed: d4d1d5d8 section 2
 - reason: The sentence gives this charter the design bound the sibling charters open with, which ruling 17's second pick adds here. It takes the sonnet sentence's subject in a tier-true form and drops the reason clause, which grants judgment on execution quality, because C008 states this tier holds no judgment and step 2 routes every judgment call to NEEDS_CONTEXT. It sits before C008 and states the design half of the same bound. Lands at the corpus-rewrite follow-up plan's section 4 as the proposal.
 - proposed: The spec owns the design, so no design change is yours to make.
-- passage: the spec owns the design, so reproduce it and the sibling pattern your brief names faithfully, with only the section's substitutions.
+- passage: the spec owns the design and the sibling your brief names owns the shape, so build what the section's contract names and design nothing.
 
 ### C056
 - key: Read the spec's `## Goal` paragraph and its `## Intent` record where the plan carries one, since those are what your step 3 add-decision line is checked against.
@@ -23286,7 +23301,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 ### W001
 - key: Treat the section's `Tests:` line as a floor over the named contracts, extend it with what implementation reveals, and amend it on contact with the code where a named contract proves to be a choice as the testing-discipline skill defines one.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:15
+- source: plugins/grimoire/agents/implementer-haiku.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
 - reason: Supersedes C012. Designed copy of the marked region in the implementer-fable charter, W001 under that heading; held byte-identical by `test/doctrine-parity.test.js`. The "Two other fields" lead-in stays this charter's own and sits outside the markers.
@@ -23295,7 +23310,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 ### W002
 - key: Flag in your report either delta to the section's `Tests:` line, an extension or an amendment, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 - class: rule
-- source: plugins/grimoire/agents/implementer-haiku.md:15
+- source: plugins/grimoire/agents/implementer-haiku.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
 - reason: Supersedes C013. Designed copy of the marked region in the implementer-fable charter, W002 under that heading.
@@ -23304,7 +23319,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 ### A007
 - key: Before reporting BLOCKED, sort the failure by systematic-debugging's classify step, and never change working code to route around an environment problem.
 - class: pointer
-- source: plugins/grimoire/agents/implementer-haiku.md:39
+- source: plugins/grimoire/agents/implementer-haiku.md:40
 - provenance: docs/plans/claude-kit_corpus-compression_spec_v1.md section 9, 2026-09-26, the classify-first step the operator approved from the Supreme review, declared growth of about forty words.
 - verdict: keep
 - reason: The classify step (A003 under the systematic-debugging ledger) owns the sort; this bullet points at it so an implementer reads the bins before it reports an environment problem as a code change or a code change as BLOCKED. The prohibition rides here as well as there because a dispatched implementer inherits no skill body and reaches the step only by opening the file. The four charters carry one text under the corpus rewrite's ruling 1.

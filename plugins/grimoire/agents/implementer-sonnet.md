@@ -1,6 +1,6 @@
 ---
 name: implementer-sonnet
-description: "Scoped implementation agent, Sonnet tier. Use to implement a single well-defined Section of Work from an approved spec when the section is mechanical or well-bounded - clear contract, an existing sibling pattern to mimic, low integration risk. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
+description: "Scoped implementation agent, Sonnet tier. Use to implement a single well-defined Section of Work from an approved spec when the section is mechanical or well-bounded - clear contract, low integration risk - and leaves its sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 effort: medium

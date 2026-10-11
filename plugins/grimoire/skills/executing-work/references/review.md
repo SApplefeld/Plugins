@@ -70,7 +70,7 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
    | **Fable re-aim**: the same, landing on fable | fable | `medium` | `Workflow` |
    | **Finishing reviews** over the whole changeset | fable | `medium` | `Workflow`, per finishing-work |
    | **Gate compensation** for a Fable gate ruled out | opus | `high` | `Workflow`, per finishing-work |
-   | **Haiku implementer**, `implementer-haiku` | haiku | none | Agent tool |
+   | **Haiku implementer**, `implementer-haiku` | haiku | `medium` (frontmatter default) | Agent tool |
    | **Sonnet implementer**, `implementer-sonnet` | sonnet | `medium` (frontmatter default) | Agent tool |
    | **Opus implementer**, `implementer-opus` | opus | `medium` (frontmatter default) | Agent tool |
    | **Fable implementer**, `implementer-fable` | fable | `medium` (frontmatter default) | Agent tool |
