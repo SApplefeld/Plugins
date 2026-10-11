@@ -1920,6 +1920,7 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     if (config.voice && gateway.voice !== null) {
       const { createVoice } = await import("./voice/connection.ts");
       const { createFlux } = await import("./voice/flux.ts");
+      const { createTurnHold } = await import("./voice/turn-hold.ts");
       const { transcriptionHooks } = await import("./voice/transcription.ts");
       const { ANSWER_TIMEOUT_MS, createFastTier } = await import("./voice/fast.ts");
       const { JEV_TIMEOUT_MS } = await import("./jev/client.ts");
@@ -1929,6 +1930,13 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       const voiceGateway = gateway.voice;
       const speechUrl = config.speechUrl;
       const speechCredential = speechToken;
+      // The turn hold's mode as it will run: `judged` needs the Jev key, and without one it runs
+      // plain, said once here rather than on every join.
+      const turnHold = config.voiceTurnHold;
+      const holdJudge = turnHold === "judged" && judgeKey !== null ? { apiKey: judgeKey } : null;
+      if (turnHold === "judged" && judgeKey === null) {
+        note("voice: CHANNEL_VOICE_TURN_HOLD is judged and no Jev key is read, so the turn hold runs plain");
+      }
       // The session bound to a thread, the live one over an ended one, as the inbound router
       // resolves a thread's message.
       const sessionBoundTo = (threadId: string): SessionRecord | null => {
@@ -1953,14 +1961,26 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
           key,
           shortTurnWords: config.voiceShortTurnWords,
           turnAudioSeconds: config.voiceTurnAudioSeconds,
-          create: (stt) =>
-            createFlux({
+          // The hold wraps Flux, so every consumer the hooks subscribe reads turns through it: the
+          // turn-audio keeper, the barge-in rule and the bridge share one hold per end. Off, the
+          // transcriber is wired bare.
+          create: (stt) => {
+            const flux = createFlux({
               key: stt,
               eotThreshold: config.voiceEotThreshold,
               eagerThreshold: config.voiceEagerThreshold,
               eager: config.voiceEager,
               log: note,
-            }),
+            });
+            if (turnHold === "off") return flux;
+            return createTurnHold(flux, {
+              mode: turnHold,
+              holdMs: config.voiceTurnHoldMs,
+              threshold: config.voiceCompleteThreshold,
+              judge: holdJudge,
+              log: note,
+            });
+          },
           attach: voiceJoin({
             gate,
             sessionBoundTo,
@@ -2034,7 +2054,15 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
           (key === null
             ? "; CHANNEL_VOICE_STT_KEY_FILE is unset, so the channel is deaf and the thread keeps working"
             : `; operator audio is transcribed by Deepgram Flux while the bot is in a channel` +
-              (config.voiceEager ? ", with eager end of turn" : "")) +
+              (config.voiceEager ? ", with eager end of turn" : "") +
+              // The hold as it will run, so a judged setting without a key reads as the plain hold
+              // it is.
+              (turnHold === "off"
+                ? ", and the turn hold is off"
+                : `, and a turn's end is held for up to ${String(config.voiceTurnHoldMs)}ms` +
+                  (holdJudge === null
+                    ? " (plain)"
+                    : ` (judged, released at once at or above ${String(config.voiceCompleteThreshold)})`))) +
           (speechToken === null
             ? "; CHANNEL_SPEECH_URL is unset, so the voice is mute and answers stay in the thread"
             : `; the speech service is configured, in the voice ${config.speechVoice}`) +

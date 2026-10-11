@@ -286,6 +286,18 @@ export type BrokerConfig = {
    */
   voiceEagerSettleMs: number;
   /**
+   * Whether a turn's end is held so a thought gathered across a pause reaches the voice as one
+   * turn. `off` wires the transcriber bare. `plain` holds every end with words for
+   * `voiceTurnHoldMs`, and a turn the operator starts inside the wait joins it. `judged` asks Jev
+   * whether the words are a finished thought and releases at once at or above
+   * `voiceCompleteThreshold`, waiting out the hold otherwise.
+   */
+  voiceTurnHold: "off" | "plain" | "judged";
+  /** How long a held end waits before it is released, from 500 to 5000 ms. */
+  voiceTurnHoldMs: number;
+  /** The finished-thought probability at or above which a judged hold releases at once, from 0.3 to 0.9. */
+  voiceCompleteThreshold: number;
+  /**
    * How long after a hand-off the thinking line waits for the session's reply before it is spoken,
    * from 0 to 10000 ms. Zero speaks it at the hand-off.
    */
@@ -529,6 +541,17 @@ const MAX_VOICE_TURN_AUDIO_SECONDS = 60;
 const DEFAULT_VOICE_EAGER_SETTLE_MS = 1500;
 const MIN_VOICE_EAGER_SETTLE_MS = 500;
 const MAX_VOICE_EAGER_SETTLE_MS = 5000;
+// Two seconds after a spoken turn's end before the held words go on, so a thought that carries on
+// inside the wait joins them. The floor keeps a hold worth having, and the ceiling keeps a finished
+// turn from waiting long after the operator has stopped. The threshold is the finished-thought
+// probability at or above which a judged hold releases at once, with its own bounds so a change
+// to the ranking's bounds leaves the hold's where they are.
+const DEFAULT_VOICE_TURN_HOLD_MS = 2000;
+const MIN_VOICE_TURN_HOLD_MS = 500;
+const MAX_VOICE_TURN_HOLD_MS = 5000;
+const DEFAULT_VOICE_COMPLETE_THRESHOLD = 0.8;
+const MIN_VOICE_COMPLETE_THRESHOLD = 0.3;
+const MAX_VOICE_COMPLETE_THRESHOLD = 0.9;
 // Two and a half seconds of silence after a hand-off before the thinking line, so a quick reply is
 // heard with no holding line at all, and nine before the still-looking line, so a slow one is not
 // met with silence. Zero speaks the thinking line at the hand-off. The ceilings keep a long wait
@@ -670,6 +693,18 @@ const RESPONSE_GATE_MODES: ReadonlyArray<"off" | "shadow" | "live"> = ["off", "s
  */
 function responseGateMode(raw: string | undefined): "off" | "shadow" | "live" {
   return strictEnum(raw, RESPONSE_GATE_MODES, "off");
+}
+
+const VOICE_TURN_HOLD_MODES: ReadonlyArray<"off" | "plain" | "judged"> = ["off", "plain", "judged"];
+
+/**
+ * Whether a spoken turn's end is held, defaulting to the plain hold, which waits out the setting
+ * with no Jev call: a typo like `CHANNEL_VOICE_TURN_HOLD=judge` is refused by the reading above
+ * rather than landing on a mode that either answers every fragment at once or spends a Jev call
+ * on every turn, silently, whichever the parser leaned toward.
+ */
+function voiceTurnHoldMode(raw: string | undefined): "off" | "plain" | "judged" {
+  return strictEnum(raw, VOICE_TURN_HOLD_MODES, "plain");
 }
 
 const ATTACHMENT_MODES: ReadonlyArray<"off" | "operator" | "all"> = ["off", "operator", "all"];
@@ -1121,6 +1156,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MIN_VOICE_EAGER_SETTLE_MS,
       MAX_VOICE_EAGER_SETTLE_MS,
       DEFAULT_VOICE_EAGER_SETTLE_MS,
+    ),
+    // The turn hold's three, read whatever the flag for the same reason as the rest of the voice's.
+    voiceTurnHold: voiceTurnHoldMode(env.CHANNEL_VOICE_TURN_HOLD),
+    voiceTurnHoldMs: bounded(
+      env.CHANNEL_VOICE_TURN_HOLD_MS,
+      MIN_VOICE_TURN_HOLD_MS,
+      MAX_VOICE_TURN_HOLD_MS,
+      DEFAULT_VOICE_TURN_HOLD_MS,
+    ),
+    voiceCompleteThreshold: boundedFraction(
+      env.CHANNEL_VOICE_COMPLETE_THRESHOLD,
+      MIN_VOICE_COMPLETE_THRESHOLD,
+      MAX_VOICE_COMPLETE_THRESHOLD,
+      DEFAULT_VOICE_COMPLETE_THRESHOLD,
     ),
     voiceHoldFirstMs: bounded(
       env.CHANNEL_VOICE_HOLD_FIRST_MS,

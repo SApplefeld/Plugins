@@ -1,7 +1,8 @@
 // The Jev client: the one way the broker sends text to TypeSafe.
 //
-// Two callers ask TypeSafe's Jev classifier yes-or-no questions about text. The response gate asks
-// about a thread's buffered conversation, and the voice's ranking asks about a spoken turn. Each
+// Three callers ask TypeSafe's Jev classifier yes-or-no questions about text. The response gate asks
+// about a thread's buffered conversation, the voice's ranking asks about a spoken turn, and the
+// voice's turn hold asks whether a held turn reads as a finished thought. Each
 // supplies its own questions, the state they are asked about, the threshold it reads the answer
 // against and the two lines its failures are logged on. What they share is here,
 // and none of it is an argument: the host, the model and the timeout are constants, so nothing a
@@ -12,7 +13,7 @@
 // first. A state matching the screen is never sent, and the call settles as a failure of its own
 // kind. The screen is a pattern and not a proof, an accepted residual recorded in
 // `docs/security-model.md`. The code point cut is each caller's to apply, since each knows what its
-// text is and which end of it to keep; the limit is shared so both cut at one length.
+// text is and which end of it to keep; the limit is shared so every caller cuts at one length.
 //
 // Every failure lands on one direction: a result naming its kind, one rate-limited log line, and
 // never a throw into the caller. A log line names the failure kind and the caller's key and carries
