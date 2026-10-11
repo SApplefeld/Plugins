@@ -229,7 +229,7 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
   };
 
   // The speaker the tier is handed: each line is posted to the thread before it is spoken, so the
-  // post never depends on the speech service answering.
+  // post never depends on the speaker answering.
   let voice: Speaker | null = null;
   // Speeches handed to the speaker and not yet settled, the persona being mid-reply. The barge-in
   // rule reads it to tell a backchannel over the persona from a turn of the operator's own.
@@ -247,7 +247,7 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     options.speaker === null
       ? null
       : {
-          speak: async (text, history, remember, turn) => {
+          speak: async (text, remember) => {
             post("persona", options.names(speakerId).session, text);
             // Pending from the moment it is handed to the speaker, so a cancel while it speaks
             // drops it; settled once the speaker is done with it, which is what lets the next
@@ -258,10 +258,9 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
             // The voice's own contract is to settle without rejecting; this is the guard behind it,
             // so a tier waiting on the line is never left hanging by a broken speaker.
             try {
-              // A session reply is in the thread from the outbound router already, so the speech
-              // service's fallback must not post it a second time; a fast answer has no other copy.
-              // The operator's latest turn, where the tier names one, goes to the speech service.
-              await voice?.speak(text, history, { inThread: remember === "session reply", turn });
+              // A session reply is in the thread from the outbound router already, so the speaker's
+              // fallback must not post it a second time; a fast answer has no other copy.
+              await voice?.speak(text, { inThread: remember === "session reply" });
             } catch {
               options.log(`voice: the speaker failed on a line for thread ${threadId}`);
             } finally {

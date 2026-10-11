@@ -9,7 +9,6 @@ import {
   REPLY_HEARTBEAT_MS,
   loadConfig,
   readJevKey,
-  readSpeechToken,
   readVoiceFastKey,
   readVoiceSttKey,
 } from "./config.ts";
@@ -865,19 +864,16 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
   // so a host whose gate cannot judge fails at once with the reason on disk: under the scheduled
   // task there is no console for the throw to reach.
   let judgeKey: string | null;
-  // The transcription key is read on the same terms, and only where the voice is on: a named file
-  // the voice cannot use refuses the start, as an unusable Discord token file does, and so does one
-  // outside the state root, the directory holding the state file.
+  // The Deepgram key, which hears and speaks, is read on the same terms, and only where the voice
+  // is on: a named file the voice cannot use refuses the start, as an unusable Discord token file
+  // does, and so does one outside the state root, the directory holding the state file.
   let sttKey: string | null;
-  // So is the speech service's token, under the same state-root rule.
-  let speechToken: string | null;
   // And the fast tier's Anthropic key, under the same rule.
   let fastKey: string | null;
   try {
     judgeKey = readJudgeKey(config, warn);
     const stateRoot = path.dirname(config.stateFile);
     sttKey = config.voice ? readVoiceSttKey(config.voiceSttKeyFile, stateRoot) : null;
-    speechToken = config.voice ? readSpeechToken(config.speechTokenFile, stateRoot) : null;
     fastKey = config.voice ? readVoiceFastKey(config.voiceFastKeyFile, stateRoot) : null;
   } catch (error) {
     const message = `broker: refusing to start: ${String(error)}`;
@@ -1924,12 +1920,10 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       const { transcriptionHooks } = await import("./voice/transcription.ts");
       const { ANSWER_TIMEOUT_MS, createFastTier } = await import("./voice/fast.ts");
       const { JEV_TIMEOUT_MS } = await import("./jev/client.ts");
-      const { createSpeechService } = await import("./voice/speech-service.ts");
+      const { createFluxSpeech } = await import("./voice/flux-speech.ts");
       const { voiceJoin } = await import("./voice/join.ts");
       const key = sttKey;
       const voiceGateway = gateway.voice;
-      const speechUrl = config.speechUrl;
-      const speechCredential = speechToken;
       // The turn hold's mode as it will run: `judged` needs the Jev key, and without one it runs
       // plain, said once here rather than on every join.
       const turnHold = config.voiceTurnHold;
@@ -1952,6 +1946,8 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       // the leave, so no audio reaches Deepgram while the bot is in no channel. The voice's own
       // stop leaves the channel, which closes it. The bridge, the fast tier and the speaker live
       // exactly as long, built by `attach` on the join and released by its detach on the leave.
+      // The speaker takes the same Deepgram key as the transcriber, so the voice speaks exactly
+      // when it hears.
       voice = createVoice({
         gateway: voiceGateway,
         gate,
@@ -1960,10 +1956,9 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
         ...transcriptionHooks({
           key,
           shortTurnWords: config.voiceShortTurnWords,
-          turnAudioSeconds: config.voiceTurnAudioSeconds,
           // The hold wraps Flux, so every consumer the hooks subscribe reads turns through it: the
-          // turn-audio keeper, the barge-in rule and the bridge share one hold per end. Off, the
-          // transcriber is wired bare.
+          // barge-in rule and the bridge share one hold per end. Off, the transcriber is wired
+          // bare.
           create: (stt) => {
             const flux = createFlux({
               key: stt,
@@ -2004,9 +1999,9 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
             eagerSettleMs: config.voiceEagerSettleMs,
             hold: (id, until) => typingKeeper?.hold(id, until) ?? ((): void => {}),
             // The longest the path from a turn's end to its first frame can run: the ranking's
-            // timeout, then the fast model's, then the speech service's.
+            // timeout, then the fast model's, then the speech socket's.
             holdMs: JEV_TIMEOUT_MS + ANSWER_TIMEOUT_MS + config.speechTimeoutMs,
-            tier: ({ names, speaker, player, handOff, forget, turnAudio }) =>
+            tier: ({ names, speaker, player, handOff, forget }) =>
               createFastTier({
                 names,
                 thresholds: { handoff: config.voiceHandoffThreshold, answer: config.voiceAnswerThreshold },
@@ -2019,16 +2014,14 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
                 player,
                 handOff,
                 forget,
-                turnAudio,
                 log: note,
               }),
             speaker:
-              speechUrl === null || speechCredential === null
+              key === null
                 ? null
                 : ({ player, fallback }) =>
-                    createSpeechService({
-                      url: speechUrl,
-                      token: speechCredential,
+                    createFluxSpeech({
+                      key,
                       voice: config.speechVoice,
                       timeoutMs: config.speechTimeoutMs,
                       player,
@@ -2052,7 +2045,7 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
           `${String(config.voiceIdleMs)}ms with no operator audio` +
           (config.voiceLoopback ? ", and the development loopback is on" : "") +
           (key === null
-            ? "; CHANNEL_VOICE_STT_KEY_FILE is unset, so the channel is deaf and the thread keeps working"
+            ? "; CHANNEL_VOICE_STT_KEY_FILE is unset, so the channel is deaf and mute, and the thread keeps working"
             : `; operator audio is transcribed by Deepgram Flux while the bot is in a channel` +
               (config.voiceEager ? ", with eager end of turn" : "") +
               // The hold as it will run, so a judged setting without a key reads as the plain hold
@@ -2062,10 +2055,8 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
                 : `, and a turn's end is held for up to ${String(config.voiceTurnHoldMs)}ms` +
                   (holdJudge === null
                     ? " (plain)"
-                    : ` (judged, released at once at or above ${String(config.voiceCompleteThreshold)})`))) +
-          (speechToken === null
-            ? "; CHANNEL_SPEECH_URL is unset, so the voice is mute and answers stay in the thread"
-            : `; the speech service is configured, in the voice ${config.speechVoice}`) +
+                    : ` (judged, released at once at or above ${String(config.voiceCompleteThreshold)})`)) +
+              `, and the voice speaks through Deepgram Flux in the voice ${config.speechVoice}`) +
           // The fast tier's keys as read at this start, each named by what it is for: the Jev key
           // the response gate and the voice share is the fast tier's ranking key, and the fast key
           // with its model is its answering key. The line says what is read and nothing of what is

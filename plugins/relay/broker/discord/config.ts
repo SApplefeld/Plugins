@@ -2,7 +2,7 @@
 // error: the broker runs its registry and its hook intake with no Discord connection at all, which
 // is what every test and every local debugging run does.
 import { readFileSync } from "node:fs";
-import { strictFlag } from "../config.ts";
+import { NOT_A_HEADER_VALUE, strictFlag, VISIBLE_ASCII_CREDENTIAL } from "../config.ts";
 import { SNOWFLAKE } from "../security/senders.ts";
 import { assertTokenFileIsProtected } from "./credentials.ts";
 
@@ -60,6 +60,11 @@ function readToken(env: NodeJS.ProcessEnv, direct: string | undefined): string |
   // The path is reported on failure; the contents never are.
   const token = readFileSync(file, "utf8").trim();
   if (token === "") throw new Error(`the token file ${file} is empty`);
+  // The token rides an Authorization header, so a file in another encoding (UTF-16 is what `>`
+  // writes in Windows PowerShell 5.1) is refused here instead of failing every request later.
+  if (!VISIBLE_ASCII_CREDENTIAL.test(token)) {
+    throw new Error(`the token file ${file} ${NOT_A_HEADER_VALUE}`);
+  }
   return token;
 }
 

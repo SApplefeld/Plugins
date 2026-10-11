@@ -6,9 +6,9 @@
 // thought releases the end at once; a doubtful answer, a failure of any kind, or the `plain` mode
 // leaves the timer to release it.
 //
-// The wrapper keeps one listener list of its own, called in subscription order, so the turn-audio
-// keeper, the barge-in rule and the bridge share one hold, one timer and one Jev call per end, and
-// the barge-in rule still runs ahead of the bridge for every event.
+// The wrapper keeps one listener list of its own, called in subscription order, so the barge-in
+// rule and the bridge share one hold, one timer and one Jev call per end, and the barge-in rule
+// still runs ahead of the bridge for every event.
 //
 // Nothing this file logs carries the operator's words: a hold's line names the turn number, how it
 // ended and the numbers, and a Jev failure is logged by its kind alone through the repeat log.

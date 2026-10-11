@@ -50,7 +50,7 @@ export function wordCount(text: string): number {
  * The barge-in rule's reading of a short turn over the persona's speech. `speaking` says whether
  * the persona is mid-reply: a speech handed to the speaker has not settled, or the player holds
  * frames. Both halves are needed, since a speak settles when its last frame reaches the player and
- * the player is empty in the gap before a segment's first frame arrives. `onHeldShort` is told the
+ * the player is empty in the gap before a turn's first frame arrives. `onHeldShort` is told the
  * number of a short turn that ended while it read true.
  */
 export type HeldShortReading = {

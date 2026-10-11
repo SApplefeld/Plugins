@@ -17,9 +17,9 @@ export type ReplyKind = "hand-off" | "access" | "walk-back";
  * Phrases about the speaker's own reach or ability. Each is first person and a whole phrase, long
  * enough that a light reply does not open with it: "I can't see why not" and "I'm just a bit
  * tired" match nothing here. A reply about the person, "you can't see that from here", is not
- * caught. The honest disclosure the prompt asks for, "I'm an AI assistant speaking in a cloned
- * voice", matches nothing here. "I'm just an assistant" and "I'm only an assistant" are caught by
- * design, so the turn is handed off rather than a disclaimer spoken.
+ * caught. The honest disclosure the prompt asks for, "I'm an AI assistant speaking in a
+ * synthesized voice", matches nothing here. "I'm just an assistant" and "I'm only an assistant"
+ * are caught by design, so the turn is handed off rather than a disclaimer spoken.
  */
 export const ACCESS_PHRASES: readonly string[] = [
   "I don't have access",

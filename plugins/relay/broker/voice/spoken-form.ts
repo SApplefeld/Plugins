@@ -1,8 +1,8 @@
 // The spoken form of a line: the words a voice can say for text written to be read. Setting names,
 // file paths, symbols, code and markup are turned into plain words by fixed rules, so the voice
 // says "channel voice max spoken words equals 300" where the thread reads
-// `CHANNEL_VOICE_MAX_SPOKEN_WORDS=300`. Only the copy sent to the speech service is rewritten, so
-// a session's reply keeps the text as written in the thread, the ring and the hand-off to the
+// `CHANNEL_VOICE_MAX_SPOKEN_WORDS=300`. Only the copy the voice speaks is rewritten, so a
+// session's reply keeps the text as written in the thread, the ring and the hand-off to the
 // session.
 //
 // The rules run in a fixed order, one pass each: fenced code, then markdown marks, then

@@ -63,11 +63,8 @@ export type VoiceJoinOptions = {
   hold: (threadId: string, until: number) => () => void;
   /** How long a held typing line stands with no frame to release it. */
   holdMs: number;
-  /**
-   * Builds the fast tier for one joined channel, with the bridge's binding and the reading of the
-   * operator's audio cut at each turn's end.
-   */
-  tier: (binding: TierBinding & { turnAudio: (turn: number) => Buffer | null }) => FastTier;
+  /** Builds the fast tier for one joined channel, with the bridge's binding. */
+  tier: (binding: TierBinding) => FastTier;
   /** Builds the voice for one joined channel, or null where the voice is mute. */
   speaker: ((binding: SpeakerBinding) => Speaker) | null;
   /** Told the bridge each join builds, which is the one the outbound router's reply tap reaches. */
@@ -86,12 +83,7 @@ export type VoiceJoinOptions = {
  */
 export function voiceJoin(
   options: VoiceJoinOptions,
-): (
-  session: JoinedSession & {
-    transcriber: Pick<Transcriber, "onTurn">;
-    turnAudio: (turn: number) => Buffer | null;
-  },
-) => Attached {
+): (session: JoinedSession & { transcriber: Pick<Transcriber, "onTurn"> }) => Attached {
   const clock: PostClock = {
     now: options.now ?? Date.now,
     sleep:
@@ -117,7 +109,7 @@ export function voiceJoin(
   }
 
   /**
-   * Where an answer the service could not speak goes. With the mirror on it goes nowhere: the
+   * Where an answer the speaker could not speak goes. With the mirror on it goes nowhere: the
    * bridge posted the line to the thread before the speaker was asked for it, so posting the
    * unspoken words again would put the answer in the thread twice. With the mirror off this is the
    * only copy of those words the operator gets, so it is posted whatever else the mirror withholds,
@@ -139,7 +131,7 @@ export function voiceJoin(
     return posts;
   }
 
-  return ({ transcriber, turnAudio, player, threadId, sessionId }) => {
+  return ({ transcriber, player, threadId, sessionId }) => {
     // The session's name is what its thread title shows, through the same bounding and the same
     // strip; the operator's is the name the gateway attributes their messages to. Both are
     // resolved at each use, never held: the session's name follows a rename, and an operator's line
@@ -165,7 +157,7 @@ export function voiceJoin(
       player,
       hold: options.hold,
       holdMs: options.holdMs,
-      tier: (binding) => options.tier({ ...binding, turnAudio }),
+      tier: options.tier,
       speaker:
         speaker === null
           ? null
@@ -181,7 +173,7 @@ export function voiceJoin(
     return {
       onDiscard: (turn, cut) => bridge.cutIn(turn, cut),
       // Mid-reply is either half: a speech handed to the speaker and not settled, which covers the
-      // gap before a segment's first frame, or frames the player still holds after the last settled.
+      // gap before a turn's first frame, or frames the player still holds after the last settled.
       speaking: () => bridge.speaking() || player.queued() > 0,
       onHeldShort: (turn) => bridge.heldShort(turn),
       detach: () => {

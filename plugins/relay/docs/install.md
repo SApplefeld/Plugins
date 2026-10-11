@@ -138,8 +138,8 @@ which needs `CHANNEL_BOARD_ROSTER`) lists every open ask the roster's personas h
 ask's question, up to 1,000 code points and as its worker wrote it, to the card's thread. TypeSafe's classifier, reached
 under the optional step "The Jev key file" below, is the one host other than Discord this broker
 reaches unless the voice is on, and the response gate described above sends it a gated thread's
-lines. The voice, when on, ranks its spoken turns with the same key and also reaches Deepgram,
-Anthropic and the speech service, as "The voice's key files and commands" below describes. All three cards are configured in `broker.env` and
+lines. The voice, when on, ranks its spoken turns with the same key and also reaches Deepgram and
+Anthropic, as "The voice's key files and commands" below describes. All three cards are configured in `broker.env` and
 documented in `operations.md`; a value tuned by hand there survives a re-install.
 
 Create Public Threads and Manage Threads are the two that fail quietly if missed: the broker posts a
@@ -191,8 +191,20 @@ install\Install-Host.ps1 -HostName <host> -ChannelId <channel id> -AllowedUserId
 It prompts for the bot token and reads it without echoing. **Do not pass the token as plain text on
 the command line**: PowerShell's history file keeps it in the clear indefinitely, and it also lands
 in the process command line and in transcription logs. `-BotToken` accepts only a `SecureString` for
-that reason. Use `-BotTokenFile <path>` instead to read a token from a file you already placed, and
-put that file inside the state root, which is where the installer hardens permissions.
+that reason.
+
+Use `-BotTokenFile <path>` instead to read a token from a file you already placed, and put that
+file inside the state root, which is where the installer hardens permissions. On a new host,
+create the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, first, from this same unelevated
+session. The installer makes it only when it runs, and hardens the directory and the file then.
+This line writes the file without showing the token, the same way the installer's prompt reads it:
+
+```powershell
+Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\discord-token.txt" -Value ([System.Net.NetworkCredential]::new('', (Read-Host 'Discord bot token' -AsSecureString)).Password) -Encoding ascii
+```
+
+"The Jev key file (optional)" says why `>` and `Out-File` fail in Windows PowerShell 5.1, and the
+same holds for this file.
 
 Unelevated is a requirement, not a convenience: a file created by an elevated shell is owned by the
 machine's Administrators group rather than by the account, and the broker's credential guard reads
@@ -381,7 +393,19 @@ Create the file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, be
 `discord-token.txt`, from the same plain non-elevated session step 2 requires. It holds one line,
 the key alone. Step 2 hardens the state root with the access control list the token file carries,
 granting only the owner, Administrators and SYSTEM, and a file created under that directory inherits
-the list, so a file placed there needs no hardening of its own. Then name it in `broker.env`:
+the list, so a file placed there needs no hardening of its own. This command asks for the key at the
+console and writes it as plain ASCII, in Windows PowerShell 5.1 and in PowerShell 7 alike:
+
+```powershell
+Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\jev-key.txt" -Value (Read-Host 'TypeSafe key') -Encoding ascii
+```
+
+In Windows PowerShell 5.1, `>` and `Out-File` write UTF-16 with a byte-order mark. The broker
+refuses such a file as holding a character a request header cannot carry. `Read-Host` keeps the key
+out of the command history, but it shows the key on screen and in any PowerShell transcription log.
+A trailing newline is fine.
+
+Then name the file in `broker.env`:
 
 ```
 CHANNEL_JEV_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\jev-key.txt
@@ -399,25 +423,30 @@ file and the cause, and the voice then sends every spoken turn to the session un
 `CHANNEL_RESPONSE_GATE` at `shadow` or `live` the broker refuses to start instead, naming the mode
 and the cause, because the gate cannot run without the key. A file
 that is missing, unreadable or empty, or one whose content, once leading and trailing whitespace is
-dropped, holds anything but visible ASCII with no spaces, is refused the same way. A trailing
-newline is fine. The key is on the installer's allowlist, so a value set by hand here survives the
-next install.
+dropped, holds anything but visible ASCII with no spaces, is refused the same way. The key is
+on the installer's allowlist, so a value set by hand here survives the next install.
 
 ### The voice's key files and commands (optional)
 
 The voice lets an operator talk to a session from a Discord voice channel. It is off unless `CHANNEL_VOICE=on`, and this step is optional: without it nothing of the voice runs, and no audio leaves the machine. Step 1 covers the Discord side, the Guild Voice States intent and the Connect and Speak permissions.
 
-Three key files serve it. Each holds one line, the key alone.
+Two key files serve it. Each holds one line, the key alone.
 
-- `CHANNEL_VOICE_STT_KEY_FILE` names the file holding the Deepgram key that transcribes the operator's audio. Without it the bot joins and is deaf.
+- `CHANNEL_VOICE_STT_KEY_FILE` names the file holding the Deepgram key that transcribes the operator's audio and speaks the persona's lines, in the voice `flux-cole-en` of Deepgram's Flux text-to-speech, unless `CHANNEL_SPEECH_VOICE` names another Deepgram Flux voice, whose name starts with `flux-`. Without it the bot joins deaf and mute, and answers stay in the thread.
 - `CHANNEL_VOICE_FAST_KEY_FILE` names the file holding the Anthropic key the fast model answers under. Without it no turn is answered by the fast model, and every turn goes to the session.
-- `CHANNEL_SPEECH_TOKEN_FILE` names the file holding the bearer token for the speech service, which turns the persona's words into audio and is addressed by `CHANNEL_SPEECH_URL`. The two are named together or not at all. Without them the bot is mute and answers stay in the thread.
 
-Create each file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside `discord-token.txt`, from the same plain non-elevated session step 2 requires. A file created under that directory inherits the access control list step 2 set. None of the keys goes in `broker.env`, only the paths.
+Create each file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside `discord-token.txt`, from the same plain non-elevated session step 2 requires. A file created under that directory inherits the access control list step 2 set. Write each file with the command from the Jev key step above, changing the path and the prompt. These two lines write the Deepgram and Anthropic key files:
 
-The broker checks each of the three files at start exactly as it checks the token file: the file and its directory must be owned by the broker's account or an administrative identity, must grant nobody beyond the owner, Administrators and SYSTEM, and must not be a symbolic link or junction. Each path must also sit inside the state root, the directory holding the broker's state file, and a path equal to the root or outside it is refused before the file is opened. Unlike the Jev key file, a named file that fails any of this stops a broker with the voice on, naming the file and the cause, as an unusable token file does. A file that is missing, unreadable or empty, or whose content holds anything but visible ASCII with no spaces, is refused the same way. A trailing newline is fine.
+```powershell
+Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\deepgram-key.txt" -Value (Read-Host 'Deepgram key') -Encoding ascii
+Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\anthropic-key.txt" -Value (Read-Host 'Anthropic key') -Encoding ascii
+```
 
-The voice also ranks each spoken turn with the Jev key file, `CHANNEL_JEV_KEY_FILE`, from the step above. It is read whenever the voice is on, and the voice needs no other TypeSafe key. With no usable Jev key every spoken turn goes to the session unranked. A turn is ranked only where the fast key file and the speech service are also named, since without either no answer could follow the ranking. A named Jev key file that cannot be used is warned once and does not stop the broker, unless `CHANNEL_RESPONSE_GATE` is `shadow` or `live`, which refuses as the step above says.
+None of the keys goes in `broker.env`, only the paths.
+
+The broker checks both files at start exactly as it checks the token file: the file and its directory must be owned by the broker's account or an administrative identity, must grant nobody beyond the owner, Administrators and SYSTEM, and must not be a symbolic link or junction. Each path must also sit inside the state root, the directory holding the broker's state file, and a path equal to the root or outside it is refused before the file is opened. Unlike the Jev key file, a named file that fails any of this stops a broker with the voice on, naming the file and the cause, as an unusable token file does. A file that is missing, unreadable or empty, or whose content holds anything but visible ASCII with no spaces, is refused the same way. A trailing newline is fine.
+
+The voice also ranks each spoken turn with the Jev key file, `CHANNEL_JEV_KEY_FILE`, from the step above. It is read whenever the voice is on, and the voice needs no other TypeSafe key. With no usable Jev key every spoken turn goes to the session unranked. A turn is ranked only where the fast key file is also named, since without it no answer could follow the ranking. A named Jev key file that cannot be used is warned once and does not stop the broker, unless `CHANNEL_RESPONSE_GATE` is `shadow` or `live`, which refuses as the step above says.
 
 Add the keys to `broker.env`:
 
@@ -425,17 +454,13 @@ Add the keys to `broker.env`:
 CHANNEL_VOICE=on
 CHANNEL_VOICE_STT_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\deepgram-key.txt
 CHANNEL_VOICE_FAST_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\anthropic-key.txt
-CHANNEL_SPEECH_URL=http://<private address>:<port>
-CHANNEL_SPEECH_TOKEN_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\speech-token.txt
 ```
 
-The speech address may use plain http only to `localhost`, a loopback address, a private-range address or an IPv6 unique-local address. Every other host needs https. It may carry no user name, password, query or fragment, and a broker whose address breaks a rule refuses to start, naming the rule. The broker never resolves a name to decide, so a hostname other than `localhost` needs https. Over plain http the token, the persona's words, the recent spoken lines and the operator's latest turn with its audio cross the network in the clear, which `security-model.md` states under T8.
-
-The other voice settings have defaults and need no entry: the loopback and eager switches, both off, the idle window, the end-of-turn thresholds, the short-turn word count, the two ranking thresholds, the fast model, the memory length, the spoken-word bound, the turn-audio length, the answer settle, the two holding-line waits, the turn hold's mode, length and completeness threshold, the speech voice name and the speech timeout. `operations.md` carries each one's range in its tunables table. All twenty-five voice keys are on the installer's allowlist, so values set by hand here survive the next install.
+The other voice settings have defaults and need no entry: the loopback and eager switches, both off, the idle window, the end-of-turn thresholds, the short-turn word count, the two ranking thresholds, the fast model, the memory length, the spoken-word bound, the answer settle, the two holding-line waits, the turn hold's mode, length and completeness threshold, the Flux voice name and the speech timeout. `operations.md` carries each one's range in its tunables table. All twenty-two voice keys are on the installer's allowlist, so values set by hand here survive the next install.
 
 To turn the voice on and join a channel:
 
-1. Restart the broker with `.\install\Repair-Broker.ps1` from an elevated prompt at the checkout root. Every setting takes effect at a restart. The start log then reads `the voice is on`, and says whether the channel will be deaf or mute and whether the Jev and fast keys are read. Where the channel can hear, it also says whether the turn hold is off, plain or judged, and how long it holds a turn's end.
+1. Restart the broker with `.\install\Repair-Broker.ps1` from an elevated prompt at the checkout root. Every setting takes effect at a restart. The start log then reads `the voice is on`, and says whether the channel can hear and speak, which it does only with the Deepgram key file, and whether the Jev and fast keys are read. Where the channel can hear, it also says whether the turn hold is off, plain or judged, and how long it holds a turn's end.
 2. Join an ordinary voice channel in the server. A stage channel is not supported.
 3. In the thread of a live session, type `voice on` from an operator account. The bot joins the channel you are sitting in. If you are in no voice channel, the thread gets one notice saying so.
 4. Talk. A light question is answered by the fast model. A technical or factual question is handed to the session. Where the reply is slow the persona fills the wait, first with a short thinking line and then, if the reply is slower still, a still-looking line, and the session's reply is spoken when it returns. Speak over the persona to stop it; a "mm-hm" lets it carry on. Every spoken line is mirrored into the thread as text, unless `CHANNEL_MIRROR=off`. "Talking to a session aloud" in `operations.md` describes each of these in full.
