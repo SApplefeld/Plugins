@@ -165,13 +165,14 @@ merged, and Claude Code substitutes the session's own value into it at request t
 #>
 # Exact names, never a pattern: the list is what stands between an attacker-writable fragment and a
 # tool pre-approved for every session on the machine, and a pattern admits names nobody wrote down.
-# One entry: Claude Code names the reply tool after the key the server arrived under, and every
-# fleet host takes the plugin route, whose plugin-scoped key gives this rule. The development
-# route's rule (mcp__channel-relay__reply) is deliberately off this list;
-# hooks/settings-fragment.json's _permissions_comment says why and what a host on the development
-# flag should expect.
+# Two entries, the relay's reply tool and its restart tool: Claude Code names each tool after the
+# key the server arrived under, and every fleet host takes the plugin route, whose plugin-scoped
+# key gives these rules. The development route's rules (mcp__channel-relay__reply and its
+# restart_broker counterpart) are deliberately off this list; hooks/settings-fragment.json's
+# _permissions_comment says why and what a host on the development flag should expect.
 $script:AllowedChannelPermissionRules = @(
-    'mcp__plugin_relay_channel-relay__reply'
+    'mcp__plugin_relay_channel-relay__reply',
+    'mcp__plugin_relay_channel-relay__restart_broker'
 )
 
 function Assert-ValidChannelFragment {
@@ -208,7 +209,7 @@ function Assert-ValidChannelFragment {
         if ($script:AllowedChannelPermissionRules -cnotcontains [string]$rule) {
             throw "Assert-ValidChannelFragment: the fragment declares a permission rule this " +
                 "installer does not merge: '$rule'. Only $($script:AllowedChannelPermissionRules -join ', ') " +
-                "is allowed, and it is the relay's own reply tool."
+                "are allowed, and they are the relay's own reply and restart tools."
         }
     }
 

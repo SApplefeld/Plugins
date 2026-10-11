@@ -222,8 +222,8 @@ The installer:
 - edits your user-level `~/.claude/settings.json` by the host's hook owner, described under "Hook
   owner: settings or plugin" below. Under `settings`, the default, it substitutes this checkout's
   absolute path into the `SessionStart` hook and merges the fragment's six hook entries, plus the
-  relay's one reply-tool permission rule. Under `plugin`, it removes every hook entry of this
-  project's from that file and merges the permission rule alone. Either way it backs the file up
+  relay's two permission rules, for its reply and restart tools. Under `plugin`, it removes every
+  hook entry of this project's from that file and merges the permission rules alone. Either way it backs the file up
   first and preserves every hook, rule, and setting that is not this project's,
 - hardens the access control lists on the whole execution surface: `hooks/`, `relay/`, `wrapper/`,
   `install/`, and `broker/` as directories, the bot token file, and the state root,
@@ -315,8 +315,8 @@ installer merges the fragment's hook entries into `~/.claude/settings.json` as d
 Under `plugin`, the persona plugin posts the same events itself, so the installer removes every hook
 entry of this project's from the settings file and merges none. It edits the file through the same
 backup and atomic write the merge uses, and leaves every other tool's hooks where they are. It still
-merges the reply-tool permission rule. The reply tool reaches a session through this repository's
-relay plugin under either owner, so the rule is needed either way.
+merges the relay tools' two permission rules. Both tools reach a session through this repository's
+relay plugin under either owner, so the rules are needed either way.
 
 Three things here carry the word plugin, and they are separate. `plugin` is a value of the hook
 owner. The relay plugin, under `plugins/relay` in this repository, carries the relay's MCP server
@@ -490,6 +490,16 @@ restart budget spent comes back without waiting for the next reboot. Running the
 creating a second one. It refuses to run unelevated with a message saying so, rather than failing
 with an access error further in.
 
+The task's script, `install/Start-Broker.ps1`, starts the broker again whenever it exits with code
+75, the broker's own request to be restarted, and re-reads `broker.env` before each start. Any other
+exit ends the script with the broker's code, so the loop never restarts a broker that crashed.
+This is what lets a session or the operator restart the broker without elevation, as
+[`operations.md`](operations.md) describes under "Restarting the broker". The script is read when
+the task starts, so a task that started before the script carried the loop runs without it until
+it next starts. Its broker refuses a restart request with a reason that opens "nothing would
+start the broker again". Restart the task once on such a host, with `.\install\Repair-Broker.ps1` from an
+elevated prompt or a reboot.
+
 ## 4. Launch a session
 
 ```powershell
@@ -640,18 +650,19 @@ checkout that moves needs no reinstall. A missing or unreadable registration mak
 non-zero with one line on stderr naming the path it looked for, rather than registering a channel
 that is silently dead.
 
-Claude Code builds the reply tool's permission rule from the key the server arrives under, and the
-plugin route scopes that key by the plugin carrying it. `hooks/settings-fragment.json` ships one
-allow rule, `mcp__plugin_relay_channel-relay__reply`, the name a plugin-route session's tool calls
-carry on the wire. Six repository places hold that name in agreement: the fragment,
+Claude Code builds each relay tool's permission rule from the key the server arrives under, and
+the plugin route scopes that key by the plugin carrying it. `hooks/settings-fragment.json` ships two
+allow rules, `mcp__plugin_relay_channel-relay__reply` and
+`mcp__plugin_relay_channel-relay__restart_broker`, the names a plugin-route session's tool calls
+carry on the wire. Six repository places hold those names in agreement: the fragment,
 `install/Install-Functions.ps1`'s `$script:AllowedChannelPermissionRules`,
 `relay/reply-permission.test.ts`, `install/Install-Functions.test.ts`,
-`install/Install-Host.test.ts`, and `plugins/manifest.test.ts`. The development route's rule,
-`mcp__channel-relay__reply`, is deliberately absent from all of them: every fleet host runs the
-plugin route, and a rule with no route that needs it is a standing squattable pre-approval. A host
-dropped back onto the development flag therefore parks its first reply on a permission prompt; for
-a longer stay, add that rule by hand to that host's `~/.claude/settings.json` and remove it when
-the host returns. `Install-Host.ps1` adds rules and never removes one already there, so a host
+`install/Install-Host.test.ts`, and `plugins/manifest.test.ts`. The development route's rules,
+`mcp__channel-relay__reply` and `mcp__channel-relay__restart_broker`, are deliberately absent from
+all of them: every fleet host runs the plugin route, and a rule with no route that needs it is a
+standing squattable pre-approval. A host dropped back onto the development flag therefore parks
+its first reply or restart on a permission prompt; for a longer stay, add those rules by hand to
+that host's `~/.claude/settings.json` and remove them when the host returns. `Install-Host.ps1` adds rules and never removes one already there, so a host
 provisioned while the fragment still shipped the development rule keeps it until the same hand
 edit removes it.
 
@@ -678,4 +689,5 @@ into the thread reach nothing. That is the same shape as the `channelsEnabled` f
    observed name replaces the plugin-scoped one in the six places above.
 5. If any check fails, set that host's `CHANNEL_LAUNCH_FLAG` to
    `--dangerously-load-development-channels` before working on the host again, and expect the first
-   reply there to raise a permission prompt: the development route's rule is not installed.
+   reply or restart there to raise a permission prompt: the development route's rules are not
+   installed.

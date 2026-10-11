@@ -47,6 +47,16 @@ export type VerdictHandler = (verdict: PermissionVerdict) => void;
  */
 export type ReplyStatus = "sent" | "no-session" | "no-thread" | "failed" | "still-posting";
 
+/**
+ * What one restart request came to. The first two are the broker's own answers, read out of the
+ * response body with the reason the broker gave; `failed` is every way the request did not reach a
+ * decision, with the relay's or the broker's words for it.
+ */
+export type RestartOutcome =
+  | { status: "restarting" }
+  | { status: "refused"; reason: string }
+  | { status: "failed"; error: string };
+
 export type BrokerClientOptions = {
   port: number;
   /** Identifies which Claude Code process this pipe belongs to. It authorizes nothing. */
@@ -117,9 +127,23 @@ export type BrokerClient = {
     description: string;
     inputPreview: string;
   }) => Promise<boolean>;
+  /**
+   * Asks the broker to restart onto the code and configuration on disk. The answer is final once
+   * received: the broker writes it before it stops, and the stream this client holds drops right
+   * after an accepted one, which the ordinary reconnect covers.
+   */
+  restart: () => Promise<RestartOutcome>;
 };
 
 const DEFAULT_RECONNECT_DELAY_MS = 1_000;
+
+/**
+ * How long a restart's POST may go unanswered before it is reported as failed.
+ *
+ * The broker decides a restart at once and writes its answer before anything stops, so what this
+ * covers is one loopback round trip; it is the permission prompt's wait for the same reason.
+ */
+const RESTART_TIMEOUT_MS = 15_000;
 
 /**
  * How long a permission prompt's POST may go unanswered before the prompt is reported as not taken.
@@ -327,8 +351,8 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
   }
 
   /**
-   * One POST to the broker, carrying the pipe's reply key. Both routes speak this shape and share
-   * it, so a settle path proved on one is the settle path on the other.
+   * One POST to the broker, carrying the pipe's reply key. Every POST route speaks this shape and
+   * shares it, so a settle path proved on one is the settle path on the others.
    *
    * The bodies differ only in their fields. Neither carries a chat_id: the broker routes by
    * session, and a field that does not exist on the wire cannot be honored by accident later.
@@ -346,7 +370,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
     body: Record<string, unknown>,
     idleMs: number,
     ceilingMs?: number,
-  ): Promise<{ status: string; error?: string }> {
+  ): Promise<{ status: string; error?: string; reason?: string }> {
     if (replyKey === null) {
       // No pipe, so no standing to write. Reported locally rather than attempted, because the
       // broker would refuse it and the model is waiting on the answer either way.
@@ -360,7 +384,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       // tool call awaiting it forever, and the turn parked with it.
       let settled = false;
       let ceiling: NodeJS.Timeout | null = null;
-      const finish = (result: { status: string; error?: string }): void => {
+      const finish = (result: { status: string; error?: string; reason?: string }): void => {
         if (settled) return;
         settled = true;
         if (ceiling !== null) clearTimeout(ceiling);
@@ -394,10 +418,14 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
           );
           response.on("end", () => {
             try {
-              const parsed = JSON.parse(raw) as { status?: unknown; error?: unknown };
+              const parsed = JSON.parse(raw) as { status?: unknown; error?: unknown; reason?: unknown };
+              // `error` is why a request failed and `reason` is why a decided one was refused.
+              // The restart route is the one that gives a reason, and it is carried as the
+              // broker wrote it, since the model reads it as the answer.
               finish({
                 status: typeof parsed.status === "string" ? parsed.status : "failed",
                 error: typeof parsed.error === "string" ? parsed.error : undefined,
+                reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
               });
             } catch {
               finish({ status: "failed", error: "the broker's answer was not JSON" });
@@ -459,6 +487,18 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
         PERMISSION_TIMEOUT_MS,
       );
       return answer.status === "received";
+    },
+
+    async restart() {
+      const answer = await post("/relay/restart", {}, RESTART_TIMEOUT_MS);
+      if (answer.status === "restarting") return { status: "restarting" };
+      if (answer.status === "refused") {
+        return { status: "refused", reason: answer.reason ?? "the broker gave no reason" };
+      }
+      // Anything else is a request the broker never decided: no stream held, no broker listening,
+      // a hang-up, a request the route refused before asking the broker, or an answer this client
+      // could not read.
+      return { status: "failed", error: answer.error ?? "the broker did not answer" };
     },
   };
 }

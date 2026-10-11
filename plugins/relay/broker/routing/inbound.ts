@@ -35,6 +35,7 @@ import { parseVerdict } from "../security/permission.ts";
 import type { PermissionDesk } from "../security/permission.ts";
 import { SNOWFLAKE } from "../security/senders.ts";
 import type { SenderClass, SenderGate } from "../security/senders.ts";
+import type { RestartAnswer } from "../index.ts";
 import type { Registry, SessionRecord } from "../registry.ts";
 import { reducedName } from "./attachments.ts";
 import type { AttachmentIntake, InboundAttachment, RefusalCause } from "./attachments.ts";
@@ -172,6 +173,29 @@ export function voiceCommand(text: string): VoiceCommand | null {
 }
 
 /**
+ * Whether a message is the thread command that restarts the broker. Whole-line and case-insensitive
+ * over the visible text, as the voice commands are, so `Broker Restart` is the command and
+ * `broker restart please` is words for the session.
+ */
+export function isBrokerRestart(text: string): boolean {
+  return /^broker[ \t]+restart$/.test(text.toLowerCase());
+}
+
+/** What the thread is told when the broker accepts its restart, before the broker goes down. */
+export const RESTARTING_NOTICE =
+  "The broker is restarting. Sessions reconnect on their own once it is back.";
+
+/** What the thread is told when the broker refuses its restart, carrying the broker's reason whole. */
+export function restartRefusedNotice(reason: string): string {
+  return `The broker did not restart: ${reason}.`;
+}
+
+/** What the thread is told when a restart it was told of is dropped before it began. */
+export function restartCancelledNotice(reason: string): string {
+  return `The broker did not restart after all: ${reason}.`;
+}
+
+/**
  * The voice module's command seam, present only while `CHANNEL_VOICE` is on. What reaches it is an
  * operator's command in the thread of a live session, and what it answers is the one notice the
  * thread is told, or null for none.
@@ -283,6 +307,12 @@ export type InboundRouterOptions = {
    * any other and reach the session.
    */
   voice?: InboundVoice;
+  /**
+   * The broker's restart, asked by an operator's `broker restart` in a thread holding a session
+   * record. It names the thread and the operator's account, never the message text. Absent,
+   * `broker restart` is text like any other and reaches the session.
+   */
+  restart?: (input: { threadId: string; senderId: string }) => RestartAnswer;
 };
 
 export type InboundRouter = {
@@ -616,7 +646,7 @@ export const REFUSAL_WORDS: Readonly<Record<NoticeCause, string>> = {
   size: "the file is larger than the limit",
   source: "the file's address was not one of Discord's",
   fetch: "the file could not be downloaded",
-  consumed: "the message was read as an answer to a prompt, so its files were not delivered",
+  consumed: "the message was read by the broker as an answer or a command, so its files were not delivered",
 };
 
 /**
@@ -713,6 +743,22 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
   }
 
   /**
+   * Tells a thread what became of the restart its operator asked for. Posted as a reply, outside the
+   * notice floor, for the reason `announceCut` gives. Only an operator's own line asks, one answer
+   * each, and the writer's post budget paces the wire.
+   */
+  async function answerRestart(threadId: string, text: string): Promise<void> {
+    try {
+      const outcome = await options.writer.reply(threadId, text);
+      if (outcome.status !== "ok") {
+        log(`routing: could not answer the restart asked in thread ${threadId}: ` + outcome.status);
+      }
+    } catch (error) {
+      log(`routing: could not answer the restart asked in thread ${threadId}: ` + String(error));
+    }
+  }
+
+  /**
    * Tells the thread which files on one message were not delivered and why, in one post. Posted
    * as a reply rather than a notice, on `announceCut`'s reasoning: the floor would let a recent
    * failure notice swallow it, and a swallowed refusal is the silent drop it exists to prevent.
@@ -740,7 +786,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     files: readonly InboundAttachment[],
   ): Promise<void> {
     if (files.length === 0) return;
-    log(`routing: refused ${String(files.length)} attachments on a message consumed as an answer`);
+    log(`routing: refused ${String(files.length)} attachments on a message the broker consumed`);
     await announceRefusals(
       threadId,
       files.map((file) => ({ name: reducedName(file.name), cause: "consumed" as const })),
@@ -1242,6 +1288,49 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         }
         if (reply !== null) await notice(message.threadId, reply);
         await refuseConsumed(message.threadId, files);
+        return;
+      }
+
+      // `broker restart` from an operator is the broker's own command, consumed as a voice command
+      // is and under the same guards: never a participant's line, never a truncated message, never
+      // a message with no typed text. It is the command in any thread holding a session record,
+      // live or ended, since the broker is the host's and not the session's. The thread is told the
+      // outcome as a reply rather than a notice, on `announceCut`'s reasoning: a notice posted in the
+      // last minute would floor it, and the operator would hear nothing of the restart they asked
+      // for. An accepted restart begins only once the thread's posts have settled, whether each
+      // posted or failed, because the restart closes the gateway they are written through. The
+      // begin is not awaited: it settles only once the broker has stopped, and in a running broker
+      // the exit that follows means it never settles at all.
+      const restart = options.restart;
+      if (
+        restart !== undefined &&
+        operator &&
+        !truncated &&
+        record !== null &&
+        isBrokerRestart(text)
+      ) {
+        const answer = restart({ threadId: message.threadId, senderId: message.senderId });
+        if (!answer.accepted) {
+          log(`routing: refused the restart asked in thread ${message.threadId}: ${answer.reason}`);
+        }
+        await answerRestart(
+          message.threadId,
+          answer.accepted ? RESTARTING_NOTICE : restartRefusedNotice(answer.reason),
+        );
+        await refuseConsumed(message.threadId, files);
+        if (answer.accepted) {
+          answer
+            .begin()
+            .then(async (outcome) => {
+              // The thread was told the broker is restarting, so a drop is told too.
+              if (typeof outcome === "object") {
+                await answerRestart(message.threadId, restartCancelledNotice(outcome.dropped));
+              }
+            })
+            .catch((error: unknown) => {
+              log(`routing: the restart asked in thread ${message.threadId} failed: ${String(error)}`);
+            });
+        }
         return;
       }
 

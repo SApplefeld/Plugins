@@ -117,7 +117,128 @@ export type Broker = {
   /** The rotating-file logger this broker started with, so the caller can log a line beside it. */
   logger: Logger;
   stop: () => Promise<void>;
+  /**
+   * Asks the broker to restart onto the code and configuration on disk. The answer is decided at
+   * once and nothing stops until the caller runs `begin`, so each trigger can deliver its answer
+   * before the broker goes down.
+   */
+  restart: (reason: string) => RestartAnswer;
 };
+
+/**
+ * The exit code that asks for a fresh start. install/Start-Broker.ps1 runs node again on exactly
+ * this code and passes every other one through, so the two values must stay the same number.
+ */
+export const RESTART_EXIT_CODE = 75;
+
+/**
+ * How long after its start the broker refuses a restart. It bounds a caller that keeps asking to
+ * one restart a minute, where an unbounded one would hold the broker in a relaunch loop.
+ */
+export const RESTART_COOLDOWN_MS = 60_000;
+
+/**
+ * How long a requested restart waits for the broker's shutdown before it exits anyway. The
+ * shutdown waits on Discord with no bound of its own, and a restart that waited on a stalled call
+ * would leave the host with a half-stopped broker and nothing to relaunch it. A signal's own stop
+ * takes no ceiling, since the task stopping the broker loses nothing to a slow exit. A signal that
+ * lands during a requested restart ends when that restart's ceiling exits.
+ */
+export const RESTART_SHUTDOWN_CEILING_MS = 30_000;
+
+/**
+ * Whether `work` settles within `ms`: true once it resolves, false once the time runs out first.
+ * A rejection is passed through. The timer never holds the process open.
+ */
+export async function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([work.then(() => true as const), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * A requested restart's end: stop the broker, then exit with the relaunch code. The exit runs even
+ * when the stop throws or outlasts its ceiling, because a broker half torn down serves nobody and
+ * the relaunch loop starts a whole one in its place. A stop cut off or failed stops short of the
+ * teardown's own question release, so the held questions are released here first: each lands on
+ * its session's console picker rather than as a reset socket. A failure is logged here, because
+ * the exit that follows ends the process before any caller could log it.
+ */
+export async function stopForRestart(steps: {
+  stop: () => Promise<void>;
+  releaseQuestions: () => Promise<void>;
+  exit: (code: number) => void;
+  note: (line: string) => void;
+  ceilingMs: number;
+}): Promise<void> {
+  try {
+    let finished: boolean;
+    try {
+      finished = await settlesWithin(steps.stop(), steps.ceilingMs);
+      if (!finished) {
+        steps.note(
+          `broker: the shutdown ran past ${steps.ceilingMs / 1000} s, so the restart ` +
+            "exits without waiting for the rest of it",
+        );
+      }
+    } catch (error) {
+      finished = false;
+      steps.note(`broker: the shutdown failed, so the restart exits without the rest of it: ${String(error)}`);
+    }
+    if (!finished) await steps.releaseQuestions();
+  } finally {
+    steps.exit(RESTART_EXIT_CODE);
+  }
+}
+
+/** A begin that did not start the restart, with the reason, written for the person who asked. */
+export type RestartDropped = { dropped: string };
+
+export type RestartAnswer =
+  | { accepted: false; reason: string }
+  | { accepted: true; begin: () => Promise<RestartDropped | void> };
+
+/**
+ * Why a restart would be refused now, or null when it may go ahead. Each reason is written for the
+ * person who asked, so it names what holds the restart back and what to do about it.
+ *
+ * Every rule guards against a restart that costs more than it gives: one with nothing to relaunch
+ * takes the host down until someone logs in, one under a live voice call cuts the call, one inside
+ * the cooldown lets a runaway caller hold the broker in a relaunch loop, and a second one while the
+ * first is stopping would race its shutdown. A restart asked while a signal stops the broker is
+ * refused for a different reason: no relaunch follows that stop, so the asker must not wait for one.
+ */
+export function restartRefusal(state: {
+  underway: boolean;
+  stopping: boolean;
+  supervised: boolean;
+  voiceCall: { threadId: string; channelId: string } | null;
+  sinceStartMs: number;
+}): string | null {
+  if (state.underway) return "a restart is already under way";
+  if (state.stopping) return "the broker is stopping and will not start again on its own";
+  if (!state.supervised) {
+    return (
+      "nothing would start the broker again, since it is not running under Start-Broker.ps1's " +
+      "relaunch loop; restart its scheduled task instead"
+    );
+  }
+  if (state.voiceCall !== null) {
+    return "a voice call is live and a restart would cut it; end the call and ask again";
+  }
+  if (state.sinceStartMs < RESTART_COOLDOWN_MS) {
+    const seconds = Math.ceil((RESTART_COOLDOWN_MS - state.sinceStartMs) / 1000);
+    return `the broker started under a minute ago; ask again in ${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+  return null;
+}
 
 /**
  * Wraps a question delivery so the alert's own outcome settles the session's hold. The volume
@@ -846,7 +967,38 @@ export function readJudgeKey(
   throw new Error(`the response gate is ${config.responseGate} and needs the Jev key, but ${cause}`);
 }
 
-export async function startBroker(config: BrokerConfig): Promise<Broker> {
+export async function startBroker(
+  config: BrokerConfig,
+  options: {
+    /** Ends the process once a restart has stopped the broker. A test passes a recorder. */
+    exit?: (code: number) => void;
+    /**
+     * The clock the restart cooldown reads, in milliseconds. Monotonic by default, so a wall clock
+     * set back does not lengthen the cooldown.
+     */
+    now?: () => number;
+    /**
+     * Whether Start-Broker.ps1's relaunch loop runs this broker, which it says by setting
+     * CHANNEL_BROKER_SUPERVISED to 1. Read from the environment once, at start, when not given.
+     */
+    supervised?: boolean;
+  } = {},
+): Promise<Broker> {
+  const exit = options.exit ?? ((code: number): void => process.exit(code));
+  const now = options.now ?? ((): number => performance.now());
+  const supervised = options.supervised ?? process.env.CHANNEL_BROKER_SUPERVISED === "1";
+  // The restart's state, declared before anything is bound because the relay routes can be asked
+  // for a restart as soon as the listener is up. `startedAt` stays null until this function is about
+  // to resolve, and a restart asked before then is refused by the cooldown as one asked at second 0.
+  let startedAt: number | null = null;
+  // The restart once one has begun. Set by the first begin rather than at acceptance, so a trigger
+  // that accepts and never begins, as a route whose socket drops before its answer finishes does,
+  // holds off no later restart. Every begin after the first, from any accepted answer, returns this
+  // same run, so two triggers accepted together stop the broker and exit once.
+  let restartRun: Promise<void> | null = null;
+  // The stop once one has begun, from a signal or a restart. Declared here, with the restart's
+  // state, because `restart` reads it and the routes can ask for one before the rest is bound.
+  let stopping: Promise<void> | null = null;
   // Console output stays as it was: a broker run at a terminal, or under `npm test`, keeps seeing
   // it. The logger writes the same lines to a rotating file too, when one is configured, because a
   // scheduled task (S7) has no console for that output to land in.
@@ -1279,6 +1431,17 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     // The asking half only. Answering a prompt belongs to the Discord side, behind the sender
     // gate, and this layer is reachable by any local process that holds a pipe.
     permissions: { request: (processToken, request) => permissions.request(processToken, request) },
+    // The reason names who asked, so the restart's log line does. It is built here because this is
+    // where a process token resolves to a session; the route never learns the session. The session
+    // is named by its id, never its title, because the title is read from the transcript and
+    // transcript content never reaches the broker log. A token with no announced session still
+    // asks: the pipe is held, which is the standing the route checks, and the log says the session
+    // was unannounced rather than nothing.
+    restart: (processToken) => {
+      const record = registry.current(processToken);
+      const asker = record === null ? "a relay with no announced session" : `session ${record.sessionId}`;
+      return restart(`${asker} asked through its relay`);
+    },
     maxBodyBytes: config.maxBodyBytes,
     streamIdleMs: RELAY_READ_TIMEOUT_MS,
     replyHeartbeatMs: REPLY_HEARTBEAT_MS,
@@ -1868,6 +2031,10 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
       ...(config.voice
         ? { voice: voiceWhenReady(() => voice) }
         : {}),
+      // An operator's typed `broker restart`. The reason names the operator's account by its
+      // Discord id, so the restart's log line says who asked; the message text never reaches it.
+      restart: ({ threadId, senderId }) =>
+        restart(`operator account ${senderId} typed broker restart in thread ${threadId}`),
     });
     inbound = router;
     if (config.responseGate === "live") {
@@ -2265,7 +2432,14 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     note(`broker: the fleet decisions card refreshes every ${config.decisionsCardRefreshMs}ms`);
   }
 
-  async function stop(): Promise<void> {
+  // A stop asked while one is running joins it, so an accepted restart and a signal arriving
+  // together tear the broker down once.
+  function stop(): Promise<void> {
+    stopping ??= tearDown();
+    return stopping;
+  }
+
+  async function tearDown(): Promise<void> {
     clearInterval(sweep);
     clearInterval(retention);
     clearInterval(heartbeat);
@@ -2325,12 +2499,71 @@ export async function startBroker(config: BrokerConfig): Promise<Broker> {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
+  async function runRestart(reason: string): Promise<void> {
+    // The reason is the trigger's own description of who asked, never a message's text.
+    note(`broker: restarting on request (${reason})`);
+    await stopForRestart({
+      stop,
+      releaseQuestions: () => questionDesk.releaseAll(),
+      exit,
+      note,
+      ceilingMs: RESTART_SHUTDOWN_CEILING_MS,
+    });
+  }
+  function restart(reason: string): RestartAnswer {
+    const refusal = restartRefusal({
+      // A signal's stop counts too: a restart joining it would exit 75 and bring back a broker the
+      // task was stopping.
+      underway: restartRun !== null,
+      stopping: restartRun === null && stopping !== null,
+      supervised,
+      voiceCall: voice?.joined() ?? null,
+      sinceStartMs: startedAt === null ? 0 : now() - startedAt,
+    });
+    if (refusal !== null) return { accepted: false, reason: refusal };
+    let begun = false;
+    let dropped: Promise<RestartDropped> | null = null;
+    return {
+      accepted: true,
+      begin: () => {
+        if (dropped !== null) return dropped;
+        // Another answer joining the run is logged too, once, so the log names everyone who asked.
+        if (!begun && restartRun !== null) note(`broker: restart also asked (${reason})`);
+        // A stop that started after the answer and before this begin is the task stopping the
+        // broker, so the begin joins it rather than turning it into a relaunch.
+        if (restartRun === null && stopping !== null) {
+          if (!begun) note(`broker: restart dropped, the broker was already stopping (${reason})`);
+          begun = true;
+          return stopping;
+        }
+        // A call joined between the answer and this begin would be cut, so the voice rule is read
+        // again here: the typed command's begin waits on a Discord post first. The drop is answered,
+        // because the asker was already told the broker is restarting.
+        if (restartRun === null && (voice?.joined() ?? null) !== null) {
+          note(`broker: restart dropped, a voice call went live after it was accepted (${reason})`);
+          begun = true;
+          dropped = Promise.resolve({
+            dropped: "a voice call went live before it began; end the call and ask again",
+          });
+          return dropped;
+        }
+        begun = true;
+        restartRun ??= runRestart(reason);
+        return restartRun;
+      },
+    };
+  }
+
+  // Taken last, after the listener is bound and every surface has started, so the cooldown counts
+  // from the moment the broker could first be asked.
+  startedAt = now();
   return {
     server,
     registry,
     port,
     logger,
     stop,
+    restart,
   };
 }
 
@@ -2356,13 +2589,20 @@ if (runDirectly(import.meta.url)) {
 
   // A bind or startup failure inside startBroker is already logged, through the config's own
   // logger, before it rejects; nothing more to do here except let it propagate.
-  const broker = await startBroker(config);
+  // A signal that lands during a requested restart ends the process with 0, whichever of the two
+  // stops reaches its exit first: a task stopping the broker is never answered with a relaunch.
+  // Such a signal also takes the restart's 30-second ceiling, since the restart's exit ends it.
+  let signalled = false;
+  const broker = await startBroker(config, {
+    exit: (code) => process.exit(signalled ? 0 : code),
+  });
   const message = `broker: listening on http://127.0.0.1:${broker.port} as host ${config.host}, ` +
     `state at ${config.stateFile}`;
   console.log(message);
   broker.logger.info(message);
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
+      signalled = true;
       void broker.stop().then(() => process.exit(0));
     });
   }

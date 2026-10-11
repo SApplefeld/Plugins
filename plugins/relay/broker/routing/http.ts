@@ -32,6 +32,15 @@
 //     down the stream as a `permission` event, because the answer can be minutes away and a
 //     request held open that long is a socket the relay's own read timeout would drop.
 //
+//   POST /relay/restart
+//     the same two headers, and no body: whatever arrives is read under the cap and discarded
+//     -> 200 {"status": "restarting"} or {"status": "refused", "reason": "..."}
+//     -> 403 on the same terms as a reply
+//
+//     The restart begins only once this response has finished, so the answer is on the wire before
+//     the broker stops and closes every connection, this one included. A caller left hanging would
+//     read a restart as a failure and ask again.
+//
 // Two things about that shape are deliberate. The body carries no chat_id: routing by session is
 // the design, and the way to make that true rather than merely intended is to give the wire no
 // field to route by. And the reply key exists because a process token is not a credential: every
@@ -45,6 +54,7 @@
 // rebinding. They are re-checked rather than shared with the intake handler because these routes
 // are composed in front of it and would otherwise be reachable without either.
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { RestartAnswer } from "../index.ts";
 import { isAllowedHost, isLoopback } from "../intake.ts";
 import type { PermissionDesk } from "../security/permission.ts";
 import type { OutboundRouter } from "./outbound.ts";
@@ -68,6 +78,12 @@ export type RelayRoutesOptions = {
    * prompt behind the pipe: a verdict is the operator's, and it arrives over Discord.
    */
   permissions: Pick<PermissionDesk, "request">;
+  /**
+   * Asks the broker to restart on behalf of the process holding the pipe. It takes the process
+   * token and nothing else: naming the session behind it is the broker's, which is the one place
+   * the token is ever resolved to a session, so this layer never reads the registry to do it.
+   */
+  restart: (processToken: string) => RestartAnswer;
   /** Hard cap on a reply body. A reply longer than a Discord message cannot be posted anyway. */
   maxBodyBytes: number;
   /**
@@ -145,7 +161,12 @@ export function createRelayRoutes(
 
   return (request, response) => {
     const route = (request.url ?? "/").split("?")[0];
-    if (route !== "/relay/stream" && route !== "/relay/reply" && route !== "/relay/permission") {
+    if (
+      route !== "/relay/stream" &&
+      route !== "/relay/reply" &&
+      route !== "/relay/permission" &&
+      route !== "/relay/restart"
+    ) {
       return false;
     }
 
@@ -217,6 +238,42 @@ export function createRelayRoutes(
         send(response, 413, { error: "body too large" });
         return;
       }
+
+      if (route === "/relay/restart") {
+        // The body is read and dropped above rather than parsed: the request carries nothing, and
+        // a route that demanded JSON would refuse the empty body a bare POST sends.
+        //
+        // A caller gone while its body was read is not asked for, since an answer nobody can
+        // receive restarts nothing.
+        if (response.destroyed) {
+          log("relay: a restart's caller hung up before it was decided, so nothing restarts");
+          return;
+        }
+        const answer = options.restart(processToken);
+        if (!answer.accepted) {
+          log(`relay: refused a restart asked through a pipe: ${answer.reason}`);
+          send(response, 200, { status: "refused", reason: answer.reason });
+          return;
+        }
+        // Begun from `finish`, which fires once the whole answer has been handed to the socket,
+        // and never from `end()`, which only queues it: the stop closes every connection, this one
+        // included, and a caller that never got its answer reads the restart as a failure. A
+        // caller gone before the answer finished never begins it, so an answer nobody received
+        // restarts nothing, and the next ask is decided on its own merits.
+        response.on("finish", () => {
+          answer.begin().catch((error: unknown) => {
+            log(`relay: the restart asked through a pipe failed: ${String(error)}`);
+          });
+        });
+        response.on("close", () => {
+          if (!response.writableFinished) {
+            log("relay: a restart was accepted but its caller hung up before the answer, so nothing restarts");
+          }
+        });
+        send(response, 200, { status: "restarting" });
+        return;
+      }
+
       let payload: unknown;
       try {
         payload = JSON.parse(body);

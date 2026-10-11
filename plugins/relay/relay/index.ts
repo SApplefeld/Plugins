@@ -14,13 +14,13 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { DEFAULT_PORT } from "../broker/config.ts";
 import { runDirectly } from "../broker/entrypoint.ts";
 import { createBrokerClient } from "./broker.ts";
-import type { ReplyStatus } from "./broker.ts";
+import type { ReplyStatus, RestartOutcome } from "./broker.ts";
 import {
   PermissionRequestNotificationSchema,
   channelCapabilities,
   permissionNotification,
 } from "./permission.ts";
-import { INSTRUCTIONS, REPLY_TOOL, REPLY_TOOL_NAME, channelNotification } from "./protocol.ts";
+import { INSTRUCTIONS, REPLY_TOOL_NAME, RESTART_TOOL_NAME, TOOLS, channelNotification } from "./protocol.ts";
 
 /** What the model is told when a reply had nowhere to land. */
 const REPLY_FAILURES: Record<string, string> = {
@@ -63,6 +63,49 @@ export function replyToolResult(status: ReplyStatus): CallToolResult {
   // expects one of the sentences above.
   const text = Object.hasOwn(REPLY_FAILURES, status) ? REPLY_FAILURES[status] : REPLY_FAILURES.failed;
   return { content: [{ type: "text", text }], isError: true };
+}
+
+/** What the model is told when the restart tool was called by a session no broker watches. */
+const RESTART_UNWATCHED: CallToolResult = {
+  content: [
+    {
+      type: "text",
+      text:
+        "Not restarted: this session was not started through the launch wrapper, so it holds no " +
+        "relay to the broker.",
+    },
+  ],
+  isError: true,
+};
+
+/**
+ * What the model is told about one restart request, from what it came to.
+ *
+ * Only the accepted answer is no error: it is the one outcome where the next step is to wait. A
+ * refusal carries the broker's reason as written, because the reason names what to do about it,
+ * and the broker already keeps message text out of it. A failure carries the relay's or the
+ * broker's words for what went wrong, which never come from a message either.
+ */
+export function restartToolResult(outcome: RestartOutcome): CallToolResult {
+  if (outcome.status === "restarting") {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "The broker is restarting onto the code and configuration on disk. This session's " +
+            "relay and thread reconnect on their own; wait before sending anything to the thread.",
+        },
+      ],
+    };
+  }
+  if (outcome.status === "refused") {
+    return { content: [{ type: "text", text: `Not restarted: ${outcome.reason}` }], isError: true };
+  }
+  return {
+    content: [{ type: "text", text: `Not restarted: the broker did not decide (${outcome.error}).` }],
+    isError: true,
+  };
 }
 
 /**
@@ -174,9 +217,15 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
 
   server.fallbackNotificationHandler = unhandledNotifications((line) => process.stderr.write(line));
 
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [REPLY_TOOL] }));
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [...TOOLS] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name === RESTART_TOOL_NAME) {
+      // Answered here for the same reason a reply is: a session started without the launch wrapper
+      // holds no pipe, so the broker would refuse the ask before deciding it.
+      if (!processToken) return RESTART_UNWATCHED;
+      return restartToolResult(await broker.restart());
+    }
     if (request.params.name !== REPLY_TOOL_NAME) {
       return { content: [{ type: "text", text: `Unknown tool ${request.params.name}.` }], isError: true };
     }
