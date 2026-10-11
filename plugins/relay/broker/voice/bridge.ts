@@ -2,9 +2,11 @@
 // and the session bound to the thread `voice on` was typed in. It hands a turn the fast tier
 // cannot answer to that session as a relay event carrying the ring's lines since the last
 // hand-off, speaks the session's replies from the turn that takes a hand-off until that turn ends,
-// routes the operator's answer to an ASK straight back to the session, and posts every spoken turn
-// to the thread as text, so the transcript is readable afterwards. The typing line is held from a
-// turn's end until the first frame of what answers it.
+// routes the operator's answer to an ASK straight back to the session, and posts every operator
+// turn, every fast answer and the cannot-reach line to the thread as text, so the transcript is
+// readable afterwards. A session reply is in the thread already and a holding line only fills the
+// wait, so neither is posted. The typing line is held from a turn's end until the first frame of
+// what answers it.
 //
 // Everything here is bounded so that nothing throws to the transcriber or to the outbound path:
 // a failure is logged by session id, never with any text. A rate-limited thread post is waited out
@@ -228,7 +230,7 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     },
   };
 
-  // The speaker the tier is handed: each line is posted to the thread before it is spoken, so the
+  // The speaker the tier is handed: a line it posts goes to the thread before it is spoken, so the
   // post never depends on the speaker answering.
   let voice: Speaker | null = null;
   // Speeches handed to the speaker and not yet settled, the persona being mid-reply. The barge-in
@@ -248,7 +250,12 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
       ? null
       : {
           speak: async (text, remember) => {
-            post("persona", options.names(speakerId).session, text);
+            // A fast answer has no other copy, and the cannot-reach line is the thread's one record
+            // of a hand-off that failed. A session reply is in the thread as written already, and a
+            // holding line only fills the wait, so neither is posted.
+            if (remember === "answer" || text === CANNOT_REACH_LINE) {
+              post("persona", options.names(speakerId).session, text);
+            }
             // Pending from the moment it is handed to the speaker, so a cancel while it speaks
             // drops it; settled once the speaker is done with it, which is what lets the next
             // turn's end remember it. An entry a cancel already dropped is flagged to no effect.
