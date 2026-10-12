@@ -25,7 +25,7 @@
 // never that it exited. A claim is non-destructive: the epoch bump makes
 // the old holder yield on its next write.
 
-import type { AgentSpawnInput, AgentSpawnResult, HttpInit, Next, PromptSubmitResult, Register, ToolCallInput, ToolCallResult } from "claude-code";
+import type { AgentSpawnInput, AgentSpawnResult, HttpInit, Next, ProcessRunInit, ProcessRunResult, PromptSubmitResult, Register, ToolCallInput, ToolCallResult } from "claude-code";
 import type { PluginHost } from "./host";
 import {
   createDefaultState,
@@ -232,6 +232,7 @@ import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore
 // The module's own after-call hooks: the C# formatter and the
 // memory-recognition nudge.
 import { formatterHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
+import { childEnvOf, gitHooksPathOf } from "./spawn";
 // The four deny guards the kit's command hooks hold, ported, and the path
 // host their tree reads go through.
 import { pathOpsOf, readonlyAgentGuard, type LexHost } from "./guards/readonly-agent";
@@ -1022,9 +1023,9 @@ function guardHostOf(dp: any): GuardHost {
       if (typeof head === "string" && head.length > 0 && !/[\\/]/.test(head)) {
         const resolved = await executableOf(dp, head);
         if (resolved === null) throw new Error(`${head} is on no absolute PATH entry`);
-        return dp.process.run([resolved, ...argv.slice(1)], init);
+        return runChild(dp, [resolved, ...argv.slice(1)], init);
       }
-      return dp.process.run(argv, init);
+      return runChild(dp, argv, init);
     },
     fileExists: (path: string) => dp.fs.exists(path),
   };
@@ -3494,7 +3495,7 @@ const sess: {
   // is. While it names the entry and the count stays at the cap, the cap
   // logs nothing more on later ticks. Cleared wherever the count resets.
   nudgeCapRefusedFor: string | null;
-  options: { healthTimeoutMs?: number; gitProbeMs?: number };
+  options: { healthTimeoutMs?: number; gitProbeMs?: number; healthCommand?: string[] };
   controllerTickCount: number; // D4: in-session tick counter for backoff and cost_summary
   staleAfterMs: number; // F9a: single-source the staleness threshold
   turnStartedAt: number | null; // plan item 8.3: this session's clock at turn.start, null between turns
@@ -4068,20 +4069,18 @@ function noteTurnToolCall(tool: string, args: { file_path?: unknown; path?: unkn
 // activated or loaded under it starts at zero.
 let countResetSinceNudgeOpened = false;
 
-// Health run helper (E2).
+// Health run helper (E2). The command is the healthCommand option's argv,
+// which the host reads from the user, --settings and managed settings tiers
+// alone, never from a project's .claude/ settings files, and never text from
+// the repository the session opened. It runs with no cwd, so it runs in the
+// session's working directory, the checkout it checks. An empty argv runs
+// nothing, since the host would reject it on every goal completion.
 async function runHealth(dp: any, forNodeId: string | null): Promise<void> {
-  const healthPath = ".agentic-health";
+  const argv = sess.options.healthCommand ?? [];
+  if (argv.length === 0) return;
   try {
-    if (!(await dp.fs.exists(healthPath))) {
-      return;
-    }
-    const raw = await dp.fs.read(healthPath, "utf8");
-    const argv: string[] = raw.trim().split(/\s+/).filter((t: string) => t);
-    if (argv.length === 0) {
-      return;
-    }
     const healthTimeoutMs = sess.options.healthTimeoutMs ?? 60000;
-    const res = await dp.process.run(argv, { timeoutMs: healthTimeoutMs });
+    const res = await runChild(dp, argv, { timeoutMs: healthTimeoutMs });
     const tail = (res.stdout || "").split("\n").slice(-20).join("\n");
     const health = {
       command: argv,
@@ -4206,7 +4205,7 @@ async function bankCompactionBoundary(dp: any, turnKind: string): Promise<void> 
   }
   const script = `${located.installPath.replace(/[/\\]+$/, "")}/hooks/kit-compact-checkpoint.js`;
   try {
-    const res = await dp.process.run(["node", script, "boundary"], {
+    const res = await runChild(dp, ["node", script, "boundary"], {
       env: { CLAUDE_CODE_SESSION_ID: sessionId },
       timeoutMs: KIT_BOUNDARY_TIMEOUT_MS,
     });
@@ -4258,6 +4257,52 @@ function firstFailureToday<K extends string>(latch: Record<K, string>, cause: K)
   if (latch[cause] === day) return false;
   latch[cause] = day;
   return true;
+}
+
+// The temp root the git pins' hooks path sits under, read from $.env on a
+// spawn and kept for the session once a read has answered, or null before
+// that. The suffix is drawn once per module load, so every git this session
+// spawns points core.hooksPath at the same never-created directory.
+let childTempRoot: string | null = null;
+const childHooksSuffix = crypto.randomUUID();
+
+/**
+ * Adapter: the module's one spawn, through which every child process it
+ * starts goes, declared at the top level so a caller holding the handle as
+ * `$` inside register() can pass it here. Runs `argv` with the caller's
+ * `init` and the env spawn.ts's childEnvOf composes: the caller's keys, then
+ * NoDefaultCurrentDirectoryInExePath=1, then the git pins where `argv[0]` is
+ * git by basename. The variable governs the child's own spawns alone, such
+ * as git starting a credential helper, and not how the host resolves the
+ * child, which the host does against its own PATH; a caller that needs an
+ * absolute path resolves one through executableOf first. The temp root is
+ * `TEMP`, then `TMPDIR`, else `/tmp`, each name a literal as the validator
+ * requires. A root that was read, or `/tmp` where both reads answered with
+ * no string, is kept for the session; where a read threw, this spawn takes
+ * `/tmp` and the next spawn reads again.
+ */
+async function runChild(dp: any, argv: readonly string[], init: ProcessRunInit = {}): Promise<ProcessRunResult> {
+  let tempRoot = childTempRoot;
+  if (tempRoot === null) {
+    let threw = false;
+    let root: unknown;
+    try {
+      root = await dp.env.get("TEMP");
+    } catch {
+      threw = true;
+    }
+    if (typeof root !== "string" || root === "") {
+      try {
+        root = await dp.env.get("TMPDIR");
+      } catch {
+        threw = true;
+      }
+    }
+    tempRoot = typeof root === "string" && root !== "" ? root : "/tmp";
+    if (!threw || tempRoot !== "/tmp") childTempRoot = tempRoot;
+  }
+  const env = childEnvOf(argv, init.env, gitHooksPathOf(tempRoot, childHooksSuffix));
+  return dp.process.run(argv, { ...init, env });
 }
 
 // The absolute paths bare command names resolved to this session, by name.
@@ -4320,7 +4365,7 @@ async function kitNodeRun(
   const startedAt = Date.now();
   let res: any;
   try {
-    res = await dp.process.run([node, ...args], {
+    res = await runChild(dp, [node, ...args], {
       cwd: sess.memqLaunchDir,
       env: { CLAUDE_CODE_SESSION_ID: sessionId },
       timeoutMs,
@@ -5974,7 +6019,8 @@ async function restartRecapBlock(dp: any): Promise<string | null> {
   const exclude = sess.mySessionId === "pending" ? [] : ["--exclude", sess.mySessionId];
   let res: any;
   try {
-    res = await dp.process.run(
+    res = await runChild(
+      dp,
       ["node", `${dp.plugin.root}/bin/restart-recap.mjs`, "--persona", sess.persona, ...exclude],
       { cwd: sess.workdir, timeoutMs: RECAP_TIMEOUT_MS },
     );
@@ -7904,7 +7950,7 @@ async function readPlanCheckout(dp: any, dir: string): Promise<{ upstream: boole
   const read = async (argv: string[]): Promise<string | null> => {
     let res: any;
     try {
-      res = await dp.process.run(argv, { cwd: dir, timeoutMs: PLAN_CHECKOUT_TIMEOUT_MS });
+      res = await runChild(dp, argv, { cwd: dir, timeoutMs: PLAN_CHECKOUT_TIMEOUT_MS });
     } catch {
       return null;
     }
@@ -8664,7 +8710,13 @@ export const register: Register = async (on, options) => {
   const nudgeIdleMs = typeof cfg.nudgeIdleMs === "number" ? (cfg.nudgeIdleMs as number) : 2 * 60_000;
   const healthTimeoutMs = typeof cfg.healthTimeoutMs === "number" ? Math.min(cfg.healthTimeoutMs as number, 120_000) : 60_000;
   const gitProbeMs = typeof cfg.gitProbeMs === "number" ? Math.min(cfg.gitProbeMs as number, 300_000) : 120_000;
-  sess.options = { healthTimeoutMs, gitProbeMs };
+  // The health command, split on whitespace into a program and its
+  // arguments with no shell. A value that is absent or not a string reads as
+  // empty, which runs nothing: that the engine fills the manifest's default
+  // into this object is not established, as the comment at tickOpenAsk's
+  // askOperatorWaitMs read records.
+  const healthCommand = typeof cfg.healthCommand === "string" ? cfg.healthCommand.trim().split(/\s+/).filter((t) => t) : [];
+  sess.options = { healthTimeoutMs, gitProbeMs, healthCommand };
 
   // Plan item 6: the persona the supervisor is given is the persona the child
   // runs as. Without this, every session starts as "default" (sess.persona's
@@ -9757,6 +9809,24 @@ export const register: Register = async (on, options) => {
         detail: `${startStoreProblem.composed} ${startStoreProblem.carried ?? ""}`.slice(0, 400),
       });
     }
+
+    // The health command comes from the healthCommand option alone. A
+    // .agentic-health file in the working directory is never read or run,
+    // and its presence is logged once per session start, so a machine that
+    // carries one learns from its own decision log where the command is set.
+    // An "off" session runs no health command and holds no persona state, so
+    // its branch above logs nothing.
+    try {
+      if (await $.fs.exists(".agentic-health")) {
+        const where = sess.workdir !== "" ? `${bracketSafeText(oneLine(sess.workdir))}/.agentic-health` : ".agentic-health in the working directory";
+        sess.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "monitor",
+          action: "health_file_ignored",
+          detail: `${where} is not read or run; the health command comes from the plugin's healthCommand option`,
+        });
+      }
+    } catch { /* the existence check failed; nothing is logged */ }
 
     sess.state.monitor.sessionStart = Date.now();
     sess.meterDrainAt = Date.now();
@@ -11674,7 +11744,7 @@ export const register: Register = async (on, options) => {
         const gitProbeMs = sess.options.gitProbeMs ?? 120000;
         if (env.git === null || now - env.git.sampledAt >= gitProbeMs) {
           gitProbeInFlight = true;
-          $.process.run(["git", "status", "--porcelain=v1", "-b"])
+          runChild($, ["git", "status", "--porcelain=v1", "-b"])
             .then((res) => {
               if (res.exitCode === 0) {
                 const lines = (res.stdout || "").split("\n").filter((l) => l.trim());
@@ -11690,7 +11760,7 @@ export const register: Register = async (on, options) => {
                   if (aheadMatch) ahead = parseInt(aheadMatch[1], 10);
                   if (behindMatch) behind = parseInt(behindMatch[1], 10);
                 }
-                return $.process.run(["git", "log", "-1", "--format=%ct"]).then((logRes) => {
+                return runChild($, ["git", "log", "-1", "--format=%ct"]).then((logRes) => {
                   const lastCommitAt = logRes.exitCode === 0 ? parseInt((logRes.stdout || "0").trim(), 10) * 1000 : 0;
                   const newGit: EnvGit = { branch, dirty, ahead, behind, lastCommitAt, sampledAt: Date.now() };
                   const prevGit = env.git;
@@ -17518,7 +17588,12 @@ export const register: Register = async (on, options) => {
       // entry, so it never reaches the launch checkout a worktree sits inside.
       // A read under such an ancestor logs one plan_record_dir_resolved decision
       // per holder naming both directories. Where the walk ends with no hit, the
-      // live directory is read and the reader names its own reason.
+      // live directory is read and the reader names its own reason. A holder
+      // whose status is complete or abandoned when this block runs, a goal_done
+      // call during the turn among the ways, is still read, so its closing
+      // Chapter is counted, but it logs neither plan_record_dir_resolved nor
+      // plan_record_unreadable, and neither log is marked as written, so the
+      // once-per-holder budget is not spent on a closed holder.
       const planHolder = turnLeaf ? planHolderOf(sess.state, turnLeaf) : undefined;
       const planPath = planHolder?.planPath;
       // Whether this turn's read found a Chapter above the stored count, or
@@ -17630,10 +17705,11 @@ export const register: Register = async (on, options) => {
       };
       if (sess.isOwner && planHolder && planPath) {
         const holder = planHolder;
+        const holderClosed = holder.status === "complete" || holder.status === "abandoned";
         try {
           const { reading, liveDir, planDir } = await readPlanDocument($, planPath);
           if (liveDir !== null && planDir !== null && planDir !== liveDir) {
-            if (!planRecordDirResolvedLogged.has(holder.id)) {
+            if (!holderClosed && !planRecordDirResolvedLogged.has(holder.id)) {
               planRecordDirResolvedLogged.add(holder.id);
               sess.state.decisions.push({
                 timestamp: Date.now(),
@@ -17646,13 +17722,13 @@ export const register: Register = async (on, options) => {
             planRecordDirResolvedLogged.delete(holder.id);
           }
           if (reading.kind === "unreadable") {
-            if (!planRecordUnreadableLogged.has(holder.id)) {
+            if (!holderClosed && !planRecordUnreadableLogged.has(holder.id)) {
               planRecordUnreadableLogged.add(holder.id);
               sess.state.decisions.push({
                 timestamp: Date.now(),
                 loop: "goal",
                 action: "plan_record_unreadable",
-                detail: `${holder.id}: ${planPath.slice(0, 150)}: ${reading.reason}`,
+                detail: `${holder.id}: ${planPath.slice(0, 150)}: ${reading.reason}${liveDir !== null ? `; live directory ${liveDir.slice(0, 200)}` : ""}`,
               });
             }
           } else {

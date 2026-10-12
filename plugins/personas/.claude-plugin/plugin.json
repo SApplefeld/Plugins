@@ -52,6 +52,12 @@
       "title": "Health timeout (ms)",
       "description": "Timeout for the health probe (ms). Default 60s, cap 120s."
     },
+    "healthCommand": {
+      "type": "string",
+      "default": "",
+      "title": "Health command",
+      "description": "The command the controller runs in the session's working directory after a goal completes, such as 'node scripts/health.js'. Exit 0 logs health_green, and any other exit, a timeout or a failure to start logs health_red, which reaches the next turn. The text is split on whitespace into a program and its arguments and run with no shell, so quoting, pipes and redirection do not work: for anything more, point it at a script, such as one run by node. Empty by default, which runs nothing."
+    },
     "gitProbeMs": {
       "type": "number",
       "default": 120000,
