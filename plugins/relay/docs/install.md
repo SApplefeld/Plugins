@@ -147,9 +147,11 @@ starter message successfully and then cannot open a thread on it.
 
 ## The one-command install
 
-The host needs Node.js, npm and the `claude` CLI on PATH first. The installer checks only that
-`node` is present, not its version, though `package.json` declares Node 24 or later, and it runs
-`npm ci` and `claude plugin` commands, which fail the run if either tool is missing.
+The host needs Node.js and the `claude` CLI on PATH first. The installer checks only that `node` is
+present, not its version, though `package.json` declares Node 24 or later. It runs `npm ci` with the
+npm bundled beside that node, not an npm found on PATH, and it runs `claude plugin` commands. The
+run fails if `claude` is missing. It also fails if that npm is missing and the dependencies need
+installing. A checkout whose dependencies already match its lockfile needs no npm.
 
 Steps 2 and 3, plus the plugin install, the managed-settings file, and the `cchat` launcher, in one
 unelevated invocation from the repository root:
@@ -227,8 +229,12 @@ The installer:
   first and preserves every hook, rule, and setting that is not this project's,
 - hardens the access control lists on the whole execution surface: `hooks/`, `relay/`, `wrapper/`,
   `install/`, and `broker/` as directories, the bot token file, and the state root,
-- runs `npm ci`, which installs the reviewed lockfile rather than resolving newer dependencies and
-  fails the run on any download whose checksum differs from the lockfile's `integrity` hash.
+- installs the dependencies through `install/ensure-dependencies.mjs`, which runs `npm ci` with
+  install scripts off. That installs the reviewed lockfile rather than resolving newer dependencies,
+  and fails the run on any download whose checksum differs from the lockfile's `integrity` hash. It
+  records which lockfile it installed from, so the broker's first start does not install again. The
+  broker's start and the relay's launch run the same helper, so a plugin update that leaves the
+  dependencies missing heals at the next start.
 
 Directories are hardened as containers rather than file by file, because a hardened file in a
 directory that permits delete-child can be deleted and re-created with a clean access control list.
@@ -499,6 +505,10 @@ the task starts, so a task that started before the script carried the loop runs 
 it next starts. Its broker refuses a restart request with a reason that opens "nothing would
 start the broker again". Restart the task once on such a host, with `.\install\Repair-Broker.ps1` from an
 elevated prompt or a reboot.
+
+Before each start the script also runs `install/ensure-dependencies.mjs`, which reinstalls the
+dependencies when they no longer match `package-lock.json`. A failed install ends the script with
+the helper's exit code, and the broker does not start on that pass.
 
 ## 4. Launch a session
 

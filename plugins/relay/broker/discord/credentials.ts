@@ -65,7 +65,14 @@ function currentWindowsUserSid(): string | null {
         "-Command",
         "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
       ],
-      { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+      // Scrubbed like windowsSddl's spawn below. This command loads no module today, but a null
+      // here is cached for the process and reads as every file being owned by another account.
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: powershellEnvironment(process.env),
+      },
     ).trim();
     cachedCurrentUserSid = output === "" ? null : output.toUpperCase();
   } catch {
@@ -112,6 +119,18 @@ export function unsafePosixMode(mode: number): boolean {
   return (mode & 0o077) !== 0;
 }
 
+/**
+ * A copy of an environment without `PSModulePath`, matched case-insensitively because Windows
+ * environment names are. Every other variable passes through unchanged.
+ */
+export function powershellEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const copy: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key.toUpperCase() !== "PSMODULEPATH") copy[key] = value;
+  }
+  return copy;
+}
+
 /** The security descriptors of several paths, in the order asked for. */
 function windowsSddl(paths: string[]): string[] {
   // One spawn, at broker start, only when a token file is configured. PowerShell is the only
@@ -121,6 +140,10 @@ function windowsSddl(paths: string[]): string[] {
   // quote, so nothing in a path is interpreted. ErrorActionPreference makes a missing or
   // unreadable path a terminating error: by default Get-Acl reports one to stderr and exits zero,
   // which would hand this check an empty string and read as "nothing foreign here".
+  //
+  // The child gets no PSModulePath. Windows PowerShell 5.1 builds its own default module path when
+  // the variable is absent, and under an inherited PowerShell 7 path it loads PowerShell 7's
+  // Microsoft.PowerShell.Security and Get-Acl fails.
   const literals = paths.map((value) => `'${value.replace(/'/g, "''")}'`).join(",");
   const output = execFileSync(
     "powershell.exe",
@@ -130,7 +153,12 @@ function windowsSddl(paths: string[]): string[] {
       "-Command",
       `$ErrorActionPreference='Stop'; @(${literals}) | ForEach-Object { (Get-Acl -LiteralPath $_).Sddl }`,
     ],
-    { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+    {
+      encoding: "utf8",
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: powershellEnvironment(process.env),
+    },
   );
   return output
     .split(/\r?\n/)

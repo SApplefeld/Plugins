@@ -337,6 +337,64 @@ function Stop-ChannelBrokerProcess {
 
 <#
 .SYNOPSIS
+Whether the checkout's installed dependencies match its lockfile, as the pass or fail of the
+dependencies check line.
+
+.DESCRIPTION
+Asks install/ensure-dependencies.mjs in its --check mode, which never installs: exit 0 is current,
+exit 2 is missing or stale, with the reason on its stdout, and exit 3 is the same while a live
+install holds the lock. The helper is the one owner of that
+rule, so this reads its verdict rather than repeating it. It runs under the node the task runs,
+because that is the node whose npm the task start will heal with.
+
+A stale install is reported, never repaired here. Start-Broker.ps1 runs the same helper before every
+pass, so the task start that follows this check heals it. Any other result, including a node that
+cannot be launched, is a failure to check, reported as such rather than as a pass.
+#>
+function Get-ChannelDependencyState {
+    param(
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$NodeExe
+    )
+    $helper = Join-Path $PSScriptRoot 'ensure-dependencies.mjs'
+    # Continue for the call: the helper writes to stderr on a bad argument, which under the runner's
+    # Stop preference Windows PowerShell 5.1 would turn into a terminating error once redirected.
+    $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = $null
+    try {
+        # Each stderr line arrives as an error record, and its string form is the line itself.
+        $output = (& $NodeExe $helper --check --root $RepoRoot 2>&1 | ForEach-Object { [string]$_ }) -join ' '
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Detail = "could not check: $($_.Exception.Message)" }
+    }
+    $code = $LASTEXITCODE
+    $reason = ($output -replace '\s+', ' ').Trim()
+    if ($code -eq 0) {
+        return [pscustomobject]@{ Ok = $true; Detail = 'match package-lock.json' }
+    }
+    if ($code -eq 3) {
+        # A live install deletes node_modules before it rebuilds it, so the missing tree is that
+        # install's work rather than something to act on.
+        return [pscustomobject]@{
+            Ok     = $false
+            Detail = "$reason An install is running now; the broker starts once it finishes."
+        }
+    }
+    if ($code -eq 2) {
+        $quote = { param($value) "'" + ($value -replace "'", "''") + "'" }
+        $helperCommand = "& $(& $quote $NodeExe) $(& $quote $helper) --root $(& $quote $RepoRoot)"
+        return [pscustomobject]@{
+            Ok     = $false
+            Detail = "$reason Starting the broker task reinstalls them; if it does not, run $helperCommand to install them and see any failure."
+        }
+    }
+    $what = if ($null -eq $code) { "node at '$NodeExe' could not be launched" } else { "the helper exited $code" }
+    $tail = if ($reason) { ": $reason" } else { '' }
+    return [pscustomobject]@{ Ok = $false; Detail = "could not check: $what$tail" }
+}
+
+<#
+.SYNOPSIS
 Reports each piece of this host's broker setup as pass or fail, and returns the facts the summary
 prints.
 
@@ -385,6 +443,13 @@ function Get-ChannelHostHealth {
 
     $node = Get-Command $nodeExe -ErrorAction SilentlyContinue
     Write-ChannelCheck -Name 'node' -Ok ([bool]$node) -Detail $(if ($node) { $node.Source } else { $nodeExe })
+
+    if ($node) {
+        $dependencies = Get-ChannelDependencyState -RepoRoot $RepoRoot -NodeExe $node.Source
+    } else {
+        $dependencies = [pscustomobject]@{ Ok = $false; Detail = "could not check: no node at '$nodeExe'" }
+    }
+    Write-ChannelCheck -Name 'dependencies' -Ok $dependencies.Ok -Detail $dependencies.Detail
 
     $head = Invoke-ChannelGit -RepoRoot $RepoRoot -Arguments @('rev-parse', 'HEAD')
     $commit = if ($head.ExitCode -eq 0) { $head.Output } else { 'unknown' }

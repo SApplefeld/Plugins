@@ -10,8 +10,15 @@
 //
 // Plain JavaScript, and nothing outside Node's own builtins: the cache directory has no
 // node_modules, no TypeScript tooling, and no install step.
-import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+//
+// Before it starts the relay, the shim runs the checkout's install/ensure-dependencies.mjs when the
+// registration points at a checkout that has one. A plugin update can leave the checkout without its
+// node_modules, and a relay that fails to start is skipped by Claude Code for 15 minutes across every
+// session on the machine. Reinstalling before the relay starts is worth the wait. An install that
+// outlasts Claude Code's MCP startup timeout fails that one start, and one cut off there leaves no
+// stamp and a lock whose holder is gone, so the next start takes the lock over and installs again.
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -58,6 +65,48 @@ try {
 
 if (!entry || typeof entry.command !== "string" || !Array.isArray(entry.args)) {
   fail(`the relay registration at '${source}' carries no usable '${SERVER_KEY}' command.`);
+}
+
+/**
+ * The checkout root a registration points at, or undefined for any other shape. The wrapper registers
+ * a single argument ending in relay/index.ts, with either separator, and the root is the directory
+ * two levels up. Windows paths compare case-insensitively.
+ */
+function checkoutRoot(args) {
+  const first = args[0];
+  if (typeof first !== "string") {
+    return undefined;
+  }
+  // Split on either separator, so the folder must be exactly `relay`, not a name ending in it.
+  const parts = first.split(/[\\/]/);
+  const fold = (value) => (process.platform === "win32" ? value.toLowerCase() : value);
+  if (parts.length < 3 || fold(parts.at(-1)) !== "index.ts" || fold(parts.at(-2)) !== "relay") {
+    return undefined;
+  }
+  return path.dirname(path.dirname(first));
+}
+
+// The helper's stdout and stderr both go to this process's stderr: a byte on stdout would corrupt the
+// MCP conversation that the relay carries on it. No shell, for the same reason as the spawn below.
+const root = checkoutRoot(entry.args);
+if (root !== undefined) {
+  const helper = path.join(root, "install", "ensure-dependencies.mjs");
+  if (existsSync(helper)) {
+    const result = spawnSync(process.execPath, [helper, "--root", root], {
+      stdio: ["ignore", 2, 2],
+      shell: false,
+      windowsHide: true,
+    });
+    if (result.error) {
+      fail(`could not run the dependency helper '${helper}' (${result.error.message}).`);
+    }
+    if (result.status !== 0) {
+      fail(
+        `the dependency helper '${helper}' failed with exit code ${result.status === null ? "none (killed)" : result.status}, ` +
+          "so the relay was not started.",
+      );
+    }
+  }
 }
 
 // stdio is inherited rather than piped: this process is a pass-through, and the MCP conversation on

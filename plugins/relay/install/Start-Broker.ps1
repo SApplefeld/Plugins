@@ -1,9 +1,11 @@
 # Runs the broker as source, with the runtime configuration Install-Host.ps1 wrote. This is the
 # script the scheduled task actually launches; Register-BrokerTask.ps1 points a task at it.
 #
-# There is no build step (see the plan's Standing Brief Amendments): the broker is invoked exactly
-# as `node broker/index.ts`, the same way a developer runs it by hand, so a scheduled run and a
-# manual one are the same command.
+# There is no build step (see the plan's Standing Brief Amendments): the broker is invoked as
+# `node --import <broker/startup-crash.mjs URL> broker/index.ts`, which is the command a developer
+# runs by hand plus a preload that records a loading failure in broker.log. Before each start,
+# install/ensure-dependencies.mjs reinstalls the dependencies when they no longer match the
+# lockfile.
 #
 # The broker can ask to be restarted, by exiting with $RestartExitCode, and this script then starts
 # it again onto whatever code and configuration are on disk now. Every other exit code ends the
@@ -71,6 +73,43 @@ while ($true) {
         throw "Start-Broker: broker entry point not found at '$brokerEntry'. Is `$RepoRoot correct?"
     }
 
+    # A plugin update re-clones this folder without node_modules, so before every pass the helper
+    # reinstalls the dependencies when they no longer match package-lock.json. It runs under the
+    # same pinned node, and a tree with no lockfile has nothing to install, matching the helper's own
+    # rule. The helper is this script's sibling and is pointed at $RepoRoot, so a -RepoRoot fixture
+    # is checked with the real helper. With a log file configured, the helper's outcome line lands
+    # in broker.log beside the broker's own.
+    if (Test-Path -LiteralPath (Join-Path $RepoRoot 'package-lock.json')) {
+        $helperArgs = @((Join-Path $PSScriptRoot 'ensure-dependencies.mjs'), '--root', $RepoRoot)
+        if (-not [string]::IsNullOrWhiteSpace($env:CHANNEL_BROKER_LOG_FILE)) {
+            $helperArgs += @('--log', $env:CHANNEL_BROKER_LOG_FILE)
+        }
+        # Cleared first for the same reason as the node launch below: a node that cannot be launched
+        # sets no exit code of its own.
+        $global:LASTEXITCODE = $null
+        & $nodePath @helperArgs
+        $helperExitCode = $LASTEXITCODE
+        if ($null -eq $helperExitCode) {
+            Write-Error "Start-Broker: could not launch node at '$nodePath' to check the dependencies."
+            exit 1
+        }
+        # A broker started over missing or stale dependencies dies loading them, so a failed heal
+        # ends the task with the helper's code, and its reason is already on stderr and in the log.
+        if ($helperExitCode -ne 0) {
+            exit $helperExitCode
+        }
+    }
+
+    # The preload records a failure to load the broker's modules in broker.log, which happens before
+    # the broker's own logger exists. Passed as a file URL, the form --import takes for an absolute
+    # Windows path. A tree without the file starts the broker without it.
+    $nodeArgs = @()
+    $preload = Join-Path $RepoRoot 'broker\startup-crash.mjs'
+    if (Test-Path -LiteralPath $preload) {
+        $nodeArgs += @('--import', ([System.Uri]$preload).AbsoluteUri)
+    }
+    $nodeArgs += $brokerEntry
+
     # Tells the broker a restart it accepts will be followed by a fresh start. A broker run any
     # other way refuses to restart, since nothing would start it again.
     $env:CHANNEL_BROKER_SUPERVISED = '1'
@@ -81,7 +120,7 @@ while ($true) {
     # script before it.
     $global:LASTEXITCODE = $null
     # $? is no test of the launch here, since a node that ran and exited non-zero clears it too.
-    & $nodePath $brokerEntry
+    & $nodePath @nodeArgs
     $exitCode = $LASTEXITCODE
     if ($null -eq $exitCode) {
         Write-Error "Start-Broker: could not launch node at '$nodePath'."

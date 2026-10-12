@@ -2568,6 +2568,14 @@ export async function startBroker(
 }
 
 if (runDirectly(import.meta.url)) {
+  // Every import has loaded, so broker/startup-crash.mjs, the preload Start-Broker.ps1 starts node
+  // with, has nothing left to record: from here the broker's own logging owns every failure. A
+  // broker started without the preload finds no disarm function and carries on.
+  const startupCrashLog = (globalThis as Record<symbol, { disarm?: () => void } | undefined>)[
+    Symbol.for("channels.startupCrashLog")
+  ];
+  startupCrashLog?.disarm?.();
+
   let config: BrokerConfig;
   try {
     config = loadConfig();

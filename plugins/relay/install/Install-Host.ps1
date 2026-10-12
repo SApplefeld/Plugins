@@ -82,8 +82,9 @@ than one it never touched. For a test run against a fixture tree with no token i
 hardening the fixture's own ACL is not the thing under test.
 
 .PARAMETER SkipNpmCi
-Skips `npm ci`. For a test run, where installing the real dependency tree is not the thing under
-test and is slow to repeat.
+Skips installing the dependencies, which install/ensure-dependencies.mjs does with `npm ci`. For a
+test run, where installing the real dependency tree is not the thing under test and is slow to
+repeat.
 
 .PARAMETER HookOwner
 Who posts this project's hook events on this host: 'settings' (the default) merges them into the
@@ -454,14 +455,17 @@ $fragment = Get-SubstitutedFragment -FragmentPath $fragmentPath -SessionStartScr
 Merge-ChannelSettingsFile -SettingsPath $SettingsPath -Fragment $fragment -HookOwner $HookOwner | Out-Null
 
 if (-not $SkipNpmCi) {
-    # Not `npm install`: an install host resolves exactly the reviewed lockfile rather than
-    # whatever a dependency's newer compatible version happens to be on install day.
-    Push-Location $RepoRoot
-    try {
-        & npm ci
-        if ($LASTEXITCODE -ne 0) { throw "Install-Host: 'npm ci' failed with exit code $LASTEXITCODE." }
-    } finally {
-        Pop-Location
+    # The dependency helper runs `npm ci`, not `npm install`, so an install host resolves exactly the
+    # reviewed lockfile rather than whatever a dependency's newer compatible version happens to be
+    # on install day. It runs under the node pinned above, takes npm from beside that node, and
+    # records which lockfile it installed from, so the broker's first start finds the dependencies
+    # current rather than installing them again. A tree already current is left as it is.
+    $global:LASTEXITCODE = $null
+    & $nodePath (Join-Path $PSScriptRoot 'ensure-dependencies.mjs') --root $RepoRoot
+    if ($LASTEXITCODE -ne 0) {
+        $code = if ($null -eq $LASTEXITCODE) { 'none, as node could not be launched' } else { $LASTEXITCODE }
+        throw "Install-Host: installing the dependencies with install\ensure-dependencies.mjs failed " +
+            "(exit code $code). Its reason is above."
     }
 }
 
