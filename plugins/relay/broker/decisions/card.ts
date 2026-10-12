@@ -1,5 +1,6 @@
-// The `Fleet: Decisions` card: one line per open ask across every roster persona's ledger, oldest
-// first, and the messages its thread carries for each ask.
+// The `Fleet: Decisions` card: one count line per persona that filed an ask in the last seven days,
+// then one line per open ask across every roster persona's ledger, oldest first, and the messages
+// its thread carries for each ask.
 //
 // Pure rendering: everything it draws arrives
 // as an argument, the clock included, so the same readings compose the same bytes and the thread
@@ -19,6 +20,7 @@ import {
   span,
 } from "../discord/render.ts";
 import { MAX_ROSTER_PERSONA_NAME_LENGTH } from "../board/roster.ts";
+import { ASK_COUNT_WINDOW_MS } from "./ledger.ts";
 import type { AskEntry, LedgerReading } from "./ledger.ts";
 
 /**
@@ -157,13 +159,24 @@ function heading(persona: string, entry: Readonly<AskEntry>): string {
   return `${glyphFor(entry)} **${named}**`;
 }
 
-/** What a card that ran out of room ends with, naming how many asks and how many personas without
- * a ledger it left out rather than cutting silently. */
-function overflowTail(asks: number, personas: number): string {
+/** What a card that ran out of room ends with, naming how many count lines, asks and personas
+ * without a ledger it left out rather than cutting silently. */
+function overflowTail(counts: number, asks: number, personas: number): string {
   const parts: string[] = [];
+  if (counts > 0) parts.push(`${String(counts)} count line${counts === 1 ? "" : "s"}`);
   if (asks > 0) parts.push(`${String(asks)} ask${asks === 1 ? "" : "s"}`);
   if (personas > 0) parts.push(`${String(personas)} persona${personas === 1 ? "" : "s"} without a ledger`);
   return `(+${parts.join(" and ").replace(" ", " more ")} not shown)`;
+}
+
+/** The window every count line is drawn over, named in the line. */
+const COUNT_WINDOW = `${String(ASK_COUNT_WINDOW_MS / 86_400_000)}d`;
+
+/** One persona's count line: how many asks it filed in the window and how many of them are open. */
+function countLine(ledger: LedgerReading): string {
+  const filed = `${String(ledger.filedInWindow)} ask${ledger.filedInWindow === 1 ? "" : "s"} in ${COUNT_WINDOW}`;
+  const open = ledger.openInWindow > 0 ? ` ${SEPARATOR} ${String(ledger.openInWindow)} open` : "";
+  return `${BULLET} ${field(ledger.name, MAX_ROSTER_PERSONA_NAME_LENGTH)} ${SEPARATOR} ${filed}${open}`;
 }
 
 /** What a run of lines costs the card: each line's own text and the newline that joins it on. */
@@ -220,8 +233,10 @@ function staleAge(ledger: LedgerReading): number | null {
  * a clock would rewrite even an empty card on every refresh. A card with an ask open is rewritten
  * as its line's age moves anyway. A card every ledger of which is fresh is as of
  * just now, and one drawing an ask off a ledger that has gone stale is as of that ledger, which is
- * what a reader cannot see from the lines. A stale ledger with no open ask draws no line, so it ages
- * nothing the reader is looking at.
+ * what a reader cannot see from the lines. A stale ledger with no open ask draws no ask line, so it
+ * ages nothing. Its count line, where it draws one, is left out of the footer too: that line changes
+ * only when the persona files, an ask closes or an entry leaves the window, and the reader counts
+ * the window against the clock on every pass, so a quiet ledger's counts are current.
  */
 function footerLine(ledgers: readonly LedgerReading[]): string {
   const oldest = ledgers.reduce((age, ledger) => {
@@ -232,14 +247,15 @@ function footerLine(ledgers: readonly LedgerReading[]): string {
 }
 
 /**
- * The whole card: a title heading, one bullet per open ask oldest first across every persona, or the
- * fixed empty line, then one line per persona with no ledger, then the footer, bounded to one
- * message the way every card here is. Composed ask by ask against a running budget rather than
- * assembled whole and cut, so a stop names how many asks it left out instead of dropping the last
- * one silently; the tail's room is reserved against every ask, the last included, on the board
+ * The whole card: a title heading, one count line per persona that filed an ask in the window, most
+ * filed first, then one bullet per open ask oldest first across every persona, or the fixed empty
+ * line, then one line per persona with no ledger, then the footer, bounded to one message the way
+ * every card here is. Composed line by line against a running budget rather than assembled whole
+ * and cut, so a stop names how many count lines and asks it left out instead of dropping the last
+ * one silently; the tail's room is reserved against every item, the last included, on the board
  * card's own reasoning: one rule with no branch to get wrong, at the price of at most one tail's
- * width of unused room on a full card. The no-ledger lines and the footer are reserved before the
- * first ask, so an ask never pushes either off the card.
+ * width of unused room on a full card. The fixed empty line and the footer are reserved before
+ * the first count line, so no item pushes either off the card.
  *
  * Nothing here reads a clock or anything else the arguments do not carry, so two renders of the
  * same readings compose the same bytes.
@@ -255,20 +271,43 @@ export function renderDecisionsCard(
     .filter((ledger) => !ledger.hasLedger)
     .map((ledger) => `${BULLET} ${field(ledger.name, MAX_ROSTER_PERSONA_NAME_LENGTH)} ${SEPARATOR} ${NO_LEDGER}`);
   const footer = footerLine(ledgers);
-  if (asks.length === 0) lines.push(EMPTY);
+  const empty = asks.length === 0 ? [EMPTY] : [];
+  const counts = ledgers
+    .filter((ledger) => ledger.filedInWindow > 0)
+    .sort((left, right) =>
+      left.filedInWindow !== right.filedInWindow
+        ? right.filedInWindow - left.filedInWindow
+        : left.name < right.name
+          ? -1
+          : left.name > right.name
+            ? 1
+            : 0,
+    )
+    .map(countLine);
 
-  // Every line under the heading is one item against one budget, the asks first and the no-ledger
-  // lines after them, each paid for together with the tail that would name it and everything
-  // after it. The footer is reserved before the first item, so no item pushes it off the card.
-  let used = spent(lines) + spent([footer]);
+  // Every line under the heading is one item against one budget, the count lines first, then the
+  // asks and the no-ledger lines after them, each paid for together with the tail that would name
+  // it and everything after it. The footer and the empty line are reserved before the first item,
+  // so no item pushes either off the card. The empty line is drawn after the count lines.
+  let used = spent(lines) + spent(empty) + spent([footer]);
+  let shownCounts = 0;
   let shownAsks = 0;
   let shownPersonas = 0;
-  const tail = (): string => overflowTail(asks.length - shownAsks, noLedger.length - shownPersonas);
+  const tail = (): string =>
+    overflowTail(counts.length - shownCounts, asks.length - shownAsks, noLedger.length - shownPersonas);
   const fits = (drawn: readonly string[]): boolean => used + spent(drawn) + spent([tail()]) <= MAX_CARD_LENGTH;
-  const stop = (): string => {
-    lines.push(tail(), footer);
+  const stop = (pending: readonly string[] = []): string => {
+    lines.push(...pending, tail(), footer);
     return lines.join("\n");
   };
+
+  for (const line of counts) {
+    if (!fits([line])) return stop(empty);
+    lines.push(line);
+    used += spent([line]);
+    shownCounts += 1;
+  }
+  lines.push(...empty);
 
   const marked = new Set<string>();
   for (const ask of asks) {

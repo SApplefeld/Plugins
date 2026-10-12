@@ -24,6 +24,10 @@ export const MAX_ASKS_PER_LIST = 64;
 /** An entry closed longer ago than this is not recently closed. */
 export const RECENTLY_CLOSED_MS = 24 * 60 * 60 * 1000;
 
+/** An entry counts as filed in the window when it was opened no longer ago than this, and not
+ * after the pass clock. */
+export const ASK_COUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 /**
  * One ask as the ledger writes it. `id` and `question` are the two a reading cannot do without, so
  * an entry lacking either is dropped. Every other field is null where the file carries none or
@@ -58,6 +62,11 @@ export type LedgerReading = {
   fileAge: number | null;
   /** False for a file with no `asks` array: a persona on a plugin that writes no ledger. */
   hasLedger: boolean;
+  /** Entries opened within `ASK_COUNT_WINDOW_MS` before the pass clock, open and closed alike, counted
+   * over the whole `asks` array and not over the bounded lists. Zero where there is no ledger. */
+  filedInWindow: number;
+  /** Those of `filedInWindow` whose status is `open`. */
+  openInWindow: number;
 };
 
 /** The seams the queue reader takes, narrowed to the three this reader uses, and its own stat. */
@@ -74,6 +83,9 @@ export type LedgerReader = {
 type Parsed = {
   /** Null when the persona's value carries no `asks` array. */
   asks: { open: readonly Readonly<AskEntry>[]; closed: readonly Readonly<AskEntry>[] } | null;
+  /** Every deduped entry with an `openedAt`, unbounded, so the window counts can be taken against
+   * each pass's clock without reading the file again. */
+  stamps: readonly { openedAt: number; open: boolean }[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -139,22 +151,25 @@ function newestFirst(
  * split. The split into open and closed is made before either list is bounded, so a run of closed
  * entries never pushes an open one out. An entry whose status is not `open`, an unknown word
  * included, is on the closed side. A closed-side entry with no `closedAt` is dropped here, since it
- * can never be recently closed. Only the 64 newest closed by `closedAt` are held, which is safe
+ * can never be recently closed. Every entry with an `openedAt` is also noted for the window counts
+ * before either list is bounded. Only the 64 newest closed by `closedAt` are held, which is safe
  * because the pass clock only moves forward: an entry outside the newest 64 now is outside them
  * on every later pass.
  */
 function parseStore(value: unknown, persona: string): Parsed | null {
   if (!isRecord(value)) return null;
   const own = value[persona];
-  if (!isRecord(own) || !Array.isArray(own.asks)) return { asks: null };
+  if (!isRecord(own) || !Array.isArray(own.asks)) return { asks: null, stamps: [] };
 
   const seen = new Set<string>();
   const open: Readonly<AskEntry>[] = [];
   const closed: Readonly<AskEntry>[] = [];
+  const stamps: { openedAt: number; open: boolean }[] = [];
   for (const raw of own.asks) {
     const entry = entryOf(raw);
     if (entry === null || seen.has(entry.id)) continue;
     seen.add(entry.id);
+    if (entry.openedAt !== null) stamps.push({ openedAt: entry.openedAt, open: entry.status === "open" });
     if (entry.status === "open") open.push(entry);
     else if (entry.closedAt !== null) closed.push(entry);
   }
@@ -163,6 +178,7 @@ function parseStore(value: unknown, persona: string): Parsed | null {
       open: newestFirst(open, (entry) => entry.openedAt).slice(0, MAX_ASKS_PER_LIST),
       closed: newestFirst(closed, (entry) => entry.closedAt).slice(0, MAX_ASKS_PER_LIST),
     },
+    stamps,
   };
 }
 
@@ -208,12 +224,18 @@ export function createLedgerReader(seams: LedgerSeams = {}): LedgerReader {
             : asks.closed
                 .filter((entry) => entry.closedAt !== null && at - entry.closedAt <= RECENTLY_CLOSED_MS)
                 .slice(0, MAX_ASKS_PER_LIST);
+        // A stamp ahead of the clock is left out rather than counted, since it would never age out.
+        const inWindow = (parsed?.stamps ?? []).filter(
+          (stamp) => at - stamp.openedAt >= 0 && at - stamp.openedAt <= ASK_COUNT_WINDOW_MS,
+        );
         readings.push({
           name: persona.name,
           open: asks === null ? [] : [...asks.open],
           recentlyClosed,
           fileAge: slot.held === null ? null : at - slot.held.stat.mtimeMs,
           hasLedger: asks !== null,
+          filedInWindow: inWindow.length,
+          openInWindow: inWindow.filter((stamp) => stamp.open).length,
         });
       }
 
