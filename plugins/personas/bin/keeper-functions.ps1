@@ -42,7 +42,9 @@ Decides what the keeper does after one supervisor exit, from the exit code and t
 .DESCRIPTION
 Implements the policy table: exit 0 holds; exit 6 parks; exit 1 relaunches after the base delay
 and holds once the consecutive short exit-1 count reaches the hold count; exit 2 relaunches after
-the base delay with the ladder untouched; 130 and 143 exit without relaunching; every other code
+the base delay with the ladder untouched; exit -1, the code Stop-Process and Process.Kill leave
+where taskkill /F leaves 1, is a termination from outside with no signal and relaunches after the
+base delay with the ladder untouched; 130 and 143 exit without relaunching; every other code
 relaunches after the current delay and doubles it up to the cap. A run that lasted the reset uptime
 or longer puts the ladder back at the base before the row is applied, so a persona that ran for an
 hour and then crashed waits the base delay, not whatever the ladder had climbed to.
@@ -96,6 +98,12 @@ function Get-KeeperDecision {
             return @{
                 Action = 'relaunch'; DelaySeconds = $script:KeeperBaseDelaySeconds; NextDelaySeconds = $delay; NextExit1Count = 0
                 Reason = 'supervisor exited 2: pre-launch gate failed or timed out'
+            }
+        }
+        -1 {
+            return @{
+                Action = 'relaunch'; DelaySeconds = $script:KeeperBaseDelaySeconds; NextDelaySeconds = $delay; NextExit1Count = 0
+                Reason = 'supervisor exited -1: ended from outside with no signal'
             }
         }
         { $_ -eq 130 -or $_ -eq 143 } {

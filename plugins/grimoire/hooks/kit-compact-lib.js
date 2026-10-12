@@ -1115,9 +1115,7 @@ function readRegistryEntryText(full, maxBytes) {
 // each is worthless alone: an unguessable temporary name, an exclusive create
 // that refuses a path already occupied, and a cleanup gated on that create
 // having returned, so a failure path can only remove the file this writer made.
-// The temporary's name is transient-shaped, so the store's sync allowlist
-// refuses it and a crash between the write and the rename leaves nothing that
-// replicates. Never throws.
+// Never throws.
 function writeRegistryEntryAtomic(full, text) {
     const tmp = atomicTmpPath(full);
     let created = false;

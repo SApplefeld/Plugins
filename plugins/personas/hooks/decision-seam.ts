@@ -47,7 +47,9 @@ export const JEV_MODEL = "jev-latest";
 // the engine meters a pending `$.clock` wait whether or not anything awaits
 // it. A live call is awaited on the hook that
 // asked it, so its one bound is that hook's hold through holdFor, and
-// LIVE_TIMEOUT_MS is the wait rule's Jev figure in HOLD_BUDGET_MS below.
+// LIVE_TIMEOUT_MS is the wait rule's Jev figure in HOLD_BUDGET_MS below. The
+// live step-effort call is awaited by nothing, so its hold takes
+// SHADOW_TIMEOUT_MS instead.
 export const SHADOW_TIMEOUT_MS = 10_000;
 export const LIVE_TIMEOUT_MS = 2_000;
 // The longest model name the result carries; the vendor's is under 16.
@@ -902,10 +904,15 @@ export function heldFailure(questionSetId: string, latencyMs: number, haikuValue
 // its handler awaits nothing but the next hook, and a call it fires is never
 // awaited, so its row is enforced as a refusal. Timer-side model calls, the
 // heartbeat's and the controller tick's, hold no hook and are not read here.
-// The one timer-side row is controller.tick, the controller timer's own
-// rather than a hook's: its live Jev call is awaited on the timer, where no
-// hook budget meters it, so the row allows Jev its figure and no model call,
-// the timer's Haiku classify being off the chain.
+// Two rows are no hook's own. controller.tick is the controller timer's: its
+// live Jev call is awaited on the timer, where no hook budget meters it, so
+// the row allows Jev its figure and no model call, the timer's Haiku
+// classify being off the chain. turn.step.effort is the live step-effort
+// call's: turn.step fires it and never awaits it, so it holds on a detached
+// chain under an unmetered budget. The hold is that call's only bound, since
+// the seam's live mode races no timer of its own, so the row allows Jev the
+// shadow figure, SHADOW_TIMEOUT_MS, rather than the figure a hook's path
+// pays, and no model call. The turn.step row itself still refuses both.
 //
 // The figures are caps on a clock race, and the race is only for a call that
 // cannot bound itself: a Jev request, and `$.model.classify`, which takes no
@@ -964,6 +971,12 @@ export const HOLD_BUDGET_MS: Readonly<Record<string, HoldBudget>> = Object.freez
   // The controller timer's row, not a hook's: the timer's live Jev call
   // holds here at the Jev figure, and the timer's model calls are not held.
   "controller.tick": Object.freeze({ jev: LIVE_TIMEOUT_MS, model: null }),
+  // The detached live step-effort call's row, not a hook's: fired from
+  // turn.step and never awaited, it holds here under an unmetered budget,
+  // and its answer is read by the next step. The hold is its only bound,
+  // since live mode races no timer of its own, so it takes the shadow
+  // figure rather than the hold figure a hook's path pays.
+  "turn.step.effort": Object.freeze({ jev: SHADOW_TIMEOUT_MS, model: null }),
 });
 
 // What holdFor resolves to where it did not wait for the call's answer: the

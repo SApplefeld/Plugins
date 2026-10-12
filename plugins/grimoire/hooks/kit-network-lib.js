@@ -16,7 +16,7 @@
 //
 // scripts/memq.js requires this module and re-exports the predicate under
 // its own name, so a caller that already holds memq for other reasons
-// (hooks/memory-session.js, hooks/memory-frontmatter-guard.js) keeps calling
+// (hooks/memory-session.js) keeps calling
 // memq.namesNetworkShare unchanged. A caller that does not otherwise need
 // memq (hooks/kit-compact-lib.js, hooks/capacity-read.js) requires this
 // module directly instead.

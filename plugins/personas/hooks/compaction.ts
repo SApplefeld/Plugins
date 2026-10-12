@@ -32,7 +32,7 @@
 
 import { bracketSafeText, oneLine } from "./agent-state";
 import { fnv1aHash } from "./cost-ledger";
-import { TOOL_RESULT_STALE_INPUT_MAX, TOOL_RESULT_STALE_RESULT_MAX } from "./question-catalog";
+import { jsonTextOf, TOOL_RESULT_STALE_INPUT_MAX, TOOL_RESULT_STALE_RESULT_MAX } from "./question-catalog";
 
 // --- Constants ---
 
@@ -605,13 +605,7 @@ export function keysPrefix(keys: readonly string[], messages: readonly PassMessa
 // A tool input's head: its JSON on one line, cut at the input bound, with its
 // brackets folded, since the head reaches a question's state and a cut line.
 export function inputHeadOf(input: unknown): string {
-  let text: string;
-  try {
-    text = input === undefined ? "" : JSON.stringify(input) ?? "";
-  } catch {
-    text = "";
-  }
-  return bracketSafeText(oneLine(text)).slice(0, COMPACT_INPUT_HEAD_MAX);
+  return bracketSafeText(oneLine(jsonTextOf(input))).slice(0, COMPACT_INPUT_HEAD_MAX);
 }
 
 // The characters a message costs in the context: its text, each tool call's

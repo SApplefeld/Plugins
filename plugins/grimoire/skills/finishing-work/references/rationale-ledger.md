@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the completion pass for a finished effort: it governs the ordered steps that take an effort from "the last section compiles" to verified behavior, the advisory reviews, an adversarial review, documentation that matches reality, and a closed plan doc. It owns the moments where finishing reviewers are dispatched and at what model and effort, where a gate that cannot run at its assigned tier is confirmed unavailable and what ladder of retry, compensation or fallback follows, where a dispatched agent is judged wedged, never-started, faulted or merely quiet and what liveness readings and windows decide that, where the tree-state bracket around the reviewing rounds is captured and compared, and where the finishing pass opens its compaction boundary. Its load class is `named-trigger`: the frontmatter says to use it when all sections of a plan in docs/plans/ are implemented, or when the operator says wrap up, finish, close out, or hand off.
 
-Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 (`skills.finishing-work.c2.md`); lines 66-110 (`skills.finishing-work.c3.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/archive/claude-kit_review-tier-decay_spec_v1.md` on 2026-09-10 (`U` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`V` entries below, their source lines read at that pass's fix rounds 1 to 3). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 2 on 2026-09-20 (W001 to W008 below, the entries amended in place carrying its provenance, and the retired entries naming it). Amended by `docs/archive/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md` on 2026-09-20 (W009 to W013 below, renumbered from that plan's own W001 to W005 where the two amendments opened the same series in parallel). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (P001 below, with S112 retired to it), and by that plan's section 4 on 2026-09-22 (P002 and P003 below). Amended by `docs/plans/claude-kit_capacity-gate_spec_v1.md` on 2026-09-24, section 2's rule written up by section 4 (Z001 below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (W012 below, amended in place). Redrafted on 2026-09-26 by section 4 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `9b437a2e` with its fix round at `a7ae70e2`, so every live entry's `passage:` line quotes the text at `a7ae70e2`, the `flag:` lines record that pass's flags, and A002 below is the body-header rule that fix round restated. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which placed the Jev promise check over the Goal before the final adversarial review (`B` entries below). Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below, with S221 retired to it, S222's passage re-pointed, A002's key reworded and P003's reason retensed). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: S025 deleted with its passage, c3.C158 and W012 rewritten to their passages as they now read, and c1.C036's and c3.C038's reasons reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the finishing pass's boundary declaration, which replaced S025's `open` call). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2 on 2026-10-06 (`F` entries below: F001, the integration-branch merge before step 1, and F002, the Commit-and-Push push on the targeted lane, with S233, S234 and S235 retired to F002), which made step 1's full-suite run the plan's one whole gate and sent step 6, step 7's merges and every push to the lanes the doctrine names. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 2 on 2026-10-06 (`G` entries below: G001, the integration branch's owner at the base ref, G002, the base named on the pull request open, and G003, a stacked pull request retargeted when its parent merges, with S033, S219 and S229 amended in place). Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 5 on 2026-10-06 (G003 amended in place, its arm again waiting on a pull request that is not a draft). Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 3 on 2026-10-06 (`H` entry below: H001, step 1's red file re-run at the integration branch's head).
+Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 (`skills.finishing-work.c2.md`); lines 66-110 (`skills.finishing-work.c3.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/archive/claude-kit_review-tier-decay_spec_v1.md` on 2026-09-10 (`U` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`V` entries below, their source lines read at that pass's fix rounds 1 to 3). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 2 on 2026-09-20 (W001 to W008 below, the entries amended in place carrying its provenance, and the retired entries naming it). Amended by `docs/archive/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md` on 2026-09-20 (W009 to W013 below, renumbered from that plan's own W001 to W005 where the two amendments opened the same series in parallel). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (P001 below, with S112 retired to it), and by that plan's section 4 on 2026-09-22 (P002 and P003 below). Amended by `docs/plans/claude-kit_capacity-gate_spec_v1.md` on 2026-09-24, section 2's rule written up by section 4 (Z001 below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (W012 below, amended in place). Redrafted on 2026-09-26 by section 4 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `9b437a2e` with its fix round at `a7ae70e2`, so every live entry's `passage:` line quotes the text at `a7ae70e2`, the `flag:` lines record that pass's flags, and A002 below is the body-header rule that fix round restated. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which placed the Jev promise check over the Goal before the final adversarial review (`B` entries below). Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below, with S221 retired to it, S222's passage re-pointed, A002's key reworded and P003's reason retensed). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: S025 deleted with its passage, c3.C158 and W012 rewritten to their passages as they now read, and c1.C036's and c3.C038's reasons reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the finishing pass's boundary declaration, which replaced S025's `open` call). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2 on 2026-10-06 (`F` entries below: F001, the integration-branch merge before step 1, and F002, the Commit-and-Push push on the targeted lane, with S233, S234 and S235 retired to F002), which made step 1's full-suite run the plan's one whole gate and sent step 6, step 7's merges and every push to the lanes the doctrine names. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 2 on 2026-10-06 (`G` entries below: G001, the integration branch's owner at the base ref, G002, the base named on the pull request open, and G003, a stacked pull request retargeted when its parent merges, with S033, S219 and S229 amended in place). Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 5 on 2026-10-06 (G003 amended in place, its arm again waiting on a pull request that is not a draft). Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 3 on 2026-10-06 (`H` entry below: H001, step 1's red file re-run at the integration branch's head). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and left `memq` reading no outcome journal: step 8's closing paragraph left the file, so c3.C142 to c3.C150 are deleted with it, and c3.C118 with its passage; c3.C121 rewritten to its passage as it now reads.
 
 ### c1.C001
 - key: Run the finishing steps in order.
@@ -3515,15 +3515,6 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - reason: The semantic channel reaches every store on the machine and memq writes only this project's; the record in the close-out is the only act available.
 - passage: A hit in another project's store is recorded and left.
 
-### c3.C118
-- key: For a journal key whose latest summary this effort's outcome overtakes, run `memq log <key> pass|fail` rather than either memory remedy.
-- class: mechanic
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:98
-- provenance: 6f26849 2026-08-26, which named `memq log` for a journal key whose belief the effort overtook.
-- verdict: keep
-- reason: No finding. A journal key is neither a record to supersede nor one to repair; the outcome is what flips what the store believes.
-- passage: A journal key whose latest summary this effort's outcome overtakes takes `memq log <key> pass|fail` instead.
-
 ### c3.C119
 - key: Run the after-query before the decay pass because `decay-scan` cannot see a pointer written after it for at least another fourteen days, `find` withholds archived records and would hand a clean zero for the wrong reason, and `add-type` and `add-operator` refuse a `--supersedes` target only the archive holds.
 - class: rationale-example
@@ -3545,13 +3536,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Name the terms queried, the outcome and the reading's strength in the close-out status, since a skipped after-query and a clean one otherwise read alike.
 
 ### c3.C121
-- key: Name the reading's strength, and record a zero read without the embedder as a partial after-query naming the absent embedder rather than as a clean one.
+- key: Name the reading's strength, and record a zero read taken while the host or its search by meaning was down as a partial after-query naming that channel rather than as a clean one.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:102
 - provenance: 6f26849 2026-08-26.
 - verdict: keep
-- reason: Without the embedder `find` serves substring matches over this project's tiers alone, reaching neither a paraphrase nor another store, so the zero is partial by construction.
-- passage: Without the embedder, `find` serves substring matches over this project's tiers alone, so a zero read that way is a partial after-query naming the absent embedder, never a clean one.
+- reason: With either channel down `find` serves substring matches alone, reaching no paraphrase, so the zero is partial by construction.
+- passage: Where the host does not answer, `find` serves substring matches from this machine's snapshot alone, and where its search by meaning does not, from the host index's substring matches alone.
+- passage: A zero read either way is a partial after-query naming the channel that was down, never a clean one.
 
 ### c3.C122
 - key: Run the decay pass when `memory/decay-stamp` in the project's memory directory is older than 14 days or does not exist; skip it and say nothing when it is fresher.
@@ -3750,100 +3742,6 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - verdict: keep
 - reason: The digest is the evidence; a paraphrase is the asserted claim the run exists to replace.
 - passage: Report the digest, and never paraphrase it into a claim it does not make.
-
-### c3.C142
-- key: Report this session's memories in the close-out as PENDING rather than synced, unless you take the immediate path.
-- class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: 945a75c 2026-08-19, the self-syncing store: the runner commits and pushes at the next session start, so "synced to remote" at close-out was false.
-- verdict: rewrite
-- landed: d549e65 section 5
-- reason: The reporting rule stays; the sync architecture around it is memory-system SKILL.md:64-66's text verbatim, and 4c6787c recorded the two unpinned copies as having drifted once already, so this paragraph keeps its reporting rules and points for the mechanics. The landed pointer names the SessionStart background runner, since c3.C145's kept sentence ("Off Windows there is no runner to spawn") refers to it and would otherwise meet the reader cold.
-- proposed: Reduce the paragraph to PENDING-not-synced, carry-not-drive, the `-Yes` go-ahead gate and the WARN/FAIL disposition, with one pointer at memory-system for the sync mechanics.
-- baseline-test: yes
-- passage: so the close-out reports them as PENDING, not synced, unless you take the immediate path.
-
-### c3.C143
-- key: Carry the sync state into the status rather than driving it, and use the kit doctor's `-Fix` as the repair where the hook nags that the sync stood down.
-- class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: 945a75c 2026-08-19; the nudge is 16c65f7 2026-08-03's.
-- verdict: keep
-- reason: This is the close-out's own act, carry not drive; the sentence survives the paragraph's reduction as one of its four reporting rules.
-- passage: Carry that state into the status rather than driving it.
-- passage: It is also the repair where the hook nags that the sync stood down.
-
-### c3.C144
-- key: Use `-Fix` as the initialization path on a fresh machine and as the way to commit this session's writes immediately; it commits and never pushes, the background sync runner at next session start or a hand path carrying the commit to the remote.
-- class: mechanic
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: 945a75c 2026-08-19; the commit-never-push split was stated at ddcb28e 2026-09-07.
-- verdict: rewrite
-- landed: d549e65 section 5
-- reason: A whole copy of memory-system SKILL.md:66, the owner of the store's sync path; finishing-work points there.
-- proposed: (via A091) Reduce the paragraph to PENDING-not-synced, carry-not-drive, the `-Yes` go-ahead gate and the WARN/FAIL disposition, with one pointer at memory-system for the sync mechanics.
-- baseline-test: yes
-- passage: The kit doctor's `-Fix` is the immediate path, and it commits and never pushes.
-
-### c3.C145
-- key: Off Windows there is no runner to spawn, so the sync is the `-Fix` commit plus the manual push, both hand-run.
-- class: mechanic
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: 945a75c 2026-08-19.
-- verdict: retire
-- reason: mechanism cut, section 4 (finishing-work shrink and merge rows): row 796 shrink. Memory-system `## Session Recap` carries it: "off Windows, with no runner, the commit and the push are both hand-run".
-
-### c3.C146
-- key: Running `-Fix` from a tool shell, tell the operator what it would do, a plain commit or also an embedder install, get their go-ahead, then pass `-Yes`.
-- class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: e23b88a 2026-08-03, the memory sync's whole-changeset reviews: the doctor declines every prompt on a redirected stdin, and a session following the old wording committed nothing.
-- verdict: keep
-- reason: Blast-radius gate: `-Yes` consents to a commit to a store that syncs off-machine and possibly a native embedder install, standing in for a prompt the tool cannot show. The redirected-stdin reason stays in the document because a session without it runs a bare `-Fix` and reads its silent decline as success.
-- passage: The memory-system skill owns the hand paths and their gates.
-- flag: stale
-
-### c3.C147
-- key: Run the manual push as `git -C ~/.claude pull --rebase`, a plain `pull` refusing on a diverged branch, then `git -C ~/.claude push`, and only once the memory-sync line reads PASS or FIXED; a FAIL there is a stop.
-- class: mechanic
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: 16c65f7 2026-08-03 (the sequence) and e23b88a 2026-08-03 (push only once the sync check reports clean, after a leaked blob's check ran and was ignored).
-- verdict: rewrite
-- landed: d549e65 section 5
-- reason: The hand path is memory-system SKILL.md:66's verbatim; finishing-work points, and c3.C150 keeps the FAIL-is-a-stop disposition at the close-out.
-- proposed: (via A091) Reduce the paragraph to PENDING-not-synced, carry-not-drive, the `-Yes` go-ahead gate and the WARN/FAIL disposition, with one pointer at memory-system for the sync mechanics.
-- baseline-test: yes
-- passage: The memory-system skill owns the hand paths and their gates.
-- passage: A WARN is carried into the close-out rather than treated as a gate, and a FAIL is a stop.
-
-### c3.C148
-- key: Prefer `doctor/sync-store.ps1` under the kit plugin root, hand-run with an explicit `-StoreRoot`, where PowerShell is available, since it takes the lock and screens the incoming tree that the other hand path does not.
-- class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: ebd12d2 2026-09-02 named the script as the better hand path; ddcb28e 2026-09-07 stated its dropped credential variables.
-- verdict: rewrite
-- landed: d549e65 section 5
-- reason: Verbatim in memory-system SKILL.md:66, the owner; the standing-grants close-out already called the two copies a liability. Finishing-work points.
-- proposed: (via A091) Reduce the paragraph to PENDING-not-synced, carry-not-drive, the `-Yes` go-ahead gate and the WARN/FAIL disposition, with one pointer at memory-system for the sync mechanics.
-- baseline-test: yes
-- passage: The memory-system skill owns the hand paths and their gates.
-
-### c3.C149
-- key: Read `docs/security-model.md` for what each hand sync path leaves exposed.
-- class: pointer
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: 4c6787c 2026-09-02.
-- verdict: retire
-- reason: mechanism cut, section 4 (finishing-work shrink and merge rows): row 796 shrink. Memory-system `## Session Recap` carries it: "`docs/security-model.md` states what each hand path leaves exposed".
-
-### c3.C150
-- key: Carry a WARN into the close-out rather than treating it as a gate, and treat a FAIL as a stop.
-- class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:108
-- provenance: e23b88a 2026-08-03 (FAIL is a stop); the WARN disposition arrived with the self-syncing store at 945a75c 2026-08-19.
-- verdict: keep
-- reason: The close-out disposition is this document's moment, and the sentence already defers to memory-system for the full rule.
-- passage: A WARN is carried into the close-out rather than treated as a gate, and a FAIL is a stop.
 
 ### c3.C151
 - key: Make sure any kit friction from this effort, captured along the way or a Chapter Surprise that traced to the kit, is in the kaizen inbox.

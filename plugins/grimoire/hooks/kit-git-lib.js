@@ -95,11 +95,6 @@ const MAX_OUTPUT_BYTES = 1024 * 1024;
 // XDG_CONFIG_HOME are not stripped, since git needs HOME for its legitimate
 // config, so they still select the global config every guarded call reads;
 // docs/security-model.md carries that residual.
-//
-// The same two pins are spelled again in Invoke-MemorySyncGit
-// (doctor/install-memory-sync.ps1), which guards the sync script's own git
-// calls. Neither language can call the other's, so the protections are
-// restated there rather than shared.
 function gitChildEnv() {
     const env = { ...process.env };
     for (const k of Object.keys(env)) {

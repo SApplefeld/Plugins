@@ -252,32 +252,23 @@ function loadCheck(root, name, failures) {
 // PR guards carry a benign command only: that probe pins their plumbing (they
 // run, parse a payload, and allow), not their deny logic.
 // The throwaway store root the probes that reach memq point at. Nothing
-// creates it: both of them are questions about a hook's screens rather than
-// about a store, and a root that is not there is an answer the store's own
-// rules give (no project holds a record), which is what keeps those probes
-// deterministic on any machine.
+// creates it: they are questions about a hook's screens rather than about a
+// store, and a root that is not there is an answer the store's own rules give
+// (no project holds a record), which is what keeps those probes deterministic
+// on any machine.
 //
 // The name is fresh per run rather than fixed. A fixed one under a shared
 // temp directory is state anybody on the machine can arrange in advance, and
-// the frontmatter guard resolves its targets against it, the real path of the
-// directory chain included: a directory planted there, a link or an unreadable
-// one, could move a probe's answer and warn at every session start that the
-// kit's guards are broken when they are not.
+// the probes that reach memq resolve the store under it: a directory planted
+// there, a link or an unreadable one, could move a probe's answer and warn at
+// every session start that the kit's guards are broken when they are not.
 const PROBE_STORE_ROOT = path.join(os.tmpdir(),
     'kit-hook-canary-store-' + crypto.randomBytes(9).toString('hex'));
 
-// The two paths the frontmatter-guard probes write to, and the variables a
-// child needs to resolve the store they sit in. The first is a record in the
-// project tier's own directory, which the guard refuses; the second is the
-// same record under a run's pending directory, the one write into a project's
-// memory directory the guard leaves alone, since memq places no tier there.
-// memq honors the root override only alongside the data signal, so the pair
+// The variables a child needs to resolve the store the probes point at. memq
+// honors the root override only alongside the data signal, so the pair
 // travels together; the empty pin is there because a pin inherited from the
-// ambient environment would take the project root away from the guard.
-const PROBE_RECORD_PATH = path.join(PROBE_STORE_ROOT, 'projects', 'hook-canary-probe',
-    'memory', 'hook-canary-probe.md');
-const PROBE_PENDING_PATH = path.join(PROBE_STORE_ROOT, 'projects', 'hook-canary-probe',
-    'memory', 'pending', 'hook-canary-run', 'hook-canary-probe.md');
+// ambient environment would take the project root away from the hook.
 const PROBE_STORE_ENV = {
     KIT_MEMORY_ROOT: PROBE_STORE_ROOT,
     KIT_MEMORY_ROOT_ALLOW_DATA: '1',
@@ -296,7 +287,7 @@ const PROBE_STORE_ENV = {
 // warning line.
 //
 // The dispatcher is handed the built probe environment with the throwaway
-// store signals, exactly as the frontmatter guard's probes are, because every
+// store signals, because every
 // Bash-routed PreToolUse hook runs inside it: the grant hook resolves the
 // store, and nothing a session-start probe sends may reach the operator's real
 // one. The payload carries no session_id, since no routed hook reads one.
@@ -363,49 +354,6 @@ const EXIT_PROBES = [
             tool_name: 'Bash',
             agent_type: 'grimoire:adversarial-reviewer',
             tool_input: { command: 'git diff' }
-        }
-    },
-    {
-        hook: 'memory-frontmatter-guard.js',
-        label: 'deny probe (a Write into the project tier\'s memory directory)',
-        expect: 2,
-        // This guard resolves the store through memq, so the payload names a
-        // project-tier path under the throwaway root above and the child is
-        // given both signals memq honors that root with. The guard refuses
-        // every file-tool write into a tier directory whatever it holds, so
-        // the content decides nothing.
-        // verdictNeedsMemq: on a cache without scripts/memq.js the guard
-        // fails open and this probe fails whatever the hook's own bytes say,
-        // so that failure is filed as being about the payload file rather
-        // than the hook, and the integrity check still hashes the hook.
-        envExtra: PROBE_STORE_ENV,
-        verdictNeedsMemq: true,
-        payload: {
-            tool_name: 'Write',
-            tool_input: {
-                file_path: PROBE_RECORD_PATH,
-                content: '# probe\n'
-            }
-        }
-    },
-    {
-        hook: 'memory-frontmatter-guard.js',
-        label: 'allow probe (the same record written under a run\'s pending directory)',
-        expect: 0,
-        // The other direction, and it is not optional here: this guard matches
-        // Write, Edit and MultiEdit, so one stuck at deny would block every file
-        // write in every session. The target has a memory filename and sits
-        // under the store root, so the guard reaches its placement, and memq
-        // places no tier at pending/<run id>/, so the answer is the allow
-        // after placement rather than an early return on the filename.
-        envExtra: PROBE_STORE_ENV,
-        verdictNeedsMemq: true,
-        payload: {
-            tool_name: 'Write',
-            tool_input: {
-                file_path: PROBE_PENDING_PATH,
-                content: '# probe\n'
-            }
         }
     },
     {
@@ -590,15 +538,15 @@ function memqGrantProbes(root, failures) {
     // two directions are probed because they fail differently. --body-file
     // reads a caller-named path into the store and memq refuses it under the
     // store signals as well, so a hook that lost that screen is one lock
-    // short. --rollup discards the prose of every journal entry it folds and
-    // no other layer refuses it, so a hook that lost that one is wide open,
-    // and nothing else here would say so. The remaining five each have a
+    // short. --rollup is a flag memq takes on no verb, screened on the
+    // hook's own account because its flag layer is a denylist, so this probe
+    // is what says that screen still holds. The remaining five each have a
     // second lock behind them: a body-carrying --update, --supersedes,
     // --trigger and --type=<type> all carry the same store-signals refusal in
     // the CLI that --body-file carries, both add verbs refusing --trigger
     // under those signals and cmdGet and cmdTouch refusing the attached type
-    // spelling, while --drop-malformed degrades to the CLI's requirement that
-    // it ride the --rollup this same hook screens. That is why none of the
+    // spelling, while --drop-malformed is, like --rollup, an option memq
+    // refuses on every verb. That is why none of the
     // five is probed here: a hook regression on any of them degrades to
     // another lock rather than to nothing, which is the property the two
     // probed shapes divide on.
@@ -654,8 +602,8 @@ function memqGrantProbes(root, failures) {
     // A verb the grant withholds, in a command that is otherwise the one
     // allowed shape. find is probed because the allowlist is the whole of what
     // withholds it: nothing in memq refuses it a second time, so this screen is
-    // all that keeps an in-process embedder load out of a prompt-free allow.
-    // Without this direction a hook that lost its argument screen entirely
+    // all that keeps find, withheld pending a decision on granting it, out of a
+    // prompt-free allow. Without this direction a hook that lost its argument screen entirely
     // still passes both probes above. The deletes are the contrast, each
     // refused a second time by deleteRefusedByStoreSignals, which is the stated
     // ground for leaving a withheld shape unprobed. That ground reaches only the
@@ -668,8 +616,8 @@ function memqGrantProbes(root, failures) {
     // costlier of the two to leave unprobed even so, because what its CLI
     // refusal covers is the erasure rather than the aiming: a merge on a
     // shared tier still points a record's recognition wherever the run says,
-    // on a tier every project on the box and every machine the store syncs to
-    // reads. docs/security-model.md tabulates all twelve withheld shapes
+    // on a tier every project on the box and every machine sharing the memory
+    // database reads. docs/security-model.md tabulates all twelve withheld shapes
     // against it, and docs/backlog.md carries the missing anchor probe as an
     // item.
     const withheld = runHook(file, {
@@ -684,43 +632,6 @@ function memqGrantProbes(root, failures) {
             got: withheld.stdout ? 'stdout ' + p(withheld.stdout) : outcome(withheld)
         });
     }
-}
-
-// Whether the cache holds a scripts/memq.js the guards can load. The probes
-// marked verdictNeedsMemq are decided through that file (the guard under probe
-// requires it for the store's rules and fails open when that require throws),
-// so their failures on a cache that cannot supply it are about the payload
-// file and not the hook, exactly as memqGrantProbes files its own
-// missing-payload line.
-//
-// The question is asked the way the guard asks it, by requiring the file in a
-// child, because a payload that is present and broken disarms the guard as
-// completely as an absent one: a partial install can leave a truncated or
-// half-written memq.js there, and a stat alone would call that cache supplied
-// and file the guard's own bytes for its dependency's failure. A syntax error
-// and a throw as the module initializes both fail one require and neither
-// fails a stat.
-//
-// The answer is computed at most once per run and only off the failure path:
-// two probes carry the flag, the call costs a child process, and it is reached
-// only after one of those probes has already answered wrong, so a healthy
-// cache pays nothing for it.
-let memqLoads = null;
-function cacheSuppliesMemq(root) {
-    if (memqLoads !== null) return memqLoads;
-    const file = path.join(root, 'scripts', 'memq.js');
-    let isFile = false;
-    try { isFile = fs.statSync(file).isFile(); } catch { /* absent or unreadable */ }
-    if (!isFile) {
-        memqLoads = false;
-        return memqLoads;
-    }
-    const res = spawnSync(process.execPath, ['-e', 'require(process.argv[1])', file], {
-        encoding: 'utf8',
-        timeout: PROBE_TIMEOUT_MS
-    });
-    memqLoads = res.status === 0;
-    return memqLoads;
 }
 
 // A shared library several hooks require, and the exports they call, with the
@@ -1115,43 +1026,16 @@ function main() {
 
     for (const probe of EXIT_PROBES) {
         if (!loadable.has(probe.hook)) continue;      // unwired or unloadable, and already reported above
-        // A probe that names extra variables gets a built environment, the
-        // allowlist plus those; a payload-only probe is answered under this
-        // process's own, which is what every one of them has always used.
-        const env = probe.envExtra ? probeEnv(probe.envExtra) : undefined;
-        const res = runHook(path.join(root, 'hooks', probe.hook), probe.payload, env, probe.args);
+        // Every payload-only probe is answered under this process's own
+        // environment.
+        const res = runHook(path.join(root, 'hooks', probe.hook), probe.payload, undefined, probe.args);
         if (res.status !== probe.expect) {
-            const failure = {
+            failures.push({
                 hook: probe.hook,
                 label: probe.label,
                 expected: 'exit ' + probe.expect,
                 got: outcome(res)
-            };
-            // A verdict decided through a scripts/memq.js the guard cannot
-            // load says the payload file is gone or broken, not that the
-            // hook's bytes are wrong, so it must not stand in for having
-            // examined the hook: the integrity check dedups on hook name and
-            // would otherwise skip a tampered guard because its dependency's
-            // failure spoke first. The line also names that file itself, the
-            // way memqGrantProbes names it on its own line, because on a
-            // cache where memq-grant.js fails its load check that line never
-            // fires and this one is the only place the real cause can be
-            // named.
-            //
-            // Only a failure observed at exit 0 is that failure. A guard whose
-            // require of that file throws answers through its own fail-open
-            // catch, so exit 0 is the only status a payload the cache cannot
-            // supply can produce; a probe that saw anything else saw the
-            // hook's own bytes decide, which is a real finding about this hook
-            // and is neither annotated as fail-open nor exempted from the
-            // dedup.
-            if (probe.verdictNeedsMemq && res.status === 0 && !cacheSuppliesMemq(root)) {
-                failure.aboutAnotherFile = true;
-                failure.got += ', with nothing this cache can load at '
-                    + p(path.join(root, 'scripts', 'memq.js'))
-                    + ', so the guard under probe fails open whatever its own bytes say';
-            }
-            failures.push(failure);
+            });
         }
     }
 

@@ -70,7 +70,6 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Where the commit and the push land in the section loop | `executing-work` |
 | Staging on a shared checkout | doctrine (Stay in scope; On a checkout another session may commit to) |
 | The commit message's three layers | doctrine (A commit title is the index line) |
-| The memory store's own commits and pushes: sync path, allowlist, lock | `memory-system` |
 | Deleting a stranded branch after its commits are recovered | `branch-hygiene` (Hard Rules) |
 
 ## Coordination and Seats
@@ -98,7 +97,6 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Moment | Owner |
 |---|---|
 | Recall, outcome journal, applied stamps, tags, decay, shared tiers, `memq`, and the four remedies for a bad record | `memory-system` |
-| Project-tier memory frontmatter | `memory-system`, enforced by `hooks/memory-frontmatter-guard.js` |
 | Capturing kit friction: the bar, the adjudication pass, how an accepted lesson lands, briefs | `kaizen` |
 | Validating and repairing the kit install | `kit-doctor` |
 | Writing or amending curated prose the kit ships, and proving a wording change moves behavior, except landing an accepted lesson | `writing-skills` |

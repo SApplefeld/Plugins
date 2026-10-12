@@ -10,9 +10,9 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 ## plugins/grimoire/skills/kit-doctor/SKILL.md
 
-This document is the kit-doctor skill: it tells a session how to validate and repair a machine's grimoire installation using the doctor command that ships inside the plugin payload. It owns the moments of locating the correct `doctor.cmd` among competing copies and verifying it is genuine, choosing between check mode, `-Fix`, and `-Fix -Yes` and the consent each requires, reading the doctor's exit codes and its per-line verdicts (doctrine freshness, memory sync and credential exposure, the semantic-search embedder), and the post-fix re-check and reporting. A session loads it on a named trigger: when the kit was just installed or updated on a machine, when a kit capability such as hooks, memory tooling, or doctrine loading misbehaves, or when the operator asks to run the doctor, check the install, or verify kit setup. Load class: `named-trigger`.
+This document is the kit-doctor skill: it tells a session how to validate and repair a machine's grimoire installation using the doctor command that ships inside the plugin payload. It owns the moments of locating the correct `doctor.cmd` among competing copies and verifying it is genuine, choosing between check mode, `-Fix`, and `-Fix -Yes` and the consent each requires, reading the doctor's exit codes and its per-line verdicts (doctrine freshness, the memq shim, the memory database and its old files), and the post-fix re-check and reporting. A session loads it on a named trigger: when the kit was just installed or updated on a machine, when a kit capability such as hooks, memory tooling, or doctrine loading misbehaves, or when the operator asks to run the doctor, check the install, or verify kit setup. Load class: `named-trigger`.
 
-Extracted at `6bc07fb`: whole document (`skills.kit-doctor.SKILL.md`). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `19c75af0` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C008's reason no longer cites the deleted kit-goal skill.
+Extracted at `6bc07fb`: whole document (`skills.kit-doctor.SKILL.md`). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `19c75af0` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C008's reason no longer cites the deleted kit-goal skill. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store, its git channel and the local search index with the doctor steps that checked them: C028 to C041, C045 and C047 deleted with their subjects; C018 rewritten to its passage as it now reads, with its key reworded; and C017's provenance and reason and C044's key and reason reworded.
 
 ### C001
 - key: Do not fetch anything before running the doctor; it ships inside the plugin payload on every machine that has the plugin.
@@ -174,20 +174,20 @@ Extracted at `6bc07fb`: whole document (`skills.kit-doctor.SKILL.md`). Redrafted
 - key: Never run `-Fix` unprompted; run it only on the operator's word.
 - class: rule
 - source: plugins/grimoire/skills/kit-doctor/SKILL.md:27
-- provenance: 318d6bf 2026-07-10, the kit-doctor plan's Chapter 2 ("`-Fix` on my word"); the repair inventory grew at ec46854 (embedder) and eac64fa (store sync).
+- provenance: 318d6bf 2026-07-10, the kit-doctor plan's Chapter 2 ("`-Fix` on my word"); the repair inventory grew at ec46854 and eac64fa, and shrank again when `docs/archive/claude-kit_retire-file-store_spec_v1.md` retired those repairs.
 - verdict: keep
-- reason: A blast-radius gate: `-Fix` writes execution policy, the shim, the store repository and its managed files, installs software and wires hooks, and the operator-tier gotcha records show a fix pass rewrites drifted managed files and spends a pending operator decision as a side effect. The coordinator's off-Windows "hand run of the fix pass" and the operator's store-sync grant do not widen it: the moment's owner, memory-system:66, requires the go-ahead before `-Yes`, and the standing-grants plan ruled the sanctioned hand path is `sync-store.ps1`, not the fix pass.
+- reason: A blast-radius gate: `-Fix` writes execution policy and the shim, installs software and wires hooks, and the operator-tier gotcha records show a fix pass rewrites drifted managed files and spends a pending operator decision as a side effect.
 - passage: **`-Fix` only on my word:**
 - flag: stale
 
 ### C018
-- key: Expect `-Fix` to apply durable repairs (execution policy, memq shim wiring, the memory store's sync repo and allowlist, the local embedding stack, kaizen signpost and clone git hooks), prompt before installing anything, and delete only the temp file its own failed signpost write left behind.
+- key: Expect `-Fix` to apply durable repairs (execution policy, memq shim wiring, kaizen signpost and clone git hooks), prompt before installing anything, run `memq db-refresh` where the memory database step warns, and delete only the temp files and backups its own run wrote.
 - class: mechanic
 - source: plugins/grimoire/skills/kit-doctor/SKILL.md:27
 - provenance: 318d6bf 2026-07-10 installed the description; "It deletes nothing" came at 8edc578 2026-07-24 to keep the destructive `-RemoveLegacyRelay` switch off the `-Fix -Yes` path, and the inventory grew at ec46854 and eac64fa; the doctor honesty plan (2026-09-23) narrowed it to the one temp file a failed signpost write leaves; section 2 of `docs/archive/claude-kit_sidecar-retirement_spec_v1.md` (2026-10-05) added the retired sidecar's task, daemon and state folder, which the doctor's "Retired sidecar" check removes behind its consent prompt.
 - verdict: keep
 - reason: The doctor does all of this itself, but the sentence is the content of the ask C017 requires: nothing shows the operator what `-Fix` will write before the word is asked, so the prose is the informed consent. Keep the inventory in step with the doctor's section headers when a repair is added or removed. Finishing fix: the inventory gained the `autoCompactWindow` write into user `settings.json`, behind its own consent prompt, which the doctor's own header lists and the sentence had omitted. The deletion bound names the sidecar removal because that check deletes a folder and a scheduled task the run did not write, so "only temp files and backups its own run wrote" would be false without it; the bound now reads "Beyond those", so it still holds for every other repair.
-- passage: it prompts before installing anything. Its repairs include installing the local embedding stack and committing the store's sync through its gated allowlist. It runs `memq db-sync` unprompted where the memory database step warns. On consent, it also removes the retired sidecar's scheduled task and state folder and stops its daemon. Beyond those, it deletes only temp files and backups its own run wrote.
+- passage: it prompts before installing anything. It runs `memq db-refresh` unprompted where the memory database step warns. On consent, it also removes the retired sidecar's scheduled task and state folder and stops its daemon. Beyond those, it deletes only temp files and backups its own run wrote.
 
 ### C019
 - key: Use `-Fix -Yes` only when the operator says the run is unattended.
@@ -283,137 +283,6 @@ Extracted at `6bc07fb`: whole document (`skills.kit-doctor.SKILL.md`). Redrafted
 - reason: No finding. A hand copy fixes one machine once and drifts at the next update; the refresh hook is the mechanism and the rule keeps sessions off the manual path.
 - passage: Never copy doctrine files by hand.
 
-### C028
-- key: Read the `Memory sync` line before any push, because its FAIL means credentials are in reach.
-- class: rule
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03, the memory-sync section: the store root is `~/.claude`, which also holds `.credentials.json`, `settings.json`, `history.jsonl` and every transcript, and the doctor gained four probes that prove the exclusion rather than assume it; widened at 70c3a3b 2026-08-28 to name the coordinator directory.
-- verdict: keep
-- reason: The one doctor line whose FAIL is a credential exposure rather than a broken feature, so it is read before the outward act it guards. Overlap with C032 is intentional: this says when the line is read, C032 what a FAIL earns.
-- passage: Read `Memory sync` before any push. Its FAIL means credentials are in reach.
-
-### C029
-- key: Expect the store root to hold `.credentials.json`, `settings.json`, `history.jsonl`, and every session transcript, with the repository there admitting only the memory tiers and the machine coordinator directory.
-- class: rationale-example
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03 installed the inventory; 70c3a3b 2026-08-28 corrected it to name the coordinator directory and rebuilt the pin as a sweep over every boundary sentence in the shipped tree.
-- verdict: keep
-- reason: A pinned copy: test/doctrine-parity.test.js (around :4119-4340) sweeps every "admits only" sentence in the shipped tree and reddens if one omits an admitted root, so the sentence must stay correct while it exists. It also tells a session reviewing a foreign managed file by hand (C033) what the repository may admit.
-- passage: The store root holds `.credentials.json`, `settings.json`, `history.jsonl` and every session transcript, and the repository there admits only the memory tiers and the machine coordinator directory.
-
-### C030
-- key: Read a `Memory sync` PASS as the allowlist being canonical and all four probes answering clean.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03 (check-ignore, dry-run add, ls-files and filtered rev-list, with the count of probes that answered).
-- verdict: keep
-- reason: No finding. PASS is a proven negative over four surfaces, not an absence of complaints, which is why the reading names the probes.
-- passage: PASS means the allowlist is canonical and all four probes answered clean.
-
-### C031
-- key: Read a `Memory sync` WARN as the store root not being a repository yet, so nothing syncs and nothing is at risk; `-Fix` initializes it.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03.
-- verdict: rewrite
-- landed: 3d2b3cd section 41
-- reason: Flipped from keep to rewrite at the corpus rewrite's finishing fix round: `doctor/doctor.ps1` emits six `Memory sync` WARN branches (git off PATH, not a repository, no origin remote, destination branch unreadable, destination advisory, no readable remote-tracking branch) and only the not-a-repository branch is `-Fix`'s to clear, so the reading is bounded to that branch and the rest read at the line, which prints a remedy for most of them and states the gap only for an unreadable destination branch and the other-branches advisory. The not-a-repository WARN is the one safe state on this line; without the reading a session treats a fresh machine as a leak.
-- proposed: The WARN reading that the store root is not a repository yet means nothing syncs and nothing is at risk, and `-Fix` initializes it; the line's other WARN branches (git off PATH, no origin remote, an unreadable destination branch, a destination advisory, no readable remote-tracking branch) are not `-Fix`'s to clear: most print their remedy on the line, while an unreadable destination branch and the advisory that origin carries other branches state the gap only.
-- passage: The WARN that the store root is not a repository yet means nothing syncs or is at risk, and `-Fix` initializes it. Its other WARNs are not `-Fix`'s to clear, so read their remedy or gap on the line.
-
-### C032
-- key: Stop and read on every `Memory sync` FAIL.
-- class: rule
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03; the coordinator's and memory-system's "a FAIL there is a stop, not a push" restate it for the manual push (ff59e19 2026-09-01).
-- verdict: keep
-- reason: kit-doctor owns the reading of the doctor's report and states every FAIL class with its remedy; the coordinator and memory-system carry the stop as pointers. The stop exists because the four FAIL classes take four remedies and the wrong one is useless or destructive.
-- passage: Every `Memory sync` FAIL is a stop-and-read, and each class has its own remedy:
-
-### C033
-- key: When a managed file the doctor did not write, or a repository it did not create, is reported, review it by hand, since the doctor will not touch it.
-- class: rule
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03 ("it never writes into a repository it did not create, and ownership rests on a git config marker"); the Foreign-versus-Drift inversion is recorded in the gotcha memories doctor-fix-is-never-a-neutral-committer and doctor-fix-rewrites-marker-carrying-managed-files.
-- verdict: keep
-- reason: `-Fix` refuses a Foreign file so as not to destroy a stranger's rules; the by-hand review is the only remedy, and no machinery performs it.
-- passage: A managed file the doctor did not write, or a repository it did not create, is one it leaves alone. Review it by hand.
-
-### C034
-- key: Treat a drifted or missing allowlist as letting an add stage anything, and run `-Fix` to restore it.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03 ("the allowlist is re-derived on every run, so a drifted ignore file is a FAIL").
-- verdict: keep
-- reason: Names `-Fix` as the remedy and does not license an unprompted run: C017 still governs when it runs, and the gotcha records show why the word matters (a fix pass rewrites every drifted marker-carrying file at once).
-- passage: A drifted or missing allowlist lets an add stage anything. `-Fix` restores it.
-
-### C035
-- key: For named leak paths, remedy with a history rewrite plus credential rotation rather than `-Fix`, which will not clear them.
-- class: rule
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03 ("a filtered rev-list reads the object history, which the first three cannot see because untracking a blob does not remove it").
-- verdict: keep
-- reason: The one FAIL class where running the obvious remedy does nothing: untracking removes no blob, so the rule points at the rewrite and the rotation and keeps a session from reporting a leak as fixed.
-- passage: Named leak paths are tracked or reachable in history. `-Fix` cannot clear them, since untracking leaves the blob. Rewrite history and rotate credentials.
-
-### C036
-- key: Treat probes that could not answer as an unproven negative rather than a clean result, which is why they fail rather than warn.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: eac64fa 2026-08-03 ("a probe that cannot answer is a FAIL, never a quiet pass").
-- verdict: keep
-- reason: No finding. The doctrine's withheld-control rule in one line: silence from a probe that could not run is not a clean sweep.
-- passage: Probes that could not answer leave the negative unproven, not clean, so they fail rather than warn.
-
-### C037
-- key: Read the `Embedder (semantic search)` line as reporting whether `memq find`'s local embedding stack is installed at `~\.claude\kit-embedder`.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:36
-- provenance: ec46854 2026-08-03, the doctor's embedder section.
-- verdict: retire
-- reason: row 833 (Embedder line semantics) shrink. The report line names the stack and its location. The act survives in "`memq shim` and `Embedder (semantic search)` name their remedy on the line.".
-- passage: `Embedder (semantic search)` reports `memq find`'s local embedding stack at `~\.claude\kit-embedder`.
-
-### C038
-- key: Read `absent` as nothing installed yet, with `find` still working lexical-only, and `unusable` as a present package with a missing or incomplete model cache needing repair rather than a fresh install.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:36
-- provenance: ec46854 2026-08-03 ("absent is an install and unusable is a repair, and an operator who cannot tell them apart runs the wrong command").
-- verdict: keep
-- reason: No finding. The two states were separated by design so the remedy named is the right one.
-- passage: With the embedder absent, `memq find` still works lexical-only.
-
-### C039
-- key: Expect `-Fix` to install or repair the embedder after a consent prompt naming about 400 MB of disk cost.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:36
-- provenance: ec46854 2026-08-03 ("the install runs behind the existing consent prompt, which states the disk cost so the consent is informed"; the npm guard is doctor.ps1:1218-1229).
-- verdict: rewrite
-- landed: 3d2b3cd section 41
-- reason: The cost stays because through a tool shell the doctor's prompt never reaches the operator and the in-chat ask (C022) must carry it. The npm-not-on-PATH clause and the runtime aside leave safely because the doctor prints the npm case itself. Lands at line 35 (section 41's close) as "`-Fix` installs or repairs it after a consent prompt naming the real disk cost (about 400 MB).", the runtime parenthetical and the npm clause gone, the four keeps sharing the line untouched.
-- proposed: Keep "`-Fix` installs or repairs it after a consent prompt naming the real disk cost (about 400 MB)"; drop the platform-runtime parenthetical and the "never prompts when `npm` is not on PATH" clause.
-- baseline-test: yes
-- passage: Its install costs about 400 MB of disk, which `-Fix`'s consent prompt names.
-
-### C040
-- key: Read the index-health lines (record count, model identity, age) as describing the derived search index without rebuilding or touching it.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:36
-- provenance: ec46854 2026-08-03 ("a check that rebuilt the index would have changed the thing it was reporting on").
-- verdict: retire
-- reason: row 833 (Embedder line semantics) shrink. The index-health lines are reference the report prints, and they change no act.
-- passage: The index-health lines (record count, model identity, age) describe the search index and never rebuild it.
-
-### C041
-- key: Treat an absent or empty search index as normal on a machine that has not yet run a semantic query.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:36
-- provenance: ec46854 2026-08-03.
-- verdict: keep
-- reason: No finding. Without it an empty index reads as a defect on every fresh machine.
-- passage: An absent or empty index is normal before a machine's first semantic query.
-
 ### C042
 - key: After a `-Fix` run, re-run check mode and report which lines flipped.
 - class: rule
@@ -433,23 +302,13 @@ Extracted at `6bc07fb`: whole document (`skills.kit-doctor.SKILL.md`). Redrafted
 - passage: Name in one line each what the fix changed on the machine, such as PATH, execution policy or installed software.
 
 ### C044
-- key: Read the Locate section's path-2 sentence as: a clone run also reads the installed copy on the memq shim, `Memory sync` and embedder steps, and where the machine matches the installed copy and not the clone, those three report INFO with `-Fix` installing nothing there.
+- key: Read the Locate section's path-2 sentence as: a clone run also reads the installed copy on the memq shim step, and where the machine matches the installed copy and not the clone, it reports INFO with `-Fix` installing nothing there.
 - class: mechanic
 - source: plugins/grimoire/skills/kit-doctor/SKILL.md:18
 - provenance: the doctor honesty plan's section 1 (docs/archive/claude-kit_doctor-honesty_spec_v1.md), 2026-09-23.
 - verdict: keep
-- reason: No finding. States the doctor's three-way verdict at the point a session picks which path's report to trust, ahead of the per-check INFO readings C045 to C047 carry.
+- reason: No finding. States the doctor's three-way verdict at the point a session picks which path's report to trust, ahead of the shim's INFO reading C046 carries.
 - passage: On a clone run, an INFO reading `trails the checkout in hand` means the machine matches the installed copy, and `-Fix` from the clone changes nothing there.
-
-### C045
-- key: Read a `Memory sync` INFO as the allowlist matching the installed copy and not the clone, with `-Fix` from that clone leaving the store as found since the installed copy's doctor commits pending memories.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:34
-- provenance: the doctor honesty plan's section 1 (docs/archive/claude-kit_doctor-honesty_spec_v1.md), 2026-09-23.
-- verdict: retire
-- reason: merged into C044's sentence, which is the same trailing rule stated for every clone-run step (row 823 shrink). Its separate `Memory sync` INFO passage and the "matching neither copy is the drift FAIL" sentence go. The drift FAIL remains under C034.
-- passage: INFO means the allowlist matches the installed copy, and `-Fix` from the clone then leaves the store as found.
-- passage: Where the machine matches the installed copy and not the clone, those report INFO reading `trails the checkout in hand`, and `-Fix` from the clone installs nothing there.
 
 ### C046
 - key: Read a `memq shim` INFO as the bin matching the installed copy and not the clone, with `-Fix` from that clone reinstalling nothing, and expect a shim that does not run to never read as trailing.
@@ -460,12 +319,3 @@ Extracted at `6bc07fb`: whole document (`skills.kit-doctor.SKILL.md`). Redrafted
 - reason: row 832 (memq shim line semantics) shrink. Its trailing-INFO act is carried by C044's sentence. The not-running exclusion is reported on the shim line itself, and the line names its remedy.
 - passage: A shim that does not run never reads as trailing, since it is healthy for no copy.
 - passage: Where the machine matches the installed copy and not the clone, those report INFO reading `trails the checkout in hand`, and `-Fix` from the clone installs nothing there.
-
-### C047
-- key: On a clone reading absent or unusable, read the Embedder's INFO as the stack being ready for the installed copy, with `-Fix` from that clone offering no install.
-- class: mechanic
-- source: plugins/grimoire/skills/kit-doctor/SKILL.md:36
-- provenance: the doctor honesty plan's section 1 (docs/archive/claude-kit_doctor-honesty_spec_v1.md), 2026-09-23.
-- verdict: keep
-- reason: No finding. Keeps a session from offering the roughly 400 MB install C039 names when the installed copy already carries a usable stack.
-- passage: On a clone run, an INFO reading `trails the checkout in hand` means the machine matches the installed copy, and `-Fix` from the clone changes nothing there.

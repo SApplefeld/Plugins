@@ -10,16 +10,16 @@
 // pin block and silences the project block, and a pin reduces the project
 // block to its index lines alone.
 //
-// The decay nudge: the decay stamp (memory/decay-stamp in the project's
-// memory directory) is touched by `memq decay-done` when a decay pass
-// completes; its mtime is the record. finishing-work step 8 owns the pass
-// itself on a 14-day cadence at close-out, so this hook is the backstop for a
-// project whose close-outs have not come around. Two overdue shapes fire it,
-// both at the same 30-day threshold: a stamp 30 or more days old, and a store
-// that holds memories 30 or more days old with no stamp at all, the project
-// where a pass has never run and which needs the nudge most. An empty or
-// absent store is the fresh-machine case and stays silent; otherwise the
-// nudge is one line naming the pass.
+// The decay nudge: the decay stamp (memory-snapshot/decay-stamp under the
+// store root, one per machine) is touched by `memq decay-done` when a
+// decay pass completes; its mtime is the record. finishing-work step 8 owns
+// the pass itself on a 14-day cadence at close-out, so this hook is the
+// backstop for a machine whose close-outs have not come around. Two overdue
+// shapes fire it, both at the same 30-day threshold: a stamp 30 or more days
+// old, and a project whose snapshot rows are 30 or more days old with no
+// stamp at all, the machine where a pass has never run and which needs the
+// nudge most. A project with no rows is the fresh-machine case and stays
+// silent; otherwise the nudge is one line naming the pass.
 //
 // The anchor-drift line: a project memory can name the files it is about at
 // the hash they had when it was written, and this hook says how many of them
@@ -40,34 +40,11 @@
 // examined, DRIFT_ENTRIES_CAP anchors walked whatever each costs, and
 // DRIFT_BYTES_CAP bytes hashed, each tier read against its own copy of those
 // caps. What a bound stopped short of is counted
-// rather than dropped. The record half is bounded by memq's own frontmatter
-// cap, which every reader of a record's fields takes: each record costs a
-// capped head read and no more, whatever the record's length. The pass runs
-// in memq's listing mode, where the tier's own directory listing is the
-// record set, because this hook has no listing of its own to spend.
-//
-// The sync trigger and its nudge: the memory store at ~/.claude can be a git
-// repository, and when the store root is its own repository and holds
-// anything pending (uncommitted changes, unpushed commits, unpulled commits,
-// or uncommitted changes alone on a store with no upstream), this hook spawns
-// doctor/sync-store.ps1 detached to sync it silently. That script re-derives
-// the doctor's full safety bar before mutating anything and records its
-// outcome to <root>/kit-sync-state.json; this hook speaks only from that
-// record, and only in two states: a recorded gate-class refusal gets the loud
-// doctor line, and a transient-failure streak older than seven days gets one
-// soft line. Everything else is silence, because a store that syncs itself
-// has nothing to nag about. Off Windows no script exists to spawn, so a
-// pending store gets the one-line text nudge instead. The hook's own checks
-// are local only, comparing HEAD against the last-fetched remote-tracking
-// ref, never running `git fetch`: a hook runs on every session start, and a
-// network round trip there is unacceptable (the spawned script's pull is
-// where the network happens, off the session's critical path). The trigger
-// rides the ordinary and pinned session states, including a session whose pin
-// resolves to a directory this hook cannot name; only the top-level store-pin
-// stand-down and a run-scoped session, whose own block already claims the
-// whole of what this hook says about where the store stands, silence it, and
-// neither of those states spawns the sync (a fleet of workers each spawning
-// one is contention with no owner).
+// rather than dropped. The record set is the snapshot's index rows, this
+// project's section and the operator tier's, so the pass opens no record
+// file: each record's anchors are the row's, parsed through memq's own
+// listing shape (indexTiers), and the only files read are the ones those
+// anchors name.
 //
 // The snapshot: the memory database is the record, and the project and type
 // blocks never wait on it; the fleet block is the one wait on the host the
@@ -82,12 +59,12 @@
 // most once per sixteen minutes (databaseRefreshSpawn), so the session that
 // found it stale or absent is the one that brings the next session a fresh one.
 //
-// The type block: a project that declares "Project-Type: <type>" at the top
-// of its memory MEMORY.md gets the snapshot's type-tier records of that type
-// emitted into session context, one line per record, so the tier's memories
-// are discoverable from the first turn. Names and descriptions only, never a
-// body: a body is fetched deliberately via `memq get`. A project without the
-// line gets nothing.
+// The type block: a project whose type is declared in this machine's
+// declarations file (by `memq declare-type <type>`) gets the snapshot's
+// type-tier records of that type emitted into session context, one line per
+// record, so the tier's memories are discoverable from the first turn. Names
+// and descriptions only, never a body: a body is fetched deliberately via
+// `memq get`. A project without a declaration gets nothing.
 //
 // The project-memory block: an ordinary session is told what its project
 // memory tier already holds (the snapshot's records for this project's key,
@@ -120,28 +97,27 @@
 // block. KIT_MEMORY_PROJECT set alongside the store signals with a value that
 // cannot be a directory name resolves no project memory directory at all, and
 // each block hangs off that directory: there is no stamp to age, no
-// Project-Type declaration to read, and no pending destination to name. The
+// Project-Type declaration to read for it, and no pending destination to name. The
 // session is told to write nothing, in the same terms an unusable run id
 // earns, because a session left silent there writes its memory files the
 // ordinary way.
 //
 // The store's shape comes from scripts/memq.js, which owns it (the stamp
-// location, the memory-dir resolution, the memory set, the Project-Type
-// reader, the type index location, the index filename); this hook restates
-// none of it.
+// location, the memory-dir resolution, the index rows' listing shape, the
+// Project-Type reader and the declarations file it reads, the index
+// filename); this hook restates none of it.
 //
 // SAFETY: fails open, always exits 0, and is silent on every failure path: a
 // missing store, an unreadable stamp or index, a malformed payload, a memq
-// that will not load, a git that is absent, errors, or times out, an
-// unreadable or corrupt sync state file, and a sync spawn that fails, all end
-// with no output from this hook. The voices memq brings with it are its own, all on stderr, which
-// never enters the session context: the ignored-override note when
+// that will not load, and a refresh spawn that fails, all end with no output
+// from this hook. The voices memq brings with it are its own, all on stderr,
+// which never enters the session context: the ignored-override note when
 // KIT_MEMORY_ROOT is set without its second signal, and, from a worktree
 // cwd, a note when a worktree-shaped `.git` pointer fails the handshake and
 // a note when a resolved worktree also has an orphaned path-derived store.
-// The anchor-drift check reads and never writes: it lists the project memory
-// directory, reads each of its records once for the frontmatter, and opens
-// the files those records anchor to hash them. What that reaches is bounded
+// The anchor-drift check reads and never writes: it takes the project tier's
+// rows from the snapshot index already read, and opens the files those rows
+// anchor to hash them. What that reaches is bounded
 // by a walk rather than by a promise: memq joins an anchor path onto the
 // root it derives from this session's own working directory, one segment at
 // a time, and refuses the anchor where it sees a symbolic link or a junction
@@ -152,43 +128,16 @@
 // walk admits one with no race at all. In both cases what the hook does with
 // the bytes is hash them: no byte of any file it reads reaches the output,
 // which carries counts and this file's own words. Every half of the pass is
-// bounded: DRIFT_RECORDS_CAP records examined, each record's frontmatter
-// read capped in bytes by memq's own head cap so the reading half cannot
-// exceed that many records times that cap, DRIFT_ENTRIES_CAP anchors walked
+// bounded: DRIFT_RECORDS_CAP records examined, each an index row already in
+// memory so the reading half opens no file, DRIFT_ENTRIES_CAP anchors walked
 // and DRIFT_BYTES_CAP bytes hashed, per tier, the project tier and the
 // operator tier's machine-scoped records each spending a budget of their
-// own. A failure of the whole pass is one
-// fixed sentence rather than the silence every other block here answers
-// with. The sync check runs
-// read-only git subcommands (never `git fetch`) under the store root's own
-// `.git`, and never a repository merely reachable by walking up from it,
-// plus a bounded read of the sync state file and stats of the sync lock and
-// the attempt marker, nothing more. This hook's one write of its own is that
-// attempt marker (kit-sync-attempt, touched in the store root just before
-// each spawn), which is how a spawn chain that silently never runs is
-// eventually noticed. The one thing it starts that writes is the detached
-// sync script, spawned only on Windows, only for an ordinary or pinned
-// attended session, only when the store is pending or standing down on a
-// recorded gate (a clean gate state still spawns so the script re-probes and
-// self-heals once the operator repairs the store), only when the store
-// carries the kit's own ownership marker (a repo the kit does not own gets no
-// marker write and no spawn, so a foreign repo at the store root is never
-// touched), and only at the default store root (an environment-overridden
-// root, however legitimate, is not a directory a background process was ever
-// authorized to sync, and os.homedir() following USERPROFILE is why ownership
-// rather than the path is the security gate); every write the script makes
-// lands inside the store root, behind the doctor's own re-derived safety bar,
-// at a script path resolved from this file's own
-// directory rather than from anything the environment carries.
+// own. A failure of the whole pass is one fixed sentence rather than the
+// silence every other block here answers with.
 // This hook's stdout lands in the model's trusted context, so what enters it
-// is bounded by provenance: the decay nudge, the sync lines and the drift line
-// carry no store-controlled strings at all, only integers
-// (day counts computed here, and commit counts parsed out of a fixed
-// tab-separated git count), a bare boolean fact (uncommitted or not, read
-// from `git status`'s output length), or a reason literal chosen from this
-// file's own fixed map (a state-file code is a lookup key, never emitted
-// text, and an unknown code gets the fixed fallback), reflowed into a literal
-// sentence built from this file's own fixed words;
+// is bounded by provenance: the decay nudge and the drift line carry no
+// store-controlled strings at all, only integers this file computes, reflowed
+// into a literal sentence built from this file's own fixed words;
 // the type block's and the project block's record lines ARE store content,
 // host rows printed into the model's context, so every line is reduced to
 // bounded printable ASCII (no line can smuggle control characters or forge a
@@ -206,69 +155,32 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
-const { gitOutput, gitChildEnv } = require('./kit-git-lib.js');
 
 const NUDGE_AFTER_DAYS = 30;   // stamp (or oldest-memory) age at which the nudge fires
 const DAY_MS = 86400000;
-const GIT_TIMEOUT_MS = 2000;   // bound on each sync-check git call, so a wedged git never holds up a session start
 
-// The sync trigger's fixed values. The state file and the lock are written by
-// doctor/sync-store.ps1 into the store root; this hook reads them and writes
-// only the attempt marker. The read cap bounds what a corrupt or hostile
-// state file can cost, the lock-freshness window matches the script's own
-// staleness bar so the hook never spawns a second run beside a live one, the
-// seven-day window is how long a transient failure streak stays silent
-// before the soft nudge names it, and the attempt-staleness window is how
-// long after a spawn a still-absent state file means the spawn chain itself
-// is broken (a healthy run finishes in seconds; two minutes is comfortably
-// past any honest run that has a state file to show for itself).
-const SYNC_STATE_FILE = 'kit-sync-state.json';
-const SYNC_LOCK_FILE = 'kit-sync.lock';
-const SYNC_ATTEMPT_FILE = 'kit-sync-attempt';
-const SYNC_STATE_READ_CAP = 4096;  // bytes of the state file read
-const SYNC_LOCK_FRESH_MS = 15 * 60 * 1000;
-const SYNC_ATTEMPT_STALE_MS = 2 * 60 * 1000;
-const SYNC_FAIL_NUDGE_DAYS = 7;
-// The sync's own bookkeeping files as they appear in `git status --porcelain`
-// path text (optionally quotepath-quoted). They live untracked in the store
-// root, so a dirty check that counted them would call every store pending
-// forever; the script's allowlist excludes them from every add, and this
-// filter is the read-side counterpart.
-const SYNC_BOOKKEEPING_RE = /^"?(?:kit-sync-state\.json(?:\.tmp\..*)?|kit-sync\.lock(?:\.stale\..*)?|kit-sync-attempt)"?$/;
-// Resolved from this file's own directory, never from an environment
-// variable: the spawn runs whatever sits at this path with the store root as
-// its argument, so the path must not be steerable by anything the store or
-// the environment carries.
-const SYNC_SCRIPT = path.join(__dirname, '..', 'doctor', 'sync-store.ps1');
-
-// The refresh spawn's own marker and the CLI it runs, both at the store root
-// and this file's own directory respectively, for the reasons the two above
-// state: the marker is per-spawn so neither the git sync nor the refresh
-// suppresses the other, and the script path comes from __dirname so nothing the
-// store or the environment carries can steer which code a detached child runs.
-// The marker keeps the name the publish spawn wrote, so a machine's existing
-// marker still holds the interval across the change of verb.
+// The refresh spawn's own marker and the CLI it runs, at the store root and
+// this file's own directory respectively. The script path comes from
+// __dirname so nothing the store or the environment carries can steer which
+// code a detached child runs. The marker keeps the name the publish spawn
+// wrote, so a machine's existing marker still holds the interval across the
+// change of verb.
 const DB_SYNC_ATTEMPT_FILE = 'kit-memory-db-sync.attempt';
 const MEMQ_SCRIPT = path.join(__dirname, '..', 'scripts', 'memq.js');
 
 // How long this marker holds the next refresh off, which is the client's own
-// run budget and not the git sync's interval.
+// run budget.
 //
-// The two spawns measure different things. The git sync's two minutes is how
-// long after a spawn a still-absent state file means the spawn chain itself is
-// broken, and a healthy sync finishes in seconds. A refresh has no state file
-// and can honestly run for minutes: it drains the queue, runs the migration
-// publish where that has not happened yet, takes the index and embeds whatever
-// carries no vector. Its ceiling is RUN_BUDGET_MS in
-// scripts/memory-database.js, fifteen minutes, past which the client refuses
-// to start another boundary call. So this is a minute past that ceiling: inside
-// it, a run may still be in flight, and a second session-start spawn would put
-// two refreshes on one machine other sessions' work already shares, both
-// draining the same queue and writing the same snapshot.
-// The minute is the
+// A refresh has no state file and can honestly run for minutes: it drains the
+// queue, takes the index and embeds whatever carries no vector. Its ceiling
+// is RUN_BUDGET_MS in scripts/memory-database.js, fifteen minutes, past which
+// the client refuses to start another boundary call. So this is a minute
+// past that ceiling: inside it, a run may still be in flight, and a second
+// session-start spawn would put two refreshes on one machine other sessions'
+// work already shares, both
+// draining the same queue and writing the same snapshot. The minute is the
 // overshoot the client declares, the one call that may cross its deadline
 // finishing within the sqlcmd spawn floor of it.
 const DB_SYNC_ATTEMPT_STALE_MS = 16 * 60 * 1000;
@@ -277,74 +189,6 @@ const DB_SYNC_ATTEMPT_STALE_MS = 16 * 60 * 1000;
 // session reading an hour-old copy of the index is the ordinary state between
 // refreshes, and a line about it on every start would be noise.
 const SNAPSHOT_AGE_LINE_MS = 60 * 60 * 1000;
-
-// The detached spawn goes through a node relauncher rather than straight at
-// powershell.exe, because the direct shape cannot work on Windows: a
-// non-detached child is killed with this short-lived hook process (libuv puts
-// children in a kill-on-close job object), and a detached one runs under
-// DETACHED_PROCESS, where Windows PowerShell's console host exits
-// immediately, code 0, without ever running the script (reproducible with
-// every stdio shape, and via conhost). Node itself detaches fine, so the
-// hook detaches a node child running this fixed one-liner, which runs
-// PowerShell non-detached and waits for it: the PowerShell child lives as
-// long as the relauncher, and the relauncher survives the hook. Everything
-// variable arrives as argv, never interpolated into the code string,
-// windowsHide (CREATE_NO_WINDOW) keeps the console-less chain from flashing
-// a console window, and -NonInteractive makes any prompt PowerShell would
-// have raised into an immediate failure, because a console-less detached
-// process that asks a question hangs forever with nobody to answer it.
-const SYNC_RELAUNCH = 'const{spawnSync}=require("child_process");'
-    + 'spawnSync(process.argv[1],["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass",'
-    + '"-File",process.argv[2],"-StoreRoot",process.argv[3]],'
-    + '{stdio:"ignore",windowsHide:true});';
-
-// The absolute path of Windows PowerShell, resolved under the system root
-// rather than searched on PATH. SystemRoot is itself an environment value, so
-// this is not unsteerable; it is a smaller target than PATH (an attacker must
-// both set SystemRoot and plant a payload at the fixed relative subpath below
-// an existing readable file), and no worse than the bare-name `git` spawn this
-// hook already relies on. The stat gate means a steered SystemRoot missing
-// that exact payload falls through to the bare name rather than running an
-// arbitrary attacker file. The bare name is also the ordinary fallback for a
-// box whose system root the environment does not name.
-function powershellPath() {
-    const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
-    const abs = path.join(sysRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    try {
-        fs.statSync(abs);
-        return abs;
-    } catch {
-        return 'powershell.exe';
-    }
-}
-
-// The state file's reason codes, mapped onto this file's own fixed words. An
-// emitted line is built from these literals only: a code the map does not
-// know gets the fallback, and no string out of the state file ever rides the
-// line, however that file was produced.
-// 'foreign' and 'git-missing' are defensive-only: the script writes no state
-// file for either, so neither reason ever reaches this lookup, but both are
-// carried so the map mirrors the full enum rather than a subset that drifts.
-const SYNC_REASON_TEXT = {
-    'leaks': 'a leak probe found content the allowlist does not admit',
-    'foreign': 'the store root is not the kit\'s own sync repository',
-    'drift': 'a managed allowlist file differs from canonical',
-    'unproven': 'a safety probe could not answer',
-    'detached': 'the store repository is on a detached HEAD',
-    'git-missing': 'git is not available',
-    'commit-failed': 'the gated commit failed',
-    'inbound-leak': 'incoming content the allowlist does not admit',
-    // The two machine-axis codes name their direction, because the repair
-    // differs by direction: an outbound refusal is a local write to another
-    // machine's coordinator directory, an inbound one is a remote commit
-    // rewriting this machine's own.
-    'outbound-foreign-write': 'this store staged a write into another machine\'s coordinator directory',
-    'inbound-foreign-write': 'incoming content rewrites this machine\'s own coordinator directory',
-    'fetch-failed': 'the fetch from the remote failed',
-    'pull-conflict': 'a pull hit a rebase conflict',
-    'push-failed': 'the push failed'
-};
-const SYNC_REASON_FALLBACK = 'a failed safety probe';
 
 // Bounds on an emitted record list, shared by the project block and the type
 // block: the emission caps bound what a snapshot section contributes to the
@@ -357,11 +201,9 @@ const PROJECT_INDEX_MAX_LINES = 60;
 const INDEX_LINE_CAP = 200;    // characters per emitted record line
 
 // Bounds on the anchor-drift pass, whose work grows with the store: it reads
-// each project-tier record's frontmatter and walks and hashes the files
-// those records anchor. It is not the only block here whose work grows that
-// way (decayNudge lists the tier and stats every record when no decay pass
-// has completed), but it is the one that also opens files the records name.
-// A session start must not wait on that, and this hook's stdout is
+// each project-tier row's anchors and walks and hashes the files those
+// records anchor. It is the one block here that opens files the records
+// name. A session start must not wait on that, and this hook's stdout is
 // all-or-nothing (hooks.json sets no timeout, and a hook that runs long
 // loses the whole block list, the project index and the write destination
 // with it), so the pass stops at these and reports what it did not reach
@@ -384,24 +226,22 @@ const INDEX_LINE_CAP = 200;    // characters per emitted record line
 // Each tier takes these three bounds as a budget of its own, the project
 // tier and the operator tier alike, so the worst case for the whole pass is
 // each bound twice, and for bytes a little more: 400 records checked, with
-// the operator tier also reading up to DRIFT_OPERATOR_HEADS_CAP heads to learn
-// which of its records are scoped here, 1,000
-// anchors walked, and per tier the byte cap plus one file. The byte meter is
-// read before each file and a file is hashed whole up to memq's per-file
-// read cap (4 MB), so a tier can overshoot its cap by one such file, which
-// puts the two tiers' worst case at about 24 MB hashed. The operator tier's
-// scope reads are head reads rather than hashes, bounded in count by
-// DRIFT_OPERATOR_HEADS_CAP and in size by memq's 64 KB head cap, so their
-// ceiling is about 131 MB read, reached only by a tier of records that large.
+// the operator tier also examining up to DRIFT_OPERATOR_HEADS_CAP index rows
+// to learn which of its records are scoped here, 1,000 anchors walked, and
+// per tier the byte cap plus one file. The byte meter is read before each
+// file and a file is hashed whole up to memq's per-file read cap (4 MB), so
+// a tier can overshoot its cap by one such file, which puts the two tiers'
+// worst case at about 24 MB hashed. The operator tier's scope reads are
+// reads of a row's `machine` field in the snapshot index already in memory,
+// so they open no file and cost no bytes beyond the rows examined.
 const DRIFT_RECORDS_CAP = 200;
 const DRIFT_BYTES_CAP = 8388608;
 const DRIFT_ENTRIES_CAP = 500;
-// The operator tier's scope reads: one capped head read per record, taken
-// for every record because a record's `machine:` is in its head, while most
-// of that tier anchors nothing. DRIFT_RECORDS_CAP there counts only the
-// records scoped to this machine that anchor a file, the ones hashed. The
-// cap sits far above a real tier while keeping the scope reads well under a
-// second on local disk.
+// The operator tier's scope reads: one index row examined per record, taken
+// for every record because a record's scope is its row's `machine` field,
+// while most of that tier anchors nothing. DRIFT_RECORDS_CAP there counts
+// only the records scoped to this machine that anchor a file, the ones
+// hashed. The cap sits far above a real tier.
 const DRIFT_OPERATOR_HEADS_CAP = 2000;
 
 // What an overdue project should do next; shared by both overdue shapes so
@@ -415,30 +255,36 @@ function readStdin() {
 
 // The overdue-decay context block, or null when there is nothing to say. A
 // mtime in the future reads as a negative age and stays silent, the same
-// no-spurious-nudge direction as every other quiet path.
-function decayNudge(cwd, memq) {
-    const memDir = memq.projectMemoryDir(cwd);
+// no-spurious-nudge direction as every other quiet path. The stamp is the
+// machine's, under the snapshot directory, since the pass it records runs
+// over the whole store. With no stamp the project's age is read from its
+// rows in `snapshot`, so a snapshot that cannot be read answers nothing
+// here, and the snapshot line says so.
+function decayNudge(cwd, memq, snapshot) {
     let st = null;
-    try { st = fs.statSync(memq.decayStampPath(cwd)); } catch { /* absent: the never-run shape below */ }
+    try { st = fs.statSync(memq.decayStampPath()); } catch { /* absent: the never-run shape below */ }
     if (st && st.isFile()) {
         const ageDays = Math.floor((Date.now() - st.mtimeMs) / DAY_MS);
         if (!Number.isFinite(ageDays) || ageDays < NUDGE_AFTER_DAYS) return null;
-        return 'Kit memory decay: this project\'s decay stamp is ' + ageDays
+        return 'Kit memory decay: this machine\'s decay stamp is ' + ageDays
             + ' days old (threshold ' + NUDGE_AFTER_DAYS + '), so the memory decay pass is overdue. '
             + PASS_INSTRUCTIONS;
     }
-    // No stamp: no pass has ever completed here. An empty or absent store is
-    // a fresh machine and stays silent, but a store whose oldest memory has
-    // aged past the threshold with no pass is overdue in the same way a stale
-    // stamp is: it simply never had a stamp to go stale.
-    const memories = memq.listMemories(memDir);
-    if (memories.length === 0) return null;
+    // No stamp: no pass has ever completed on this machine. A project with
+    // no rows is a fresh machine and stays silent, but a project whose
+    // oldest record has aged past the threshold with no pass is overdue in
+    // the same way a stale stamp is: it simply never had a stamp to go
+    // stale. A row's age is its created time, or its updated time where no
+    // created time was recorded.
+    if (!snapshot.ok || typeof memq.projectKey !== 'function') return null;
+    const section = snapshot.index.projects[memq.projectKey(cwd)];
+    const rows = section && Array.isArray(section.rows) ? section.rows : [];
     let oldestMs = Infinity;
-    for (const m of memories) {
-        try {
-            const ms = fs.statSync(path.join(memDir, m.name + '.md')).mtimeMs;
-            if (ms < oldestMs) oldestMs = ms;
-        } catch { /* unreadable: it cannot age the store */ }
+    for (const row of rows) {
+        const at = typeof row.created === 'string' ? row.created
+            : typeof row.updated === 'string' ? row.updated : '';
+        const ms = Date.parse(at);
+        if (Number.isFinite(ms) && ms < oldestMs) oldestMs = ms;
     }
     const ageDays = Math.floor((Date.now() - oldestMs) / DAY_MS);
     if (!Number.isFinite(ageDays) || ageDays < NUDGE_AFTER_DAYS) return null;
@@ -451,10 +297,10 @@ function decayNudge(cwd, memq) {
 // is called so that a memq which will not load or whose export table a
 // version skew has moved is told apart from a check that failed on a store
 // that is there.
-const DRIFT_MEMQ_SYMBOLS = ['anchorRoot', 'projectMemoryDir', 'tierAnchorDrift'];
-// The operator tier's reading asks three more, checked apart so that a memq
+const DRIFT_MEMQ_SYMBOLS = ['anchorRoot', 'projectKey', 'indexTiers', 'tierAnchorDrift'];
+// The operator tier's reading asks two more, checked apart so that a memq
 // without them costs that tier's sentences and leaves the project tier's.
-const DRIFT_OPERATOR_SYMBOLS = ['memoryRoot', 'operatorTierOrNull', 'storeAnchorDrift'];
+const DRIFT_OPERATOR_SYMBOLS = ['memoryRoot', 'storeAnchorDrift'];
 
 // The could-not-check answers, this file's own fixed words: no count, no
 // name, nothing from the store. Each tier has two. One names a tier that is
@@ -473,7 +319,7 @@ const DRIFT_OPERATOR_SYMBOLS = ['memoryRoot', 'operatorTierOrNull', 'storeAnchor
 // anchorRoot has not already answered with the ordinary pin silence below,
 // so the sentence had no reachable state left to describe.
 const DRIFT_TIER_UNEXAMINABLE = 'This project\'s memories could not be checked '
-    + 'against the files they anchor, because its memory directory could not be '
+    + 'against the files they anchor, because its records could not be '
     + 'examined; memq decay-scan says why.';
 const DRIFT_CHECK_FAILED = 'This project\'s memories could not be checked against '
     + 'the files they anchor, because the check itself failed.';
@@ -492,15 +338,14 @@ const DRIFT_OPERATOR_CHECK_FAILED = 'Operator memories scoped to this machine co
 // other machine. The reading takes its own budget, so a large project tier
 // cannot starve it: the project tier's three caps, with its record cap
 // counting only records scoped here that anchor a file, plus
-// DRIFT_OPERATOR_HEADS_CAP on the head reads that learn each record's scope. Every value on the
-// line is a count or this file's own words.
-function operatorDriftSentences(memq) {
+// DRIFT_OPERATOR_HEADS_CAP on the rows read to learn each record's scope.
+// `listing` is the operator tier's rows in memq's listing shape. Every
+// value on the line is a count or this file's own words.
+function operatorDriftSentences(memq, listing) {
     for (const symbol of DRIFT_OPERATOR_SYMBOLS) {
         if (typeof memq[symbol] !== 'function') return [];
     }
-    const dir = memq.operatorTierOrNull();
-    if (dir === null) return [];
-    const drift = memq.storeAnchorDrift(dir, null, memq.memoryRoot(),
+    const drift = memq.storeAnchorDrift(null, listing, memq.memoryRoot(),
         { heads: DRIFT_OPERATOR_HEADS_CAP, records: DRIFT_RECORDS_CAP,
             bytes: DRIFT_BYTES_CAP, entries: DRIFT_ENTRIES_CAP });
     if (drift === null) return [DRIFT_OPERATOR_UNEXAMINABLE];
@@ -575,10 +420,11 @@ function operatorDriftSentences(memq) {
 // load, and answering it with silence would be the clean answer for a check
 // that failed.
 //
-// Silence, then, means one of three things and each is a nothing-to-say:
+// Silence, then, means one of four things and each is a nothing-to-say:
 // every count zero, a store pin (including one whose cwd also names a
 // network share, since the pin resolves before cwd's shape is ever
-// consulted), or a memq whose symbols are not there.
+// consulted), a memq whose symbols are not there, or a snapshot that could
+// not be read, which the snapshot line beside this one already says.
 //
 // A run-scoped session is not a special case: a run id adds a pending tier
 // and leaves the project tier where the working directory puts it, so the
@@ -590,8 +436,10 @@ function operatorDriftSentences(memq) {
 // tier's reading runs in a try of its own, so a throw in one reports that
 // tier's check failing and leaves the other tier's sentences standing. A
 // throw out of the root resolution itself is the project tier's failed check
-// alone, because until it answers nothing says the session is not pinned.
-function driftNudge(cwd, memq) {
+// alone, because until it answers nothing says the session is not pinned. A
+// throw out of the rows' own listing is both tiers' failed check, since
+// both read it.
+function driftNudge(cwd, memq, snapshot) {
     if (memq === null || typeof memq !== 'object') return null;
     for (const symbol of DRIFT_MEMQ_SYMBOLS) {
         if (typeof memq[symbol] !== 'function') return null;
@@ -616,20 +464,32 @@ function driftNudge(cwd, memq) {
         return DRIFT_CHECK_FAILED;
     }
     if (root === null) return null;
+    if (!snapshot.ok) return null;
+    // The record set is the snapshot's: this project's section and the
+    // operator tier's, each empty where the snapshot holds none, in memq's
+    // own listing shape so each record carries its anchors parsed as the
+    // frontmatter readers parse them. No record file is opened.
+    let tiers;
+    try {
+        const index = snapshot.index;
+        const project = index.projects[memq.projectKey(cwd)];
+        const operator = index.tiers.operator;
+        const rows = [].concat(
+            project && Array.isArray(project.rows) ? project.rows : [],
+            operator && Array.isArray(operator.rows) ? operator.rows : []);
+        tiers = memq.indexTiers(rows, cwd);
+    } catch {
+        return DRIFT_CHECK_FAILED;
+    }
     let operatorParts;
     try {
-        operatorParts = operatorDriftSentences(memq);
+        operatorParts = operatorDriftSentences(memq, tiers.operator);
     } catch {
         operatorParts = [DRIFT_OPERATOR_CHECK_FAILED];
     }
     let projectParts;
     try {
-        const memDir = memq.projectMemoryDir(cwd);
-        // Listing mode (a null listing): memq builds the record set from
-        // the directory listing it already takes and reads each record's
-        // frontmatter through its bounded reader, so a session start never
-        // reads a whole tier of records to ask one question about each.
-        const drift = memq.tierAnchorDrift(memDir, null, root,
+        const drift = memq.tierAnchorDrift(null, tiers.project, root,
             { records: DRIFT_RECORDS_CAP, bytes: DRIFT_BYTES_CAP,
                 entries: DRIFT_ENTRIES_CAP });
         // The tier is there and could not be examined. Saying nothing here
@@ -687,347 +547,6 @@ function projectDriftSentences(drift) {
         .filter((part) => part !== null);
 }
 
-// The environment a store-root git call runs under: process.env with every
-// GIT_* variable removed, case-insensitively (Windows env keys are not the
-// casing a plain-object copy is indexed by, the same rule the test suite
-// documents for PATH). A wholesale strip, not just GIT_DIR/GIT_WORK_TREE,
-// because GIT_COMMON_DIR redirects even a `-C <root> config --local` read to
-// another repository's config: without the strip, a repo-carried environment
-// (a committed .vscode/settings.json terminal env) could point the ownership
-// check at a config that answers claudekit.memorysync=true and forge the gate.
-// None of these variables is needed here, since every call passes `-C <root>`.
-// The strip itself is spelled once, in the shared git runner (kit-git-lib.js),
-// which every hook's git calls already run through; this name is what the
-// detached sync relauncher below reads it by.
-function gitStoreEnv() {
-    return gitChildEnv();
-}
-
-// A read-only git subcommand run under the store root, or null on any
-// failure: git absent, a nonzero exit, or a run past GIT_TIMEOUT_MS. Every
-// one of those is silence to syncNudge's caller, never a thrown error, which
-// is what lets a machine with no git at all, or a store that predates the
-// sync repo, pass through this check unremarked.
-//
-// The shared runner (kit-git-lib.js) is what supplies the `-C <root>` form,
-// the environment gitStoreEnv describes above, and a spawn working directory
-// outside the repository being read.
-function gitStoreOutput(root, args) {
-    return gitOutput(root, args, { timeoutMs: GIT_TIMEOUT_MS });
-}
-
-// The recorded outcome of the last sync run, or null when there is none to
-// read: absent, unreadable, oversized (the bounded read tears the JSON and
-// the parse fails), or not an object. The file is store content, so nothing
-// read here is ever emitted; the caller uses lastResult and reason only as
-// lookup keys against this file's own literals, and firstFailSince only as a
-// date to subtract.
-function readSyncState(root) {
-    let raw;
-    try {
-        const fd = fs.openSync(path.join(root, SYNC_STATE_FILE), 'r');
-        try {
-            const buf = Buffer.alloc(SYNC_STATE_READ_CAP);
-            const n = fs.readSync(fd, buf, 0, SYNC_STATE_READ_CAP, 0);
-            raw = buf.toString('utf8', 0, n);
-        } finally {
-            fs.closeSync(fd);
-        }
-    } catch {
-        return null;
-    }
-    let parsed;
-    try { parsed = JSON.parse(raw); } catch { return null; }
-    if (parsed === null || typeof parsed !== 'object') return null;
-    return parsed;
-}
-
-// What a pending store on a platform with no sync runner is told: one line
-// naming the conditions, built from integers this hook parsed itself and
-// fixed literals from this file, nothing else. A store that is only dirty
-// (neither ahead nor behind) gets the commit clause alone: telling it to
-// push and pull would be instructing an exchange no counted fact says is
-// owed.
-function syncFallbackText(dirty, ahead, behind) {
-    const facts = [];
-    if (dirty) facts.push('holds uncommitted changes');
-    if (ahead > 0) facts.push('is ' + ahead + ' commit(s) ahead of its remote (not yet pushed)');
-    if (behind > 0) {
-        facts.push('is ' + behind + ' commit(s) behind its remote (not yet pulled, as last known '
-            + 'here; no fetch was run)');
-    }
-    let stated;
-    if (facts.length === 1) stated = facts[0];
-    else if (facts.length === 2) stated = facts[0] + ', and ' + facts[1];
-    else stated = facts[0] + ', ' + facts[1] + ', and ' + facts[2];
-
-    const base = 'Kit memory sync: the memory store ' + stated + '. Run the kit doctor\'s -Fix '
-        + '(the kit-doctor skill owns that run) to commit through the gated allowlist';
-    if (ahead === 0 && behind === 0) return base + '.';
-    return base + '; push only once that run\'s memory-sync line clears (the memory-system skill '
-        + 'owns what each status allows), then `git pull --rebase` and push, in the store, to '
-        + 'bring machines back in sync.';
-}
-
-// The sync trigger: decide whether the store is pending, spawn the detached
-// sync script that does the work, and emit at most one fixed line about a
-// recorded standing failure. Returns null when the store root is not itself
-// a git repository or holds nothing pending.
-//
-// `git -C <dir>` discovers a repository by walking UP from <dir> through its
-// parent directories, the way an ordinary working-tree lookup does, so a
-// store root that is merely nested under someone else's repository (a
-// scratch checkout one level up, an operator's dotfiles repo) would answer
-// every call below about that foreign repository rather than staying silent.
-// Requiring the store root's own `.git` before any git call runs is the same
-// rule install-memory-sync.ps1 already applies to the sync repo's ownership
-// check (it tests for the path; this stats it and additionally requires a
-// directory, refusing a stray `.git` file this hook has no reason to trust
-// is a worktree pointer at the sync repo), so a machine with no sync repo at
-// all (git installed or not) costs this check nothing beyond the one stat.
-//
-// Pending is any of: uncommitted changes, commits not yet pushed, or commits
-// not yet pulled. The ahead/behind counts come from one `rev-list` call
-// against the literal `@{upstream}` token, never a name resolved by a prior
-// call and concatenated in, so no store-controlled ref text ever occupies an
-// argv position `rev-list` could read as a flag. A branch with no upstream
-// fails that call outright, which zeroes both counts without silencing the
-// dirty check: on Windows a store the operator deliberately keeps
-// remote-less still pends on uncommitted memories, and the sync script
-// commits them locally; off Windows a remote-less dirty store is silence,
-// because the text nudge's whole instruction is the exchange with a remote
-// the store does not have. The dirty check itself ignores the sync's own
-// bookkeeping files (the state file and its temporaries, the lock, the
-// attempt marker), which live untracked in the store root: counting them
-// would call every store pending forever. No `git fetch` runs here, so the
-// behind count is as of this machine's last fetch; the spawned script's own
-// fetch is where the network happens.
-//
-// A pending store spawns doctor/sync-store.ps1 detached (streams ignored,
-// unref'd, so a session start never waits on it), except where the store is
-// not the kit's own repository (no ownership marker, so a foreign repo at the
-// store root is never committed, pushed, or even marked), where powershell.exe
-// is not a thing to spawn (off Windows the one line above is the whole
-// behavior), where a fresh kit-sync.lock says a run is already going (a lock
-// stamped in the future reads as no lock, so a jumped clock cannot pin the
-// sync off), or where the resolved store root is not the default
-// <home>/.claude: an environment-overridden root is a directory this hook
-// reads because the operator pointed a session at it, not one a background
-// process was ever authorized to commit and push, so an overridden store gets
-// no spawn and syncs by the operator's own hand. Each spawn first touches the
-// attempt marker, so a chain that silently never runs leaves dated evidence.
-// The spawn happens whatever text was chosen, a recorded gate state
-// included: the gate self-heals only if the script re-probes after the
-// operator repairs the store. A spawn that fails is silence, and the store
-// simply stays pending for the next session start.
-//
-// What is said is decided by the state file the script writes, and only two
-// states speak at all: a recorded gate-class refusal (the one state where
-// nagging is correct, because no sync will happen until the operator acts)
-// and a transient-failure streak older than SYNC_FAIL_NUDGE_DAYS. Anything
-// else, a healthy sync in progress most of all, is silent, with one
-// backstop: a store still pending with no state file at all, minutes after
-// an attempt marker says a spawn was tried, means the spawn chain itself is
-// broken on this box, and that store gets the same text nudge a platform
-// with no runner gets rather than staying silent forever. Every value that
-// reaches an emitted line is an integer this function computed itself or a
-// fixed literal from this file (the reason text is a map lookup with a fixed
-// fallback); nothing git prints, nothing the state file holds, no path,
-// branch name, or remote URL, ever rides it.
-//
-// `source` gates the whole function to two of the three SessionStart
-// sources hooks.json's matcher admits: `startup` and `resume`, never
-// `compact`. The matcher covers `compact` so that the drift line and the
-// memory index answer on a compacted session instead of going silent, which
-// would be a false clean. This function is a different kind of block, and
-// takes the narrower gate for its own reason: docs/security-model.md
-// records the detached commit-and-push as happening at the next session
-// start, and every auto-compaction is now a session start this function can
-// reach. Gating here, ahead of every git subprocess this function runs to
-// decide whether to spawn (not only the spawn itself), keeps that spawn's
-// trigger where the security model already describes it while letting the
-// drift line and the index block ride the wider matcher. A `source` this
-// function cannot read as exactly 'startup' or 'resume' (absent, non-string,
-// 'compact', 'clear', or any other value) takes the same branch as
-// 'compact': the spawn is the outward, irreversible-ish action this gate
-// exists to contain, so an unreadable source answers the question the
-// conservative way for that action, never the permissive one
-// session-start.js's own benign text nudge defaults to.
-function syncNudge(source, memq) {
-    if (source !== 'startup' && source !== 'resume') return null;
-    const root = memq.memoryRoot();
-    let hasGit = false;
-    try { hasGit = fs.statSync(path.join(root, '.git')).isDirectory(); } catch { hasGit = false; }
-    if (!hasGit) return null;
-
-    let behind = 0;
-    let ahead = 0;
-    let hasUpstream = false;
-    const counts = gitStoreOutput(root, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD']);
-    if (counts !== null) {
-        const m = /^(\d+)\t(\d+)$/.exec(counts.trim());
-        if (m) {
-            const b = Number(m[1]);
-            const a = Number(m[2]);
-            if (Number.isFinite(b) && Number.isFinite(a)) {
-                behind = b;
-                ahead = a;
-                hasUpstream = true;
-            }
-        }
-    }
-
-    // A porcelain line is two status columns, a space, then the path; the
-    // sync's own untracked bookkeeping files are not pending work.
-    const status = gitStoreOutput(root, ['status', '--porcelain']);
-    const dirty = status !== null && status.split('\n').some(function (line) {
-        if (line.trim() === '') return false;
-        return !SYNC_BOOKKEEPING_RE.test(line.slice(3).trim());
-    });
-
-    const pending = !(behind === 0 && ahead === 0 && !dirty);
-
-    // The sync script is Windows PowerShell; a platform without it keeps the
-    // text-only nudge, since silence there would never be broken by a state
-    // file no script ever writes. A remote-less store has no exchange for that
-    // nudge to instruct, so it stays silent.
-    if (process.platform !== 'win32') {
-        if (pending && hasUpstream) return syncFallbackText(dirty, ahead, behind);
-        return null;
-    }
-
-    // The recorded outcome is read up front, before the not-pending shortcut: a
-    // recorded gate is the one state that must speak and re-probe even when
-    // nothing is pending, because the sync stood down and stays down until the
-    // operator acts, and a clean-looking store (a pull-only machine, or a leak
-    // sitting in already-pushed history) is exactly where that alarm would
-    // otherwise be lost. The read touches no git, so a clean store with no gate
-    // costs only a file open before it falls silent here.
-    const state = readSyncState(root);
-    const gated = state !== null && state.lastResult === 'gate';
-    if (!pending && !gated) return null;
-
-    // Past here the store is pending or standing down; confirm the kit owns it
-    // before it speaks, spawns, or is marked. Ownership is the LOCAL git config
-    // key the doctor's -Fix sets, deliberately not the marker-bearing .gitignore
-    // that Test-MemorySyncRepoIsOwn also accepts: a committed .gitignore rides
-    // into a clone (and could be planted by a hostile repo), but a --local
-    // config value is never cloned, so this gate is not forgeable by shipping a
-    // repo at the store root. The cost is that a freshly cloned store reads
-    // foreign here until its first doctor -Fix sets the key, which is the
-    // per-machine setup step anyway. The read runs under gitStoreEnv, which
-    // strips every GIT_* variable the session carried and leaves only the
-    // runner's own prompt refusal and config pins, so a repo-carried
-    // GIT_COMMON_DIR cannot redirect this --local read at an attacker-supplied
-    // config that answers
-    // true, and os.homedir() following USERPROFILE (which the default-store
-    // comparison below trusts) cannot help either, since the key is not on disk
-    // to move. A repo without the key is one this gate does not treat as owned,
-    // an operator's own dotfiles repo at the store root among them: a detached
-    // sync would pollute a worktree the kit has no claim on, and doctor -Fix
-    // refuses a foreign repo, so neither the marker, the spawn, nor a line
-    // belongs to it.
-    const ownedOut = gitStoreOutput(root, ['config', '--local', '--get', 'claudekit.memorysync']);
-    if (ownedOut === null || ownedOut.trim() !== 'true') return null;
-
-    // A lock with a future timestamp is no lock: a clock that jumped backward
-    // must not pin the sync off until it catches up.
-    let lockFresh = false;
-    try {
-        const lockAge = Date.now() - fs.statSync(path.join(root, SYNC_LOCK_FILE)).mtimeMs;
-        lockFresh = lockAge >= 0 && lockAge < SYNC_LOCK_FRESH_MS;
-    } catch { lockFresh = false; }
-
-    let text = null;
-    if (gated) {
-        const reason = Object.prototype.hasOwnProperty.call(SYNC_REASON_TEXT, state.reason)
-            ? SYNC_REASON_TEXT[state.reason] : SYNC_REASON_FALLBACK;
-        text = 'Kit memory sync: automatic sync is standing down (' + reason + '). Run the kit '
-            + 'doctor with -Fix (the kit-doctor skill owns that run); the store is not synced '
-            + 'until its memory-sync line clears.';
-    } else if (state !== null && state.lastResult === 'transient') {
-        const sinceMs = Date.parse(typeof state.firstFailSince === 'string' ? state.firstFailSince : '');
-        const days = Math.floor((Date.now() - sinceMs) / DAY_MS);
-        if (Number.isFinite(days) && days >= SYNC_FAIL_NUDGE_DAYS) {
-            text = 'Kit memory sync: automatic sync has not succeeded in ' + days + ' day(s); it '
-                + 'keeps retrying at session start. If this persists, run the kit doctor with -Fix.';
-        }
-    }
-
-    // The broken-chain backstop: a spawn was tried (the marker records when),
-    // but no run recorded an outcome for it, and no run is in flight now (a
-    // fresh lock means one is, so an absent-or-old state is a run still working
-    // rather than a broken chain, and a slow first fetch must not be mistaken
-    // for one). A healthy run writes its state file at the END, after this
-    // marker, so a marker OLDER than the recorded lastAttempt is a finished run
-    // and stays silent; a marker NEWER than lastAttempt (or a store with no
-    // state at all), once past the stale window, is a spawn that never recorded
-    // an outcome: a missing script after a partial update, a launch failure, a
-    // crash before the state write. That path leaves a frozen prior result
-    // (even 'ok') and the transient streak never surfaces it, because no
-    // transient was ever written. Silence there would never end, so the
-    // platform-without-a-runner text speaks instead.
-    if (text === null && !lockFresh) {
-        try {
-            const markerMs = fs.statSync(path.join(root, SYNC_ATTEMPT_FILE)).mtimeMs;
-            const stateAttemptMs = state && typeof state.lastAttempt === 'string'
-                ? Date.parse(state.lastAttempt) : NaN;
-            // A few seconds of slack over lastAttempt: a lock-losing spawn
-            // writes its marker but no state, so its marker can post-date the
-            // winning run's lastAttempt by milliseconds; without the slack that
-            // reads as a broken chain over a healthy one.
-            const chainStalled = Date.now() - markerMs > SYNC_ATTEMPT_STALE_MS
-                && (!Number.isFinite(stateAttemptMs) || markerMs > stateAttemptMs + 5000);
-            if (chainStalled) text = syncFallbackText(dirty, ahead, behind);
-        } catch { /* no marker: no spawn has been attempted here yet */ }
-    }
-
-    // Only the default store root earns the background spawn; an
-    // environment-overridden root (KIT_MEMORY_ROOT, or a steered USERPROFILE)
-    // is a directory the operator pointed a session at, not one a detached
-    // process was authorized to commit and push, so it syncs only by the
-    // operator's own hand. Windows paths compare case-insensitively.
-    let isDefaultStore = false;
-    try {
-        isDefaultStore = path.resolve(root).toLowerCase()
-            === path.resolve(path.join(os.homedir(), '.claude')).toLowerCase();
-    } catch { isDefaultStore = false; }
-
-    if (isDefaultStore && !lockFresh) {
-        try {
-            // The relauncher must run its fixed one-liner and nothing else, so
-            // the detached env is gitStoreEnv (already stripped of every GIT_*
-            // variable the session carried: GIT_CONFIG_* config injection,
-            // GIT_ASKPASS, GIT_SSH_COMMAND, GIT_PROXY_COMMAND,
-            // GIT_EXTERNAL_DIFF, none of which a background fetch/push should
-            // inherit from a session's environment, leaving the guard's own
-            // GIT_CONFIG_* pins that hold core.fsmonitor and core.hooksPath
-            // inert) with NODE_OPTIONS (a preload injector) additionally
-            // dropped. The two credential variables are set AFTER the strip so
-            // any authentication prompt fails at once instead of hanging a
-            // console-less chain that can never answer one.
-            const env = gitStoreEnv();
-            for (const k of Object.keys(env)) {
-                if (/^NODE_OPTIONS$/i.test(k)) delete env[k];
-            }
-            env.GIT_TERMINAL_PROMPT = '0';
-            env.GCM_INTERACTIVE = 'never';
-            try {
-                fs.writeFileSync(path.join(root, SYNC_ATTEMPT_FILE), new Date().toISOString() + '\n');
-            } catch { /* an unwritable marker costs the backstop, never the spawn */ }
-            const child = spawn(process.execPath, ['-e', SYNC_RELAUNCH, powershellPath(), SYNC_SCRIPT, root],
-                { detached: true, stdio: 'ignore', windowsHide: true, env });
-            // An async spawn failure (EMFILE/EAGAIN) emits 'error'; with no
-            // listener that throws as an uncaught exception and breaks this
-            // hook's exits-0-silently contract. A failed spawn is silence.
-            child.on('error', function () { });
-            child.unref();
-        } catch { /* a failed spawn is silence; the store stays pending and the next session retries */ }
-    }
-
-    return text;
-}
-
 // Spawn `memq db-refresh` detached, so a session that starts on a machine with
 // the memory database configured drains what the last one queued, takes a
 // fresh snapshot of the index and embeds what carries no vector, without
@@ -1040,27 +559,22 @@ function syncNudge(source, memq) {
 // a machine where none can. Every failure is silence, the posture the rest of
 // this hook takes.
 //
-// The relauncher the git sync spawns through is deliberately not used here. It
-// exists because Windows PowerShell's console host exits immediately under
-// DETACHED_PROCESS, so the sync's script needs a node child to run it
-// non-detached; this spawn's target is node itself, which detaches correctly,
-// so a relauncher would add a process and answer nothing.
-//
 // Four conditions, each narrowing what a detached refresh may run against. A
-// startup or resume only, the git sync's own reading of when a session begins.
-// No store pin, since a pinned session's tier is the operator's choice for that
-// session and a whole-store refresh is not what they pinned. The default store
-// root only, the git sync's rule exactly: an overridden root is a directory an
-// operator pointed one session at, never one a background process was
-// authorized to publish from. And the client config must exist, because absent
-// is the ordinary state and a spawn that only ever stands down is a process
-// started on every session start for nothing.
+// startup or resume only: hooks.json's matcher also admits `compact` so the
+// drift line and the memory blocks answer on a compacted session, but a
+// compaction is not a new session, and a source this hook cannot read as
+// exactly one of the two takes the conservative answer for an unattended
+// spawn. No store pin, since a pinned session's tier is the operator's choice
+// for that session and a whole-store refresh is not what they pinned. The
+// default store root only: an overridden root is a directory an operator
+// pointed one session at, never one a background process was authorized to
+// publish from. And the client config must exist, because absent is the
+// ordinary state and a spawn that only ever stands down is a process started
+// on every session start for nothing.
 //
 // The marker is the interval. It is written before the spawn and read on the
 // next start, so a machine opening sessions back to back refreshes once per
-// DB_SYNC_ATTEMPT_STALE_MS rather than once per session, and it is the
-// refresh's own file, with its own interval, so the git sync's marker neither
-// suppresses this spawn nor is suppressed by it.
+// DB_SYNC_ATTEMPT_STALE_MS rather than once per session.
 //
 // The refresh runs in the store root, so the session's project rides its argv:
 // the key and segment memq derives from the session's directory, in the shape
@@ -1101,8 +615,8 @@ function databaseRefreshSpawn(source, memq, cwd) {
     } catch { /* an unwritable marker costs the interval, never the spawn */ }
 
     try {
-        // NODE_OPTIONS is dropped for the reason the sync spawn drops it: it
-        // preloads code into a child this hook is starting unattended. The
+        // NODE_OPTIONS is dropped because it preloads code into a child this
+        // hook is starting unattended. The
         // child's working directory is the store root rather than this
         // session's, so a session opened on a network share does not hand that
         // share to a background process that then spawns a client tool under
@@ -1222,8 +736,8 @@ function redirectedRootLine(memq, pendingNamed) {
 // DRIFT_MEMQ_SYMBOLS checks memq's own symbols before driftNudge calls any of
 // them: an installed cache carrying a kit-compact-lib.js older than
 // scrubAfterStrip would throw here, and the throw reaches the hook's outer
-// catch, which discards every block already built (the decay nudge, the sync
-// trigger) rather than costing this one line. The fall-through is scrub, which
+// catch, which discards every block already built (the decay nudge among
+// them) rather than costing this one line. The fall-through is scrub, which
 // is the same elision with its boundaries kept, so a skewed cache still takes
 // the account name off every line a reduction left alone. The one-version skew
 // is the whole of what the check closes: a cache carrying neither export
@@ -1264,10 +778,10 @@ function rowLines(rows, maxLines, memq, compact, space) {
 
 // The type-tier context block, or null when the project declares no type, the
 // snapshot has no type section, or the section holds no record of that type.
-// memq.projectType validates the declared name against the store's closed
-// type charset, so an invalid or path-token declaration reads as untyped and
-// nothing is ever joined onto a path from raw file content; the type name is
-// then matched against each row's typeName as text and nothing more. Every
+// memq.projectType reads the declarations file under this project's key and
+// validates the value against the store's closed type charset, so an invalid
+// or path-token declaration reads as untyped; the type name is then matched
+// against each row's typeName as text and nothing more. Every
 // no-lines condition is the same silence here, unlike the project block: with
 // no destination half, a block that cannot show its lines has nothing to say.
 function typeIndexBlock(cwd, memq, compact, snapshot) {
@@ -1664,8 +1178,8 @@ async function main() {
     // A store pin the kit cannot honor is resolved first and as its own state,
     // rather than discovered when a block throws. Every block below hangs off
     // the project memory directory, and under such a pin there is no such
-    // directory to hang off: the decay stamp, the Project-Type declaration
-    // that selects the type index, and the run's pending directory are all
+    // directory to hang off: the decay stamp, the project key the Project-Type
+    // declaration is read under, and the run's pending directory are all
     // unreachable, so the stand-down is the whole of what this hook can
     // truthfully say. Deciding it here is what keeps the outer catch from
     // turning the condition into silence, and silence is the failure that
@@ -1690,30 +1204,19 @@ async function main() {
         // lands on the refused-cwd branch below instead.
         //
         // namesNetworkShare is checked for presence here the same way
-        // DRIFT_MEMQ_SYMBOLS checks its own three symbols before driftNudge
+        // DRIFT_MEMQ_SYMBOLS checks its own symbols before driftNudge
         // calls any of them: an installed cache carrying a memq.js older
         // than this predicate lacks the export, and
         // without this guard that throws past this branch to the outer
         // catch, which silences this whole hook (no decay nudge, no type
-        // index, no destination line, no sync trigger) rather than the one
+        // index, no destination line) rather than the one
         // line the skew would otherwise cost. Missing the export routes to the
         // ordinary branch below instead, where driftNudge's own resolution
         // through anchorRoot answers null for an unusable pin, degrading one
         // line rather than the whole hook (a plain skew, memq missing
-        // DRIFT_MEMQ_SYMBOLS' own three exports, is degraded the same way by
+        // DRIFT_MEMQ_SYMBOLS' own exports, is degraded the same way by
         // that separate check).
         blocks.push(NETWORK_CWD_STAND_DOWN);
-        // syncNudge touches neither cwd nor anything this stand-down exists
-        // to protect: its root is memq.memoryRoot(), which reads only
-        // KIT_MEMORY_ROOT/the home directory. Standing the whole hook down
-        // here would silence it alongside the cwd-derived blocks it has
-        // nothing to do with, including the automatic-sync alarm it carries
-        // (the "automatic sync is standing down" line, built to fire even
-        // when nothing is pending), which would otherwise go quiet for every
-        // unpinned network session. So it runs here too, same as the
-        // ordinary branch below.
-        const sync = syncNudge(source, memq);
-        if (sync !== null) blocks.push(sync);
     } else if (!resolvableProjectCwd(cwd, memq)) {
         // A working directory the store refuses to resolve, decided here for
         // the reason the two states above are: every block on the ordinary
@@ -1739,13 +1242,7 @@ async function main() {
                 + 'cannot see. Reach the store through memq from a fully qualified working '
                 + 'directory, one naming its drive or UNC host, since a rooted path without a '
                 + 'drive names a different directory per process drive.');
-        // syncNudge touches nothing cwd-derived, exactly as on the network
-        // branch above, so it still runs.
-        const sync = syncNudge(source, memq);
-        if (sync !== null) blocks.push(sync);
     } else {
-        const nudge = decayNudge(cwd, memq);
-        if (nudge !== null) blocks.push(nudge);
         // A store root the record door does not serve reads no snapshot: its
         // one line, printed once below in the snapshot line's place, stands
         // for every block built from the snapshot or the database.
@@ -1758,6 +1255,10 @@ async function main() {
         // line, which says whether a missing or stale snapshot is being
         // replaced.
         const snapshot = redirected !== null ? { ok: false, reason: 'redirected' } : readSnapshot();
+        // The nudge leads the blocks, and reads the snapshot for the
+        // never-run shape, so it is built here and pushed first.
+        const nudge = decayNudge(cwd, memq, snapshot);
+        if (nudge !== null) blocks.push(nudge);
         let refresh = 'withheld';
         let shownFromSnapshot = false;
         const typeIndex = typeIndexBlock(cwd, memq, compact, snapshot);
@@ -1778,22 +1279,10 @@ async function main() {
         // everything, the index alone, or nothing.
         if (runScoped !== null) blocks.push(runScoped);
         else {
-            // The sync trigger is a maintenance action on the store, the
-            // nudge shape of the decay line above, but it cannot sit beside
-            // it unconditionally: a run-scoped session's block already claims
-            // the whole of what this hook says about where the store stands,
-            // and displacing that with a second voice about the repo would
-            // contradict it. Gating on the same branch as the destination
-            // blocks keeps both the text and the detached sync spawn to the
-            // ordinary and pinned sessions the rest of this branch already
-            // speaks to: a fleet of run-scoped workers each spawning a sync
-            // would be contention with no owner.
-            const sync = syncNudge(source, memq);
-            if (sync !== null) blocks.push(sync);
             // The refresh spawn rides this branch and adds no block. It is
-            // gated here for the sync spawn's own reason rather than for
-            // anything it says: a fleet of run-scoped workers each refreshing
-            // the whole snapshot would be contention with no owner.
+            // gated here for contention rather than for anything it says: a
+            // fleet of run-scoped workers each refreshing the whole snapshot
+            // would be contention with no owner.
             refresh = databaseRefreshSpawn(source, memq, cwd);
             const pinnedDestination = redirected !== null ? null : pinnedDestinationBlock(memq);
             if (pinnedDestination !== null) blocks.push(pinnedDestination);
@@ -1824,7 +1313,7 @@ async function main() {
         // the project tier's anchors are checkable from a run-scoped session
         // exactly as they are from an ordinary one, the same reach the decay
         // nudge above already has.
-        const drift = driftNudge(cwd, memq);
+        const drift = driftNudge(cwd, memq, snapshot);
         if (drift !== null) blocks.push(drift);
     }
 

@@ -194,6 +194,9 @@ import {
   STEP_DRIFT,
   STEP_DRIFT_OPTIONS,
   stepDriftStateText,
+  STEP_EFFORT,
+  STEP_EFFORT_OPTIONS,
+  stepEffortStateText,
   TOOL_RESULT_STALE,
   TOOL_RESULT_STALE_OPTIONS,
   toolResultStaleStateText,
@@ -213,7 +216,7 @@ import { ask, askAll, COMPLETE_TIMEOUT_MS, heldFailure, holdFor, HOLD_TIMEOUT, S
 import { newStampId, segment, splitOf, writeCall, writeAnswers, writeOutcome, writeRendering, writeEvent, journalDirOf, JOURNAL_FILE_PATTERN, ASK_MARKER_VALUE, type JournalWrite, type OutcomeKind } from "./decision-journal";
 // The in-process recognition index the memory-recognition shadow matches,
 // and the memory-recognition nudge's index, match, claim and text.
-import { recognitionIndexOf, recognitionKeyOf, recognitionMatches, recognitionScopeOf, shellCommandOf, RECOGNITION_OPS_MAX, RECOGNITION_SCOPE_RETRY_MS, RECOGNITION_SCOPE_SCRIPT, RECOGNITION_ACT_WINDOW, nudgeClaim, nudgeCollectHits, nudgeElisionsOf, nudgeEventDetail, nudgeIndexOf, nudgeMarkerKeys, nudgeMarkerOf, nudgeStampsRead, nudgeStrictSeat, nudgeSubjectsOf, nudgeText, type NudgeBoundary, type NudgeHit, type NudgeMarker, type NudgePayload, type NudgeRecord, type NudgeSubjects, type RecognitionIndex, type RecognitionMatch, type RecognitionScope, type RecognitionTier } from "./recognition";
+import { recognitionIndexOf, recognitionKeyOf, recognitionMatches, recognitionScopeOf, shellCommandOf, RECOGNITION_OPS_MAX, RECOGNITION_SCOPE_RETRY_MS, RECOGNITION_SCOPE_SCRIPT, RECOGNITION_ACT_WINDOW, nudgeClaim, nudgeCollectHits, nudgeElisionsOf, nudgeEventDetail, nudgeIndexOf, nudgeMarkerKeys, nudgeMarkerOf, nudgeStrictSeat, nudgeSubjectsOf, nudgeText, type NudgeBoundary, type NudgeHit, type NudgeMarker, type NudgePayload, type NudgeRecord, type NudgeSubjects, type RecognitionIndex, type RecognitionMatch, type RecognitionScope, type RecognitionTier } from "./recognition";
 // The one builder of a prompt's context blocks, for a typed prompt and for a
 // delivered inbox record.
 import { assembleContext, deliveryWithContext, type ContextSources } from "./context-assembly";
@@ -226,9 +229,9 @@ import { COMPACT_PASS_FLOOR_PERCENT, COMPACT_PLAN_STALE_MESSAGES, COMPACT_REMIND
 // The seam the before-tool guards and the after-call hooks plug into, run
 // around next(e) in the tool.call handler.
 import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore, type AfterHook, type BeforeGuard, type GuardCall, type GuardContext, type GuardHost, type GuardResult, type GuardVerdictRecord } from "./guards/runner";
-// The module's own after-call hooks: the C# formatter, the memory read stamp
-// and the memory-recognition nudge.
-import { formatterHook, readStampHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
+// The module's own after-call hooks: the C# formatter and the
+// memory-recognition nudge.
+import { formatterHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
 // The four deny guards the kit's command hooks hold, ported, and the path
 // host their tree reads go through.
 import { pathOpsOf, readonlyAgentGuard, type LexHost } from "./guards/readonly-agent";
@@ -683,8 +686,10 @@ export type LiveAskResult =
  * or names why it fell back, reads the stamp id and the reason as well.
  *
  * A live call is awaited on the hook that asked it, and `event` names that
- * hook's event. `budget` is that hook's own, built by hookBudgetOf. The call
- * holds through holdFor at the
+ * hook's event. `budget` is that hook's own, built by hookBudgetOf. The one
+ * exception is step-effort's call, which turn.step fires and never awaits,
+ * under the turn.step.effort event with an unmetered budget, so its hold
+ * runs on a detached chain. The call holds through holdFor at the
  * wait rule's Jev figure for that event, held under the hook's remaining
  * budget, from the moment this is called, which covers the key read, the
  * override resolver and the request alike; that hold is the call's one
@@ -1293,8 +1298,8 @@ async function guardEvent(dp: any, event: "guard_verdict" | "guard_shadow" | "gu
 const guardPhaseCalls = new Map<string, string>();
 
 // The module's own after hooks for one call, built over the hook-bound `$`
-// for hostOf's reason: the C# formatter, the memory read stamp and, on a call
-// the model made, the memory-recognition nudge. A call a plugin raised
+// for hostOf's reason: the C# formatter and, on a call the model made, the
+// memory-recognition nudge. A call a plugin raised
 // through $.tool.call reaches the handler too, and the engine drops the
 // context such a call's result carries, so a pointer claimed there would be
 // marked as pointed at and never seen; `modelMade` is next.origin naming
@@ -1304,7 +1309,6 @@ const guardPhaseCalls = new Map<string, string>();
 function moduleAfterHooks(dp: any, modelMade: boolean): AfterHook[] {
   const hooks: AfterHook[] = [
     formatterHook({ cwd: () => guardCwdOf(dp), host: guardHostOf(dp), resolve: (name: string) => executableOf(dp, name) }),
-    readStampHook({ stamp: (filePath: string) => readStamp(dp, filePath) }),
   ];
   if (modelMade) hooks.push(recognitionHook({ nudge: (call: GuardCall, r: GuardResult) => toolCallNudges(dp, call, r) }));
   return hooks;
@@ -3399,16 +3403,78 @@ function isNudgeCountWork(toolName: string): boolean {
 // asked about, whether the call has settled and the choice Jev answered, null
 // while it is pending or where it failed. The entry id is what the turn end
 // matches against the entry the scorer labelled.
+//
+// `effortReading` is the latest step-effort call the watch fired, held until
+// the next step writes its outcome: its stamp id, the index of the step its
+// answer is for, whether the call has settled and the choice Jev answered,
+// null while it is pending or where it failed; null before the turn's first
+// reading and between an outcome and the next reading. `effort` counts the
+// turn's step-effort readings for the turn end's decision: the calls fired,
+// the calls settled, the settled choices by option id, the readings still
+// unsettled when the step they were for fired, and the effort rewrites
+// applied to a step, by level, and refused for an effort the event's shape
+// does not take. Only a live reading rewrites a step, so under shadow the
+// three rewrite counts stay zero.
 type StepWatch = {
   turnId: string | null;
   steps: number;
   toolUses: number;
   answeredSteps: number;
   driftCalls: { stampId: string; entryId: string; settled: boolean; choice: string | null }[];
+  effortReading: { stampId: string; forIndex: number; settled: boolean; choice: string | null } | null;
+  effort: {
+    readings: number;
+    settled: number;
+    choices: Record<string, number>;
+    late: number;
+    lowered: number;
+    raised: number;
+    unrewritable: number;
+  };
 };
 
 function stepWatchOf(turnId: string | null): StepWatch {
-  return { turnId, steps: 0, toolUses: 0, answeredSteps: 0, driftCalls: [] };
+  return {
+    turnId, steps: 0, toolUses: 0, answeredSteps: 0, driftCalls: [],
+    effortReading: null,
+    effort: { readings: 0, settled: 0, choices: {}, late: 0, lowered: 0, raised: 0, unrewritable: 0 },
+  };
+}
+
+// A step-effort call's next_step_tools value, read off the step after it: the
+// names of the tools that step called, in call order and joined with commas,
+// or `answer` where it called none, whatever its text. The turn end writes
+// `none` itself for a call no step came after.
+function nextStepToolsValue(toolUses: readonly { name: string }[]): string {
+  return toolUses.length > 0 ? toolUses.map((use) => String(use.name)).join(",") : "answer";
+}
+
+// The step event a settled live step-effort choice sends down, counting the
+// rewrite it applies into `counts`. `low` sends the request at low effort.
+// `high` sends it at high where the step came at low or medium, and leaves a
+// step already at high or above as it came, so a `high` never lowers the
+// step's effort. `keep`, and any other choice, sends the
+// step as it came. A step whose effort is absent or a number takes no named
+// level, so a `low` or `high` choice leaves it as it came and counts it
+// unrewritable. A step already at the level the choice names counts nothing.
+function stepEffortRewrite<E extends { effort?: unknown }>(
+  e: E,
+  choice: string,
+  counts: { lowered: number; raised: number; unrewritable: number },
+): E {
+  if (choice !== "low" && choice !== "high") return e;
+  if (typeof e.effort !== "string") {
+    counts.unrewritable += 1;
+    return e;
+  }
+  if (choice === "low") {
+    if (e.effort === "low") return e;
+    counts.lowered += 1;
+    return { ...e, effort: "low" };
+  }
+  if (e.effort !== "low" && e.effort !== "medium") return e;
+  counts.raised += 1;
+  return { ...e, effort: "high" };
 }
 
 const sess: {
@@ -5169,8 +5235,8 @@ function recallRecordText(c: RecallCandidate, body: string | null, length: numbe
 // records Jev said show, in that same order, fetching each body through memq
 // get --no-stamp only where its known length is inside RECALL_BODY_MAX, since
 // a longer record shows as its pointer whatever the body says. Every fetch
-// carries --no-stamp, so none writes a read stamp or a pointer outcome, and
-// none can count as the session opening the record.
+// carries --no-stamp, so none writes a pointer outcome, and none can count
+// as the session opening the record.
 //
 // `mode` off sends nothing, spawns nothing and writes nothing, shadowAsk's
 // rule. The one decision a failed journal write earns is noteJournalWrite's.
@@ -5507,8 +5573,8 @@ async function recognitionScopeRead(dp: any): Promise<RecognitionScope | null> {
 
 // One check of the snapshot. Where `mayRunScope` is set and the session holds
 // no scope, the scope program runs first, before the snapshot is looked at,
-// so the read stamp, which reads the scope alone, has one whatever state the
-// snapshot is in. Then a size and mtime equal to the index's stamp leave the
+// so the session holds a scope whatever state the snapshot is in. Then a
+// size and mtime equal to the index's stamp leave the
 // index as it is, and otherwise the file is read and both indexes, the
 // shadow's and the nudge's, rebuilt from that one read. session.start's load
 // and prompt.submit's retry set `mayRunScope`: a check a tool call starts
@@ -5644,7 +5710,7 @@ function settleRecognitionOutcomes(dp: any, fetches: ReadonlyArray<{ name: strin
   sess.recognitionPending = open;
 }
 
-// --- The memory-recognition nudge and the memory read stamp ---
+// --- The memory-recognition nudge ---
 //
 // The nudge points the session at a stored record whose triggers or anchors
 // match what it is doing, by the rules hooks/recognition.ts holds: after a
@@ -5820,39 +5886,6 @@ async function spawnWithNudge(dp: any, e: AgentSpawnInput, next: Next<"agent.spa
     text = null;
   }
   return next(text === null ? e : { ...e, prompt: e.prompt + "\n\n" + text });
-}
-
-// Stamps a Read of a memory file read through memq's stamp-read verb, once,
-// bounded at MEMQ_WRITE_TIMEOUT_MS. A path outside the store's tiers under
-// the scope's memory root spawns nothing, and so does a session whose scope
-// is unknown: the scope comes from session.start's run or prompt.submit's
-// retry, never from a run of the call's own. A stamp that failed is
-// journaled once a session as a guard_error event line in the after phase,
-// naming the read stamp and the verb, so a stamp that cannot be taken is
-// seen: a stamp-read that ran and exited other than 0 names the exit code,
-// and one kitMemq did not run to an exit names kitMemq's cause, `start` (no
-// node on PATH among them) or `timeout`. The Read's result is untouched
-// either way.
-let readStampFailureJournaled = false;
-
-async function readStamp(dp: any, filePath: string): Promise<void> {
-  await recognitionSettledNow(dp);
-  const scope = sess.recognition.scope;
-  if (scope === null || typeof scope.memoryRoot !== "string") return;
-  if (!nudgeStampsRead(filePath, scope.memoryRoot, scope.namesFoldCase)) return;
-  let notRun: { cause: string; reason: string } | null = null;
-  const ran = await kitMemq(dp, ["stamp-read", filePath], { timeoutMs: MEMQ_WRITE_TIMEOUT_MS, onNotRun: (cause, reason) => { notRun = { cause, reason }; } });
-  if (readStampFailureJournaled) return;
-  if (ran === null) {
-    const failed = notRun as { cause: string; reason: string } | null;
-    if (failed === null) return;
-    readStampFailureJournaled = true;
-    await guardEvent(dp, "guard_error", { guard: "read-stamp", phase: "after", verb: "stamp-read", cause: failed.cause, failure: `memq stamp-read did not run: ${failed.cause}${failed.reason ? `; ${failed.reason}` : ""}` });
-    return;
-  }
-  if (ran.exitCode === 0) return;
-  readStampFailureJournaled = true;
-  await guardEvent(dp, "guard_error", { guard: "read-stamp", phase: "after", verb: "stamp-read", exitCode: ran.exitCode, failure: `memq stamp-read exited ${ran.exitCode === null ? "with no exit code" : ran.exitCode}` });
 }
 
 async function migrateLegacyMemories(dp: any): Promise<void> {
@@ -6444,13 +6477,18 @@ async function drainSupervisorMailbox(
 
 // --- Fleet status: one row per roster persona, for the fleet_status tool ---
 
-// The foot of the process keeper's relaunch ladder, in seconds.
-// bin/keeper-functions.ps1 holds the same number as KeeperBaseDelaySeconds.
-// The ladder doubles on a crash-class exit and returns to this value after a
-// run that lasted the reset uptime, so a keeper.json whose currentDelay is
-// above this is a persona the keeper has escalated. The two files carry one
-// value, pinned by .kit/fleet-status-unit-test.mjs.
+// The process keeper's relaunch ladder, in seconds. bin/keeper-functions.ps1
+// holds the same three numbers as KeeperBaseDelaySeconds,
+// KeeperMaxDelaySeconds and KeeperResetUptimeSeconds. The ladder starts at the
+// base, doubles on a crash-class exit up to the cap, and returns to the base
+// after a run that lasted the reset uptime, so a keeper.json whose
+// currentDelay is above the base is a persona the keeper has escalated, and
+// one whose current run has lasted the reset uptime goes back to the base at
+// its next exit. The two files carry one value each, pinned by
+// test-personas/fleet-status-unit-test.mjs.
 const KEEPER_BASE_DELAY_SECONDS = 300;
+const KEEPER_MAX_DELAY_SECONDS = 14400;
+const KEEPER_RESET_UPTIME_SECONDS = 3600;
 
 // One roster persona's line in the fleet report. The keeper half comes from
 // <rundir>/keeper.json and <rundir>/keeper.hold or keeper.park, the commons
@@ -6482,7 +6520,10 @@ type FleetRow = {
   // The delay in seconds the keeper will apply after the next crash-class
   // exit, which is what keeper.json's currentDelay holds: bin/Start-Persona.ps1
   // writes the decision's NextDelaySeconds there. It is not the wait being
-  // served now, and keeper.json records no such value.
+  // served now, and keeper.json records no such value. The keeper puts it back
+  // at the base before that exit's row once the exiting run lasted the reset
+  // uptime, so on a running row it can name a delay that will never be served,
+  // which the health class reads past (fleetLadderDueToReset).
   nextDelaySeconds: number | null;
   holdReason: string | null;
   // The file holdReason was read from, so text a persona's own run directory
@@ -6851,6 +6892,29 @@ function fleetEndUnreadable(standing: KeeperStanding, claimHeld: boolean, lastEn
   return standing === "stopped" && claimHeld && lastEndMs === null;
 }
 
+// Whether a live row's ladder is one the keeper will put back at the base on
+// the current run's next exit. Get-KeeperDecision in bin/keeper-functions.ps1
+// resets the ladder before applying any row once the exiting run lasted the
+// reset uptime, and keeper.json is written at an exit and never at a launch,
+// so the current run's uptime is bounded from that file alone. The keeper
+// stamps lastEnd when the previous supervisor returns and then sleeps the
+// delay it served before launching. That served delay is at most the recorded
+// currentDelay where the ladder has reached the cap, and at most half of it
+// below the cap, since the doubling row writes twice the served delay. So the
+// run has lasted the time since the stamp less that bound, short only by the
+// seconds the keeper takes to launch after its sleep. The bound holds for a
+// keeper at its default delay scale whose launch followed a decision. A
+// launch that follows the wait on a supervisor the keeper could not open
+// writes no stamp, so the run after it can read as due early by as long as
+// that wait lasted.
+// With no live claim there is no current run to measure, and with no readable
+// stamp nothing bounds it, so both leave the ladder standing as read.
+function fleetLadderDueToReset(nextDelaySeconds: number | null, lastEndMs: number | null, claimHeld: boolean, now: number): boolean {
+  if (!claimHeld || nextDelaySeconds === null || lastEndMs === null) return false;
+  const servedBoundSeconds = nextDelaySeconds >= KEEPER_MAX_DELAY_SECONDS ? nextDelaySeconds : nextDelaySeconds / 2;
+  return (now - lastEndMs) / 1000 - servedBoundSeconds >= KEEPER_RESET_UPTIME_SECONDS;
+}
+
 // One line of the watcher's line-structured prompt, in the two halves that
 // prompt tells apart by a line's own opening: `composed` is the plugin's own
 // sentence and `carried` is text a file supplied, which rides on a quoted line
@@ -6870,9 +6934,15 @@ type FleetLine = { composed: string; carried: string | null };
 // roster entry that got no row. The fleet_status tool serves this as JSON and
 // the controller tick's watcher reduces its rows to health classes, so the two
 // readers cannot drift on what a row means.
+// `ladderDueToReset` names the rows whose climbed ladder the keeper will reset
+// on the current run's next exit, which only the watcher's class reduction
+// reads. It rides beside the rows rather than on them, so the row the tool
+// serves keeps its shape, and it is keyed by name because a report gives one
+// name one row.
 type FleetReport = {
   roster: string | null;
   rows: FleetRow[];
+  ladderDueToReset: ReadonlySet<string>;
   problem?: FleetLine;
   problems?: FleetLine[];
 };
@@ -6895,7 +6965,7 @@ const readFleetRows = async (
   now: number,
 ): Promise<FleetReport> => {
   if (fleetRoster === "") {
-    return { roster: null, rows: [], problem: { composed: "the plugin's fleetRoster setting names no roster file, so there is no fleet to read.", carried: null } };
+    return { roster: null, rows: [], ladderDueToReset: new Set(), problem: { composed: "the plugin's fleetRoster setting names no roster file, so there is no fleet to read.", carried: null } };
   }
   let roster: unknown;
   try {
@@ -6914,6 +6984,7 @@ const readFleetRows = async (
     return {
       roster: fleetRoster,
       rows: [],
+      ladderDueToReset: new Set(),
       problem: {
         composed: `the roster '${fleetRoster}' could not be read, and the error the read returned is carried beside this sentence.`,
         carried: boundedText(safeErrorText(err)),
@@ -6921,9 +6992,10 @@ const readFleetRows = async (
     };
   }
   if (!Array.isArray(roster)) {
-    return { roster: fleetRoster, rows: [], problem: { composed: `the roster '${fleetRoster}' does not hold a JSON array of persona entries.`, carried: null } };
+    return { roster: fleetRoster, rows: [], ladderDueToReset: new Set(), problem: { composed: `the roster '${fleetRoster}' does not hold a JSON array of persona entries.`, carried: null } };
   }
   const rows: FleetRow[] = [];
+  const ladderDueToReset = new Set<string>();
   const problems: FleetLine[] = [];
   // The names already given a row. A roster naming one persona twice gets one
   // row and a problem line rather than two rows: the watcher that reduces
@@ -6980,6 +7052,7 @@ const readFleetRows = async (
         : []),
     ];
     const note = notes.length > 0 ? boundedText(notes.join("; ")) : undefined;
+    if (fleetLadderDueToReset(keeper.nextDelaySeconds, keeper.lastEndMs, commons.claimHeld, now)) ladderDueToReset.add(name);
     rows.push({
       name,
       enabled: entry.enabled === true,
@@ -6999,7 +7072,7 @@ const readFleetRows = async (
       ...(note !== undefined ? { note } : {}),
     });
   }
-  return { roster: fleetRoster, rows, ...(problems.length > 0 ? { problems } : {}) };
+  return { roster: fleetRoster, rows, ladderDueToReset, ...(problems.length > 0 ? { problems } : {}) };
 };
 
 // One row's health class. The five classes and the value the watcher stores
@@ -7013,7 +7086,9 @@ const readFleetRows = async (
 // The order settles a row that satisfies more than one class. A marker
 // decides first, because it says what happens next whatever is running now.
 // The ladder decides next, above the base being a keeper that has escalated,
-// except on the one exit the keeper never relaunches from. Then what the
+// except on the one exit the keeper never relaunches from and on a live row
+// whose current run has outlasted the keeper's reset uptime, which
+// `ladderDueToReset` carries from where the row was built. Then what the
 // commons says: an enabled roster line no live session is holding takes one
 // class, whether its old entry is still standing or has aged out of the store.
 // A disabled line is nobody's problem once its entry has gone and reads
@@ -7023,7 +7098,7 @@ const readFleetRows = async (
 // has yet to write: under a claim, a note is otherwise the keeper state that
 // could not be read, and a persona whose keeper state cannot be read is one
 // nobody can say is well.
-function fleetHealthOf(row: FleetRow): FleetHealth {
+function fleetHealthOf(row: FleetRow, ladderDueToReset: boolean): FleetHealth {
   if (row.action === "held") return FLEET_HEALTH.held;
   // A signalled exit standing over a live claim: the keeper recorded exit 130
   // or 143, on which it relaunches nothing, and the claim's own heartbeat is
@@ -7043,8 +7118,15 @@ function fleetHealthOf(row: FleetRow): FleetHealth {
   // with no live session holding its claim, is placed by the commons below
   // rather than by the ladder, which would otherwise report it as backing off
   // and name a relaunch that is not coming.
+  // A ladder due to reset is read past for the same kind of reason: the keeper
+  // puts it back at the base before applying the next exit's row once the
+  // exiting run lasted the reset uptime, and this live row's run may already
+  // have, so the delay it names is not one the keeper will serve.
+  // fleetLadderDueToReset sets it only on a row with a live claim and a
+  // readable lastEnd, so a persona nothing live is holding still reads its
+  // ladder here, as its action does.
   const signalledAndDown = row.action === "stopped" && !row.claimHeld;
-  if (!signalledAndDown && (row.action === "backing off" || (row.nextDelaySeconds !== null && row.nextDelaySeconds > KEEPER_BASE_DELAY_SECONDS))) {
+  if (!signalledAndDown && !ladderDueToReset && (row.action === "backing off" || (row.nextDelaySeconds !== null && row.nextDelaySeconds > KEEPER_BASE_DELAY_SECONDS))) {
     return FLEET_HEALTH.backingOff;
   }
   if (!row.claimHeld) {
@@ -8795,8 +8877,8 @@ export const register: Register = async (on, options) => {
 
     // The recognition indexes, the shadow's and the nudge's, read from the
     // memory snapshot once the launch directory their scope is resolved in
-    // is known, and awaited by nothing. The nudge and the read stamp run
-    // whatever Jev's mode, so the load does too.
+    // is known, and awaited by nothing. The nudge runs whatever Jev's mode,
+    // so the load does too.
     startRecognitionLoad($, true);
 
     // Register tools. Every registration goes through registerTool, so a
@@ -9306,7 +9388,8 @@ export const register: Register = async (on, options) => {
         "The five fleet health classes each name a whole row in one reading, and a [FLEET] prompt's lines carry them. A row takes " +
         "the first class that fits, read in this order. held: the action reads held. stale: the action reads stopped and a live " +
         "session holds the claim. backing off: the action reads anything but stopped, and either it reads backing off or " +
-        "nextDelaySeconds sits above the base, so a running row whose delay has climbed carries this class. no live claim while " +
+        "nextDelaySeconds sits above the base, so a running row carries this class until 3600 s plus half that delay, " +
+        "or all of it at the cap, pass since its last exit. no live claim while " +
         "the roster enables it: nothing live holds the claim and the roster enables the persona. " +
         "With no live claim under a disabled roster entry, a commons entry still standing reads stale and none reads healthy. " +
         "With a live claim, no note at all or nothing but a keeper.json not yet written reads healthy, and any other note reads " +
@@ -10502,7 +10585,7 @@ export const register: Register = async (on, options) => {
             // to healthy, and have that fall held back as a flap into a class it
             // has already been reported in. The note saying its keeper state is
             // gone then reaches nobody who did not call fleet_status by hand.
-            const health = fleetClassValue(fleetHealthOf(row), row.enabled, row.keeperStateUnwritten);
+            const health = fleetClassValue(fleetHealthOf(row, report.ladderDueToReset.has(row.name)), row.enabled, row.keeperStateUnwritten);
             // What this persona reads as when there is nothing to say about it,
             // which for a roster entry the operator has disabled is that entry
             // healthy and disabled: an entry disabled before the steward's first
@@ -13472,6 +13555,13 @@ export const register: Register = async (on, options) => {
     openTurns.set(e.turnId, at);
     // The step watch opens this turn's reading under its id, before any
     // await, so no step of this turn can land on the last turn's reading.
+    // A step-effort reading the last watch still held, its turn never
+    // completed, has no next step it will see and takes none first.
+    const heldEffortReading = sess.stepWatch.effortReading;
+    if (heldEffortReading !== null) {
+      sess.stepWatch.effortReading = null;
+      shadowOutcome(hostOf($), heldEffortReading.stampId, "next_step_tools", "none");
+    }
     sess.stepWatch = stepWatchOf(typeof e.turnId === "string" ? e.turnId : null);
     sess.askSeenAtStep = null;
     // The follow-up entries the prompt opening this turn listed, taken here
@@ -16062,8 +16152,8 @@ export const register: Register = async (on, options) => {
         return next(e);
       }
       // Every tier, "off" included, retries a scope run that did not answer,
-      // so the read stamp and the nudge recover without a tool call spawning
-      // anything; the retry writes no file.
+      // so the nudge recovers without a tool call spawning anything; the
+      // retry writes no file.
       recognitionScopeRetry($);
       // An "off" session attaches the memory-recognition block and does
       // nothing else: no origin reading, no record, no other block.
@@ -16276,22 +16366,51 @@ export const register: Register = async (on, options) => {
 
   // --- turn.step: the step watch ---
   // Runs on every model response of every turn, so it holds nothing: every
-  // chunk passes up as it arrived, the result returned is the one next(e)
+  // chunk passes up as it arrived, the result returned is the one next
   // returned, and the only thing awaited is the stream beneath. On the way up
   // it reads the finished response for the main loop of an owner session's
   // open turn: it counts the step and its tool calls, notes the first step
   // whose answer carries an ASK: marker line, and at every
   // STEP_DRIFT_EVERY-th step with an answer, where an entry is active, fires
   // the step-drift question in shadow over that entry's objective, never
-  // awaited. A subagent's step, a reader session's and a step of a turn this
-  // session saw no start for pass through with no reading. Every reading sits
-  // inside a catch, so nothing here throws into the step.
+  // awaited. At every step whose response arrived, with an answer or not, it
+  // writes the previous step-effort call's next_step_tools outcome from this
+  // step's tools and fires step-effort over this step for the next request,
+  // never awaited: in shadow, or live through liveAsk where jevLive names
+  // step-effort. A step whose response never arrived, one with no result or
+  // with no stop reason, fires nothing and closes the reading made for it
+  // with none. Going down it reads the step-effort reading for this step. One
+  // still unsettled is counted late and the step goes as it came. A live one
+  // settled with a choice rewrites the step's effort through
+  // stepEffortRewrite. Otherwise the event handed to next is the event
+  // received. A subagent's step, a reader session's and a step of a turn this
+  // session saw no start for pass through with no reading and no rewrite.
+  // Every reading sits inside a catch, so nothing here throws into the step.
   on("turn.step", async function* ($, e, next) {
     // The budget a shadow call fired here takes its share of, live until
     // the handler returns; hookBudgetOf says why the flag is cleared here.
     const hookBudget = hookBudgetOf(next);
     try {
-      const result = yield* next(e);
+      // The event handed down: the event received, or, where a live reading
+      // for this step settled with a choice, that choice's rewrite of it.
+      let down = e;
+      try {
+        const watch = sess.stepWatch;
+        const subagentStep = typeof e.agentId === "string" && e.agentId.length > 0;
+        const reading = watch.effortReading;
+        if (sess.isOwner && !subagentStep && watch.turnId !== null && e.turnId === watch.turnId
+          && reading !== null && reading.forIndex === e.index) {
+          if (!reading.settled) {
+            watch.effort.late += 1;
+          } else if (jevMode === "shadow" && jevLive.includes(STEP_EFFORT) && reading.choice !== null) {
+            down = stepEffortRewrite(e, reading.choice, watch.effort);
+          }
+        }
+      } catch {
+        // A count or a rewrite is lost, and the step goes on as it came.
+        down = e;
+      }
+      const result = yield* next(down);
       try {
         const watch = sess.stepWatch;
         const subagentStep = typeof e.agentId === "string" && e.agentId.length > 0;
@@ -16331,6 +16450,91 @@ export const register: Register = async (on, options) => {
                 call.stampId = stampId;
                 watch.driftCalls.push(call);
               }
+            }
+          }
+        }
+        if (sess.isOwner && !subagentStep && watch.turnId !== null && e.turnId === watch.turnId) {
+          if (!result || result.stopReason === null) {
+            // No response arrived for this step's request, so it fires no
+            // reading. The reading made for this step has no next step to
+            // describe and takes none. A reading for another index is left.
+            const pending = watch.effortReading;
+            if (pending !== null && pending.forIndex === e.index) {
+              watch.effortReading = null;
+              shadowOutcome(hostOf($), pending.stampId, "next_step_tools", "none");
+            }
+          } else {
+            const answer = typeof result.answer === "string" ? result.answer : "";
+            // The previous step-effort call's outcome: what this step, the one
+            // its reading was for, did next.
+            const toolUses: readonly { name: string; input?: unknown }[] = Array.isArray(result.toolUses) ? result.toolUses : [];
+            const prior = watch.effortReading;
+            if (prior !== null) {
+              watch.effortReading = null;
+              shadowOutcome(hostOf($), prior.stampId, "next_step_tools", nextStepToolsValue(toolUses));
+            }
+            // The reading for the next request, over this step and the entry
+            // active at it, or none with no active entry. The slot settles
+            // through the call's result, whenever that arrives.
+            const effortActiveId = sess.state.activeGoalId;
+            const effortEntry = effortActiveId ? sess.state.goals.find((g) => g.id === effortActiveId) : undefined;
+            const reading: NonNullable<StepWatch["effortReading"]> = { stampId: "", forIndex: e.index + 1, settled: false, choice: null };
+            const settle = (choice: string | null): void => {
+              reading.settled = true;
+              watch.effort.settled += 1;
+              if (choice !== null) {
+                reading.choice = choice;
+                watch.effort.choices[choice] = (watch.effort.choices[choice] ?? 0) + 1;
+              }
+            };
+            const effortState = stepEffortStateText(
+              effortEntry ? effortEntry.objective : null,
+              e.index,
+              answer,
+              toolUses,
+              typeof result.stopReason === "string" ? result.stopReason : null,
+            );
+            let effortStampId: string | null = null;
+            if (jevMode === "shadow" && jevLive.includes(STEP_EFFORT)) {
+              // Live: liveAsk holds under the turn.step.effort row, never
+              // awaited here, so the step passes up at once and the next
+              // step reads the slot. The budget is unmetered rather than
+              // this hook's, which ends before the call can answer. A
+              // rejection, which liveAsk's contract rules out, settles the
+              // slot with no choice, and the catch covers a throw in settle.
+              const effortBudget: HookBudget = { live: false, remainingMs: () => Infinity };
+              void liveAsk(
+                hostOf($),
+                "turn.step.effort",
+                effortBudget,
+                STEP_EFFORT,
+                STEP_EFFORT,
+                STEP_EFFORT_OPTIONS,
+                effortState,
+                jevMode,
+                jevLive,
+                (stampId) => { effortStampId = stampId; },
+              )
+                .then((live) => settle(live !== null && "answer" in live ? live.answer.choice : null), () => settle(null))
+                .catch(() => { /* a lost reading; nothing awaits this chain */ });
+            } else {
+              effortStampId = shadowAsk(
+                hostOf($),
+                STEP_EFFORT,
+                STEP_EFFORT,
+                STEP_EFFORT_OPTIONS,
+                effortState,
+                jevMode,
+                null,
+                undefined,
+                (settled) => settle(settled !== null && settled.ok ? settled.answer.choice : null),
+                hookBudget,
+              );
+            }
+            if (effortStampId !== null) {
+              reading.stampId = effortStampId;
+              watch.effortReading = reading;
+              watch.effort.readings += 1;
             }
           }
         }
@@ -17252,6 +17456,27 @@ export const register: Register = async (on, options) => {
           for (const call of driftCalls) {
             if (call.entryId === turnLeaf.id) shadowOutcome(hostOf($), call.stampId, "turn_score_label", scoredLabel);
           }
+        }
+        // The step-effort readings of the same turn, as one decision beside
+        // it: the steps, the readings fired, the settled readings by choice,
+        // the readings that settled with no choice, the readings still
+        // unsettled now, the rewrites applied by level and refused, and the
+        // readings still unsettled when the step they were for fired. The
+        // turn's last reading had no step after it, so its next_step_tools
+        // outcome is none.
+        const effort = stepWatchAtDelete.effort;
+        const byChoice = STEP_EFFORT_OPTIONS.map((id) => `${id} ${effort.choices[id] ?? 0}`).join(", ");
+        const chosen = STEP_EFFORT_OPTIONS.reduce((sum, id) => sum + (effort.choices[id] ?? 0), 0);
+        sess.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "goal",
+          action: "step_effort_readings",
+          detail: `turn ${kaizenLine(String(e.turnId))}: steps ${stepWatchAtDelete.steps}, readings ${effort.readings} (${byChoice}, failed ${effort.settled - chosen}, pending ${effort.readings - effort.settled}), lowered ${effort.lowered}, raised ${effort.raised}, unrewritable ${effort.unrewritable}, late ${effort.late}`,
+        });
+        const lastReading = stepWatchAtDelete.effortReading;
+        if (lastReading !== null) {
+          stepWatchAtDelete.effortReading = null;
+          shadowOutcome(hostOf($), lastReading.stampId, "next_step_tools", "none");
         }
       }
 

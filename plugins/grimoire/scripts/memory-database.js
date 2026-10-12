@@ -10,11 +10,12 @@
 // point answers absence with a typed result naming the reason, and nothing
 // here throws that condition at a caller.
 //
-// The markdown store stays the record. This module publishes a derived copy
-// and never reads one back into a file: the tiers, the usage sidecars and the
-// outcome journal are written exactly as they were, whether the database call
-// succeeded or failed. A stamp's database write is additive, so a lost one
-// costs a row on the host and never a line in usage.jsonl.
+// The database is the record. This module writes records and stamps to it
+// and reads them back as rows, never into a tier file: the one file store a
+// project keeps, its pending directory and its frozen outcome journal, is
+// written exactly as it was, whether the database call succeeded or failed.
+// A stamp's database write is additive, so a lost one costs a row on the
+// host and nothing on this machine.
 //
 // The local queue is a SQLite file, opened through node's own built-in
 // binding, and every row on it is a row a writer composed whole. There is no
@@ -57,42 +58,33 @@ const endpoint = require('./kit-endpoint-lib.js');
 // load, so it takes no part in the cycle below and is bound outright.
 const { shownText } = require('../hooks/kit-compact-lib.js');
 
-// memq and memory-index are resolved at the first call rather than at load,
-// because memq loads this module and both of them load memq. A require taken
-// while memq is still evaluating answers with the half-built exports object
-// memq has filled so far, which is empty: memq assigns module.exports as its
-// last statement. Binding that object would leave every call below reading
-// undefined. Nothing here runs before the process's first memq call returns, by
-// which point memq's exports are whole, so the accessors always answer the
-// finished module. kit-endpoint-lib above loads node built-ins and nothing
-// else, so it takes no part in the cycle and is bound outright.
+// memq is resolved at the first call rather than at load, because memq loads
+// this module. A require taken while memq is still evaluating answers with the
+// half-built exports object memq has filled so far, which is empty: memq
+// assigns module.exports as its last statement. Binding that object would leave
+// every call below reading undefined. Nothing here runs before the process's
+// first memq call returns, by which point memq's exports are whole, so the
+// accessor always answers the finished module. kit-endpoint-lib above loads
+// nothing, so it takes no part in the cycle and is bound outright.
 let memqModule = null;
-let indexModule = null;
 
 function memqLib() {
     if (memqModule === null) memqModule = require('./memq.js');
     return memqModule;
 }
 
-function indexLib() {
-    if (indexModule === null) indexModule = require('./memory-index.js');
-    return indexModule;
-}
-
-// The client config, hand-authored per machine beside kit-endpoint.json. It
+// The client config, hand-authored per machine under ~/.claude. It
 // carries a password, so it is read from the home directory rather than from
 // the store root override: a store redirected for data must not move which
 // credentials a publish presents.
 const CONFIG_FILE = 'kit-memory-db.json';
 
 // The local queue, a SQLite file at the store root beside the client config.
-// The sync repository's allowlist re-includes only paths inside the memory
-// tiers and the machine coordinator directory, so it cannot be staged: a queue
-// holding this machine's undelivered stamps is per-machine state and syncing it
-// would publish one machine's pending journal to every other.
+// A queue holding this machine's undelivered stamps is per-machine state, and
+// nothing carries it to another machine.
 //
 // SQLite writes beside it, a write-ahead log and a shared-memory index, carry
-// the same name with a suffix and are excluded by the same rule.
+// the same name with a suffix.
 const QUEUE_FILE = 'kit-memory-db-queue.sqlite';
 
 // How long a drain waits on a lock another connection holds before the call
@@ -130,7 +122,7 @@ const QUEUE_BUSY_TIMEOUT_MS = 2000;
 // a second at twenty thousand, and a quarter of a second at fifty thousand. So
 // a writer loses its row to this only on a queue holding tens of thousands of
 // undelivered stamps, which is a host that has been unreachable long enough for
-// the doctor's last-successful-publish age to have been the loud signal for
+// the doctor's queue-depth line to have been the loud signal for
 // weeks. Raising the depth at which a writer starts losing rows means lowering
 // the depth, not lengthening this wait, which would spend a session's budget on
 // every stamp to buy one row back at a depth nothing should reach. The queue
@@ -199,12 +191,9 @@ function spawnKillMs(budgetMs) {
 // after its deadline is this, and a bound of one floor is short by the other.
 const SPAWN_MAX_OVERSHOOT_MS = spawnKillMs(SQLCMD_FLOOR_MS);
 
-// The budget the reachability probe below spends, which is this verb's own and
-// not the judged channel's.
+// The budget the reachability probe below spends, which is this verb's own.
 //
-// That channel's probe is 400 milliseconds because it sits inside an
-// interactive search, and it bounds an HTTP call whose clock is expressed in
-// milliseconds. A sqlcmd spawn's two clocks are whole seconds, so any budget
+// A sqlcmd spawn's two clocks are whole seconds, so any budget
 // under two of them buys a one-second login clock and a one-second query clock,
 // and a healthy host whose TLS handshake and SQL login together run past a
 // second is then refused as unreachable on every run, silently where the
@@ -235,27 +224,27 @@ const PROBE_TIMEOUT_MS = SQLCMD_FLOOR_MS * 2;
 // At the boundary, a run holding less than this on its own deadline spends what
 // is left instead and a batch may then be killed mid-wait. Both writes are
 // idempotent and neither is ever queued, so what a killed batch costs is the
-// work behind it: a record upsert costs the call alone, since the next run
-// re-derives every record from the files, while an embedding write costs the
+// work behind it: an adoption call costs the call alone, since a second call
+// changes nothing and the next run sends it again, while an embedding write costs the
 // vectors of the pack it carried, which the next run makes again from the same
 // records the inventory still reports unembedded.
 const LOCK_WAIT_MS = 30000;
 const UPSERT_TIMEOUT_MS = (LOCK_WAIT_MS + SQLCMD_FLOOR_MS) * 2;
 
-// The whole run's budget, over every boundary call a publish makes.
+// The whole run's budget, over every boundary call a `db-refresh` makes.
 //
 // Each call carries its own clock and nothing bounded the chain of them, so a
-// host degraded rather than down bought a run of arbitrary length: a walk of
-// several hundred records is a few dozen spawns and as many embedding calls,
-// every one of them willing to spend the configured timeout. Fifteen minutes is
-// past any healthy run of this store (a first publish of several hundred
-// records embeds in a few dozen calls) and far short of the interval the
+// host degraded rather than down bought a run of arbitrary length: an embed
+// pass over several hundred records is a few dozen spawns and as many embedding
+// calls, every one of them willing to spend the configured timeout. Fifteen
+// minutes is past any healthy run of this store (an embed pass over several
+// hundred records takes a few dozen calls) and far short of the interval the
 // session-start spawn holds the next run off for, which is DB_SYNC_ATTEMPT_STALE_MS
 // in hooks/memory-session.js. That constant is a literal chosen to exceed this
 // one plus SPAWN_MAX_OVERSHOOT_MS rather than derived from either, and the
 // ordering between the three is held by test/memory-session.test.js, so a
 // change to any one of them reds there rather than quietly letting a second
-// publish start beside a run still in flight.
+// refresh start beside a run still in flight.
 const RUN_BUDGET_MS = 15 * 60 * 1000;
 
 // The schema version the queue drain needs on the host before it sends a row.
@@ -318,11 +307,37 @@ const CHUNK_TARGET_CHARS = 4096;
 const CHUNK_MIN_CHARS = 2048;
 const CHUNK_MAX_CHARS = 6144;
 
+// The most texts handed to the embedding server in one call. A batch saves a
+// round trip per text, and the width is bounded so one call's response stays
+// small: embedCallWidth narrows it further wherever vectors this many would not
+// fit the bound the response's reader holds it under.
+const EMBED_BATCH = 16;
+
+// Characters of one text fed to the embedder. The model truncates at its own
+// token window, so the cap is not about retrieval quality: it bounds the
+// string a pathological input can push through the tokenizer.
+const TEXT_CAP = 8192;
+
+// What a text contributes to its vector: the record's name, then the text. The
+// name is a fact-bearing phrase in this store (memories are named for what
+// they teach, not numbered), so it belongs in the embedded text rather than
+// being carried only as an identifier.
+//
+// Exported, because a caller ranking a record that is not on the host yet has
+// to compose its query the way the corpus was composed: the authoring verbs'
+// neighbour query is the name and description of the record being written,
+// spelled through here. A second spelling of this composition is a silent
+// ranking defect.
+function embedText(name, body) {
+    const text = name.replace(/[-_]+/g, ' ') + '\n\n' + body;
+    return text.length > TEXT_CAP ? text.slice(0, TEXT_CAP) : text;
+}
+
 // The most texts one embedding call may carry, which is a property of the
 // answer rather than of the request: kit-endpoint-lib reads a response body
 // under a fixed byte bound, and a vector of this model's width printed as JSON
-// is about twenty kilobytes. Sixteen of them, the local sweep's batch width,
-// is a third of a megabyte, so every full pack would be refused at the reader
+// is about twenty kilobytes. Sixteen of them, EMBED_BATCH above, is a third of
+// a megabyte, so every full pack would be refused at the reader
 // and only a store whose records pack into fewer chunks would embed at all.
 //
 // The width is the schema's: mem.Embedding holds VECTOR(1024) and the fleet's
@@ -342,32 +357,6 @@ function configPath() {
 
 function queuePath() {
     return path.join(memqLib().memoryRoot(), QUEUE_FILE);
-}
-
-// The migration marker: the record a complete `memq db-sync` publish leaves, so
-// the publish that copies this machine's files into the database runs once. It
-// sits beside the config under the home directory, which is the store the
-// publish speaks for, and the store sync admits nothing at that root.
-const MIGRATION_MARKER_FILE = 'memory-migrated.json';
-function migrationMarkerPath() {
-    return path.join(os.homedir(), '.claude', MIGRATION_MARKER_FILE);
-}
-
-// The marker's text, or null where there is no marker. A marker that is there
-// and cannot be read is still a marker: the answer carries the reason in place
-// of the text, so the verb sends nothing and says why.
-function readMigrationMarker() {
-    try {
-        return { text: fs.readFileSync(migrationMarkerPath(), 'utf8') };
-    } catch (err) {
-        if (err && err.code === 'ENOENT') return null;
-        return { text: null, reason: errText(err) };
-    }
-}
-
-// Write the marker, replacing one a `--again` run found.
-function writeMigrationMarker(marker) {
-    fs.writeFileSync(migrationMarkerPath(), JSON.stringify(marker, null, 2) + '\n', 'utf8');
 }
 
 // The down marker: the file a failed probe or a failed host call leaves beside
@@ -891,7 +880,7 @@ function redirectedRootText(shownRoot) {
 // The client config a call to the host runs under, or the refusal that stops
 // it before any probe, marker, queue row or snapshot write. Every entry point
 // a caller reaches the host through resolves its config here: the record
-// reads and writes, and the publish, drain, adoption, embed, curator, health
+// reads and writes, and the drain, adoption, embed, curator, health
 // and calibration calls. So a redirected store root is refused in one place:
 // its credential and config come from the home directory, and a call from it
 // would read and write the machine's own records under the machine's login.
@@ -915,9 +904,8 @@ function errText(err) {
     return memqLib().sanitize(err && err.message ? String(err.message) : String(err), 200);
 }
 
-// The client config, or a described refusal. The refusal reasons are
-// kit-endpoint-lib's, because a caller stands down on all of them alike and
-// the two config files are read for the same kind of thing:
+// The client config, or a described refusal. A caller stands down on every
+// reason alike:
 //
 //   absent      no file at that path: no database on this machine
 //   unreadable  the file is there and could not be read
@@ -1201,7 +1189,7 @@ const PAYLOAD_FUNDED_CHARS = PAYLOAD_PIECE_CHARS * PAYLOAD_PIECES_PER_BUDGET;
 // what a call's clock is, lifted only to the tool's own floor, so a clock
 // derived upward from the payload would put one sqlcmd process past the timeout
 // the operator configured, on a machine other sessions' suites and builds share
-// and with the session-start publish running detached. The size of
+// and with the session-start `db-refresh` running detached. The size of
 // the payload is the operator's question rather than this client's licence.
 //
 // So the payload does not move the clock, and what the payload does instead is
@@ -1480,11 +1468,10 @@ function callProcedure(config, procedure, parameters, options) {
 
 // One batch of texts embedded on the host, as {ok, vectors, detail}.
 //
-// The request shape, the abort clock, the bounded body read and the failure
-// classification are kit-endpoint-lib's, which is the module that owns this
-// boundary: the kit speaks one OpenAI dialect to one host, and a second
-// hand-rolled client would be a second set of answers to a slow socket, an
-// unread body and a hostile error string.
+// The abort clock, the bounded body read and the failure classification are
+// kit-endpoint-lib's, the module that owns those helpers: a second hand-rolled
+// set would be a second set of answers to a slow socket, an unread body and a
+// hostile error string.
 async function embedBatch(config, texts, options) {
     const opts = options || {};
     const deps = opts.deps || {};
@@ -1550,12 +1537,12 @@ async function embedBatch(config, texts, options) {
     }
 }
 
-// Texts in one embedding call: the local sweep's batch width, or fewer where a
-// response that wide would not fit the bound its reader holds it under.
+// Texts in one embedding call: EMBED_BATCH, or fewer where a response that
+// wide would not fit the bound its reader holds it under.
 function embedCallWidth() {
     const room = endpoint.MAX_BODY_BYTES - EMBED_RESPONSE_OVERHEAD_BYTES;
     const perVector = EMBED_VECTOR_DIMENSIONS * EMBED_FLOAT_BYTES;
-    return Math.max(1, Math.min(indexLib().EMBED_BATCH, Math.floor(room / perVector)));
+    return Math.max(1, Math.min(EMBED_BATCH, Math.floor(room / perVector)));
 }
 
 // ----------------------------------------------------------------- the queries --
@@ -1634,9 +1621,9 @@ const NEAREST_ARCHIVED_SCHEMA_VERSION = 4;
 // parameter and is served on any host at SEARCH_SCHEMA_VERSION or later.
 const SCOPED_SEARCH_SCHEMA_VERSION = 6;
 
-// The schema version where the database holds the record, and the floor a
-// publish stands down below. A version 7 host lands each project record in its
-// key's fleet store and answers with the twins it resolved; a lower host reads
+// The schema version where the database holds the record, and the floor every
+// record call stands down below, `db-refresh`'s adoption among them. A version
+// 7 host lands each project record in its key's fleet store and answers with the twins it resolved; a lower host reads
 // no key and would file every record in the older per-sandbox stores, so it is
 // sent nothing and the sentence names the installer. The queue drain keeps its
 // own floor, REQUIRED_SCHEMA_VERSION.
@@ -1851,11 +1838,10 @@ function rankOf(value) {
 // records, or only records carrying that tag; an empty string or any other
 // value asks for neither, and the nearest scan takes neither.
 //
-// EVERY VECTOR THAT REACHES THE HOST IS ONE THE HOST'S OWN EMBEDDER MADE. The
-// local index's model is a different model at 384 dimensions, and its vectors
-// compare with nothing the fleet holds, so a local vector on this path would
-// either be refused by a VECTOR(1024) parameter or, worse, rank against the
-// wrong space. The width screen below is that rule made mechanical: a vector of
+// EVERY VECTOR THAT REACHES THE HOST IS ONE THE HOST'S OWN EMBEDDER MADE. A
+// vector from any other model compares with nothing the fleet holds, so one on
+// this path would either be refused by a VECTOR(1024) parameter or, worse,
+// rank against the wrong space. The width screen below is that rule made mechanical: a vector of
 // any other width stands the query down and nothing is sent.
 //
 // It never throws and it never falls back. A caller that meets a stand-down
@@ -2745,32 +2731,6 @@ function stamped(value) {
     return day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-// A record file's modification time as mem.usp_UpsertRecords reads it, or null
-// where this machine's filesystem handed back a time that type will not take.
-//
-// THE SCREEN IS THE ONE ABOVE, AND WHAT IT CLOSES IS A RUN THAT NEVER PUBLISHES
-// AGAIN. The procedure reads this field as a DATETIMEOFFSET and throws over the
-// whole batch when it cannot, and the walk re-derives every record from the
-// files on every run, so one file whose time renders outside that type's range
-// would fail every record batch on every run for as long as that file stood, and
-// the publish would stand down with none of its legs reached. A time this
-// runtime cannot represent at all is worse still: toISOString throws a
-// RangeError, which is nothing this leg catches.
-//
-// Null is what the column takes for a record whose time is unknown. It is
-// nullable, the procedure's own refusal check does not name it, and the
-// comparison that skips an older copy requires a time on both sides, so a record
-// that arrives with none is upserted and never skipped as older.
-function fileModifiedAt(mtimeMs) {
-    let rendered = null;
-    try {
-        rendered = new Date(mtimeMs).toISOString();
-    } catch {
-        return null;
-    }
-    return stamped(rendered) ? rendered : null;
-}
-
 // The sentence a refusal takes, wherever in this client one is met.
 //
 // A REFUSAL AND AN OUTAGE SEND A READER TWO WAYS, AND ONE OF THEM IS NEVER
@@ -2925,8 +2885,8 @@ function keepRefusedUnit(unit, answer) {
 // far more than that deadline sends, so the read is paged: the drain reads at
 // most this many rows in queue order, sends them, and answers with the depth
 // still behind them. A write that finds rows behind its page queues its own
-// row rather than overtake them; db-refresh and the publish read page after
-// page (drainPages) under their own budget until the rows the first page
+// row rather than overtake them; db-refresh reads page after
+// page (drainPages) under its own budget until the rows the first page
 // found are sent or a page stops short. Two thousand rows is a bounded parse
 // for a write, about four hundred kilobytes of stamp payload, and still a page
 // a stamp batch past PAYLOAD_FUNDED_CHARS fits inside, so a queue grown past
@@ -3416,13 +3376,13 @@ function deleteRows(handle, ids) {
 // milliseconds does not fund a cold sqlcmd start plus a TLS negotiation plus a
 // login: on a healthy host that attempt is killed on nearly every stamp and the
 // row goes to the queue regardless, having first spent the session's time. So
-// every interactive stamp is queued and `memq db-sync` delivers it in one
+// every interactive stamp is queued and `memq db-refresh` delivers it in one
 // batched call, which is the same journey with the latency removed. A stamp's
 // whole worth here is that it is not lost, and the queue is what makes it not
 // lost.
 //
 // A redirected store writes nothing either, for the reason isDefaultStoreRoot
-// states: every publish leg refuses a non-default root, so a queue filling
+// states: every host leg refuses a non-default root, so a queue filling
 // under one grows without bound and drains nowhere, which is the same shape as
 // a machine with no database at all.
 function deliver(entry, options) {
@@ -3475,8 +3435,8 @@ function pointerStampId(recognitionId) {
 // the identity form mem.usp_AppendUsage accepts beside a record id, and the
 // procedure resolves it against the records the caller may see, rejecting and
 // counting a stamp that resolves to none rather than writing it. That is why a
-// publish drains the queue behind its record upsert: by then the record this
-// names has been published, and a stamp still resolving to nothing names a
+// write drains the queue behind its record upsert: by then the record this
+// names is on the host, and a stamp still resolving to nothing names a
 // record the host does not hold at all.
 function usageEntry(tier, segment, name, fileKey, kind, projectKey) {
     const entry = {
@@ -3744,10 +3704,10 @@ function writeThrough(entry, options) {
     return queued('unreachable', sent.detail, drain);
 }
 
-// The tier and segment of a tier directory, or null where the path is not one
-// of the store's three tiers. memq owns both answers, so a stamp writer states
-// neither: tierNameFor decides the tier and the directory's own name is the
-// segment the store keys that tier by.
+// The tier and segment of a tier directory, or null where the path is not
+// spelled as one of the store's three tiers. memq owns both answers, so a
+// stamp writer states neither: tierNameFor decides the tier and the
+// directory's own name is the segment the store keys that tier by.
 function tierIdentity(tierDir) {
     const tier = memqLib().tierNameFor(tierDir);
     if (tier === null) return null;
@@ -3756,691 +3716,18 @@ function tierIdentity(tierDir) {
     return { tier, segment: path.basename(path.dirname(tierDir)) };
 }
 
-// ---------------------------------------------------------------- the walk --
-
-// Every record the walk found, as the rows mem.usp_UpsertRecords reads.
-//
-// The walk, the tier tokens and the body hash are memory-index's, the same
-// three the local semantic sweep uses, so the two derived copies of this store
-// are built from one reading of it. The fields beyond the body come from the
-// record's own frontmatter through memq's readers, so what counts as a tag, a
-// machine or a supersedes pointer is the store's answer rather than this
-// file's.
-// A live record and its archived namesake key alike: both carry one tier word
-// once the archive token is stripped, one segment and one file key, which is
-// the store row's own unique key. The store permits both files to exist, so
-// the collision is reachable, and sending both would make the row's archived
-// flag and its body flip on every run and drop its embeddings each time. The
-// pair is therefore reported and neither half is sent, since neither is more
-// the record than the other and picking one silently would hide a state the
-// operator has to resolve in the store itself.
-//
-// It is reported on `duplicates` rather than on `failed`, which carries only
-// what the walk could not read. A publish reads `failed` as evidence that its
-// reading of the store is incomplete and holds every removal back on it, and a
-// twin is the opposite of that: both of its files were read, and the key they
-// share is known to be backed by files on this machine.
-function collectRecords() {
-    describedDirectories.clear();
-    const walk = indexLib().walkStore();
-    const failed = walk.failed.slice();
-    const records = [];
-    const duplicateKeys = new Set();
-    for (const entry of walk.records) {
-        const archived = indexLib().isArchivedTier(entry.tier);
-        const tier = archived ? entry.tier.replace('-archive', '') : entry.tier;
-        const segment = tier === 'operator' ? null : entry.store;
-        const file = entry.file;
-        let body = '';
-        let mtime = null;
-        try {
-            mtime = fs.statSync(file).mtimeMs;
-            body = fs.readFileSync(file, 'utf8');
-        } catch (err) {
-            failed.push({ store: entry.store, tier: entry.tier, name: entry.name, reason: errText(err) });
-            continue;
-        }
-        const fileKey = memqLib().memoryFileKey(entry.name + '.md');
-        const descriptions = describeDirectory(path.dirname(file));
-        const fields = memqLib().publishedFields(body);
-        records.push({
-            tier,
-            segment,
-            // A project folder's key is its folder name. The folder a store
-            // segment was flattened from cannot be read back from the segment,
-            // and a synced folder may name no directory on this machine at all,
-            // so the walk keys every folder alike; `db-sync` adopts the folder's
-            // records into the remote key of the checkout it runs from.
-            ...(tier === 'project' ? { projectKey: 'path:' + segment } : {}),
-            name: entry.name,
-            fileKey,
-            // The index line wins where it holds text; an empty index line
-            // counts the same as no line, and only then does the record's
-            // own frontmatter speak for it, through the one fallback helper
-            // memq.js exports, so this walk and listMemories share one parse
-            // rule for the field even though this walk reads the whole file
-            // and listMemories reads a bounded head.
-            description: descriptions.get(entry.name + '.md') || memqLib().frontmatterDescription(body) || '',
-            // The record's prose alone, the fields riding in their own columns.
-            // The hash is of what is sent, so the embedding leg, which embeds
-            // this same text, and the host agree about which text a vector is of.
-            body: fields.body,
-            bodyHash: indexLib().hashOf(fields.body),
-            fileModified: fileModifiedAt(mtime),
-            machine: memqLib().machineIdentityOrNull(memqLib().frontmatterValue(body, 'machine')),
-            tags: memqLib().frontmatterTags(memqLib().frontmatterValue(body, 'tags')),
-            supersedes: memqLib().supersedesName(memqLib().frontmatterValue(body, 'supersedes')),
-            triggers: fields.triggers,
-            anchors: fields.anchors,
-            pinned: fields.pinned,
-            // A day the procedure's DATE column refuses, February 30th or year
-            // zero among them, would fail the whole batch it rides in, so it is
-            // sent as no day, under the screen the file time takes.
-            created: fields.created !== null && stamped(fields.created + 'T00:00:00Z') ? fields.created : null,
-            author: fields.author,
-            archived
-        });
-    }
-
-    // The collision pass, run after the walk so the second file of a pair is
-    // not treated as the change the first one made. A duplicated key is
-    // reported once and both of its records are withheld, and the key is
-    // handed back so the removal leg knows the host's row for it is still
-    // backed by files on this machine.
-    const byKey = new Map();
-    for (const record of records) {
-        const key = recordKey(record.tier, record.segment, record.fileKey);
-        if (!byKey.has(key)) byKey.set(key, []);
-        byKey.get(key).push(record);
-    }
-    const duplicates = [];
-    for (const [key, group] of byKey) {
-        if (group.length === 1) continue;
-        duplicateKeys.add(key);
-        duplicates.push({
-            store: group[0].segment,
-            tier: group[0].tier,
-            name: group[0].name,
-            reason: memqLib().sanitize(group[0].name, 80) + ' exists in the ' + group[0].tier
-                + ' tier both live and archived, which is one record on the host, so neither copy '
-                + 'was published; delete or rename one of them'
-        });
-    }
-    const kept = records.filter((record) =>
-        !duplicateKeys.has(recordKey(record.tier, record.segment, record.fileKey)));
-    return { records: kept, failed, duplicates, unscanned: walk.unscanned, duplicateKeys };
-}
-
-function recordKey(tier, segment, fileKey) {
-    return tier + '\u0000' + (segment === null ? '' : segment) + '\u0000' + fileKey;
-}
-
-// One directory's index descriptions, read once per directory per run. A tier
-// holds one index line per record, and a walk of several hundred records
-// otherwise reads each tier's index once per record in it.
-const describedDirectories = new Map();
-function describeDirectory(dir) {
-    if (!describedDirectories.has(dir)) describedDirectories.set(dir, memqLib().readIndexDescriptions(dir));
-    return describedDirectories.get(dir);
-}
-
-// The live tier directories on this machine, as {tier, segment, dir}. The
-// index-orphan pass reads each one's index lines, so it enumerates the tiers
-// themselves rather than the records the walk found: a tier whose every record
-// file is gone has index lines and no records, which is exactly the state the
-// pass exists to report.
-function tierDirectories() {
-    const out = [{ tier: 'operator', segment: null, dir: memqLib().operatorDirPath() }];
-    const segments = memqLib().projectSegments();
-    if (segments !== null) {
-        for (const segment of segments) {
-            out.push({ tier: 'project', segment, dir: memqLib().projectMemoryDirFor(segment) });
-        }
-    }
-    let types = [];
-    try { types = fs.readdirSync(memqLib().typesRootPath()); } catch { types = []; }
-    for (const type of types) {
-        if (!memqLib().isTypeName(type)) continue;
-        const dir = path.join(memqLib().typesRootPath(), type);
-        try { if (!fs.statSync(dir).isDirectory()) continue; } catch { continue; }
-        out.push({ tier: 'type', segment: type, dir });
-    }
-    return out;
-}
-
-// The index lines naming a file the tier does not hold, as the rows
-// mem.usp_UpsertIndexOrphans reads.
-function collectOrphans() {
-    const orphans = [];
-    for (const tier of tierDirectories()) {
-        for (const [file, description] of describeDirectory(tier.dir)) {
-            if (!memqLib().isMemoryFilename(file)) continue;
-            try {
-                if (fs.statSync(path.join(tier.dir, file)).isFile()) continue;
-            } catch { /* no file behind the line: that is the orphan */ }
-            orphans.push({
-                tier: tier.tier,
-                segment: tier.segment,
-                name: file.slice(0, -3),
-                description
-            });
-        }
-    }
-    return orphans;
-}
-
-// --------------------------------------------------------------- the publish --
+// ---------------------------------------------------------------- the drain --
 
 function counted(rows) {
     const first = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
     return (first !== null && typeof first === 'object') ? first : {};
 }
 
-// One sentence of a publish run's error column, rendered for a channel that
-// leaves this machine.
-//
-// THIS IS THE SAME RENDER THE PRINTED COPY TAKES, AND IT IS THE CHANNEL'S OWN
-// RATHER THAN THIS CLIENT'S. The sentences on that column are composed around an
-// absolute queue path, SQL Server's own message and an
-// operating system's error text, the store sits under the home directory by
-// default, and this value lands on a host every sandbox in the fleet reads. The
-// same sentence goes to the screen through memq's db-sync failure line, so the
-// two are one sentence rendered twice, once to a screen and once to the host. A
-// render spelled separately in each module would be one edit away from a column
-// that cut at some other point or kept a character the screen removes, storing
-// text under a run that nobody ever read. So both callers take the one helper in
-// kit-compact-lib, which states the four passes and why they are four.
-//
-// The cap stays here, because it is this channel's width and it sits beside the
-// other widths this module spends. It is the same number memq gives one of these
-// sentences, and the pin that compares the two renderings of one value byte for
-// byte is what holds the pair together.
-//
-// The column's type is NVARCHAR(MAX), so nothing on the host bounds this value
-// and the five-sentence slice plus this cap are the whole bound.
-const COLUMN_TEXT_CAP = 1200;
-function columnText(value) {
-    return shownText(value, COLUMN_TEXT_CAP);
-}
-
-// The whole of `memq db-sync`: drain, publish, list, remove, embed, record.
-//
-// The order is what makes the run self-healing. The list in step three is a
-// live reading of the host rather than a memory of what this machine published,
-// so a run whose embedding leg died leaves records the next run sees as
-// unembedded and finishes. There is no local copy of database state anywhere in
-// this module, so there is nothing to drift.
-//
-// Every record the walk found is sent, whether its body changed or not. The
-// server's `unchanged` disposition stamps the record's last-published time,
-// which the thirty-day orphan rule reads, so a client that skipped hash-equal
-// records would starve that stamp and every untouched shared record would list
-// to the curator as an orphan.
-//
-// A walk that could not read some tier names nothing as removed. A removal is
-// soft and lifts when the file is published again, but only if it is never
-// emitted from a partial reading of the store: a tier that failed to enumerate
-// is no evidence its records are gone, which is the judgment the local sweep
-// takes about the same condition. A store the walk found no record at all in is
-// held to the same bar, whatever the walk reported: an empty reading of a store
-// the host holds rows for is the shape a mis-resolved root takes, and it is
-// indistinguishable from a store whose last record was deleted, so the rows
-// stay and the summary says how many were held back.
-async function publish(options) {
-    const opts = options || {};
-    const loaded = hostConfig(opts);
-    if (!loaded.ok) return { ok: false, standDown: loaded.reason, detail: loaded.detail, path: loaded.path };
-    const config = loaded.config;
-    const deps = opts.deps || {};
-    const started = new Date().toISOString();
-    const summary = {
-        added: 0, changed: 0, unchanged: 0, skippedOlder: 0, removed: 0, heldBack: 0,
-        held: 0, twins: [],
-        embedded: 0, embedRejected: 0, drained: 0, queueRemaining: 0, rejected: 0,
-        orphans: 0, failed: [], workFailed: false, partial: false,
-        outOfBudget: false
-    };
-
-    // The two answers a run owes, and they are not the same question. `failed`
-    // is everything a person should read, warnings included, and it is the one
-    // list: the verb prints all of it, and the only other place any of it goes
-    // is the publish run's error column, which carries the failing part of this
-    // same list and composes no sentence of its own.
-    // `workFailed` is whether something this run set out to do did not happen,
-    // which is what the verb's exit code is. They part on a queue that grew past
-    // what one call funds and on a queue another writer holds a lock on,
-    // both of which are delivered work with something to say. A code taken from
-    // the list's emptiness would report failure on either, and a verb that fails
-    // on an ordinary busy run teaches its reader to ignore the code.
-    //
-    // `workFailures` is not a second surface and holds no sentence of its own:
-    // every sentence in it is on the list above, and it is the part of that list
-    // the run failed at, which is what the publish run's error column carries.
-    // The column answers the exit code's question rather than the list's, since
-    // a host-side reader treating a null error as a clean run would otherwise
-    // read a failure on every busy or oversized publish, and a warning ahead of
-    // a real failure in the list's order would otherwise push that failure past
-    // the five sentences the column takes. The column's own type is
-    // NVARCHAR(MAX), so that slice and this client's own cap on each sentence
-    // are the only bound on it.
-    const workFailures = [];
-    const failure = (reason) => {
-        summary.workFailed = true;
-        summary.failed.push(reason);
-        workFailures.push(reason);
-    };
-
-    // The run's one deadline, and the two things every boundary call below asks
-    // of it: whether it may start at all, and what clock it gets if it does.
-    //
-    // The clock is the caller's own budget or what is left of the run's,
-    // whichever is smaller, so the budget bounds the chain rather than each link
-    // separately. A call refused for want of budget ends the run where it stands
-    // and the summary reports what the run did: the records already published
-    // are published, every leg of this publish is re-derived from the files on
-    // the next run, and nothing here is queued, so stopping early costs a
-    // repeat and never a row. A caller running the publish as one step of a
-    // longer run passes that run's `deadline`, so the steps share one budget.
-    const now = (typeof deps.now === 'function') ? deps.now : Date.now;
-    const deadline = Number.isFinite(opts.deadline) ? opts.deadline : now() + RUN_BUDGET_MS;
-    const budgetFor = (wantMs, floorMs) =>
-        callBudget(deadline, now(), wantMs, floorMs === undefined ? SQLCMD_FLOOR_MS : floorMs);
-    const stopped = (what) => {
-        summary.outOfBudget = true;
-        failure('the run budget of ' + RUN_BUDGET_MS
-            + ' ms was spent before ' + what + ', so that call and everything after it was not made');
-        return { ok: true, summary };
-    };
-
-    // The run's own row on the host, written once from wherever the run ends.
-    //
-    // EVERY LEG THAT STANDS THE RUN DOWN ON A REFUSAL REACHES IT TOO. A refusal
-    // is a permanent defect in what this client built, met on a host that
-    // answered the probe one call earlier and will answer the next one, so the
-    // run row is both writable and the only trace the fleet gets: a leg that
-    // returned without it left the defect recorded on the host nowhere, and a
-    // host-side reader watching the error column would see the run simply not
-    // happen. It is the same write the ordinary end of the run makes rather than
-    // a second one composed beside it, so the two rows cannot come apart.
-    //
-    // The column carries the part of the printed failure list this run actually
-    // failed at, the first five of them in the run's own order, so a run that
-    // delivered everything it read and had something to say about the next one
-    // records no error and a reader watching this column for trouble is not
-    // taught to ignore it.
-    //
-    // A run that stands down on a refusal prints one sentence, the refusal, and
-    // none of the list it had gathered before it, so that sentence is the whole
-    // of what its column carries. Anything more would be a sentence on the host
-    // that no reader of the run ever saw, and the refusal is what the run
-    // stopped on besides.
-    //
-    // Each sentence is rendered on its own and then joined, which is how the
-    // printed copy renders them: one sentence is one value on both channels, so
-    // the text under a cut is the same text in both places. columnText above
-    // states what that render is and why it is four passes rather than one.
-    //
-    // A null answer is a run with no budget left for the write. The ordinary end
-    // of the run reports that as the stop it is; a leg standing down on a
-    // refusal has its own sentence to print and takes the missing row as the
-    // lesser loss.
-    const recordRun = (endedOn) => {
-        const sentences = endedOn ? [endedOn] : workFailures;
-        const budgetMs = budgetFor(config.timeoutMs);
-        if (budgetMs === null) return null;
-        return callProcedure(config, 'usp_AppendPublishRun', {
-            '@p_Run': {
-                started,
-                finished: new Date().toISOString(),
-                added: summary.added,
-                changed: summary.changed,
-                removed: summary.removed,
-                embedded: summary.embedded,
-                // The key mem.usp_AppendPublishRun reads this count under, in
-                // its own OPENJSON ... WITH list. The host's column and this key
-                // still carry the local queue's former name, and the name on the
-                // wire is the procedure's to change: a client that renamed one
-                // side alone would send a key the procedure does not name, which
-                // it would read as null and record as zero on every run.
-                spoolDrained: summary.drained,
-                twins: summary.twins,
-                error: sentences.length > 0
-                    ? sentences.slice(0, 5).map(columnText).join('; ') : null
-            }
-        }, { deps, budgetMs });
-    };
-
-    // The reachability probe, spent before anything else so an unreachable host
-    // is discovered in about the time one spawn costs rather than after a first
-    // record batch at the full configured timeout. The hard kill is the module's
-    // declared overshoot rather than the probe budget itself, since a kill
-    // inside the tool's own floor would refuse every host alive or dead.
-    const probe = callProcedure(config, 'usp_Health', {},
-        { deps, budgetMs: PROBE_TIMEOUT_MS, killMs: PROBE_TIMEOUT_MS + SQLCMD_FLOOR_MS });
-    if (!probe.ok) return { ok: false, standDown: 'unreachable', detail: probe.detail };
-
-    // The record gate, on the version the probe already carries. It stands
-    // ahead of the walk, the drain and every write, so a host below it is sent
-    // nothing at all.
-    const hostSchema = Number(counted(probe.rows).schemaVersion);
-    if (!(Number.isFinite(hostSchema) && hostSchema >= RECORD_SCHEMA_VERSION)) {
-        const found = Number.isFinite(hostSchema) ? 'schema version ' + hostSchema : 'no schema version at all';
-        return {
-            ok: false,
-            standDown: 'schema',
-            detail: 'the memory database reports ' + found + ' where a publish needs version '
-                + RECORD_SCHEMA_VERSION + ', which files each project record under its project key, '
-                + 'so nothing was sent. Re-run plugins/grimoire/db/Install-MemoryDatabase.ps1 against '
-                + 'the host to apply the newer scripts'
-        };
-    }
-
-    const walk = collectRecords();
-    // `partial` is the walk's own completeness and nothing else, because every
-    // removal in this run is held back on it. A twinned record is reported
-    // beside the rest and leaves it alone: its key is known to be backed by
-    // files here, which the removal leg reads from duplicateKeys.
-    summary.partial = walk.failed.length > 0 || walk.unscanned.length > 0;
-    // A tier that would not read and a key two files claim are both records this
-    // run set out to publish and did not, so each moves the exit code as well as
-    // printing.
-    for (const entry of walk.failed) failure(entry.reason);
-    for (const entry of walk.duplicates) failure(entry.reason);
-
-    // The keys of shared records this machine may hold an older copy of than
-    // the host does. The procedure answers with counts rather than identities,
-    // so what is known is that some record in the batch was skipped as older,
-    // and every shared record of that batch is withheld from the embedding leg
-    // below.
-    //
-    // Embedding is the one leg that would write this machine's text against the
-    // host's record: the host keeps its newer body, the reader still reports
-    // the row unembedded, and vectors made here would be the older text stored
-    // against the newer record, which then reads as embedded forever with text
-    // no file holds. A withheld record is embedded by the sandbox whose copy is
-    // the newer one, and it stays withheld here for as long as this machine's
-    // file is behind, which the git sync does not resolve: the sync carries no
-    // modification times, so a shared record another machine published reads as
-    // older on every later run from this one.
-    //
-    // Only a shared record is withheld. A project record can be answered older
-    // too, a version 7 copy that lost a twin, but the fleet row it lost to is
-    // not in the inventory the embedding leg reads, which holds this sandbox's
-    // own older project rows and the shared tiers alone, so no project record
-    // reaches that leg against another copy's text and none needs withholding.
-    // A project record of a version 6 batch keeps its place in the embedding
-    // leg beside a withheld shared one, and since a batch is a slice of the
-    // walk's order, any store of fewer than a batch's records mixes the two
-    // tiers in one call.
-    const withheld = new Set();
-    for (let at = 0; at < walk.records.length; at += RECORD_BATCH) {
-        const batch = walk.records.slice(at, at + RECORD_BATCH);
-        const budgetMs = budgetFor(UPSERT_TIMEOUT_MS);
-        if (budgetMs === null) return stopped('a record batch');
-        const sent = callProcedure(config, 'usp_UpsertRecords', { '@p_Records': batch }, { deps, budgetMs });
-        // A REFUSAL IS NOT A HOST THAT DID NOT ANSWER, AND ON THIS LEG IT IS
-        // PERMANENT. The host answered the probe one call ago, so what a refusal
-        // here names is a defect in the batch this client built, which every
-        // later run rebuilds from the same files. Reported as an unreachable
-        // host it would send a reader to the network on every run forever while
-        // the fault sat in the data, which is the same split the drain already
-        // makes on the cause the transport answers with.
-        if (!sent.ok) {
-            if (!hostAnswered(sent.cause)) return { ok: false, standDown: 'unreachable', detail: sent.detail };
-            const refusal = answeredText(sent.cause, 'the ' + batch.length + ' record(s)', 'usp_UpsertRecords',
-                sent.detail, 'the run stopped there, so nothing later in it was done and the '
-                + 'next run sends every record again from the files on this machine, which '
-                + 'still hold every one of them');
-            // The row goes down with the run's own account of what it ended on.
-            // Its answer is not read: the caller is already being told the run
-            // stood down and why, and a second sentence about the bookkeeping
-            // would sit in front of the one a reader has to act on.
-            recordRun(refusal);
-            return { ok: false, standDown: 'refused', detail: refusal };
-        }
-        const counts = counted(sent.rows);
-        summary.added += Number(counts.added) || 0;
-        summary.changed += Number(counts.changed) || 0;
-        summary.unchanged += Number(counts.unchanged) || 0;
-        const older = Number(counts.skippedOlder) || 0;
-        summary.skippedOlder += older;
-        summary.held += Number(counts.held) || 0;
-        // The twins the host resolved, as it named them. Each rides out to the
-        // publish run row and to the verb's own line, so the names reach a
-        // person and the host both.
-        if (Array.isArray(counts.twins)) {
-            for (const twin of counts.twins) {
-                if (twin !== null && typeof twin === 'object') {
-                    summary.twins.push({ name: twin.name, winner: twin.winner, loser: twin.loser });
-                }
-            }
-        }
-        if (older > 0) {
-            for (const record of batch) {
-                if (record.tier === 'project') continue;
-                withheld.add(recordKey(record.tier, record.segment, record.fileKey));
-            }
-        }
-    }
-
-    // THE DRAIN RUNS HERE, BEHIND THE RECORDS AND AHEAD OF THE EMBEDDING, AND
-    // THE POSITION IS THE CONTRACT. A usage stamp names a record, and
-    // mem.usp_AppendUsage resolves that name against the records the host holds,
-    // rejecting and counting a stamp that resolves to none rather than writing
-    // it. A drain ahead of the upsert above therefore loses every stamp for a
-    // record the host has not been told about yet, which is the ordinary case
-    // twice over: a record created and stamped between two runs, and a first
-    // publish from a machine that has never published, where every queued stamp
-    // resolves to nothing. The drain deletes the rows it sent, so those stamps
-    // are gone from the host with the summary reporting them delivered, which is
-    // the silent loss between queue and database this whole mechanism exists to
-    // prevent.
-    //
-    // It is not later than this either. The embedding leg below is the long one
-    // and the run's deadline stops a call rather than queuing it, so a drain
-    // behind the embedding is a drain a busy run never reaches, which trades one
-    // loss for another. Between the two legs the records exist and the budget is
-    // barely spent. It also sits ahead of the removal marking, so a stamp naming
-    // a record this very run removes still resolves and lands.
-    //
-    // The probe above takes no gate: it is the run's first act and the deadline
-    // was read one statement earlier, so it starts inside the budget by
-    // construction and a gate there could never answer anything but yes. The
-    // record batches above carry the run's first gate, and this is the second.
-    const drainBudgetMs = budgetFor(config.timeoutMs);
-    if (drainBudgetMs === null) return stopped('the queue drain');
-    // The probe's own answer carries the host's schema version, which the drain
-    // will not send without. It is read from that answer rather than asked for
-    // again, because a second call to the same procedure spends a whole spawn on
-    // a number this run already holds.
-    const drain = drainPages(config, {
-        deps,
-        budgetMs: config.timeoutMs,
-        deadline,
-        schemaVersion: counted(probe.rows).schemaVersion
-    });
-    // What left the queue and what is still on it, which part whenever the delete
-    // was never reached or a row arrived behind the read. Both ride out to the
-    // summary line, so a queue that keeps reporting the same rows is visible on
-    // the surface a person reads rather than only in the file.
-    //
-    // A count the drain never took is carried as null rather than as zero. A
-    // drain refused by the version gate, or stopped by a file no connection could
-    // open, knows nothing about how many rows the queue holds, and printing zero
-    // would tell a reader, and any later step that scrapes this field, that a
-    // full queue is empty. The summary line omits the clause instead, and the
-    // cause's own sentence on the failure list is what says nothing was deleted.
-    summary.drained = drain.drained;
-    summary.queueRemaining = Number.isFinite(drain.remaining) ? drain.remaining : null;
-    summary.rejected = drain.rejected || 0;
-    // A stamp the host would not record, which after this leg's position is a
-    // genuine surprise rather than the ordinary first-publish case: the records
-    // were upserted one call earlier, so a stamp still resolving to nothing
-    // names a record the host does not hold at all. The count is the only thing
-    // that says so, since the procedure answers in counts rather than
-    // identities, and the row it names is off the queue once the delete runs. So
-    // it goes on the failure list, where the verb prints it and the publish run
-    // records it.
-    if (summary.rejected > 0) {
-        failure('the queue (rejected): the memory database would not record '
-            + summary.rejected + ' queue row(s), each of which resolved to no record it holds, so '
-            + 'no row was written for them. The local usage journal on this machine still holds '
-            + 'every one');
-    }
-    // Whatever the drain answers is a fact about the queue and never a reason to
-    // abandon the run. The probe above has already had the host's answer and the
-    // records are already published, so a refusal here is evidence about the
-    // queue's own rows, a file that could not be read or a lock another writer
-    // holds, and the legs that follow neither read the queue nor write to it. A
-    // host that has since gone away is caught by the inventory read below, which
-    // does stand the run down.
-    //
-    // The drain's cause rides out in front of its own words, because the states
-    // it reports have different remedies and the sentence that follows is the
-    // host's or the disk's rather than this client's: a reader who sees
-    // `refused` knows to fix what is sent, `outage` to wait for the host,
-    // `contended` to expect the other writer of this machine's queue file to
-    // finish, `contention` to expect the next run to resend a unit the host
-    // chose as a deadlock victim or timed out a lock for, `budget` to expect the
-    // next run to take it, `schema` to re-run the installer against the host,
-    // `oversized` to look at a queue grown past what one call carries,
-    // `unreadable` to look at the queue file itself, and `unclearable` to look at
-    // the disk. Without it the word the drain reached is known to this module and
-    // to nobody the summary reaches.
-    //
-    // ONE LIST, AND EVERY DRAIN SENTENCE ON IT. The failure list is the publish's
-    // one surface for what a run left a person to read: the verb prints it on
-    // standard error beside the summary line. The cause word distinguishes the
-    // states for the reader and branches nowhere, so no sentence is routed
-    // anywhere a person does not read. The count of what the queue still holds
-    // goes out on the summary line as well.
-    //
-    // The exit code is the drain's own `ok` rather than a reading of that list,
-    // because a warning and a delivered-but-undeleted row both belong in front of
-    // a person and neither is work this run failed to do.
-    //
-    // A QUEUE FILE HELD IS NOT A FAILURE, AND IT IS THE ORDINARY CASE. Another writer
-    // holding the queue's write lock past the busy timeout is a busy machine, and
-    // no row is lost in it: either nothing was sent and every row is still there,
-    // or the host took the rows and the delete did not run, which the host takes
-    // once when the next run sends them again: by the stamp id's unique index,
-    // or for a usage stamp on a version 8 host by the usage fold. Two
-    // sessions starting inside one drain's window and a session-start publish
-    // beside a doctor run reach it, so a verb that exited non-zero there would be
-    // exiting non-zero on a healthy machine. The sentence still prints, because
-    // the drained count of zero on the summary line is otherwise unexplained.
-    // That is `contended`, the queue file's lock. The host's own lock,
-    // `contention`, stops the drain with work it set out to do left on the
-    // queue, so it counts as work failed, as an outage does.
-    const drainFailed = !drain.ok && !drain.contended;
-    if (drainFailed) summary.workFailed = true;
-    if (drain.detail) summary.failed.push('the queue (' + (drain.cause || 'unclear') + '): ' + drain.detail);
-    // The same sentence, taken off the list it was just put on rather than
-    // composed a second time, so the host's copy and the printed one cannot
-    // come apart.
-    if (drainFailed && drain.detail) workFailures.push(summary.failed[summary.failed.length - 1]);
-
-    const identity = modelIdentity(config);
-    const listBudgetMs = budgetFor(config.timeoutMs);
-    if (listBudgetMs === null) return stopped('the inventory read');
-    const listed = callProcedure(config, 'usp_ListRecords', { '@p_ModelIdentity': identity },
-        { deps, budgetMs: listBudgetMs });
-    // The same split the record batches take: a refusal here is a defect in what
-    // this client asks for, and every run asks for the same thing.
-    if (!listed.ok) {
-        if (!hostAnswered(listed.cause)) return { ok: false, standDown: 'unreachable', detail: listed.detail };
-        const refusal = answeredText(listed.cause, 'this sandbox\'s own inventory read', 'usp_ListRecords',
-            listed.detail, 'the run stopped there, so nothing was marked removed and nothing '
-            + 'was embedded on it; the records this run published are published, and the next '
-            + 'run reads the inventory again');
-        recordRun(refusal);
-        return { ok: false, standDown: 'refused', detail: refusal };
-    }
-
-    // The removed set: rows the host holds in this sandbox's own project
-    // stores that the walk no longer found. A shared row is never named here,
-    // and the procedure ignores one that is, so neither side alone decides it.
-    const removed = [];
-    const toEmbed = [];
-    const byKey = new Map();
-    // The stores the walk actually found records in. A listed row whose own
-    // store is not among them is left alone: the walk read that store empty,
-    // and an empty reading is what a mis-resolved root, a store moved on disk
-    // or a permission change all look like from here.
-    const storesWalked = new Set();
-    for (const record of walk.records) {
-        byKey.set(recordKey(record.tier, record.segment, record.fileKey), record);
-        storesWalked.add(recordKey(record.tier, record.segment, ''));
-    }
-    for (const row of listed.rows) {
-        if (row === null || typeof row !== 'object') continue;
-        const segment = row.segment === undefined ? null : row.segment;
-        const key = recordKey(row.tier, segment, row.fileKey);
-        const walked = byKey.get(key);
-        if (walked === undefined) {
-            if (row.tier !== 'project') continue;
-            // A key the walk found twice is backed by files on this machine,
-            // whichever of them the host holds, so it is not a removal.
-            if (walk.duplicateKeys.has(key)) continue;
-            if (summary.partial || !storesWalked.has(recordKey(row.tier, segment, ''))) {
-                summary.heldBack += 1;
-                continue;
-            }
-            removed.push({ segment: row.segment, fileKey: row.fileKey });
-            continue;
-        }
-        if (!row.embedded && !withheld.has(key)) toEmbed.push({ recordId: row.recordId, record: walked });
-    }
-
-    if (removed.length > 0) {
-        const budgetMs = budgetFor(UPSERT_TIMEOUT_MS);
-        if (budgetMs === null) return stopped('the removal marking');
-        const marked = callProcedure(config, 'usp_UpsertRecords',
-            { '@p_Records': [], '@p_Removed': removed }, { deps, budgetMs });
-        if (!marked.ok) {
-            if (!hostAnswered(marked.cause)) return { ok: false, standDown: 'unreachable', detail: marked.detail };
-            const refusal = answeredText(marked.cause, 'the ' + removed.length + ' file key(s) this run names as '
-                + 'removed', 'usp_UpsertRecords', marked.detail, 'the run stopped there, so '
-                + 'no row was marked removed and nothing was embedded on it; the next run '
-                + 'names the same keys again');
-            recordRun(refusal);
-            return { ok: false, standDown: 'refused', detail: refusal };
-        }
-        summary.removed = Number(counted(marked.rows).removed) || 0;
-    }
-
-    const embedded = await embedRecords(config, toEmbed, { deps, deadline });
-    summary.embedded = embedded.embedded;
-    // A vector row the host would not store, which names a record it does not
-    // hold or may not show this sandbox. The records those rows belong to stay
-    // unsearchable until some run stores them whole, and nothing on this machine
-    // notices that by itself, so the count goes where a person reads it.
-    summary.embedRejected = embedded.rejected;
-    for (const reason of embedded.failed) failure(reason);
-    if (embedded.outOfBudget !== null) return stopped(embedded.outOfBudget);
-
-    const orphans = collectOrphans();
-    summary.orphans = orphans.length;
-    if (orphans.length > 0) {
-        const budgetMs = budgetFor(config.timeoutMs);
-        if (budgetMs === null) return stopped('the index orphans');
-        const sent = callProcedure(config, 'usp_UpsertIndexOrphans', { '@p_Orphans': orphans },
-            { deps, budgetMs });
-        if (!sent.ok) failure('the index orphans were not recorded: ' + sent.detail);
-    }
-
-    const run = recordRun(null);
-    if (run === null) return stopped('the publish run record');
-    if (!run.ok) failure('the publish run was not recorded: ' + run.detail);
-
-    return { ok: true, summary };
-}
-
-// The queue drain alone, for `db-sync` under the migration marker, which sends
-// no record: the probe, then drainQueue under its own version gate, as
+// The queue drain alone, db-refresh's first step, which sends no record: the
+// probe, then drainQueue under its own version gate, as
 // {ok, drain, schemaVersion} or a stand-down. `ok` is whether the drain ran to
 // its end. A write lock another connection holds on the queue file is
-// `contended`, which the publish counts as no failure either: the host took
+// `contended`, which is no failure either: the host took
 // the rows and takes the next run's resend once. The host's schema version rides out beside the
 // drain, since db-refresh gates its adoption call on it. A probe the host does
 // not answer leaves the down marker, so the verbs behind it queue without a
@@ -4524,11 +3811,11 @@ function summedDrains(first, second) {
 }
 
 // Move the records a project folder's key holds into the remote key of the
-// checkout `db-sync` runs from, through mem.usp_AdoptProjectStore, as
+// checkout `db-refresh` runs from, through mem.usp_AdoptProjectStore, as
 // {ok, adopted} with the procedure's own counts and names, or a stand-down.
 //
-// The publish keys every project folder by its folder name, since the walk
-// cannot tell which directory a flattened folder name came from. The working
+// A `path:` key names a project by its folder name alone, which cannot tell
+// which directory a flattened folder name came from. The working
 // directory is the one folder whose checkout this machine can read, so its
 // records are the ones carried into the key the same repository takes on
 // every machine. The procedure refuses any pair but path: into remote:, and a
@@ -5385,18 +4672,6 @@ async function recallCandidates(query, options) {
     return { ok: true, schemaVersion, server: config.server, rows, vectorDetail, namedFailed: null };
 }
 
-// Whether any tier directory on this machine still holds a record file, which
-// with no migration marker is what makes `db-refresh` run the publish once:
-// a machine whose tiers hold no file has nothing to migrate.
-function oldTiersHoldFiles() {
-    for (const tier of tierDirectories()) {
-        let names = [];
-        try { names = fs.readdirSync(tier.dir); } catch { continue; }
-        if (names.some((name) => memqLib().isMemoryFilename(name))) return true;
-    }
-    return false;
-}
-
 // Embed one record the host just stored, from the body the writer sent, as
 // {ok} or {ok: false, detail}: the embedding call through the configured
 // endpoint and one usp_UpsertEmbeddings call, embedRecords' own leg over one
@@ -5428,8 +4703,8 @@ async function embedStoredRecord(fields, options) {
 // on this machine: a fleet row may hold a twin's newer body from another
 // machine, and vectors made from other text would mark it embedded for good.
 // A row of this sandbox's older project store carries no key and the record
-// procedures do not serve it, so it is skipped and counted: its body is a file
-// on this machine, which the publish embeds. A version 6 body still carries
+// procedures do not serve it, so it is skipped and counted until `db-refresh`'s
+// adoption carries it into its key's store. A version 6 body still carries
 // its frontmatter, which is stripped before chunking so the vectors are made
 // from the prose alone.
 //
@@ -5542,7 +4817,7 @@ async function embedUnembedded(options) {
 // several. So the records are gathered into packs of whole records, a pack
 // holding as many as fit inside one call's width, and a pack is one or more
 // embedding calls and exactly one database call. Most records in this store are
-// a single chunk, so a first publish over a store of several hundred goes from
+// a single chunk, so an embed pass over several hundred records goes from
 // several hundred process starts with a TLS login each to a few dozen. A record
 // whose own chunk count is at or past that width is a pack by itself and takes
 // as many embedding calls as it needs, still landing in one database call.
@@ -5565,8 +4840,8 @@ async function embedRecords(config, pending, options) {
     // so a caller can tell an absent endpoint from a host that refused.
     const out = { embedded: 0, rejected: 0, failed: [], outOfBudget: null, unembedded: 0, unstored: 0, stopped: null };
 
-    // The run's deadline, carried in from the publish so this leg's many calls
-    // are bounded by the same clock as the few before them, and defaulted to a
+    // The run's deadline, carried in from `db-refresh` so this leg's many calls
+    // are bounded by the same clock as the steps before them, and defaulted to a
     // whole budget of its own for a caller that embeds without one. `outOfBudget`
     // names the call that was refused rather than flagging that one was, since
     // the caller reports it and an embedding call and the write that stores its
@@ -5602,14 +4877,14 @@ async function embedRecords(config, pending, options) {
     // One group's chunks embedded, as {ok, rows} or {ok: false, detail}. Every
     // row's vector is the one made from its own text, since the answers come
     // back in the order the texts were sent. The embedded text is composed the
-    // way the corpus is composed, through memory-index's own function: the
-    // record's name, then the text. A second spelling of that composition is a
+    // way the corpus is composed, through embedText: the record's name, then
+    // the text. A second spelling of that composition is a
     // silent ranking defect.
     const embedGroup = async (group) => {
         const flat = [];
         for (const item of group) {
             item.chunks.forEach((chunk, index) => {
-                flat.push({ item, chunk, index, text: indexLib().embedText(item.name, chunk.text) });
+                flat.push({ item, chunk, index, text: embedText(item.name, chunk.text) });
             });
         }
         const rows = [];
@@ -5697,9 +4972,9 @@ async function embedRecords(config, pending, options) {
             if (taken.length === 0) continue;
         }
         // The lock budget rather than the configured timeout: this write takes
-        // the same fleet publish lock the record upsert takes, at the same
-        // thirty-second wait, so a client clock shorter than that wait kills a
-        // queuing publisher with its own tool. Here that costs the vectors as
+        // the same mem.Publish lock `db-refresh`'s adoption call takes, at the
+        // same thirty-second wait, so a client clock shorter than that wait
+        // kills a writer queuing for the lock with its own tool. Here that costs the vectors as
         // well as the call, since the pack is reported embedded and not stored
         // and the next run embeds the same records into the same wall.
         const storeBudgetMs = callBudget(deadline, now(), UPSERT_TIMEOUT_MS, SQLCMD_FLOOR_MS);
@@ -6109,29 +5384,6 @@ function meterDrain(options) {
     }
 }
 
-// The run's one line, in the shape the local sweep's counters take: integers
-// this module counted itself, no text off the wire.
-function summaryLine(summary) {
-    const published = summary.added + summary.changed + summary.unchanged + summary.skippedOlder;
-    return 'db-sync: ' + published + ' record(s) published (added ' + summary.added
-        + ', changed ' + summary.changed + ', unchanged ' + summary.unchanged
-        + ', older ' + summary.skippedOlder + '), ' + summary.embedded + ' embedded, '
-        + summary.removed + ' removed, ' + summary.drained + ' queue row(s) drained, '
-        + summary.orphans + ' index orphan(s)'
-        + (summary.queueRemaining > 0 ? ', ' + summary.queueRemaining
-            + ' queue row(s) still on the queue' : '')
-        + (summary.rejected > 0 ? ', ' + summary.rejected
-            + ' queue row(s) the host would not record, so no row on the host holds them' : '')
-        + (summary.embedRejected > 0 ? ', ' + summary.embedRejected
-            + ' vector row(s) the host would not store, so the records they belong to are not searchable' : '')
-        + (summary.heldBack > 0 ? ', ' + summary.heldBack
-            + ' removal(s) held back where the store read empty' : '')
-        + (summary.held > 0 ? ', ' + summary.held
-            + ' record(s) left as the database holds them, written through memq or already retired in the database' : '')
-        + (summary.partial ? ', walk incomplete so nothing was marked removed' : '')
-        + (summary.outOfBudget ? ', the run budget was spent so it stopped there' : '');
-}
-
 // Why a run stood down, in one sentence per reason. A stand-down is loud: the
 // caller prints this and does nothing else.
 function standDownText(result) {
@@ -6201,6 +5453,8 @@ module.exports = {
     CHUNK_TARGET_CHARS,
     CHUNK_MIN_CHARS,
     CHUNK_MAX_CHARS,
+    EMBED_BATCH,
+    embedText,
     PROBE_TIMEOUT_MS,
     MAX_TIMEOUT_MS,
     REQUIRED_SCHEMA_VERSION,
@@ -6238,16 +5492,10 @@ module.exports = {
     PROJECT_KEY_WIDTH,
     SQLCMD_FLOOR_MS,
     SPAWN_MAX_OVERSHOOT_MS,
-    COLUMN_TEXT_CAP,
-    columnText,
     spawnKillMs,
     failureCause,
     configPath,
     queuePath,
-    MIGRATION_MARKER_FILE,
-    migrationMarkerPath,
-    readMigrationMarker,
-    writeMigrationMarker,
     isDefaultStoreRoot,
     storeRootServesDatabase,
     redirectedRootText,
@@ -6288,13 +5536,9 @@ module.exports = {
     usageEntry,
     outcomeEntry,
     tierIdentity,
-    collectRecords,
-    collectOrphans,
-    publish,
     adoptProjectStore,
     readRecord,
     drainOnly,
-    summaryLine,
     standDownText,
     SNAPSHOT_INDEX_FILE,
     SNAPSHOT_INDEX_VERSION,
@@ -6303,6 +5547,8 @@ module.exports = {
     snapshotIndexCeiling,
     snapshotDir,
     snapshotIndexPath,
+    writeAtomically,
+    SNAPSHOT_DIR,
     readSnapshotIndex,
     writeSnapshotIndex,
     snapshotRecordPath,
@@ -6317,7 +5563,6 @@ module.exports = {
     APPLIED_NAMES_MAX,
     readIndex,
     getRecords,
-    oldTiersHoldFiles,
     embedStoredRecord,
     embedUnembedded
 };

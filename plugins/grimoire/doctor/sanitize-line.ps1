@@ -1,8 +1,8 @@
 # The one sanitizer every kit PowerShell surface prints foreign text through.
 #
-# Dot-sourced by doctor.ps1, by the memory database host probe beside the
-# installer, and by install-memory-sync.ps1, so every script whose lines the
-# doctor prints under its own steps sanitizes them one way. A second copy
+# Dot-sourced by doctor.ps1 and by the memory database host probe beside the
+# installer, so every script whose lines the doctor prints under its own steps
+# sanitizes them one way. A second copy
 # would be one edit away from a cap or a character class the other side does
 # not keep.
 #

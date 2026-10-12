@@ -43,8 +43,7 @@
 //     withholds it. Left out of that list are delete-type and delete-operator,
 //     which mark a shared-tier record's row deleted so no read serves it;
 //     forget, which does the same to a project-tier record; find, withheld pending a decision on
-//     granting it, since the in-process embedder load it was withheld for is
-//     no longer on its path; anchor, which rewrites a project-tier
+//     granting it, its search by meaning being the memory database's; anchor, which rewrites a project-tier
 //     record in place at a name the command line gives it, and with it the
 //     claim every drift surface reads about which files that memory is still
 //     true of; and triggers, which rewrites a record of any tier the same way
@@ -60,10 +59,9 @@
 //     --supersedes, which demotes and labels a record no pin protects from
 //     it; --trigger, which writes that same recognition line at a record's
 //     birth and so would reach through a granted verb what the triggers verb
-//     is withheld for; --rollup, which folds every expired journal entry's
-//     prose into a tally and keeps the text in a single local .bak the sync
-//     never carries; --drop-malformed, which deletes the sidecar lines
-//     the rollup rewrite preserves; and --type=<type>, the attached spelling
+//     is withheld for; --rollup and --drop-malformed, flags memq takes on
+//     no verb, screened here on this hook's own account because its verb
+//     layer is an allowlist and its flag layer a denylist; and --type=<type>, the attached spelling
 //     alone, which points a granted read or applied stamp at any type tier
 //     the store holds rather than at the one the calling project declared,
 //     the bare --type spelling keeping its grant for exactly that reason.
@@ -72,11 +70,10 @@
 //     store signals as well, so those seven are a second lock rather than the
 //     only one, and it refuses one shape of an eighth, a `triggers --replace`
 //     reaching a shared tier or a pinned project store;
-//     find, forget, anchor, the rest of triggers and --rollup
-//     are withheld here alone, and --drop-malformed's other lock is the
-//     CLI's own coupling (an argument error without --rollup) rather than a
-//     store-signal refusal, so its screen here is what holds if that
-//     coupling is ever loosened. What a withheld grant costs on this vector
+//     find, forget, anchor and the rest of triggers are withheld here
+//     alone, and --rollup and --drop-malformed are refused by memq as
+//     unknown options on every verb, so their screens here hold if either
+//     flag ever returns to a verb. What a withheld grant costs on this vector
 //     is the capability itself: no operator is watching a fleet worker's
 //     session, so the command does not run rather than waiting for an
 //     approval. Each withholding below is chosen against that price, not
@@ -92,12 +89,9 @@
 //     variables that select code for the granted child are refused outright
 //     whenever they are set at all: NODE_OPTIONS (carries --require/--import),
 //     NODE_PATH (steers module resolution), and NODE_REPL_EXTERNAL_MODULE (a
-//     preloaded module). All three are node's own. No variable naming an
-//     embedder directory is among them, for the reason PRELOAD_ENV states
-//     below: no granted verb loads an embedder package, and the granted verbs
-//     that require the index module stand their own check down whenever such
-//     a variable is set at all, so the directory question is bounded rather
-//     than screened for.
+//     preloaded module). All three are node's own. No variable of the kit's
+//     is among them, for the reason PRELOAD_ENV states below: no granted memq
+//     path loads code out of a named directory.
 //   - The whole command line is free of shell metacharacters: ; & | < > ` $
 //     ( ) are refused anywhere, quoted spans included. The scan deliberately
 //     does not parse quoting to be lenient inside it; quote parity is
@@ -228,31 +222,30 @@ const ESCAPED_QUOTE = /\\["']/;
 // this hook's environment, so any of them being set at all refuses the grant.
 //
 // No variable of the kit's belongs here. No granted memq path loads code out of
-// a named directory. The authoring verbs add-type and add-operator, at their
+// a named directory: the authoring verbs add-type and add-operator, at their
 // write-time neighbours check, and decay-scan, at its neighbour-pairs block
-// after the drift block, require scripts/memory-index.js for its text composer
-// alone (embedText), and neither calls the loader that would require an
-// embedder package out of KIT_EMBEDDER_ROOT; find makes no such require, its
-// search by meaning being the memory database's. The set is pinned whole,
-// callers included, by the closure assertion in test/memq-grant.test.js, which
-// is where a new path shows up rather than in this sentence. find is withheld
-// by the argument screen below, an open decision now that it makes no such
-// load. The authoring verbs and the scan are granted, and both stand their
-// check down whenever KIT_MEMORY_ROOT or KIT_EMBEDDER_ROOT is present, one
-// stand-down they share, read in the child rather than here.
+// after the drift block, ask the memory database, and so does find. That no
+// granted path loads code is pinned by the no-code-loads assertion in
+// test/memq-grant.test.js, which asserts memq loads no code past its fixed
+// block and is where a new path shows up rather than in this sentence. find is
+// withheld by the argument screen below, an open decision. The authoring verbs
+// and the scan are granted, and both stand their
+// check down whenever KIT_MEMORY_ROOT is present, one stand-down they share,
+// read in the child rather than here.
 // The other root this repo gates the same way, KIT_PLUGINS_ROOT, selects which
 // memq a shim resolves; it is absent for its own reason, that the grant names
 // this script by absolute path and the child loads no shim.
 const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 
 // The verbs a prompt-free allow covers, which is memq's own subcommand list
-// minus the thirteen this grant does not extend to. memq dispatches log, find,
-// get, recall, judged, recent, unstamped, touch, stamp-read, anchor, triggers,
+// minus the twelve this grant does not extend to. memq dispatches log, find,
+// get, recall, judged, recent, unstamped, touch, anchor, triggers,
 // add-type, add-operator, put, forget, delete-type, delete-operator,
-// decay-scan, decay-prune, decay-done, db-sync, db-refresh, db-promote,
-// db-curate, jev-calibration and meter-drain, and the thirteen absent here are
-// the two shared-tier deletes, find, anchor, triggers, db-sync, db-refresh,
-// db-promote, db-curate, jev-calibration, forget, meter-drain and stamp-read.
+// decay-scan, decay-prune, decay-done, declare-type, db-refresh, db-promote,
+// db-curate, jev-calibration and meter-drain, and the twelve absent here are
+// the two shared-tier deletes, find, anchor, triggers, db-refresh,
+// db-promote, db-curate, jev-calibration, forget, meter-drain and
+// declare-type.
 //
 // anchor is the fourth, and it is withheld on what it authors rather than on
 // what it destroys: it rewrites a record of the project tier in place, at a
@@ -274,9 +267,9 @@ const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 // record and one naming none takes the line away, which is erasure rather than
 // aiming and leaves the record with no recognition at all. The tier flags are
 // what make the blast radius wider than anchor's: the same rewrite on a
-// machine-wide tier aims or erases recognition for every project on the box
-// and every machine the store syncs to, rather than for the one project a
-// worker was pointed at. The --confirm-shared the CLI asks for that replace is
+// machine-wide tier aims or erases recognition for every project on the box,
+// rather than for the one project a worker was pointed at. The
+// --confirm-shared the CLI asks for that replace is
 // no second lock, being a flag rather than a person on this vector. What does
 // stand behind this screen, for that one shape alone, is memq's own refusal of
 // a replace reaching a shared tier or a pinned project store under the store
@@ -284,34 +277,19 @@ const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 // have no such refusal, for anchor's reason, so for those this screen is again
 // the only one.
 //
-// db-sync is the sixth, and it is withheld on what it would do here, which is
-// nothing. The verb publishes the store to the shared SQL Server index, and it
-// refuses to run at all unless the store it walks is the machine's own at the
-// home directory, because a publish presents that store's credential whatever
-// store the walk read. This grant fires only where the fleet-store signals are
-// set, and under exactly those signals memq's store root is the override rather
-// than the home directory, so a granted db-sync stands down before it reads a
-// record. Granting it would put a line on a permission surface authorizing an
-// act that cannot happen on this vector, which is a line a later audit has to
-// work out and nothing gains from. The same refusal is why no granted verb
-// writes the shared index's queue here: log, get and touch each offer their
-// stamp to that queue, and the client declines it under exactly these signals,
-// for the same reason and in the same one place.
-//
-// db-refresh is withheld beside db-sync and on its account: it drains the
-// queue and adopts the working directory's folder store into its remote key,
-// which is this machine's own maintenance of the memory database and nothing
-// a fleet worker's task asks for. A worker's own writes drain the queue ahead
-// of themselves, so withholding the verb costs it nothing.
+// db-refresh is the sixth, and it is withheld on whose maintenance it is: it
+// drains the queue, takes a fresh snapshot of the index and embeds what
+// carries no vector, which is this machine's own maintenance of the memory
+// database and nothing a fleet worker's task asks for. A worker's own writes
+// drain the queue ahead of themselves, so withholding the verb costs it
+// nothing. No granted verb writes the shared index's queue here either: log,
+// get and touch each offer their stamp to that queue, and the client declines
+// it under exactly these signals, in one place.
 //
 // meter-drain is withheld on the same account: it sends this machine's meter
 // folder to the memory database, and the persona plugin's own timer runs it
 // as a process of its own, never through a worker's shell, so no fleet
 // worker's task asks for it.
-//
-// stamp-read is withheld on meter-drain's account: the persona module's read
-// stamp runs it as a process of its own after a Read of a memory file, never
-// through a worker's shell, so no fleet worker's task asks for it.
 //
 // db-promote and db-curate are the seventh and eighth, and they are withheld
 // on whose act they are. Both run under the curator login alone, the one
@@ -337,6 +315,13 @@ const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 // every read, and nothing in memq takes the mark back off. memq carries no store-signal refusal for it,
 // since under those signals a pin names the project store it resolves, so this
 // screen is its only lock on this vector.
+//
+// declare-type is the eleventh, and it is withheld on the ground --type=<type>
+// is: it chooses which type tier the checkout's bare --type reaches, by
+// writing the project's declaration in this machine's declarations file, so
+// a worker granted it could point every granted bare --type read and stamp of
+// that checkout at any tier the store holds. memq carries no store-signal
+// refusal for it, so this screen is its only lock on this vector.
 //
 // recall-candidates is granted on judged's and recall's shape: a read through
 // a publisher procedure with typed parameters, a path accepted only as match
@@ -499,7 +484,8 @@ function screensFlag(argv, flag) {
 // The attached-value spelling alone, for a flag whose bare word means
 // something the grant keeps. `--type` by itself resolves the calling project's
 // own declared Project-Type and nothing else, which is a read of the tier that
-// project already opted into; `--type=<type>` names any tier in the store. So
+// project already opted into through `memq declare-type`, a verb this grant
+// withholds; `--type=<type>` names any tier in the store. So
 // what is withheld is the naming of a foreign tier rather than the flag, and a
 // screen matching the word whole would take the granted reading with it.
 // `--type=` with nothing after it is matched too: it is a whole word here and
@@ -574,9 +560,8 @@ function grantable(p) {
     // at the one the calling project declared, the reach the bare --type
     // spelling is granted for, which cmdGet and cmdTouch refuse under those
     // same signals.
-    // Five more are withheld here alone, with no second layer behind them:
-    // find, withheld pending a decision on granting it now that it loads no
-    // embedder; forget, which marks a project-tier record's row deleted; --rollup, which discards prose no copy survives; anchor,
+    // Four more are withheld here alone, with no second layer behind them:
+    // find, withheld pending a decision on granting it; forget, which marks a project-tier record's row deleted; anchor,
     // which rewrites a project-tier record in place and with it the claim
     // every drift surface reads about which files that memory is still true
     // of; and triggers, which rewrites a record of any tier in place at the
@@ -588,19 +573,17 @@ function grantable(p) {
     // store signals, that being the shape that takes every declaration off a
     // record rather than aiming one, so what is withheld here alone is the
     // aiming and the unpinned project-tier replace. The
-    // fourteenth, --drop-malformed, deletes sidecar lines behind one
-    // .bak generation; what stands behind its screen is the CLI's requirement
-    // that the flag ride --rollup, a coupling rather than a store-signal
-    // refusal, so this screen is what keeps the delete withheld if that
-    // coupling is ever loosened for ergonomics. None of the fourteen belongs in
-    // a prompt-free allow with no operator in the loop, and the five with no
+    // last two, --rollup and --drop-malformed, are flags memq takes on no
+    // verb, screened on this hook's own account because its flag layer is a
+    // denylist. None of the fourteen belongs in
+    // a prompt-free allow with no operator in the loop, and the four with no
     // second lock are the ones a later edit here would silently free.
     //
     // This screen is the second lock rather than a move of the first: the CLI
     // evaluates those signals in the child process, this hook evaluates them
     // in its own, and where the two disagree the child both skips its refusal
     // and resolves memoryRoot() to the operator's real store, so a caller-named
-    // path would be read into the tier that syncs to a private remote.
+    // path would be read into the operator's own tier.
     // Withholding a grant is silence, not a deny: the command is not blocked
     // here, it simply gets no prompt-free allow. On the unattended vector
     // this hook serves that is the whole of the outcome, since no operator is
@@ -613,18 +596,13 @@ function grantable(p) {
     //
     // The verb is judged against GRANTED_VERBS, so a word this hook has never
     // heard of withholds rather than passing through. find stays off the list,
-    // and this hook is its only lock. The reason it was left off no longer
-    // holds: find once loaded code out of a directory named outside the command
-    // line, scripts/memory-index.js and through it an embedder package under a
-    // root that falls back to one inside the caller's own HOME, and its search
-    // by meaning is now the memory database's, with no such load. Whether to
-    // grant it is an open decision, so it stays withheld until that decision is
-    // made. The require of scripts/memory-index.js remains on two granted
-    // paths, for its text composer alone, and neither loads an embedder:
-    // add-type and add-operator reach it at their write-time neighbours check,
-    // and decay-scan at its neighbour-pairs block after the drift block, each
-    // stood down in the child on the presence of KIT_MEMORY_ROOT or
-    // KIT_EMBEDDER_ROOT rather than by anything this hook screens. The cost of
+    // and this hook is its only lock. Its search by meaning is the memory
+    // database's, and loads no code out of a named directory. Whether to grant
+    // it is an open decision, so it stays withheld until that decision is
+    // made. The two granted semantic checks, add-type and add-operator at
+    // their write-time neighbours check and decay-scan at its neighbour-pairs
+    // block after the drift block, are stood down in the child on the presence
+    // of KIT_MEMORY_ROOT rather than by anything this hook screens. The cost of
     // withholding find is deliberate and worth naming: a fleet worker gets no
     // semantic search at all, not a prompt for one. It is affordable because
     // recall is the retrieval path an effort starts from by the memory skill's
@@ -673,8 +651,7 @@ function grantable(p) {
     // add-operator the capability the verb list withholds from `triggers`. The
     // tier is what makes the reach the widest of the ones screened here, the
     // verb's own paragraph above owning the reason: a machine-wide record aims
-    // recognition for every project on the box and every machine the store
-    // syncs to.
+    // recognition for every project on the box.
     //
     // What the flag does not reach is the verb's other half. A create writes
     // its own new record's line and can neither re-aim a record the operator
@@ -684,41 +661,20 @@ function grantable(p) {
     // than the only one, and the second lock is worth its place because the
     // two layers read their environment in separate processes: the divergence
     // case is the one where the CLI's own refusal does not fire and
-    // memoryRoot() still resolves to the operator's real synced store. The
+    // memoryRoot() still resolves to the operator's real store. The
     // cost is one attended command, the record still landing from a fleet
     // worker with every other field and stderr naming the verb that declares
     // its triggers later.
     if (screensFlag(w, '--trigger')) return false;
-    // --rollup is withheld on how much it destroys, not on where the copy
-    // goes: it replaces each expired journal group with one synthetic tally
-    // line and drops the prose of every entry in that group, which is the
-    // shape the delete verbs are withheld for. The granted writes bounded the
-    // same way are bounded far tighter: a description-only --update rewrites
-    // one index line and leaves the record it describes untouched, and
-    // archiving is demotion, refused against a pinned record, with the record
-    // still readable by name afterwards. What bounds it is that pair, the
-    // reversibility and the pin, rather than the demotion class alone: a
-    // demotion no pin can stop is not bounded by this comparison, which is
-    // why --supersedes is screened above rather than read as archiving's
-    // lighter cousin. So a bare decay-prune and the archive flags stay
-    // granted.
-    //
-    // The cost is real and deliberate: the kit's own close-out runs
-    // decay-prune --rollup, and a fleet worker reaching that step loses the
-    // rollup with nothing to prompt and nobody to approve it. What that costs
-    // is growth in a journal an attended session compacts later, against a
-    // prompt-free allow for the one operation in this CLI that discards prose
-    // outright.
+    // --rollup and --drop-malformed are flags memq takes on no verb, and
+    // memq refuses either as unknown. They are screened here all the same,
+    // because the verb layer of this hook is an allowlist while its flag
+    // layer is a denylist, and a flag of either name reaching a granted verb
+    // gets no prompt-free allow whatever the CLI makes of it. A bare
+    // decay-prune and the archive flags stay granted: archiving is demotion,
+    // refused against a pinned record, with the record still readable by
+    // name afterwards.
     if (screensFlag(w, '--rollup')) return false;
-    // --drop-malformed is withheld as the delete it is: it removes lines
-    // from a usage sidecar with one .bak generation behind them, on all
-    // three tiers of the invocation at once. The CLI couples it to
-    // --rollup, which the screen above already withholds, so today no
-    // granted command could reach it; this screen is its own lock rather
-    // than a restatement of that coupling, because the verb layer here is
-    // an allowlist while the flags are a denylist, and a destructive flag
-    // whose only bar is an ergonomic coupling in another file is one a
-    // later decoupling would silently free with nothing here saying so.
     if (screensFlag(w, '--drop-malformed')) return false;
     // --type=<type> is withheld on which tier it reaches, not on what it does
     // there. `get`, `applied` and `touch` are granted verbs that take it, so

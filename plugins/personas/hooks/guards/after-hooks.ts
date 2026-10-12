@@ -1,18 +1,18 @@
-// after-hooks.ts: the three after-call hooks the tool.call handler runs on a
-// call's result through runner.ts: the C# formatter, the memory read stamp
-// and the memory-recognition nudge. Each attaches what it has to say as
-// context and nothing else, and each swallows its own failure, so a
-// formatter that will not start, a stamp that is not taken or a nudge that
-// cannot read the store attaches nothing and raises no GuardError.
+// after-hooks.ts: the two after-call hooks the tool.call handler runs on a
+// call's result through runner.ts: the C# formatter and the
+// memory-recognition nudge. Each attaches what it has to say as context and
+// nothing else, and each swallows its own failure, so a formatter that will
+// not start or a nudge that cannot read the store attaches nothing and
+// raises no GuardError.
 //
 // Nothing here reads `$` (runner.ts says why). Each hook reaches what it
 // needs through deps hooks/index.ts builds over `$` and hands in: the
 // formatter the session's working directory, a host to spawn through and
-// the resolver for its launchers, the stamp and the nudge the session's memq
-// and its recognition index. None reads the shared GuardContext, so none
-// fails where that context cannot be built. The formatter and the stamp pass
-// over a call whose result is an error, as the PostToolUse hooks they
-// replace fired on a call that succeeded alone.
+// the resolver for its launchers, the nudge the session's recognition index.
+// None reads the shared GuardContext, so none fails where that context
+// cannot be built. The formatter passes over a call whose result is an
+// error, as the PostToolUse hook it replaces fired on a call that succeeded
+// alone.
 
 import type { AfterHook, GuardCall, GuardHost, GuardResult } from "./runner";
 
@@ -122,32 +122,6 @@ export function formatterHook(deps: FormatterDeps): AfterHook {
           // this launcher did not resolve, did not start or ran past its
           // bound; the next one runs
         }
-      }
-      return {};
-    },
-  };
-}
-
-// What the read stamp reaches through hooks/index.ts: `stamp` decides
-// whether the path names a memory file in one of the store's tiers and, where
-// it does, spawns memq's stamp verb for it once, bounded.
-export type ReadStampDeps = { stamp(filePath: string): Promise<void> };
-
-/**
- * Stamps a Read of a memory file as read in the memory database. Every Read
- * naming a file whose result is not an error matches, and `stamp` spawns
- * nothing for a file outside the store's tiers. Attaches nothing.
- */
-export function readStampHook(deps: ReadStampDeps): AfterHook {
-  return {
-    name: "read-stamp",
-    readsContext: false,
-    matches: (e: GuardCall, r: GuardResult) => r.isError !== true && e.tool === "Read" && filePathOf(e) !== "",
-    apply: async (e: GuardCall) => {
-      try {
-        await deps.stamp(filePathOf(e));
-      } catch {
-        // a stamp is never worth disturbing the call that read the file
       }
       return {};
     },

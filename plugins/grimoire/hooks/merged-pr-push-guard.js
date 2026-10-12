@@ -90,8 +90,8 @@ function noteUngatedOverride() {
 // The environment a query runs under: this process's, with every GIT_*
 // variable removed case-insensitively (Windows env keys are not the casing a
 // plain-object copy is indexed by), and the prompt suppressed. A wholesale
-// strip, not just GIT_DIR/GIT_WORK_TREE, and for the same reason the memory
-// store's git calls take one (gitStoreEnv in memory-session.js): a repo-carried
+// strip, not just GIT_DIR/GIT_WORK_TREE, and for the same reason the shared
+// git boundary takes one (gitChildEnv in kit-git-lib.js): a repo-carried
 // GIT_COMMON_DIR or GIT_CONFIG_GLOBAL redirects a git read at another
 // repository, and every fact this guard's decision rests on (the branch name,
 // the origin URL) comes from a git read. Nothing here needs any of them, since

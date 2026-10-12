@@ -102,12 +102,12 @@ settings_path_json() {
 }
 
 # --- JEV_PROMOTABLE_SET_IDS ---
-# The five question-set ids a JEV_LIVE value may name, typed once here so the
+# The six question-set ids a JEV_LIVE value may name, typed once here so the
 # two callers of jev_live_to_csv below cannot disagree about which ids
 # are promotable, and so test-personas/settings-plugin-key-test.sh can pin this
 # list against hooks/question-catalog.ts's PROMOTABLE_SET_IDS, the plugin's own
-# copy of the same five ids.
-JEV_PROMOTABLE_SET_IDS=(turn-open turn-disposition memory-kind turn-score controller-decision)
+# copy of the same six ids.
+JEV_PROMOTABLE_SET_IDS=(turn-open turn-disposition memory-kind turn-score controller-decision step-effort)
 
 # --- jev_live_to_csv ---
 # Usage: jev_live_to_csv <caller-name> <comma-separated ids>

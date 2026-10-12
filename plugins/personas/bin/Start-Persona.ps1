@@ -6,7 +6,9 @@
 # The wrapper reads the persona's roster entry, applies the env file's allowlisted keys to its own
 # process, launches bin/supervise.sh through the bash the env file names, and loops on
 # Get-KeeperDecision (bin/keeper-functions.ps1) over the supervisor's exit code: relaunch after a
-# delay, hold, park, or exit. Before each launch it looks for a supervisor already running for the
+# delay, hold, park, or exit. Exit -1 is a termination with no signal (Stop-Process and Process.Kill
+# leave it where taskkill /F leaves 1): it relaunches after the base delay with the ladder untouched.
+# Before each launch it looks for a supervisor already running for the
 # persona, and where it finds one it waits on that one instead of launching (ADOPT in keeper.log).
 # State the operator can read lives under the entry's run directory:
 # keeper.log (one line per event, rotated at 5 MB keeping keeper.log.1), keeper.json (the last

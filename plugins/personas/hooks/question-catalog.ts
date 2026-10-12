@@ -143,23 +143,6 @@ export const PLAN_SWITCH_NO_MATCH = "no_match";
 export const TURN_OPEN = "turn-open";
 export const TURN_DISPOSITION = "turn-disposition";
 
-// The sets a settings live list may name: a live answer is read into a
-// branch by option id, so only a set whose ids are this catalog's own and
-// whose promotion bar is stated is here. The constant enforces nothing by
-// itself. The read that turns the settings value into the list liveAsk is
-// handed is where an id outside this set is dropped, and liveAsk checks
-// membership in that list alone. The memory kind is here because the memory
-// site reads its live answer as a gate ahead of the Haiku classify, and its
-// promotion bar is the shadow journal's count of what that gate would skip.
-// The turn score is here because the scoring site reads its live answer as
-// the turn's label in place of Haiku's, and its promotion bar is the gold
-// pass's agreement with the hand labels. The controller decision is here on
-// the same ground: the tick reads its live answer as the decision in place
-// of Haiku's, and its promotion bar is the gold pass's agreement on version
-// 3 calls. The three memory sets below are
-// absent: each is asked in shadow, and its promotion is a ruling on a gold pass.
-export const PROMOTABLE_SET_IDS: readonly string[] = Object.freeze([TURN_OPEN, TURN_DISPOSITION, MEMORY_KIND, TURN_SCORE, CONTROLLER_DECISION]);
-
 // Each set's option ids in force, the caller's one constant, journaled as a
 // closed vocabulary the way BLOCK_OWNER_OPTIONS is, and here also the ids
 // offered to Jev.
@@ -253,6 +236,17 @@ export const MEMORY_RECOGNITION_STATE_DESCRIPTION = "description";
 export const STEP_DRIFT = "step-drift";
 export const STEP_DRIFT_OPTIONS: readonly string[] = Object.freeze(["on-goal", "drift"]);
 
+// Asked at every main-loop step of an owner's turn whose response arrived,
+// over stepEffortStateText's state of the step just finished: how hard should
+// the next request think, relative to the session's own effort. The reading
+// is for the next request, since no hook sees a request before it is sent.
+// No Haiku counterpart asks it. Shadow unless the live list names it, where
+// the settled answer rewrites the next request's effort. Each call is
+// measured against the tools the next step called, which hooks/index.ts
+// writes as its next_step_tools outcome at that step or at the turn's end.
+export const STEP_EFFORT = "step-effort";
+export const STEP_EFFORT_OPTIONS: readonly string[] = Object.freeze(["low", "keep", "high"]);
+
 // --- The compaction pass's set ---
 //
 // Asked on the module's timer, never inside a hook, of each tool result older
@@ -273,7 +267,29 @@ export const QUESTION_SET_IDS: readonly string[] = Object.freeze([
   MEMORY_VALUE, MEMORY_RECALL, MEMORY_RECOGNITION,
   STEP_DRIFT,
   TOOL_RESULT_STALE,
+  STEP_EFFORT,
 ]);
+
+// The sets a settings live list may name: a live answer is read into a
+// branch by option id, so only a set whose ids are this catalog's own and
+// whose promotion bar is stated is here. The constant enforces nothing by
+// itself. The read that turns the settings value into the list liveAsk is
+// handed is where an id outside this set is dropped, and liveAsk checks
+// membership in that list alone. The memory kind is here because the memory
+// site reads its live answer as a gate ahead of the Haiku classify, and its
+// promotion bar is the shadow journal's count of what that gate would skip.
+// The turn score is here because the scoring site reads its live answer as
+// the turn's label in place of Haiku's, and its promotion bar is the gold
+// pass's agreement with the hand labels. The controller decision is here on
+// the same ground: the tick reads its live answer as the decision in place
+// of Haiku's, and its promotion bar is the gold pass's agreement on version
+// 3 calls. The step effort is here because the step watch reads its live
+// answer as the effort of the session's next model request, and its
+// promotion bar is the gold pass's agreement with the hand labels. The three
+// memory sets above are absent: each is asked in shadow, and its promotion is
+// a ruling on a gold pass. Declared after every id it names, since a const is
+// not readable before its declaration runs.
+export const PROMOTABLE_SET_IDS: readonly string[] = Object.freeze([TURN_OPEN, TURN_DISPOSITION, MEMORY_KIND, TURN_SCORE, CONTROLLER_DECISION, STEP_EFFORT]);
 
 // The sets asked at a plan entry's turn end, in the order the request
 // carries them: block-owner alone.
@@ -300,15 +316,15 @@ export const MAX_OPTIONS = 255;
 // record sets are here on that ground and one more: a live answer's choice is
 // read into a branch by option id. The three memory sets are here on the
 // block owner's ground: each set's ids are its caller's one constant, and a
-// load reads that column as a closed vocabulary. The step watch's set is here
-// on the same ground, and so is the compaction pass's set, whose verdict the
-// pass reads into an apply by option id. The plan switch is absent
+// load reads that column as a closed vocabulary. The step watch's two sets are
+// here on the same ground, and so is the compaction pass's set, whose verdict
+// the pass reads into an apply by option id. The plan switch is absent
 // because its option ids are the caller's pending plan ids rather than the
 // catalog's.
 export const FIXED_OPTION_SETS: readonly string[] = Object.freeze([
   CONTROLLER_DECISION, TURN_SCORE, MEMORY_KIND, BLOCK_OWNER, TURN_OPEN, TURN_DISPOSITION,
   MEMORY_VALUE, MEMORY_RECALL, MEMORY_RECOGNITION,
-  STEP_DRIFT, TOOL_RESULT_STALE,
+  STEP_DRIFT, TOOL_RESULT_STALE, STEP_EFFORT,
 ]);
 
 // A Score's levels are positions rather than names, so what an override of
@@ -499,6 +515,22 @@ export const SHIPPED_QUESTIONS: Readonly<Record<string, ResolvedQuestion>> = {
       "drop": "Neither the call nor its result matters any more: a listing, a search, a build or test run, or a read of a file the session has since rewritten or finished with, with nothing later depending on it.",
     },
   },
+  // Asked over stepEffortStateText's state, the step just finished. Each
+  // option is relative to the session's own effort rather than a level, so a
+  // session launched high is not lowered by an ordinary step, and each
+  // description carries the nearest cases that are still this option.
+  [STEP_EFFORT]: {
+    id: STEP_EFFORT,
+    version: SHIPPED_VERSION,
+    overrideRefused: null,
+    primitive: "choice",
+    instructions: "This is the response an autonomous worker just gave in the middle of its turn, with the tools it called. Its next model request reads those tools' results. Given what this step shows, how hard should that next request think, relative to the session's usual effort?",
+    options: {
+      "low": "Less than usual: the next request is routine follow-through with its course already set, such as reading a file the step just located, running a command the step already planned, applying an edit already decided, or a status check on work already running. A step that read a result it still has to make sense of is still low only where what to do with it is plain.",
+      "keep": "The usual effort: ordinary work with some judgment in it, such as reading search results to pick the next file, a small edit whose shape is mostly clear, a test run whose outcome decides the next move, or a step that shows too little to tell. A plain error with an obvious fix is still keep.",
+      "high": "More than usual: the next request has to reason hard, such as diagnosing a failure or a test that went red for no plain reason, choosing between designs, planning a change across several files, reviewing work against a spec, or deciding what to do after a result that contradicts the plan. A step about to write the turn's final report on hard work is still high.",
+    },
+  },
 };
 
 // What the resolver hands back for a question set id it does not know. Its
@@ -621,6 +653,57 @@ export const STEP_DRIFT_ANSWER_MAX = 1200;
 export function stepDriftStateText(objective: string, answer: string): string {
   return `Goal objective: ${stateValue(objective)}\n\n` +
     `Step answered: ${stateValue(answer).slice(0, STEP_DRIFT_ANSWER_MAX)}`;
+}
+
+// --- The step-effort state ---
+//
+// The state step-effort is asked over: five labelled parts, a blank line
+// between each, and no question sentence. The objective of the entry active
+// at the step, or none with no active entry; the step's index; the head of
+// its answer, or none where it gave no text; each tool it called by name with
+// the head of its input's JSON text, or none where it called no tool; and why
+// the model stopped, or none where no stop reason arrived. Every text value
+// goes through stateValue, the objective being stored text and the rest model
+// or host text, so no value can write a sixth part. Each cut is applied to
+// the collapsed value, so each bound counts the text as it is sent. An input
+// with no JSON form reads as an empty head, so the tool's name stands alone.
+export const STEP_EFFORT_ANSWER_MAX = 1200;
+export const STEP_EFFORT_INPUT_MAX = 200;
+
+// One tool call of the step, as the turn.step result carries it.
+export type StepEffortToolUse = { readonly name: string; readonly input?: unknown };
+
+// A tool input as JSON text: empty for an absent input or one with no JSON
+// form, such as a cyclic object or a function. The step-effort state and the
+// compaction pass both cut their input heads from it.
+export function jsonTextOf(input: unknown): string {
+  try {
+    return input === undefined ? "" : JSON.stringify(input) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function stepEffortToolText(use: StepEffortToolUse): string {
+  const name = stateValue(String(use.name));
+  const head = stateValue(jsonTextOf(use.input)).slice(0, STEP_EFFORT_INPUT_MAX);
+  return head.length > 0 ? `${name} ${head}` : name;
+}
+
+export function stepEffortStateText(
+  objective: string | null,
+  index: number,
+  answer: string,
+  toolUses: readonly StepEffortToolUse[],
+  stopReason: string | null,
+): string {
+  const answerHead = stateValue(answer).slice(0, STEP_EFFORT_ANSWER_MAX);
+  const tools = toolUses.map(stepEffortToolText);
+  return `Goal objective: ${objective === null ? "none" : stateValue(objective)}\n\n` +
+    `Step index: ${index}\n\n` +
+    `Step answered: ${answerHead.length > 0 ? answerHead : "none"}\n\n` +
+    `Tools called: ${tools.length > 0 ? tools.join("; ") : "none"}\n\n` +
+    `Stop reason: ${stopReason === null ? "none" : stateValue(stopReason)}`;
 }
 
 // --- The tool-result-stale state ---

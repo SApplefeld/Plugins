@@ -100,7 +100,7 @@ param(
 $script:failCount = 0
 
 # The timeout the checks run under when the config names none, and the range a
-# configured one is accepted in. The range matches kit-endpoint-lib.js's
+# configured one is accepted in. The range matches memory-database.js's
 # MIN_TIMEOUT_MS and MAX_TIMEOUT_MS, and so does the tolerance: a value outside
 # it is ignored with a line saying so rather than treated as fatal, because a
 # typo in one optional key is no reason to refuse to probe a working host.

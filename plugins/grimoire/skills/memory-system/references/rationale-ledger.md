@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the operating manual for the kit memory store's extension layer: the memory records the shared memory database holds plus an outcome journal, used-tracking, tags, a decay lifecycle, a shared project-type tier, an operator tier, and the `memq` CLI that reaches all of them. It owns the moments where a session touches that store beyond reading one record: recalling the whole store at effort start or a seat takeover, reporting what the store recorded during a session, logging an action outcome, stamping a memory applied, tagging, running or reading the decay pass, pinning against decay, writing or repairing or deleting a shared-tier record, recording file anchors and recognition triggers on a record, and interpreting a refusal when a memory write is denied. It also owns how `memq` resolves which store answers from a given working directory, which verbs stand down on a network share, and how each verb's output and exit status must be read. Load class: `named-trigger` - the frontmatter description says to use it when working with the store beyond plain memory files and lists the specific verbs, fields and error states that trigger it, so it is loaded before one of those acts rather than at session start or at every plan run.
 
-Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 (`skills.memory-system.c2.md`); lines 147-208 (`skills.memory-system.c3.md`); lines 209-255 (`skills.memory-system.c4.md`); lines 256-316 (`skills.memory-system.c5.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`T` entries below, their source lines read at that pass's fix rounds 1 and 2). Amended on 2026-09-25 by `docs/plans/claude-kit_persona-memory-port_spec_v1.md` sections 3, 5 and 6 (`D` entries below). Redrafted on 2026-09-26 by section 6 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c3de1f16` with its fix round at `894c89d4`, so every live entry's `passage:` line quotes the text at `894c89d4` and the `flag:` lines record that pass's flags. Redrafted on 2026-10-01 by section 5 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied that plan's cut list, so every live entry's `passage:` line quotes the text that section landed, and the entries its drop rows retired carry `ruled: cut 2026-09-30`. Amended on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and `memq` its one door (`E` entries below); an entry whose rule that section kept in new words reads `rewrite` with its `passage:` quoting the new text, and an entry whose passage that section deleted reads `retire`, with a `superseded-by:` line only where an `E` entry's passage carries its rule. Amended on 2026-10-04 by section 6 of the same plan, which made `delete-type` and `delete-operator` mark the record's database row deleted rather than remove files (`E007` and `E008` below), and respelled the `forget` row to match the soft delete it already sent (`E009` below). Amended on 2026-10-04 by section 7 of the same plan, which stands a store root that is not the machine's own down from the memory database (`E010` below).
+Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 (`skills.memory-system.c2.md`); lines 147-208 (`skills.memory-system.c3.md`); lines 209-255 (`skills.memory-system.c4.md`); lines 256-316 (`skills.memory-system.c5.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`T` entries below, their source lines read at that pass's fix rounds 1 and 2). Amended on 2026-09-25 by `docs/plans/claude-kit_persona-memory-port_spec_v1.md` sections 3, 5 and 6 (`D` entries below). Redrafted on 2026-09-26 by section 6 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c3de1f16` with its fix round at `894c89d4`, so every live entry's `passage:` line quotes the text at `894c89d4` and the `flag:` lines record that pass's flags. Redrafted on 2026-10-01 by section 5 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied that plan's cut list, so every live entry's `passage:` line quotes the text that section landed, and the entries its drop rows retired carry `ruled: cut 2026-09-30`. Amended on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and `memq` its one door (`E` entries below); an entry whose rule that section kept in new words reads `rewrite` with its `passage:` quoting the new text, and an entry whose passage that section deleted reads `retire`, with a `superseded-by:` line only where an `E` entry's passage carries its rule. Amended on 2026-10-04 by section 6 of the same plan, which made `delete-type` and `delete-operator` mark the record's database row deleted rather than remove files (`E007` and `E008` below), and respelled the `forget` row to match the soft delete it already sent (`E009` below). Amended on 2026-10-04 by section 7 of the same plan, which stands a store root that is not the machine's own down from the memory database (`E010` below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the markdown tiers, the store's git channel, the local search index, the write-door hook on the tier files, the type lock and the journal rollup with its malformed-line flag, and left `memq` reading no outcome journal: c1.C021, c1.C089, c2.C044 to c2.C051, c2.C099, c2.C141, c2.C142, c3.C021, c3.C041, c3.C043, c3.C093, c3.C108, c4.C077, c5.C035, c5.C052, c5.C053, c5.C056, c5.C057, c5.C058, c5.C064, c5.C070, c5.C074, c5.C080 to c5.C083, c5.C086, c5.C088, c5.C093, c5.C094, c5.C096, c5.C099, c5.C105, c5.C106, S015, S016, S021 and T001 deleted with their subjects; c1.C031, c1.C035, c1.C057, c1.C077, c1.C088, c1.C092, c1.C093, c1.C110, c2.C064, c2.C071, c2.C101, c2.C120, c3.C001, c3.C032, c3.C036, c4.C083, c5.C059, c5.C098, S006 and S007 rewritten to their passages as they now read, with their keys reworded where the key named a removed flag, path or reader; and the keys, reasons or provenance of c2.C067, c3.C006, c3.C033, c3.C035, c3.C044, c3.C103, c4.C032, c4.C043, c4.C082, D002 and E001 reworded where they stated the sync, the guard or a removed verb as present.
 
 ### c1.C001
 - key: Load this skill before any work on the kit memory store that goes beyond plain memory files.
@@ -159,7 +159,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: If `memq` does not resolve in the shell, the shim is not installed: ask for a kit doctor `-Fix` run (the kit-doctor skill owns that run).
 
 ### c1.C015
-- key: Never hand-edit `outcomes.jsonl` or `usage.jsonl`.
+- key: Never hand-edit a file in a run's pending directory or in the snapshot.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:14
 - provenance: 8e22ff4 2026-07-31, the original install of the journals; the residue and delete detail around it came later (b136b28 2026-08-22).
@@ -168,7 +168,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: Nothing enforces the rule: the frontmatter guard leaves the sidecars out of scope by design, so a hand edit still races the read-stamp hook. The bold rule and the three sentences a session acts on stay; the writer list, step order and residue taxonomy leave to their owners. Its landing respelled c1.C019's keep sentence; c1.C019 records the flip. Its landing respelled c1.C020's keep sentence; c1.C020 records the flip. Its landing respelled c1.C108's keep sentence; c1.C108 records the flip. Lands with two sentences after the bold rule naming the residue's subject (a confirmed shared-tier delete's three-backup sweep, pointed at the Delete bullet) ahead of the residue sentences, since the cut left the sweep, the delete and the stop with no antecedent in the paragraph. The writer list and step order the proposal moves here have their home in c1.C017's reason and in the CLI's own failure line rather than in this ledger.
 - proposed: Cut line 14 to the bold rule plus one sentence each for C019, C022 and C023, and move the writer list, step order and residue taxonomy to this ledger or to the Delete bullet at line 160.
 - baseline-test: yes
-- passage: **Never hand-edit `outcomes.jsonl` or `usage.jsonl`.**
+- passage: **Never hand-edit a file in a run's pending directory, `memory/pending/<run-id>/`, or in the snapshot, `~/.claude/memory-snapshot/`.**
 
 ### c1.C016
 - key: Treat a hand edit as racing the hook that appends on every memory read, including your own.
@@ -222,17 +222,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: row 862 (Never hand-edit journal sidecars) cuts the residue catalogue to the stopped-delete sentence the bold-lead bullet keeps, and row 890 (Shared-tier repair and delete mechanics) drops the residue detail from the Delete bullet, so no landed text carries this caveat.
 - proposed: A `<file>.tmp.<pid>` a hard-killed rewrite stranded at one of the sweep's three paths survives it unnamed,
 - passage: A `<file>.tmp.<pid>` a hard-killed rewrite stranded at one of the sweep's three paths survives it unnamed.
-
-### c1.C021
-- key: Treat backup and temp copies as machine-local, since the store's sync refuses `*.bak` and `*.tmp.*`.
-- class: rationale-example
-- source: plugins/grimoire/skills/memory-system/SKILL.md:14
-- provenance: ae2c70a 2026-08-22, the read-whole-against-the-CLI pass.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The same fact is stated at line 205 where the rotation decision is actually made, and c1.C019 and c1.C020 are obeyed without it here.
-- proposed: Drop the sync-refuses sentence from line 14; line 205 keeps it where the rotation question is asked.
-- baseline-test: yes
 
 ### c1.C022
 - key: Read the failure line naming exactly what a stopped delete removed, rather than inferring it from the step order.
@@ -320,13 +309,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: (via A025) Drop "Warns on an unregistered tag, never blocks" from the log row; line 125 carries it.
 
 ### c1.C031
-- key: Search with `memq find <term> [--tag t] [--outcomes|--memories|--all] [--archived]`, which returns a lexical block then a semantic block.
+- key: Search with `memq find <term> [--tag t] [--memories|--all] [--archived]`, which returns a lexical block then a semantic block.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:22
 - provenance: 6cbb24a 2026-08-03, the synced-semantic-memory plan that added the semantic block beside the lexical one.
 - verdict: keep
 - reason: The row is the reference entry for the verb's signature and output order while the Recall section at line 46 is the rule with its reasoning: index and rule, not two rules. No pointer replaces a signature.
-- passage: `memq find <term> [--tag t] [--outcomes\|--memories\|--all] [--archived]` | Hybrid search. The lexical block first,
+- passage: `memq find <term> [--tag t] [--memories\|--all] [--archived]` | Hybrid search. The lexical block first,
 
 ### c1.C032
 - key: Pass `--archived` to see retired records, labeled and demoted, instead of the one counting line.
@@ -344,11 +333,11 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:22
 - provenance: 050587b 2026-08-30, the plan that made the model-judged channel degrade honestly.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The advisory reading survives; what changes is that the row and line 46 both carry the three degrade states at sentence length. The row keeps one clause and the states live in one place.
-- proposed: (via A033) Cut the find row's model-judged passage to one clause ("a model-judged block, advisory, where an endpoint is configured") and leave the degrade states to the Recall section.
+- verdict: retire
+- landed: ccc1f5a3 section 2
+- reason: The advisory reading survives; what changes is that the row and line 46 both carry the three degrade states at sentence length. The row keeps one clause and the states live in one place. Retired on 2026-10-11 by section 2 of `docs/archive/claude-kit_qwen-retirement_spec_v1.md`, which removed the model-judged block from `memq find` and its sentences from the skill; the verdict before it was rewrite.
 - passage: A model-judged block follows where an endpoint is configured, and it is advisory.
+- proposed: (via A033) Cut the find row's model-judged passage to one clause ("a model-judged block, advisory, where an endpoint is configured") and leave the degrade states to the Recall section.
 
 ### c1.C034
 - key: Reach records through `recall` and `get` rather than `find` when running as a fleet worker.
@@ -363,14 +352,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: No grant under the engine store signals (the unattended-vector paragraph owns the rule).
 
 ### c1.C035
-- key: Read journal entries or a memory body with `memq get <key|name> [--type|--type=<type>|--operator]`.
+- key: Read a memory body with `memq get <name> [--type|--type=<type>|--operator]`.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:23
 - provenance: 8e22ff4 2026-07-31 installed `get`; 6cbb24a 2026-08-03 added its tier flag.
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: A calling convention is what a session types, and no machinery types it for the session. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: `memq get <key\|name> [--type\|--type=<type>\|--operator]` | Full journal entries for a key, or a memory record's body
+- passage: `memq get <name> [--type\|--type=<type>\|--operator] [--no-stamp]` | A memory record's body from the first tier holding that name.
 
 ### c1.C036
 - key: Pin a tier with `--type` or `--operator` to reach a shared-tier record that a nearer tier shadows by name.
@@ -592,7 +581,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: Within the table this row is the one the get and touch rows defer to for the two spellings, so it owns the flag shape in the reference; line 219 owns the write door and its bars. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: With no tier flag it writes the project tier, refusing inside a run a name the pending tier holds. Bare `--type` means the working project's declared `Project-Type`, and `--type=<type>` names the tier.
+- passage: With no tier flag it writes the project tier, refusing inside a run a name the pending tier holds. Bare `--type` means the type the working project declared with `memq declare-type`, and `--type=<type>` names the tier.
 
 ### c1.C058
 - key: Attach the type value to the flag word as `--type=<type>` rather than as a following positional.
@@ -803,7 +792,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: keep
 - reason: No finding. The scope is set at creation and `--update` carrying it is refused, so a fact scoped wrong costs a delete and a rewrite; the decision has to be made before the call.
 - passage: `--machine` scopes the fact to one box.
-- passage: Like `--tag` and `--supersedes`, both are set at creation, and `--update` carrying any of them is refused.
+- passage: Like `--tag` and `--supersedes`, it is set at creation, and `--update` carrying any of them is refused.
 
 ### c1.C078
 - key: Point an operator-tier `--supersedes` at an operator-tier record only; a type-tier name is a miss here.
@@ -911,22 +900,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Drop the stdout-and-exit-code clause from the decay-scan row.
 
 ### c1.C088
-- key: Mutate the store in the decay pass only with `memq decay-prune`, which touches only what its flags name.
+- key: Mutate the store in the decay pass only with `memq decay-prune`, which archives only what its flags name.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:35
 - provenance: 8e22ff4 2026-07-31, the decay lifecycle install.
 - verdict: keep
-- reason: Which flags mutate what is what a session decides before running the pass's one mutation path; line 292 owns what `--rollup` folds and line 278 the pin refusal.
-- passage: The pass's one mutation path over the store's own records and sidecars, and it mutates only what its flags name.
-
-### c1.C089
-- key: Add `--drop-malformed` alongside `--rollup` to remove malformed sidecar lines, each removal said and counted.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:35
-- provenance: ad7b109 2026-08-25, which made malformed-line handling explicit with preserving as the default.
-- verdict: keep
-- reason: The row states the flag in one sentence and already points at the evidence-line section for its bounds, so it is pointer-sized as it stands.
-- passage: `--drop-malformed` rides `--rollup` and removes the malformed sidecar lines that rewrite otherwise preserves.
+- reason: Which flags archive what is what a session decides before running the pass's one mutation path; the row's own last sentence states the pin refusal.
+- passage: The pass's one mutation path over the store's own records, and it archives only what its flags name.
 
 ### c1.C090
 - key: Pass `--confirm-shared` for a shared-tier archival: always for `--archive-operator`, and for `--archive-type` whenever more than one declaring project is found or the scan cannot run.
@@ -959,10 +939,10 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 8e22ff4 2026-07-31, with the decay lifecycle.
 - verdict: keep
 - reason: One line in the row; line 296 owns the pass order. Pointer-sized already.
-- passage: `memq decay-done` | Touch the decay stamp that records a completed pass.
+- passage: `memq decay-done` | Touch the decay stamp that records a completed pass, `~/.claude/memory-snapshot/decay-stamp`.
 
 ### c1.C093
-- key: Expect `get` to resolve a name collision most-specific-first: journal key, pending tier, project memory, type tier, operator tier, then those last three archives in the same order.
+- key: Expect `get` to resolve a name collision most-specific-first: pending tier, project memory, type tier, operator tier, then those last three archives in the same order.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:38
 - provenance: 8e22ff4 2026-07-31 set the precedence; 70f4f8b 2026-08-02 inserted the pending tier into it.
@@ -970,8 +950,8 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - landed: f92e99ec section 5
 - reason: The order is what predicts a collision and tells a session when to pin, and the provenance fence names the tier only for shared hits, so the rule stays. What changes is that the order is stated twice; line 38 is the titled owner. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was rewrite.
 - proposed: State the precedence once at line 38 and cut the get row's copy to "from the first tier holding that name".
-- passage: or a memory record's body from the first tier holding that name.
-- passage: On a name collision `get` takes the most specific tier first: a journal key, a run's pending tier, a project memory, the type tier, then the operator tier. The project, type and operator archives follow in that order, so live beats retired.
+- passage: A memory record's body from the first tier holding that name.
+- passage: On a name collision `get` takes the most specific tier first: a run's pending tier, a project memory, the type tier, then the operator tier. The project, type and operator archives follow in that order, so live beats retired.
 
 ### c1.C094
 - key: Expect a provenance fence on stdout around a hit whose writer is not its reader, and an archive hit noted on stderr.
@@ -1137,13 +1117,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Drop the five-step order from line 14; keep C022's instruction to read the failure line.
 
 ### c1.C110
-- key: Read a `find` lexical hit as `<key> <pass>/<fail> last <age> <latest summary>` for a journal key or `<name> [tags] <description>` for a memory.
+- key: Read a `find` lexical hit as `<name> [tags] <description>`.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:22
 - provenance: 8e22ff4 2026-07-31, which installed find's lexical block and its two hit shapes.
 - verdict: keep
-- reason: The shape of output a session must read is not enforced on it by the code that prints it, and the two shapes are not self-labelling.
-- passage: journal keys as `<key>  <pass>/<fail>  last <age>  <latest summary>`, memories as `<name>  [tags]  <description>`.
+- reason: The shape of output a session must read is not enforced on it by the code that prints it, and the shape is not self-labelling.
+- passage: one summary line per substring hit over this project's records, as `<name>  [tags]  <description>`.
 
 ### c1.C111
 - key: Expect `find`'s semantic block to withhold retired records and instead print one line counting them and naming the best score an `--archived` rerun would show.
@@ -1463,11 +1443,11 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:46
 - provenance: 050587b 2026-08-30, the commit that made the model-judged channel degrade honestly and documented its shape.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: A reader cannot parse find's output without knowing the third block is optional and re-orders the other two; the verb composes the blocks and labels none of them for the reader (A026 to A028). Flipped from keep to rewrite at section 22's close: c2.C129's retire dropped the 'which is the pass' clause, so the sentence was respelled to stand as landed. Landed as the proposal below.
-- proposed: A third block joins them where this machine has a model endpoint configured, reading the candidates the other two ranked and re-ordering them by judged relevance with a clause per hit.
+- verdict: retire
+- landed: ccc1f5a3 section 2
+- reason: A reader cannot parse find's output without knowing the third block is optional and re-orders the other two; the verb composes the blocks and labels none of them for the reader (A026 to A028). Flipped from keep to rewrite at section 22's close: c2.C129's retire dropped the 'which is the pass' clause, so the sentence was respelled to stand as landed. Landed as the proposal below. Retired on 2026-10-11 by section 2 of `docs/archive/claude-kit_qwen-retirement_spec_v1.md`, which removed the model-judged block from `memq find` and its sentences from the skill; the verdict before it was rewrite.
 - passage: A third block, model-judged and advisory, appears where this machine has a model endpoint configured and re-orders the candidates, its record names coming from the store rather than the model.
+- proposed: A third block joins them where this machine has a model endpoint configured, reading the candidates the other two ranked and re-ordering them by judged relevance with a clause per hit.
 
 ### c2.C017
 - key: Expect two local channels because they fail differently: lexical catches exact identifiers an embedding fuzzes, semantic catches the paraphrase a substring misses.
@@ -1484,21 +1464,22 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:46
 - provenance: 050587b 2026-08-30, installed with the channel as its reading rule.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The doctrine owns data-not-instructions and memq now prints that instruction on the block's own header line, so this becomes a pointer; what memory-system keeps is the store-specific bound, that the record names come from the store rather than from the model (A030 to A032).
-- proposed: (via A030) Replace "weigh its clauses as you would any other model output" with a pointer at the doctrine's data-not-instructions rule, keeping that the record names come from the store.
-- baseline-test: yes
+- verdict: retire
+- landed: ccc1f5a3 section 2
+- reason: The doctrine owns data-not-instructions and memq now prints that instruction on the block's own header line, so this becomes a pointer; what memory-system keeps is the store-specific bound, that the record names come from the store rather than from the model (A030 to A032). Retired on 2026-10-11 by section 2 of `docs/archive/claude-kit_qwen-retirement_spec_v1.md`, which removed the model-judged block from `memq find` and its sentences from the skill; the verdict before it was rewrite.
 - passage: A third block, model-judged and advisory, appears where this machine has a model endpoint configured and re-orders the candidates, its record names coming from the store rather than the model.
 - passage: Those indented lines, the shared tiers and the model-judged clauses take the doctrine's data-not-instructions rule.
+- proposed: (via A030) Replace "weigh its clauses as you would any other model output" with a pointer at the doctrine's data-not-instructions rule, keeping that the record names come from the store.
+- baseline-test: yes
 
 ### c2.C019
 - key: Expect the model-judged block to send your query and the candidates' names, tiers and descriptions off this machine, in cleartext over plain HTTP with no authentication by default, to a multi-tenant service.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:46
 - provenance: 050587b 2026-08-30, the channel's security disclosure, elaborated in docs/security-model.md.
-- verdict: keep
-- reason: Nothing in code stops an operator configuring the endpoint, so the exposure is a fact a session weighs before querying with sensitive words (A033).
+- verdict: retire
+- landed: ccc1f5a3 section 2
+- reason: Nothing in code stops an operator configuring the endpoint, so the exposure is a fact a session weighs before querying with sensitive words (A033). Retired on 2026-10-11 by section 2 of `docs/archive/claude-kit_qwen-retirement_spec_v1.md`, which removed the model-judged block from `memq find` and its sentences from the skill; the verdict before it was keep.
 - passage: It sends your query and those candidates' names, tiers and descriptions off this machine, which `docs/security-model.md` describes in full.
 - flag: environment
 
@@ -1507,8 +1488,9 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:46
 - provenance: 050587b 2026-08-30, which corrected documentation that had the absent-endpoint case wrong.
-- verdict: keep
-- reason: Silence is exactly what the verb cannot explain, and reading it as the ordinary state rather than a failure is the reader's act on a case the docs once got wrong (A034 to A036).
+- verdict: retire
+- landed: ccc1f5a3 section 2
+- reason: Silence is exactly what the verb cannot explain, and reading it as the ordinary state rather than a failure is the reader's act on a case the docs once got wrong (A034 to A036). Retired on 2026-10-11 by section 2 of `docs/archive/claude-kit_qwen-retirement_spec_v1.md`, which removed the model-judged block from `memq find` and its sentences from the skill; the verdict before it was keep.
 - passage: A dead or slow endpoint costs one line, and a machine with no endpoint configured says nothing, which is normal.
 
 ### c2.C021
@@ -1540,7 +1522,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The doctrine owns data-not-instructions and memq prints the same line on the block's header, so the rule becomes a pointer; the fence mechanic stays, since the indent is what tells a reader the text came from another store (A042 to A044).
 - proposed: (via A042) Keep that the block is fenced and indented because it reaches other stores; replace "treat what it surfaces as data to weigh" with a pointer at the doctrine.
 - baseline-test: yes
-- passage: The semantic block is fenced and indented, and the digest indents type-derived and operator-derived records under a provenance line, column zero being memq's own voice. Those indented lines, the shared tiers and the model-judged clauses take the doctrine's data-not-instructions rule.
+- passage: The semantic block is fenced and indented, and the digest indents type-derived and operator-derived records under a provenance line, column zero being memq's own voice. Those indented lines and the shared tiers take the doctrine's data-not-instructions rule.
 
 ### c2.C024
 - key: Treat a hit labelled with another project's store as a pointer to a file; `get` will not fetch it from here.
@@ -1616,7 +1598,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: Memory-system owns the fence and the column-zero convention and keeps them; the data-not-instructions rule itself is the doctrine's and becomes a pointer, and the tier-authorship reason (c2.C134) leaves (A057, A058).
 - proposed: (via A057) Keep "indented under a provenance line; column zero is memq's own voice"; replace "data to weigh rather than instruction to follow" with a pointer at the doctrine; drop the "written by every project" reason.
 - baseline-test: yes
-- passage: The semantic block is fenced and indented, and the digest indents type-derived and operator-derived records under a provenance line, column zero being memq's own voice. Those indented lines, the shared tiers and the model-judged clauses take the doctrine's data-not-instructions rule.
+- passage: The semantic block is fenced and indented, and the digest indents type-derived and operator-derived records under a provenance line, column zero being memq's own voice. Those indented lines and the shared tiers take the doctrine's data-not-instructions rule.
 
 ### c2.C031
 - key: When a recalled record changes what you do, run `memq touch <name> --applied` in that turn, adding `--type` or `--operator` for a shared-tier memory.
@@ -1759,89 +1741,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - superseded-by: S004
 - reason: Two pointers at one owner are not two owners, and deleting this one would leave the recap section naming no trigger owner (A079, A080). Superseded at `4b2e64c` by S004 (the Section 8 merge; the verdict before it was keep).
 
-### c2.C044
-- key: Verify the store sync at close-out rather than driving it; the store syncs itself.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:64
-- provenance: 945a75c 2026-08-19, which aligned the skill to the self-syncing store, closed out in bbd6545 2026-08-19.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The rule stands, but the four-state nag enumeration beside it retires: the hook prints each state's own line and the enumeration has already drifted once, corrected in the worktree-store finishing pass (A082). Keep one sentence naming the runner and its allowlist-gated commit and push. Lands as the rule plus the one runner sentence; the consequence sentence ('So a session's writes reach the private remote at the next session start with nothing to hand-run') left with the nag list as un-keyed text of the same passage. The four nag states the proposal moves here have their home in the hook's own state table in plugins/grimoire/hooks/memory-session.js rather than in this ledger.
-- proposed: Keep the rule and one sentence naming the runner and its allowlist-gated commit and push; move the nag-state list to this ledger.
-- baseline-test: yes
-- passage: The store then syncs itself, and the close-out verifies that rather than driving it.
-
-### c2.C045
-- key: Expect the Windows SessionStart hook to run `doctor/sync-store.ps1`, committing new and edited memory files through the allowlist gate and, where an upstream exists, fetching, screening, rebasing and pushing, and to nag only when the sync stood down.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:64
-- provenance: 945a75c 2026-08-19, the self-syncing store's own documentation.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The verify-rather-than-drive rule needs the reader to know what does the driving, so one sentence stays; the state-by-state nag enumeration is superseded by the hook's own lines in plugins/grimoire/hooks/memory-session.js (A082). The four nag states the proposal moves here have their home in the hook's own state table in plugins/grimoire/hooks/memory-session.js rather than in this ledger.
-- proposed: Keep the rule and one sentence naming the runner and its allowlist-gated commit and push; move the nag-state list to this ledger.
-- baseline-test: yes
-- passage: On Windows the SessionStart hook spawns `doctor/sync-store.ps1`, which commits through the allowlist gate and, where an upstream exists, screens incoming content, rebases and pushes.
-- flag: stale
-
-### c2.C046
-- key: Use the kit doctor's `-Fix` to repair or initialize the store, clear a standing gate, and commit this session's writes immediately; it commits and never pushes.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: 945a75c 2026-08-19 for the doctor path; the commits-never-pushes clause is 2bdc43b 2026-08-31, a standing-lines fix so the skill stops promising a push the fix pass does not make.
-- verdict: keep
-- reason: Running `-Fix` is the session's act and the doctor repairs only once run; the never-pushes half is exactly the promise that was found wrong once already (A083 to A085).
-- passage: The kit doctor's `-Fix` sets the store up, clears a standing gate and commits this session's writes, but never pushes.
-
-### c2.C047
-- key: Off Windows, run the sync by hand as that commit plus the manual push, since there is no PowerShell runner.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: 2bdc43b 2026-08-31, stated where the hook's Windows-only gate is (plugins/grimoire/hooks/memory-session.js:58).
-- verdict: keep
-- reason: No runner exists off Windows, so both steps are the session's and no machinery can supersede the instruction (A086).
-- passage: The push comes from the runner at the next session start or a hand path below, and off Windows, with no runner, the commit and the push are both hand-run.
-
-### c2.C048
-- key: Before running `-Fix` from a tool shell, tell the operator what it would do and get a go-ahead, then pass `-Yes`.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: e23b88a 2026-08-03, which closed the gaps between what the store said and what it did, after the close-out sequence was found inert and the consent prompt was made to name what it is about to do.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The gate stays as the kit doctor's own over its run, no longer grounded in the doctrine's stop-for-a-yes bullet, whose closed list now names the store's sync. It carries the store-specific mechanic that a bare `-Fix` declines on a redirected stdin (A087, A089). The rewrite is the surrounding paragraph's restructure, not the rule's (A088).
-- proposed: Restructure line 66: the doctor's role in one sentence; the from-a-tool-shell rule; the manual pair with its PASS/FIXED gate; the script as the better hand path with its two disclosures and the security-model pointer; the WARN handling.
-- baseline-test: yes
-- passage: Running `-Fix` from a tool shell: its consent prompt cannot reach a redirected stdin, so a bare `-Fix` declines. Tell me what it would do, get my go-ahead, then pass `-Yes`.
-
-### c2.C049
-- key: Do the manual push as `git -C ~/.claude pull --rebase` then `git -C ~/.claude push`, and only once the memory-sync line reads PASS or FIXED; a FAIL is a stop.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: 16c65f7 2026-08-03, the sync-freshness nudge and close-out sync step; the commit-and-push default that frames it is ebd12d2 2026-09-02.
-- verdict: keep
-- reason: The passage orders the two hand paths itself, the script preferred where PowerShell exists and this pair the fallback, so no state produces two acts (A091); the gate and its FAIL stop are the session's to read. The passage also restates that the pair needs no go-ahead, and says the consent in the paragraph above is the doctor's own over its `-Fix` run. That is the bound stated at C048 rather than a second rule, restated here because the two sit one paragraph apart and a ruled probe moved to declining the push once the prose pass split the permission two paragraphs back.
-- passage: The manual push is `git -C ~/.claude pull --rebase` then `git -C ~/.claude push`. It needs no go-ahead either, since it is the sync and the doctrine's closed list never gates it. Run it only once the doctor's memory-sync line reads PASS or FIXED, since a FAIL there is a stop.
-
-### c2.C050
-- key: Prefer hand-running `doctor/sync-store.ps1` with an explicit `-StoreRoot` over the pull-and-push pair.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: ddcb28e 2026-09-08, the store-git-guard plan's close, whose security review installed the preference and its two disclosures.
-- verdict: keep
-- reason: No finding group named it; the preference holds because the pair takes no lock against the background sync and screens no incoming tree, while the script does both (A091 records the ordering as intentional, not a conflict). The passage states the preference beside that reason rather than as a bare ranking, since a session syncing unasked has to know why one path is better. It names the flag rather than a value: the script has no default store root (plugins/grimoire/doctor/sync-store.ps1:86), so a run that omits `-StoreRoot` is a parameter error rather than a sync against the wrong directory.
-- passage: Where PowerShell exists, prefer hand-running `doctor/sync-store.ps1` under the kit plugin root with an explicit `-StoreRoot`, which also takes the sync lock and screens incoming content.
-- flag: stale
-
-### c2.C051
-- key: Carry a doctor WARN into the close-out rather than treating it as a gate, and treat a FAIL as a stop already delivered.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: kaizen/archive/2026-08-07-memory-sync-destination.md, after a destination WARN was found blocking legitimate pushes; landed in the skill with 945a75c 2026-08-19.
-- verdict: keep
-- reason: The doctor classifies but does not decide what a session does with a WARN, and the incident that installed the distinction is a live class (A092).
-- passage: A memory-sync WARN comes only after every leak probe read clean, so carry it into the close-out rather than treating it as a gate. An unanswerable probe reports as FAIL, a stop already delivered.
-
 ### c2.C052
 - key: Write action keys dot-namespaced with the project or domain leading, as in `neo.sql.procs` or `neat.deploy.iis`.
 - class: mechanic
@@ -1863,7 +1762,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The rule stands and the substring bound stays as what it rests on, since `find` matches key substrings; only the specimen keys thin from three to one (A094). Its landing respelled c2.C052's keep sentence; c2.C052 records the flip.
 - proposed: One specimen key, then the two rules with the substring bound.
 - baseline-test: yes
-- passage: `find` matches key substrings, so lead with the name a future session will reach for, and keep one hierarchy per subject rather than minting near-duplicates.
+- passage: Lead with the name a future session will reach for, and keep one hierarchy per subject rather than minting near-duplicates. No verb reads the keys back yet, since `memq find --outcomes` is refused until the memory database has an outcome read.
 
 ### c2.C054
 - key: Use tags for a fact that cuts across the hierarchy, not a second key.
@@ -1966,13 +1865,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: **Write the summary and detail yourself, never paste raw tool output into a memq argument, and compose without embedded `"` characters.**
 
 ### c2.C064
-- key: Name the shape of a secret in a journal entry, never its value, since the journal is plaintext on disk and read back into context.
+- key: Name the shape of a secret in a journal entry, never its value, since the journal is plaintext in the shared database.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:86
 - provenance: 8e22ff4 2026-07-31 for the bar; restated at its present strength in e23b88a 2026-08-03.
 - verdict: keep
 - reason: This is the general shape-not-value bar with its worked example, and the triggers sentence at line 233 merely applies it to one field; this side is the owner (A101).
-- passage: The journal is plaintext on disk and read back into context, so name a secret's shape ("the connection string was missing Encrypt=True"), never its value.
+- passage: The journal is plaintext in the shared database, so name a secret's shape ("the connection string was missing Encrypt=True"), never its value.
 
 ### c2.C065
 - key: Expect memq to strip `"` from a log summary, a log detail and a shared-tier description, but never from a record body, so a body is the one thing the store hands out that is unsafe to paste onto a `cmd.exe` command line.
@@ -2006,7 +1905,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: c56a8b5 2026-08-21, which gave shared-tier bodies a channel no shell can mangle and bounded what may ride it.
 - verdict: rewrite
 - landed: d2c43f1 section 22
-- reason: The rule stands, since a shared-tier body syncs to a remote every machine and person sharing the kit can read; the normalization and cap mechanics beside it (c2.C069) leave, and the remote's readership becomes this ledger's reason (A104). Its landing respelled c2.C068's keep sentence; c2.C068 records the flip.
+- reason: The rule stands, since a shared-tier body reaches the shared database every machine and person sharing the kit can read; the normalization and cap mechanics beside it (c2.C069) leave, and the remote's readership becomes this ledger's reason (A104). Its landing respelled c2.C068's keep sentence; c2.C068 records the flip.
 - proposed: Two sentences: --body-file is for a body you composed, never a .env, a settings or credentials file, or raw output; read a file you did not write before naming it.
 - baseline-test: yes
 - passage: **`--body-file` is for a body you composed, never a file you merely have**: not a `.env`, a settings or credentials file, or raw log or tool output.
@@ -2045,17 +1944,17 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: **Applied means acted on, not merely read.** A memory is applied when it changed what you did, as when you followed its warning. In that turn, run `memq touch <name> --applied`, adding `--type` or `--operator` for a shared-tier memory.
 
 ### c2.C071
-- key: Expect reads to be recorded for you by the read-stamp hook when a tier memory file is opened with the Read tool, and by `memq get` when it serves a body.
+- key: Expect reads to be recorded for you by `memq get` when it serves a body without `--no-stamp`, and by no other reader.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:92
 - provenance: 8e22ff4 2026-07-31, with the hook at plugins/grimoire/hooks/memory-usage-stamp.js.
 - verdict: rewrite
 - landed: d2c43f1 section 22
-- reason: The reader needs only that reads are recorded for them and where the hook's scope ends, so that no session stamps reads by hand or expects a MEMORY.md read to count; the tier-children bound the untracked-reader list at line 102 rests on stays (A108 to A110).
+- reason: The reader needs only that reads are recorded for them and where the recording ends, so that no session stamps reads by hand or expects a digest line acted on to count (A108 to A110). The read-stamp hook left with the tier files on 2026-10-11 (`docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4), so `get` is the one reader.
 - proposed: One clause: reads are recorded for you by the read-stamp hook (tier memory files opened with Read, never MEMORY.md) and by memq get.
 - baseline-test: yes
-- passage: Reads are recorded for you, on the two paths named below.
-- passage: Only two readers leave a read stamp in the tiers `unstamped` sweeps: `memq get` serving a project, type or operator body, and the read-stamp hook on a Read of such a file.
+- passage: Reads are recorded for you, on the one path named below.
+- passage: Only one reader leaves a read stamp `unstamped` sweeps: `memq get` serving a project, type or operator body without `--no-stamp`.
 
 ### c2.C072
 - key: Expect only `applied` stamps to reset a memory's idle clock, with `read` stamps riding along as evidence for the summarize-versus-archive judgment.
@@ -2358,18 +2257,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - baseline-test: yes
 - passage: **Do not quote a value you write by hand.** A `tags: "a, b"` typed at the top level matches neither `a` nor `b` while printing as `[a,b]`.
 
-### c2.C099
-- key: Write tags in the inline form only, `tags: a, b` on one line inside the `---` block at the top level; the YAML list form reads as no tags at all.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:124
-- provenance: 8e22ff4 2026-07-31 for the inline form; the write-door guard came with 426bf68 2026-08-26 (plugins/grimoire/hooks/memory-frontmatter-guard.js).
-- verdict: retire
-- landed: f92e99ec section 5
-- reason: The rule survives the guard, which refuses the list form only at the three write tools and only for a project-tier record, so a shell write and a record already on disk still need it; the "written at the top level" clause is line 116's and the guard's reach is the guard section's, both becoming pointers (A152). Retired on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and removed this passage; the verdict before it was rewrite.
-- proposed: Two sentences: tags: a, b on one line inside the block; the YAML list form reads as no tags at all, which the frontmatter guard refuses at the write door for a project-tier record.
-- baseline-test: yes
-- passage: - **Frontmatter uses the inline form only**: `tags: a, b` on one line inside the `---` block. The YAML list form reads as no tags at all.
-
 ### c2.C100
 - key: Expect the frontmatter guard to refuse a Write, Edit or MultiEdit carrying the YAML list tag form into a project-tier record at the write door.
 - class: mechanic
@@ -2381,13 +2268,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Fold into A152's pointer clause.
 
 ### c2.C101
-- key: Keep the tag registry at `~/.claude/memory-types/tag-registry.md`: one tag per line with an optional one-phrase gloss, `#` comments and blank lines ignored.
+- key: Keep the tag registry at `~/.claude/memory-tag-registry.md` at the store root, edited by hand: one tag per line with an optional one-phrase gloss, `#` comments and blank lines ignored.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:125
 - provenance: 8e22ff4 2026-07-31, shipped with the tag vocabulary (parser at plugins/grimoire/scripts/memq.js:2241).
 - verdict: keep
 - reason: memq parses the file and writes none of its lines, so keeping the registry is a person's act (A154).
-- passage: - **The registry** is `~/.claude/memory-types/tag-registry.md`: one tag per line, an optional one-phrase gloss after it.
+- passage: - **The registry** is `~/.claude/memory-tag-registry.md` at the store root, edited by hand: one tag per line, an optional one-phrase gloss after it.
 
 ### c2.C102
 - key: Add a registry line before minting a tag; memq warns on any tag outside the registry and still writes the record.
@@ -2588,7 +2475,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: Memory-system keeps the rule with its lock reason, that the tier is shared by concurrent sessions of every project and the Write tool cannot take the lock, and the doctrine points (A185, A186, A189). The project-tier correction-by-Write at line 201 is scoped to that tier and does not contradict it (A187). The paragraph compresses only by dropping the overwrite shapes (A188). Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was rewrite.
 - proposed: Author only through add-operator with the lock reason; read the neighbours block; the two refusals; the pointer to repair and removal.
 - baseline-test: yes
-- passage: Author only through `memq add-operator`, since the frontmatter guard refuses every file write into a tier directory.
+- passage: Author only through `memq add-operator`, since the tier is a database tier with no file to write.
 
 ### c2.C121
 - key: Read the neighbours block the verb prints before the write lands, and treat a `likely overlap` as the store saying the fact may already be recorded.
@@ -2684,8 +2571,9 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - class: pointer
 - source: plugins/grimoire/skills/memory-system/SKILL.md:46
 - provenance: 050587b 2026-08-30, installed with the channel's exposure disclosure.
-- verdict: keep
-- reason: No finding named it. The pointer is what keeps the exposure disclosure (c2.C019) short while leaving the full account with its owner.
+- verdict: retire
+- landed: ccc1f5a3 section 2
+- reason: No finding named it. The pointer is what keeps the exposure disclosure (c2.C019) short while leaving the full account with its owner. Retired on 2026-10-11 by section 2 of `docs/archive/claude-kit_qwen-retirement_spec_v1.md`, which removed the model-judged block from `memq find` and its sentences from the skill; the verdict before it was keep.
 - passage: which `docs/security-model.md` describes in full.
 
 ### c2.C131
@@ -2789,24 +2677,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: row 874 (Doctor -Fix and manual push) shrink removes the gate-narrowness argument. c2.C050's landed sentence still carries its consequence: "...which also takes the sync lock and screens incoming content.".
 - passage: That gate is the outbound half, the leak probes and the index state, and the pair needs more: it takes no lock against the background sync and screens no incoming tree.
 
-### c2.C141
-- key: Expect a hand-run `sync-store.ps1` push to lack `GIT_SSH_COMMAND` and `GIT_ASKPASS` even if the calling shell relied on them, because its git calls carry the unattended run's environment guard.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: 9012fd8 2026-09-07, which named the hand run's dropped credential variables where the hand run is prescribed (guard at plugins/grimoire/doctor/sync-store.ps1:8).
-- verdict: retire
-- reason: row 874 (Doctor -Fix and manual push) shrink removes the environment-guard detail. c2.C142's landed pointer "`docs/security-model.md` states what each hand path leaves exposed." carries it to `docs/security-model.md`, which covers `GIT_ASKPASS` at line 98 and the hand-path exposure at lines 152 and 704.
-- passage: Its git calls take the unattended run's environment guard, so a shell that relied on `GIT_SSH_COMMAND` or `GIT_ASKPASS` for its push has neither there.
-
-### c2.C142
-- key: Read `docs/security-model.md` for what each hand sync path leaves exposed.
-- class: pointer
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66
-- provenance: 9012fd8 2026-09-07, installed with the hand-path disclosures.
-- verdict: keep
-- reason: No finding named it, and A088's restructure keeps it: it is what lets the paragraph carry one clause per disclosure instead of the full account.
-- passage: `docs/security-model.md` states what each hand path leaves exposed.
-
 ### c2.C143
 - key: The PowerShell 5.1 quote-mangling is a parsing hazard rather than an injection hazard, and is a separate issue from the `cmd.exe` shim's argument forwarding.
 - class: rationale-example
@@ -2877,7 +2747,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: The flag exists but issuing the query is the caller's act, and the sentence is what tells a reader tags are queryable at all (A226). Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: Tags are an optional list on records and journal entries, set with `--tag` and queried with `memq find --tag <t>`, from a controlled vocabulary.
+- passage: Tags are an optional list on records and journal entries, set with `--tag` from a controlled vocabulary. `memq find --tag <t>` queries the records' tags.
 
 ### c2.C150
 - key: The tag vocabulary is controlled because unmanaged tags decay into synonyms that make `--tag` queries silently incomplete.
@@ -2912,13 +2782,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - baseline-test: yes
 
 ### c3.C001
-- key: Opt a project into a type tier by putting a `Project-Type: <type>` line in the first ten lines of its own memory `MEMORY.md`.
+- key: Opt a project into a type tier with `memq declare-type <type>` run in its checkout, which records the type in this machine's `project-types.json`.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:149
 - provenance: 8e22ff4 2026-07-31, the memory-extension plan that shipped the shared project-type tier (docs/archive/claude-kit_memory-extension_spec_v1.md).
 - verdict: keep
-- reason: The opt-in is a hand edit the hook only reads; nothing writes the line for a project, so the instruction is the one place a session learns how to opt in.
-- passage: A project opts in with a `Project-Type: <type>` line in the first ten lines of its memory `MEMORY.md`
+- reason: The opt-in is a verb a session runs; nothing declares a type for a project on its own, so the instruction is the one place a session learns how to opt in. The verb replaced a hand-edited declaration line on 2026-10-11 (`docs/archive/claude-kit_retire-file-store_spec_v1.md`, ruling 1).
+- passage: A project opts in with `memq declare-type <type>` run in its checkout, which records the type under the project's key in this machine's `~/.claude/memory-snapshot/project-types.json`
 
 ### c3.C002
 - key: Put a fact in the type tier only when it holds for every project of that type, not just the one that taught it.
@@ -2969,10 +2839,10 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Author type-tier records only through `memq add-type`, never with a direct Write into `memory-types/`.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:153
-- provenance: 8e22ff4 2026-07-31 installed the rule with the tier; 426bf68 2026-08-26 made the frontmatter guard refuse every write tool on both shared tiers (test/memory-frontmatter-guard.test.js:1005).
+- provenance: 8e22ff4 2026-07-31 installed the rule with the tier; 426bf68 2026-08-26 made a write-door hook refuse every write tool on both shared tiers, and that hook left with the tier files on 2026-10-11.
 - verdict: rewrite
 - landed: f92e99ec section 5
-- reason: The positive instruction stays as the section's rule; the Write bar is now the guard's refusal and is stated by pointer rather than argued, with the doctrine's line 82 and row 30 as pointers (A012 to A015). test/memory-frontmatter-guard.test.js:1005 at HEAD asserts the --update create-form hint on stderr rather than the every-write-tool refusal on both shared tiers, so that pin is re-located by content rather than by this line number. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was rewrite.
+- reason: The positive instruction stays as the section's rule; a type-tier record is a database row, so `add-type` is its one authoring path and no file bar is left to state (A012 to A015). Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was rewrite.
 - proposed: Two instructions and the repair-section pointer; the rest moves as the cited rulings say.
 - proposed: (via A013) Keep "Author only through `memq add-type`", state the Write bar as the guard's refusal by pointer, and leave rows 30 and 54 as pointers.
 - baseline-test: yes
@@ -3125,16 +2995,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The defect is still open, so the incident recurs and no machinery catches it; the rule is the only guard (A045). Retired on 2026-10-04 by section 6 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the shared-tier deletes mark the record's database row deleted and removed this passage: the host answers a name it holds no live row of as absent and the verb refuses it, which E007's passage states; the verdict before it was keep.
 - passage: Check the name before you confirm, because a name the tier does not hold is not refused.
 
-### c3.C021
-- key: Settle a modify/delete conflict from another machine as a human git operation in the store checkout, since the sync aborts the rebase and nothing syncs until it is resolved.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:160
-- provenance: 752dbce 2026-08-22 stated the conflict when delete met a self-syncing store; the operator-tier record memory-store-divergence-is-a-union-with-two-traps records the runner standing down on a real divergence.
-- verdict: retire
-- landed: 54629b25 section 6
-- reason: The gate is blast-radius: a wrong resolution pushes a half-merged shared tier to a remote a second machine pulls, and no program resolves it (A046, A047). Retired on 2026-10-04 by section 6 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the shared-tier deletes mark the record's database row deleted and removed this passage: a delete removes no file, so it meets no git conflict in the store checkout; the verdict before it was keep.
-- passage: A delete of a record another machine has since modified stalls the sync until a human settles the git conflict in the store checkout.
-
 ### c3.C022
 - key: Delete the record that was never true: a mistake, a fact wrong when written, or a body that says something you did not mean.
 - class: rule
@@ -3234,19 +3094,19 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Drop the "which is why it never needs `--confirm-shared`" sentences; the ledger holds the reason.
 
 ### c3.C032
-- key: Rotate anything a deleted record carried, because deletion removes it from the store and not from the git history or the machines that already pulled.
+- key: Rotate anything a deleted record carried, because deletion keeps the row with a deleted mark and leaves any body copy a machine's snapshot fetched earlier.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:164
 - provenance: 752dbce 2026-08-22, written when the shared tiers gained a delete so that a delete is never read as a redaction; rewritten 2026-10-04 by the finishing pass of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`.
 - verdict: rewrite
-- reason: The owner of the rotation rule; the trigger section and the project-tier paragraph point at it, and a secret in a synced store recurs (A065 to A067). A delete marks the database row and keeps it, and the record's file stays on every machine's disk beside the git history, so the passage names all three places the content survives.
-- passage: **Deletion marks a record's row deleted and erases nothing.** The row stays in the memory database with the deleted mark, the record's file stays on every machine's disk, and the shared tiers' git history keeps its content on every machine that already pulled. Rotate anything it carried that it should not have, since the delete is not a redaction.
+- reason: The owner of the rotation rule; the trigger section points at it, and a secret in a shared store recurs (A065 to A067). A delete marks the database row and keeps it, and a body copy under a machine's snapshot `records/` is never pruned (plugins/grimoire/scripts/memory-database.js), so the passage names both places the content survives.
+- passage: **Deletion marks a record's row deleted and erases nothing.** The row stays in the memory database with the deleted mark, and a body copy a machine's snapshot fetched earlier stays on that machine's disk. Rotate anything it carried that it should not have, since the delete is not a redaction.
 
 ### c3.C033
-- key: Expect seventeen shapes to get no grant on the unattended vector: `delete-type`, `delete-operator`, `forget`, `--update` with a body, `--body-file`, `--type=<type>`, `--trigger` on either add verb, `--supersedes`, `find`, `--rollup`, `anchor`, `triggers`, `--drop-malformed`, `db-sync`, `db-promote`, `db-curate` and `jev-calibration`.
+- key: Expect the prompt-free grant in `hooks/memq-grant.js` to own the list of shapes that get no grant on the unattended vector.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:216, "Seventeen shapes get no grant there"
-- provenance: 752dbce 2026-08-22 made the grant hook the enforcement point with six shapes; b5c0a98, c0a1388, 0d1e610, 2b6e936 and 9b1180b 2026-09-03 grew the list to twelve, each addition a reviewer-found reach; the persona-memory-port plan's section 5 added `forget`, the project-tier delete, and its section 6 named the four database verbs the hook already withheld, which the paragraph had left out, so the count reads seventeen as `docs/security-model.md` counts it.
+- provenance: 752dbce 2026-08-22 made the grant hook the enforcement point with six shapes; b5c0a98, c0a1388, 0d1e610, 2b6e936 and 9b1180b 2026-09-03 grew the list to twelve, each addition a reviewer-found reach; the persona-memory-port plan's section 5 added `forget`, the project-tier delete, and its section 6 named the four database verbs the hook already withheld, which the paragraph had left out, so the count then read seventeen as `docs/security-model.md` counted it; the passage now names the hook as the list's owner rather than counting.
 - verdict: rewrite
 - landed: d2c43f1 section 22
 - reason: The list stays because a withheld shape on that vector is silence rather than a refusal, so the list is what a worker can consult; the per-shape reasons move here, since hooks/memq-grant.js:43-73 and 501-651 carry every one of them and test/memq-grant.test.js pins each shape (A068 to A070).
@@ -3270,7 +3130,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - source: plugins/grimoire/skills/memory-system/SKILL.md:166
 - provenance: 752dbce 2026-08-22, the grant hook's design: it emits an allow for one shape and never a deny.
 - verdict: keep
-- reason: A reading rule the hook cannot print, and the gate it describes is blast-radius (deletes, body replacements, recognition rewrites on a synced store), not loop maintenance (A074, A075).
+- reason: A reading rule the hook cannot print, and the gate it describes is blast-radius (deletes, body replacements, recognition rewrites on a shared store), not loop maintenance (A074, A075).
 - passage: A withheld shape is not denied but silent, and with nobody there to approve it the command is lost.
 
 ### c3.C036
@@ -3280,7 +3140,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 2b6e936 2026-09-02, when the `--trigger` option was refused on the unattended vector after its own spec's claim that it widened nothing was disproved.
 - verdict: keep
 - reason: The handoff to an attended session is a human act no program performs, guarding a recognition line that reaches every project and machine (A076 to A079).
-- passage: So a fleet worker leaves a withheld shape to an attended session, such as `find`, `--type=<type>`, a delete, a body-carrying update, `--body-file`, `--supersedes`, `--trigger`, `triggers`, `anchor` or `--rollup`.
+- passage: So a fleet worker leaves a withheld shape to an attended session, such as `find`, `--type=<type>`, a delete, a body-carrying update, `--body-file`, `--supersedes`, `--trigger`, `triggers`, `anchor` or `declare-type`.
 
 ### c3.C037
 - key: Re-run the whole `add` from an attended session to give a record a `supersedes:` pointer, or delete and rewrite one that already landed without it, since the field is creation-only and `--update` refuses it.
@@ -3325,16 +3185,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: Rows 23 and 27 state both spellings and the refusal at the CLI and the grant alike; the hook (memq-grant.js:643-651, test 505) and memq (memq.js:7620, 9612) enforce it; the entry stays in the twelve, the explanation goes (A086 to A088).
 - proposed: (via A086) Keep `--type=<type>` as an entry in the twelve; drop the explanation.
 
-### c3.C041
-- key: Treat `--drop-malformed`'s screen as the only thing withholding a prompt-free delete of malformed usage lines, since its coupling to the withheld `--rollup` sits in another file and is not a lock.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:166
-- provenance: ad7b109 2026-08-25 gave a torn sidecar line its exit; the grant screens the flag on its own (test/memq-grant.test.js:387).
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: A test pins that the flag gets no grant of its own, and the hook's comment states the coupling; a session has no act to take on the coupling's fragility (A089).
-- proposed: Keep `--drop-malformed` in the twelve; drop the coupling sentence.
-
 ### c3.C042
 - key: Write a project-tier `supersedes:` line by hand with the Write tool, exactly as you write that file's `tags:` and `pinned:` lines.
 - class: mechanic
@@ -3345,25 +3195,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: No program writes a project-tier pointer; the hand path is the only one (A090). Retired on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and removed this passage; the verdict before it was keep.
 - passage: The project tier gets it by hand: a project memory is an ordinary file you write with the Write tool, so its `supersedes:` line is authored like its `tags:` and `pinned:` lines.
 
-### c3.C043
-- key: Write `supersedes:` at the top level inside the frontmatter block, which must open on the file's first line, and read it there or under the `metadata:` map.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:174
-- provenance: b5c0a98 2026-08-23 wrote the grammar; eecf17c 2026-08-23 added the `metadata:` placement when memq learned to read fields where the harness moves them; 426bf68 2026-08-26 put the guard at the write door.
-- verdict: retire
-- landed: f92e99ec section 5
-- reason: Line 116 owns placement for every memq field and the guard enforces placement and the first-line fence on a Write or Edit; the bullet becomes a pointer keeping only the silent-failure note for a file the guard never saw (A091 to A093). Retired on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and removed this passage; the verdict before it was rewrite.
-- proposed: (via A091) Replace the placement bullet with a pointer at line 116 and the guard section, keeping only the silent-failure note for a file the guard never saw.
-- baseline-test: yes
-- passage: Written where every memq field is written, per the placement rule above, which `hooks/memory-frontmatter-guard.js` checks on a Write, an Edit or a MultiEdit. In a file the guard never saw, a `supersedes:` under any other key is not the field, and it fails silently.
-
 ### c3.C044
 - key: Give `supersedes:` one name matching the record-name charset and naming a live record.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:175
 - provenance: b5c0a98 2026-08-23, the hand-written field's grammar.
 - verdict: keep
-- reason: The guard checks the live-record half on the harness path, but a synced or externally edited file gets no check and the author composes to this (A094).
+- reason: The author composes `--supersedes` to this grammar, and a pointer outside it points nowhere (A094).
 - passage: One name, matching the record-name charset, naming a live record of the same tier. Two names point nowhere.
 
 ### c3.C045
@@ -3850,19 +3688,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: A session has no act to take on an orphaned stamp; the retention is the code's (A183).
 - proposed: Drop the stamps sentence from line 203.
 
-### c3.C093
-- key: Sweep the local copies and rotate the secret after a hand unlink, because a project tier syncs under `projects/*/memory` and the record is already in the repository's history and on the private remote.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:205
-- provenance: 426bf68 2026-08-26, the project tier's instance of the rotation rule line 164 owns.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: merged into c3.C091's landed sentence (forget and rotate). c3.C032's deletion paragraph carries the history reason.
-- proposed: Keep the two acts with one clause saying the record's text is already in the store's history, pointing at the deletion paragraph.
-- baseline-test: yes
-- passage: The record's own text is already in the store's history, per the deletion paragraph above. So where the four remedies route to a delete, run `forget` and rotate the secret.
-- flag: stale
-
 ### c3.C094
 - key: Never delete a memory on a drift line alone.
 - class: rule
@@ -3957,7 +3782,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - baseline-test: yes
 
 ### c3.C103
-- key: Understand --body-file is withheld because it reads a caller-named path into a tier that syncs to a private remote.
+- key: Understand --body-file is withheld because it reads a caller-named path into a tier every machine reads.
 - class: rationale-example
 - source: plugins/grimoire/skills/memory-system/SKILL.md:166
 - provenance: 752dbce 2026-08-22 (hooks/memq-grant.js:54, 502-503).
@@ -4006,17 +3831,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: retire
 - landed: d2c43f1 section 22
 - reason: A reason attached to one entry of a list the hook carries (A205).
-- proposed: Move to the ledger.
-- baseline-test: yes
-
-### c3.C108
-- key: Understand --rollup is withheld at the grant alone because it discards the prose of every journal entry it folds.
-- class: rationale-example
-- source: plugins/grimoire/skills/memory-system/SKILL.md:166
-- provenance: 752dbce 2026-08-22 (hooks/memq-grant.js:612-632; docs/security-model.md:673).
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: As c3.C107 (A206).
 - proposed: Move to the ledger.
 - baseline-test: yes
 
@@ -4474,7 +4288,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: On the type or operator tier, or a pinned project store, it takes `--confirm-shared`, since a replace states the line whole.
 
 ### c4.C032
-- key: Gate the shared-tier replace because a replace states the line whole, dropping every unnamed declaration on a tier every project reads and every machine syncs to.
+- key: Gate the shared-tier replace because a replace states the line whole, dropping every unnamed declaration on a tier every project and machine reads.
 - class: rationale-example
 - source: plugins/grimoire/skills/memory-system/SKILL.md:219
 - provenance: 9b1180b 2026-09-03.
@@ -4597,7 +4411,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 0d1e610 2026-08-30, the two specificity bars installed with the field.
 - verdict: retire
 - landed: d2c43f1 section 22
-- reason: Enforced at both doors and the write door (TRIGGER_PATTERN_MIN at scripts/memq.js:498, the check at 4186; hooks/memory-frontmatter-guard.js:1173) with a refusal naming the rule.
+- reason: Enforced at both doors (TRIGGER_PATTERN_MIN in scripts/memq.js) with a refusal naming the rule.
 - proposed: Delete the paragraph at line 221 except the pointer that the two bars exist and the refusal names which one was met.
 
 ### c4.C044
@@ -4940,16 +4754,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: `get`'s output under the store-wide rule that an indented line is data; the keying lesson is recorded here.
 - proposed: (via A127) Delete the paragraph at line 229.
 
-### c4.C077
-- key: Have the frontmatter guard read the field at the write door, refusing an entry outside the grammar on a Write, an Edit or a MultiEdit that lands one.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:229
-- provenance: 0d1e610 2026-08-30, the guard learned the field and its check was restructured under a rank rule after a hoist made every deny below it unreachable.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The guard's own behavior (hooks/memory-frontmatter-guard.js:941, 1173-1176), owned by the guard section of this document.
-- proposed: (via A127) Delete the paragraph at line 229.
-
 ### c4.C078
 - key: Have `memq recall` read the field to count only, carrying per-tier coverage of records declaring no admitted trigger and never saying what any one record recognizes.
 - class: mechanic
@@ -4999,13 +4803,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 0d1e610 2026-08-30.
 - verdict: retire
 - landed: d2c43f1 section 22
-- reason: row 900 (triggers: field declaration) shrink. This is outside the row's kept content. c4.C083's landed sentence ("published as a body is, synced and embedded") carries the premise.
+- reason: row 900 (triggers: field declaration) shrink. This is outside the row's kept content. c4.C083's landed sentence ("published to the shared database as a body is") carries the premise.
 - proposed: One sentence: "A pattern is search surface as well as a recognition rule: the embedder reads the record file whole, frontmatter included, so a line of patterns shifts the record's vector by the text it adds."
 - baseline-test: yes
 - passage: A pattern is search surface as well as a recognition rule: the embedder reads the record file whole, frontmatter included, so a line of patterns shifts the record's vector by the text it adds.
 
 ### c4.C083
-- key: Treat a pattern as published once written: the project tier syncs to the private remote and the semantic index embeds the record file whole.
+- key: Treat a pattern as published once written: it reaches the shared database as a body does.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:233
 - provenance: 0d1e610 2026-08-30.
@@ -5014,7 +4818,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The premise of the two secrets rules; survives as one clause of the compressed paragraph, since publication is automatic and the stance is the author's.
 - proposed: (via A143) Reduce line 233 to: "A `cmd:` pattern is a command line, which is where a token gets typed, and a pattern is published as a body is (synced, embedded), so the field takes the body's rule: name the shape of the command rather than the invocation that carried the secret, and a credential that reached a trigger line is rotated, per the deletion rule above."
 - baseline-test: yes
-- passage: A pattern is published as a body is, synced and embedded.
+- passage: A pattern is published to the shared database as a body is.
 
 ### c4.C084
 - key: Rotate any credential a record's trigger line carried; neither a rewrite of the line nor an unlink of the record is a redaction.
@@ -5722,16 +5526,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: An absence of a code path is not something a program enforces, and this absence is the premise the shared-tier pin rules (c5.C035, c5.C036) rest on. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
 - passage: No memq verb sets or clears a pin, so a record holds one only where its memory file carried a `pinned:` line at the migration publish, and `--replace` keeps it.
 
-### c5.C035
-- key: Add or remove a shared-tier pin outside the harness, in an editor or the store's own checkout.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:282
-- provenance: 426bf68 2026-08-26, the anchors-and-guard plan's Standing Amendment restated the hand-edit exception after the guard began refusing the tools that would make it.
-- verdict: retire
-- landed: f92e99ec section 5
-- reason: The guard forces the route (hooks/memory-frontmatter-guard.js:14-17, :90-91) and the edit itself is the operator's; nothing enforces where they make it. The apparent conflict with the CLI-authored rule is not real at execution time, because no session performs this act. Retired on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and removed this passage; the verdict before it was keep.
-- passage: So a shared-tier pin is the operator's own edit made outside the harness, since the frontmatter guard refuses the write tools there.
-
 ### c5.C036
 - key: Treat the operator's own `pinned:` edit as the one exception to the bar on hand-editing a shared tier.
 - class: rule
@@ -5900,29 +5694,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: Suppression and the skipped-line count are the scan's (memq.js:11713-11722, `evidenceUnread`) and the evidence line reports them on the run where they happen. The why is here: a torn applied append is exactly where applied evidence hides, so a partial read must nominate nothing rather than nominate on less.
 - proposed: Delete the suppression sentence; the evidence line reports it.
 
-### c5.C052
-- key: Remove a torn sidecar line only with `decay-prune --rollup --drop-malformed`, which states per-tier counts on stderr before removing, names each removed line, and counts removals in the report.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:288
-- provenance: ad7b109 2026-08-25: "decay-prune --drop-malformed is the sanctioned exit; preserving stays the default".
-- verdict: rewrite
-- landed: 227ba108 section 5
-- reason: The rule survives, because a session facing a torn line needs to know there is one exit and that preserving is the default. The report narration (per-tier counts, each line named, removals counted) retires to the verb, which prints it (memq.js:13198-13272). Lands with a defining clause for the torn line (one the scan skipped as malformed inside a sidecar) ahead of the exit, since c5.C051's retire removed the sentence that defined it. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was rewrite.
-- proposed: (via A071) "A torn line has one sanctioned exit, `decay-prune --rollup --drop-malformed`; preserving stays the default." with the report description dropped.
-- baseline-test: yes
-- passage: A torn line in a frozen usage sidecar has one exit, `decay-prune --rollup --drop-malformed`.
-- flag: stale
-
-### c5.C053
-- key: Treat `--drop-malformed` as invocation-wide, removing malformed lines from the type and operator tiers as well as the reporting tier.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:288
-- provenance: 5ac33f5 2026-08-25, after the security lens found the flag could empty a tier.
-- verdict: keep
-- reason: The reach is the flag's (memq.js:13536), but a session shapes the call before the verb can tell it, and one flag drops lines in tiers other than the one that reported the skip.
-- passage: That flag is invocation-wide, so it drops malformed lines from every tier the pass reaches.
-- flag: stale
-
 ### c5.C054
 - key: Treat the drop as local hygiene only, since sidecars merge by union and a dropped line another machine carries returns at the next merge.
 - class: mechanic
@@ -5942,45 +5713,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The refusal is the verb's, named on stderr with the file byte-unchanged (memq.js:13260-13272). The why is here: a wholly unparseable sidecar is evidence to investigate rather than a file to empty.
 - proposed: Delete the "it refuses any tier where no valid stamp would survive" sentence.
 
-### c5.C056
-- key: Treat journal entries older than 30 days as rollup candidates that `decay-prune --rollup` folds into one per-key entry preserving the pass/fail tally and the union of tags.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:292
-- provenance: 8e22ff4 2026-07-31, the memory-extension plan's Chapter 3 rollup contract fix; last touched ad7b109 2026-08-25.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The fold, the tally, the tag union and the refusal to re-flag its own rollups are all the verb's (memq.js:13116-13160), and the verb table row at line 35 states what `--rollup` runs, which is what a session shaping a call needs.
-- proposed: Delete the journal-rollup description from 292; the row at 35 carries the flag's scope.
-
-### c5.C057
-- key: Expect `--rollup` to fold each memory's `applied` stamps into one per-file record carrying distinct-day count and first and last application, and to prune `read` stamps to the newest per file.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:292
-- provenance: f270e9c 2026-07-31, the plan's Approach: "The usage prune preserves the evidence the formula reads".
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The fold and the prune are the verb's (memq.js:13316). The design reason stays here: the prune keeps the distinct-day evidence the extension formula reads, so a rollup never shortens a memory's earned extension.
-- proposed: (via A077) Delete the journal-rollup description from 292; the row at 35 carries the flag's scope.
-
-### c5.C058
-- key: Pass `--drop-malformed` only alongside `--rollup`; it is an argument error without it.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:292
-- provenance: ad7b109 2026-08-25, installed with the flag.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The coupling is enforced at parse time with its own message (memq.js:14259-14262), and the skill states it at 35 and again at 288 where the exit names the flag pair.
-- proposed: (via A079) Delete "which rides `--rollup` and is an argument error without it" from 292.
-
 ### c5.C059
-- key: Expect the rollup and usage prunes to run only under `--rollup`; an archive flag alone moves what it names and touches nothing else.
+- key: Expect an archive flag to archive what it names and touch nothing else.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:292
 - provenance: 8e22ff4 2026-07-31; the split-call discipline that reads it dates to 752dbce 2026-08-22.
 - verdict: keep
-- reason: Flag scope is the verb's (memq.js:14171-14184), but the session must know it before the call, since the rules about which call carries `--rollup` are built on it and the verb can only tell it afterwards.
-- passage: The pass's one mutation path over the store's own records and sidecars, and it mutates only what its flags name. `--rollup` runs the journal rollup and the usage prunes.
-- passage: The rollup and the usage prunes run only under `--rollup`. An archive flag alone moves what it names and touches nothing else.
+- reason: Flag scope is the verb's, but the session must know it before the call, since the split-call rules for the shared tiers are built on it and the verb can only tell it afterwards. The rollup flag it once bounded left on 2026-10-11 (`docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4).
+- passage: An archive flag archives what it names and touches nothing else.
 - flag: stale
 
 ### c5.C060
@@ -6023,15 +5763,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: retire
 - superseded-by: S006
 - reason: Nothing in memq starts a pass; the 14-day predicate is a reading of the stamp the close-out performs, and the never-run case is the one the fix exists for. Superseded at `4b2e64c` by S006 (the Section 8 merge; the verdict before it was keep).
-
-### c5.C064
-- key: Run the pass in order: `decay-scan` reports, your judgment picks, `decay-prune --rollup` with archive flags mutates, `decay-done` stamps.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: 8e22ff4 2026-07-31, the plan's Approach: decay is deterministically scanned, human-judged and close-out-triggered.
-- verdict: retire
-- superseded-by: S007
-- reason: The verbs report, mutate and stamp, but no driver runs them in order and the judgment step between them is the session's. Superseded at `4b2e64c` by S007 (the Section 8 merge; the verdict before it was keep).
 
 ### c5.C065
 - key: Hand-edit only a project-tier summarize; summarize a shared-tier candidate through `add-type` or `add-operator` with `--update`, a body flag and `--confirm-shared`.
@@ -6078,15 +5809,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - superseded-by: S014
 - reason: The rule holds and nothing enforces it: the security model records the split as prose-enforced with no mechanical check, and combining the calls waives the type tier's cross-project gate silently. Only the paragraph's wording and order change. Superseded at `4b2e64c` by S014 (the Section 8 merge; the verdict before it was rewrite).
 
-### c5.C070
-- key: Put `--rollup` on exactly one call, the project tier's.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: ae2c70a 2026-08-22, installed with the split-call discipline.
-- verdict: retire
-- superseded-by: S015
-- reason: The rule holds unenforced: a second rollup can rewrite a sidecar a lock-free stamp touched since the first and spend the file's only backup generation on the already-pruned copy. Wording compresses with the paragraph. Superseded at `4b2e64c` by S015 (the Section 8 merge; the verdict before it was rewrite).
-
 ### c5.C071
 - key: Add `--confirm-shared` to the type-tier call only after the refusal has named the projects the retirement would reach.
 - class: rule
@@ -6113,15 +5835,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: retire
 - superseded-by: S020
 - reason: The split rule is obeyable without the reassurance, which restates the verb's validate-before-mutate posture. Recorded here: a refused pass changes nothing, so the cost of splitting a call wrongly is one round. Superseded at `4b2e64c` by S020 (the Section 8 merge).
-
-### c5.C074
-- key: Under the engine store, archive what the pass names and leave the journal rollup to an attended session.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: 752dbce 2026-08-22, the shared-tier plan's grant list ("Six shapes get no prompt-free allow"); the denylist gained `--drop-malformed` at 5ac33f5 2026-08-25.
-- verdict: retire
-- superseded-by: S021
-- reason: The gate guards an irreversible act and stays: a rollup rewrites every tier's sidecar and journal under a single `.bak` that never syncs, so on an unattended worker it is as final as a deletion. `hooks/memq-grant.js` withholds the flag mechanically; this sentence tells the pass what to do instead. Superseded at `4b2e64c` by S021 (the Section 8 merge; the verdict before it was keep).
 
 ### c5.C075
 - key: Expect the SessionStart hook to nudge when the decay stamp is 30+ days overdue.
@@ -6171,46 +5884,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The rule keeps verbatim inside the split paragraph. A withheld record has no score to compare, so a reader waiting for one would miss the strongest overlap the query found.
 - passage: Read a lexical hit as an overlap candidate on its own, since a record the lexical block listed shows no semantic score.
 
-### c5.C080
-- key: Expect `hooks/memory-frontmatter-guard.js`, a PreToolUse hook in front of Write, Edit and MultiEdit, to be the only surface that sees a record before it exists.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:300
-- provenance: 426bf68 2026-08-26, the anchors-and-guard plan installed the guard; registered at hooks.json:74.
-- verdict: rewrite
-- landed: f92e99ec section 5
-- reason: The ownership map makes this skill the owner of the project-tier frontmatter moment with the guard as its named enforcement, so the sentence naming the guard, its door and its uniqueness stays as the pointer. What the guard checks and refuses retires to the guard. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: `hooks/memory-frontmatter-guard.js` refuses any Write, Edit or MultiEdit into a tier directory but a run's pending one, naming `memq put`.
-
-### c5.C081
-- key: Expect the guard to compute the content the call would leave on disk and, where that content changes a frontmatter block, hold it to the field rules for `supersedes:`, `anchors:`, `triggers:`, `tags:`, memq field placement, and `pinned:`/`created:` date form.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:300
-- provenance: 426bf68 2026-08-26; the eight named checks were gathered under one rank rule at 0d1e610 2026-08-30.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: Every field rule named is a check in the guard (`frontmatterFault`, hooks/memory-frontmatter-guard.js:940-944) and a deny names the rule and the fix on its stderr line, while the field sections above already tell an author what to write.
-- proposed: Delete the field-rule enumeration from 300.
-
-### c5.C082
-- key: Expect the guard to refuse a frontmatter block that opens and never closes, and one whose opening fence is not the file's first line.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:300
-- provenance: 426bf68 2026-08-26.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: Both refusals are the guard's (hooks/memory-frontmatter-guard.js:960-990) and each deny line carries its reason. The why is here: memq reads either shape as a record declaring no fields at all.
-- proposed: (via A115) Delete the "It refuses a block that opens and never closes" sentence.
-
-### c5.C083
-- key: Take field placement from memq's own exports so the guard and its readers cannot disagree, and keep the guard's re-spelled frontmatter read cap in step by maintenance.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:300
-- provenance: 426bf68 2026-08-26.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: A maintainer's note rather than a session's rule, and the guard's own header states that it duplicates `FRONTMATTER_READ_CAP` rather than importing it (hooks/memory-frontmatter-guard.js:201-230), which is where a maintainer meets it.
-- proposed: Delete the exports-and-read-cap sentences from 300.
-
 ### c5.C084
 - key: Expect both shared tiers to refuse Write, Edit and MultiEdit, whoever is writing, with one stderr line naming the memq routes that author that tier.
 - class: rule
@@ -6234,16 +5907,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: The matcher names those three tools and nothing else, so a shell redirection and an edit made outside the harness pass it untouched. The CLI-authored rule above governs those, the operator's own `pinned:` edit among them.
 - ruled: cut 2026-09-30
 
-### c5.C086
-- key: Read a guard deny as exit 2 with one stderr line, a clean check as exit 0 with no output, and a placed-but-uncheckable record as exit 0 with a `hookSpecificOutput` object on stdout naming tier, cause, and that the write proceeds unchecked.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:304
-- provenance: 426bf68 2026-08-26, the plan's Chapter 4: the guard answers three ways rather than two.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The three exits and their channels are the hook's own (hooks/memory-frontmatter-guard.js:50-62, :1325, :1504) and each answer states what it is; the reading rule that matters (c5.C089) stays. Lands as two silent allows rather than the proposal's one: the guard's own header (hooks/memory-frontmatter-guard.js:50-58) makes a checked-and-clean record silent as well as a target placed nowhere, so the clause reads 'silent where the record was checked and clean, and where nothing was placed inside the store', with the not-checked allow named as the one that speaks. Its landing respelled c5.C089's keep sentence at the fix round; c5.C089 records the flip. The speaking allow is named as a placed record the guard could not check or, under a memq version skew, any target at all, since the guard's skew branch (hooks/memory-frontmatter-guard.js:1400-1415) writes the not-checked line before placement.
-- proposed: Reduce 304 to C089 with one clause naming that an allow is silent only where nothing was placed.
-
 ### c5.C087
 - key: Decide which of the two allows applies by placement: once a target is placed inside the store, a parse error, unreadable file, unresolvable root or a throw all give the not-checked answer.
 - class: mechanic
@@ -6252,16 +5915,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: retire
 - landed: d2c43f1 section 22
 - reason: The routing by placement is in the guard and the not-checked line names its own cause when it fires.
-- proposed: (via A124) Reduce 304 to C089 with one clause naming that an allow is silent only where nothing was placed.
-
-### c5.C088
-- key: Treat a target out of scope, under an `archive/`, not a memory filename, unplaceable, a payload with no target, or a throw on the way there as the silent allow.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:304
-- provenance: 426bf68 2026-08-26.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The silent-allow set is decided in the guard (hooks/memory-frontmatter-guard.js:59-62), and the class rule at 306 (c5.C095) is what a session actually needs. The why is here: before placement there is no record for a not-checked line to be about.
 - proposed: (via A124) Reduce 304 to C089 with one clause naming that an allow is silent only where nothing was placed.
 
 ### c5.C089
@@ -6309,26 +5962,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: The run-scoped pending tier is not a tier directory to memq's resolver, so a record written there is out of scope and unvalidated.
 - ruled: cut 2026-09-30
 
-### c5.C093
-- key: Treat `memory-operator/archive/` and `memory-types/<type>/archive/` as placing nothing, so a record written there is allowed in silence while `memq get` still serves it and the store still syncs it.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:306
-- provenance: 426bf68 2026-08-26: "A write into either shared tier's archive is allowed in silence".
-- verdict: retire
-- reason: row 908 (Frontmatter guard scope and silence), dropped under the mechanism cut.
-- passage: A record written into `memory-operator/archive/` or `memory-types/<type>/archive/` is allowed in silence, while `memq get` still serves it by name and the store still syncs it.
-- ruled: cut 2026-09-30
-
-### c5.C094
-- key: Treat `MEMORY.md`, the decay stamp and the sidecars as out of scope on every tier, shared ones included.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:306
-- provenance: 426bf68 2026-08-26.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: `isMemoryFilename` (memq.js:1742) is the boundary and the guard takes it from memq (hooks/memory-frontmatter-guard.js:87, :727); the class sentence at c5.C095 covers these members, which are named here: `MEMORY.md`, the decay stamp and the sidecars. Its landing respelled c5.C095's keep sentence; c5.C095 records the flip.
-- proposed: Fold the `MEMORY.md`, stamp and sidecar members into the class sentence.
-
 ### c5.C095
 - key: Read the out-of-scope set as one class: a target the guard cannot place inside the store is one it says nothing about.
 - class: mechanic
@@ -6340,16 +5973,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Those are the members worth naming rather than the boundary of the set, which is one class: a target the guard cannot place inside the store, `MEMORY.md`, the decay stamp and the sidecars among them, is a target it says nothing about.
 - passage: Those are the members worth naming rather than the boundary of the set, which is one class: a target the guard cannot place inside the store, `MEMORY.md`, the decay stamp and the sidecars among them, is a target it says nothing about.
 - ruled: cut 2026-09-30
-
-### c5.C096
-- key: Expect placement to try the written spelling first (extended-length and device prefixes folded off, an administrative-share UNC naming this machine rewritten to drive form), then the parent directory's resolved real path.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:306
-- provenance: 426bf68 2026-08-26.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: Placement is computed by `placeTarget` (hooks/memory-frontmatter-guard.js:354-500) and the file's own header documents both passes; no session act depends on the fold order. Its landing respelled c5.C097's keep sentence; c5.C097 records the flip.
-- proposed: Delete the two-pass description from 306.
 
 ### c5.C097
 - key: Expect only a target reaching the store through an alias of the root itself to survive both passes: an administrative share by qualified or aliased host name, and a mapped or substituted drive letter.
@@ -6364,25 +5987,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - ruled: cut 2026-09-30
 
 ### c5.C098
-- key: Re-add a `Project-Type` line in some project of that type before running a pass over that type tier.
+- key: Run `memq declare-type <type>` in some project of that type before running a pass over that type tier.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:310
 - provenance: 8e22ff4 2026-07-31, the memory-extension plan installed the type tier and its declaring-project resolution.
 - verdict: keep
-- reason: No finding. The tier's files become unreachable by scan or prune when the last declaring project drops its line, and nothing detects or repairs that state.
-- passage: Re-add the line in some project of that type before running a pass over it.
-
-### c5.C099
-- key: Recover a wedged type lock by confirming no writer is live, then deleting `~/.claude/memory-types/<type>/store.lock` by hand.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:311
-- provenance: 8e22ff4 2026-07-31, Section 4 (locked writes); the shared-tier lock discipline was extended at 752dbce 2026-08-22; reworded 2026-10-04 by the finishing pass of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The recovery rule and "no memq command recovers it" stay, because a hand deletion of a lock file is exactly the act no verb performs. The failure-mode description and the integrity reassurance leave; recorded here, the lock is availability only, so a wedged lock costs writes rather than data. 'K07 B369's two sentences' is not in the tree, so the entry lands as: no memq command recovers a wedged type lock at its path; confirm no writer is live, then delete the entry by hand. The shared-tier writes go through the memory database and take no file lock, so `decay-prune --rollup` is the one verb the type lock still blocks (memq.js, the rollup's `acquireLock(path.join(typed.dir, STORE_LOCK_FILE))`), and the passage names it.
-- proposed: K07 B369's two sentences.
-- baseline-test: yes
-- passage: A wedged type lock at `~/.claude/memory-types/<type>/store.lock` blocks only `memq decay-prune --rollup`, and no memq command recovers it. Confirm no rollup is running, then delete that entry by hand.
+- reason: No finding. The tier's records are unreachable by scan or prune where no project on this machine declares the type, since the declaration is this machine's own file, and nothing detects or repairs that state.
+- passage: Run `memq declare-type <type>` in some project of that type before running a pass over it.
 
 ### c5.C100
 - key: Run `touch --applied` on a memory you act on, and use a pin for a memory whose use is structurally invisible.
@@ -6438,25 +6049,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - superseded-by: E005
 - reason: The incident class is live: an operator memory (`kit-project-memory-does-not-resolve-from-current-checkout`) records the kit's own project memories split across three stores by checkout path. The contrast sentence naming the tiers that resolve everywhere is the remedy, not decoration. Retired on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and removed this passage, and E005's passage carries the rule; the verdict before it was keep.
 - passage: A project store syncs under its flattened path, so a project tier resolves on another machine only where that project sits at the identical path.
-
-### c5.C105
-- key: Expect a freshly synced store to answer lexically until each machine builds its own semantic index on first query.
-- class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:315
-- provenance: 6cbb24a 2026-08-03.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: The index is built per machine on first query with no session act (scripts/memory-index.js:7), so the sentence shapes nothing a session does. The why is here: a vector is valid only against the embedder that produced it, which is why the index is derived and never synced.
-- proposed: Delete the semantic-index bullet from Known limits.
-
-### c5.C106
-- key: Commit the store through the SessionStart background sync runner or the kit doctor's `-Fix`, never a bare `git add`.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:316
-- provenance: 945a75c 2026-08-19, which made both committers go through the same leak probes.
-- verdict: keep
-- reason: The ownership map assigns the store's own commits and pushes to memory-system, and the doctrine's staging rule governs a working repository rather than this. Both sanctioned paths pass the probes that refuse a path the allowlist does not admit; a bare `git add` passes none.
-- passage: Nothing else does, which is why the close-out relies on one of those rather than a bare `git add`.
 
 ### S001
 - key: Run the session-recap command over the session's whole span at close-out.
@@ -6523,18 +6115,18 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - landed: d2c43f1 section 22
 - reason: The predicate stays verbatim, since the SessionStart hook's own threshold is 30 days and the 14-day reading lives only here; the safe change is rewording the owner clause so step 8 calls the pass rather than owning its trigger.
 - proposed: Keep the predicate and its absent-is-due parenthetical as written; reword the owner clause so finishing-work step 8 is the caller.
-- passage: It is due when the decay stamp is older than 14 days, or absent (a store where no pass has ever run is due, not exempt).
+- passage: It is due when the decay stamp, `~/.claude/memory-snapshot/decay-stamp`, is older than 14 days, or absent (a machine where no pass has ever run is due, not exempt).
 
 ### S007
-- key: Run the pass in order: `decay-scan` reports, your judgment picks, `decay-prune --rollup` with archive flags mutates, `decay-done` stamps.
+- key: Run the pass in order: `decay-scan` reports, your judgment picks, `decay-prune` with archive flags archives, `decay-done` stamps.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:296
 - provenance: 8e22ff4 2026-07-31, the plan's Approach: decay is deterministically scanned, human-judged and close-out-triggered; re-extracted at 55c5abc 2026-09-09.
 - verdict: rewrite
 - landed: d2c43f1 section 22
 - reason: The verbs report, mutate and stamp separately and no driver runs them in order; the judgment step between scan and prune is the session's. Flipped from keep to rewrite at section 22's close: S008's rewrite lifted the summarize rule out of the parenthetical, so the sentence was respelled to stand as landed. Landed as the proposal below.
-- proposed: The run: `decay-scan` reports, your judgment picks, `decay-prune --rollup` with the archive flags mutates, `decay-done` stamps.
-- passage: The run: `decay-scan` reports, your judgment picks, `decay-prune --rollup` with the archive flags mutates, `decay-done` stamps.
+- proposed: The run: `decay-scan` reports, your judgment picks, `decay-prune` with the archive flags mutates, `decay-done` stamps.
+- passage: The run: `decay-scan` reports, your judgment picks, `decay-prune` with the archive flags archives, `decay-done` stamps.
 
 ### S008
 - key: Make the summarize edit the pass's only hand edit, and hand-edit the project tier alone.
@@ -6613,29 +6205,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - baseline-test: yes
 - passage: The operator tier's gate is unconditional, so give any operator-tier archive its own `decay-prune` call and run the type-tier archive in a separate call without the flag.
 
-### S015
-- key: Put `--rollup` on exactly one call, the project tier's.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: ae2c70a 2026-08-22, installed with the split-call discipline; re-extracted at 55c5abc 2026-09-09.
-- verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The rule holds unenforced, since nothing counts rollups across calls; wording compresses with the paragraph while S016 carries its cost here.
-- proposed: Keep as one sentence beside the split rule, with S016's reason retired to the ledger.
-- baseline-test: yes
-- passage: `--rollup` rides exactly one of the calls, the project tier's.
-
-### S016
-- key: A second `--rollup` run can rewrite a sidecar a lock-free stamp touched since the first and spend that file's only backup generation on the already-pruned copy.
-- class: rationale-example
-- source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: ae2c70a 2026-08-22, installed as S015's reason.
-- verdict: retire
-- landed: d2c43f1 section 22
-- reason: S015 is obeyable without it, so the cost lives here: the read-stamp hook appends without a lock, a second rollup rewrites the sidecar it touched under the same single `.bak`, and the pre-prune copy is gone.
-- proposed: Drop the "because a second run of it can rewrite ..." clause; this ledger entry holds the reason.
-- baseline-test: yes
-
 ### S017
 - key: Add `--confirm-shared` to the type-tier call only after the refusal has named the projects the retirement would reach.
 - class: rule
@@ -6678,15 +6247,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The split rule is obeyable without the reassurance, which restates the verb's validate-before-mutate posture; recorded here that a refused pass changes nothing, so splitting a call wrongly costs one round.
 - proposed: Delete the "A pass that needed the flag and omitted it ..." sentence.
 
-### S021
-- key: Under the engine store signals, archive what the pass names and leave the journal rollup to an attended session.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: 752dbce 2026-08-22, the shared-tier plan's grant list; the denylist gained `--drop-malformed` at 5ac33f5 2026-08-25; re-extracted at 55c5abc 2026-09-09.
-- verdict: keep
-- reason: The grant hook withholds `--rollup` mechanically on the unattended vector and this sentence is the only surface telling the pass what to do instead; the gate guards a rewrite of every tier's sidecar under a single backup the sync never carries.
-- passage: Under the engine store signals the grant covers bare `decay-prune` and its archive flags but not `--rollup`, so a pass there archives what it names and leaves the rollup to an attended session.
-
 ### S022
 - key: Expect the SessionStart hook to nudge once the decay stamp is 30 or more days overdue.
 - class: mechanic
@@ -6709,15 +6269,6 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - baseline-test: yes
 - passage: The pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one.
 
-### T001
-- key: Sync the store without asking, at any time and as often as you like, since the doctrine's closed list of never-gated channels names the store's own sync and that entry covers no other act.
-- class: rule
-- source: plugins/grimoire/skills/memory-system/SKILL.md:66, the hand-path paragraph's opening sentences.
-- provenance: c5881f9 2026-09-13, batch 2 ruling 13 of the corpus rewrite's rulings, given because sessions spent a decision ask on a sync the operator had already granted where the paragraph left the question unsaid; landed by the corpus-rewrite follow-up plan's section 3, and recorded here at that plan's finishing pass, fix rounds 1 and 2.
-- verdict: keep
-- reason: The store is private and made to sync, so the paragraph opens by stating the grant before it states the hand paths, and a session reading it meets the permission before the mechanics. The grant names its owner, the doctrine's closed list, so this skill states where the permission sits rather than conferring it. The last sentence bounds it: the doctor's `-Fix` consent (c2.C048), the PASS-or-FIXED gate and its FAIL stop (c2.C049) and the leak probe all stand under it. `docs/security-model.md`'s credential paragraph records what taking either hand path unasked costs.
-- passage: Syncing the store needs no go-ahead, for any session at any time, under the doctrine's closed list: a commit of what the allowlist admits, a pull with rebase, then a push, the manual pair below included. A failing leak probe is reported, not asked about.
-
 ### D001
 - key: Expect a record's `MEMORY.md` index line description to win over its frontmatter `description:` line wherever the index line holds text, and expect a record with no index line, or an empty one, to rank, publish and be judged on that frontmatter value instead, left out of the `MEMORY.md` block session start prints but ranked in the session-start fleet block like any other record on a machine with the memory database.
 - class: rule
@@ -6736,7 +6287,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: retire
 - landed: c822a4e8 section 6
 - superseded-by: E009
-- reason: The flag is `--confirm` rather than `--confirm-shared` because a project-tier removal has no reach across projects. The host line has three forms because the publisher (`scripts/memory-database.js`, `publish`) names a project row removed only when its walk read that row's store and found no file for it: a store the walk reads empty, or a walk that could not read some tier, holds every removal back. `cmdForget` spawns `db-sync` only where `db-sync` itself would publish, a config file present and the store root the machine's default, so the line never promises a publish that cannot run. The store counts as empty when neither the live directory nor `archive/` holds a record file, the walk's own test, since a retired record is published too. Retired on 2026-10-04 by section 6 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which rewrote the `forget` row to the soft delete `cmdForget` sends, with no locked operation and no host-row line, and E009's passage carries the row; the verdict before it was keep.
+- reason: The flag is `--confirm` rather than `--confirm-shared` because a project-tier removal has no reach across projects. The host line has three forms because the publisher (`scripts/memory-database.js`, `publish`) names a project row removed only when its walk read that row's store and found no file for it: a store the walk reads empty, or a walk that could not read some tier, holds every removal back. `cmdForget` spawned the publish only where the publisher itself would run, a config file present and the store root the machine's default, so the line never promises a publish that cannot run. The store counts as empty when neither the live directory nor `archive/` holds a record file, the walk's own test, since a retired record is published too. Retired on 2026-10-04 by section 6 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which rewrote the `forget` row to the soft delete `cmdForget` sends, with no locked operation and no host-row line, and E009's passage carries the row; the verdict before it was keep.
 - passage: `memq forget <name> --confirm` | Remove a project-tier record outright, in one locked operation. Without the flag it refuses, having changed nothing. Its last stdout line says what the memory database will do with the record's row.
 
 ### D003
@@ -6784,7 +6335,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - source: plugins/grimoire/skills/memory-system/SKILL.md:162, the Memory Database Layer section's opening sentence
 - provenance: the memory-in-sql plan, on the operator's words of 2026-10-02: "SQL memory is the tool all the way down, excepting the local queue and small cache", and "I like one tool being responsible for ALL our memory processes".
 - verdict: keep
-- reason: Two doors let two machines edit one record apart, which is the conflict the git sync could not settle and the database would have had to rebuild. One door is also the one place a later hook or augmentation attaches. The frontmatter guard (`hooks/memory-frontmatter-guard.js`) refuses every Write, Edit and MultiEdit into a tier directory but a run's pending one, so the rule is enforced at the file tools, and this sentence is what names the door a refused session turns to.
+- reason: Two doors let two machines edit one record apart, which is the conflict the store's earlier git channel could not settle and the database would have had to rebuild. One door is also the one place a later hook or augmentation attaches. A record is a database row with no tier file a file tool could open, so this sentence is what names the door a session turns to.
 - passage: **The shared memory database holds every record, and `memq` is its one door.**
 
 ### E002

@@ -107,8 +107,8 @@ export type RecognitionTier = "project" | "type" | "operator";
 // whether a KIT_MEMORY_PROJECT pin is in effect, which bars the prompt, glob
 // and anchor doors; the home directory, its root and the platform, from which
 // shown's home elisions are built; the host name a record's machine scope is
-// compared with; and the memory root the read stamp's tier test resolves
-// against. A scope printed without them reads each as unknown.
+// compared with; and memq's memory root, the share test's own subject. A
+// scope printed without them reads each as unknown.
 export type RecognitionScope = {
   serves: boolean;
   projectKey: string | null;
@@ -324,7 +324,7 @@ export function recognitionKeyOf(record: { tier: RecognitionTier; name: string }
 // pin is in effect, the home directory and its root as the kit's home
 // elisions read them, the platform, the host name and memq's memory root,
 // each answered before the share test so a scope that does not serve still
-// names the memory root the read stamp tests against. It prints one JSON
+// carries them. It prints one JSON
 // object and exits 0, every failure reading as a scope that does not serve.
 // One line, so no shell or platform reads a line break in an argument.
 export const RECOGNITION_SCOPE_SCRIPT = [
@@ -1376,50 +1376,4 @@ export function nudgeSha256Hex(text: string): string {
     h[7] = (h[7] + hh) >>> 0;
   }
   return h.map((x) => x.toString(16).padStart(8, "0")).join("");
-}
-
-// --- The read stamp's tier test ---
-
-// A path's segments with `.` dropped and `..` taken back, as
-// path.win32.resolve reads an absolute path on every platform, either slash
-// a separator, so a POSIX path that opens with `//` keeps two root segments. `..` never climbs above
-// the root: a drive (`C:`) is the root's one segment, a UNC path's server and
-// share are its two, as path.win32.resolve reads them, so
-// `//srv/other/../mem` reads as `//srv/other/mem`, and a POSIX path's root is
-// the empty list, so `/a/..` and `/..` both read as `/`.
-function nudgePathSegments(p: string): string[] {
-  const normal = p.replace(/\\/g, "/");
-  const floor = normal.startsWith("//") ? 2 : /^[A-Za-z]:(\/|$)/.test(normal) ? 1 : 0;
-  const out: string[] = [];
-  for (const seg of normal.split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") {
-      if (out.length > floor) out.pop();
-      continue;
-    }
-    out.push(seg);
-  }
-  return out;
-}
-
-// Whether a Read's path names a record file in one of the store's tiers under
-// `memoryRoot`: a record filename directly inside projects/<project>/memory,
-// memory-types/<type> or memory-operator, compared without case where
-// `foldCase` holds, as memq's isMemoryFilename and tierDirFor read it. memq's
-// stamp-read verb makes the same test against the file itself, so this only
-// keeps a Read of any other file from spawning it.
-export function nudgeStampsRead(filePath: string, memoryRoot: string, foldCase: boolean): boolean {
-  const root = nudgePathSegments(memoryRoot);
-  const file = nudgePathSegments(filePath);
-  if (root.length === 0 || file.length <= root.length) return false;
-  const eq = (a: string, b: string): boolean => (foldCase ? a.toLowerCase() === b.toLowerCase() : a === b);
-  if (!root.every((seg, i) => eq(seg, file[i]))) return false;
-  const parts = file.slice(root.length);
-  const name = parts[parts.length - 1];
-  if (!eq(name.slice(-3), ".md") || !recordNameAdmitted(name.slice(0, -3), foldCase)) return false;
-  const dirs = parts.slice(0, -1);
-  if (dirs.length === 3) return eq(dirs[0], "projects") && eq(dirs[2], "memory");
-  if (dirs.length === 2) return eq(dirs[0], "memory-types");
-  if (dirs.length === 1) return eq(dirs[0], "memory-operator");
-  return false;
 }

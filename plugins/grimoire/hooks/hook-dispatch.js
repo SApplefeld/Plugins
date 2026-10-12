@@ -65,7 +65,6 @@ const DECISION_RANK = { deny: 3, ask: 2, allow: 1 };
 const FALLBACK_TABLE = {
     PreToolUse: [
         ['Write|Edit|MultiEdit|Bash|PowerShell', 'docs-write-guard.js'],
-        ['Write|Edit|MultiEdit', 'memory-frontmatter-guard.js'],
         ['Bash|PowerShell', 'pr-docs-guard.js'],
         ['Bash|PowerShell', 'merged-pr-push-guard.js'],
         ['Bash|PowerShell', 'readonly-agent-guard.js'],

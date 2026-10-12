@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// memq: deterministic CLI over the kit memory store (the outcome journal and
-// the file-per-fact memories) for the project resolved from cwd.
+// memq: deterministic CLI over the kit memory store (the memory database's
+// records, read through the host and this machine's snapshot of it) for the
+// project resolved from cwd.
 //
 // Subcommands:
 //   memq log <key> pass|fail "<summary>" [--tag t]... [--detail "..."]
-//   memq find <term> [--tag t] [--outcomes|--memories|--all] [--archived]
+//   memq find <term> [--tag t] [--memories|--all] [--archived]
 //   memq get <key|name> [--type|--type=<type>|--operator] [--no-stamp]
 //   memq recall
 //   memq judged --situation "<text>" [--tag t] [--limit <n>]
@@ -13,7 +14,6 @@
 //   memq recent [--since <n>d|<n>h]
 //   memq unstamped [--since <n>d|<n>h]
 //   memq touch <name> --applied [--type|--type=<type>|--operator]
-//   memq stamp-read <path>
 //   memq anchor <name> <path>... [--operator]
 //   memq triggers <name> <type>:<pattern>... [--type|--type=<type>|--operator]
 //   memq triggers <name> [<type>:<pattern>...] --replace
@@ -24,7 +24,6 @@
 //   memq add-type <type> <name> "<description>" --update
 //                 [(--body "..."|--body-file "<path>") --confirm-shared]
 //   memq add-operator <name> "<description>" [--tag t]... [--machine <name>]
-//                     [--board <path>]
 //                     [--trigger <type>:<pattern>]... [--supersedes <name>]
 //                     [--body "..."|--body-file "<path>"]
 //   memq add-operator <name> "<description>" --update
@@ -36,67 +35,59 @@
 //   memq delete-type <type> <name> --confirm-shared
 //   memq delete-operator <name> --confirm-shared
 //   memq decay-scan
-//   memq decay-prune [--rollup] [--archive <name>]... [--archive-type <name>]...
+//   memq decay-prune [--archive <name>]... [--archive-type <name>]...
 //                    [--archive-operator <name>]... [--confirm-shared]
 //   memq decay-done
+//   memq declare-type <type>|--none
 //
 // The outcome journal is the memory database's: `log` sends each entry to
 // mem.usp_AppendOutcomes with the local queue (~/.claude/kit-memory-db-queue.sqlite)
 // behind it, so an entry the host cannot take now lands at the next write verb
-// or `memq db-refresh`, and `log` caps every field at write time. The
-// project memory directory's outcomes.jsonl is frozen at its last line: the
-// journal surfaces still read it and each says so first, and nothing appends
-// to it.
+// or `memq db-refresh`, and `log` caps every field at write time. No verb
+// reads the journal back yet: a project memory directory's outcomes.jsonl is
+// pre-cutover outcome history that a later plan imports, and nothing here
+// opens it.
 //
-// Used-tracking is the database's too. `touch` stamps a record applied, `get`
-// stamps the body it serves read, and the persona module's read stamp runs
-// the `stamp-read` verb to stamp a Read of a tier file read; each stamp
-// is a usage row on the local queue, delivered to mem.usp_AppendUsage by the
-// next drain, and no usage.jsonl line is written. `touch --type` and
-// `touch --operator` are what let the applied signal reach a shared-tier
-// record: without them a shared memory would accumulate reads forever, never
-// receive the stamp decay keys on, and be flagged for archival no matter how
-// heavily used. `decay-prune`'s archive flags retire records through
-// mem.usp_ArchiveRecord, and its `--rollup` alone rewrites files, the frozen
-// journal and usage sidecars, under the project's decay.lock and each shared
-// tier's store.lock, through the lockfile helper exported here.
+// Used-tracking is the database's too. `touch` stamps a record applied and
+// `get` stamps the body it serves read; each stamp is a usage row on the
+// local queue, delivered to mem.usp_AppendUsage by the next drain, and no
+// usage.jsonl line is written outside a run's pending directory. `touch
+// --type` and `touch --operator` are what let the applied signal reach a
+// shared-tier record: without them a shared memory would accumulate reads
+// forever, never receive the stamp decay keys on, and be flagged for archival
+// no matter how heavily used. `decay-prune`'s archive flags retire records
+// through mem.usp_ArchiveRecord and rewrite no file.
 //
-// The project-type tier lives in <root>/memory-types/<type>/: the same
-// file-per-fact format with its own MEMORY.md index, shared by every project
-// of that type. A project opts in with a "Project-Type: <type>" line at the
-// top of its own memory MEMORY.md; `find`, `get`, `touch --type`, and the
-// decay pass resolve the type tier through that declaration, and the
-// SessionStart hook (hooks/memory-session.js) emits the type index into
-// session context through the same projectType reader.
+// The project-type tier is the memory database's type tier, shared by every
+// project of that type. A project opts in with `memq declare-type <type>`,
+// which records the type under the project's key in this machine's
+// declarations file beside the snapshot index (projectTypesPath); `find`,
+// `get`, `touch --type`, and the decay pass resolve the type tier through
+// that declaration, and the SessionStart hook (hooks/memory-session.js)
+// emits the type's snapshot records into session context through the same
+// projectType reader.
 //
-// The operator tier lives in <root>/memory-operator/, in that same format,
-// and holds facts true of the operator or of a machine rather than of one
-// project or one platform. It is one directory rather than a per-key set,
-// because there is one operator: no path segment names it and no declaration
-// resolves it, so the tier is simply present as a directory or absent. Every
-// project's sessions read and write it, which makes it the most widely shared
-// surface in the store, and the promotion ladder it completes runs journal,
-// project, type, operator, doctrine. Retrieval is most-specific-wins: a
-// project memory shadows a type memory shadows an operator memory, live
-// before archived. Unlike the type tier it is not emitted into session
-// context at start; it is reached through `recall`, `find`, and `get`, which
-// keeps every use visible to the read and applied stamps that feed the decay
-// clock.
+// The operator tier holds facts true of the operator or of a machine rather
+// than of one project or one platform. There is one operator, so no path
+// segment names it and no declaration resolves it. Every project's sessions
+// read and write it, which makes it the most widely shared surface in the
+// store, and the promotion ladder it completes runs journal, project, type,
+// operator, doctrine. Retrieval is most-specific-wins: a project memory
+// shadows a type memory shadows an operator memory, live before archived.
+// Unlike the type tier it is not emitted into session context at start; it
+// is reached through `recall`, `find`, and `get`, which keeps every use
+// visible to the read and applied stamps that feed the decay clock.
 //
 // A shared-tier record is written through the memory database, which takes no
-// file lock. The one rewrite of the shared tiers' files is `decay-prune
-// --rollup`, which takes each tier's store.lock over its usage sidecar, and the
-// project's decay.lock over the project tier's journal and sidecar.
+// file lock, and nothing here rewrites a tier file.
 //
 // The decay lifecycle splits into judgment and mechanics. `decay-scan`
-// reports the store's decay candidates and writes no memory file and no
-// store sidecar: a memory 30 idle
+// reports the store's decay candidates and writes no file: a memory 30 idle
 // days past its last sign of life is a summarize candidate and 60 an archive
 // candidate, both thresholds extended in proportion to how many distinct days
 // the memory was applied and waived entirely by a `pinned:` frontmatter
-// field, and journal entries older than 30 days are rollup candidates,
-// each line carrying the evidence dates that justify it. Beside those three
-// classes it reports anchor drift over the project tier's live records: a
+// field, each line carrying the evidence dates that justify it. Beside those
+// two classes it reports anchor drift over the project tier's live records: a
 // memory whose anchored file has changed or gone is unverified rather than
 // wrong, so that block nominates a re-read and no `decay-prune` flag acts on
 // it; and it reports the live pairs of each tier it reaches whose records read
@@ -106,23 +97,21 @@
 // candidates to act on is a judgment made in-session, never automated here.
 // `decay-prune` then performs exactly the work its arguments call for:
 // `--archive`, `--archive-type` and `--archive-operator` retire records
-// through mem.usp_ArchiveRecord and move no file, and `--rollup` folds the
-// frozen journal and the usage sidecars under the locks above, with a .bak
-// beside every file it rewrites, so no hand ever edits a sidecar. A pinned
-// memory it is asked to archive is refused rather than retired.
-// `decay-done` records that a pass completed by touching memory/decay-stamp;
-// the stamp's mtime is the record and its contents are incidental. The
-// SessionStart hook (hooks/memory-session.js) reads that mtime to nudge when
-// a pass is badly overdue.
+// through mem.usp_ArchiveRecord and move no file. A pinned memory it is asked
+// to archive is refused rather than retired. `decay-done` records that a pass
+// completed by touching the machine's decay stamp, memory-snapshot/decay-stamp
+// under ~/.claude; the stamp's mtime is the record and its contents are
+// incidental. The SessionStart hook (hooks/memory-session.js) reads that
+// mtime to nudge when a pass is badly overdue.
 //
 // This module owns the store's shape for every process that touches it: what
 // counts as a memory file (isMemoryFilename), the memory set itself
 // (listMemories), the key one is recorded under (memoryFileKey), where the
-// tiers live (tierDirFor, projectMemoryDir, typeDir, operatorDirPath,
-// pendingDirFor), what a
+// project tier lives (tierNameFor, projectMemoryDir, pendingDirFor), what a
 // valid run id is and what provenance a run's memory carries (isRunId,
 // provenanceLines), what a valid type name is (isTypeName), the type a
-// project declares (projectType), the store root
+// project declares and where the declarations sit (projectType,
+// projectTypesPath), the store root
 // (memoryRoot), where the decay stamp sits (decayStampPath), and whether a
 // project directory is pinned and honored (pinnedProjectSegment,
 // storePinUnusable). The hooks import them rather than restating them, so a
@@ -136,41 +125,20 @@
 // the model reads summary lines. `find` output is byte-stable for identical
 // database answers (a documented total order, never filesystem enumeration
 // order). `find` is hybrid: a lexical substring channel over this project's
-// tiers, and a semantic channel the memory database's search answers. Where
-// the host does not answer, find matches names and descriptions in this
-// machine's snapshot and says so in one stderr line, never a failure. A third
-// channel joins them on a machine whose operator has configured a model
-// endpoint in `~/.claude/kit-endpoint.json`: find sends the query and the
-// records the other two channels found to that endpoint to be ranked by
-// relevance, and prints the ranking above the semantic block under a fence
-// naming it as model-judged.
+// tiers, and a semantic channel the memory database's search answers, printed
+// as two blocks and nothing after them. Where the host does not answer, find
+// matches names and descriptions in this machine's snapshot and says so in one
+// stderr line, never a failure. The query text reaches the memory database and
+// its embedding endpoint, which the client (memory-database.js) names, and
+// docs/security-model.md inventories that egress.
 //
-// THAT THIRD CHANNEL IS THE ONE PLACE A memq VERB SENDS RECORD TEXT TO THE
-// MODEL ENDPOINT. The endpoint does not run on this VM: in the fleet's
-// configuration it runs on the Hyper-V host, reached across the virtual switch
-// over plain HTTP with no authentication, and shared with other tenants of that
-// host. What crosses that boundary is the query text and, per candidate record,
-// its name, its bare tier token and its index description. A record body never
-// crosses, and neither does the store segment a record's provenance label is
-// built from, which for the project tier is a flattened absolute path. With no
-// config file nothing is sent, no socket is opened, and find behaves exactly as
-// it does without the channel; every failure of the endpoint costs one stderr
-// line and leaves both other blocks untouched. The memory database and its
-// embedding endpoint are a separate destination, named in the client
-// (memory-database.js). The judged channel region below carries the full
-// posture, and docs/security-model.md inventories the egress.
-//
-// SAFETY: reads never destroy data. A malformed journal or usage line is
-// skipped with a stderr note and reading continues; a journal or registry
-// that exists but cannot be read is noted on stderr rather than silently
-// reading as empty. `decay-scan`, `recall` and `find` write no memory file and
-// no store sidecar: none ever moves, edits, or deletes a memory, and `recall`
-// does not even stamp reads, because it serves summaries rather than bodies.
-// The only rewriting path in the store is `decay-prune --rollup`, under its
-// locks and bounded: every rewrite copies the file to <file>.bak first,
-// replaces it by temp-write-then-rename rather than in place, preserves
-// verbatim any line it cannot parse, and prints what it removed; no other
-// subcommand ever rewrites or truncates a store file. Every record write goes
+// SAFETY: reads never destroy data. A tag registry that exists but cannot be
+// read is noted on stderr rather than silently reading as empty.
+// `decay-scan`, `recall` and `find` write no memory file: none ever moves,
+// edits, or deletes a memory, and `recall` does not even stamp reads, because
+// it serves summaries rather than bodies. No subcommand rewrites or truncates
+// a store file: the one file write is `put` inside a run, an exclusive create
+// in the run's pending directory. Every record write goes
 // through the memory database with the local queue behind it, and `forget`,
 // `delete-type` and `delete-operator` retire a record's row there and remove no
 // file. Only argument/usage errors and a failed write exit nonzero: a write the
@@ -194,9 +162,8 @@
 //
 // KIT_MEMORY_PROJECT, set alongside that same pair, names the project
 // directory segment in place of the cwd-derived one, so every surface hanging
-// off the project memory dir (the index, the memories, the pending tier, the
-// journal, the usage sidecar, the decay stamp) lands in
-// <root>/projects/<value>/memory whatever directory the process runs in. It
+// off the project memory dir (the pending tier) lands
+// in <root>/projects/<value>/memory whatever directory the process runs in. It
 // exists because one external-engine instance spawns work under several
 // working directories, and a cwd-derived segment files those writes in as
 // many stores as the instance has spawn shapes, each invisible to the others.
@@ -278,7 +245,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const childProcess = require('child_process');
 // The five siblings, bound through a guard that splits the two ways this file is
 // loaded. Four are hooks/ libraries and the fifth is the shared index's client,
 // which sits beside this file: it is bound here rather than required inside the
@@ -341,10 +307,8 @@ try {
     process.exitCode = 1;
 }
 
-const JOURNAL_FILE = 'outcomes.jsonl';
 const USAGE_FILE = 'usage.jsonl';
 const INDEX_FILE = 'MEMORY.md';
-const GET_CAP = 20;        // full journal entries shown by `get` before truncation
 const SUMMARY_CAP = 120;   // characters of a summary or description, at write and display
 const DETAIL_CAP = 500;    // characters of a detail, at write and display
 const NAME_CAP = 80;       // characters of a key or memory name, at write and display
@@ -353,26 +317,24 @@ const MEMORY_FILE_CAP = NAME_CAP + 3;   // the same cap over a memory filename, 
 const TAG_CAP = 40;        // characters of a tag, at write and display
 const TYPE_CAP = 40;       // characters of a project-type name, at write and display
 // What a type name may be, in the one wording every door that takes one
-// states: the five verbs that read a type off the command line and the
-// boundary they resolve it through (namedTypeDirOrNote). One string because a
-// caller reads this sentence from whichever door refused, and two spellings of
-// one rule read as two rules.
+// states: the verbs that read a type off the command line, declare-type
+// among them. One string because a caller reads this sentence from whichever
+// door refused, and two spellings of one rule read as two rules.
 const TYPE_NAME_RULE = 'type must be characters from [A-Za-z0-9_.-], at most ' + TYPE_CAP
     + ', and not a path token';
 const FAILURE_TEXT_CAP = 400;   // characters of a failure's own message, in the line reporting it
-// Characters of one reason on a db-sync run's failure list. Wider than the two
-// caps above because a publish failure is a composed sentence that names the
-// queue file, says what the client was left holding and quotes the server's or
-// the transport's own diagnosis, and the diagnosis is the part no reader can
-// reconstruct. This client's own boilerplate alone runs past 350 characters, so
-// a cap near the others would print the boilerplate and cut the words that say
-// what went wrong.
+// Characters of one reason on a memory database verb's failure line. Wider
+// than the two caps above because a drain or stand-down failure is a composed
+// sentence that names the queue file, says what the client was left holding
+// and quotes the server's or the transport's own diagnosis, and the diagnosis
+// is the part no reader can reconstruct. This client's own boilerplate alone
+// runs past 350 characters, so a cap near the others would print the
+// boilerplate and cut the words that say what went wrong.
 const DB_SYNC_REASON_CAP = 1200;
-const BACKUP_LIST_CAP = 240;    // characters of the backup names a failure line offers
-// Characters of a machine name. A Windows NetBIOS name stops at 15, but the
-// store syncs across machines that may record a longer or fully-qualified
-// one, and this value rides in a frontmatter line that has to stay bounded
-// like every other field the store writes.
+// Characters of a machine name. A Windows NetBIOS name stops at 15, but a
+// record may name a longer or fully-qualified one, and this value rides in a
+// frontmatter line that has to stay bounded like every other field the store
+// writes.
 const MACHINE_CAP = 40;
 const MAX_TAGS = 8;        // tags per entry, so a journal line stays bounded
 const BODY_CAP = 65536;    // characters of a memory body printed by `get`
@@ -391,26 +353,9 @@ const OPERATOR_DIR = 'memory-operator';   // the operator tier, one directory at
 // of a type-tier record's type name. It is a fixed word rather than a
 // directory name because the tier has no per-key segment to take one from.
 const OPERATOR_LABEL = 'operator';
-const DECAY_STAMP_FILE = 'decay-stamp';   // mtime records when a decay pass last completed
-// The two lock names, and what each one actually covers, because they do not
-// cover the same thing and a caller that takes only one of them excludes only
-// what that one holds.
-//
-// store.lock is the shared tiers' lock: every rewrite of a type-tier or
-// operator-tier file takes it in that tier's own directory, and those are all
-// of its holders but one. decay.lock is the project tier's, taken by the
-// decay pass over its project-tier work, and the pass takes no store.lock.
-// The callers of both are the project-tier record rewriters, `anchor` and
-// `triggers`: each takes decay.lock and then store.lock in the project memory
-// directory, because decay.lock is what excludes the pass and store.lock is
-// what excludes the other rewriter of the same record.
-//
-// So a project-tier writer arriving later cannot get its exclusion from
-// store.lock: the pass does not hold it. It takes decay.lock, and it takes it
-// first, which is the order both of them use and the only thing keeping two
-// lock-takers from inverting into a deadlock.
-const STORE_LOCK_FILE = 'store.lock';
-const DECAY_LOCK_FILE = 'decay.lock';
+// The decay stamp, one file under the snapshot directory whose mtime records
+// when a decay pass last completed on this machine.
+const DECAY_STAMP_FILE = 'decay-stamp';
 const DECLARERS_SHOWN = 10;   // declaring-project names listed before the remainder is counted
 const PINNED_SHOWN = 10;      // pinned memories listed by decay-scan before the remainder is counted
 const DRIFT_SHOWN = 10;       // drifted memories listed by decay-scan before the remainder is counted
@@ -436,16 +381,14 @@ const DRIFT_PATHS_SHOWN = 4;
 const SUPERSEDED_SHOWN = 4;
 const RECALL_MAX_LINES = 200;           // total lines `recall` emits before tier-ordered truncation
 const RECENT_MAX_LINES = 200;           // total lines `recent` emits before surface-ordered truncation
-const ARCHIVE_INDEX_READ_CAP = 65536;   // bytes of the archive index `recall` reads, a fixed-size prefix
 const GIT_POINTER_READ_CAP = 4096;      // bytes read from a .git pointer file, which git writes as one line
-// Bytes of a memory index read to answer the Project-Type declaration. The
-// declaration sits inside the first ten lines by its own grammar, so a head is
-// the whole of what the question needs, and this bound is what keeps an index
-// of any size off a path a hook crosses on every tool call. A declaration past
-// this prefix reads as no declaration at all, which is the ruling a mangled
-// value already gets, and 64 KB is far past ten index lines of a store that
-// caps a description at 120 characters.
-const PROJECT_TYPE_READ_CAP = 65536;
+// Bytes of the project-type declarations file read to answer which type a
+// project declares. The bound is what keeps a file of any size off a path a
+// hook crosses on every tool call: a file cut here no longer parses and reads
+// as declarations that cannot be established, which is named rather than
+// silently read as none. 256 KB holds some two thousand entries of a key and
+// a type name, far past the projects one machine declares.
+const PROJECT_TYPES_READ_CAP = 262144;
 const GIT_POINTER_PATH_CAP = 2048;      // characters of a path a .git pointer file may name
 const ANCHOR_PATH_CAP = 256;            // characters of the path an anchors: entry names
 const ANCHOR_ENTRIES_MAX = 32;          // anchors read from one record's line
@@ -554,7 +497,6 @@ const SUMMARIZE_AFTER_DAYS = 30;   // idle days before a memory is a summarize c
 const ARCHIVE_AFTER_DAYS = 60;     // idle days before it is an archive candidate
 const EXTEND_PER_APPLIED_DAY = 30; // idle days both decay thresholds gain per distinct applied day
 const EXTEND_CAP_DAYS = 365;       // the most an applied tally can ever defer decay
-const ROLLUP_AFTER_DAYS = 30;      // journal entry age before it is a rollup candidate
 
 // The semantic hits `find` displays, after its own filters.
 const SEMANTIC_SHOWN = 10;             // semantic hits displayed, after ranking and filtering
@@ -912,7 +854,6 @@ function readHead(file, cap) {
 const WORKTREE_ROOT_MEMO_CAP = 64;
 const worktreeMainRoots = new Map();
 let worktreeHandshakeNoted = false;
-let worktreeOrphanNoted = false;
 
 function worktreeMainRoot(cwd) {
     const key = String(cwd);
@@ -1032,8 +973,7 @@ function resolveWorktreeMainRoot(cwd) {
     return null;
 }
 
-// The accepted main checkout, in the spelling the store keys on, plus the one
-// note a successful resolution can owe the operator.
+// The accepted main checkout, in the spelling the store keys on.
 //
 // Project directory names preserve case while the handshake compares paths the
 // way the filesystem does, so a pointer spelling the main root 'd:/someproject'
@@ -1042,11 +982,6 @@ function resolveWorktreeMainRoot(cwd) {
 // on. Only win32 folds, since names are case-sensitive elsewhere and resolving
 // the real path there would silently follow symlinks, changing which store a
 // deliberately linked checkout uses.
-//
-// A store already standing at the worktree's own path-derived name is worth
-// one line, because it is now unread: nothing here moves or merges records
-// written before the resolution existed, and a directory that quietly stops
-// being consulted is the kind of loss that is noticed months later.
 function acceptedWorktreeMain(cwd, main) {
     let root = main;
     if (process.platform === 'win32') {
@@ -1055,19 +990,6 @@ function acceptedWorktreeMain(cwd, main) {
         } catch {
             // An unresolvable path keeps the lexical spelling: the handshake
             // already closed, so the resolution stands either way.
-        }
-    }
-    if (!worktreeOrphanNoted) {
-        try {
-            if (fs.statSync(projectMemoryDirFor(sanitizeProjectPath(cwd))).isDirectory()) {
-                worktreeOrphanNoted = true;
-                process.stderr.write('memq: this worktree reads and writes the main checkout\'s '
-                    + 'memories, and a memory directory left under the worktree\'s own '
-                    + 'path-derived store is no longer read; records written there stay until '
-                    + 'they are moved by hand\n');
-            }
-        } catch {
-            // No such directory is the ordinary case and the quiet one.
         }
     }
     return root;
@@ -1266,7 +1188,7 @@ function sessionTranscriptDir(sessionId) {
 // Whether the working directory being resolved is this process's own. The
 // session leg answers where THIS process is running, so a caller naming some
 // other project's path is asking about that path and gets the derivation from
-// it: decayStampPath and the cross-project surfaces resolve directories they
+// it: the cross-project surfaces resolve directories they
 // are handed rather than the one they stand in, and a leg that overrode those
 // would answer every question about every project with this session's own.
 // Nothing is lost at the surfaces the split runs through, since the CLI
@@ -1593,37 +1515,6 @@ function resolveSessionProjectFiling(cwd, named) {
     return null;
 }
 
-// The one line an honored session leg can owe the operator, printed once per
-// process. It mirrors acceptedWorktreeMain's note and for the same reason: the
-// leg redirects reads and writes off the directory the cwd derivation names,
-// and where records were already written there, that directory is now unread.
-// Nothing here moves or merges them. This is the common case rather than the
-// exotic one, since a store split by running from subdirectories is exactly
-// what the session leg exists to close, so those directories exist on every
-// box that had the split.
-let sessionOrphanNoted = false;
-function noteSessionOrphan(cwd, segment) {
-    if (sessionOrphanNoted) return;
-    let own;
-    try {
-        own = sanitizeProjectPath(cwd);
-    } catch {
-        return;
-    }
-    if (fsEq(own, segment)) return;
-    try {
-        if (!fs.statSync(projectMemoryDirFor(own)).isDirectory()) return;
-    } catch {
-        // No such directory is the ordinary case and the quiet one.
-        return;
-    }
-    sessionOrphanNoted = true;
-    process.stderr.write('memq: this session reads and writes the project store resolved from '
-        + 'the directory the harness filed it under, and a memory directory left under this '
-        + 'working directory\'s own path-derived store is no longer read; records written there '
-        + 'stay until they are moved by hand\n');
-}
-
 // The projects/ directory name this process reads and writes under: the pin
 // when one is honored, otherwise the main checkout's derivation when the
 // working directory is a worktree of one, otherwise the directory the harness
@@ -1671,7 +1562,6 @@ function projectSegment(cwd) {
     if (main !== null) return sanitizeProjectPath(main);
     const filed = sessionProjectFiling(cwd);
     if (filed === null) return sanitizeProjectPath(cwd);
-    noteSessionOrphan(cwd, filed.segment);
     return filed.segment;
 }
 
@@ -1937,24 +1827,6 @@ function projectMemoryDir(cwd) {
     return projectMemoryDirFor(projectSegment(cwd));
 }
 
-// Every project directory segment the store holds, sorted, or null when the
-// projects root cannot be enumerated. Null rather than an empty array because
-// the two are different facts: no projects is an answer, while an unreadable
-// root is the absence of one, and a caller that treats them alike reports a
-// store it never read as empty. Each caller says what it does with the null,
-// since the right answer differs by surface.
-//
-// A projects root that is not there is the first of those, not the second: a
-// store synced onto a machine before any project has written to it holds no
-// projects, and that is a fact this can state. Every other code is a root that
-// exists and could not be read.
-function projectSegments() {
-    try {
-        return fs.readdirSync(projectsRootPath()).sort();
-    } catch (err) {
-        return err && err.code === 'ENOENT' ? [] : null;
-    }
-}
 
 // Path and filename fragments compare the way the platform's filesystem
 // compares them, so one physical file cannot pass one caller's check and fail
@@ -1979,10 +1851,10 @@ function fsEq(a, b) {
 // store's table of contents rather than a fact in it.
 //
 // The charset and the cap are enforced here rather than at display, because
-// this name is what `touch` and the usage-stamp hook write into usage.jsonl
-// and what the decay pass later joins onto a path: a name that cannot leave
-// the memory directory, and a line that stays bounded, are properties of the
-// write, not of the printing.
+// this name is what every usage stamp carries and what `get` joins onto a
+// pending directory's path: a name that cannot leave the memory directory,
+// and a line that stays bounded, are properties of the write, not of the
+// printing.
 function isMemoryFilename(name) {
     if (typeof name !== 'string' || name.length <= 3 || name.length > MEMORY_FILE_CAP) return false;
     if (!/^[\w.-]+$/.test(name)) return false;
@@ -1995,33 +1867,20 @@ function isMemoryFilename(name) {
     return !fsEq(name, INDEX_FILE);
 }
 
-// The key a memory file is recorded under in usage.jsonl, normalized the way
-// the platform's filesystem compares names. A read spelled in one case and a
-// `touch` of the same file must land on one key, never two.
+// The key a memory file is recorded under in a usage stamp, normalized the
+// way the platform's filesystem compares names. A read spelled in one case
+// and a `touch` of the same file must land on one key, never two.
 function memoryFileKey(name) {
     return process.platform === 'win32' ? String(name).toLowerCase() : String(name);
 }
 
-// The memory tier directory a path sits directly in, or null when it sits in
-// none. The tiers are a project's memory dir
-// (<root>/projects/<project>/memory), a type dir
-// (<root>/memory-types/<type>), and the operator dir
-// (<root>/memory-operator), and each keeps its own sidecars. Each shape is
-// answered by its own segment count, so the operator tier, which is one
-// directory at the store root rather than a parent of per-key ones, is
-// resolved here rather than falling through: a tier this walk does not
-// recognize takes no read stamp, and the miss is silent.
-//
-// Nesting is deliberately not followed. A file below a tier dir (under
-// memory/archive/, say) has been retired from that tier, and a record written
-// beside it would land in a sidecar no reader of the tier ever opens: a write
-// that can never be read.
 // The tier shape a path relative to the store root matches: 'project'
 // (projects/<name>/memory), 'type' (memory-types/<type>), 'operator'
-// (memory-operator), or null for a relative path matching none of them.
-// tierDirFor and tierNameFor both decide the three shapes through this one
-// function, so whether a directory is a tier and which tier it is cannot
-// answer from two different spellings of the same three shapes.
+// (memory-operator), or null for a relative path matching none of them. The
+// shapes are how a tier directory is spelled to memory-database.js's
+// tierIdentity, which names a tier and its segment to the host; no tier file
+// is read under them. Nesting is deliberately not followed: a directory below
+// a tier dir (memory/pending/<run>/, say) names no tier.
 function tierShapeName(rel) {
     const parts = rel.split(/[\\/]/);
     if (parts[0] === '..') return null;
@@ -2031,22 +1890,11 @@ function tierShapeName(rel) {
     return null;
 }
 
-function tierDirFor(filePath) {
-    const dir = path.dirname(path.resolve(filePath));
-    // A relative path that is empty, absolute (another drive), or climbing out
-    // of the root means the file is not under the store at all.
-    const rel = path.relative(memoryRoot(), dir);
-    if (rel === '' || path.isAbsolute(rel)) return null;
-    return tierShapeName(rel) === null ? null : dir;
-}
-
 // Which of the three tiers a directory names, or null for one that names none
-// of them: tierDirFor answers only whether a file's directory is a tier
-// directory, so a caller naming the tier in a message calls this rather than
-// re-spelling the three shapes locally. `dir` is expected to be exactly the
-// value tierDirFor itself would return for a file inside it, so the two
-// answers walk the same relative path against the same root and cannot
-// disagree about where memq's own shapes moved to.
+// of them, so a caller naming the tier calls this rather than re-spelling the
+// three shapes locally. `dir` is a tier directory as projectMemoryDir spells
+// the project tier's, or as the old type and operator tiers were spelled
+// under the same root.
 function tierNameFor(dir) {
     if (typeof dir !== 'string' || dir === '') return null;
     const rel = path.relative(memoryRoot(), dir);
@@ -2054,10 +1902,58 @@ function tierNameFor(dir) {
     return tierShapeName(rel);
 }
 
-// Where a project's decay stamp sits. `decay-done` touches it and the
-// SessionStart hook reads its mtime, so the location lives here, once.
-function decayStampPath(cwd) {
-    return path.join(projectMemoryDir(cwd), DECAY_STAMP_FILE);
+// Where this machine's decay stamp sits: under the store root's snapshot
+// directory, which is the directory the snapshot's index.json lives in on a
+// machine running on its own store, and the redirected root's own under
+// KIT_MEMORY_ROOT. `decay-done` touches it and the SessionStart hook reads
+// its mtime, so the location lives here, once. It is one stamp per machine
+// rather than one per project, since the pass it records runs over the whole
+// store.
+function decayStampPath() {
+    return path.join(memoryRoot(), memoryDatabase.SNAPSHOT_DIR, DECAY_STAMP_FILE);
+}
+
+// Where this machine's project-type declarations sit, beside the decay stamp
+// under the store root: one JSON object, {"version": 1, "projects":
+// {"<projectKey>": "<type>"}}, written by `memq declare-type` and read by every consumer that
+// asks which type tier a project opted into (projectType). It is a file of
+// its own rather than a section of index.json because `db-refresh` rewrites
+// that file whole from the host, and the host carries no project-type column.
+// It is per machine, like the stamp, because the key a checkout resolves to
+// is the same on every machine that holds the checkout, so a declaration
+// made here is the one each machine makes for itself.
+const PROJECT_TYPES_FILE = 'project-types.json';
+const PROJECT_TYPES_VERSION = 1;
+function projectTypesPath() {
+    return path.join(memoryRoot(), memoryDatabase.SNAPSHOT_DIR, PROJECT_TYPES_FILE);
+}
+
+// The declarations file as {projects, fault}: `projects` is its map of
+// project key to type name, an empty one where there is no file, and null
+// where the file is present but could not be read as declarations, with
+// `fault` saying why in a clause that follows the file's name. The map is the
+// file's own, values unvalidated, so a writer carrying it back keeps every
+// entry whether or not this memq would read it; each reader validates the
+// value it takes with isTypeName. A bounded, kind-checked head rather than a
+// whole-file read, because this answer sits on paths that run per tool call:
+// readHead settles the kind on the open descriptor and opens non-blocking off
+// win32, so a FIFO planted at this path answers instead of parking the caller.
+function readProjectTypes() {
+    let raw;
+    try {
+        raw = readHead(projectTypesPath(), PROJECT_TYPES_READ_CAP);
+    } catch (err) {
+        if (err && err.code === 'ENOENT') return { projects: Object.create(null), fault: null };
+        return { projects: null, fault: 'could not be read (' + failureText(err) + ')' };
+    }
+    if (raw === null) return { projects: null, fault: 'is not a regular file' };
+    let parsed = null;
+    try { parsed = JSON.parse(raw.replace(/^\uFEFF/, '')); } catch { parsed = null; }
+    if (parsed === null || typeof parsed !== 'object' || parsed.version !== PROJECT_TYPES_VERSION
+        || parsed.projects === null || typeof parsed.projects !== 'object' || Array.isArray(parsed.projects)) {
+        return { projects: null, fault: 'is not a version-' + PROJECT_TYPES_VERSION + ' declarations file' };
+    }
+    return { projects: parsed.projects, fault: null };
 }
 
 // The Windows device names, which the OS resolves as devices rather than as
@@ -2082,8 +1978,8 @@ function isReservedDeviceSegment(seg) {
 
 // The store's definition of a name usable as one path segment inside it: an
 // identifier from the same closed charset as keys, tags, and type names,
-// bounded, and safe as a directory name on every platform the store syncs
-// across. Two segments come from the environment and answer to it, a run id
+// bounded, and safe as a directory name on every platform the kit runs
+// on. Two segments come from the environment and answer to it, a run id
 // (memory/pending/<run-id>/) and a pinned project (projects/<project>/), and
 // both are joined onto a path, so a value carrying a separator, or anything
 // outside the token charset, could place writes outside the directory chosen
@@ -2170,13 +2066,11 @@ function runIdOrNull() {
 // 'run1' name one directory, so both resolve to one path here rather than
 // reading as two isolated runs that in fact share their contents.
 //
-// tierDirFor deliberately does not resolve this directory: it is nested one
-// level deeper than a tier, like archive/. The sidecar beside a pending
-// memory is read (`recall` reports this tier's applied tally from it), so
-// `get` and `touch` write their stamps there; what has no consumer yet is a
-// pending `read` stamp in particular, since read stamps feed only the decay
-// clock and this tier is exempt from decay. Every writer here carries its
-// destination instead of deriving one from a hit path.
+// This directory is nested one level deeper than a tier, like archive/. The
+// sidecar beside a pending memory is where `get` writes its read stamp of a
+// pending record; nothing reads it back, since read stamps feed only the
+// decay clock and this tier is exempt from decay. Every writer here carries
+// its destination instead of deriving one from a hit path.
 function pendingDirFor(cwd) {
     const id = runIdOrNull();
     return id === null ? null : path.join(projectMemoryDir(cwd), PENDING_DIR, memoryFileKey(id));
@@ -2212,13 +2106,11 @@ function provenanceLines() {
 
 // The store's definition of a valid project-type name: an identifier from the
 // same closed charset as keys and tags, bounded, never a path token, and
-// never '.md'-suffixed. It is enforced at every write boundary because a type
-// name is joined onto a path (memory-types/<type>/), so a name that could
-// leave that directory must be refused before anything is created under it.
-// The '.md' refusal is both a category gate (a type is a directory; a .md
-// name is a file name) and a reservation: tag-registry.md lives beside the
-// type dirs, and a type of that name would mint a directory at the registry
-// path, silently disabling the tag warning store-wide.
+// never '.md'-suffixed. It is enforced at every door that takes one, before
+// the value is matched against the host's type rows or written as a
+// declaration, so a value that is not a name is refused in the door's own
+// words rather than silently matching nothing. The '.md' refusal is a
+// category gate: a type names a tier, and a .md name is a file name.
 //
 // Two further names are reserved for the operator tier, on the same
 // reservation reasoning. A type is printed as the name column's tier prefix
@@ -2229,8 +2121,9 @@ function provenanceLines() {
 // an operator reads to decide which retirement flag to run, so a name lifted
 // from it and passed to --archive-type rather than --archive-operator could
 // retire the wrong tier's record where the name exists in both.
-// 'memory-operator' is reserved with it because it names the tier's own
-// directory, and one word meaning two places is how that ambiguity starts.
+// 'memory-operator' is reserved with it because it named the tier's own
+// directory in the old file store, and one word meaning two places is how
+// that ambiguity starts.
 function isTypeName(t) {
     if (typeof t !== 'string' || t === '' || t.length > TYPE_CAP) return false;
     if (!/^[\w.-]+$/.test(t)) return false;
@@ -2239,177 +2132,39 @@ function isTypeName(t) {
     return !fsEq(t.slice(-3), '.md');
 }
 
-// The parent of every type tier under the current store root, and the home of
-// the tag registry beside them.
-function typesRootPath() {
-    return path.join(memoryRoot(), 'memory-types');
-}
 
-// Where a project type's tier lives. The caller validates the type name with
-// isTypeName before joining; projectType below returns only validated names.
-function typeDir(type) {
-    return path.join(typesRootPath(), type);
-}
-
-// The type tier's MEMORY.md index. The SessionStart hook reads this path to
-// emit the index into session context, so the location lives here, once.
-function typeIndexPath(type) {
-    return path.join(typeDir(type), INDEX_FILE);
-}
-
-// The type a memory MEMORY.md's content declares: a "Project-Type: <type>"
-// line within the first 10 lines ("at the top" is a bounded head, not line
-// one, so the declaration can follow the index's own heading). The first
-// such line wins, and a value that fails isTypeName reads as no declaration
-// at all, so a hand-mangled line can never route a caller to a path-token
-// type dir. Shared by projectType (this project's declaration) and the
-// declaring-projects scan in decay-prune (every project's), so the
-// declaration's grammar has one definition and the two cannot drift.
-function declaredType(raw) {
-    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-    const lines = raw.split(/\r?\n/);
-    for (let i = 0; i < lines.length && i < 10; i++) {
-        const m = /^Project-Type:\s*(.*)$/i.exec(lines[i].trim());
-        if (m) {
-            const t = m[1].trim();
-            return isTypeName(t) ? t : null;
-        }
-    }
-    return null;
-}
-
-// The project type a project's memory MEMORY.md declares. Absent file,
-// absent line, or an invalid value are all null: this project has not opted
-// in.
+// The project type a project declares, read from this machine's declarations
+// file under the project's key, or null: no file, no entry for the key, an
+// entry whose value is not a type name, and a file that cannot be read as
+// declarations all read as "this project has not opted in". The last is
+// named once per process on stderr, since silently reading a damaged file as
+// no declaration would hide a type tier from every reader at once.
+let projectTypesFaultNoted = false;
 function projectType(cwd) {
-    // The directory is resolved outside the catch on purpose: only a
-    // filesystem answer about the index may read as "no declaration". A pin
-    // this process cannot honor is a refusal to resolve a store at all, and
-    // swallowing that refusal here would answer from a store the caller was
-    // never pointed at.
-    const indexPath = path.join(projectMemoryDir(cwd), INDEX_FILE);
-    // A bounded, kind-checked head rather than a whole-file read, because this
-    // answer sits on paths that run per tool call: the recognition nudge asks
-    // it through typedTierOrNull at each of its four boundaries, and the
-    // session hook asks it too. readHead settles the kind on the open
-    // descriptor and opens non-blocking off win32, so a FIFO planted at the
-    // index's path answers instead of parking the caller for as long as the
-    // process lives, and an index of any size costs this prefix rather than
-    // its own length. It is the same reader every other head-shaped store read
-    // takes, reused rather than matched by hand.
-    let raw;
-    try {
-        raw = readHead(indexPath, PROJECT_TYPE_READ_CAP);
-    } catch {
+    // The key is resolved outside the read on purpose: only the file's own
+    // state may read as "no declaration". A pin this process cannot honor is
+    // a refusal to resolve a store at all, and swallowing that refusal here
+    // would answer for a project the caller was never pointed at.
+    const key = projectKey(cwd);
+    const read = readProjectTypes();
+    if (read.projects === null) {
+        if (!projectTypesFaultNoted) {
+            projectTypesFaultNoted = true;
+            process.stderr.write('memq: ' + shownPath(projectTypesPath()) + ' ' + read.fault
+                + ', so no project reads as declaring a type\n');
+        }
         return null;
     }
-    return raw === null ? null : declaredType(raw);
+    if (!Object.prototype.hasOwnProperty.call(read.projects, key)) return null;
+    const type = read.projects[key];
+    return isTypeName(type) ? type : null;
 }
 
-// The type tier this project has opted into, as {type, dir}, or null when the
-// project declares no type or the tier does not exist on disk yet.
-//
-// What it answers is the bare `--type` spelling's question and only that one:
-// which tier is this project's own. Every consumer that asks that question
-// (`find`, the bare `--type` of `get`, `touch` and `triggers`, the decay pass)
-// resolves through this, so it has one answer. The spelling that names a tier
-// outright asks a different question and resolves through namedTypeDirOrNote
-// below, which reads no project declaration at all, so three of those verbs
-// carry both routes and which one a call takes is decided at its own door.
-function typedTierOrNull(cwd) {
-    const type = projectType(cwd);
-    if (type === null) return null;
-    const dir = typeDir(type);
-    let st = null;
-    try { st = fs.statSync(dir); } catch { return null; }
-    return st.isDirectory() ? { type, dir } : null;
-}
-
-// The type tier a caller named outright, as its directory, or null having
-// written the refusal that says why there is none. The counterpart of
-// typedTierOrNull for the `--type=<type>` spelling: that one asks the project
-// which tier is its own, this one takes the tier from the command line, so
-// nothing here reads a working directory or a project index at all. Every verb
-// that admits the spelling resolves through this, so an absent type, a
-// mis-cased one and an unlistable tier root read the same words whichever verb
-// was asked.
-//
-// The name is asked here rather than only at the caller's door: every caller
-// asks isTypeName first and keeps doing so, since a door refusing in its own
-// words is what a caller reads, but this is the one place a caller's string
-// becomes a path, so the guard belongs to the crossing rather than to the
-// verb that first needed it. The words are the doors' own (TYPE_NAME_RULE), so
-// a caller meets one rule whichever layer answered.
-//
-// The spelling is confirmed against the store's own listing rather than
-// against the stat alone, because a stat answers case-insensitively on NTFS:
-// `--type=WebApp` finds the `webapp` directory, writes into it, and then names
-// `WebApp` in everything it reports, which is a type that exists nowhere on
-// the case-sensitive peer this store syncs to. The refusal names both
-// spellings, the one asked for and the one the store holds, so the re-run is
-// the caller's own words with the store's casing. A listing that cannot be
-// read decides nothing, so it refuses rather than proceeding on the stat: the
-// question this answers is which directory the store holds, and a run that
-// could not look is not a run that found one.
-//
-// That refusal answers first, ahead of every absence this derives from the
-// stat, and the distinction it rests on is storeTypeSpelling's own: a root
-// that is simply not there is an absence and a root that could not be read is
-// not an answer at all. One permission error on the tier root fails the
-// listing and the type directory's stat together, so an unlistable root read
-// second would fall through to the absence branch and tell a caller the store
-// holds no such type when it may well hold it, which is the conflation this
-// pair of messages exists to keep apart.
-function namedTypeDirOrNote(namedType) {
-    const shown = sanitize(namedType, TYPE_CAP);
-    if (!isTypeName(namedType)) {
-        process.stderr.write('memq: ' + TYPE_NAME_RULE + ' (nothing was done)\n');
-        return null;
-    }
-    const spelling = storeTypeSpelling(namedType);
-    if (!spelling.listed && !spelling.rootAbsent) {
-        typeListingNote(shown, 'nothing was done');
-        return null;
-    }
-    const dir = typeDir(namedType);
-    let st = null;
-    try { st = fs.statSync(dir); } catch { st = null; }
-    const actual = spelling.actual;
-    if (st === null || !st.isDirectory() || actual === undefined) {
-        process.stderr.write('memq: no type \'' + shown + '\' in this store, so --type='
-            + shown + ' has no target\n');
-        return null;
-    }
-    if (actual !== namedType) {
-        typeCaseNote(actual, '--type=' + shown, 'nothing was done');
-        return null;
-    }
-    return dir;
-}
-
-// The store's own spelling of a type, as {listed, rootAbsent, actual}: whether
-// the type-tier root could be listed at all, whether it is simply not there
-// yet, and the entry the listing holds for this name, undefined where it holds
-// none. The doors that join a caller's type onto a path share it, so the
-// question "does this store hold this type, spelled this way" has one answer
-// whether the door is about to read a tier or mint one.
-//
-// A root that is not there is held apart from one that could not be read,
-// because the two mean opposite things to a create: the first is the state a
-// store's very first type tier is created in, and the second is a store this
-// process cannot see the shape of.
-function storeTypeSpelling(namedType) {
-    let entries = null;
-    let code = null;
-    try {
-        entries = fs.readdirSync(typesRootPath());
-    } catch (err) {
-        code = err && err.code ? err.code : String(err);
-    }
-    if (entries === null) {
-        return { listed: false, rootAbsent: code === 'ENOENT', actual: undefined };
-    }
-    return { listed: true, rootAbsent: false, actual: entries.find((e) => fsEq(e, namedType)) };
+// The refusal every bare `--type` door answers a project that declares no
+// type with, in one wording, naming both ways out of it.
+function noDeclaredTypeText(flag) {
+    return 'memq: this project declares no Project-Type, so ' + flag + ' has no target'
+        + ' (--type=<type> names one outright; memq declare-type <type> declares one)\n';
 }
 
 // The refusal `get` and `touch` answer a named type tier with under the
@@ -2432,56 +2187,10 @@ function namedTypeRefusedBySignals(reach) {
         + reach + '. Bare --type still answers from the project\'s own declared type';
 }
 
-// The refusal for a spelling the store holds in another case, in one wording
-// for every door: the reader that resolves a named tier and the create that
-// would otherwise mint a second spelling of one. `given` is how the caller
-// named the type, since a flag and a positional are read back differently, and
-// `nothing` is that door's own words for what it did not do.
-function typeCaseNote(actual, given, nothing) {
-    process.stderr.write('memq: this store spells that type \'' + sanitize(actual, TYPE_CAP)
-        + '\', and ' + given + ' differs from it in case; a case-insensitive filesystem answers'
-        + ' for either spelling and a case-sensitive one that shares this store answers for'
-        + ' neither, so name the type the way the store holds it (' + nothing + ')\n');
-}
-
-// The refusal for a type-tier root that could not be listed, the counterpart
-// of the case note above: the store may or may not hold this type under some
-// spelling, and a run that could not look is not a run that found out.
-function typeListingNote(shown, nothing) {
-    process.stderr.write('memq: the type tiers could not be listed, so whether this store'
-        + ' spells the type \'' + shown + '\' that way is unknown and ' + nothing + '\n');
-}
-
-// Where the operator tier lives. It takes no argument because there is one
-// operator: the tier is a single directory at the store root rather than a
-// parent of per-key ones, so no name is joined onto this path and no gate is
-// needed over one.
-function operatorDirPath() {
-    return path.join(memoryRoot(), OPERATOR_DIR);
-}
-
-// The operator tier's MEMORY.md index, the counterpart of typeIndexPath.
-function operatorIndexPath() {
-    return path.join(operatorDirPath(), INDEX_FILE);
-}
-
-// The operator tier as a directory path, or null when the store does not have
-// one yet. typedTierOrNull's counterpart with the declaration branch removed:
-// a project opts into a type, while the operator tier belongs to every
-// project unconditionally, so presence on disk is the whole question. Every
-// consumer that spans tiers resolves through this, so "is there an operator
-// tier" has one answer.
-function operatorTierOrNull() {
-    const dir = operatorDirPath();
-    let st = null;
-    try { st = fs.statSync(dir); } catch { return null; }
-    return st.isDirectory() ? dir : null;
-}
-
-// The controlled tag vocabulary lives beside the type tier, one file for the
-// whole store.
+// The controlled tag vocabulary: one hand-edited file at the store root for
+// the whole store.
 function tagRegistryPath() {
-    return path.join(typesRootPath(), 'tag-registry.md');
+    return path.join(memoryRoot(), 'memory-tag-registry.md');
 }
 
 // Tag registry reader: one tag per line, an optional one-phrase gloss after
@@ -2562,7 +2271,8 @@ function breakablePayload(lockPath) {
     }
 }
 
-// Lockfile for shared writes. Acquire creates the lock file exclusively
+// Lockfile for a shared file write, the Jev shown file jev-judge.js keeps
+// beside a project's .kit state. Acquire creates the lock file exclusively
 // ('wx' fails on an existing file), with a unique token in its JSON payload;
 // a holder that died leaves its lock behind, so a lock older than staleMs is
 // broken and taken. The break is atomic: the stale file is renamed aside
@@ -2652,206 +2362,6 @@ function acquireLock(lockPath, options) {
     }
 }
 
-// Whether a parsed journal line has a shape this module writes: a plain
-// outcome from `log`, or a rollup entry from `decay-prune` carrying explicit
-// pass/fail counts so the tally it replaced survives in every later `find`.
-// Anything else on a line is malformed data to skip, not a reason to stop
-// reading. The key is re-gated on the same charset and cap `log` enforces at
-// write, so a hand-written line cannot render a report column it did not earn.
-function isEntry(v) {
-    if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-    if (typeof v.ts !== 'string') return false;
-    if (typeof v.key !== 'string' || v.key === '' || v.key.length > NAME_CAP
-        || !/^[\w.-]+$/.test(v.key)) return false;
-    if (typeof v.summary !== 'string') return false;
-    if (v.tags !== undefined && !(Array.isArray(v.tags) && v.tags.every((t) => typeof t === 'string'))) return false;
-    if (v.detail !== undefined && typeof v.detail !== 'string') return false;
-    // The four fields a judged pointer's row carries, each optional and typed
-    // as that row writes it.
-    if (v.recognitionId !== undefined && typeof v.recognitionId !== 'string') return false;
-    if (v.score !== undefined && typeof v.score !== 'number') return false;
-    if (v.rank !== undefined && !Number.isSafeInteger(v.rank)) return false;
-    if (v.shown !== undefined && typeof v.shown !== 'boolean') return false;
-    if (v.outcome === 'pass' || v.outcome === 'fail') return true;
-    if (v.outcome === 'rollup') {
-        return Number.isSafeInteger(v.pass) && v.pass >= 0
-            && Number.isSafeInteger(v.fail) && v.fail >= 0
-            && (v.first === undefined || typeof v.first === 'string')
-            && (v.last === undefined || typeof v.last === 'string');
-    }
-    return false;
-}
-
-// Read and parse the journal, in file order. An absent journal is an empty
-// list. A line that is not valid JSON, or parses to something without the
-// entry shape, is skipped with a one-line stderr note and reading continues:
-// the file is never rewritten or truncated, so one bad line cannot poison the
-// lines after it.
-function readJournal(memDir) {
-    let raw;
-    try {
-        raw = fs.readFileSync(path.join(memDir, JOURNAL_FILE), 'utf8');
-    } catch (err) {
-        // Only absence reads as an empty journal. Any other failure (locked,
-        // unreadable) is noted, so it cannot masquerade as "no matches".
-        if (!err || err.code !== 'ENOENT') {
-            process.stderr.write('memq: could not read journal: '
-                + failureText(err) + '\n');
-        }
-        return [];
-    }
-    const entries = [];
-    const lines = raw.replace(/^\uFEFF/, '').split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line === '') continue;
-        let parsed = null;
-        try { parsed = JSON.parse(line); } catch { /* reported just below */ }
-        if (!isEntry(parsed)) {
-            process.stderr.write('memq: skipping malformed journal line ' + (i + 1) + '\n');
-            continue;
-        }
-        entries.push(parsed);
-    }
-    return entries;
-}
-
-// The calendar day a usage timestamp falls on, as a UTC day number (epoch
-// milliseconds over the day length, floored). UTC deliberately: every
-// timestamp in the store is written as an ISO UTC string and the store syncs
-// between machines, so a local-time day would let one stamp change days with
-// the timezone reading it. This is the one day derivation for applied
-// evidence: the fold that writes a rollup and the tally that counts one both
-// answer to it through appliedTally, so a stamp near midnight cannot change
-// category between a prune and a scan.
-function usageDay(ms) {
-    return Math.floor(ms / DAY_MS);
-}
-
-// Whether a parsed usage line has a shape this module writes: a raw stamp
-// from `touch`, `get`, or the stamp hook, or the applied-rollup record
-// decay-prune's fold leaves in place of a file's raw applied history.
-// Anything else on a line is malformed data to skip, not a reason to stop
-// reading. Every timestamp must actually parse as a date, because the decay
-// clock compares parsed times: a shape-valid stamp with garbage in ts could
-// otherwise win the newest-stamp pick and silently displace the genuine one.
-// A rollup's boundaries must also be ordered, and its day count can never
-// exceed the calendar days its own range spans: a hand-forged count outside
-// that invariant would inflate the applied tally past any evidence the
-// record could hold. The filename answers to the store's own predicate, the
-// same gate every writer of this sidecar already passed.
-function isUsageStamp(v) {
-    if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-    if (typeof v.ts !== 'string' || !Number.isFinite(Date.parse(v.ts))) return false;
-    if (!isMemoryFilename(v.file)) return false;
-    if (v.kind === 'read' || v.kind === 'applied') return true;
-    if (v.kind === 'applied-rollup') {
-        if (typeof v.firstApplied !== 'string' || typeof v.lastApplied !== 'string') return false;
-        const firstMs = Date.parse(v.firstApplied);
-        const lastMs = Date.parse(v.lastApplied);
-        if (!Number.isFinite(firstMs) || !Number.isFinite(lastMs) || lastMs < firstMs) return false;
-        return Number.isSafeInteger(v.distinctDays) && v.distinctDays >= 1
-            && v.distinctDays <= usageDay(lastMs) - usageDay(firstMs) + 1;
-    }
-    return false;
-}
-
-// The distinct-day applied tally per memory file, over the usage stamps
-// usageStep reads from a frozen sidecar: each applied-rollup record
-// contributes the days it already counted, and each raw applied stamp
-// contributes its calendar day when that
-// day falls outside every rollup's covered range. A raw stamp on a covered
-// day adds nothing to the count but still moves the boundaries, so a
-// same-day re-application advances lastMs (the decay clock) without
-// double-counting the day.
-//
-// Rollups merge as day intervals, because a rollup carries its boundary
-// days, never the day set it counted. Counts sum across disjoint intervals
-// (no shared day exists to double-count) and an overlapping run of
-// intervals takes the max of its members' counts, since any member's days
-// may all lie inside another's: a synced store carries both machines'
-// rollups for one file, and both machines folded largely the same history,
-// so overlap is the common shape and summing it would forge days. Both
-// rules undercount before they overcount, the same conservatism as the
-// covered-range rule for raw days: the tally is evidence a memory earns,
-// and claiming a day that may never have happened is worse than missing
-// one. The final clamp restates isUsageStamp's own invariant (a count never
-// exceeds the calendar days its range spans); the merge arithmetic already
-// satisfies it (each cluster's max is within its own span, clusters are
-// disjoint, and new raw days lie outside them, all inside the merged
-// range), so the clamp is the enforced guarantee that the record the fold
-// writes from this tally is admissible by construction and a prune can
-// never poison the sidecar with a line its own reader refuses.
-//
-// Read stamps never enter the tally. Returns a Map keyed by
-// memoryFileKey(file), the same derivation every consumer looks up with, so
-// a stamp synced from a machine that spelled the name in a different case
-// still lands in the group the lookup reaches; keyed raw, such a stamp
-// would silently read as never-applied and age the memory faster. The
-// normalization is the reading platform's comparison rule, not a symmetric
-// canonical form: a POSIX reader keeps distinct spellings distinct, because
-// there they are distinct files. The map's values are
-// { distinctDays, firstMs, lastMs }. This is the one reader of applied
-// evidence, exported as the tally's single contract: the decay scan's clock
-// and decay-prune's fold both take their numbers from here, so a prune
-// rewrites the sidecar into exactly the record this function already
-// reported and can never change what it reads.
-function appliedTally(stamps) {
-    const groups = new Map();
-    for (const u of stamps) {
-        if (u.kind !== 'applied' && u.kind !== 'applied-rollup') continue;
-        const fileKey = memoryFileKey(u.file);
-        let g = groups.get(fileKey);
-        if (!g) {
-            g = { rollups: [], rawMs: [] };
-            groups.set(fileKey, g);
-        }
-        if (u.kind === 'applied-rollup') {
-            g.rollups.push({
-                count: u.distinctDays,
-                firstMs: Date.parse(u.firstApplied),
-                lastMs: Date.parse(u.lastApplied)
-            });
-        } else {
-            g.rawMs.push(Date.parse(u.ts));
-        }
-    }
-    const tally = new Map();
-    for (const [file, g] of groups) {
-        let firstMs = Infinity;
-        let lastMs = -Infinity;
-        const intervals = [];
-        for (const r of g.rollups) {
-            if (r.firstMs < firstMs) firstMs = r.firstMs;
-            if (r.lastMs > lastMs) lastMs = r.lastMs;
-            intervals.push({ first: usageDay(r.firstMs), last: usageDay(r.lastMs), count: r.count });
-        }
-        intervals.sort((a, b) => a.first - b.first || a.last - b.last);
-        const clusters = [];
-        for (const iv of intervals) {
-            const top = clusters[clusters.length - 1];
-            if (top !== undefined && iv.first <= top.last) {
-                if (iv.last > top.last) top.last = iv.last;
-                if (iv.count > top.count) top.count = iv.count;
-            } else {
-                clusters.push({ first: iv.first, last: iv.last, count: iv.count });
-            }
-        }
-        let count = 0;
-        for (const c of clusters) count += c.count;
-        const newDays = new Set();
-        for (const ms of g.rawMs) {
-            const day = usageDay(ms);
-            if (!clusters.some((c) => day >= c.first && day <= c.last)) newDays.add(day);
-            if (ms < firstMs) firstMs = ms;
-            if (ms > lastMs) lastMs = ms;
-        }
-        const span = usageDay(lastMs) - usageDay(firstMs) + 1;
-        tally.set(file, { distinctDays: Math.min(count + newDays.size, span), firstMs, lastMs });
-    }
-    return tally;
-}
-
 // The one character this CLI bars beyond printable ASCII is BARRED_QUOTE, bound
 // above from kit-compact-lib, where the channel renderer that removes it on the
 // way to a terminal lives. The rule below removes it on the way to disk, and the
@@ -2887,7 +2397,7 @@ const CHANNEL_IS_OURS = require.main === module;
 
 // Reduce a value to short printable ASCII, with the double quote barred and,
 // on this CLI's own channel, the home directory elided, before it enters
-// stdout. Journal and index content is data entering the session's context
+// stdout. Store content is data entering the session's context
 // through this output, so it is normalized at the boundary, matching the
 // sibling hooks' sanitize-before-trust rule for repo-controlled strings.
 //
@@ -3470,120 +2980,6 @@ function frontmatterUnclosed(block) {
     return block.opened && block.closer === -1;
 }
 
-// Which of the two shapes a block that never closed has, because they need
-// opposite repairs and one of the two repairs destroys a record it is given
-// to the wrong one. 'past-bound' is a closing fence standing later in the
-// text than the reader looks; 'no-closer' is no closing fence anywhere in
-// the text at all; null is a block that is not this class, which is a block
-// that closed inside the bound and a record that opens no block alike, since
-// neither has anything to repair.
-//
-// The bound is where `frontmatterBlock` stopped: it examines indices 1
-// through FRONTMATTER_MAX_LINES, so a fence at any later index is one it
-// never looked at. The answer is about the text handed in and nothing else,
-// so a caller holding part of a record gets an answer about that part: the
-// file-reading wrapper below hands in the whole record for that reason,
-// because the state it explains was decided from the whole record too.
-//
-// A record whose whole text is `---` is 'no-closer' and not a third thing:
-// it opens a block and closes none, which is what the class says.
-function frontmatterUnclosedShape(block) {
-    if (!frontmatterUnclosed(block)) return null;
-    for (let i = FRONTMATTER_MAX_LINES + 1; i < block.lines.length; i++) {
-        if (block.lines[i].trim() === '---') return 'past-bound';
-    }
-    return 'no-closer';
-}
-
-// The repair to name for a record whose frontmatter block did not close.
-// Every door that names this repair calls this function or the file-reading
-// wrapper below it, so a grep for the two names finds all of them; each says
-// it about a record it is refusing, declining to classify, or refusing to
-// write into.
-//
-// The shape decides the instruction, and telling the shapes apart is the
-// whole point. A block whose fence sits past the bound is closed already,
-// just not where a reader looks, so telling its author to add a fence is
-// destructive advice: the new fence closes the block early, every line below
-// it becomes body, and a pinned: among those lines then reads as no pin at
-// all. A block with no fence anywhere needs one added inside the bound. Both
-// instructions carry the same preservation clause, because both of them are
-// satisfiable by deleting the record's own fields: a fence inserted above a
-// field drops that field into the body, and a block shortened from the tail
-// takes the fields at its end with it, which for a past-bound record is
-// where its fields are.
-//
-// The tier decides the rest. The frontmatter guard refuses Write, Edit and
-// MultiEdit on the type and operator tiers for every writer, and those tiers
-// have no hand-edit path at all, their one writer being the memory database
-// put. So the shared-tier repair names the one authoring route there is, the
-// tier's own --update with a body, and names what it costs: that put replaces
-// the record's body, and an unread block lives in the body, so the block and
-// every field in it go, and the database writes the record in place and
-// keeps no earlier version. Under the engine store signals that route is
-// refused for that same reason, so there the line names the state rather
-// than a command, the frontmatter guard's own fork for the identical advice.
-function frontmatterUnclosedRepair(block, sharedTier) {
-    const shape = block === null ? null : frontmatterUnclosedShape(block);
-    const fix = shape === 'past-bound'
-        ? 'shorten the block so its closing --- sits inside the first '
-            + FRONTMATTER_MAX_LINES + ' lines'
-        : shape === 'no-closer'
-            ? 'close the block with a --- line inside the first ' + FRONTMATTER_MAX_LINES
-                + ' lines'
-            // Both shapes at once, for a caller that could not tell them
-            // apart. It is one statement rather than a merge of two: the
-            // property both repairs establish is that the block closes where
-            // a reader looks, and a caller here has no reading that says
-            // which way it does not.
-            : 'make its frontmatter block close inside the first ' + FRONTMATTER_MAX_LINES
-                + ' lines';
-    return fix + ', keeping every field the record is to carry above that line' + (sharedTier
-        ? '. A record on a shared tier is not writable through the Write, Edit or MultiEdit'
-            + ' tools and has no hand-edit path, so ' + (storeSignalsPresent()
-            // The body route is refused outright under the engine store
-            // signals, so naming it there sends a fleet worker to a command
-            // whose whole answer is a refusal. What is named instead is the
-            // state, which is a thing to act on: the block stays unread until
-            // a session without those signals repairs the record.
-            ? 'there is no repair route from this process: it carries the engine store signals,'
-                + ' and memq refuses a shared-tier body repair under them, because the memory'
-                + ' database writes the record in place and keeps no earlier version. The block'
-                + ' goes unread until a session without those signals rewrites the record'
-            : 'the repair route is memq add-type <type>'
-                + ' <name> "<description>" --update --body "<text>" --confirm-shared, or'
-                + ' add-operator without the type: that replaces the record\'s body and drops the'
-                + ' unread block with every field in it, and the memory database writes the record'
-                + ' in place and keeps no earlier version')
-        : '');
-}
-
-// The same answer for a record on disk, for the doors that hold a path and a
-// pin state rather than the record's text.
-//
-// The whole record is read, uncapped, because that is the read the state
-// being explained was decided by: `pinState` goes through `frontmatterField`,
-// which reads the file whole, so a record whose fence stands past a capped
-// head would be called unclosed by the caller and 'no-closer' by this
-// function, which is the one pairing that prints the fence-adding advice to
-// the record it damages. The two reads are the same read instead.
-//
-// Where this read cannot say which shape the record has, it names what both
-// repairs establish. Two inputs reach that: a file it could not read back,
-// and a record that closes its block now, which is a record something
-// rewrote between the caller's reading and this one. Both are one statement,
-// that this look cannot tell the shapes apart, rather than two collapsed.
-function readFrontmatterUnclosedRepair(file, sharedTier) {
-    let raw = null;
-    try {
-        raw = fs.readFileSync(file, 'utf8');
-    } catch {
-        raw = null;
-    }
-    return frontmatterUnclosedRepair(typeof raw === 'string' ? frontmatterBlock(raw) : null,
-        sharedTier);
-}
-
 // A record's text past its frontmatter block: the record's prose, opening at the
 // first line after the closing fence, with that text's own line endings. A
 // record with no block, or one whose block never closes inside the reader's
@@ -3700,9 +3096,8 @@ const DESCRIPTION_BLOCK_SCALAR = /^[|>][+-]?$/;
 // a value promoted out of the harness's metadata: map already takes, because
 // a top-level `description:` can be serializer output too: some
 // harness-written records carry one beside their metadata: map, and memq put
-// writes one under descriptionScalar's quoting. `listMemories` in this file and `collectRecords` in
-// `memory-database.js` both call this rather than each walking the
-// frontmatter on its own, so the two share the one parse rule read here.
+// writes one under descriptionScalar's quoting. `listMemories` calls this
+// rather than walking the frontmatter on its own.
 function frontmatterDescription(raw) {
     const value = frontmatterValue(raw, 'description');
     if (typeof value !== 'string') return '';
@@ -3888,10 +3283,9 @@ function frontmatterField(file, name) {
 // A `machine:` field's value as the identifier its writer's own gate admits,
 // or null for every other answer, the sentinels a field reader gives among
 // them. `add-operator --machine` is the writer, and this is the shape it
-// accepted, asked again here because frontmatter is hand-editable and the
-// store syncs: a value that writer would have refused reaches a reader only by
-// a hand edit or another machine's file, and what such a value could carry is
-// text on a line a session reads. Every reader that puts this field in front
+// accepted, asked again here because a reader meets the value in a database
+// row another machine may have written, never at the door that checked it, and
+// what such a value could carry is text on a line a session reads. Every reader that puts this field in front
 // of a session goes through this gate rather than through a sanitize of its
 // own, so the CLI's label and the hook's cannot come to disagree about what
 // counts as a machine name. The writer is not one of them and states the shape
@@ -3931,8 +3325,9 @@ function authorValue() {
 
 // Whether a value is inside the `author:` grammar: the record-name charset
 // and the record-name cap, which admits both spellings authorValue writes.
-// The frontmatter guard asks this of a project-tier record at the write door,
-// so the writer's grammar and the guard's are one definition.
+// put asks this of its --author at the door and authorOrNull below admits
+// only a value inside it, so the writer's grammar and the reader's are one
+// definition.
 function isAuthorValue(value) {
     return typeof value === 'string' && value.length <= NAME_CAP && /^[\w.-]+$/.test(value);
 }
@@ -4122,58 +3517,44 @@ function isAnchorPath(value) {
     return isPathGrammar(value, ANCHOR_PATH_CAP, false);
 }
 
-// The store roots the memory sync publishes, the list
-// `Get-MemorySyncAdmittedRootPrefixes` returns in
-// doctor/install-memory-sync.ps1, spelled as a store-relative anchor path
-// spells them. test/memq.test.js pins the two lists equal.
-const SYNCED_STORE_ROOTS = ['projects/*/memory', 'memory-types', 'memory-operator', 'coordinator'];
+// The store roots a store anchor may name, the coordinator directory alone,
+// spelled as a store-relative anchor path spells it.
+const STORE_ANCHOR_ROOTS = ['coordinator'];
 
-// The two files at the store root the sync admits by name, which the doctor
-// writes from fixed text.
-const SYNCED_STORE_ROOT_FILES = ['.gitignore', '.gitattributes'];
-
-// A path segment the sync refuses whatever else matched: the transient names
-// `Get-MemorySyncTransientPatterns` lists (`*.lock`, `*.bak`, `*.tmp.*`),
-// matched caselessly; any segment carrying `~`, the mark of an auto-generated
-// NTFS 8.3 short-name alias, which names a real file under a spelling no rule
-// above was written for; and a `.git` segment, whose contents git never
-// tracks.
+// A path segment refused whatever else matched: the transient names
+// (`*.lock`, `*.bak`, `*.tmp.*`), matched caselessly; any segment carrying
+// `~`, the mark of an auto-generated NTFS 8.3 short-name alias, which names a
+// real file under a spelling no rule above was written for; and a `.git`
+// segment, whose contents git never tracks.
 const STORE_ANCHOR_REFUSED_SEGMENT = /\.lock$|\.bak$|\.tmp\.|~|^\.git$/i;
 
-// Whether a store-relative anchor path names a file the memory sync
-// publishes, the one question the writer and both store-root readers ask. An
-// operator record's anchors ride the record to the store's remote and into
-// the shared database, so an anchor may carry only the hash of a file whose
-// bytes already travel there. Anything else under the store root stays home,
-// a credential file among them, whose SHA-1 over a known JSON shape around a
-// chosen password is a dictionary target.
+// Whether a store-relative anchor path names a file a store anchor may hash:
+// a .md file under the coordinator directory. It is the one question the
+// writer and both store-root readers ask. An operator record's anchors ride
+// the record into the shared database, so an anchor may carry only the hash
+// of a file under that root. Anything else under the store root goes
+// unhashed, a credential file among them, whose SHA-1 over a known JSON shape
+// around a chosen password is a dictionary target.
 //
-// Admitted: `.gitignore` or `.gitattributes` at the store root, or a path
-// under one of SYNCED_STORE_ROOTS with at least one segment after the root
-// and a leaf ending in `.md`, `*` in a root matching any one non-empty
-// segment. That is narrower than the sync, which also carries each tier's
-// usage sidecar and the project tier's journal and stamp. It is judged
-// against the store's own ignore file and nothing else: a nested repository,
-// a nested ignore file, `.git/info/exclude` or a global excludes file can
-// still keep an admitted `.md` home, which costs only the hash of prose.
-// test/memory-sync.test.js pins a table of named paths, each admitted one
-// being one the sync's own predicate allows and git does not ignore.
+// Admitted: a path under one of STORE_ANCHOR_ROOTS with at least one segment
+// after the root and a leaf ending in `.md`. A file under that root whose
+// leaf does not end in `.md` is refused. test/memq.test.js pins a table of
+// named paths, admitted and refused.
 //
 // Case splits by direction. What is admitted matches as literals, case and
-// all, the root segments, the `.md` suffix and the two dotfile names, since
-// git on Linux tells `Coordinator/` from `coordinator/` and the sync's rules
-// name only the second. What is refused matches caselessly, so a transient
-// segment is refused however it is spelled, since on this platform every
-// spelling names the same file.
+// all, the root segment and the `.md` suffix, since a case-sensitive
+// filesystem tells `Coordinator/` from `coordinator/` and only the second is
+// the coordinator directory. What is refused matches caselessly, so a
+// transient segment is refused however it is spelled, since on this platform
+// every spelling names the same file.
 //
 // A non-string answers false rather than throwing, as `isAnchorPath` does.
 function isStoreAnchorPath(value) {
     if (typeof value !== 'string') return false;
-    if (SYNCED_STORE_ROOT_FILES.includes(value)) return true;
     const segments = value.split('/');
     if (segments.some((one) => one === '' || STORE_ANCHOR_REFUSED_SEGMENT.test(one))) return false;
     if (!segments[segments.length - 1].endsWith('.md')) return false;
-    return SYNCED_STORE_ROOTS.some((root) => {
+    return STORE_ANCHOR_ROOTS.some((root) => {
         const parts = root.split('/');
         return segments.length > parts.length
             && parts.every((part, i) => part === '*' || part === segments[i]);
@@ -4182,10 +3563,10 @@ function isStoreAnchorPath(value) {
 
 // The writer's words for a path `isStoreAnchorPath` refused, naming the rule
 // whole so a refusal names the one it met.
-const STORE_ANCHOR_UNSYNCED_FAULT = 'not a file the store syncs, and an anchor\'s hash rides the'
-    + ' record to the store\'s remote. A store anchor names .gitignore or .gitattributes at the'
-    + ' store root, or a .md file under ' + SYNCED_STORE_ROOTS.join(', ') + ', spelled in that'
-    + ' case, with no segment ending in .lock or .bak or holding .tmp. or ~';
+const STORE_ANCHOR_ROOT_FAULT = 'not a file a store anchor may name, and an anchor\'s hash rides'
+    + ' the record into the memory database. A store anchor names a .md file under '
+    + STORE_ANCHOR_ROOTS.join(', ') + ', spelled in that case, with no segment ending in .lock'
+    + ' or .bak or holding .tmp. or ~';
 
 // The path grammar both `anchors:` and a `glob:` trigger answer to, with the
 // one difference between them passed in: a glob admits `*` and `?`, and an
@@ -4233,8 +3614,8 @@ function anchorRefusalText(entry, fault) {
 // Four steps, elide, strip, elide, cap, and the order is what the elision is
 // worth here. A refused entry is free text by definition, so it can carry an
 // absolute home-anchored path, and this text is display text for a report line
-// on both of the channels that read it: this CLI's stderr, and the deny reason
-// the frontmatter guard composes from it, which a model reads. It is never disk
+// on both of the channels that read it: this CLI's stderr, and the drift block
+// the session hook composes from it, which a model reads. It is never disk
 // text, so it takes the elision whichever way this file was loaded, the way
 // failureText does, rather than behind CHANNEL_IS_OURS.
 //
@@ -4251,11 +3632,9 @@ function anchorRefusalText(entry, fault) {
 //
 // Both renderer calls are gated and caught here rather than left to a catch
 // above them, because the readers of this text are on paths where a throw is
-// an ALLOW. The frontmatter guard reaches it by loading this file as a module
-// and asking frontmatterAnchors or frontmatterTriggers for the entry it denies
-// on, and a throw out of that lands in the catch around that guard's main(),
-// which lets the write through; the session hook reaches it through
-// tierAnchorDrift and loses its whole block to its own outer catch. So a cache
+// a lost block. The session hook reaches it by loading this file as a module
+// and asking tierAnchorDrift, and a throw out of that loses the hook its whole
+// block to its own outer catch. So a cache
 // carrying a kit-compact-lib.js one version behind (scrub present,
 // scrubAfterStrip absent) falls through to scrub, which is the same elision
 // with its name boundaries kept, and one whose exports load and throw when
@@ -5090,30 +4469,6 @@ function anchorStates(file, root) {
     }
 }
 
-// The record names a tier directory actually holds, or null when the directory
-// is there and could not be enumerated. Absent reads as empty, because an absent
-// tier holds no records, which is a fact rather than a failure and is the state
-// every tier reader in this file already treats as an empty tier.
-//
-// This exists because `listMemories` cannot answer the question: it returns the
-// same empty array for a tier that is not there, a tier that is empty, and a tier
-// whose listing threw, and it drops a record it could not stat. So every block
-// that reports on a whole tier establishes the directory through this rather than
-// inferring it from a listing, and they all report one unreadable tier one way.
-// The names are kept rather than counted, because the difference between the
-// listing and the directory is a record the listing lost and each caller answers
-// for it in its own words.
-function tierRecordNames(dir) {
-    try {
-        return fs.readdirSync(dir)
-            .filter((f) => isMemoryFilename(f))
-            .map((f) => f.slice(0, -3));
-    } catch (err) {
-        const code = err !== null && typeof err === 'object' ? err.code : null;
-        return code === 'ENOENT' ? [] : null;
-    }
-}
-
 // One tier directory's records judged against their anchors, or null when
 // nothing in it could be checked at all.
 //
@@ -5205,28 +4560,14 @@ function tierRecordNames(dir) {
 // which is the listing mode below.
 //
 // This never throws, for any input, since every caller of it is a report
-// line. `memories` is the caller's own listing (listMemories), passed in so a
-// caller that already walked the tier walks it once. A record carrying an
-// `anchors` field is judged from that parse rather than read again, which is
-// what listMemories hands over from the one read it already spends per
-// record; a record list from anywhere else carries no such field and is read
-// here.
-//
-// `null` for `memories` is the listing mode, for a caller that wants this
-// tier read and has no listing of its own to spend. The record set is then
-// the directory listing this already takes, names only, and every record's
-// anchors arrive through `readFrontmatterAnchors`. Both doors read the same
-// capped head of a record, `listMemories` included, so no record is read
-// two ways and the two modes cannot disagree about one. What this mode
-// saves is the rest of a listing's work, the per-record stat and the fields
-// this pass never asks about, which is little: on the largest project store
-// on this machine (105 records, 304 KB) the whole pass measures 60 to 70 ms
-// either way. The mode is for the caller that has no listing rather than
-// for the caller that wants a faster one.
-// Nothing is reconciled in that mode, because the listing every record came
-// from is the only one there is. A path is null on an entry the grammar refused, so the
-// `unreadable` list carries the row's own display text where there is no path
-// to name.
+// line. `memories` is the caller's listing of the tier's index rows in the
+// shape indexTiers gives them, each record carrying its `anchors` parse, so
+// no file is read here: the memory database's index is the record set, and a
+// listing from anywhere else that carries no `anchors` field is a record
+// whose anchors no reader could parse. `dir` is unused and kept at the front
+// of the signature for the callers that pass null there. A path is null on
+// an entry the grammar refused, so the `unreadable` list carries the row's
+// own display text where there is no path to name.
 function tierAnchorDrift(dir, memories, root, limits) {
     if (root === null) return null;
     const drifted = [];
@@ -5234,39 +4575,18 @@ function tierAnchorDrift(dir, memories, root, limits) {
     const unchecked = [];
     let unexamined = 0;
     try {
-        // The directory established rather than inferred from the listing, for
-        // the reason the doc block above states, and its own names kept rather
-        // than thrown away: a record whose file the caller's listing could not
-        // stat is absent from that listing while its file sits right there, and a
-        // pass that walked only the listing would report the tier as one that
-        // never held it. A tier nobody could enumerate is the whole-tier
-        // not-checked answer this block's caller resolves a cause for.
-        // A tier the memory database holds has no directory: the listing's
-        // names are the record set, and nothing is lost between two lists.
-        const present = dir === null
-            ? (memories === null ? [] : memories.map((m) => m.name))
-            : tierRecordNames(dir);
-        if (present === null) return null;
+        const records = memories === null ? [] : memories;
         const recordCap = limits !== undefined && limits !== null
             ? capOrNone(limits.records) : Infinity;
         const meter = meterFor(limits);
-        // Listing mode: the tier's own names are the record set, in name
-        // order because a directory's enumeration order is not one.
-        const records = memories === null
-            ? present.slice().sort().map((name) => ({ name }))
-            : memories;
-        const listed = new Set();
         let examined = 0;
         for (const m of records) {
-            listed.add(m.name);
             if (examined >= recordCap || meterSpent(meter)) {
                 unexamined += 1;
                 continue;
             }
             examined += 1;
-            const parsed = m.anchors === undefined
-                ? readFrontmatterAnchors(path.join(dir, m.name + '.md'))
-                : m.anchors;
+            const parsed = m.anchors === undefined ? null : m.anchors;
             if (parsed === null) {
                 unchecked.push({ name: m.name, cause: 'frontmatter' });
                 continue;
@@ -5303,16 +4623,6 @@ function tierAnchorDrift(dir, memories, root, limits) {
                 unverified.push({ name: m.name, unreadable, truncated, budgeted });
             }
         }
-        // A file the directory holds under a memory name that no record in
-        // the caller's listing accounts for. The listing drops a record it
-        // could not stat, so this is where such a record is answered for,
-        // in name order because a directory's enumeration order is not one.
-        // Listing mode has no second list to disagree with, so nothing here
-        // applies to it.
-        if (memories !== null) {
-            const lost = present.filter((name) => !listed.has(name)).sort();
-            for (const name of lost) unchecked.push({ name, cause: 'file' });
-        }
     } catch {
         return null;
     }
@@ -5337,14 +4647,14 @@ const STORE_ANCHOR_ELSEWHERE = 'record is scoped to another machine';
 
 // What `anchorStateText` prints after the path of a store anchor
 // `isStoreAnchorPath` refused.
-const STORE_ANCHOR_REFUSED_TEXT = 'not checked (not a file the store syncs)';
+const STORE_ANCHOR_REFUSED_TEXT = 'not checked (not a file a store anchor may name)';
 
 // `anchorStatesFrom` for a record read against the store root, and the only
 // form the store-root readers call. An entry naming a path `isStoreAnchorPath`
 // refuses is never walked, hashed or charged to the meter: it becomes a row
 // in `unreadable` marked `refused: true`, in the record's own order. A
-// record reaching a reader through the sync or the shell can name any path,
-// and hashing a file the store keeps home would put what its hash settles, a
+// record reaching a reader through the database or the shell can name any
+// path, and hashing a file the store keeps home would put what its hash settles, a
 // match against a hash the planter chose and a prefix of the file's own, into
 // the reading session's context. `unreadable` is the state it takes because
 // it is a check that was not made, which every surface already counts under
@@ -5425,35 +4735,30 @@ function storeAnchorCountText(counts) {
 //   elsewhere   the names of the anchoring records scoped to another machine
 //   unexamined  how many records a caller's budget stopped this from reading
 //
-// `memories` is the caller's listing, which carries each record's `machine:`
-// and `anchors:` from the one head read it spent, or null for the listing
-// mode, where each record's head is read here once. `limits` bounds the pass
-// as it bounds `tierAnchorDrift`'s, so a caller running both takes a budget
-// per tier.
+// `memories` is the caller's listing of the tier's index rows in the shape
+// indexTiers gives them, each record carrying its `machine` and `anchors`
+// parse, so no file is read here. `dir` is unused and kept at the front of
+// the signature for the callers that pass null there. `limits` bounds the
+// pass as it bounds `tierAnchorDrift`'s, so a caller running both takes a
+// budget per tier.
 function storeAnchorDrift(dir, memories, root, limits) {
     const checked = [];
     const elsewhere = [];
     let unexamined = 0;
     try {
-        const present = dir === null
-            ? (memories === null ? [] : memories.map((m) => m.name))
-            : tierRecordNames(dir);
-        if (present === null) return null;
         const rootReal = anchorRootReal(root);
         if (rootReal === null) return null;
         // Two record bounds, because a scope read and a drift check cost
-        // different things. `heads` caps the head reads that learn a record's
-        // scope, cheap and taken for every record in a tier most of whose
-        // records anchor nothing. `records` caps the records scoped to this
-        // host that anchor anything, the ones whose files are hashed. A
-        // bound the caller does not pass is no bound.
+        // different things. `heads` caps the rows examined at all, each a
+        // cheap read of the row's scope in a tier most of whose records
+        // anchor nothing. `records` caps the rows scoped to this host that
+        // anchor anything, the ones whose files are hashed. A bound the
+        // caller does not pass is no bound.
         const bounded = limits !== undefined && limits !== null;
         const recordCap = bounded ? capOrNone(limits.records) : Infinity;
         const headCap = bounded ? capOrNone(limits.heads) : Infinity;
         const meter = meterFor(limits);
-        const records = memories === null
-            ? present.slice().sort().map((name) => ({ name }))
-            : memories;
+        const records = memories === null ? [] : memories;
         let heads = 0;
         let examined = 0;
         for (const m of records) {
@@ -5464,16 +4769,8 @@ function storeAnchorDrift(dir, memories, root, limits) {
                 continue;
             }
             heads += 1;
-            let parsed = m.anchors;
-            let machine = m.machine;
-            if (parsed === undefined || machine === undefined) {
-                let raw = null;
-                try {
-                    raw = readHead(path.join(dir, m.name + '.md'), FRONTMATTER_READ_CAP);
-                } catch { /* unread: no scope, so not this rule's record */ }
-                parsed = raw === null ? null : frontmatterAnchors(raw);
-                machine = raw === null ? null : frontmatterValue(raw, 'machine');
-            }
+            const parsed = m.anchors === undefined ? null : m.anchors;
+            const machine = m.machine === undefined ? null : m.machine;
             // The scope is read first, so a record whose `anchors:` line no
             // reader could parse is kept rather than left out as a record
             // anchoring nothing: scoped to this host it is counted as a row
@@ -5514,8 +4811,8 @@ function storeAnchorDrift(dir, memories, root, limits) {
 
 // The last sign of life of a memory file: the newest of its mtime (an edit
 // is curation), its frontmatter `created:` date (author-asserted recency,
-// null when absent), and its last applied stamp (the memory's appliedTally
-// entry, undefined when it has none). Read stamps never enter: being served
+// null when absent), and its last applied stamp (an object carrying the
+// stamp's `lastMs`, undefined when it has none). Read stamps never enter: being served
 // is not evidence of being useful. This is the one clock over that question,
 // and both of its consumers call it here: the decay scan's idle arithmetic
 // and `recall`'s recency ordering, so no two surfaces can disagree about
@@ -5594,8 +4891,8 @@ function pinState(file) {
 // tier this reader is the only gate between what a file says and what a line
 // claims. The two shared tiers have a second: --supersedes writes the field
 // there, holding its value to this same grammar and its target to a live
-// record of the tier, so what a hand can still write into those files is what
-// a sync from another machine or an edit outside the store's own verbs left.
+// record of the tier, so a value there that this grammar refuses is one an
+// edit outside the store's own verbs left.
 function supersedesName(value) {
     if (typeof value !== 'string') return null;
     const name = value.trim();
@@ -5848,25 +5145,11 @@ function listMemories(memDir) {
     return memories;
 }
 
-// A missing memory directory is an empty result with a clear note, never a
-// crash. This is the answer for a command that writes into the project store
-// (`touch`, `decay-prune`, `decay-done`): a project directory that does not
-// exist is a store those commands have nothing to write into, and minting one
-// from a stray cwd is the failure the note exists to make visible.
-function memDirOrNote() {
-    const memDir = projectMemoryDir(process.cwd());
-    if (!fs.existsSync(memDir)) {
-        process.stderr.write('memq: no memory directory at ' + shownPath(memDir) + '\n');
-        return null;
-    }
-    return memDir;
-}
-
 function usage(problem) {
     if (problem) process.stderr.write('memq: ' + problem + '\n');
     process.stderr.write(
         'usage: memq log <key> pass|fail "<summary>" [--tag t]... [--detail "..."]\n'
-        + '       memq find <term> [--tag t] [--outcomes|--memories|--all] [--archived]\n'
+        + '       memq find <term> [--tag t] [--memories|--all] [--archived]\n'
         + '       memq get <key|name> [--type|--type=<type>|--operator] [--no-stamp]\n'
         + '       memq recall [--situation "<text>"]\n'
         + '       memq judged --situation "<text>" [--tag t] [--limit <n>]\n'
@@ -5878,7 +5161,6 @@ function usage(problem) {
         + '       memq recent [--since <n>d|<n>h]\n'
         + '       memq unstamped [--since <n>d|<n>h]\n'
         + '       memq touch <name> --applied [--type|--type=<type>|--operator]\n'
-        + '       memq stamp-read <path>\n'
         + '       memq anchor <name> <path>... [--operator]\n'
         + '       memq triggers <name> <type>:<pattern>... [--type|--type=<type>|--operator]\n'
         + '       memq triggers <name> [<type>:<pattern>...] --replace\n'
@@ -5889,7 +5171,6 @@ function usage(problem) {
         + '       memq add-type <type> <name> "<description>" --update\n'
         + '                     [(--body "..."|--body-file "<path>") --confirm-shared]\n'
         + '       memq add-operator <name> "<description>" [--tag t]... [--machine <name>]\n'
-        + '                         [--board <path>]\n'
         + '                         [--trigger <type>:<pattern>]... [--supersedes <name>]\n'
         + '                         [--body "..."|--body-file "<path>"]\n'
         + '       memq add-operator <name> "<description>" --update\n'
@@ -5901,12 +5182,11 @@ function usage(problem) {
         + '       memq delete-type <type> <name> --confirm-shared\n'
         + '       memq delete-operator <name> --confirm-shared\n'
         + '       memq decay-scan\n'
-        + '       memq decay-prune [--rollup [--drop-malformed]] [--archive <name>]...\n'
-        + '                        [--archive-type <name>]... [--archive-operator <name>]...\n'
-        + '                        [--confirm-shared]\n'
+        + '       memq decay-prune [--archive <name>]... [--archive-type <name>]...\n'
+        + '                        [--archive-operator <name>]... [--confirm-shared]\n'
         + '       memq decay-done\n'
-        + '       memq db-sync [--again]\n'
-        + '                (once it has run, drains the queue; --again publishes the files again)\n'
+        + '       memq declare-type <type>|--none\n'
+        + '                (records this project\'s type tier for bare --type and the session hook)\n'
         + '       memq db-refresh\n'
         + '                (drains the queue, then adopts this checkout\'s folder store into its remote key)\n'
         + '       memq db-promote <name> [--sandbox <name>] [--tier project|type|operator]\n'
@@ -6132,7 +5412,7 @@ function cmdLog(argv, options) {
 //
 // Each row is an outcome row for mem.usp_AppendOutcomes, written to the local
 // queue alone and sent by the next drain. No outcomes.jsonl line is written,
-// since that file is frozen. No host call is made: two of the three writers run
+// since no verb reads that file. No host call is made: two of the three writers run
 // inside hooks, which never wait on the database.
 //
 // The queue is the row's only copy, so every writer queues inside the shown
@@ -6288,46 +5568,10 @@ function recordUnreadPointers(cwd, sessionId) {
     return { ok: true };
 }
 
-// Aggregate the journal per key: pass/fail tallies, the latest entry
-// (lexical ISO compare; a later line wins a timestamp tie), and the union of
-// tags across the key's entries for `find --tag` intersection. A rollup
-// entry stands for the entries decay-prune folded into it, so its counts are
-// added rather than the entry counting as one: the tally a key shows is the
-// same before and after its history rolls up. One aggregation serves `find`
-// and `recall`, so the two cannot disagree about a key's record.
-function journalByKey(entries) {
-    const byKey = new Map();
-    for (const e of entries) {
-        let g = byKey.get(e.key);
-        if (!g) {
-            g = { pass: 0, fail: 0, latest: e, tags: new Set() };
-            byKey.set(e.key, g);
-        }
-        if (e.outcome === 'rollup') {
-            g.pass += e.pass;
-            g.fail += e.fail;
-        } else if (e.outcome === 'pass') g.pass += 1;
-        else g.fail += 1;
-        if (e.ts >= g.latest.ts) g.latest = e;
-        if (e.tags) for (const t of e.tags) g.tags.add(t);
-    }
-    return byKey;
-}
-
-// The one line shape for an aggregated journal key, shared by `find` and
-// `recall` so the two surfaces cannot drift: key, pass/fail tally, coarse
-// age of the latest entry, and its summary, every fragment sanitized at
-// this display boundary.
-function journalKeyLine(key, g, now) {
-    return sanitize(key, NAME_CAP) + '  ' + g.pass + '/' + g.fail
-        + '  last ' + formatAge(g.latest.ts, now)
-        + '  ' + sanitize(g.latest.summary, SUMMARY_CAP);
-}
-
 // memq find: one summary line per hit, over two retrieval channels that fail
 // differently. The lexical channel is a case-insensitive substring over the
-// frozen journal's keys and over the index's memory names and descriptions
-// (which subsumes key prefix), intersected with --tag when given. The semantic
+// index's memory names and descriptions, intersected with --tag when given.
+// The semantic
 // channel is the memory database's hybrid search, asked in the same spawn that
 // reads the index (indexForVerb): it ranks this project's records and the
 // shared tiers' records by meaning and by full text. One command carries both
@@ -6336,8 +5580,7 @@ function journalKeyLine(key, g, now) {
 // and an embedding catches the paraphrase substrings miss, so a caller made to
 // choose a channel would re-learn that fork on every query.
 //
-// Total order of the lexical output: journal key lines precede memory
-// lines; memory lines run
+// Total order of the lexical output: memory lines run
 // tier by tier from the one closest to the caller outward, project then type
 // then operator; within each group, ascending codepoint order on the key or
 // name. That order, plus the sorted grouping itself, is what makes the
@@ -6350,8 +5593,7 @@ function journalKeyLine(key, g, now) {
 // has no ambiguity, so its lines stay unlabeled. A record carrying an author
 // adds an "author:<value>" token inside that parenthesis after the tier label,
 // and an unlabeled line gains a parenthesis holding that token alone, which
-// names itself rather than a tier. The journal is project-tier
-// only, so key lines are never labeled. Pending lines lead the memory lines,
+// names itself rather than a tier. Pending lines lead the memory lines,
 // the precedence `get` walks: a record this run wrote and the store has not
 // adjudicated is the one closest to the caller, so it shows before the tiers
 // it may be a revision of. The pending tier is read from its files, the
@@ -6415,7 +5657,6 @@ async function cmdFind(argv, options) {
     const opts = options || {};
     let term = null;
     let tag = null;
-    let scope = 'all';
     let showArchived = false;
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
@@ -6423,25 +5664,22 @@ async function cmdFind(argv, options) {
             const v = argv[++i];
             if (v === undefined || v.startsWith('--')) return usage('--tag needs a value');
             tag = v;
-        } else if (a === '--outcomes') scope = 'outcomes';
-        else if (a === '--memories') scope = 'memories';
-        else if (a === '--all') scope = 'all';
-        else if (a === '--archived') showArchived = true;
+        } else if (a === '--outcomes') {
+            // Refused rather than answered empty: the outcome journal is the
+            // memory database's and no read procedure serves it yet, so a
+            // scope that silently matched nothing would read as "no
+            // outcomes" where the truth is "not readable from here".
+            return usage('--outcomes has nothing to read: the outcome journal is the memory database\'s,'
+                + ' and memq has no read of it yet');
+        } else if (a === '--memories' || a === '--all') {
+            // Both name the whole of what find reads, the index's records,
+            // so each is satisfied rather than dropped.
+        } else if (a === '--archived') showArchived = true;
         else if (a.startsWith('--')) return usage('unknown option ' + sanitize(a, 40));
         else if (term !== null) return usage('find takes one <term>');
         else term = a;
     }
     if (term === null) return usage('find needs a <term>');
-    // --outcomes answers from the journal alone and never opens the search
-    // by meaning, so --archived alongside it is a request this run cannot
-    // serve. It is refused rather than ignored: a caller who asked for
-    // retired records and got a clean exit 0 has no way to learn the ask was
-    // dropped, and a flag that silently does nothing is the shape every
-    // other option here already refuses.
-    if (showArchived && scope === 'outcomes') {
-        return usage('--archived has nothing to filter under --outcomes:'
-            + ' the journal has no archive');
-    }
     // The project key is read from the working directory, and an unpinned
     // one on a network share resolves through a walk that can hang for the
     // SMB timeout on an unreachable host, so the whole verb refuses.
@@ -6464,32 +5702,6 @@ async function cmdFind(argv, options) {
     const identityOf = (tier, store, name) => recordIdentity(tier === 'project' ? '' : store, tier, name);
     const lexicalShown = new Set();
     const reachableTiers = new Set();
-    // The same lexical hits as the structured records the model-judged channel
-    // ranks, in the order they printed.
-    const lexicalCandidates = [];
-
-    // The journal, which is frozen: its keys answer the bare scope and
-    // --outcomes with the frozen line ahead of them.
-    if (scope !== 'memories' && fs.existsSync(path.join(memDir, JOURNAL_FILE))) {
-        process.stderr.write(frozenJournalLine(memDir) + '\n');
-        const byKey = journalByKey(readJournal(memDir));
-        const keys = Array.from(byKey.keys())
-            .filter((k) => k.toLowerCase().includes(needle))
-            .sort();
-        for (const k of keys) {
-            const g = byKey.get(k);
-            if (tag !== null && !g.tags.has(tag)) continue;
-            lines.push(journalKeyLine(k, g, now));
-        }
-    }
-    if (scope === 'outcomes') {
-        if (lines.length === 0) {
-            process.stderr.write('memq: no matches for \'' + sanitize(term, NAME_CAP) + '\'\n');
-            return;
-        }
-        process.stdout.write(lines.join('\n') + '\n');
-        return;
-    }
 
     // The index and the search by meaning in one spawn, or the snapshot's
     // index with its line: under the snapshot there is no vector, so the
@@ -6521,14 +5733,6 @@ async function cmdFind(argv, options) {
                 + (supersedes === null ? '' : supersededLabel(supersedes, m.name, false)));
             reachableTiers.add(tier === null ? 'pending' : tier);
             if (tier !== null) lexicalShown.add(identityOf(tier, storeSegment, m.name));
-            lexicalCandidates.push({
-                name: m.name,
-                tier: tier === null ? 'pending' : tier,
-                store: tier === null ? '' : storeSegment,
-                description: m.description,
-                archived: false,
-                superseded: supersedes !== null && supersededBy(supersedes, m.name, false) !== null
-            });
         }
     };
     // The pending tier stays a file, the engine's carve-out, and is listed
@@ -6551,7 +5755,6 @@ async function cmdFind(argv, options) {
     // snapshot, the lexical lines are the whole answer and one line says so
     // where the host was reached.
     const semanticLines = [];
-    const semanticHits = [];
     let withheld = null;
     if (read.source === 'host') {
         if (read.search !== null) {
@@ -6569,7 +5772,6 @@ async function cmdFind(argv, options) {
             if (!showArchived) ({ kept: visible, withheld } = withholdRetired(admitted, SEMANTIC_SHOWN));
             for (const h of visible.slice(0, SEMANTIC_SHOWN)) {
                 semanticLines.push(semanticHitLine(h, now));
-                semanticHits.push(h);
             }
             process.stderr.write(FLEET_SERVED_NOTE + '\n');
         } else if (read.searchDetail !== null) {
@@ -6589,20 +5791,9 @@ async function cmdFind(argv, options) {
         return;
     }
 
-    // The model-judged channel runs last and only over records already found,
-    // so a find with nothing to rank has already returned above and no endpoint
-    // was contacted for it. Its whole failure surface is stderr notes.
-    const judged = await judgedChannel(term, lexicalCandidates, semanticHits, opts.judged);
-    for (const note of judged.notes) process.stderr.write(note + '\n');
-    const judgedLines = judged.hits.map((h) => judgedHitLine(h, judged.reasonCap));
-
     const out = lines.slice();
-    if (judgedLines.length > 0) {
-        out.push(fenceLine([judgedClause(judged.endpointIsLocal)]));
-        for (const l of judgedLines) out.push(l);
-    }
     if (semanticLines.length > 0 || withheldTotal > 0) {
-        out.push(fenceLine([semanticFenceClause(true)]));
+        out.push(fenceLine([fleetClause()]));
         for (const l of semanticLines) out.push(l);
     }
     if (withheldTotal > 0) out.push(withheldLine(withheld));
@@ -6907,12 +6098,6 @@ async function fleetNearestChannel(texts, limit, options) {
     };
 }
 
-// Action keys the fleet memory query is composed from: the most recent of the
-// project's own outcome journal. Three, because the query is about what this
-// effort is doing now and a longer tail drags the ranking toward whatever the
-// project was doing last month.
-const FLEET_RECENT_KEYS = 3;
-
 // The clock the fleet memory block may spend where a caller cannot wait for
 // the client's own query budget: the session-start block
 // (hooks/memory-session.js) and `memq judged`.
@@ -6934,15 +6119,12 @@ const FLEET_BUDGET_MS = 2000;
 const FLEET_RECALL_SHOWN = 10;
 const FLEET_SESSION_SHOWN = 5;
 
-// The query the fleet memory block asks the shared index: what this project is,
-// and what it has been doing lately. The segment names the project the way the
-// store keys it, and the action keys are the words the effort itself has been
-// using, which is what makes this block answer the current work rather than the
-// project's whole history.
-function fleetQueryText(segment, keys) {
-    return [segment].concat(keys.slice(0, FLEET_RECENT_KEYS))
-        .filter((s) => typeof s === 'string' && s !== '')
-        .join(' ');
+// The query the fleet memory block asks the shared index: what this project
+// is, which is its segment, the name the store keys it by. An empty segment
+// is an empty query, and the block says it has nothing to ask rather than
+// asking the index about nothing.
+function fleetQueryText(segment) {
+    return typeof segment === 'string' ? segment : '';
 }
 
 // One fleet memory line: the record's name, where it sits, which sandbox holds
@@ -6981,7 +6163,7 @@ function fleetMemoryLine(hit) {
 //
 // Two paths, decided by whether this machine has a Jev config, read before
 // stage 1 so an unconfigured machine does no extra work. Without one the block
-// is the nearest scan over the project's segment and recent action keys, for
+// is the nearest scan over the project's segment alone, for
 // two reasons that agree: not asked for retired records, it serves live ones
 // only, so a retired record never fills one of the few lines this block has;
 // and the query is a composed phrase rather than a person's words, so the
@@ -7010,16 +6192,7 @@ async function fleetMemoryBlock(memDir, limit, options) {
     // asks about is spelled the way the rows it ranks were published.
     const identity = memoryDatabase.tierIdentity(memDir);
     const segment = identity === null || identity.segment === null ? '' : identity.segment;
-    // A judged pointer's outcome row records this block rather than the
-    // session's work, so its key is never a query word.
-    const keys = Array.from(journalByKey(readJournal(memDir)).entries())
-        .filter((e) => e[0] !== JEV_POINTER_KEY)
-        .sort((a, b) => (a[1].latest.ts < b[1].latest.ts ? 1
-            : a[1].latest.ts > b[1].latest.ts ? -1
-                : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-        .slice(0, FLEET_RECENT_KEYS)
-        .map((e) => e[0]);
-    const text = fleetQueryText(segment, keys);
+    const text = fleetQueryText(segment);
     if (text === '') {
         return { lines: [], reason: 'this project names nothing to ask the index about', note: null, judged: false };
     }
@@ -7495,8 +6668,7 @@ function cmdApplied(argv, options) {
     } else if (fromType) {
         const type = namedType !== null ? namedType : projectType(cwd);
         if (type === null) {
-            process.stderr.write('memq: this project declares no Project-Type, so --type has no target'
-                + ' (--type=<type> names one outright)\n');
+            process.stderr.write(noDeclaredTypeText('--type'));
             process.exitCode = 1;
             return;
         }
@@ -7537,10 +6709,9 @@ function cmdApplied(argv, options) {
 // guard and none can come to spell one differently.
 //
 // `flags` says which optional fields the calling surface prints, and each is a
-// deliberate difference between surfaces. A model-judged ranking carries no
-// similarity to print and no scope judgment to make of one, and the overlap
-// label is the authoring block's own reading of its own floor rather than
-// anything this function decides. The retirement and the supersession are
+// deliberate difference between surfaces. The overlap label is the authoring
+// block's own reading of its own floor rather than anything this function
+// decides. The retirement and the supersession are
 // properties of the hit instead of flags: a retired or replaced record whose
 // label is dropped reads as a live one, and a reader acting on the top block of
 // a search and an author reading a neighbours block are acting on the same fact,
@@ -7623,60 +6794,13 @@ function tierProvenanceLabel(tier, store) {
     return 'operator';
 }
 
-// The tier token that crosses the machine boundary, as against the provenance
-// label above, which does not.
-//
-// The label carries the store segment, and for the project tier that segment is
-// a flattened absolute path: it holds the OS account name and the directory
-// name of whatever repository the record's store belongs to. Because the
-// candidate set draws on the semantic channel, which spans every store on this
-// machine, those are the paths of repositories the reading project never
-// opened. That is a reader-convenience field, not a ranking input, and a
-// candidate's identity on the wire is already its position in the list, which
-// is what the answer resolves on. So the model is told which tier a record
-// sits in and nothing about where on this disk it sits, and the full label
-// still prints on the rendered line, which is where a human reads it.
-//
-// The type token keeps the type's name because a project type is a declared
-// category, not a path, and which category a record belongs to is a thing a
-// relevance judgment can use.
-function tierWireToken(tier, store) {
-    if (tier === 'type' || tier === 'type-archive') return 'type:' + sanitize(store, TYPE_CAP);
-    if (tier === 'operator' || tier === 'operator-archive') return 'operator';
-    if (tier === 'pending') return 'pending';
-    return 'project';
-}
-
-// The semantic block's provenance clause. The channel spans stores and
-// archives the reading project never wrote, so the whole block rides under
-// one fence even when a line happens to be this project's own: one block
-// under one framing line is the fence discipline, and splitting the block by
-// per-line ownership would put two competing frames over one listing.
-// Which population's sentence fences find's semantic block. This is a function
-// rather than a ternary spelled at the fence because the defect it guards is an
-// inversion, and an inversion is invisible to a pin that reads the source as
-// text: swap the arms and the line still holds both clause names and the flag,
-// so every such assertion passes while every host-served row is framed as local.
-// A caller-free function taking a boolean and returning a sentence is drivable,
-// so a test asserts the value on each input and an inversion reddens on what the
-// code does rather than on how it is spelled.
-function semanticFenceClause(fleetServed) {
-    return fleetServed ? fleetClause() : semanticClause();
-}
-
-function semanticClause() {
-    return 'the semantic index, ranking every memory store and archive on this'
-        + ' machine by meaning';
-}
-
-// The shared index's counterpart, and the reason there are two of these rather
-// than one. The clause frames a block of hits, so it has to be true of the
-// population that block ranked. semanticClause() is true of this machine's own
-// stores and false of the host's answer, which ranks every sandbox's records
-// this login may see, most of them written on machines this one only syncs
-// from. A single clause over both blocks tells the reader of a shared hit that
-// it came from a store on this disk, which is the provenance confusion this
-// channel exists to avoid rather than to create.
+// The semantic block's provenance clause. The channel ranks every sandbox's
+// records this login may see, most of them written on other machines, so the
+// whole block rides under one fence even when a line happens to be this
+// project's own: one block under one framing line is the fence discipline, and
+// splitting the block by per-line ownership would put two competing frames over
+// one listing. The clause names the shared database, so a reader of a shared
+// hit does not take it for a store on this disk.
 function fleetClause() {
     return 'the shared memory database, ranking every sandbox\'s records this'
         + ' login may see by meaning, each as its sandbox last published it';
@@ -7724,588 +6848,14 @@ function withheldLine(w) {
         + '; rerun with --archived';
 }
 
-// ---------------------------------------------- the model-judged channel --
-//
-// `find`'s third channel: the query and the records the other two channels
-// already found, sent to the operator's model endpoint to be ranked by whether
-// they bear on what was asked. Cosine similarity answers proximity of wording;
-// this asks the question a reader actually has.
-//
-// WHERE THE DATA GOES. This is the only part of memq that sends anything off
-// this machine. When `~/.claude/kit-endpoint.json` exists, the query text and,
-// for each candidate record, its name, its bare tier token (project, type:<name>,
-// operator) and its index description are POSTed to the endpoint it names. The
-// store segment does not go: for the project tier it is a flattened absolute
-// path carrying this account's name and the directory name of whatever
-// repository the record's store belongs to, and since the candidate set draws
-// on the semantic channel those are repositories this project never opened. It
-// is a field a reader uses to open a file rather than one a ranking needs, and
-// the answer is resolved on a candidate's position in the list, so it stays on
-// the rendered line and off the wire. That endpoint does not run on this VM:
-// in the fleet's configuration it runs on the Hyper-V host, reached across the
-// virtual switch, over plain HTTP with no authentication, and it is shared with
-// other tenants of that host including the operator's own agent harness. Record
-// bodies never travel; the descriptions do, and they can come from stores this
-// project never opened, because that is the reach the semantic channel already
-// has. With no config file nothing is sent, no socket is opened and no file is
-// created, and the command's output is what it was before this channel existed.
-//
-// THE ENDPOINT IS NEVER A DEPENDENCY. Every failure of it, from an unreadable
-// config to an answer that is not a ranking, costs one stderr line and leaves
-// both other blocks exactly as they were. Nothing here throws: whatever the
-// endpoint did, the caller still owes its lexical and semantic results.
-//
-// THE MODEL SUPPLIES A RANKING AND A CLAUSE, NOTHING ELSE. The names it returns
-// are matched back to the candidates it was sent and dropped otherwise, and the
-// name that prints is the store's own spelling rather than the returned one, so
-// no record this store does not hold can be spelled into a line a reader acts
-// on. The clause is the one piece of model prose on the surface, sanitized and
-// capped like every other untrusted string this file prints.
-
-// How long the liveness probe waits. Short by design: it exists to keep a dead
-// or absent endpoint from spending an interactive command's whole budget, so it
-// has to cost less than the fact it establishes is worth.
-const JUDGED_PROBE_TIMEOUT_MS = 400;
-
-// How long the ranking call waits. Sized to a cold call on an idle slot: a
-// ranking answer runs to a few hundred tokens behind a prompt of a few thousand,
-// and a prompt-cache miss on the fleet's endpoint puts that at two to three
-// seconds, so the budget admits that case with room and nothing more. It stays
-// well under a batch caller's budget, and deliberately so: this is a command
-// typed at a prompt, where a minute's queue is not acceptable. A call that
-// outruns this budget degrades to the store's own ranking rather than making a
-// person wait for a wedged lane.
-const JUDGED_CALL_TIMEOUT_MS = 5000;
-
-// The generation ceiling, sized above the schema's own worst case rather than
-// near it. Five entries, each carrying a number, a name at this store's naming
-// habit of 40 to 65 characters, a clause at its full budget, and the JSON
-// around them, runs past 250 tokens; a ceiling set near that turns a complete
-// answer into a truncated one, and a truncated JSON object is indistinguishable
-// at the parse from an endpoint that answered badly. It is a bound on a model
-// that will not stop, not a target, so it costs nothing when the answer is the
-// ordinary short one.
-const JUDGED_NUM_PREDICT = 512;
-
-// The most of the model's `response` string that is parsed. The object the
-// schema describes is a few hundred characters; a string past this is something
-// else and is refused without being parsed.
-const JUDGED_MAX_ANSWER_CHARS = 4096;
-
-// The judged block's provenance clause, under the same fence every other
-// untrusted-content block rides. It says the things a reader needs before
-// weighing the lines: that a model produced this order, where that model ran,
-// and that the block is advisory beside the store's own ranking below it.
-//
-// Where it ran is read from the config rather than asserted. A configured
-// loopback endpoint is a model on this machine, and a clause telling a reader
-// their content went off this VM when it did not is an untrue sentence on a
-// shipped surface. That costs more than the disclosure buys: a reader who
-// catches the clause overstating its case once discounts it on the run where it
-// is right.
-function judgedClause(endpointIsLocal) {
-    return 'a model at this machine\'s configured endpoint, '
-        + (endpointIsLocal ? 'on this machine' : 'off this VM')
-        + ', asked which of these memories bear on the query: advisory, and'
-        + ' derived from a model rather than from the store';
-}
-
-// One displayed line per judged hit: the record's name, its provenance, and the
-// model's one clause of why. Names, labels and one bounded clause, the same
-// discipline the semantic hit line states and for the same reason, with one
-// addition that matters more here: the name is the candidate's own, taken from
-// the store, and the clause is the only fragment on the line the model wrote.
-// It is sanitized to short printable ASCII and capped, because it reaches a
-// terminal and anything quoting it.
-//
-// The name, the provenance and the retirement and supersession labels are the
-// shared composer's, and the reason those two labels print here is sharper than
-// on any other surface: under `--archived` a retired record can be ranked first
-// by the model, and a top line indistinguishable from a live one is how a reader
-// acts on a record the store retired. The similarity and the machine scope are
-// withheld, this ranking carrying no number of its own and making no scope
-// judgment. A cut clause is marked, because this module's own failureText marks
-// its cut for the same reason: a sentence that ends where it means to and one
-// the renderer stopped mid-phrase are two different facts about the answer.
-// The clause budget arrives as an argument rather than being read from the
-// prompt module here. Reading it here puts a require on a render loop that runs
-// outside judgedChannel's try/catch, which survives only because a non-empty
-// hits list implies the module was already loaded inside that guard. That is an
-// ordering invariant nothing states and nothing enforces, and it is the exact
-// defect class this channel's own comment claims to prevent, so the caller
-// resolves the cap once inside the guard and passes it here.
-function judgedHitLine(h, reasonCap) {
-    const line = hitLine(h, {});
-    const cap = reasonCap;
-    const why = sanitize(h.why, cap + 1);
-    if (why === '') return line;
-    return line + '  ' + (why.length > cap ? why.slice(0, cap) + ' [cut]' : why);
-}
-
-// The prompt module, required on use. It is one small file and this is the only
-// caller, so loading it on every non-find command would be a cost for nothing.
-let relevancePromptModule = null;
-function relevancePrompt() {
-    if (relevancePromptModule === null) {
-        relevancePromptModule = require('./prompts/relevance-v1.js');
-    }
-    return relevancePromptModule;
-}
-
-// The candidate set: the lexical hits in the order they printed, then the
-// embedder's admitted ranking in its own order, deduplicated on the identity
-// the two channels already share and capped.
-//
-// The embedder's hits are given their slots first when the two together would
-// overflow the cap, because a term matching dozens of names lexically would
-// otherwise fill the whole set with one channel's answer and leave the model
-// ranking a list the other channel never saw. Both channels reaching the model
-// is the point of asking it.
-function judgedCandidates(lexical, semanticHits) {
-    const prompt = relevancePrompt();
-    const descriptions = new Map();
-    // The clip notes those index reads produce, returned to the caller rather
-    // than written to stderr from in here. Written directly they land ahead of
-    // the channel's own disclosure, which is the statement they are a footnote
-    // to, so a reader meets the caveat before the sentence it qualifies.
-    const notes = [];
-    // One index read per distinct tier directory, and only for records the
-    // semantic channel found: the lexical hits carry their descriptions from
-    // the listing that printed them.
-    //
-    // An archive directory is read through the store's own bounded reader
-    // rather than the tier one. A tier index holds a line per live record and a
-    // store bounds that by what it keeps; an archive index gains a line for
-    // every record a decay pass ever retires and nothing prunes it, so it has
-    // no natural bound and `find --archived` on a mature store is what reaches
-    // it. That reader takes a fixed-size prefix and says on stderr when it cut,
-    // which is why the tag names this channel: a caller reading that line needs
-    // to know which surface asked.
-    //
-    // The lookup folds the name the way the platform's filesystem compares one,
-    // the same fold the identity twelve lines below uses, because both sides are
-    // filenames and an index spelling a record in a different case than its file
-    // resolves the same record on a case-folding filesystem.
-    const describe = (hit) => {
-        // A hit that carries its own description is one the shared index
-        // answered, whose record may have no file on this machine at all. Its
-        // description is the host's copy of the same index line this reader
-        // would otherwise go find, so it is taken as given rather than looked
-        // up under a path that does not resolve here.
-        if (typeof hit.description === 'string' && hit.description !== '') return hit.description;
-        if (typeof hit.file !== 'string' || hit.file === '') return '';
-        const dir = path.dirname(hit.file);
-        let map = descriptions.get(dir);
-        if (map === undefined) {
-            const raw = readCappedDescriptions(dir,
-                fsEq(path.basename(dir), ARCHIVE_DIR) ? 'archive index' : 'memory index',
-                ' (the model-judged channel\'s candidate set)', notes);
-            map = new Map();
-            for (const [file, description] of raw) map.set(memoryFileKey(file), description);
-            descriptions.set(dir, map);
-        }
-        return map.get(memoryFileKey(hit.name + '.md')) || '';
-    };
-
-    const seen = new Set();
-    const out = [];
-    const add = (candidate) => {
-        const key = recordIdentity(candidate.store, candidate.tier, candidate.name);
-        if (seen.has(key)) return;
-        seen.add(key);
-        // `where` is the bare tier token and not the rendered line's provenance
-        // label, because the label carries the store segment and for the project
-        // tier that segment is a flattened absolute path. Sending it would put
-        // this account's name and the directory names of unrelated repositories
-        // across a machine boundary for a field the ranking does not use: the
-        // model is told which tier a record sits in, the answer is resolved on
-        // the candidate's position, and the full label prints on the line a
-        // person reads.
-        out.push({ ...candidate, where: tierWireToken(candidate.tier, candidate.store) });
-    };
-    const semantic = semanticHits.slice(0, prompt.MAX_CANDIDATES);
-    const room = Math.max(0, prompt.MAX_CANDIDATES - semantic.length);
-    // The pending tier is excluded, and this is the one exclusion in the set.
-    //
-    // A run's pending records are unadjudicated drafts the run itself wrote, and
-    // the store's own policy already keeps them out of the semantic index so
-    // that a run's writes never reach another session's search. Posting them to
-    // a multi-tenant service on another machine is further than the reach that
-    // policy refuses, not nearer, so the tier that is deliberately unsearchable
-    // locally is not a tier this channel exports. They still print in the
-    // lexical block, which is the session reading back its own drafts.
-    for (const c of lexical.filter((c) => c.tier !== 'pending').slice(0, room)) add(c);
-    for (const h of semantic) {
-        add({
-            name: h.name,
-            tier: h.tier,
-            store: h.store,
-            archived: h.archived === true,
-            superseded: h.superseded === true,
-            description: describe(h)
-        });
-    }
-    return { set: out.slice(0, prompt.MAX_CANDIDATES), notes };
-}
-
-// The endpoint's answer as ranked candidates, or a described refusal.
-//
-// `candidates` is the list this call was made against, in the order it was
-// sent, and it is required: the model ranks what it was sent, and an entry that
-// does not resolve into that list is dropped, counted and reported rather than
-// printed. A line naming a record this store does not hold is worse than a
-// shorter block, and the check costs an array index.
-//
-// AN ENTRY IS RESOLVED BY POSITION AND CONFIRMED BY NAME, never by name alone.
-// A record name is unique inside a tier and not across them, so the same name
-// can sit in the project tier and the operator tier and a name-keyed lookup
-// resolves to whichever was indexed first: the rendered line then carries a
-// provenance label, the very address a reader opens the file by, for a record
-// the model may not have meant, and the other one can never be ranked at all.
-// The candidate lines are numbered for this reason, and an entry whose number
-// and name disagree is refused rather than resolved on one of them, which also
-// makes a fabricated name a refusal rather than a coincidence.
-//
-// The name is held to the store's own definition of a memory file, the single
-// predicate every writer and reader here answers to, rather than to a copy of
-// its charset rule: a copy drifts, and this one had already lost the `.`/`..`
-// stem refusal and the index-file refusal that predicate carries.
-//
-// The name that reaches the line is always the candidate's own spelling out of
-// the store, so even an accepted answer supplies the ordering and the clause
-// and never the identifier.
-function parseJudgedAnswer(body, candidates) {
-    const prompt = relevancePrompt();
-    const known = Array.isArray(candidates) ? candidates : [];
-    const raw = (body !== null && typeof body === 'object' && typeof body.response === 'string')
-        ? body.response : '';
-    if (raw.length > JUDGED_MAX_ANSWER_CHARS) {
-        return { status: 'unusable', detail: 'response past ' + JUDGED_MAX_ANSWER_CHARS + ' characters' };
-    }
-    const text = raw.trim();
-    if (text === '') return { status: 'unusable', detail: 'empty response' };
-
-    let answer = null;
-    try {
-        answer = JSON.parse(text);
-    } catch {
-        return { status: 'unusable', detail: 'response is not JSON' };
-    }
-    if (answer === null || typeof answer !== 'object' || Array.isArray(answer)) {
-        return { status: 'unusable', detail: 'response is not a JSON object' };
-    }
-    // An absent list is not an empty one. Empty is an ordinary answer and says
-    // the model read the candidates and found none of them relevant; a missing
-    // key says the answer did not have the shape the schema asked for, and
-    // reading it as "nothing bears on this" would turn a broken decode into a
-    // clean result.
-    if (!Array.isArray(answer.ranked)) {
-        return { status: 'unusable', detail: 'ranked is not a list' };
-    }
-
-    const hits = [];
-    const seen = new Set();
-    // Two counts, because one number cannot answer both questions a reader has.
-    // `unresolved` is entries that named no candidate in this set, which is the
-    // invention question; `repeated` is entries naming a candidate already
-    // ranked, which is the model listing one record twice and costs the block a
-    // line rather than raising any question about the store. A single tally
-    // reported as records the set did not hold would be false about every entry
-    // in the second class and about a malformed entry that named nothing at all.
-    // A third count, for the same reason. The schema asks for at most MAX_RANKED
-    // entries and an endpoint that ignores maxItems returns more; those are
-    // dropped, and dropping them without saying so, on a surface whose whole
-    // design is counts that say what they count, would leave the block quietly
-    // shorter than the answer that produced it.
-    let unresolved = 0;
-    let repeated = 0;
-    let overflowed = 0;
-    for (const item of answer.ranked) {
-        if (hits.length >= prompt.MAX_RANKED) {
-            overflowed += 1;
-            continue;
-        }
-        if (item === null || typeof item !== 'object' || Array.isArray(item)
-            || typeof item.name !== 'string' || item.name.length > MEMORY_FILE_CAP
-            || !Number.isInteger(item.n)) {
-            unresolved += 1;
-            continue;
-        }
-        // The `.md` is stripped because the candidate lines spell names without
-        // it and a model that includes it is naming the right record; the name
-        // is then held to the store's own file rule with it put back, since
-        // that predicate's subject is a filename.
-        const name = item.name.trim().replace(/\.md$/i, '');
-        if (!isMemoryFilename(name + '.md')) {
-            unresolved += 1;
-            continue;
-        }
-        const candidate = known[item.n - 1];
-        if (candidate === undefined || memoryFileKey(candidate.name) !== memoryFileKey(name)) {
-            unresolved += 1;
-            continue;
-        }
-        const key = recordIdentity(candidate.store, candidate.tier, candidate.name);
-        if (seen.has(key)) {
-            repeated += 1;
-            continue;
-        }
-        seen.add(key);
-        hits.push({
-            name: candidate.name,
-            tier: candidate.tier,
-            store: candidate.store,
-            archived: candidate.archived === true,
-            superseded: candidate.superseded === true,
-            why: typeof item.why === 'string' ? item.why : ''
-        });
-    }
-    return { status: 'ok', hits, unresolved, repeated, overflowed };
-}
-
-// What each probe outcome says happened, in the probe's own terms.
-//
-// The transport's shared reason map is the vocabulary for a generation
-// call: "lane busy" names a queued generation behind a serial lane, which is
-// not what a GET that never completed did, and "endpoint refused the call" is
-// an answer, so a sentence built around "nothing answered" would contradict
-// itself. A probe asks one question, whether anything is there, and each
-// outcome is a different answer to it.
-// `refused` is here for completeness of the transport's own vocabulary and is
-// not reachable through it: probeEndpoint answers refused only for a response
-// carrying no numeric status, which the global fetch this module calls does not
-// produce. A test that drove it would be pinning a branch reached only by
-// replacing the transport, so nothing here claims it is exercised.
-const JUDGED_PROBE_CONDITIONS = {
-    timeout: 'the endpoint did not answer a ' + JUDGED_PROBE_TIMEOUT_MS + ' ms liveness probe',
-    unreachable: 'nothing answered at the endpoint\'s address',
-    refused: 'the endpoint\'s address answered the liveness probe with no usable response'
-};
-
-// The one line that says this channel stood down, in memq's own voice on
-// stderr, where the embedder's own absence line goes: stdout stays the answer,
-// and a degrade that printed into the answer would be a line a reader has to
-// tell apart from a hit.
-function judgedOffLine(condition) {
-    return 'memq: model-judged ranking off (' + condition
-        + '); the lexical and semantic blocks are unchanged';
-}
-
-// The model-judged half of `find`, answered as displayable hits plus stderr
-// notes. Never a throw and never a nonzero exit: this channel is the last thing
-// `find` does and the least of what it owes.
-//
-// The order of the three gates is what keeps a machine with no endpoint at the
-// behavior it had before this existed. The config read comes first and an
-// absent file returns silently, having opened no socket and created nothing. A
-// config that exists but cannot be used is reported, because there the operator
-// meant to have an endpoint here. Only then is anything sent, and the probe
-// goes first so a dead address costs the probe's clock instead of the call's.
-// `options.configPath` names the endpoint config this channel reads, on the seam
-// the fleet channel already has and for a sharper reason. Every other channel in
-// this command answers from disk, so a caller that cannot substitute one gets a
-// slow test. This one posts the candidate set to a model endpoint and is billed
-// for the answer, so a caller that cannot substitute one gets a test that spends
-// money and reaches the network every time it runs. A path that resolves to
-// nothing reads as `absent`, which is the ordinary no-endpoint case and is
-// silent, so substituting one here exercises the same branch most machines take.
-async function judgedChannel(term, lexicalCandidates, semanticHits, options) {
-    try {
-        const client = require('./kit-endpoint-lib.js');
-        const config = client.loadEndpointConfig((options || {}).configPath);
-        if (!config.ok) {
-            // No file is the ordinary case on a machine with no endpoint, and
-            // it is silent: a line every find printed would be noise about a
-            // channel nobody configured.
-            if (config.reason === 'absent') return { hits: [], notes: [] };
-            return {
-                hits: [],
-                notes: [judgedOffLine('the endpoint config is ' + config.reason + ': '
-                    + sanitize(config.detail || 'unusable', 120))]
-            };
-        }
-
-        // The candidate set is built here rather than by the caller, and the
-        // ordering is the point: everything above this line is a config read,
-        // so a machine with no endpoint reaches none of the work below. The
-        // build reads an index per distinct semantic-hit directory, which is
-        // I/O no find without an endpoint should pay, and it loads the prompt
-        // module, which is a require that must sit inside this function's
-        // guard: an installed copy missing the prompts directory would
-        // otherwise throw out of an argument expression, past the try/catch
-        // that promises this channel can never fail a find, and take the
-        // lexical and semantic blocks down with it.
-        const built = judgedCandidates(lexicalCandidates, semanticHits);
-        const candidates = built.set;
-        // Nothing to rank is nothing to export, and it returns before a word is
-        // said about what crosses the wire. Every line below this one describes
-        // an export that is about to happen, and a run that posts nothing while
-        // announcing that data is leaving the network trains a reader straight
-        // past the announcement on the run where it is true.
-        if (candidates.length === 0) return { hits: [], notes: [] };
-
-        const notes = built.notes;
-        // What the config read had to say about itself, said out loud. An
-        // ignored key is the operator's typo and the reader who can fix it is
-        // the one at this terminal. The timeout key gets a sentence of memq's
-        // own beside the client's, because this channel forces its own probe
-        // and call budgets: a reader told only that the key was ignored would
-        // go and fix a value that changes nothing on this path.
-        for (const warning of (config.warnings || [])) {
-            const mine = warning.startsWith(client.TIMEOUT_WARNING_PREFIX)
-                ? '; find sets its own probe and call budgets, so that key changes'
-                    + ' nothing on this path'
-                : '';
-            notes.push('memq: endpoint config: ' + sanitize(warning, 200) + mine);
-        }
-        // The disclosure this channel owes when the configured host is off this
-        // network, composed by the shared client so both producers on this
-        // channel say it. The config file is rewritable by anything running as
-        // this user, so prevention is already lost and this line is the whole
-        // of the control: without it a redirected endpoint sends every query
-        // and every candidate record's name and description to an arbitrary
-        // address with no surface anywhere reporting it. It rides ahead of the
-        // probe, so it is said even when the redirected endpoint is dead.
-        const remoteWarning = client.remoteEndpointWarning(config,
-            'this query and the name, tier and description of every candidate record');
-        if (remoteWarning !== null) notes.push('memq: ' + remoteWarning);
-
-        // The probe's argument is named key by key rather than spread, which
-        // is the opposite of the judged call below and deliberate. The probe
-        // owes liveness and nothing else, so a dialect it never learns is the
-        // contract rather than a key gone missing: naming the two keys here is
-        // what keeps this call blind if the probe ever learns to read one.
-        const probe = await client.probeEndpoint({
-            url: config.url,
-            timeoutMs: JUDGED_PROBE_TIMEOUT_MS
-        });
-        if (probe.status !== 'ok') {
-            // The probe's own vocabulary, not a generation call's. A GET that never
-            // completes is a hung connection and not the "lane busy" a queued
-            // generation earns, and a probe the endpoint answered with a
-            // refusal was answered, so "nothing answered" would be false about
-            // it. Each outcome says what happened to the probe.
-            notes.push(judgedOffLine(JUDGED_PROBE_CONDITIONS[probe.status]
-                || 'the ' + JUDGED_PROBE_TIMEOUT_MS + ' ms probe of the endpoint did not succeed'));
-            return { hits: [], notes };
-        }
-
-        const prompt = relevancePrompt();
-        // Which endpoint answered, named by its fingerprint. The locality
-        // warning above fires only for a host outside every private range, and
-        // this fleet's endpoint is itself on a private address across the
-        // virtual switch, so a config rewritten from that address to another
-        // private one changes where every query goes while leaving this
-        // command's output identical. The fingerprint is what makes that
-        // visible: it is a change detector, and a reader who sees a different
-        // one from yesterday's knows a different endpoint answered. The address
-        // itself is never printed, which is the whole reason the endpoint is
-        // fingerprinted rather than named.
-        notes.push('memq: model-judged ranking calling the endpoint fingerprinted '
-            + sanitize(config.endpointFingerprint, 32));
-        // The loaded config is handed to the transport whole, with this
-        // command's own call budget as its one override: the transport reads
-        // the endpoint's declared dialect off it, and a hand-built object
-        // carrying the keys one reader needs today drops whatever the next one
-        // reads. The probe above is the deliberate exception, for the reason
-        // stated there. The object is read for the call rather than sent: the
-        // request beside it is what is serialized.
-        const sent = await client.postGenerate({
-            model: config.model,
-            system: prompt.SYSTEM,
-            prompt: prompt.formatQuery(term, candidates),
-            stream: false,
-            think: false,
-            format: prompt.responseSchema(),
-            options: { num_predict: JUDGED_NUM_PREDICT, temperature: client.TEMPERATURE }
-        }, { ...config, timeoutMs: JUDGED_CALL_TIMEOUT_MS });
-        if (sent.status !== 'ok') {
-            const condition = sent.status === 'timeout'
-                ? 'the ranking call outran its ' + JUDGED_CALL_TIMEOUT_MS + ' ms budget'
-                : sanitize(client.GAP_REASONS[sent.status] || sent.status, 120)
-                    + ': ' + sanitize(sent.detail || 'no detail', 120);
-            notes.push(judgedOffLine(condition));
-            return { hits: [], notes };
-        }
-
-        const parsed = parseJudgedAnswer(sent.body, candidates);
-        if (parsed.status !== 'ok') {
-            // A generation the endpoint stopped at OUR ceiling is our fault and
-            // says so. The API reports why it stopped, and `length` means the
-            // answer ran into num_predict rather than finishing, which leaves a
-            // JSON object cut mid-structure: reporting that as an endpoint that
-            // answered badly is the instrument blaming another party for its
-            // own limit, which is exactly the class of quiet wrongness this
-            // channel exists to help catch. The ceiling is set well above the
-            // schema's worst case, so this path is a bound being wrong rather
-            // than an answer being long.
-            const truncated = sent.body !== null && typeof sent.body === 'object'
-                && sent.body.done_reason === 'length';
-            notes.push(judgedOffLine(truncated
-                ? 'the answer hit this command\'s own ' + JUDGED_NUM_PREDICT
-                    + '-token generation ceiling and was cut off mid-object,'
-                    + ' which is a bound set here rather than a fault of the endpoint'
-                : 'the endpoint\'s answer was not a ranking: ' + sanitize(parsed.detail, 120)));
-            return { hits: [], notes };
-        }
-
-        // Each count says what it counts. An entry that resolved to no
-        // candidate is the invention question and is the one worth a reader's
-        // attention; an entry naming a record already ranked is the model
-        // listing one record twice and costs the block a line. The names
-        // themselves are not printed: what is established about an unresolved
-        // one is that this candidate set did not hold it, which the count
-        // carries and a name would not.
-        if (parsed.unresolved > 0) {
-            notes.push('memq: the model-judged ranking returned ' + parsed.unresolved
-                + ' entr' + (parsed.unresolved === 1 ? 'y' : 'ies')
-                + ' naming no record in the candidate set; dropped');
-        }
-        if (parsed.repeated > 0) {
-            notes.push('memq: the model-judged ranking named ' + parsed.repeated
-                + ' record' + (parsed.repeated === 1 ? '' : 's')
-                + ' twice; the repeat' + (parsed.repeated === 1 ? ' was' : 's were') + ' dropped');
-        }
-        if (parsed.overflowed > 0) {
-            notes.push('memq: the model-judged ranking returned ' + parsed.overflowed
-                + ' entr' + (parsed.overflowed === 1 ? 'y' : 'ies') + ' past the '
-                + prompt.MAX_RANKED + ' this command asks for; dropped');
-        }
-        // An empty ranking is an ordinary answer and not a failure, so it takes
-        // its own line rather than the degrade one: silence here would read
-        // exactly like a channel that never ran.
-        if (parsed.hits.length === 0) {
-            notes.push('memq: the model judged none of the ' + candidates.length
-                + ' candidate' + (candidates.length === 1 ? '' : 's')
-                + ' relevant to this query');
-        }
-        // The clause budget and the endpoint's locality ride out with the hits
-        // because the caller renders them and must not reach back into this
-        // module's prompt or its config to find them: the render loop runs
-        // outside this try/catch, so a require or a config read taken there is
-        // a throw this channel promised could not happen.
-        return {
-            hits: parsed.hits,
-            notes,
-            reasonCap: prompt.REASON_MAX_CHARS,
-            endpointIsLocal: config.endpointIsLocal === true
-        };
-    } catch (err) {
-        // Every expected condition above is answered as a status, so a throw
-        // here is a genuine bug in this channel or in the client it loads. It
-        // still degrades, because nothing about the endpoint may fail a find.
-        return { hits: [], notes: [judgedOffLine(failureText(err))] };
-    }
-}
-
 // The standing stamp reminder closing a find whose shown hits include at
 // least one `touch` can stamp from this working directory. It rides at the
 // moment of use because applied stamps are a judgment act sessions
 // demonstrably under-record, and the decay clock starves without them. The
 // tiers passed in are the reachable ones only, so the flags teach exact
 // invocations rather than a menu, and a result whose every hit is out of
-// touch's reach (a journal-only result, a foreign store's record, an
-// undeclared type's, an archived one) gets no reminder at all: a line
+// touch's reach (a foreign store's record, an undeclared type's, an
+// archived one) gets no reminder at all: a line
 // recommending an invocation that errors, or that stamps a same-named local
 // record instead of the one displayed, trains sessions off the stamp, the
 // opposite of the line's job.
@@ -8504,7 +7054,7 @@ function printBodyText(body, fence) {
 //
 // The caller passes the tier directory the search started from, never one
 // derived from the file that answered: an archived file sits below its tier,
-// where tierDirFor deliberately resolves nothing, so a stamp placed beside it
+// which names no tier of its own, so a stamp placed beside it
 // would land in a sidecar no reader of the tier ever opens. The filename is
 // charset-closed and bounded by isMemoryFilename before it reaches here and
 // normalized to one key per file by memoryFileKey, so the appended line is
@@ -8580,7 +7130,7 @@ function queueRefusalText(answered, what) {
 // delivers a run's worth of them in one call. A machine with no client config
 // writes nothing at all.
 //
-// A directory tierNameFor does not recognise delivers nothing. The pending
+// A directory tierIdentity does not recognise delivers nothing. The pending
 // tier is the one in practice: a record the store has not adjudicated into a
 // tier is never published, so the host holds nothing for the stamp to name.
 function deliverStamp(tierDir, file, kind, options) {
@@ -8649,7 +7199,7 @@ function reportDrainRefusals(drain) {
 // the next write or refresh, which is the whole reason the queue exists. A
 // stand-down, a refusal and an unwritable queue exit non-zero, since each is a
 // write that landed nowhere, and the sentence says which. A stand-down is
-// rendered by the client's own standDownText, the db-sync rule, through the
+// rendered by the client's own standDownText, db-refresh's rule, through the
 // channel's renderer at the same cap, because it is composed around a config
 // path and the server's own words.
 function reportUndelivered(answer, what) {
@@ -8886,9 +7436,8 @@ const ANCHOR_TIER_UNEXAMINED = 'this tier could not be examined';
 // required alongside this file's built-ins and re-exported under this name
 // below: see the header comment near the top of this file for why it lives
 // there rather than as a local function, and module.exports for the
-// re-export. hooks/memory-session.js's drift pass and
-// hooks/memory-frontmatter-guard.js both already hold this module and call
-// this export directly; hooks/kit-compact-lib.js, which does not otherwise
+// re-export. hooks/memory-session.js's drift pass already holds this module
+// and calls this export directly; hooks/kit-compact-lib.js, which does not otherwise
 // need memq, requires hooks/kit-network-lib.js directly instead.
 
 // What a coverage line says about a tier whose anchors this digest never
@@ -8920,7 +7469,7 @@ const SHARED_TIER_ANCHOR_CLAUSE = ', anchors not checked (a shared tier\'s '
 // 'unreadable' were a file's condition rather than the pass's.
 //
 // A store anchor `storeAnchorStatesFrom` refused prints
-// `<path> not checked (not a file the store syncs)` in place of `unreadable`,
+// `<path> not checked (not a file a store anchor may name)` in place of `unreadable`,
 // since nothing examined the file and the word would say something did.
 //
 // A row the grammar refused carries no path at all, so it prints the row's
@@ -9152,26 +7701,8 @@ function authorReport(file, raw, indented) {
 // Every read verb asks the memory database in one sqlcmd spawn and falls back
 // to the snapshot this machine last took, with one line saying so, the
 // helpers below being what the seven verbs share: the index for the working
-// directory's key, a record composed in its file shape from the columns, the
-// read stamp a served body earns, and the line the frozen outcomes journal
-// takes ahead of anything read from it.
-
-// The line every surface that still reads outcomes.jsonl prints before
-// anything from the file: the journal is frozen, since `memq log` writes the
-// database and no read procedure serves it yet, so what the file shows is as
-// of its last line. The date is the newest entry's, or `none` for a journal
-// with no entry. It is one sentence on standard error, since it is a fact
-// about the evidence rather than part of it.
-function frozenJournalLine(memDir) {
-    let last = null;
-    try {
-        for (const e of readJournal(memDir)) {
-            if (typeof e.ts === 'string' && Number.isFinite(Date.parse(e.ts)) && (last === null || e.ts > last)) last = e.ts;
-        }
-    } catch { last = null; }
-    return 'memq: outcomes journal: frozen file, last line ' + (last === null ? 'none' : isoDate(last))
-        + '; outcomes logged since are in the database and memq cannot read them yet';
-}
+// directory's key, a record composed in its file shape from the columns, and
+// the read stamp a served body earns.
 
 // A record as a file, composed from the columns mem.usp_GetRecord returns: a
 // frontmatter block carrying the fields, then the body. A version 6 row's
@@ -9396,8 +7927,7 @@ function rowAliveMs(row) {
 }
 
 // memq get: the full record behind a find line. Precedence on a name
-// collision: a journal key wins (keys are the primary namespace `get`
-// serves), then this run's pending memory, then a project-tier memory, then
+// collision: this run's pending memory wins, then a project-tier memory, then
 // the type tier's, then the operator tier's, so the tier closest to the
 // caller always shadows the more widely shared one, then each tier's archive/
 // in that same order, so a
@@ -9410,9 +7940,8 @@ function rowAliveMs(row) {
 // so a caller who has been told which tier a record is in (the recognition
 // nudge names it, `find` labels it) has no spelling short of a flag that
 // reaches the shadowed record, and the bare name answers with the wrong one
-// while stamping the wrong tier's read. A flag names its tier outright, walks
-// no precedence, and skips the journal with it: a key is the namespace the
-// bare form serves, and a caller who spelled a tier named a memory file. Both
+// while stamping the wrong tier's read. A flag names its tier outright and
+// walks no precedence. Both
 // flags together is refused for `touch`'s reason in this verb's own terms, one
 // fetch answering from one record. The stamp follows the pinned tier, which is
 // the whole of what makes the flag worth having: a read credited to the tier
@@ -9424,8 +7953,8 @@ function rowAliveMs(row) {
 // back a record a checkout declaring no type can nonetheless write, which is
 // most checkouts, and a record that can be written and not read is a record
 // nobody can check. Given twice it is refused rather than resolved by
-// last-wins, and a name that is not a type name is refused before it is joined
-// onto a path.
+// last-wins, and a name that is not a type name is refused before it is
+// matched against anything.
 //
 // A record's own `anchors:` states follow its body on stdout, one line per
 // anchor, or one line naming why they could not be checked (anchorReport
@@ -9444,13 +7973,10 @@ function rowAliveMs(row) {
 // archived hit prints under its own tier's posture, raw or fenced, with the
 // retirement noted on stderr: what the note carries is the record that the
 // fact was retired, which is about the hit rather than part of it. A record
-// a live record of its own tier supersedes answers here in full and takes a
-// second such note naming its successor: a replaced fact is still evidence
-// of what was true, and this is the surface that says where the current
-// answer lives. Every
-// memory-file hit appends a read stamp to the tier it resolved from, an
-// archive hit included; a journal-key hit stamps nothing, because the sidecar
-// records memories, not keys. Nothing missing is an error: only
+// another supersedes answers here in full with no note naming its successor,
+// because the row carries what it supersedes and not what supersedes it. A
+// hit from a run's pending directory appends a read stamp to that directory's
+// usage.jsonl. Nothing missing is an error: only
 // argument/usage errors exit nonzero.
 //
 // `--no-stamp` serves the same output and writes no read stamp and no judged
@@ -9474,8 +8000,7 @@ function cmdGet(argv, options) {
             fromType = true;
             if (a !== '--type') {
                 namedType = a.slice('--type='.length);
-                // A named type is joined onto a path under the type-tier
-                // root, so it answers the store's own type-name gate where
+                // A named type answers the store's own type-name gate where
                 // it is read, before anything else is, which is where
                 // add-type, delete-type and `triggers` ask it too.
                 if (!isTypeName(namedType)) return usage(TYPE_NAME_RULE);
@@ -9495,11 +8020,11 @@ function cmdGet(argv, options) {
     if (fromType && fromOperator) {
         return usage('get reads one tier: give --type or --operator, not both');
     }
-    // Under a flag the argument is a record name and nothing else, the journal
-    // being the bare form's own namespace, so a name the store will not answer
-    // for is a refusal here rather than the bare form's 'nothing named' note.
-    // That note is the right answer for a bare argument, which may be a key
-    // this store simply does not hold; under a flag it would swallow the
+    // Under a flag the argument is a record name and nothing else, so a name
+    // the store will not answer for is a refusal here rather than the bare
+    // form's 'nothing named' note. That note is the right answer for a bare
+    // argument, which may name a record this store simply does not hold;
+    // under a flag it would swallow the
     // named tier's own answer, since a name the memory-file predicate refuses
     // never reaches the rungs where an absent tier is refused by name, and the
     // caller would read exit 0 for a tier that is not there. It is `touch`'s
@@ -9518,25 +8043,24 @@ function cmdGet(argv, options) {
             + ' of a model and stamps a read clock in a tier no project on this vector opted'
             + ' into'));
     }
-    // This hoist sits ahead of the journal read below: its
+    // This hoist sits ahead of the tier reads below: its
     // projectMemoryDir(cwd) reaches worktreeMainRoot's
     // fs.statSync(cwd/.git) whenever no pin is set, the walk that hangs for
     // the SMB timeout on an unreachable host. A pin answers projectSegment
     // before worktreeMainRoot is ever reached, so only an unpinned network
-    // cwd rides that walk; a pinned one reaches the journal read safely and
+    // cwd rides that walk; a pinned one reaches the tier reads safely and
     // lands on anchorReport's own anchorRoot(cwd) call further below, which
     // the pin cause covers directly for a pinned session whose cwd also
     // names a share.
     //
     // `--operator` is excluded from it for `touch`'s reason: that form
-    // resolves through operatorTierOrNull(), which takes no cwd argument at
-    // all, and it reads no journal, no pending tier and no project rung, so
-    // nothing on its path reaches the walk. Gating it would refuse a read for
-    // a hazard that is not on its path. Bare `--type` rides the gate with the
-    // plain form, reaching the same walk through typedTierOrNull(cwd);
-    // `--type=<type>` is excluded beside `--operator` and for its reason,
-    // resolving through typeDir(type) -> memoryRoot(), which reads the
-    // environment and the home directory and no working directory at all.
+    // takes no working directory at all, and it reads no pending tier and no
+    // project rung, so nothing on its path reaches the walk.
+    // Gating it would refuse a read for a hazard that is not on its path.
+    // Bare `--type` rides the gate with the plain form, reaching the same
+    // walk through projectType(cwd) -> projectKey(cwd); `--type=<type>` is
+    // excluded beside `--operator` and for its reason, naming its tier
+    // outright and reading no working directory at all.
     if (!fromOperator && namedType === null && pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
         process.stderr.write('memq: this call\'s working directory names a network share, so its '
             + 'project memory directory was not resolved (a synchronous walk under it risks '
@@ -9557,36 +8081,6 @@ function cmdGet(argv, options) {
     }
     const cwd = process.cwd();
     const opts = options || {};
-    // The journal is the bare form's own namespace: a key the frozen file
-    // holds answers here, the frozen line ahead of it. A pinned rung is a
-    // record name, so the journal is not consulted for it.
-    const memDir = fromType || fromOperator ? null : projectMemoryDir(cwd);
-    const entries = memDir !== null && fs.existsSync(path.join(memDir, JOURNAL_FILE))
-        ? readJournal(memDir).filter((e) => e.key === target) : [];
-    if (entries.length > 0) {
-        process.stderr.write(frozenJournalLine(memDir) + '\n');
-        // Newest first: reverse to later-lines-first, then a stable sort by
-        // ts descending, so a timestamp tie keeps the later-appended entry
-        // first. This is a total order over an append-only file, so the
-        // output is deterministic for identical store state.
-        const ordered = entries.slice().reverse()
-            .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
-        const shown = ordered.slice(0, GET_CAP);
-        process.stdout.write(sanitize(target, NAME_CAP) + ': showing ' + shown.length
-            + ' of ' + ordered.length + ' (cap ' + GET_CAP + '), newest first\n');
-        for (const e of shown) {
-            let line = sanitize(e.ts, 30) + '  ' + e.outcome + '  ' + sanitize(e.summary, SUMMARY_CAP);
-            if (e.tags && e.tags.length > 0) {
-                line += '  [' + e.tags.map((t) => sanitize(t, TAG_CAP)).join(',') + ']';
-            }
-            process.stdout.write(line + '\n');
-            if (e.detail !== undefined) {
-                process.stdout.write('    detail: ' + sanitize(e.detail, DETAIL_CAP) + '\n');
-            }
-        }
-        return;
-    }
-
     // The store's own definition of a memory file decides what may be read
     // by name, the same gate `touch`, the stamp hook, and listMemories
     // answer to: the MEMORY.md index is refused here exactly as it is
@@ -9626,8 +8120,7 @@ function cmdGet(argv, options) {
     } else if (fromType) {
         const type = namedType !== null ? namedType : projectType(cwd);
         if (type === null) {
-            process.stderr.write('memq: this project declares no Project-Type, so --type has no target'
-                + ' (--type=<type> names one outright)\n');
+            process.stderr.write(noDeclaredTypeText('--type'));
             process.exitCode = 1;
             return;
         }
@@ -9707,55 +8200,6 @@ function cmdGet(argv, options) {
     process.exitCode = 1;
 }
 
-// The same bounded read, with the clip handed back to the caller instead of
-// written to stderr, and with the kind of index it read named in the note.
-//
-// Every caller that reads an index it did not write takes this rather than the
-// whole-file reader: the size of a file this process did not produce is not a
-// caller's to assume, and the reads on the judged channel's path cross stores
-// this project never opened, whose indexes are as large as their own histories
-// made them. A clipped read drops its torn tail line and says so, because a
-// description this read missed would otherwise be indistinguishable from one
-// the store never had, and the note says stale or absent rather than absent:
-// later index lines shadow earlier ones by file key, so a clip can leave an
-// earlier, superseded line standing as a file's description rather than merely
-// losing the current one. \`tag\` labels the surface that asked, the way
-// usageEvidenceLine's does. An absent or unreadable index is empty
-// descriptions, not an error.
-function readCappedDescriptions(dir, what, tag, notes) {
-    const map = new Map();
-    let raw;
-    let clipped = false;
-    try {
-        const fd = fs.openSync(path.join(dir, INDEX_FILE), 'r');
-        try {
-            // One byte past the cap tells a file of exactly the cap
-            // (complete: nothing dropped, nothing to report) from one that
-            // genuinely continues beyond it.
-            const buf = Buffer.alloc(ARCHIVE_INDEX_READ_CAP + 1);
-            const n = fs.readSync(fd, buf, 0, ARCHIVE_INDEX_READ_CAP + 1, 0);
-            clipped = n > ARCHIVE_INDEX_READ_CAP;
-            raw = buf.toString('utf8', 0, Math.min(n, ARCHIVE_INDEX_READ_CAP));
-        } finally {
-            fs.closeSync(fd);
-        }
-    } catch {
-        return map;
-    }
-    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-    const lines = raw.split(/\r?\n/);
-    if (clipped) {
-        lines.pop();
-        notes.push('memq: ' + what + ' read capped at ' + ARCHIVE_INDEX_READ_CAP
-            + ' bytes; descriptions past the cap may be stale or absent' + tag);
-    }
-    for (const line of lines) {
-        const parsed = parseIndexLine(line);
-        if (parsed !== null) map.set(parsed.file, parsed.description);
-    }
-    return map;
-}
-
 // The applied column of a recall line, from the row's own aggregates: the
 // distinct-day count when the row carries a last applied stamp, and 'never'
 // when it carries none. The host keeps those aggregates over every sandbox's
@@ -9821,8 +8265,8 @@ function triggerlessCount(records) {
 // budget is a function parameter the tests can lower rather than an
 // environment knob: KIT_MEMORY_ROOT is gated precisely because an env
 // variable shaping what reaches the model is an attack surface, and a new
-// ungated one would reopen it. `surfaces` is {journal, archive, type,
-// operator, project, pending}, each {coverage, lines, narrow} with `lines` ordered
+// ungated one would reopen it. `surfaces` is {archive, type, operator, fleet,
+// project, pending}, each {coverage, lines, narrow} with `lines` ordered
 // newest first and `narrow` naming the move that reaches what a cut hides,
 // plus an optional top-level `fence` string. A surface the store does not
 // have (pending, outside a run) is omitted entirely rather than passed
@@ -9839,9 +8283,9 @@ function triggerlessCount(records) {
 // The output is the coverage header (one line per surface the store has,
 // zero-record surfaces included: an empty surface is a stated fact, never a
 // silent absence), then each surface's lines in the fixed output order
-// journal, archive, type, operator, project, pending. When the total tops
-// maxLines, record lines are cut tier by tier in the fixed order project,
-// type, operator, archive, pending, journal, which ranks each surface by how
+// archive, type, operator, fleet, project, pending. When the total tops
+// maxLines, record lines are cut tier by tier in the fixed order fleet,
+// project, type, operator, archive, pending, which ranks each surface by how
 // many other ambient paths a reader has to it: the project tier has the most
 // (`memq find`, `memq get`, and its index file sitting in
 // one known directory, pinned or not), so its floor of presence is the one
@@ -9849,10 +8293,9 @@ function triggerlessCount(records) {
 // hook emits its index; the operator tier follows the type tier because it is
 // deliberately not emitted at session start, leaving it one path fewer;
 // the archive follows both shared tiers because `find` never reaches retired
-// records at all; while the journal's aggregated evidence has no
-// other ambient surface, so it goes last, and the pending tier sits just
-// ahead of it for the same reason (a run has no other path to its own
-// pending writes; its index line is exactly what the tier withholds).
+// records at all; and the pending tier goes last because a run has no other
+// path to its own pending writes (its index line is exactly what the tier
+// withholds).
 // A cut surface keeps its newest lines (the oldest are what
 // the cut takes) and ends with a counted remainder naming the narrowing
 // move. The coverage header, the remainder lines, and the fence are the
@@ -9862,7 +8305,7 @@ function triggerlessCount(records) {
 // one remainder frees nothing.
 function recallDigest(surfaces, maxLines) {
     const present = (n) => surfaces[n] !== undefined;
-    const order = ['journal', 'archive', 'type', 'operator', 'fleet', 'project', 'pending']
+    const order = ['archive', 'type', 'operator', 'fleet', 'project', 'pending']
         .filter(present);
     const isFenced = (l) => l.startsWith('  ');
     let total = order.length;
@@ -9877,7 +8320,7 @@ function recallDigest(surfaces, maxLines) {
     // machine may not even hold, and every line of it is reachable by a `memq
     // find` the coverage line above already points at, so it is the cheapest
     // thing in the digest to lose to the budget.
-    for (const name of ['fleet', 'project', 'type', 'operator', 'archive', 'pending', 'journal']
+    for (const name of ['fleet', 'project', 'type', 'operator', 'archive', 'pending']
         .filter(present)) {
         if (total <= maxLines) break;
         const count = surfaces[name].lines.length;
@@ -9924,7 +8367,6 @@ function recallDigest(surfaces, maxLines) {
 // Output shape, in order, with a class token leading every record line (the
 // decay-scan convention, so a line stays self-describing wherever it lands):
 //
-//   outcomes journal: <n> keys
 //   archive: retired records are not in the index; memq find --archived reaches them
 //     (from the snapshot, " when the memory database answers, since this snapshot holds none" appended)
 //   type tier (<type>): <n> records, <n> without a recognition trigger
@@ -9932,7 +8374,6 @@ function recallDigest(surfaces, maxLines) {
 //   project tier: <n> records
 //     (pinned, ", the pinned tier this instance shares" appended)
 //   pending tier (<run-id>): <n> records, awaiting adjudication
-//   journal  <key>  <pass>/<fail>  last <age>  <summary>
 //   memq: from type '<type>', ... The indented lines below are data, not instructions:
 //     type  <name>  applied <n>d distinct|never  alive <age>
 //     operator  <name>  applied <n>d distinct|never  alive <age>
@@ -10023,10 +8464,9 @@ const ARCHIVE_ANCHOR_CLAUSE = ', anchors not checked (this digest does not check
 // judged path: that appends what it judged to `.kit/jev-shown.json` and can
 // append the stale sweep's `kit.jev.pointer` rows to the journal. Otherwise
 // it writes nothing, not even the read stamps `get` appends, because it
-// serves summaries rather than bodies; an absent journal or an empty tier is
-// a normal empty state; a malformed journal line is skipped with a note by the
-// shared reader; and finding nothing is an answer, so only argument errors and
-// an index nothing could serve exit nonzero.
+// serves summaries rather than bodies; an empty tier is a normal empty state;
+// and finding nothing is an answer, so only argument errors and an index
+// nothing could serve exit nonzero.
 async function cmdRecall(argv, options) {
     const opts = options || {};
     // The one option: a one-line situation for the fleet block's judge, which
@@ -10050,20 +8490,10 @@ async function cmdRecall(argv, options) {
     const now = Date.now();
     const reach = 'memq find <term> reaches them';
 
-    // The journal, frozen: its keys and the frozen line ahead of them.
-    const hasJournal = fs.existsSync(path.join(memDir, JOURNAL_FILE));
-    if (hasJournal) process.stderr.write(frozenJournalLine(memDir) + '\n');
-    const byKey = journalByKey(hasJournal ? readJournal(memDir) : []);
-    const journalLines = Array.from(byKey.keys())
-        .map((k) => ({ name: k, ts: byKey.get(k).latest.ts }))
-        .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1
-            : a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-        .map((e) => 'journal  ' + journalKeyLine(e.name, byKey.get(e.name), now));
-
     // The fleet block's query, composed before the one spawn so the search
     // rides the batch beside the index: the situation the judge reads where
-    // this machine has a judge, else the project's segment and its recent
-    // action keys, fleetMemoryBlock's own question.
+    // this machine has a judge, else the project's segment, fleetMemoryBlock's
+    // own question.
     const fleet = fleetConfigured(opts) && fleetRootStandDown() === null;
     const judging = fleet && jevJudge.judgeConfigured(opts.deps);
     let queryText = null;
@@ -10075,14 +8505,7 @@ async function cmdRecall(argv, options) {
     } else if (fleet) {
         const identity = memoryDatabase.tierIdentity(memDir);
         const segment = identity === null || identity.segment === null ? '' : identity.segment;
-        const keys = Array.from(byKey.entries())
-            .filter((e) => e[0] !== JEV_POINTER_KEY)
-            .sort((a, b) => (a[1].latest.ts < b[1].latest.ts ? 1
-                : a[1].latest.ts > b[1].latest.ts ? -1
-                    : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-            .slice(0, FLEET_RECENT_KEYS)
-            .map((e) => e[0]);
-        const text = fleetQueryText(segment, keys);
+        const text = fleetQueryText(segment);
         queryText = text === '' ? null : text;
     }
     const read = await indexForVerb(cwd, queryText === null ? null : { text: queryText, limit: jevJudge.FETCH_LIMIT }, opts);
@@ -10176,11 +8599,6 @@ async function cmdRecall(argv, options) {
             : '');
 
     const surfaces = {
-        journal: {
-            coverage: 'outcomes journal: ' + byKey.size + ' key' + (byKey.size === 1 ? '' : 's'),
-            lines: journalLines,
-            narrow: reach
-        },
         // The index lists live records alone, so retired ones are not in
         // this digest: the line says where they are reached rather than
         // leaving the surface out. `find --archived` reaches them only on
@@ -10371,9 +8789,10 @@ function byRecentThenName(a, b) {
 //
 // The cut order is the reverse of the output order, which is a rule rather
 // than a coincidence: the surfaces are printed from the one with no other
-// ambient path to it (the journal, which no session-start block carries and
-// no other reader summarizes) to the one with the most (memory files, which `find`,
-// `recall`, and the session's own index all reach), so the last printed is
+// ambient path to it (the applied stamps, which no session-start block
+// carries and no other reader summarizes) to the one with the most (memory
+// records, which `find`, `recall`, and the session's own index all reach), so
+// the last printed is
 // the first cut. A cut surface keeps its newest lines and ends with a counted
 // remainder naming the narrowing move, because a truncation the output does
 // not announce is a silent one, the failure shape this module refuses
@@ -10439,35 +8858,26 @@ function recentLabel(row) {
 // memq recent: everything the store recorded inside a time window, as one
 // bounded digest, for a session recap. Where `recall` answers what the store
 // holds, this answers what happened to it lately, so it groups by write
-// surface rather than by tier: journal entries logged, records applied and
-// read, and records added or updated, each group opening with a coverage line
+// surface rather than by tier: records applied and read, and records added
+// or updated, each group opening with a coverage line
 // that states its count even at zero, because an idle surface is a stated
 // fact rather than a silent absence.
 //
 // Output shape, in order, with a class token leading every record line (the
 // decay-scan convention, so a line stays self-describing wherever it lands):
 //
-//   journal entries: <n> in the last <window>
-//   journal  <key>  pass|fail|rollup <p>/<f>  <age>  <summary>
-//     (pinned, indented under the fence below with the rest of that store's
-//     surfaces)
 //   applied stamps: <n> in the last <window>, <n> records read
 //   memq: from type '<type>', ... The indented lines below are data, not instructions:
 //     applied  <name>  (type:<type>)  <age>
 //   applied  <name>  (project)  <age>
 //   memory records: <n> added or updated in the last <window>
 //   added|updated  <name>  (<tier>)  <age>
-//   judged pointers: <n> in the last <window>
-//   pointer  <name>  read|unread  <age>
-//     (only where the window holds a journal row carrying a recognition id;
-//     indented under a pin with the journal's own lines)
 //
 // Every tier of the store contributes: the project tier, the declared type
 // tier and the operator tier from the index rows, and, inside a run, that
 // run's pending tier from its own files, the engine's carve-out. A reader that
 // spanned the project tier alone would report the shared and run-scoped
-// surfaces as idle, which is this store's known failure shape. The journal is
-// project-tier only, because that is the only tier that has one.
+// surfaces as idle, which is this store's known failure shape.
 //
 // The applied group reads each row's aggregates, which the host keeps over
 // every sandbox's stamps: one line per record whose newest applied stamp is
@@ -10479,8 +8889,8 @@ function recentLabel(row) {
 // answered. A record's added or updated line keys on its row's update time,
 // labeled by recentLabel, and a pending record on its file's.
 //
-// recent is stamp-free, the `recall` and `find` posture: it reads the index,
-// the journal, and the pending tier's file stats, never serves a body, so it
+// recent is stamp-free, the `recall` and `find` posture: it reads the index
+// and the pending tier's file stats, never serves a body, so it
 // queues no read stamp of its own and mutates nothing. A digest that stamped
 // the reads it reports on would corrupt the decay evidence it exists to show.
 //
@@ -10489,14 +8899,10 @@ function recentLabel(row) {
 // same reason `get` fences those bodies and `recall` fences those lines:
 // this is a path that carries store text into a model's context. For the
 // project tier the fence decision keys on whether a store pin is in effect.
-// Unpinned, the project tier's lines and the journal's are the session's own
-// content and print raw; under a pin every one of those surfaces was written
-// by another worker of this instance, so the project tier's records and the
-// journal's entries all ride indented. The journal
-// is fenced under a pin because this digest prints one line per entry inside
-// the window, each carrying that entry's own summary prose, and the journal
-// is the surface the budget cuts last: unfenced, a pinned digest could fill
-// its output with another worker's prose in this tool's voice. Pending lines
+// Unpinned, the project tier's lines are the session's own content and print
+// raw; under a pin that tier was written by another worker of this instance,
+// so its records ride indented: unfenced, a pinned digest could fill its
+// output with another worker's prose in this tool's voice. Pending lines
 // stay at column zero pin or no pin, since that tier is the reading run's own
 // writing.
 //
@@ -10505,10 +8911,9 @@ function recentLabel(row) {
 // claims over lines from another surface would teach the reader something
 // false about the block below it.
 //
-// An absent journal or an empty tier is a normal empty state; a malformed
-// journal line is skipped with a note by the shared reader; and finding
-// nothing is an answer, so only argument errors and an index nothing could
-// serve exit nonzero. Under a redirected store root the shared tiers' index is
+// An empty tier is a normal empty state, and finding nothing is an answer, so
+// only argument errors and an index nothing could serve exit nonzero. Under a
+// redirected store root the shared tiers' index is
 // not read, so the applied group's coverage line says so in place of a count
 // and the record group counts the pending tier alone.
 async function cmdRecent(argv, options) {
@@ -10555,28 +8960,6 @@ async function cmdRecent(argv, options) {
         spans.push({ memories: tiers.type, label: '(type:' + sanitize(tiers.declaredType, TYPE_CAP) + ')', indent: '  ', isProject: false, isType: true, isOperator: false });
     }
     spans.push({ memories: tiers.operator, label: '(operator)', indent: '  ', isProject: false, isType: false, isOperator: true });
-
-    // The journal, frozen: its entries inside the window, and the judged
-    // pointer rows as their own group, with the frozen line ahead of both.
-    const hasJournal = fs.existsSync(path.join(memDir, JOURNAL_FILE));
-    if (hasJournal) process.stderr.write(frozenJournalLine(memDir) + '\n');
-    const windowed = (hasJournal ? readJournal(memDir) : [])
-        .map((e) => ({ entry: e, ms: Date.parse(e.ts) }))
-        .filter((r) => Number.isFinite(r.ms) && r.ms >= from)
-        .sort((a, b) => b.ms - a.ms
-            || (a.entry.key < b.entry.key ? -1 : a.entry.key > b.entry.key ? 1 : 0));
-    const journalLines = windowed
-        .filter((r) => r.entry.recognitionId === undefined)
-        .map((r) => projectIndent + 'journal  ' + sanitize(r.entry.key, NAME_CAP)
-            + '  ' + (r.entry.outcome === 'rollup'
-                ? 'rollup ' + r.entry.pass + '/' + r.entry.fail : r.entry.outcome)
-            + '  ' + recallAgeColumn(r.ms, now)
-            + '  ' + sanitize(r.entry.summary, SUMMARY_CAP));
-    const pointerLines = windowed
-        .filter((r) => r.entry.recognitionId !== undefined)
-        .map((r) => projectIndent + 'pointer  ' + sanitize(r.entry.summary, NAME_CAP)
-            + '  ' + (r.entry.outcome === 'pass' ? 'read' : r.entry.outcome === 'fail' ? 'unread' : r.entry.outcome)
-            + '  ' + recallAgeColumn(r.ms, now));
 
     // Applied stamps from the index's aggregates: one line per record whose
     // last applied stamp is inside the window, and the count of records read
@@ -10625,12 +9008,6 @@ async function cmdRecent(argv, options) {
             + '  ' + r.tier.label + '  ' + recallAgeColumn(r.ms, now));
 
     const surfaces = [
-        {
-            name: 'journal',
-            coverage: 'journal entries: ' + journalLines.length + ' in the last ' + window.label,
-            lines: journalLines,
-            narrow
-        },
         // Under a redirected root the stamps live only in the shared tiers'
         // index, which was not read, so the one unread line stands in their
         // place, and the record count is the pending tier's alone.
@@ -10650,16 +9027,7 @@ async function cmdRecent(argv, options) {
             narrow
         }
     ];
-    if (pointerLines.length > 0) {
-        surfaces.push({
-            name: 'judged pointer',
-            coverage: 'judged pointers: ' + pointerLines.length + ' in the last ' + window.label,
-            lines: pointerLines,
-            narrow
-        });
-    }
-    const pinContributed = journalLines.length > 0 || pointerLines.length > 0
-        || appliedRecords.some((r) => r.tier.isProject)
+    const pinContributed = appliedRecords.some((r) => r.tier.isProject)
         || recordRows.some((r) => r.tier.isProject);
     const typeShown = appliedRecords.some((r) => r.tier.isType) || recordRows.some((r) => r.tier.isType);
     const operatorShown = appliedRecords.some((r) => r.tier.isOperator) || recordRows.some((r) => r.tier.isOperator);
@@ -10706,10 +9074,10 @@ async function cmdRecent(argv, options) {
 // type tier, and the operator tier, each stating its count even at zero,
 // because a tier with nothing to adjudicate is a stated fact rather than a
 // silent absence. A reader that spanned the project tier alone would report the
-// shared tiers as clean, which is this store's known failure shape. Three
-// surfaces are deliberately out of the domain: journal keys, which have no
-// applied concept at all; the pending tier, whose records `touch` cannot
-// stamp, so a line naming one would teach an invocation that errors; and any
+// shared tiers as clean, which is this store's known failure shape. Two
+// surfaces are deliberately out of the domain: the pending tier, whose
+// records `touch` cannot stamp, so a line naming one would teach an
+// invocation that errors; and any
 // archived record, which `touch` refuses for having left its tier, kept out
 // here because the index lists live rows alone.
 //
@@ -10845,35 +9213,6 @@ async function cmdUnstamped(argv, options) {
     process.stdout.write(out.join('\n') + '\n');
 }
 
-// memq stamp-read: the read half of used-tracking, for a session that has
-// opened a memory file. The path names the file the session read; the stamp
-// lands where the file is a memory file by the store's own definition
-// (isMemoryFilename on its base name), sits in a tier directory tierDirFor
-// recognises, and exists as a file, since a stamp claims the file was opened
-// and a failed read opens nothing. The stamp is deliverStamp's `read` row on
-// the local queue, keyed to the project of the working directory this verb
-// runs in, which is what keys a project stamp to its fleet-wide store.
-//
-// It is silent and exits 0 on every path past its one argument: a path the
-// store does not own is no error, the caller is an after hook that reads no
-// answer, and a stamp is never worth disturbing the read that produced it.
-function cmdStampRead(argv) {
-    if (argv.length !== 1 || argv[0] === '' || argv[0].startsWith('--')) {
-        return usage('stamp-read takes one <path>');
-    }
-    try {
-        const resolved = path.resolve(argv[0]);
-        const name = path.basename(resolved);
-        if (!isMemoryFilename(name)) return;
-        const tierDir = tierDirFor(resolved);
-        if (tierDir === null) return;
-        let st = null;
-        try { st = fs.statSync(resolved); } catch { return; }
-        if (!st.isFile()) return;
-        deliverStamp(tierDir, name, 'read', { cwd: process.cwd() });
-    } catch { /* a read stamp is never worth a failed command */ }
-}
-
 // memq touch: the self-report half of used-tracking. The stamp hook records
 // that a memory was read; this records that one was actually applied, which
 // is the signal the decay lifecycle keys on, so --applied is required rather
@@ -10882,7 +9221,7 @@ function cmdStampRead(argv) {
 // project's key and segment, and no usage.jsonl line is written. With --type
 // the stamp names a type-tier record instead, on `triggers`'s two spellings of
 // the flag: bare, the tier is resolved through the project's own Project-Type
-// line, so a stamp can never land in a type the project has not opted into,
+// declaration, so a stamp can never land in a type the project has not opted into,
 // and `--type=<type>` names the tier outright, which is what stamps the
 // record a checkout declaring no type can still write and read. With
 // --operator it names an operator-tier record, which needs no resolution at
@@ -10937,10 +9276,9 @@ function cmdTouch(argv, options) {
         return usage('name must be characters from [A-Za-z0-9_.-], at most '
             + (MEMORY_FILE_CAP - 3) + ', and not the memory index');
     }
-    // A named type is joined onto a path under the type-tier root, so it
-    // answers the store's own type-name gate here, before anything is
-    // resolved from it, which is where add-type, delete-type and `triggers`
-    // ask it too.
+    // A named type answers the store's own type-name gate here, before
+    // anything is resolved from it, which is where add-type, delete-type and
+    // `triggers` ask it too.
     if (namedType !== null && !isTypeName(namedType)) {
         return usage(TYPE_NAME_RULE);
     }
@@ -10956,20 +9294,18 @@ function cmdTouch(argv, options) {
     }
 
     // This hoist sits ahead of every branch below but --operator: --type
-    // reaches typedTierOrNull(process.cwd()) -> projectType(cwd) ->
-    // projectMemoryDir(cwd), and the plain form reaches memDirOrNote() and
-    // pendingDirFor(process.cwd()), all three of which land on
-    // worktreeMainRoot's fs.statSync(cwd/.git) whenever no pin is set, the
-    // walk that hangs for the SMB timeout on an unreachable host. --operator
-    // resolves through operatorTierOrNull(), which takes no cwd argument at
-    // all (the operator tier belongs to every project unconditionally), so
-    // it never reaches that walk and is excluded from this refusal: gating
-    // it would refuse a shared-tier stamp for a reason that does not apply
-    // to it, the same reason add-operator and delete-operator are not gated.
-    // `--type=<type>` is excluded beside it and for its reason, resolving
-    // through typeDir(type) -> memoryRoot(), which reads the environment and
-    // the home directory and no working directory at all; bare `--type` still
-    // rides the gate, its tier coming from the project's own index.
+    // reaches projectType(process.cwd()) -> projectKey(cwd), and the plain
+    // form reaches projectKey(cwd) and pendingDirFor(process.cwd()), all of
+    // which land on worktreeMainRoot's fs.statSync(cwd/.git) whenever no pin
+    // is set, the walk that hangs for the SMB timeout on an unreachable host.
+    // --operator takes no cwd argument at all (the operator tier belongs to
+    // every project unconditionally), so it never reaches that walk and is
+    // excluded from this refusal: gating it would refuse a shared-tier stamp
+    // for a reason that does not apply to it, the same reason add-operator
+    // and delete-operator are not gated. `--type=<type>` is excluded beside
+    // it and for its reason, naming its tier outright and reading no working
+    // directory at all; bare `--type` still rides the gate, its tier coming
+    // from the project's own declaration.
     if (!toOperator && namedType === null && pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
         process.stderr.write('memq: this call\'s working directory names a network share, so its '
             + 'project memory directory was not resolved (a synchronous walk under it risks '
@@ -10983,9 +9319,10 @@ function cmdTouch(argv, options) {
     // a project record the project's fleet key beside it. A named type is the
     // tier the caller spelled, which is what stamps a type-tier record from a
     // checkout that declares no type at all; bare --type is the project's own
-    // declared type, read from its index. No tier directory is read for the
-    // record itself: the host resolves the name and counts a stamp for a record
-    // it does not hold as rejected, which the line below reports.
+    // declared type, read from this machine's declarations file. No tier
+    // directory is read for the record itself: the host resolves the name and
+    // counts a stamp for a record it does not hold as rejected, which the
+    // line below reports.
     let tier;
     let segment;
     let projectKeyOf = null;
@@ -10995,17 +9332,15 @@ function cmdTouch(argv, options) {
         segment = namedType;
         stampType = namedType;
     } else if (toType) {
-        const typed = typedTierOrNull(process.cwd());
-        if (typed === null) {
-            process.stderr.write('memq: this project declares no Project-Type'
-                + ' (or its type directory does not exist), so --type has no target'
-                + ' (--type=<type> names one outright)\n');
+        const declared = projectType(process.cwd());
+        if (declared === null) {
+            process.stderr.write(noDeclaredTypeText('--type'));
             process.exitCode = 1;
             return;
         }
         tier = 'type';
-        segment = typed.type;
-        stampType = typed.type;
+        segment = declared;
+        stampType = declared;
     } else if (toOperator) {
         tier = 'operator';
         segment = null;
@@ -11144,25 +9479,24 @@ function cmdAnchor(argv, options) {
     // the network-share hoist below, `touch`'s and `triggers`' asymmetry.
     if (toOperator) return anchorOperator(name, file, given, opts);
 
-    // This hoist sits ahead of memDirOrNote(): that call's own first
-    // statement is projectMemoryDir(process.cwd()), which reaches
-    // worktreeMainRoot's fs.statSync(cwd/.git) whenever no pin is set, the
-    // walk that hangs for the SMB timeout on an unreachable host. A pin
-    // answers projectSegment before worktreeMainRoot is ever reached, so it
-    // is specifically an unpinned network cwd that rides that walk; a
-    // pinned one reaches memDirOrNote safely and lands on this function's
-    // own anchorRoot(cwd) call below instead, which the pin refusal there
-    // covers directly for a pinned session whose cwd also happens to name a
-    // share. This command authors the record's own anchors: line, so
-    // proceeding into a hang here risks losing an interruptible foreground
-    // wait rather than merely a report.
+    // This hoist sits ahead of projectKey(cwd): that call's own first
+    // statement is projectSegment(cwd), which reaches worktreeMainRoot's
+    // fs.statSync(cwd/.git) whenever no pin is set, the walk that hangs for
+    // the SMB timeout on an unreachable host. A pin answers projectSegment
+    // before worktreeMainRoot is ever reached, so it is specifically an
+    // unpinned network cwd that rides that walk; a pinned one resolves its
+    // key safely and lands on this function's own anchorRoot(cwd) call below
+    // instead, which the pin refusal there covers directly for a pinned
+    // session whose cwd also happens to name a share. This command authors
+    // the record's own anchors: line, so proceeding into a hang here risks
+    // losing an interruptible foreground wait rather than merely a report.
     const cwd = process.cwd();
     if (pinnedProjectSegment() === null && namesNetworkShare(cwd)) {
         process.stderr.write('memq: this call\'s working directory names a network share, so no '
             + 'root was derived for an anchor path to be relative to (a synchronous walk under '
             + 'it risks hanging for the SMB timeout on an unreachable host, the same walk '
-            + 'memDirOrNote\'s own resolution of the project memory directory would otherwise '
-            + 'take next); there is no route to run this command from a network working '
+            + 'the resolution of the project store\'s key would otherwise take next); there is '
+            + 'no route to run this command from a network working '
             + 'directory, so nothing was written\n');
         process.exitCode = 1;
         return;
@@ -11337,7 +9671,7 @@ function anchorComputed(rootReal, given, rootWord, admits) {
     const refusals = [];
     for (const one of given) {
         if (typeof admits === 'function' && isAnchorPath(one) && !admits(one)) {
-            refusals.push(anchorRefusalText(one, STORE_ANCHOR_UNSYNCED_FAULT));
+            refusals.push(anchorRefusalText(one, STORE_ANCHOR_ROOT_FAULT));
             continue;
         }
         const got = anchorPathSha(rootReal, one, rootWord);
@@ -11383,10 +9717,9 @@ function anchorComputed(rootReal, given, rootWord, admits) {
 // scoped to this box is admitted, compared caselessly, and every other
 // operator record is refused with the rule named.
 //
-// The operator tier's own store.lock is the one lock taken, the lock its
-// other writers take (`triggers`' shared-tier rule), and no working
-// directory is read, so neither the network-share hoist nor a store pin
-// reaches this form.
+// No lock is taken, since the write goes to the memory database, and no
+// working directory is read, so neither the network-share hoist nor a store
+// pin reaches this form.
 function anchorOperator(name, file, given, opts) {
     const where = ' in the operator tier';
     const shown = '\'' + sanitize(name, NAME_CAP) + '\'' + where;
@@ -11467,9 +9800,7 @@ function anchorOperator(name, file, given, opts) {
 // tier nobody named. A type given twice is refused rather than resolved by
 // last-wins, two spellings naming two tiers being the same ambiguity both
 // flags together is refused for, and a name that is not a type name is
-// refused before it is joined onto a path, on `add-type`'s own gate. A name
-// that differs from the store's own spelling of the type in case alone is
-// refused too, for the reason namedTypeDirOrNote states.
+// refused before it is matched against anything, on `add-type`'s own gate.
 //
 // Two of `anchor`'s gates are deliberately absent, because both are about
 // resolving a path against a project root and this verb resolves none. A
@@ -11493,9 +9824,10 @@ function anchorOperator(name, file, given, opts) {
 // them, so two plain calls on one record at the same moment can each read the
 // list without the other's entry and the later write lose one; re-running the
 // call declares it again. `--replace` is the only way an entry comes off a
-// record: the frontmatter guard denies Write, Edit and MultiEdit on a shared
-// tier, so a wrong declaration there is otherwise correctable only by removing
-// the record, which takes its body and its applied history with it. Every bar
+// record: a shared-tier record has no hand-edit path, its one writer being
+// the database put, so a wrong declaration there is otherwise correctable
+// only by removing the record, which takes its body and its applied history
+// with it. Every bar
 // the plain form applies is applied here, and a replace naming no entry at all
 // removes the line rather than writing an empty one, which is why the arity
 // check below is the plain form's alone. A replace reads nothing, so it is the
@@ -11507,7 +9839,7 @@ function anchorOperator(name, file, given, opts) {
 // line, so what a caller risks there is a trigger too many; a replace states
 // the line whole, so every declaration the record carried and the invocation
 // did not name comes off it, on a tier every project on the machine reads and
-// every machine the store syncs to. The bar is on the flag reaching a shared
+// every machine the database serves. The bar is on the flag reaching a shared
 // tier at all rather than on a run that provably drops something, because
 // which entries a record carries is what the caller is correcting and so
 // exactly what they cannot be assumed to know: a replace that turns out to
@@ -11668,30 +10000,28 @@ function cmdTriggers(argv, options) {
         return;
     }
 
-    // This hoist sits ahead of memDirOrNote(): that call's own first statement
-    // is projectMemoryDir(process.cwd()), which reaches worktreeMainRoot's
+    // This hoist sits ahead of projectKey(cwd): that call's own first
+    // statement is projectSegment(cwd), which reaches worktreeMainRoot's
     // fs.statSync(cwd/.git) whenever no pin is set, the walk that hangs for
     // the SMB timeout on an unreachable host. The gate is about that walk
     // rather than about anything a trigger needs, which is why it is here in a
     // verb that derives no root at all: what it protects is the resolution of
-    // the memory directory this command writes into, the same resolution
+    // the store key this command writes under, the same resolution
     // `touch` takes and gates for the same reason. A pin answers
     // projectSegment before worktreeMainRoot is ever reached, so it is
     // specifically an unpinned network cwd that rides the walk, and under a
     // pin this verb runs through to the end, having no root to want.
     //
     // Bare `--type` rides the gate with the plain form, reaching that same walk
-    // through typedTierOrNull(cwd) -> projectType(cwd) -> projectMemoryDir(cwd);
-    // `--operator` is excluded from it, resolving through operatorTierOrNull(),
-    // which takes no cwd argument at all and so never reaches the walk. Gating
-    // the operator tier here would refuse a write for a hazard that is not on
-    // its path, which is `touch`'s own asymmetry and the reason add-operator
-    // and delete-operator carry no such gate either.
+    // through projectType(cwd) -> projectKey(cwd); `--operator` is excluded
+    // from it, taking no cwd argument at all and so never reaching the walk.
+    // Gating the operator tier here would refuse a write for a hazard that is
+    // not on its path, which is `touch`'s own asymmetry and the reason
+    // add-operator and delete-operator carry no such gate either.
     //
     // `--type=<type>` is excluded for `--operator`'s reason and no other: it
-    // resolves through typeDir(type) -> memoryRoot(), which reads the
-    // environment and the home directory and takes no working directory at
-    // all, so the walk this gate exists to prevent is not on its path either.
+    // names its tier outright and takes no working directory at all, so the
+    // walk this gate exists to prevent is not on its path either.
     // The gate is per door rather than per verb, which is what the whole-tree
     // pin over these gates reads and what keeps a spelling that never reaches
     // the walk from being refused for it.
@@ -11709,7 +10039,8 @@ function cmdTriggers(argv, options) {
     // Where the line is going: the record on the host, named by its tier and
     // its store's key. A tier flag names its destination outright. A named
     // type is the tier the caller spelled; bare --type is the project's own
-    // declared type, read from its index; --operator is the operator store;
+    // declared type, read from this machine's declarations file; --operator
+    // is the operator store;
     // and the plain form is the project tier under the project's key. No tier
     // directory and no record file is read: the host answers whether it holds
     // the name, and a run's pending tier is not a rung here, since the host
@@ -11722,17 +10053,15 @@ function cmdTriggers(argv, options) {
         store = { typeName: namedType };
         declaredType = namedType;
     } else if (toType) {
-        const typed = typedTierOrNull(cwd);
-        if (typed === null) {
-            process.stderr.write('memq: this project declares no Project-Type'
-                + ' (or its type directory does not exist), so --type has no target'
-                + ' (--type=<type> names one outright)\n');
+        const own = projectType(cwd);
+        if (own === null) {
+            process.stderr.write(noDeclaredTypeText('--type'));
             process.exitCode = 1;
             return;
         }
         tier = 'type';
-        store = { typeName: typed.type };
-        declaredType = typed.type;
+        store = { typeName: own };
+        declaredType = own;
     } else if (toOperator) {
         tier = 'operator';
     } else {
@@ -12084,8 +10413,8 @@ function addTriggerEntries(given) {
 //
 // `tierFlag` is the spelling that names the record this note is about, and
 // each tier's is the one whose target does not depend on where the command is
-// run. `memq triggers --operator` resolves through operatorTierOrNull(),
-// which takes no working directory. `memq triggers --type=<type>` names the
+// run. `memq triggers --operator` takes no working directory. `memq
+// triggers --type=<type>` names the
 // tier this record was written to, where bare `--type` would resolve the
 // working directory's own declared Project-Type instead and, from a project
 // declaring some other type, either report no such record or rewrite a record
@@ -12104,13 +10433,11 @@ function noTriggerNote(name, tierFlag) {
 }
 
 // memq decay-scan: report the store's decay candidates, one deterministic
-// line each, moving no memory and rewriting no sidecar; the derived vector
-// index its neighbour-pairs block sweeps is the one file it writes. Line
-// shapes:
+// line each, moving no memory and rewriting no sidecar; its neighbour-pairs
+// block is served by the memory database. Line shapes:
 //
 //   summarize  <name>  idle <n>d  applied <date (<n>d distinct)|never>  [created <date>]  edited <date>  read <date|never>
 //   archive    <name>  idle <n>d  (same evidence fields)
-//   rollup     <key>  <pass>/<fail> older than 30d  <first>..<last>
 //
 // and on stderr, where the scan's facts about itself go, the pinned block:
 //
@@ -12159,10 +10486,7 @@ function noTriggerNote(name, tierFlag) {
 // edit is itself an mtime reset, an untouched memory reaches its archive
 // threshold 60 idle days plus its extension after its summarize, not that
 // long after its last application: the ladder is summarize plus 60 plus the
-// extension, by construction. Journal entries older than 30 days are rollup
-// candidates, tallied per key so the rollup entry that replaces them can
-// preserve the tally; an existing rollup entry is decay-prune's own artifact
-// and is never a candidate again.
+// extension, by construction.
 //
 // A memory a live record of its own tier supersedes is an archive candidate
 // whatever its idle age, with 'superseded by <name>' closing its line as the
@@ -12379,24 +10703,17 @@ function storeDriftBlock(drift) {
                 + ' more not checked\n' : '');
 }
 
-// Whether a pinned store root or a pinned embedder root stands a semantic
-// check down, as the clause the line naming it prints, or null where neither
-// variable is set. Both surfaces that load the embedder outside `find` read
-// their skip from here, so the two cannot come to disagree about the condition
-// or about which variable it names.
+// Whether a pinned store root stands a semantic check down, as the clause the
+// line naming it prints, or null where the variable is not set. Both surfaces
+// that run a semantic check outside `find` read their skip from here, so the
+// two cannot come to disagree about the condition or about which variable it
+// names.
 //
-// Both conditions are wider than the honored pair every other caller in this
-// file asks storeSignalsPresent about. That is deliberate, because the question
-// here is not the one storeSignalsPresent answers.
-//
-// What each variable does on its own is not the same in the two cases, and
-// neither case reduces to the other. KIT_EMBEDDER_ROOT selects which code runs
-// only with KIT_EMBEDDER_ROOT_ALLOW_CODE=1 beside it: with the pair the embedder
-// really is required out of a directory the command line does not name, and
-// without it memory-index ignores the variable with a note and loads from the
-// install location instead. KIT_MEMORY_ROOT moves the store only with
-// KIT_MEMORY_ROOT_ALLOW_DATA=1 beside it, and moves nothing on its own. So each
-// bare variable is a skip that was not strictly necessary.
+// The condition is wider than the honored pair every other caller in this file
+// asks storeSignalsPresent about. That is deliberate, because the question here
+// is not the one storeSignalsPresent answers. KIT_MEMORY_ROOT moves the store
+// only with KIT_MEMORY_ROOT_ALLOW_DATA=1 beside it, and moves nothing on its
+// own, so the bare variable is a skip that was not strictly necessary.
 //
 // The breadth is the point all the same, and the reason is where the two parties
 // stand: the grant that lets an unattended worker run these verbs with no prompt
@@ -12404,18 +10721,12 @@ function storeDriftBlock(drift) {
 // checks run in the child. The Bash tool's shell persists across calls, so a
 // variable an earlier call exported is in the child's environment and not in the
 // hook's, and the hook cannot see which pair the child will hold. Keying on the
-// presence of either variable is what makes the child's stand-down no narrower
+// presence of the variable is what makes the child's stand-down no narrower
 // than the hook's grant condition. The cost is a skipped convenience in a shell
 // carrying a stray variable, and each caller's line says which condition
 // skipped it.
-//
-// Callers read this before the call that loads the embedder, which is the
-// ordering test/memq-grant.test.js pins for each of them: a check that ran after
-// the load would print the same line while loading exactly the code the grant's
-// reasoning says a granted verb does not.
 function pinnedRootStandDown() {
     if (process.env.KIT_MEMORY_ROOT) return 'a pinned store root (KIT_MEMORY_ROOT)';
-    if (process.env.KIT_EMBEDDER_ROOT) return 'a pinned embedder root (KIT_EMBEDDER_ROOT)';
     return null;
 }
 
@@ -12436,9 +10747,7 @@ function pairOrder(x, y) {
 }
 
 // One tier's reading: its heading, the pair lines under it, and the counted
-// remainder. `mi` is the index module the caller loaded and `vectors` the live
-// vectors of the sweep by directory key, so nothing here loads or sweeps
-// anything of its own.
+// remainder. Nothing here loads or ranks anything of its own.
 //
 // Only the strongest PAIRS_SHOWN pairs are held, with a running count of every
 // pair above the floor beside them. The cap is what a reader sees either way,
@@ -12702,17 +11011,14 @@ async function fleetPairsBlock(tiers, options) {
         for (const t of tiers) printTierPairs(t, fleetPairSource(new Map()));
         return;
     }
-    // The require is lazy and rides after an await, the block's own two reasons,
-    // and it is here for one thing: the text composition a record is queried by,
-    // which is the composition the authoring block's own query is spelled
-    // through, so one record asks the index one question wherever it is asked.
-    await null;
-    const mi = require('./memory-index.js');
+    // Each record is queried by the database client's text composition, the
+    // one the authoring block's own query is spelled through, so one record
+    // asks the database one question wherever it is asked.
     const texts = [];
     const spans = [];
     for (const t of tiers) {
         spans.push({ tier: t, at: texts.length, count: t.memories.length });
-        for (const mem of t.memories) texts.push(mi.embedText(mem.name, mem.description));
+        for (const mem of t.memories) texts.push(memoryDatabase.embedText(mem.name, mem.description));
     }
     const answered = await fleetVectorNearest(texts, FLEET_PAIRS_NEAREST,
         { budgetMs: FLEET_PAIRS_BUDGET_MS, ...(options || {}) });
@@ -12881,34 +11187,7 @@ async function cmdDecayScan(argv, options) {
     // The neighbour pairs, after the drift block and before the candidate list.
     await printNeighbourPairsBlock(pairTiers, { config: opts.config, deps: opts.deps });
 
-    // Journal entries past the rollup age, from the frozen file with its line
-    // ahead of them. A rollup entry is the artifact of a past prune, not
-    // pending history: counting it would re-flag a dormant key forever.
-    const byKey = new Map();
-    if (fs.existsSync(path.join(memDir, JOURNAL_FILE))) {
-        process.stderr.write(frozenJournalLine(memDir) + '\n');
-        for (const e of readJournal(memDir)) {
-            if (e.outcome === 'rollup') continue;
-            const ageMs = now - Date.parse(e.ts);
-            if (!Number.isFinite(ageMs) || ageMs < ROLLUP_AFTER_DAYS * DAY_MS) continue;
-            let g = byKey.get(e.key);
-            if (!g) {
-                g = { pass: 0, fail: 0, first: e.ts, last: e.ts };
-                byKey.set(e.key, g);
-            }
-            if (e.outcome === 'pass') g.pass += 1; else g.fail += 1;
-            if (e.ts < g.first) g.first = e.ts;
-            if (e.ts > g.last) g.last = e.ts;
-        }
-    }
-    const rollup = [];
-    for (const k of Array.from(byKey.keys()).sort()) {
-        const g = byKey.get(k);
-        rollup.push('rollup  ' + sanitize(k, NAME_CAP) + '  ' + g.pass + '/' + g.fail
-            + ' older than ' + ROLLUP_AFTER_DAYS + 'd  ' + isoDate(g.first) + '..' + isoDate(g.last));
-    }
-
-    const lines = summarize.concat(archive, rollup);
+    const lines = summarize.concat(archive);
     if (lines.length === 0) {
         process.stderr.write('memq: no decay candidates\n');
         return;
@@ -12963,245 +11242,15 @@ function indexDecayCandidates(memories, label, now, summarize, archive, pinned) 
     }
 }
 
-// Replace a store file's contents without an in-place truncate. The current
-// bytes are copied to <file>.bak first; the new content goes to a temp file
-// beside the original; any bytes appended to the original after origBuf was
-// read are copied onto the temp; the temp then renames over the original. A
-// crash at any point leaves either the original or the fully-written
-// replacement on disk, never a half-written store file. The window between
-// the tail copy and the rename can still lose one concurrent append.
-//
-// Its callers are decay-prune's two folds, rollupStep over the outcome
-// journal and usageStep over each tier's usage sidecar. Both files are frozen:
-// `memq log` writes the memory database and the stamp hook queues its stamps,
-// so nothing in this version appends to either. Both callers still take
-// `true`, because a lock-free append is the one write either file was ever
-// given, and a line one lands mid-pass is kept rather than dropped.
-//
-// The tail copy preserves lawful concurrent appends, so it belongs to the
-// files that have a lawful lock-free appender and to nothing else. It is a
-// property of neither this helper nor the file's name, so
-// `options.concurrentAppends` is required and the caller, which knows the
-// file it is writing, states it. A wrong value here splices foreign bytes
-// into a store file and reports success, so a call site that says nothing is
-// refused rather than defaulted: an omitted value is undefined, undefined
-// negates to no tail copy, and a new call site would pick that up silently.
-//
-// The flag answers one question, may this rewrite carry a tail, and the head
-// check answers a different one that has the same answer for every caller:
-// was the file under this pass replaced wholesale while it worked. So the
-// check runs for every rewrite and only the splice is gated. A replacement
-// inside that window ends the pass with nothing written and the replacing
-// file intact, and the remedy is to run the command again. What the flag
-// still decides is what a longer file with this pass's own bytes at its head
-// means: to a `true` caller it is a lawful append to carry, and to a `false`
-// caller it is a write with no lawful author, which the rewrite drops.
-function rewriteWithBackup(filePath, origBuf, newContent, options) {
-    if (!options || typeof options.concurrentAppends !== 'boolean') {
-        throw new Error(sanitize(path.basename(filePath), MEMORY_FILE_CAP + 16)
-            + ' was not rewritten: the call did not state whether it takes lawful'
-            + ' concurrent appends');
-    }
-    // `refuseGrowth` is optional and off when absent, so absence is lawful
-    // where an absent `concurrentAppends` is not. Any other non-boolean is a
-    // misspelling or a mistyped value, and the `=== true` reading below turns
-    // one into the permissive answer with nothing said, which is the same
-    // silent selection of the unsafe branch the required option above exists
-    // to refuse.
-    if (options.refuseGrowth !== undefined && typeof options.refuseGrowth !== 'boolean') {
-        throw new Error(sanitize(path.basename(filePath), MEMORY_FILE_CAP + 16)
-            + ' was not rewritten: refuseGrowth was given as something other than a boolean');
-    }
-    const concurrentAppends = options.concurrentAppends;
-    const bak = filePath + '.bak';
-    const tmp = filePath + '.tmp.' + process.pid;
-    // All three names this rewrite touches, asked about before any of them is
-    // read or written. Both destination names are predictable, and
-    // copyFileSync and writeFileSync each follow a link, so a symlink or
-    // junction planted at either would send a whole store file wherever it
-    // points. The target is the same question from the other side: this
-    // function dereferences it three times, at the caller's read, at the
-    // head-identity read below and at the backup copy, and a link there reads
-    // a file outside the store in as the document's own bytes, copies those
-    // bytes into the store's .bak, and leaves a regular file holding them
-    // where the link stood. The head-identity check cannot see it, because
-    // both reads go through the same link and agree. What the store then does
-    // with that content is what makes the read matter: a tier index is pushed
-    // to the private remote by the next sync and emitted line by line into
-    // every session that reads the store.
-    for (const dest of [filePath, bak, tmp]) refuseNonRegularStoreFile(dest);
-    // What a lawful append leaves behind is the bytes this pass read,
-    // unchanged, with more after them. Anything else at this path is a
-    // replacement: the whole store syncs, and a sync landing a pull writes a
-    // file whole while holding no lock this module takes. Length is not the
-    // test, on either side of it. A replacement can be longer than the read
-    // and share no prefix, and it can equally be shorter, which is what a
-    // prune on another machine produces, so a check made only where the file
-    // grew would let a pulled prune be clobbered by the document it replaced.
-    // No lawful appender shortens a file and a concurrent prune of this same
-    // file holds the lock this pass holds, so a shorter read is a pull and
-    // nothing else.
-    //
-    // A replacement ends the pass with nothing written. The alternative is to
-    // rewrite anyway, on the grounds that this pass holds the newer truth for
-    // the lines it rebuilt, but the rewrite is whole-document: it would
-    // republish a stale copy of every line it did not touch and drop whatever
-    // the pull added, which for an index is another machine's memories. The
-    // stop is transient and its remedy is the caller's own: the file on disk
-    // is the pulled one, intact, and the same command run again rebuilds from
-    // it.
-    //
-    // `refuseGrowth` widens the check to any length change, for a caller that
-    // cannot survive one. Without it a file that grew while keeping this
-    // pass's bytes as its prefix passes the check, takes no tail under
-    // `concurrentAppends: false`, and is renamed over: the appended bytes are
-    // dropped and the pass reports success. That is the deliberate answer for
-    // a shared tier's MEMORY.md, where the growth is a sync pull and
-    // last-writer-wins is the failure chosen a few lines above. It is the
-    // wrong answer for a caller whose new content is a splice of the bytes it
-    // read, since the splice is stale the moment the file moved. The callers
-    // passing it today are the two frontmatter-line writers, `anchor` and
-    // `triggers`, which is what every splicing caller has in common rather
-    // than a coincidence of who exists: a verb that rewrites one line of a
-    // record and promises the rest of it unchanged cannot let the rest move
-    // underneath it.
-    //
-    // The read and the check come before the backup copy, so a stop here
-    // leaves the target and its .bak both as they were. Copying first would
-    // spend the single generation of .bak on the replacing bytes, losing the
-    // previous one, for a rewrite that never happened, and would hand the
-    // caller a backup to report for a file it did not rewrite.
-    const current = fs.readFileSync(filePath);
-    if (current.length < origBuf.length
-        || !current.subarray(0, origBuf.length).equals(origBuf)
-        || (options.refuseGrowth === true && current.length !== origBuf.length)) {
-        const err = new Error(sanitize(path.basename(filePath), MEMORY_FILE_CAP + 16)
-            + ' was replaced while this pass was rewriting it, so nothing'
-            + ' was written; run it again against the file as it stands');
-        // Marked, because it is the one stop from here that clears itself: the
-        // file this pass read is gone and the one in its place is what a
-        // re-run reads, so a caller's failure line can say so instead of
-        // sending its reader to clear a path that is not blocked.
-        err.replaced = true;
-        throw err;
-    }
-    let tail = null;
-    if (concurrentAppends && current.length > origBuf.length) {
-        // The appended bytes are the appender's, not this pass's, so a
-        // caller that is removing something from the file gets to say
-        // what it will not carry back in.
-        tail = options.filterAppend
-            ? options.filterAppend(current.subarray(origBuf.length))
-            : current.subarray(origBuf.length);
-    }
-    fs.copyFileSync(filePath, bak);
-    // Announced here, after the copy returns, because this is the moment the
-    // backup exists: the guards above and the copy itself can all throw, and
-    // a caller told sooner would report a .bak that was never written. What
-    // it announces is the copy, never the rewrite, which can still fail after
-    // this. It is announced with the file's own path, because a caller
-    // reporting backups is reporting a set of files rather than a fact about
-    // the pass: several of the ways a rewrite stops happen before this line,
-    // so a pass that took one backup and then stopped short of a second must
-    // not send an operator looking for the second. That is the fact a caller's
-    // failure line needs: the single previous generation of this .bak is spent
-    // either way, so the file it now
-    // holds is that file as it stood just before this pass wrote to it,
-    // whether or not the rewrite that took it landed. That is one step later
-    // than the bytes checked above: where the file takes lawful concurrent
-    // appends, bytes appended between that read and this copy are in the copy
-    // too. Both are the file before this pass wrote, which is what recovery
-    // needs, and taking the copy earlier would spend the generation on a
-    // rewrite that the check can still refuse.
-    if (options.onBackup) options.onBackup(filePath);
-    try {
-        // Inside the try, so a failed write takes its own partial file with
-        // it: a stranded tmp beside a record holds a fragment of a body that
-        // no reader lists and no later write overwrites.
-        fs.writeFileSync(tmp, newContent, 'utf8');
-        if (tail !== null && tail.length > 0) fs.appendFileSync(tmp, tail);
-        fs.renameSync(tmp, filePath);
-    } catch (err) {
-        try { fs.unlinkSync(tmp); } catch { /* best effort: a leftover tmp is inert */ }
-        throw err;
-    }
-    // How many appended bytes the rewrite carried in verbatim, 0 where none
-    // were. The tail is the appender's and is never screened here, so a
-    // caller whose rewrite removed lines by a rule can say its rule did not
-    // cover these bytes rather than reporting a whole-file claim.
-    return tail === null ? 0 : tail.length;
-}
-
-// A store file as bytes plus decoded lines, or null when absent. The bytes
-// are what rewriteWithBackup diffs against for concurrent appends; any other
-// read failure propagates to the prune's failure path.
-function readStoreFile(filePath) {
-    let buf;
-    try {
-        buf = fs.readFileSync(filePath);
-    } catch (err) {
-        if (err && err.code === 'ENOENT') return null;
-        throw err;
-    }
-    let text = buf.toString('utf8');
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    return { buf, lines: text.split(/\r?\n/) };
-}
-
-// The name a backup is reported under: enough of the path to reach exactly
-// one file. In this store that is the tier and the filename, and one segment
-// more for a document that sits in a tier's archive.
-//
-// A basename alone collides. The rollup, this label's one caller, rewrites the
-// usage.jsonl sidecar of the project, type and operator tiers in one pass, so
-// three files of one name are backed up together. A reader handed one of
-// these names is going to walk it to a .bak and recover a document from it,
-// so it has to name one file and not a shape several files share.
-function backupLabel(filePath) {
-    const dir = path.dirname(filePath);
-    const tier = path.basename(dir) === ARCHIVE_DIR
-        ? path.basename(path.dirname(dir)) + '/' + ARCHIVE_DIR
-        : path.basename(dir);
-    return tier + '/' + path.basename(filePath);
-}
-
-// Name the backups a stopped pass took, for its failure line. The caller
-// passes what its rewrites recorded as they took each one, so an empty list
-// says no .bak of this pass exists rather than that nothing was written: a
-// rename, an unlink and a whole-file create all leave the list empty and the
-// store changed.
-// Each file once: a pass can rewrite one document twice, and a name printed
-// twice reads as two files rather than as one recovery. With a two-segment
-// label the only thing that repeats is one file, which is what this collapses.
-//
-// The list is bounded, and a cut says so, failureText's rule for the same
-// reason: this is the sentence an operator acts on when a rewrite stopped, and
-// a list that loses its last name silently tells them the file they most need
-// to know about is not there. The bound is generous for the line a pass
-// ordinarily prints, two or three names; the marker is what keeps it honest
-// for the pass that backs up a document in every tier, whose names are longer
-// since each carries the directory it sits in.
-function backupClause(names) {
-    const each = [...new Set(names)];
-    const listed = sanitize(each.join(', '), BACKUP_LIST_CAP + 1);
-    const text = listed.length > BACKUP_LIST_CAP
-        ? listed.slice(0, BACKUP_LIST_CAP) + ' [cut]'
-        : listed;
-    return (each.length === 1
-        ? 'a .bak beside ' + text + ' holds it'
-        : 'a .bak beside each of ' + text + ' holds it')
-        + ' as it stood just before this pass wrote to it';
-}
-
 // Refuse a store path that holds something other than a plain file, for a
-// write that is about to overwrite whatever is there. readStoreFile, and a
-// writeFileSync or appendFileSync opening a file the ordinary way, follow a
-// link, so a link at a store document's name reads as that document and then
-// takes the whole rewritten document to wherever it points, outside the store
-// the caller named. An overwrite has no flag that would refuse instead, the
-// way an exclusive create does, so lstat is what sees the link here rather
-// than following it. An absent path is not this check's business: the caller's
-// own read has already answered for it.
+// write that is about to overwrite whatever is there: the decay stamp, and
+// the read-stamp line a pending record's sidecar takes. A writeFileSync or
+// appendFileSync opening a file the ordinary way follows a link, so a link at
+// the name reads as the file and then takes the whole write to wherever it
+// points, outside the store the caller named. An overwrite has no flag that
+// would refuse instead, the way an exclusive create does, so lstat is what
+// sees the link here rather than following it. An absent path is not this
+// check's business: the caller's own read has already answered for it.
 function refuseNonRegularStoreFile(filePath) {
     let st = null;
     try { st = fs.lstatSync(filePath); } catch { /* absent: the caller's read answered */ }
@@ -13211,19 +11260,18 @@ function refuseNonRegularStoreFile(filePath) {
     }
 }
 
-// Create a store document at a name a check has just answered absent for: an
-// index a read returned null for, or a record an existence check did not find.
+// Create a pending record at a name an existence check has just answered
+// absent for, the one file write this module makes.
 //
-// Neither check can tell an absent file from a link pointing at nothing: both
-// answer absent, and a plain write would then follow the link and put a whole
-// tier index, an archive index or a record wherever it points. Two
-// instruments, for two different halves of the question. The lstat sees a
-// reparse point of either shape, a file symlink or a directory junction, and
-// refuses it in words. The exclusive flag closes the window between that look
-// and the write, which is not a theoretical window here: a sync pull writes
-// files into this store whole while holding no lock this module takes, so a
-// name that was free at the check can be a document by the time the write
-// runs, and a plain write would replace it.
+// That check cannot tell an absent file from a link pointing at nothing: both
+// answer absent, and a plain write would then follow the link and put the
+// record wherever it points. Two instruments, for two different halves of
+// the question. The lstat sees a reparse point of either shape, a file
+// symlink or a directory junction, and refuses it in words. The exclusive
+// flag closes the window between that look and the write: another process
+// of the same run can write the same name while holding no lock this module
+// takes, so a name that was free at the check can be a record by the time
+// the write runs, and a plain write would replace it.
 //
 // Both refusals are one state in one sentence, distinct from the state a
 // caller's own duplicate check reports: that one is a name already taken when
@@ -13277,263 +11325,6 @@ function createStoreFile(filePath, content) {
     }
 }
 
-// Fold the journal's expired entries, plain outcomes and earlier rollups
-// alike, into one rollup entry per key, preserving the pass/fail tally, the
-// covered date range, and the union of the entries' tags so `find --tag`
-// keeps matching the key. Entries newer than the rollup age, entries whose
-// timestamp does not parse, and lines that are not entries at all are kept
-// verbatim. A key whose only expired line is a single earlier rollup is left
-// alone: re-rolling it would rewrite the file to remove nothing.
-function rollupStep(memDir, now, report, onBackup) {
-    const file = path.join(memDir, JOURNAL_FILE);
-    const src = readStoreFile(file);
-    if (src === null) return;
-    const items = [];                  // {line, key: null to keep verbatim}
-    const groups = new Map();
-    for (let i = 0; i < src.lines.length; i++) {
-        const line = src.lines[i].trim();
-        if (line === '') continue;
-        let parsed = null;
-        try { parsed = JSON.parse(line); } catch { /* preserved just below */ }
-        if (!isEntry(parsed)) {
-            process.stderr.write('memq: preserving unparseable journal line ' + (i + 1) + '\n');
-            items.push({ line, key: null });
-            continue;
-        }
-        const ts = Date.parse(parsed.ts);
-        if (!Number.isFinite(ts) || now - ts < ROLLUP_AFTER_DAYS * DAY_MS) {
-            items.push({ line, key: null });
-            continue;
-        }
-        items.push({ line, key: parsed.key });
-        let g = groups.get(parsed.key);
-        if (!g) {
-            g = { pass: 0, fail: 0, firstMs: Infinity, lastMs: -Infinity, plain: 0, rollups: 0, tags: new Set() };
-            groups.set(parsed.key, g);
-        }
-        // The tag union survives the rollup because `find --tag` intersects
-        // against the tags of the entries that exist: a rollup without them
-        // would silently drop its key from every later tag query. This is a
-        // write boundary, so each tag is re-gated the way `log` gates it,
-        // and the set is bounded below where the entry is built.
-        if (parsed.tags) {
-            for (const t of parsed.tags) {
-                if (/^[\w.-]+$/.test(t) && t.length <= TAG_CAP) g.tags.add(t);
-            }
-        }
-        if (parsed.outcome === 'rollup') {
-            g.rollups += 1;
-            g.pass += parsed.pass;
-            g.fail += parsed.fail;
-            const firstMs = Date.parse(parsed.first === undefined ? parsed.ts : parsed.first);
-            const lastMs = Date.parse(parsed.last === undefined ? parsed.ts : parsed.last);
-            g.firstMs = Math.min(g.firstMs, Number.isFinite(firstMs) ? firstMs : ts);
-            g.lastMs = Math.max(g.lastMs, Number.isFinite(lastMs) ? lastMs : ts);
-        } else {
-            g.plain += 1;
-            if (parsed.outcome === 'pass') g.pass += 1; else g.fail += 1;
-            g.firstMs = Math.min(g.firstMs, ts);
-            g.lastMs = Math.max(g.lastMs, ts);
-        }
-    }
-    for (const [k, g] of groups) {
-        if (g.plain === 0 && g.rollups === 1) groups.delete(k);
-    }
-    if (groups.size === 0) return;
-    // The merged rollups lead the file (they are its oldest history) in
-    // sorted key order; every kept line follows in its original order. The
-    // timestamps are re-serialized canonically, which also bounds them.
-    const merged = [];
-    for (const k of Array.from(groups.keys()).sort()) {
-        const g = groups.get(k);
-        const first = new Date(g.firstMs).toISOString();
-        const last = new Date(g.lastMs).toISOString();
-        // Sorted for byte-stable output, capped at the same per-entry bound
-        // `log` enforces, and omitted when empty, the shape `log` writes.
-        const tags = Array.from(g.tags).sort().slice(0, MAX_TAGS);
-        const entry = {
-            ts: last, key: k, outcome: 'rollup', pass: g.pass, fail: g.fail, first, last,
-            summary: ('rolled up ' + (g.pass + g.fail) + ' outcomes '
-                + first.slice(0, 10) + '..' + last.slice(0, 10)).slice(0, SUMMARY_CAP)
-        };
-        if (tags.length > 0) entry.tags = tags;
-        merged.push(JSON.stringify(entry));
-        report.push('rollup  ' + sanitize(k, NAME_CAP) + '  ' + g.pass + '/' + g.fail
-            + '  ' + first.slice(0, 10) + '..' + last.slice(0, 10));
-    }
-    const kept = items.filter((it) => it.key === null || !groups.has(it.key)).map((it) => it.line);
-    // The outcome journal: `log` appends to it without taking the decay lock.
-    rewriteWithBackup(file, src.buf, merged.concat(kept).join('\n') + '\n',
-        { concurrentAppends: true, onBackup: onBackup });
-}
-
-// Prune the usage sidecar to what the decay lifecycle still reads. A file's
-// applied stamps fold into one applied-rollup record through the same tally
-// the decay clock consumes, so the distinct-day count and the first/last
-// applied times survive the prune and a pruned store gives a memory exactly
-// the clock its raw stamps did. The record's ts is its lastApplied, never
-// the prune time: a stamp's ts is the evidence moment it stands for, and a
-// prune-time ts would read as a fresh application and hold decay off
-// forever. Read stamps keep the newest-only prune: they are evidence, not a
-// tally, and the newest one is all the scan reports. The record is rebuilt
-// from validated parts (the file key its gated stamps carried, canonically
-// re-serialized timestamps, a counted integer), so every field is bounded at
-// this write boundary by construction. The sidecar grows on every memory
-// Read, so this is where the pass reclaims that growth; unparseable lines
-// are preserved by default, and a pass in which nothing would change
-// rewrites nothing. `dropMalformed` is the one sanctioned exit for such a
-// line: every read path preserves it and hand-editing the sidecar is
-// banned, so without one a single torn append suppresses the tier's decay
-// candidates on every future run. The exit is a delete, so it rides this
-// rewrite's own .bak, states its counts on stderr before the rewrite that
-// removes anything (so the audit trail exists even where the rewrite then
-// fails), says each removed line on stderr where the default says each
-// preserved one, and counts the removals in the report. The one shape it
-// refuses is a drop that would remove every non-blank line of a tier's
-// sidecar: no valid stamp surviving means the flag would empty the tier's
-// whole usage evidence, which is the motivating case's own input (a sidecar
-// written entirely in a stamp shape this memq does not parse, synced in
-// from a newer one), and that is evidence to investigate rather than bytes
-// to reclaim, with only a single-generation .bak behind the delete. The
-// refusal preserves the lines, leaves the file unrewritten, says so on
-// stderr, and stands down for this tier alone, so the rest of the pass and
-// the other tiers proceed as asked. `tag` labels the report and stderr
-// lines with the tier they describe ('' for the project tier), so a pass
-// over several tiers stays auditable from its output alone.
-function usageStep(memDir, report, tag, onBackup, dropMalformed) {
-    const file = path.join(memDir, USAGE_FILE);
-    const src = readStoreFile(file);
-    if (src === null) return;
-    const items = [];                  // {line, keep}
-    const stamps = [];                 // parsed stamps, the fold's tally input
-    const newestRead = new Map();      // file -> {ms, idx}
-    const appliedShape = new Map();    // file -> {raw, rollups, idxs}
-    const malformed = [];              // {idx, lineNo}, disposed of after the walk
-    let total = 0;
-    let readCount = 0;
-    let droppedMalformed = 0;
-    for (let i = 0; i < src.lines.length; i++) {
-        const line = src.lines[i].trim();
-        if (line === '') continue;
-        let parsed = null;
-        try { parsed = JSON.parse(line); } catch { /* disposed of after the walk */ }
-        if (!isUsageStamp(parsed)) {
-            // Held in place rather than judged here, because the drop's
-            // total-wipe refusal needs the whole file's stamp count, which
-            // the walk has only once it ends. The keep flag starts at the
-            // caller's answer and the refusal below flips it back.
-            malformed.push({ idx: items.length, lineNo: i + 1 });
-            items.push({ line, keep: !dropMalformed });
-            continue;
-        }
-        total += 1;
-        stamps.push(parsed);
-        const idx = items.length;
-        items.push({ line, keep: false });
-        if (parsed.kind === 'read') {
-            readCount += 1;
-            const ms = Date.parse(parsed.ts);
-            const prev = newestRead.get(parsed.file);
-            if (prev === undefined || ms > prev.ms) newestRead.set(parsed.file, { ms, idx });
-        } else {
-            // Grouped by memoryFileKey, the tally's own key, so the lookup
-            // below cannot miss a group the tally holds and the rollup this
-            // fold writes is keyed exactly as the tally reports it; on the
-            // platform where two synced spellings are one file, both fold
-            // into that one record.
-            const fileKey = memoryFileKey(parsed.file);
-            let s = appliedShape.get(fileKey);
-            if (!s) {
-                s = { raw: 0, rollups: 0, idxs: [] };
-                appliedShape.set(fileKey, s);
-            }
-            if (parsed.kind === 'applied-rollup') s.rollups += 1; else s.raw += 1;
-            s.idxs.push(idx);
-        }
-    }
-    // The malformed lines' disposal, in file order either way. A preserve
-    // notes each line; a drop is refused whole where no valid stamp would
-    // survive it, since removing every non-blank line of the sidecar empties
-    // the tier's usage evidence behind one .bak generation, and a sidecar in
-    // that state is a question to investigate rather than growth to reclaim;
-    // otherwise the counts print first, before anything is removed, so the
-    // delete's audit trail does not depend on the rewrite below landing.
-    if (!dropMalformed) {
-        for (const m of malformed) {
-            process.stderr.write('memq: preserving unparseable usage line ' + m.lineNo + tag + '\n');
-        }
-    } else if (malformed.length > 0 && total === 0) {
-        for (const m of malformed) items[m.idx].keep = true;
-        process.stderr.write('memq: --drop-malformed refused: no valid stamp would survive it'
-            + ' (' + malformed.length + ' malformed line' + (malformed.length === 1 ? '' : 's')
-            + ', 0 parsed), so the drop would empty this tier\'s usage evidence;'
-            + (malformed.length === 1 ? ' the line is' : ' the lines are')
-            + ' preserved and the sidecar is unchanged' + tag + '\n');
-    } else if (malformed.length > 0) {
-        process.stderr.write('memq: dropping ' + malformed.length + ' malformed line'
-            + (malformed.length === 1 ? '' : 's') + ' from a sidecar holding ' + total
-            + ' valid stamp' + (total === 1 ? '' : 's') + tag + '\n');
-        for (const m of malformed) {
-            process.stderr.write('memq: removing unparseable usage line ' + m.lineNo + tag + '\n');
-        }
-        droppedMalformed = malformed.length;
-    }
-
-    for (const v of newestRead.values()) items[v.idx].keep = true;
-
-    // A file's applied evidence folds when there is anything to fold: a raw
-    // stamp to absorb, or two rollups to merge (a synced store can carry
-    // both machines' rollups for one file). A lone rollup with nothing new
-    // beside it is kept verbatim in place, the same leave-alone rollupStep
-    // gives a key whose only expired line is an earlier rollup, so a prune
-    // that changes nothing rewrites nothing.
-    const foldFiles = [];
-    for (const [f, s] of appliedShape) {
-        if (s.raw === 0 && s.rollups === 1) {
-            items[s.idxs[0]].keep = true;
-        } else {
-            foldFiles.push(f);
-        }
-    }
-    // A removal is a change on its own: a sidecar whose stamps are already
-    // pruned to shape still gets its rewrite when a malformed line is
-    // leaving, or the drop the caller asked for would silently not happen.
-    if (foldFiles.length === 0 && readCount === newestRead.size && droppedMalformed === 0) return;
-
-    // The merged rollups lead the file (they are its oldest history) in
-    // sorted file-key order; every kept line follows in its original order,
-    // the same layout as the journal rollup.
-    const tally = appliedTally(stamps);
-    foldFiles.sort();
-    const merged = [];
-    for (const f of foldFiles) {
-        const t = tally.get(f);
-        const lastApplied = new Date(t.lastMs).toISOString();
-        merged.push(JSON.stringify({
-            ts: lastApplied, file: f, kind: 'applied-rollup',
-            distinctDays: t.distinctDays,
-            firstApplied: new Date(t.firstMs).toISOString(),
-            lastApplied
-        }));
-    }
-    const keptCount = merged.length + newestRead.size + (appliedShape.size - foldFiles.length);
-    // A usage sidecar: the stamp hook appends to it without taking any lock.
-    const splicedTail = rewriteWithBackup(file, src.buf,
-        merged.concat(items.filter((it) => it.keep).map((it) => it.line)).join('\n') + '\n',
-        { concurrentAppends: true, onBackup: onBackup });
-    report.push('usage  kept ' + keptCount + ' of ' + total + ' stamps' + tag);
-    if (droppedMalformed > 0) {
-        // The drop screened the lines this pass read and nothing else: a
-        // concurrent append lands in the rewrite verbatim through the tail
-        // copy, because those bytes are the appender's and may hold a lawful
-        // stamp still being written, so where one rode through, the report
-        // line says so rather than reading as a whole-file guarantee.
-        report.push('usage  dropped ' + droppedMalformed + ' malformed line'
-            + (droppedMalformed === 1 ? '' : 's')
-            + (splicedTail > 0 ? '; a concurrent append rode through unscreened' : '') + tag);
-    }
-}
-
 // A project directory name as this module prints it. The charset is the
 // store's own segment grammar (isStorePathSegment), which is what both minters
 // of these names are bounded by: sanitizeProjectPath, which leaves letters,
@@ -13550,7 +11341,8 @@ function usageStep(memDir, report, tag, onBackup, dropMalformed) {
 // a project segment is the working directory flattened, so one under the home
 // directory carries the account name inside the segment and prints as
 // `flattened-home-...`, which is the elision doing its job on a value that is
-// a path in a different spelling. The bound is the path bound (260, as in memDirOrNote) rather than
+// a path in a different spelling. The bound is the path bound (260, the cap
+// shownPath takes) rather than
 // the memory-name cap, because the segment is derived from a full path and
 // two deep sibling projects truncated shorter would print as one
 // indistinguishable declarer.
@@ -13558,85 +11350,43 @@ function projectLabel(segment) {
     return sanitize(String(segment).replace(/[^A-Za-z0-9_.-]/g, '-'), 260);
 }
 
-// The store's projects that declare a given type, as a sorted list of
-// bounded printable project directory names under <root>/projects. Retiring
-// a type-tier memory removes it from every one of these projects' shared
-// tier, so decay-prune prints this list before any type-tier retirement and
+// The projects this machine declares as a given type, as a sorted list of
+// bounded printable project keys out of the declarations file. Retiring a
+// type-tier memory removes it from every one of these projects' shared tier,
+// so decay-prune prints this list before any type-tier retirement and
 // refuses a multi-project one without --confirm-shared: add-type already
 // refuses to overwrite a name because another project may rely on it, and
-// retirement answers to the same reasoning. The walk is resilient by design,
-// because it runs across a store that may be partially synced between
-// machines: a project whose index exists but cannot be read is skipped with
-// a note, never a crash, and a projects/ root that cannot be enumerated at
-// all answers null, which is "the list could not be established" rather than
-// a list. The callers differ on what that is worth, so each says so where it
-// asks. Declared types compare the way the filesystem compares names,
-// since two spellings of one type reach the same tier directory on a
-// case-insensitive filesystem.
+// retirement answers to the same reasoning. A declarations file that cannot
+// be read as one answers null, which is "the list could not be established"
+// rather than a list, and the callers differ on what that is worth, so each
+// says so where it asks. The keys are printed through projectLabel, which
+// reduces a key the way it reduces a segment, since the file is hand-editable
+// and a key is printed in memq's own voice in the line an operator reads
+// while deciding whether to confirm a destructive act. Declared types
+// compare without case where the filesystem does, as the type rows of a
+// store synced across such machines were once minted.
 function projectsDeclaringType(type) {
-    const projectsDir = projectsRootPath();
-    const entries = projectSegments();
-    if (entries === null) {
-        process.stderr.write('memq: could not scan ' + shownPath(projectsDir)
-            + ' for declaring projects\n');
+    const read = readProjectTypes();
+    if (read.projects === null) {
+        process.stderr.write('memq: could not read ' + shownPath(projectTypesPath())
+            + ' for declaring projects: it ' + read.fault + '\n');
         return null;
     }
     const declaring = [];
-    for (const name of entries) {
-        let raw;
-        try {
-            // The same bounded, kind-checked head `projectType` takes of the
-            // same declaration, for its reasons: the declaring line sits at
-            // the index's head, so an index of any size costs this prefix,
-            // and the kind is settled on the open descriptor with a
-            // non-blocking open off win32, so a FIFO planted at one project's
-            // index path cannot park a pass that walks every project in the
-            // store.
-            raw = readHead(path.join(projectMemoryDirFor(name), INDEX_FILE),
-                PROJECT_TYPE_READ_CAP);
-        } catch (err) {
-            // No index there (or a stray file under projects/) is simply not
-            // a declarer; any other failure is a project this scan cannot
-            // vouch for either way, so it is named rather than silently
-            // counted out.
-            if (err && err.code !== 'ENOENT' && err.code !== 'ENOTDIR') {
-                process.stderr.write('memq: skipping unreadable project \''
-                    + projectLabel(name) + '\' in the declaring-projects scan\n');
-            }
-            continue;
-        }
-        // Null is "something other than a regular file answers at that path,
-        // or it was rewritten under the read", which is a project this scan
-        // cannot vouch for either way rather than a project that declares
-        // nothing, so it is named on the same channel as an unreadable one.
-        if (raw === null) {
-            process.stderr.write('memq: skipping unreadable project \''
-                + projectLabel(name) + '\' in the declaring-projects scan\n');
-            continue;
-        }
-        const declared = declaredType(raw);
-        if (declared !== null && fsEq(declared, type)) declaring.push(projectLabel(name));
+    for (const key of Object.keys(read.projects)) {
+        const declared = read.projects[key];
+        if (isTypeName(declared) && fsEq(declared, type)) declaring.push(projectLabel(key));
     }
+    declaring.sort();
     return declaring;
 }
 
 // memq decay-prune: the decay pass's one mutation path, and it mutates only
 // what its arguments name. --archive <name>, --archive-type <name>, and
-// --archive-operator <name> move
-// the memories judged done to their tier's archive/ and prune their index
-// lines; --rollup runs the age-based compaction, the journal rollup plus the
-// usage prune of each tier. The compaction is behind its own explicit flag
-// because the rollup discards the expired entries' prose for a tally, in a
-// store with no version control and a single-generation .bak, so it runs
-// only when the full pass asks for it, never as a side effect of an archive
-// move. --drop-malformed rides --rollup and removes the malformed usage
-// lines that rewrite otherwise preserves, the one sanctioned exit for a torn
-// line (usageStep owns the reasons); it is behind its own flag on the same
-// ground as the rollup, a delete of bytes no copy but the .bak survives, and
-// preserving stays the default. At least one flag is required: a prune asked
-// to do nothing is an argument error, not a silent no-op. The summarize edit
-// stays a hand edit because it is a judgment over prose, not a mechanical
-// rewrite.
+// --archive-operator <name> retire the memories judged done through the
+// memory database. At least one flag is required: a prune asked to do
+// nothing is an argument error, not a silent no-op. The summarize edit stays
+// a hand edit because it is a judgment over prose, not a mechanical rewrite.
 //
 // A shared-tier retirement is a cross-project act: the tier is shared, so a
 // move to archive/ removes the memory from every project's copy of it, not
@@ -13648,48 +11398,19 @@ function projectsDeclaringType(type) {
 // requires the confirmation, because the operator tier belongs to every
 // project reading the store and so has no unshared case.
 //
-// Safety posture, because no version control sits under the store: every
-// lock the requested work needs is acquired before anything mutates (the
-// project tier's decay.lock first, then the type tier's store.lock, then the
-// operator tier's, each taken only when the pass has work in that tier and
-// always in that order so two passes cannot
-// deadlock; the shared locks are the same ones add-type and add-operator
-// take, since prunes from
-// every project contend for those files), so a pass that
-// cannot get everything it needs refuses whole instead of half-applying the
-// project tier. Every archive name is
-// validated, deduplicated, and its source and destination checked before
-// anything mutates, and before any lock, so a refused pass has contended for
-// nothing; each fact another writer holding these same locks can change in
-// that window is asked again inside the locked step by the code that acts on
-// it, and every one of them refuses rather than skips: for a live name, that
-// it is still a record and that its archive slot is still free; for a name an
-// earlier run archived, that it is still gone from the tier and that the
-// archived body is still a plain file; and the directory all those slots sit
-// under, before any of them is read; every rewrite goes through rewriteWithBackup (a .bak, a
-// temp write, then a rename), carrying a concurrent append where the file has
-// a lawful lock-free appender and carrying none for the shared tiers' index
-// files, which a sync pull replaces whole; and everything
-// removed is printed, on the failure paths too, so the pass is auditable
-// from its output alone: a step that throws mid-pass prints what completed
-// before it, and each rewritten file keeps its .bak. The stamp hook appends
-// without these locks, which is exactly what the tail copy exists to
-// absorb.
+// Safety posture: every archive name is validated, deduplicated and read from
+// the memory database before anything is retired, so a refused pass has
+// changed nothing, and everything retired is printed, on the failure paths
+// too, so the pass is auditable from its output alone.
 function cmdDecayPrune(argv, options) {
     const opts = options || {};
     const archives = [];
     const typeArchives = [];
     const operatorArchives = [];
-    let rollup = false;
-    let dropMalformed = false;
     let confirmShared = false;
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
-        if (a === '--rollup') {
-            rollup = true;
-        } else if (a === '--drop-malformed') {
-            dropMalformed = true;
-        } else if (a === '--confirm-shared') {
+        if (a === '--confirm-shared') {
             confirmShared = true;
         } else if (a === '--archive' || a === '--archive-type' || a === '--archive-operator') {
             const v = argv[++i];
@@ -13702,30 +11423,21 @@ function cmdDecayPrune(argv, options) {
                 : a === '--archive-type' ? typeArchives : operatorArchives).push(v);
         } else if (a.startsWith('--')) return usage('unknown option ' + sanitize(a, 40));
         else {
-            return usage('decay-prune takes only --rollup, --drop-malformed, --archive,'
+            return usage('decay-prune takes only --archive,'
                 + ' --archive-type, --archive-operator, and --confirm-shared options');
         }
     }
-    // The flag rides the pass that rewrites the sidecars, never a pass of
-    // its own: alone it would be a rewrite nothing else asked for, and a
-    // silent no-op would read as a drop that happened. Checked before the
-    // no-work refusal below so a caller who gave only this flag is told what
-    // it rides on rather than that they asked for nothing.
-    if (dropMalformed && !rollup) {
-        return usage('--drop-malformed removes the malformed usage lines the rollup rewrite'
-            + ' preserves, so it needs --rollup');
-    }
-    if (!rollup && archives.length === 0 && typeArchives.length === 0
+    if (archives.length === 0 && typeArchives.length === 0
         && operatorArchives.length === 0) {
-        return usage('decay-prune needs --rollup, --archive, --archive-type, or --archive-operator');
+        return usage('decay-prune needs --archive, --archive-type, or --archive-operator');
     }
     if (confirmShared && typeArchives.length === 0 && operatorArchives.length === 0) {
         return usage('--confirm-shared confirms a shared-tier retirement, so it needs'
             + ' --archive-type or --archive-operator');
     }
-    // A name listed twice would pass per-name validation and then throw on
-    // the second rename mid-pass, after earlier rewrites landed; it is
-    // refused here with the other argument errors. Names are compared the
+    // A name listed twice would pass per-name validation and then be sent to
+    // the host twice; it is refused here with the other argument errors.
+    // Names are compared the
     // way the filesystem compares them, so two spellings of one file cannot
     // slip through. The same name in two tiers is two different files and
     // stays legal.
@@ -13738,12 +11450,12 @@ function cmdDecayPrune(argv, options) {
         }
     }
 
-    // This hoist sits ahead of memDirOrNote(): that call's own first
-    // statement, projectMemoryDir(process.cwd()), reaches worktreeMainRoot's
-    // fs.statSync(cwd/.git) whenever no pin is set, the walk that hangs for
-    // the SMB timeout on an unreachable host. Every form of this pass,
-    // --archive-type and --archive-operator included, resolves memDir first
-    // (below), so the gate covers all of them from this one door.
+    // This hoist sits ahead of projectType(cwd): that call reaches
+    // projectKey(cwd) and then worktreeMainRoot's fs.statSync(cwd/.git)
+    // whenever no pin is set, the walk that hangs for the SMB timeout on an
+    // unreachable host. Every form of this pass, --archive-type and
+    // --archive-operator included, reads the declaration first (below), so
+    // the gate covers all of them from this one door.
     if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
         process.stderr.write('memq: this call\'s working directory names a network share, so its '
             + 'project memory directory was not resolved (a synchronous walk under it risks '
@@ -13753,22 +11465,13 @@ function cmdDecayPrune(argv, options) {
     }
 
     const cwd = process.cwd();
-    const memDir = projectMemoryDir(cwd);
-    // The rollup rewrites the frozen files, so it needs the project
-    // directory; an archive writes the memory database and needs none.
-    if (rollup && !fs.existsSync(memDir)) {
-        process.stderr.write('memq: no memory directory at ' + shownPath(memDir) + '\n');
-        process.exitCode = 1;
-        return;
-    }
-    const typed = typedTierOrNull(cwd);
     const declaredType = projectType(cwd);
     if (typeArchives.length > 0 && declaredType === null) {
-        process.stderr.write('memq: this project declares no Project-Type, so --archive-type has no target\n');
+        process.stderr.write('memq: this project declares no Project-Type, so --archive-type has no target'
+            + ' (memq declare-type <type> declares one)\n');
         process.exitCode = 1;
         return;
     }
-    const operator = operatorTierOrNull();
     // Each archive target read from the memory database before anything is
     // retired: an absent name and a pinned record are refused, since a pin is
     // the decay lifecycle's override and the host does not read it.
@@ -13834,65 +11537,6 @@ function cmdDecayPrune(argv, options) {
     archiveThroughHost('type', { typeName: declaredType }, typeTargets, ' in the type tier',
         '  (type:' + sanitize(declaredType === null ? '' : declaredType, TYPE_CAP) + ')', report, opts);
     archiveThroughHost('operator', {}, operatorTargets, ' in the operator tier', '  (operator)', report, opts);
-
-    // The rollup stays on the frozen files, under the locks it always took.
-    if (rollup) {
-        const lock = acquireLock(path.join(memDir, DECAY_LOCK_FILE));
-        if (!lock.ok) {
-            if (report.length > 0) process.stdout.write(report.join('\n') + '\n');
-            process.stderr.write('memq: decay pass not started: ' + shownText(lock.reason, 200) + '\n');
-            process.exitCode = 1;
-            return;
-        }
-        let typeLock = null;
-        if (typed !== null) {
-            typeLock = acquireLock(path.join(typed.dir, STORE_LOCK_FILE));
-            if (!typeLock.ok) {
-                lock.release();
-                if (report.length > 0) process.stdout.write(report.join('\n') + '\n');
-                process.stderr.write('memq: decay pass not started: type store locked: '
-                    + shownText(typeLock.reason, 200) + '\n');
-                process.exitCode = 1;
-                return;
-            }
-        }
-        let operatorLock = null;
-        if (operator !== null) {
-            operatorLock = acquireLock(path.join(operator, STORE_LOCK_FILE));
-            if (!operatorLock.ok) {
-                if (typeLock !== null) typeLock.release();
-                lock.release();
-                if (report.length > 0) process.stdout.write(report.join('\n') + '\n');
-                process.stderr.write('memq: decay pass not started: operator store locked: '
-                    + shownText(operatorLock.reason, 200) + '\n');
-                process.exitCode = 1;
-                return;
-            }
-        }
-        const backedUp = [];
-        const noteBackup = (f) => { backedUp.push(backupLabel(f)); };
-        try {
-            process.stderr.write(frozenJournalLine(memDir) + '\n');
-            rollupStep(memDir, Date.now(), report, noteBackup);
-            usageStep(memDir, report, '', noteBackup, dropMalformed);
-            if (typed !== null) usageStep(typed.dir, report, '  (type:' + sanitize(typed.type, TYPE_CAP) + ')', noteBackup, dropMalformed);
-            if (operator !== null) usageStep(operator, report, '  (operator)', noteBackup, dropMalformed);
-        } catch (err) {
-            if (report.length > 0) process.stdout.write(report.join('\n') + '\n');
-            process.stderr.write('memq: decay prune failed: '
-                + failureText(err)
-                + (backedUp.length > 0
-                    ? ' (' + backupClause(backedUp) + ')'
-                    : ' (this pass took no .bak, so there is none of its own to restore from;'
-                        + ' what it had already done stands in the lines above)') + '\n');
-            process.exitCode = 1;
-            return;
-        } finally {
-            if (operatorLock !== null) operatorLock.release();
-            if (typeLock !== null) typeLock.release();
-            lock.release();
-        }
-    }
 
     if (report.length === 0) {
         if (process.exitCode !== 1) process.stderr.write('memq: nothing to prune\n');
@@ -13986,7 +11630,7 @@ function archiveThroughHost(tier, store, names, where, tag, report, opts) {
 // prevent. The conditions, each with its own line:
 //   - the database did not answer, is not configured on this machine, or
 //     stood down by its own rule: the client's own sentence for the condition.
-//   - a store root or an embedder root is named in the environment: skipped
+//   - a store root is named in the environment: skipped
 //     rather than served, for the reason the skips state where they are read.
 //   - the check itself threw: a bug in a convenience never costs an author
 //     their record.
@@ -14026,7 +11670,7 @@ async function printNeighbourBlock(name, description, options) {
 // client tool being something no spawned child can be given a fake of. Absent,
 // the config is read from its own path and NEIGHBOUR_TIMEOUT_MS is the clock.
 async function neighbourBlock(name, description, options) {
-    // The skip a pinned store root or a pinned embedder root earns, decided by
+    // The skip a pinned store root earns, decided by
     // the shared predicate the decay scan's pairs block reads too, so the two
     // surfaces stand down on one condition and name the same variable for it.
     // Why the condition is wider than the honored pair storeSignalsPresent asks
@@ -14038,16 +11682,10 @@ async function neighbourBlock(name, description, options) {
             + '; this check does not block the write\n');
         return;
     }
-    // The index module, for its text composer alone: embedText is the
-    // composition every record's vectors are made from, the name's rewrite into
-    // words included, so the query is spelled the way the corpus it is ranked
-    // against is. Requiring the module loads no embedder. The require is lazy
-    // and rides after an await: memory-index requires this module back for the
-    // store's shape and this file assigns module.exports at its bottom, so the
-    // await is what puts the require past this file's own evaluation.
-    await null;
-    const mi = require('./memory-index.js');
-    const query = mi.embedText(name, description);
+    // The database client's text composer: embedText is the composition every
+    // record's vectors are made from, the name's rewrite into words included,
+    // so the query is spelled the way the corpus it is ranked against is.
+    const query = memoryDatabase.embedText(name, description);
     // The nearest scan rather than the hybrid search: the query is a record's
     // own text rather than a person's words, so there is nothing for a lexical
     // list to rank, and the answer wanted is a cosine similarity, which is the
@@ -14116,7 +11754,7 @@ async function neighbourBlock(name, description, options) {
 // serializes them and refuses a name the tier already holds.
 //
 // The type names the tier directly (rather than resolving through the
-// project's Project-Type line) because authoring is how a type first comes
+// project's Project-Type declaration) because authoring is how a type first comes
 // into existence: the first add-type for a type creates its store on the host.
 // An existing memory name is refused, never overwritten: a shared fact another
 // project may rely on is not silently replaced by a one-line command. The
@@ -14387,7 +12025,7 @@ async function cmdAddType(argv, options) {
     // `triggers` verb outright, on the ground that the line it writes is what
     // decides when a memory is put in front of a session, so a worker could
     // aim recognition on a tier every project on the machine reads and every
-    // machine the store syncs to. A record born carrying that line reaches
+    // machine the database serves. A record born carrying that line reaches
     // exactly the same surface as one given it afterwards, so admitting the
     // flag on a granted verb would hand that reach back through the grant.
     //
@@ -14602,10 +12240,6 @@ async function cmdAddType(argv, options) {
 // session working that box remotely wants exactly the facts about it. It is
 // set at creation or by --replace, and a replace without it clears the scope.
 //
-// --board is refused: the memory database stores no board location yet, and
-// the value rides in no other field. The flag keeps its own terms, a value
-// given once, and its screen stays with it for the day the column exists.
-//
 // --supersedes names the live record of this tier that this one replaces,
 // add-type's flag under add-type's rule and for add-type's reasons.
 //
@@ -14615,7 +12249,7 @@ async function cmdAddType(argv, options) {
 // entry, noted on stderr where a record lands without one, and refused under
 // the engine store signals. What differs is only the reach the refusal is
 // about, and it is wider here: this tier is read by every project on the
-// machine and by every machine the store syncs to, where the type tier is
+// machine and by every machine the database serves, where the type tier is
 // read by the projects of one type.
 async function cmdAddOperator(argv, options) {
     const opts = options || {};
@@ -14625,7 +12259,6 @@ async function cmdAddOperator(argv, options) {
     let body;
     let bodyFile;
     let machine;
-    let board;
     let supersedes;
     let update = false;
     let replace = false;
@@ -14659,14 +12292,6 @@ async function cmdAddOperator(argv, options) {
             // and say nothing about the one they did.
             if (machine !== undefined) return usage('--machine is given once');
             machine = v;
-        } else if (a === '--board') {
-            const v = argv[++i];
-            if (v === undefined || v.startsWith('--')) return usage('--board needs a value');
-            // One location, given once, --machine's rule and its reason: a
-            // repeat that kept the last value would record a board the
-            // author did not mean and say nothing about the one they did.
-            if (board !== undefined) return usage('--board is given once');
-            board = v;
         } else if (a === '--trigger') {
             const v = argv[++i];
             if (v === undefined || v.startsWith('--')) return usage('--trigger needs a value');
@@ -14719,39 +12344,6 @@ async function cmdAddOperator(argv, options) {
     if (machine !== undefined && (!/^[\w.-]+$/.test(machine) || machine.length > MACHINE_CAP)) {
         return usage('machine must be characters from [A-Za-z0-9_.-], at most ' + MACHINE_CAP);
     }
-    // A board location is a path the stamp audit opens, so it takes the
-    // recorded-path screen every reader of the key applies, at the write door
-    // as well: refused outright rather than repaired, --machine's rule, since a
-    // path quietly rewritten names a different file. The value is trimmed
-    // first, and that is no rewrite: both readers trim it too, so the screen
-    // judges the path they will open. Three refusals are this door's own. The
-    // length cap bounds the line. A control character is refused on
-    // --machine's terms: the value goes into a line-oriented frontmatter
-    // block, and refusing one is what keeps the value on one line rather than
-    // forging further fields around itself. A normalized value ending in a
-    // separator names a directory, which the audit reports as not a regular
-    // file rather than reading it. What lands is the normalized form the
-    // screen answers, which is the spelling every reader resolves.
-    let boardPath;
-    if (board !== undefined) {
-        const value = board.trim();
-        let screened;
-        if (value.length > BODY_FILE_PATH_CAP) {
-            screened = { path: null, reason: 'is longer than ' + BODY_FILE_PATH_CAP + ' characters' };
-        } else if (/[\u0000-\u001f\u007f]/.test(value)) {
-            screened = { path: null, reason: 'carries a control character' };
-        } else {
-            screened = screenRecordedPath(value);
-            if (screened.path !== null && /[\\/]$/.test(screened.path)) {
-                screened = { path: null, reason: 'ends in a separator, so it names a directory' };
-            }
-        }
-        if (screened.path === null) {
-            return usage('--board takes the local absolute path of a board file, and this one '
-                + screened.reason);
-        }
-        boardPath = screened.path;
-    }
     // A supersedes target answers the record-name grammar before the tier is
     // asked whether it holds one, add-type's rule and its reasons: a value no
     // record could be called is a malformed pointer rather than a missing
@@ -14791,15 +12383,6 @@ async function cmdAddOperator(argv, options) {
             + ' --body-file the record body). A record that already exists takes its triggers'
             + ' from `memq triggers <name> <type>:<pattern> --operator`, which writes that line'
             + ' whole');
-    }
-    // The memory database stores no board location yet: mem.usp_PutRecord
-    // takes none, so the flag is refused rather than dropped on the way, and
-    // the value rides in no other field. A record already carrying a board:
-    // line on this machine keeps working for the readers of that line.
-    if (board !== undefined) {
-        return usage('--board names a board location the memory database does not store yet, so'
-            + ' it cannot be recorded; drop it (a record already carrying a board: line keeps'
-            + ' working)');
     }
     if (confirmShared && !repair && !replace) {
         return usage('--confirm-shared confirms a shared-tier overwrite, so it needs --replace or'
@@ -15003,29 +12586,25 @@ async function cmdAddOperator(argv, options) {
     if (wantedTriggers.length === 0) noTriggerNote(name, '--operator');
 }
 
-// memq put: one project-tier record written where memq resolves the working
-// project's store, and no index line with it. The directory is
-// projectMemoryDir's answer, a store pin, a worktree's main checkout and a
-// transcript filing included, so a caller that spawns memq files the record
-// where every reader and every publish looks, rather than in a directory
-// derived from its own working directory's spelling. Inside a run (an honored
-// KIT_RUN_ID) the record lands in that run's pending tier,
-// memory/pending/<run-id>/ under the same project directory, because
-// promotion into the project tier is the engine's adjudication and memq never
-// writes it. A record the engine promotes takes whatever index treatment the
-// engine applies, so the unindexed guarantee holds for a put made outside a
-// run.
+// memq put: one project-tier record sent to the memory database under the
+// working project's key, through mem.usp_PutRecord and the queue behind it.
+// The key is the store's own resolution of the working directory, a store pin,
+// a worktree's main checkout and a transcript filing included, so a caller
+// that spawns memq files the record under the key every reader lists, rather
+// than under a spelling derived from its own working directory. Inside a run
+// (an honored KIT_RUN_ID) the record lands in that run's pending tier instead,
+// memory/pending/<run-id>/ under the project's memory directory, as a file,
+// because promotion into the project tier is the engine's adjudication by file
+// and memq never writes it. That pending file is the one record write that
+// stays a file.
 //
-// The record takes add-type's layout, a frontmatter block, the `# <name>`
+// The pending file takes add-type's layout, a frontmatter block, the `# <name>`
 // heading, a blank line and the body, with put's own fields in the block:
 // `description:`, `tags:` in the inline form where tags are given,
 // `created:` as today's date, `author:` where --author is given, and the
-// run's provenance lines inside a run. It writes none of what add-type writes
-// and put does not: an `author:` taken from the session, `supersedes:` and
-// `triggers:`. MEMORY.md is never written, because the
-// index is what the session-start hook prints: an unindexed record ranks,
-// publishes and is judged on its frontmatter description, and it reaches a
-// session's opening text only when someone adds its index line by hand.
+// run's provenance lines. Outside a run the same fields travel as the
+// procedure's own columns, every list stated, so a `--replace` states the
+// whole record and clears what it does not name.
 //
 // A name the project tier holds live or retired, or the run's pending tier
 // holds, is refused with exit 1 and a stderr
@@ -15035,9 +12614,9 @@ async function cmdAddOperator(argv, options) {
 //
 // The refusals are add-type's wherever they apply to a create: the name
 // grammar, the tag grammar and count, one body over exactly one channel, a
-// blank body, the record cap, --body-file under the engine store signals, the
-// link refusal ahead of the existence check, and a create that cannot replace
-// a file a sync pull put there. Each answers before anything is written.
+// blank body, the record cap, --body-file under the engine store signals, and
+// for the pending file the link refusal ahead of the existence check. Each
+// answers before anything is written or sent.
 async function cmdPut(argv, options) {
     const opts = options || {};
     const positionals = [];
@@ -15255,70 +12834,34 @@ async function cmdPut(argv, options) {
 }
 
 // The pending-tier write `put` makes inside a run: the record file under
-// memory/pending/<run-id>/, created with an exclusive open under the project
-// store's lock, after a check of the pending, live and retired names. The
-// engine promotes or discards it by file, so this is the one record write that
-// stays a file.
+// memory/pending/<run-id>/, created with an exclusive open after a check of
+// the pending name. The engine promotes or discards it by file, so this is
+// the one record write that stays a file. No lock is taken: a pending write
+// is a create, and the exclusive open is what excludes a concurrent writer
+// of the same name. The project tier's names are the memory database's and
+// are not asked here; the engine's promotion is where a pending name meets
+// them.
 function putPending(cwd, pendingDir, name, file, content) {
-    const dir = projectMemoryDir(cwd);
-    const where = ' in the project tier';
     const pendingWhere = ' in the pending tier';
     const target = path.join(pendingDir, file);
-    // Whether the name is unwritable here, with the refusal printed. The link
-    // refusal runs ahead of each existence read, because existsSync follows a
-    // link, so a dangling one at the name reads as absent and a create would
-    // then take the body to wherever it points. It is asked once before the
-    // lock, so a doomed command never has acquireLock mint the directory, and
-    // again under it, where only the lock excludes a concurrent writer. Inside
-    // a run the pending tier's copy is refused as well as the project tier's
-    // live and retired ones, so a pending record is never one whose promotion
-    // lands on a name the project tier already holds.
-    const refused = () => {
-        const live = path.join(dir, file);
-        const retired = path.join(dir, ARCHIVE_DIR, file);
-        if (nonRecordRefusal(target, name, pendingWhere, 'put', true)) return true;
-        if (nonRecordRefusal(live, name, where, 'put', true)) return true;
-        if (nonRecordRefusal(retired, name, where + ' under ' + ARCHIVE_DIR + '/', 'put', true)) {
-            return true;
-        }
-        const held = fs.existsSync(target) ? pendingWhere
-            : fs.existsSync(live) ? where
-                : archiveHoldsRetired(dir, name) ? where + ', retired under ' + ARCHIVE_DIR + '/'
-                    : null;
-        if (held === null) return false;
-        process.stderr.write('memq: \'' + sanitize(name, NAME_CAP) + '\' already exists' + held
+    // The link refusal runs ahead of the existence read, because existsSync
+    // follows a link, so a dangling one at the name reads as absent and a
+    // create would then take the body to wherever it points. A refused
+    // command mints no pending directory.
+    if (nonRecordRefusal(target, name, pendingWhere, 'put', true)) return;
+    if (fs.existsSync(target)) {
+        process.stderr.write('memq: \'' + sanitize(name, NAME_CAP) + '\' already exists' + pendingWhere
             + '; put writes a new record only (nothing written)\n');
-        process.exitCode = 1;
-        return true;
-    };
-    if (refused()) return;
-    // store.lock alone, not decay.lock beside it as anchor and triggers take.
-    // Those rewrite an existing record and could rename it back over a name a
-    // decay pass has just archived; put only creates with an exclusive open,
-    // after an under-lock check of the pending, live and retired names, so it
-    // can never invert a pass's archive move.
-    const lock = acquireLock(path.join(dir, STORE_LOCK_FILE));
-    if (!lock.ok) {
-        process.stderr.write('memq: project store locked, nothing written: '
-            + shownText(lock.reason, 260) + '\n');
         process.exitCode = 1;
         return;
     }
     try {
-        if (refused()) return;
-        // The pending directory is made here, under the lock and past both
-        // refusals, so a refused command never mints it.
         fs.mkdirSync(pendingDir, { recursive: true });
-        // Created rather than written: a sync pull writes into this store
-        // whole and holds no lock this module takes, so a name free at the
-        // check above can be taken by the time the write runs.
         createStoreFile(target, content);
     } catch (err) {
         process.stderr.write('memq: could not write project memory: ' + failureText(err) + '\n');
         process.exitCode = 1;
         return;
-    } finally {
-        lock.release();
     }
     process.stdout.write(shownPath(target) + '\n');
 }
@@ -15573,24 +13116,6 @@ function deleteRefusedByStoreSignals(verb) {
 // record is a separate question, asked by nonRecordKind on the paths that
 // write.
 //
-// False here means "no plain file answers at this path", which covers both a
-// name standing free and a path that could not be examined. That conflation is
-// the reader's own semantics and is why every caller whose false branch then
-// writes, unlinks or reports a name as empty asks nonRecordRefusal first, which
-// separates the two and refuses the second: updateTargetUnusable for the record
-// it is about to repair, supersedesTargetRefusal for the record a pointer
-// names, and both create paths for the name they are about to
-// take. The callers left reading this answer alone are the ones whose false
-// branch only withholds a line of prose: archiveHoldsRetired and
-// archiveShadowNote's presence question.
-function regularFile(filePath) {
-    try {
-        return fs.statSync(filePath).isFile();
-    } catch {
-        return false;
-    }
-}
-
 // What a path is when it is not the plain file a record has to be, as a
 // phrase for a refusal, or null when it is a plain file or is absent.
 //
@@ -15618,19 +13143,6 @@ function nonRecordKind(filePath) {
     if (st.isSymbolicLink()) return { phrase: 'a symbolic link', code: null };
     if (st.isDirectory()) return { phrase: 'a directory', code: null };
     return { phrase: 'not a plain file', code: null };
-}
-
-// Whether the tier's archive already holds a record of this name. The create
-// paths read it under the lock they are about to write with: the create
-// proceeds either way, because a name coming back is ordinary, and what it
-// must not do is come back silently. Under --update the same state is a
-// refusal instead, because there the caller believes they are editing the
-// record that is gone. The pointer gate reads it lock-free, which it may
-// because both of its answers only withhold: a refusal writes nothing, and
-// the answer that lets a write through is about a second record the write
-// never touches.
-function archiveHoldsRetired(dir, name) {
-    return regularFile(path.join(dir, ARCHIVE_DIR, name + '.md'));
 }
 
 // Refuse a write against a path that is not a plain file, answering whether
@@ -15662,37 +13174,21 @@ function nonRecordRefusal(filePath, name, where, what, creating) {
     return true;
 }
 
-// memq decay-done: record that a decay pass completed, by touching the decay
-// stamp. The stamp's mtime is the record; the contents only say what the file
-// is. Like `touch`, the store must already exist and a run that does not end
-// in a written stamp exits nonzero: a stamp minted under the wrong cwd, or
-// reported but never written, would silence the overdue nudge while the real
-// store stays stale.
+// memq decay-done: record that a decay pass completed, by touching the
+// machine's decay stamp under the snapshot directory. The stamp's mtime is
+// the record; the contents only say what the file is. A run that does not
+// end in a written stamp exits nonzero: a stamp reported but never written
+// would silence the overdue nudge while the store stays stale. No working
+// directory is read, since the stamp is the machine's rather than a
+// project's, so neither the network-share hoist nor a store pin reaches it.
 function cmdDecayDone(argv) {
     if (argv.length > 0) return usage('decay-done takes no arguments');
-    // This hoist sits ahead of memDirOrNote(): that call's own first
-    // statement, projectMemoryDir(process.cwd()), reaches worktreeMainRoot's
-    // fs.statSync(cwd/.git) whenever no pin is set, the walk that hangs for
-    // the SMB timeout on an unreachable host. A pin answers projectSegment
-    // before worktreeMainRoot is ever reached, so only an unpinned network
-    // cwd rides that walk.
-    if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
-        process.stderr.write('memq: this call\'s working directory names a network share, so its '
-            + 'project memory directory was not resolved (a synchronous walk under it risks '
-            + 'hanging for the SMB timeout on an unreachable host); nothing was written\n');
-        process.exitCode = 1;
-        return;
-    }
-    const memDir = memDirOrNote();
-    if (memDir === null) {
-        process.exitCode = 1;
-        return;
-    }
     try {
         // The stamp is overwritten rather than created, since its mtime is the
         // record and the file outlives every pass, so the lstat is what keeps
         // the write from following a link planted at the name.
-        const stampPath = path.join(memDir, DECAY_STAMP_FILE);
+        const stampPath = decayStampPath();
+        fs.mkdirSync(path.dirname(stampPath), { recursive: true });
         refuseNonRegularStoreFile(stampPath);
         fs.writeFileSync(stampPath,
             'Touched by memq decay-done when a decay pass completes; the mtime is the record.\n',
@@ -15706,229 +13202,68 @@ function cmdDecayDone(argv) {
     process.stdout.write('decay stamp touched\n');
 }
 
-// memq db-sync: publish this machine's memory store to the shared SQL Server
-// index, and drain whatever the local queue caught while that host was away.
-//
-// The markdown store is untouched by this verb. It reads every tier, sends what
-// it finds, and writes nothing back into a memory file, a sidecar or the
-// journal, so a publish that fails halfway leaves the store exactly as it was
-// and the next run re-derives everything from the files.
-//
-// A stand-down is loud. A machine with no client config is an ordinary machine
-// and this verb still says so and exits nonzero, because a session that asked
-// for a publish and read silence would take the absence for success.
-//
-// The publish is the migration that copies this machine's files into the
-// database, and it runs once. A complete run writes the migration marker. A
-// later run finding it prints it, sends no record, and drains the queue, so the
-// stamps a session queues keep landing; its exit code is the drain's. Given
-// --again, a run publishes the files once more under each folder's key, and
-// each copy stays under that key until the next adoption from a checkout of
-// the project, which resolves each pair under its rules: a memq, archived or
-// deleted remote row stands, a memq source beats a live file target, and
-// between two live file rows the newer wins. The losing row is dropped and
-// passes the winner no archive. It is named unless it matches a live,
-// unarchived winner in every field but its file time. A row a database verb
-// retired stays retired. Run from a checkout whose project
-// key is a git remote, a publish then adopts that checkout's folder-name store
-// into the remote key, so the folder's records join the ones the same
-// repository keeps on every other machine. `options` carries a config and the
-// client's boundary seams for an in-process caller.
-const MARKER_SHOWN_CAP = 2000;
-
-// A value off the wire for a db-sync line: the store's display cap and charset
-// reduction, or `absent` where the host sent no value at all.
-function wireText(value, cap, absent) {
-    return value === null || value === undefined ? absent : sanitize(String(value), cap);
-}
-async function cmdDbSync(argv, options) {
-    const opts = options || {};
-    let again = false;
+// memq declare-type <type> | --none: record which type tier this project
+// opted into, in this machine's declarations file beside the snapshot index
+// (projectTypesPath), or take the record out. The entry is keyed by the
+// project key the working directory resolves to, a pin's where the store
+// signals pin one, which is the key projectType reads it back under for bare
+// --type, find's and recall's type surfaces, the session hook's type block
+// and the recognition nudge. Every other project's entry is carried back
+// verbatim, and the file is written whole beside its name and renamed over,
+// so a reader never meets a half-written one. A file that is present and
+// cannot be read as declarations is refused rather than replaced, since
+// replacing it would drop every other project's declaration with it. The
+// network-share hoist is `touch`'s, for its reason: the key resolution walks
+// the working directory whenever no pin is set. The write is a
+// read-modify-write under no lock, so two declares racing on one machine can
+// lose one update: the verb is an operator's own act in a checkout, run once,
+// which is why a lock is not spent on it.
+function cmdDeclareType(argv) {
+    let type = null;
+    let clear = false;
     for (const a of argv) {
-        if (a === '--again') again = true;
-        else return usage('db-sync takes one option, --again');
+        if (a === '--none') clear = true;
+        else if (a.startsWith('--')) return usage('unknown option ' + sanitize(a, 40));
+        else if (type !== null) return usage('declare-type takes one <type>');
+        else type = a;
     }
-    // The stand-down every store verb spells. The store root comes from the
-    // environment and the home directory, and the walk enumerates the store's
-    // own tiers; the working directory is read once, after the publish, for the
-    // project key the adoption moves the folder's records into. It is gated
-    // with the rest because it is the verb that spawns a client tool and
-    // opens a socket, whether a caller runs it or `forget` spawns it, and a
-    // child process inherits this process's working directory, so a publish
-    // started on an unreachable share carries that share into every spawn it
-    // makes. `forget` spawns it with the store root as its working directory
-    // for that reason.
+    if (clear === (type !== null)) return usage('declare-type takes one <type>, or --none to clear the declaration');
+    if (type !== null && !isTypeName(type)) return usage(TYPE_NAME_RULE);
     if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
         process.stderr.write('memq: this call\'s working directory names a network share, so its '
-            + 'project memory directory was not resolved (a synchronous walk under it risks '
-            + 'hanging for the SMB timeout on an unreachable host); nothing was published\n');
+            + 'project key was not resolved (a synchronous walk under it risks hanging for the '
+            + 'SMB timeout on an unreachable host); nothing was written\n');
         process.exitCode = 1;
         return;
     }
-    // A publish runs against the machine's own store or it does not run. The
-    // credential comes from the home directory while the walk's root can be
-    // moved by KIT_MEMORY_ROOT, so a redirected store would publish under the
-    // default store's login and into the same sandbox's rows: the rows the
-    // redirected walk does not hold would be named removed, and the next
-    // ordinary publish would name the redirected ones removed in turn, leaving
-    // the shared index oscillating between two readings of one sandbox. The
-    // session-start hook and the stamp writers refuse a non-default root for
-    // this reason and this is the same refusal at the verb, since the verb is
-    // what a worker, a doctor run or a hand-typed command reaches. The question
-    // is asked of the client, in one place, so the verb that publishes and the
-    // stamp writer that queues cannot answer it differently: a store one of
-    // them accepted and the other refused would grow a queue nothing drains.
-    if (!memoryDatabase.isDefaultStoreRoot()) {
-        process.stderr.write('memq: the memory store is redirected to ' + sanitize(memoryRoot(), PATH_DISPLAY_CAP)
-            + ', and a publish presents the default store\'s credential, so this run would publish '
-            + 'one store\'s records under another store\'s identity; nothing was published\n');
+    const key = projectKey(process.cwd());
+    const read = readProjectTypes();
+    if (read.projects === null) {
+        process.stderr.write('memq: ' + shownPath(projectTypesPath()) + ' ' + read.fault
+            + ', so nothing was written\n');
         process.exitCode = 1;
         return;
     }
-    const marker = memoryDatabase.readMigrationMarker();
-    if (marker !== null && !again) {
-        // The marker's text is a file in the home directory, so it takes the
-        // channel's render on one line, as every path and value this verb
-        // prints does.
-        process.stdout.write('db-sync: the migration publish has run on this machine ('
-            + (marker.text === null
-                ? 'its marker could not be read: ' + shownText(marker.reason, DB_SYNC_REASON_CAP)
-                : shownText(marker.text.replace(/\s+/g, ' ').trim(), MARKER_SHOWN_CAP))
-            + '); no record was sent. db-sync --again publishes the files again under each folder\'s key, '
-            + 'and the next adoption from a checkout of the project resolves each pair under its rules: '
-            + 'a memq, archived or deleted remote row stands, a memq source beats a live file target, and between '
-            + 'two live file rows the newer wins; the other is dropped, passes on no archive, and is named unless it '
-            + 'matches a live, unarchived winner in every field but its file time; a row a database verb retired '
-            + 'stays retired\n');
-        // The queue drains under the marker, through the probe and the drain's
-        // own version gate, and the drain's end is the exit code.
-        const drained = memoryDatabase.drainOnly({ config: opts.config, deps: opts.deps });
-        if (drained.drain === undefined) {
-            process.stderr.write('memq: '
-                + shownText(memoryDatabase.standDownText(drained), DB_SYNC_REASON_CAP) + '\n');
-            process.exitCode = 1;
-            return;
-        }
-        const drain = drained.drain;
-        process.stdout.write('db-sync: ' + drain.drained + ' queue row(s) drained'
-            + (Number.isFinite(drain.remaining) && drain.remaining > 0
-                ? ', ' + drain.remaining + ' queue row(s) still on the queue' : '')
-            + (drain.rejected > 0 ? ', ' + drain.rejected
-                + ' queue row(s) the host would not record, so no row on the host holds them' : '')
-            + '\n');
-        if (drain.detail) {
-            process.stderr.write('memq: ' + shownText('the queue (' + (drain.cause || 'unclear') + '): '
-                + drain.detail, DB_SYNC_REASON_CAP) + '\n');
-        }
-        // A row the host would not record is a stamp lost to it, which fails the
-        // run here as it fails a publish.
-        if (!drained.ok || drain.rejected > 0) process.exitCode = 1;
-        return;
-    }
-    const result = await memoryDatabase.publish({ config: opts.config, deps: opts.deps });
-    if (!result.ok) {
-        // The same render the failure lines below take, at the same cap. A
-        // stand-down sentence is composed around the same values they are, the
-        // config path, the queue path and the server's own message, and this
-        // channel's guard is a property of the channel rather than of the line:
-        // a sentence printed around it would carry the OS account name out to a
-        // channel a model reads on exactly the stand-downs whose text names a
-        // file, and would print a server message of any length uncut.
-        process.stderr.write('memq: '
-            + shownText(memoryDatabase.standDownText(result), DB_SYNC_REASON_CAP) + '\n');
-        process.exitCode = 1;
-        return;
-    }
-    process.stdout.write(memoryDatabase.summaryLine(result.summary) + '\n');
-    // What the run left a person to read rides on stderr beside the summary:
-    // every sentence the publish put on its one list, warnings among them, with
-    // nothing classifying what goes on it.
-    //
-    // The exit code answers a different question, whether anything this run set
-    // out to do actually failed, and the publish answers it as a fact of its own
-    // rather than as a reading of that list. A caller that reads no text has to
-    // be able to tell a clean publish from one that left a refused drain, a queue
-    // it could not read, a tier the walk could not read or a record the
-    // embedder refused: the session-start spawn is detached with nobody reading
-    // its standard error, and the doctor step reports a fix from this verb's own
-    // result. A code taken from the list would also fail a run warning that the
-    // queue has grown past what a single call carries, and a verb that reports
-    // failure on an ordinary run teaches its reader to ignore the code.
-    //
-    // Each reason is a composed sentence carrying a path inside it, the queue
-    // file, which is the value shownText is the renderer for. It elides the home
-    // directory, takes the cut on the text a reader will actually see, and marks
-    // that cut, so a truncated failure never reads as a whole one. The cap is
-    // wide enough for a whole drain sentence with a server message in front of
-    // it.
-    for (const reason of result.summary.failed) {
-        process.stderr.write('memq: ' + shownText(reason, DB_SYNC_REASON_CAP) + '\n');
-    }
-    // The twins the host resolved, each name and sandbox off the wire and so
-    // taken through the store's display caps and charset reduction.
-    const twins = result.summary.twins;
-    if (twins.length > 0) {
-        process.stdout.write('db-sync: ' + twins.length + ' twin record(s) resolved, the newer copy kept and the '
-            + 'other dropped, its file left on its machine: '
-            + twins.map((t) => wireText(t.name, NAME_CAP, 'unknown') + ' (kept ' + wireText(t.winner, MACHINE_CAP, 'unknown sandbox')
-                + ', dropped ' + wireText(t.loser, MACHINE_CAP, 'unknown sandbox') + ')').join(', ') + '\n');
-    }
-    // The working directory's folder store into its remote key. A key this
-    // process cannot resolve, or one that is a folder name, adopts nothing.
-    let adoption = null;
-    let adoptionFailed = false;
-    let key = null;
-    let segment = null;
+    const projects = read.projects;
+    if (clear) delete projects[key];
+    else projects[key] = type;
     try {
-        key = projectKey(process.cwd());
-        segment = projectSegment(process.cwd());
-    } catch {
-        key = null;
+        memoryDatabase.writeAtomically(projectTypesPath(),
+            JSON.stringify({ version: PROJECT_TYPES_VERSION, projects }, null, 2) + '\n');
+    } catch (err) {
+        process.stderr.write('memq: could not write the project-type declaration: '
+            + failureText(err) + '\n');
+        process.exitCode = 1;
+        return;
     }
-    if (key !== null && key.startsWith('remote:')) {
-        const adopted = memoryDatabase.adoptProjectStore({
-            config: opts.config, deps: opts.deps, fromKey: 'path:' + segment, toKey: key
-        });
-        if (!adopted.ok) {
-            adoptionFailed = true;
-            process.stderr.write('memq: '
-                + shownText(memoryDatabase.standDownText(adopted), DB_SYNC_REASON_CAP) + '\n');
-        } else {
-            adoption = { from: 'path:' + segment, to: key, ...adopted.adopted };
-            process.stdout.write('db-sync: adopted ' + sanitize('path:' + segment, PATH_DISPLAY_CAP) + ' into '
-                + sanitize(key, PATH_DISPLAY_CAP) + ' (moved ' + adoption.moved + ', merged ' + adoption.merged
-                + ', left in place ' + adoption.skipped + ')'
-                + (adoption.mergedNames.length > 0 ? '; merged, one copy kept under the adoption\'s rules and the other dropped: '
-                    + adoption.mergedNames.map((n) => wireText(n, NAME_CAP, 'unknown')).join(', ') : '')
-                + (adoption.skippedNames.length > 0 ? '; left in place because the remote key holds a record of that '
-                    + 'file it does not replace: '
-                    + adoption.skippedNames.map((n) => wireText(n, NAME_CAP, 'unknown')).join(', ') : '')
-                + '\n');
-        }
-    }
-    // A complete run, with its adoption where it owed one, is the migration,
-    // and the marker records it.
-    if (!result.summary.workFailed && !adoptionFailed) {
-        const s = result.summary;
-        try {
-            memoryDatabase.writeMigrationMarker({
-                migratedAt: new Date().toISOString(),
-                added: s.added,
-                changed: s.changed,
-                unchanged: s.unchanged,
-                older: s.skippedOlder,
-                held: s.held,
-                twinCount: twins.length,
-                twins,
-                adoption
-            });
-        } catch (err) {
-            process.stderr.write('memq: the migration marker was not written (' + failureText(err)
-                + '), so the next db-sync publishes again\n');
-            process.exitCode = 1;
-        }
-    }
-    if (result.summary.workFailed || adoptionFailed) process.exitCode = 1;
+    process.stdout.write(clear ? 'cleared this project\'s Project-Type\n'
+        : 'declared Project-Type \'' + sanitize(type, TYPE_CAP) + '\' for this project\n');
+}
+
+// A value off the wire for a db-refresh line: the store's display cap and
+// charset reduction, or `absent` where the host sent no value at all.
+function wireText(value, cap, absent) {
+    return value === null || value === undefined ? absent : sanitize(String(value), cap);
 }
 
 // memq db-refresh: drain the queue, then adopt this checkout's folder store into
@@ -15947,12 +13282,10 @@ async function cmdDbSync(argv, options) {
 // are not failed steps: each printed its line and the drain ran to its end; a
 // transport fault and a held record row are.
 //
-// Behind the drain, in order: the migration publish, run once where no marker
-// is there and the old tiers still hold a record file, since a second publish
-// is the path that could put a file body over a correction; the adoption; the
-// index, mem.usp_ListIndex for the shared tiers and this working directory's
-// key, written to the snapshot's index.json; and the embed pass, which embeds
-// every row the host lists without a vector from the body the host holds.
+// Behind the drain, in order: the adoption; the index, mem.usp_ListIndex for
+// the shared tiers and this working directory's key, written to the
+// snapshot's index.json; and the embed pass, which embeds every row the host
+// lists without a vector from the body the host holds.
 //
 // The steps share one deadline, RUN_BUDGET_MS from the start, and each takes
 // what is left of it, so a refresh the session-start hook spawns ends inside
@@ -15970,7 +13303,7 @@ async function cmdDbRefresh(argv, options) {
     }
     const now = opts.deps && typeof opts.deps.now === 'function' ? opts.deps.now : Date.now;
     const deadline = now() + memoryDatabase.RUN_BUDGET_MS;
-    // The stand-down every store verb spells, db-sync's reason: the working
+    // The stand-down every store verb spells: the working
     // directory is read for the project key the adoption moves the folder's
     // records into, and an unpinned one on a network share resolves through a
     // walk that can hang for the SMB timeout. A passed project reads no
@@ -16003,8 +13336,8 @@ async function cmdDbRefresh(argv, options) {
         + (drain.held > 0 ? ', ' + drain.held + ' record row(s) waiting for a host at schema version '
             + memoryDatabase.RECORD_SCHEMA_VERSION : '')
         + '\n');
-    // What the drain left a person to read, rendered at the db-sync cap, the
-    // refused records excepted, which the lines above already carry.
+    // What the drain left a person to read, rendered at the failure-line cap,
+    // the refused records excepted, which the lines above already carry.
     if (drain.detail && drain.cause !== 'refused-records') {
         process.stderr.write('memq: ' + shownText('the drain step (' + (drain.cause || 'unclear') + '): '
             + drain.detail, DB_SYNC_REASON_CAP) + '\n');
@@ -16018,54 +13351,6 @@ async function cmdDbRefresh(argv, options) {
         process.stderr.write('memq: db-refresh stopped at the drain step: a record row is held for a newer host\n');
         process.exitCode = 1;
         return;
-    }
-
-    // The publish, once: no marker and a record file still in an old tier.
-    // It presents the default store's credential, db-sync's rule, so a
-    // redirected store runs none.
-    if (memoryDatabase.readMigrationMarker() === null && memoryDatabase.oldTiersHoldFiles()) {
-        if (!memoryDatabase.isDefaultStoreRoot()) {
-            process.stderr.write('memq: the publish step did not run: the memory store is redirected to '
-                + sanitize(memoryRoot(), PATH_DISPLAY_CAP) + ', and a publish presents the default store\'s credential\n');
-            process.exitCode = 1;
-            return;
-        }
-        const result = await memoryDatabase.publish({ config: opts.config, deps: opts.deps, deadline });
-        if (!result.ok) {
-            process.stderr.write('memq: the publish step did not run: '
-                + shownText(memoryDatabase.standDownText(result), DB_SYNC_REASON_CAP) + '\n');
-            process.exitCode = 1;
-            return;
-        }
-        process.stdout.write(memoryDatabase.summaryLine(result.summary) + '\n');
-        for (const reason of result.summary.failed) {
-            process.stderr.write('memq: ' + shownText(reason, DB_SYNC_REASON_CAP) + '\n');
-        }
-        if (result.summary.workFailed) {
-            process.stderr.write('memq: db-refresh stopped at the publish step, so no marker was written and the next refresh publishes again\n');
-            process.exitCode = 1;
-            return;
-        }
-        const published = result.summary;
-        try {
-            memoryDatabase.writeMigrationMarker({
-                migratedAt: new Date().toISOString(),
-                added: published.added,
-                changed: published.changed,
-                unchanged: published.unchanged,
-                older: published.skippedOlder,
-                held: published.held,
-                twinCount: published.twins.length,
-                twins: published.twins,
-                adoption: null
-            });
-        } catch (err) {
-            process.stderr.write('memq: db-refresh stopped at the publish step: the migration marker was not written ('
-                + failureText(err) + '), so the next refresh publishes again\n');
-            process.exitCode = 1;
-            return;
-        }
-        process.stdout.write('db-refresh: the migration publish ran once on this machine, and its marker is written\n');
     }
 
     // The adoption, gated on the key and the host's version. A key this process
@@ -16196,7 +13481,7 @@ function reportAdoption(adoption, segment, key) {
 // The two curator verbs below run under the config's curator pair and touch no
 // file in the store: a promote is a fact about the host's rows, and a curation
 // query is a reading of them. A stand-down prints one sentence and exits
-// non-zero, db-sync's rule, through the same renderer at the same cap, since
+// non-zero, db-refresh's rule, through the same renderer at the same cap, since
 // the sentence is composed around a config path and the server's own words. A
 // refusal carries the procedure's own sentence, because every refusal a curator
 // procedure raises, the role check and the identity that matched no row among
@@ -16613,7 +13898,6 @@ function main() {
     }
     else if (cmd === 'applied') cmdApplied(rest);
     else if (cmd === 'touch') cmdTouch(rest);
-    else if (cmd === 'stamp-read') cmdStampRead(rest);
     else if (cmd === 'anchor') cmdAnchor(rest);
     else if (cmd === 'triggers') cmdTriggers(rest);
     // The two authoring verbs are async for the neighbours block they print
@@ -16664,22 +13948,12 @@ function main() {
     }
     else if (cmd === 'decay-prune') cmdDecayPrune(rest);
     else if (cmd === 'decay-done') cmdDecayDone(rest);
-    // db-sync is async for its embedding calls, find's reason and find's
+    else if (cmd === 'declare-type') cmdDeclareType(rest);
+    // db-refresh is async for the embed pass, find's reason and find's
     // backstop: every expected condition on the way to the host is answered
-    // inside cmdDbSync (an absent config, an unreachable host and a refused
-    // embedding each leave a printed line), so this catch is for a genuine bug,
-    // reported like any other failed command rather than left to crash as an
-    // unhandled rejection.
-    else if (cmd === 'db-sync') {
-        cmdDbSync(rest).catch((err) => {
-            process.stderr.write('memq: db-sync failed: '
-                + failureText(err) + '\n');
-            process.exitCode = 1;
-        });
-    }
-    // db-refresh is async for the publish and the embed pass, db-sync's reason
-    // and db-sync's backstop: every expected condition on the way to the host
-    // is answered inside it with a printed line naming the step.
+    // inside it with a printed line naming the step, so this catch is for a
+    // genuine bug, reported like any other failed command rather than left to
+    // crash as an unhandled rejection.
     else if (cmd === 'db-refresh') {
         cmdDbRefresh(rest).catch((err) => {
             process.stderr.write('memq: db-refresh failed: '
@@ -16741,9 +14015,7 @@ function resetUncaughtLatch() {
 
 module.exports = {
     USAGE_FILE,
-    backupClause,
     INDEX_FILE,
-    appliedTally,
     lastAliveMs,
     frontmatterBlock,
     frontmatterUnclosed,
@@ -16766,7 +14038,7 @@ module.exports = {
     blobSha,
     isAnchorPath,
     isStoreAnchorPath,
-    SYNCED_STORE_ROOTS,
+    STORE_ANCHOR_ROOTS,
     ANCHOR_PATH_CAP,
     ANCHOR_ENTRIES_MAX,
     ANCHOR_READ_CAP,
@@ -16796,11 +14068,9 @@ module.exports = {
     FRONTMATTER_INDENTED,
     FRONTMATTER_UNREADABLE,
     FRONTMATTER_UNCLOSED,
-    frontmatterUnclosedShape,
-    frontmatterUnclosedRepair,
-    readFrontmatterUnclosedRepair,
     recallDigest,
     recentDigest,
+    indexTiers,
     withheldLine,
     hitLine,
     recordIdentity,
@@ -16814,26 +14084,15 @@ module.exports = {
     neighbourBlock,
     FLEET_PAIRS_BUDGET_MS,
     FLEET_SERVED_NOTE,
-    semanticClause,
     fleetClause,
     FLEET_RECALL_SHOWN,
     FLEET_SESSION_SHOWN,
     FLEET_BUDGET_MS,
-    FLEET_RECENT_KEYS,
-    judgedClause,
-    judgedHitLine,
-    judgedCandidates,
-    tierWireToken,
-    parseJudgedAnswer,
-    JUDGED_PROBE_TIMEOUT_MS,
-    JUDGED_CALL_TIMEOUT_MS,
     SEMANTIC_SHOWN,
     FLEET_SEMANTIC_FLOOR,
     clearsFloor,
-    semanticFenceClause,
     cmdFind,
     cmdDbPromote,
-    cmdDbSync,
     cmdDbRefresh,
     cmdDbCurate,
     cmdJevCalibration,
@@ -16892,19 +14151,17 @@ module.exports = {
     projectsRootPath,
     projectMemoryDirFor,
     projectMemoryDir,
-    projectSegments,
-    typesRootPath,
     pinnedProjectSegment,
     storePinUnusable,
     isMemoryFilename,
     memoryFileKey,
-    tierDirFor,
     tierNameFor,
     isRunId,
     storeSignalsPresent,
     pendingDirFor,
     provenanceLines,
     decayStampPath,
+    projectTypesPath,
     listMemories,
     readIndexDescriptions,
     deliverStamp,
@@ -16916,12 +14173,6 @@ module.exports = {
     reportUncaught,
     resetUncaughtLatch,
     isTypeName,
-    typeDir,
-    typeIndexPath,
-    operatorDirPath,
-    operatorIndexPath,
-    typedTierOrNull,
-    operatorTierOrNull,
     projectType
 };
 
@@ -16933,7 +14184,7 @@ module.exports = {
 //
 // The dispatch runs below the export table rather than above it, because a verb
 // can reach a sibling that loads this file back: the database client does, and
-// so does the semantic index. A require taken while this file is still
+// so does the judge. A require taken while this file is still
 // evaluating answers with whatever module.exports holds at that moment, so a
 // dispatch that ran first would hand every such sibling an empty object and
 // each call through it would fail on an undefined function. With the table

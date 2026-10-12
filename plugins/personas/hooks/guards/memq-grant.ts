@@ -70,14 +70,15 @@ const ESCAPED_QUOTE = /\\["']/;
 // names, each refusing the grant when set at all.
 export const PRELOAD_ENV = ["NODE_OPTIONS", "NODE_PATH", "NODE_REPL_EXTERNAL_MODULE"] as const;
 
-// The verbs the grant covers: memq's subcommands less the thirteen withheld.
+// The verbs the grant covers: memq's subcommands less the twelve withheld.
 // Withheld for what they destroy: delete-type and delete-operator (a shared
 // record's row out of every read) and forget (a project record's). Withheld
-// for what they author: anchor (a record's drift claim) and triggers (when a
-// record of any tier is put in front of a session). Withheld because no
-// fleet worker's task asks for them: db-sync (stands down under the store
-// signals anyway), db-refresh, meter-drain and stamp-read (the module's own
-// processes), db-promote and db-curate (the curator's act), and
+// for what they author: anchor (a record's drift claim), triggers (when a
+// record of any tier is put in front of a session) and declare-type (which
+// type tier the checkout's bare --type reaches, the ground --type=<type> is
+// withheld on). Withheld because no
+// fleet worker's task asks for them: db-refresh and meter-drain (the
+// module's own processes), db-promote and db-curate (the curator's act), and
 // jev-calibration (the operator's reading). find is withheld pending a
 // decision on granting it. An allowlist, so a verb the CLI gains later is
 // withheld until listed here.
@@ -249,8 +250,10 @@ export async function memqGrantable(tool: string, input: unknown, deps: MemqGran
   // --body replaces a record whole; --replace on the two shared-tier add
   // verbs writes a shared record whole; --supersedes demotes a record no pin
   // protects; --trigger writes at creation the line the triggers verb is
-  // withheld for; --rollup discards journal prose; --drop-malformed deletes
-  // sidecar lines; --type=<type> names a tier the project never opted into.
+  // withheld for; --rollup and --drop-malformed are flags memq takes on no
+  // verb, screened on this guard's own account because its verb layer is an
+  // allowlist and its flag layer a denylist; --type=<type> names a tier the
+  // project never opted into.
   if (!GRANTED_VERBS.has(w[2])) return false;
   if (screensFlag(w, "--body-file")) return false;
   if (screensFlag(w, "--update") && screensFlag(w, "--body")) return false;

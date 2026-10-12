@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the runbook for the machine-coordinator seat, the single exclusive machine-wide role that stewards the seam between repositories and speaks as one voice toward the operator. It owns the moments that seat performs: opening or resuming a pass (arming the wake, reading the board at `coordinator/<machine>/board.md`, running the reconciliation loop), aggregating worker status from artifacts and deciding when a message round is warranted, funnelling a declared BLOCKED to the operator as a decision brief and naming the reply address, dispositioning kaizen inbox notes, arbitrating machine resources, dispatching plans across repos and tracking and redirecting the work in flight, refusing within-repo oversight and routing it to the expert seat, and running an operator-declared update window from declaration through drain, report, park, and cancel. It also owns the disclosure bars on everything the seat sends up, the path screens on stranger-supplied paths, and the dedup rules for briefs and stubs. A session loads it under load class `named-trigger`: its own frontmatter says to use it when taking or resuming the coordinator seat, running a coordination loop over live sessions, running a reconciliation pass, dispatching or redirecting cross-repo work, arbitrating machine-resource contention, or handing the seat to a successor.
 
-Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`skills.coordinator.c2.md`); lines 67-84 (`skills.coordinator.c3.md`); lines 85-103 (`skills.coordinator.c4.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (c1.C123 below, amended in place). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (c2.C065 amended in place, and c2.C066 retired with no successor here, its rule being the peer-sessions ledger's Y001). Redrafted on 2026-09-26 by section 5 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `642c1008` with its fix round at `4f01b65b`, so every live entry's `passage:` line quotes the text at `4f01b65b` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`B` entries below, with c1.C046, c2.C073, c2.C087, c3.C033, c4.C003 and c4.C015 retired by supersession, and c1.C004, c1.C092, c2.C012, c2.C075, c2.C077, c2.C086, c3.C087, c4.C061, c4.C063 and c4.C068 amended in place). Amended by the same plan's section 2 on 2026-10-02 (B016 to B019 below). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and the BLOCKED funnel's reading of `goal-blocked` events and goal state: c1.C057 to c1.C061, c1.C068 to c1.C072, c1.C076, c1.C126, c1.C127, c2.C003, c2.C075 and c2.C094 deleted with their passages; c1.C004, c1.C055, c1.C056, c1.C062, c1.C063, c1.C065, c1.C067, c1.C073, c1.C075, c1.C077, c1.C085, c1.C110, c1.C123, c2.C076, c3.C017, c3.C088, c4.C085, W001, W002, B001, B002 and B004 rewritten to their passages as they now read; and c1.C103's key reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the funnel's sentence on a blocker traced only through a worker's registry entry or plan doc; c4.C083's reason names the Blocked Peers rule). At the plan's finishing pass, B002 was re-synced to the seat's sentence pointing at executing-work's goal template, and c1.C033's key no longer names the events file. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C095 rewritten to its passage as it now reads, and the keys or reasons of c1.C048, c1.C049 and c1.C050 reworded where they stated the note files or an append as present.
+Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`skills.coordinator.c2.md`); lines 67-84 (`skills.coordinator.c3.md`); lines 85-103 (`skills.coordinator.c4.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (c1.C123 below, amended in place). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (c2.C065 amended in place, and c2.C066 retired with no successor here, its rule being the peer-sessions ledger's Y001). Redrafted on 2026-09-26 by section 5 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `642c1008` with its fix round at `4f01b65b`, so every live entry's `passage:` line quotes the text at `4f01b65b` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`B` entries below, with c1.C046, c2.C073, c2.C087, c3.C033, c4.C003 and c4.C015 retired by supersession, and c1.C004, c1.C092, c2.C012, c2.C075, c2.C077, c2.C086, c3.C087, c4.C061, c4.C063 and c4.C068 amended in place). Amended by the same plan's section 2 on 2026-10-02 (B016 to B019 below). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and the BLOCKED funnel's reading of `goal-blocked` events and goal state: c1.C057 to c1.C061, c1.C068 to c1.C072, c1.C076, c1.C126, c1.C127, c2.C003, c2.C075 and c2.C094 deleted with their passages; c1.C004, c1.C055, c1.C056, c1.C062, c1.C063, c1.C065, c1.C067, c1.C073, c1.C075, c1.C077, c1.C085, c1.C110, c1.C123, c2.C076, c3.C017, c3.C088, c4.C085, W001, W002, B001, B002 and B004 rewritten to their passages as they now read; and c1.C103's key reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the funnel's sentence on a blocker traced only through a worker's registry entry or plan doc; c4.C083's reason names the Blocked Peers rule). At the plan's finishing pass, B002 was re-synced to the seat's sentence pointing at executing-work's goal template, and c1.C033's key no longer names the events file. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C095 rewritten to its passage as it now reads, and the keys or reasons of c1.C048, c1.C049 and c1.C050 reworded where they stated the note files or an append as present. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel, so the board, the registry and the admin requests are this machine's own and nothing copies them off it: c3.C073 to c3.C082, c4.C002, c4.C007 to c4.C012 and c4.C093 deleted with their passages and subjects; c1.C005, c3.C001, c3.C002, c3.C004, c3.C005, c3.C014, c3.C072, c4.C001, c4.C013, c4.C060, c4.C077, c4.C078 and c4.C079 rewritten to their passages as they now read, with the keys of c1.C005, c3.C001, c3.C004, c3.C005, c4.C013, c4.C077, c4.C078 and c4.C079 reworded; the keys, reasons or provenance of c1.C010, c1.C021, c2.C011, c2.C012, c3.C003, c3.C006, c4.C001 and c4.C060, and the reasons of six entries naming a replicated or synced board, reworded where they stated the copying as present; and M001 added for the sentence naming the directory this machine's own.
 
 ### c1.C001
 - key: Load this skill when taking or resuming the machine-coordinator seat, running a coordination loop over live sessions, or coordinating the machine's sessions across repos.
@@ -57,7 +57,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - flag: weak-reason
 
 ### c1.C005
-- key: Keep the seat's board in the memory store at `coordinator/<machine>/board.md` under `~/.claude`, with `<machine>` being the identifier `os.hostname()` reports.
+- key: Keep the seat's board on this machine at `coordinator/<machine>/board.md` under `~/.claude`, with `<machine>` being the identifier `os.hostname()` reports.
 - class: mechanic
 - source: plugins/grimoire/skills/coordinator/SKILL.md:8
 - provenance: ebf5ee0 2026-08-28, the board moved from the per-machine home repo into the memory store at this path; fb0f194 2026-08-28 made the role skill the owner of the directory contract.
@@ -66,7 +66,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - reason: The path stays, since test/doctrine-parity.test.js pins that the coordinator body spells it and peer-sessions defers to it; the `os.hostname()` identifier is the role contract's (role:12) and becomes a pointer (A005, A007).
 - proposed: (via A005) Keep "The seat's board lives in the memory store at `coordinator/<machine>/board.md` under `~/.claude`" and replace "`<machine>` being the identifier `os.hostname()` reports" with a pointer at the role skill's directory contract, carrying C006's memq screen bound with the identifier wherever it lands.
 - baseline-test: yes
-- passage: The seat's board lives in the memory store at `coordinator/<machine>/board.md` under `~/.claude`, with `<machine>` as the role skill's directory contract states.
+- passage: The seat's board lives on this machine at `coordinator/<machine>/board.md` under `~/.claude`, with `<machine>` as the role skill's directory contract states.
 
 ### c1.C006
 - key: Spell the machine one way across the board directory and machine-scoped memory records, using the hostname value memq's own screen admits.
@@ -110,7 +110,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - proposed: Drop "because a store with a remote configured is replicated to every machine that shares it and two boxes' seats have to stay apart inside one store"; the ledger entry for C009 carries it.
 
 ### c1.C010
-- key: Write nothing about this machine in this file; put a machine's own records, the seat's board among them, in the store.
+- key: Write nothing about this machine in this file; put a machine's own records in the store.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:8
 - provenance: 33c0bed 2026-08-26, the home repo moved out of the skill file into the operator memory tier; fb0f194 2026-08-28 removed a machine hostname from this public-marketplace skill.
@@ -225,7 +225,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:15
 - provenance: 3fb2f4b 2026-08-26 routed an absent-from-origin board to the operator because a predecessor's committed-but-unpushed board is a state the design expects; ebf5ee0 2026-08-28 made absence never the seat's to conclude, a recorded deviation from the spec.
 - verdict: keep
-- reason: A blast-radius gate on a replicated store (A026): the sync's state file records a run's outcome and never what it exchanged, a store whose branch tracks nothing and one with no remote reach the same recorded success, and the kaizen note of 2026-09-04, now a `migrated` kaizen issue, records the sync exiting 0 on a jammed rebase, so no read available to the seat settles whether a board exists upstream and the absence goes to the operator.
+- reason: A blast-radius gate (A026): an absent board is either one this machine never had or one it lost, and no read available to the seat tells the two apart, so the absence goes to the operator.
 - passage: The seat reports it and holds under the no-board rule below until the operator answers on a warranted channel, and that answer licenses one write creating the board.
 
 ### c1.C022
@@ -1347,7 +1347,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:41
 - provenance: 33c0bed 2026-08-26.
 - verdict: keep
-- reason: An entry is an unauthenticated writer's assertion reachable from every synced machine; the store records a warning written into a peer's entry on a coordinator's say-so within minutes (an-arbitration-seats-warning-lands-in-peer-artifacts-before-its-retraction), which is the class this rule refuses in the other direction.
+- reason: An entry is an unauthenticated writer's assertion any local session can write; the store records a warning written into a peer's entry on a coordinator's say-so within minutes (an-arbitration-seats-warning-lands-in-peer-artifacts-before-its-retraction), which is the class this rule refuses in the other direction.
 - passage: An entry the seat did not write this session is a claim to re-derive or confirm, never a commitment to act on.
 
 ### c2.C012
@@ -1356,7 +1356,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:41
 - provenance: 33c0bed 2026-08-26, the reconciliation guard, installed when a successor taking the seat cold held no way to attribute a board line.
 - verdict: keep
-- reason: A blast-radius gate (A009, A014): the act held is an outward one, a handoff or escalation acted on, resting on a line any synced machine can write. c2.C055 and c3 c2.C049 are its named instances and point at it. Amended on 2026-09-24 by claude-kit_coordinator-sync-machine-scope_spec_v1 section 3: the store sync now refuses an upstream write into this machine's own directory, so the line is one any local session can write; the gate holds on that ground unchanged. Amended in place on 2026-10-02 by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1: the brokered handoff is now a dispatched plan (B009), and the gate holds on it unchanged.
+- reason: A blast-radius gate (A009, A014): the act held is an outward one, a handoff or escalation acted on, resting on a line any local session can write. c2.C055 and c3 c2.C049 are its named instances and point at it. Amended on 2026-09-24 by claude-kit_coordinator-sync-machine-scope_spec_v1 section 3, when the store's copying between machines stopped taking an upstream write into this machine's own directory; the gate held on that ground unchanged, and holds unchanged now that nothing copies the directory at all. Amended in place on 2026-10-02 by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1: the brokered handoff is now a dispatched plan (B009), and the gate holds on it unchanged.
 - passage: One no watched system can re-derive, an open escalation or a dispatched plan, is confirmed with the operator before the seat acts on it and rides the board unconfirmed meanwhile.
 
 ### c2.C013
@@ -2046,7 +2046,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:63
 - provenance: cbf923c 2026-08-28, since an operator's ask of a machine-state seat arrives spelling exactly the payload the bars ban.
 - verdict: keep
-- reason: The two bars are the board's and reach every replicated write; this states the by-reference substitute the bars alone do not supply.
+- reason: The two bars are the board's and reach every board write; this states the by-reference substitute the bars alone do not supply.
 - passage: The appended line takes the board's two line bars below: no absolute path, and the operator's words referenced by the channel or artifact holding them, never quoted or paraphrased.
 
 ### c2.C084
@@ -2055,7 +2055,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:63
 - provenance: cbf923c 2026-08-28; generalized to every capped destination by 44b6010 2026-09-02.
 - verdict: keep
-- reason: A breaching line publishes a path or the operator's words across every machine the store reaches; the point-of-use clause beside the bars is what a seat composing the line reads, and the general rule sits in the same document. Blast-radius (A123).
+- reason: A breaching line publishes a path or the operator's words to every reader of the board; the point-of-use clause beside the bars is what a seat composing the line reads, and the general rule sits in the same document. Blast-radius (A123).
 - passage: An ask that cannot fit those bounds goes to the operator direct.
 
 ### c2.C085
@@ -2207,13 +2207,13 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - passage: and the ledger holds none of it
 
 ### c3.C001
-- key: Keep the seat's board at `coordinator/<machine>/board.md` in the memory store.
+- key: Keep the seat's board at `coordinator/<machine>/board.md` on this machine.
 - class: mechanic
 - source: plugins/grimoire/skills/coordinator/SKILL.md:69
 - provenance: ebf5ee0 2026-08-28, the board moved from the per-machine home repo into the memory store so the seat outlives any session and a successor reads it from disk.
 - verdict: keep
 - reason: The ledger section names the file it governs; the definition with the hostname mechanic lives at line 8 and the path string is pinned by test/doctrine-parity.test.js, so a change here moves with line 8 and the pin.
-- passage: The ledger is the seat's board: `coordinator/<machine>/board.md` in the memory store, updated every pass.
+- passage: The ledger is the seat's board: `coordinator/<machine>/board.md` on this machine, updated every pass.
 
 ### c3.C002
 - key: Update the board every pass.
@@ -2222,37 +2222,37 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - provenance: ebf5ee0 2026-08-28, the pass rewrites the board in place each time as the seat's survival mechanism, replacing the seat's own push ritual.
 - verdict: keep
 - reason: The every-pass write is what makes the board a record a successor can resume from; the no-board rule (line 95) and the contest freeze (line 99) are its named exceptions and carry themselves.
-- passage: `coordinator/<machine>/board.md` in the memory store, updated every pass.
+- passage: `coordinator/<machine>/board.md` on this machine, updated every pass.
 
 ### c3.C003
-- key: Do not run a docs-curating pass over the board; it sits in no repo's docs/ and the store's allowlist admits it as a seat artifact.
+- key: Do not run a docs-curating pass over the board; it sits in no repo's docs/.
 - class: rationale-example
 - source: plugins/grimoire/skills/coordinator/SKILL.md:69
 - provenance: 33c0bed 2026-08-26, a curating pass read the board as a stray and the curator's charter would have let a finishing pass rewrite the seat's own state, so the board was carved out of curation.
 - verdict: rewrite
 - landed: fe0f812 section 23
-- reason: The no-curating-pass clause is a carve-out a session obeys and stays; the allowlist and sync clause describes machinery (install-memory-sync.ps1 admits `/coordinator` `*.md`) that memory-system owns, so it becomes a pointer, and any reworded allowlist sentence moves with the allowlist-roots pin in test/doctrine-parity.test.js.
-- proposed: Keep "it sits in no repo's docs/, so no curating pass governs it"; replace the allowlist-and-sync clause with a pointer at the memory-system skill for how the store carries the file.
+- reason: The no-curating-pass clause is a carve-out a session obeys and stays; the clause on how the store then carried the file described machinery memory-system owned, so it became a pointer, and the pointer left with that machinery.
+- proposed: Keep "it sits in no repo's docs/, so no curating pass governs it"; replace the clause on how the store carries the file with a pointer at the memory-system skill.
 - baseline-test: yes
 - passage: It sits in no repo's `docs/`, so no curating pass governs it.
 
 ### c3.C004
-- key: Treat the store remote's privacy as a named precondition, established only by an operator's answer naming who reads that remote.
+- key: Treat the privacy of this machine's home directory as a named precondition, established only by an operator's answer naming who reads that directory.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:69
 - provenance: ebf5ee0 2026-08-28, the private-store premise shipped as a named precondition of one installation because the kit configures no remote and reads no remote's visibility.
 - verdict: keep
-- reason: No seat can derive its own readership, and the operator-tier record coordinator-board-clearance shows a seat's own memory getting the readership wrong on the mechanism (corrected 2026-08-31); the coordinator owns the precondition and the role skill points at it for the registry.
-- passage: This file rests on a named precondition: the store's remote is private and its principals are the operator's own. Only the operator's answer on a warranted channel naming who reads that remote establishes it, never a repository host's privacy flag.
+- reason: No seat can derive its own readership, and the operator-tier record coordinator-board-clearance shows a seat's own memory getting the readership wrong on the mechanism (corrected 2026-08-31); the coordinator owns the precondition and the role skill points at it for the registry. Restated on 2026-10-11 by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on the directory's readers, since no remote carries the board any longer.
+- passage: This file rests on a named precondition: everyone who can read this machine's home directory is the operator's own. Only the operator's answer on a warranted channel naming who reads that directory establishes it, never a file permission.
 
 ### c3.C005
-- key: Never accept a repository host's privacy flag as that answer; hold the premise unestablished when only the flag supports it.
+- key: Never accept a file permission as that answer; hold the premise unestablished when only a permission supports it.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:69
 - provenance: ebf5ee0 2026-08-28, a security-model downgrade had rested on the host's privacy flag, which reports who can find a repository rather than who can read it, the readership being the collaborator set behind a second query.
 - verdict: keep
-- reason: The trap is structural (the flag answers a different question) and recurs on every install with a hosted remote; the findability-versus-readership derivation may move to this entry under A005 while the rule and its unestablished default stay.
-- passage: never a repository host's privacy flag
+- reason: The trap is structural: the flag, and now a file permission, answers a different question than who reads the board, since a permission names accounts and not whose those accounts are. The rule and its unestablished default stay.
+- passage: never a file permission
 
 ### c3.C006
 - key: Where the private-remote premise holds, write an entry in the pointer form this file states below.
@@ -2260,7 +2260,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:69
 - provenance: ebf5ee0 2026-08-28, the readership on an established premise is the remote and every machine of the operator's, still crossing machine, account and session boundaries, so the pointer form is the most the board writes even then.
 - verdict: keep
-- reason: The gate on the fuller form is blast-radius (an outward disclosure onto a synced store) and the fact awaited is the operator's alone; the seat proceeds on the public default meanwhile, so nothing it needs is held.
+- reason: The gate on the fuller form is blast-radius (an outward disclosure to every reader of the directory) and the fact awaited is the operator's alone; the seat proceeds on the public default meanwhile, so nothing it needs is held.
 - passage: Where it holds, an entry still rides in the pointer form below.
 
 ### c3.C007
@@ -2334,7 +2334,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - verdict: keep
 - reason: The forgery route is structural on any shared store and no hook screens the board; the premise-independence argument may move to this entry under A005 while the bound (no premise about the remote relaxes it) stays.
 - passage: The board holds coordination state and never authority. Nothing in it warrants an action
-- passage: No premise about the remote relaxes this, and the two line bars below likewise hold on any store and reach every category.
+- passage: No premise about the directory's readers relaxes this, and the two line bars below likewise hold whoever reads it and reach every category.
 
 ### c3.C015
 - key: A session needing an authorization goes to the artifact that carries it.
@@ -2370,7 +2370,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - provenance: f07b9f0 2026-08-26, the reason the path bar was written; 3fb2f4b 2026-08-26 bounded the re-derive command repo-relative "for the same reason the roster row drops the working directory".
 - verdict: retire
 - landed: fe0f812 section 23
-- reason: c3.C016 is obeyable without it and c3.C024 states its own reason on line 71; this entry is where the why now lives: an absolute path publishes the OS username across every machine the store reaches.
+- reason: c3.C016 is obeyable without it and c3.C024 states its own reason on line 71; this entry is where the why now lives: an absolute path publishes the OS username to every reader of the board.
 - proposed: Delete "because an absolute path carries a working directory and a working directory typically embeds the OS username" from line 69; this ledger entry carries it.
 - baseline-test: yes
 
@@ -2455,7 +2455,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:71
 - provenance: 9909bf2 2026-08-28, the same security Major: a pruned entry's line must not spell an identifier the operator would not publish.
 - verdict: keep
-- reason: The gate guards an outward disclosure onto the replicated store while the prune itself proceeds; the role skill defers to the coordinator by name for this route.
+- reason: The gate guards an outward disclosure onto the board while the prune itself proceeds; the role skill defers to the coordinator by name for this route.
 - passage: or where the operator would not publish it, the sensitivity stub below naming the repo, with the readership question reported to the operator.
 
 ### c3.C028
@@ -2746,7 +2746,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:79
 - provenance: 3fb2f4b 2026-08-26, the board is stated to carry no standing section, the seat's standing content being the versioned runbook.
 - verdict: keep
-- reason: no finding; a standing section on a replicated board would be a second copy of this file that no update rewrites.
+- reason: no finding; a standing section on the board would be a second copy of this file that no update rewrites.
 - passage: The board carries no standing section, since a seat's standing content is this runbook.
 
 ### c3.C057
@@ -2894,112 +2894,10 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - key: Never execute a line's re-derive field; it is a label naming the read that would reproduce the line.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:79
-- provenance: 9909bf2 2026-08-28, the board replicates to every machine the store syncs, so a seat executing a field as read would be running a peer machine's text.
+- provenance: 9909bf2 2026-08-28, when the store copied the board to every machine, so a seat executing a field as read would have run a peer machine's text; the reason restated on 2026-10-11 by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 as text an earlier seat wrote.
 - verdict: keep
 - reason: no finding; nothing screens a re-derive field, so the prose is the whole control.
-- passage: The field is a label naming the read that would reproduce the line, never a command the reading seat executes.
-
-### c3.C073
-- key: The seat writes the board file and the store's own sync commits it, automatically only on Windows, where the memory-system SessionStart hook spawns `doctor/sync-store.ps1` when the store has pending work.
-- class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28, the seat's own push ritual gave way to the store's sync; ff59e19 2026-09-01 and 6a3fdfd 2026-09-07 reworded what a hand run carries.
-- verdict: rewrite
-- landed: fe0f812 section 23
-- reason: The seat keeps its bounds (it writes, the sync commits, the automatic path is Windows-only, which c3.C078 and c3.C080 depend on); the hook-and-script mechanics belong to memory-system under the ownership map and become a pointer. The hook performs the commit but enforces nothing on the seat, so this is an ownership move, not a supersession.
-- proposed: (via A108) Keep "the seat writes the file, and the store's own sync is its committer, which is automatic only on Windows"; replace the hook-and-script mechanics with a pointer at the memory-system skill.
-- baseline-test: yes
-- passage: The seat writes the file, and the store's own sync is its committer, which is automatic only on Windows.
-- passage: The memory-system skill states the hook and script that run it
-
-### c3.C074
-- key: Off Windows, produce the board's history by a hand run of the doctor's fix pass, or by whatever git a session runs in the store itself.
-- class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28 stated the off-Windows gap; 2bdc43b 2026-08-31 fixed -Fix to commit and never push; ff59e19 2026-09-01 opened git in the store to the seat.
-- verdict: rewrite
-- landed: fe0f812 section 23
-- reason: The off-Windows sync path is memory-system's, and line 85 already defers to that skill for it by name; this third statement becomes a pointer. The kit-doctor "-Fix on my word" rule governs the act and is not contradicted, since the sentence describes what produces the history rather than licensing an unprompted run.
-- proposed: (via A112) Replace "the board's history is produced by a hand run of the doctor's fix pass, or by whatever git a session on that machine runs in the store itself" with a pointer at the memory-system skill for the off-Windows sync path.
-- baseline-test: yes
-- passage: The memory-system skill states the hook and script that run it, and the sync path off Windows.
-- flag: stale
-
-### c3.C075
-- key: Route reading the store's own configuration and history to another seat rather than performing it, while publishing your own board by hand stays open to you.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ff59e19 2026-09-01, the seat's unconditional git prohibition retired for the workload principle on the operator's ruling; pinned by test/doctrine-parity.test.js ("states no git prohibition and carries the workload principle").
-- verdict: keep
-- reason: The seat routes work rather than performing it, and the contest paragraph gives an independent second reason for the same abstention; the pin reads this sentence, so a rewording moves with it.
-- passage: The seat may run git in the store exactly as any other session on this machine may, and reading the store's own configuration and history is work it routes rather than performs.
-- passage: Publishing its own board by hand is the separate case, open to this seat as to any other session, on the path the board-write rule below states.
-
-### c3.C076
-- key: Read what the sync has done from `kit-sync-state.json` in the store root, which carries the last attempt, the last result, the last success time, and where the current failure streak began.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28, the state file is what the seat reads instead of concluding absence itself; sync-store.ps1 writes it.
-- verdict: keep
-- reason: no finding; the read protocol is the seat's own and the file's fields are what the protocol keys on.
-- passage: A durability gap in `kit-sync-state.json` in the store root, a last result of `gate` or a failure streak standing through the session starts since it began, goes to the operator and is not worked around.
-
-### c3.C077
-- key: Read a durability gap as a last result of `gate`, or as a failure streak standing through the session starts since it began.
-- class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28, the two shapes an honest sync records for a gap.
-- verdict: keep
-- reason: no finding; the definition is what makes c3.C081 executable.
-- passage: A durability gap in `kit-sync-state.json` in the store root, a last result of `gate` or a failure streak standing through the session starts since it began, goes to the operator and is not worked around.
-
-### c3.C078
-- key: Do not read a last success older than the seat's own last write as a gap; it is the ordinary steady state.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28, the sync runs at a session start, so a long-lived seat's writes ordinarily postdate the last success.
-- verdict: keep
-- reason: no finding; without it a healthy machine reads as a gap on every pass, which is the false report the read exists to avoid.
-- passage: A last success older than the seat's own last write is the ordinary steady state, and an absent state file goes up as a question rather than as a finding.
-
-### c3.C079
-- key: Do not over-read a clean state-file reading; nothing authenticates the file and the read gates no act, neither write nor release.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28, the state file records a run's outcome and never what it exchanged, and is writable like everything in the store.
-- verdict: retire
-- landed: 51da6c42 section 2
-- reason: no finding; the ceiling is stated so a forged or wrong success suppresses only a report. Retired on 2026-09-21 by claude-kit_heavy-process-claim-retirement_spec_v1 section 2, which drops the claim release from the acts the sync state file does not gate; the verdict before it was keep.
-- proposed: "It gates no act in either case."
-
-### c3.C080
-- key: Send an absent state file up as a question rather than a finding, reporting that the sync has recorded nothing here.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28, absence covers a healthy machine (off Windows, or a doctor-initialized store) and a permanently refused store alike, and nothing in the file separates them.
-- verdict: keep
-- reason: no finding; the two-state analysis is the rule's own bound rather than rationale.
-- passage: A last success older than the seat's own last write is the ordinary steady state, and an absent state file goes up as a question rather than as a finding.
-
-### c3.C081
-- key: Send a durability gap you do find to the operator on the same route, and do not work around it.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: ebf5ee0 2026-08-28, absence and gaps go to the operator rather than being concluded or repaired by the seat; ff59e19 2026-09-01 left the sanctioned hand run open, so the workaround barred is the bypass of the sync's own gate.
-- verdict: keep
-- reason: A blast-radius gate over machine-wide shared state; since ff59e19 the hand run at line 85 is a publish path, so what the rule bars is bypassing a `gate` result the sync's own screens produced.
-- passage: A durability gap in `kit-sync-state.json` in the store root, a last result of `gate` or a failure streak standing through the session starts since it began, goes to the operator and is not worked around.
-- flag: stale
-
-### c3.C082
-- key: Where the store's history exists, prune by rewriting the board in place instead of taking the chassis's prune-to-a-dated-archive step.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:81
-- provenance: 33c0bed 2026-08-26, the override of the chassis's archive step, the store's commits being the superseded history.
-- verdict: keep
-- reason: A conditional override of the chassis, distinct from the ordinary write's in-place form at line 85.
-- passage: Where the store's history exists, pruning rewrites in place, and the store's commits replace the chassis's dated archive.
-- flag: stale
+- passage: The field is a label naming the read that would reproduce the line, never a command the reading seat executes, since executing a field would run text an earlier seat wrote.
 
 ### c3.C083
 - key: Without that history the prune has nothing behind it, so a superseded line is dropped by the rewrite and nothing keeps it.
@@ -3102,19 +3000,10 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - key: Rewrite the board file in place on each pass rather than appending a new one.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ebf5ee0 2026-08-28, the board moved into the memory store and the seat's own push ritual gave way to the store's sync, the pass writing one file and no second one.
+- provenance: ebf5ee0 2026-08-28, the pass writing one file and no second one; `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11 dropped the committer clause with the store's git channel.
 - verdict: keep
-- reason: The in-place rewrite is what lets the store's commit history be the superseded record; the contest freeze is its one stated exception (A002), and the passage's rewrite under A003 moves rationale only, leaving this sentence as written. The kaizen note of 2026-09-02 (now a `migrated` kaizen issue) records that nothing binds the rewrite's coverage to the read's, a gap for the write rule's owner rather than a reason to change this sentence.
-- passage: A pass rewrites the board file in place, and the store's own sync is its committer per the override above.
-
-### c4.C002
-- key: Leave committing the board to the store's own sync rather than committing it yourself.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ebf5ee0 2026-08-28, the store's sync became the board's committer when the board left the home repo.
-- verdict: keep
-- reason: A five-word pointer at the durability override at line 81, which owns the committer rule and its platform split; the pointer is what the one-owner rule asks for here.
-- passage: the store's own sync is its committer per the override above
+- reason: The in-place rewrite keeps one board a successor reads whole; the contest freeze is its one stated exception (A002), and the passage's rewrite under A003 moves rationale only, leaving this sentence as written. The kaizen note of 2026-09-02 (now a `migrated` kaizen issue) records that nothing binds the rewrite's coverage to the read's, a gap for the write rule's owner rather than a reason to change this sentence.
+- passage: A pass rewrites the board file in place.
 
 ### c4.C003
 - key: Dispatch nothing for work a pass turns up; produce artifacts and asks instead.
@@ -3158,70 +3047,14 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - proposed: Cut "or the row is neither re-derivable by the next pass nor addressable by the status round" from line 85 and carry the consequence in the ledger entry for C004.
 - baseline-test: yes
 
-### c4.C007
-- key: Close the board's publish lag by hand-running `doctor/sync-store.ps1` with an explicit `-StoreRoot`.
-- class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ff59e19 2026-09-01, the retired git prohibition replaced by the screened hand path, with 6a3fdfd and 582360a 2026-09-07 correcting what a hand run carries.
-- verdict: keep
-- reason: The session-start hook spawns the script only at a session start or resume, so a long-lived seat's lag is closed by nobody but the seat; the route is pinned at test/doctrine-parity.test.js:3095 and memory-system SKILL.md:66 states the same path as the sync's owner. The sync-store route phrase sits at test/doctrine-parity.test.js:3086 at the landing (cited :3095); memory-system SKILL.md:66 still holds at d2c43f1.
-- passage: Closing that lag by hand is a hand run of `doctor/sync-store.ps1` with an explicit `-StoreRoot`, the same script the session-start hook spawns, though not the same run, which takes `kit-sync.lock`, runs the leak probes and screens the incoming tree.
-
-### c4.C008
-- key: Read `docs/security-model.md` for the comparison of hand sync paths and what each leaves exposed.
-- class: pointer
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ff59e19 2026-09-01, the security model rewritten in the same round to carry the hand-path comparison.
-- verdict: keep
-- reason: No finding. The pointer is what keeps the exposure comparison in one place.
-- passage: Two protections the hook puts around that spawn do not come with a hand run, and `docs/security-model.md` carries the comparison and what each hand path leaves exposed.
-- flag: weak-reason
-
-### c4.C009
-- key: Do not close the lag with the bare `git -C ~/.claude pull --rebase` plus `git -C ~/.claude push` pair; it takes no lock, runs no leak probe, and runs no inbound screen.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ff59e19 2026-09-01, round three found a clause claiming the three guards were properties of the store's channel, when they belong to one run and the bare pair performs none.
-- verdict: keep
-- reason: Pinned verbatim at test/doctrine-parity.test.js:3101; the bare pair rebases an unscreened upstream tree into the live store root, which is the consequence clause A003 moves here: a rename, a duplicate-content push, or a symlink another machine sent lands where nothing un-writes it. The bare-pair phrase sits at test/doctrine-parity.test.js:3092 at the landing (cited :3101).
-- passage: The bare pair `git -C ~/.claude pull --rebase` and `git -C ~/.claude push` closes the lag unscreened, because it takes no lock, runs no leak probe, and runs no inbound screen at all.
-
-### c4.C010
-- key: Off Windows, sync the store with the doctor's `-Fix` commit followed by the bare pull-rebase and push pair, carrying that exposure.
-- class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ff59e19 2026-09-01, the off-Windows case stated when the screened path was made the Windows route.
-- verdict: keep
-- reason: A pointer at the memory-system skill, the sync path's owner per the ownership map, whose line 66 states the same path with the operator go-ahead `-Fix` takes; the kit-doctor bar on an unprompted `-Fix` governs when, this sentence what, so the contention is not real (A015). The lead clause is pinned at test/doctrine-parity.test.js:3108. The off-Windows lead clause sits at test/doctrine-parity.test.js:3099 at the landing (cited :3108); memory-system SKILL.md:66 still holds at d2c43f1.
-- passage: Off Windows the screened run is not on offer at all, the runner being PowerShell, so the commit and the push are both hand-run there, as the memory-system skill states, the push being that same bare pair.
-
-### c4.C011
-- key: Do not treat the memory-system skill's doctor memory-sync gate as a substitute for the screened run.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ff59e19 2026-09-01, the memory-system gate scoped to the outbound half after a clause overstated what the channel supplies.
-- verdict: keep
-- reason: Pinned at test/doctrine-parity.test.js:3103 ("is the outbound half"); the gate reads no incoming tree and takes no lock, so a seat that read PASS as clearance for the bare pair would rebase an unscreened tree. 'is the outbound half' sits at test/doctrine-parity.test.js:3094 at the landing (cited :3103).
-- passage: It takes no lock and reads no incoming tree, so it is not a substitute for the screened run.
-
-### c4.C012
-- key: Read a peer machine's board copy as a state that may lag by a whole session, not by minutes.
-- class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ebf5ee0 2026-08-28, the sync's triggers stated when the board moved into the store.
-- verdict: keep
-- reason: Visibility rides the sync's triggers, a session start on each side, so a peer's copy is a durable record and never a channel; the rule is what stops a seat reading a stale copy as current.
-- passage: A peer machine sees the board only at its own next session start, so anything the operator or a peer needs sooner goes over a warranted channel instead.
-- flag: weak-reason
-
 ### c4.C013
-- key: Send anything needed before the next session start over a warranted channel rather than writing it to the board.
+- key: Send anything the operator or a peer elsewhere needs over a warranted channel rather than writing it to the board, since no other machine reads it.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ebf5ee0 2026-08-28, with c4.C012.
+- provenance: ebf5ee0 2026-08-28, when a peer machine saw the board only at its own next session start; `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11 restated it once nothing copied the board off this machine.
 - verdict: keep
-- reason: The board is a record first and a channel a distant second; a fact the operator or a peer needs sooner than the next session start reaches them by message or not at all.
-- passage: A peer machine sees the board only at its own next session start, so anything the operator or a peer needs sooner goes over a warranted channel instead.
+- reason: The board is a record and never a channel; a fact the operator or a peer on another machine needs reaches them by message or not at all.
+- passage: No other machine reads the board, so anything the operator or a peer elsewhere needs goes over a warranted channel instead.
 - flag: weak-reason
 
 ### c4.C014
@@ -3335,7 +3168,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:87
 - provenance: 33c0bed 2026-08-26, a committed quote of the operator's words was copy-pasteable into any plan and defeated the receiver's trace, so grants left the ledger; 3fb2f4b 2026-08-26 added the paraphrase clause.
 - verdict: keep
-- reason: The one board-wide sentence barring dates and scope and extending the words bar to a paraphrase; line 22's bar and line 72's efforts note are its instances. A record the seat wrote cannot serve as the authority trace, so a quotation buys nothing and spends a disclosure on every synced machine.
+- reason: The one board-wide sentence barring dates and scope and extending the words bar to a paraphrase; line 22's bar and line 72's efforts note are its instances. A record the seat wrote cannot serve as the authority trace, so a quotation buys nothing and spends a disclosure on every reader of the board.
 - passage: No entry carries the authorization's own dates, its scope, or the operator's words, whether quoted or paraphrased.
 
 ### c4.C024
@@ -3703,10 +3536,10 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - provenance: ebf5ee0 2026-08-28, stated at both line 15 and line 95.
 - verdict: rewrite
 - landed: fe0f812 section 23
-- reason: Line 15 states the paid-once rule in the cold-start step where it binds; line 95's sentence reduces to its one addition, that the seat can write the file off Windows because the platform decides who commits and not whether the seat can write, with a pointer at step 2. Lands with line 95 keeping the paid-once sentence and its platform clause as the rule's one statement, since c1.C024 (via A029) drops the statement from step 2 and names line 95 as its carrier, and step 2 points here ('The report is paid once, per the no-board rule below'); the proposal's line-95-points-at-step-2 form is not landed, because with c1.C024 applied it would leave the rule stated nowhere, and c1.C024 records the same pair.
+- reason: Line 15 states the paid-once rule in the cold-start step where it binds; line 95's sentence then reduced to its one addition, that the seat can write the file off Windows, with a pointer at step 2. That platform clause left on 2026-10-11 with the store's git channel (`docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4). Lands with line 95 keeping the paid-once sentence and its platform clause as the rule's one statement, since c1.C024 (via A029) drops the statement from step 2 and names line 95 as its carrier, and step 2 points here ('The report is paid once, per the no-board rule below'); the proposal's line-95-points-at-step-2 form is not landed, because with c1.C024 applied it would leave the rule stated nowhere, and c1.C024 records the same pair.
 - proposed: (via A063) Rewrite line 95's sentence as the platform clause pointing at step 2 for the paid-once rule.
 - baseline-test: yes
-- passage: That wait is paid once, since every later session reads the board on disk, and off Windows too, since the platform decides who commits the store rather than whether the seat can write the file.
+- passage: That wait is paid once, since every later session reads the board on disk.
 
 ### c4.C061
 - key: While boardless or frozen, keep reading, re-deriving, and answering the operator as usual.
@@ -3863,34 +3696,34 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - flag: stale
 
 ### c4.C077
-- key: Do not read the pre-contest version out of the store's history or name either version authoritative.
+- key: Do not bless the board on disk or name it authoritative while the contest stands.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: ff59e19 2026-09-01, the two reasons that reach the read half stated beside the freeze, since the freeze reaches a restore and not a read.
 - verdict: keep
-- reason: Pinned at test/doctrine-parity.test.js:3160-3164; naming a version authoritative settles the seat's own collision, and reading store history is work line 81 routes rather than performs. The read-half phrases sit at test/doctrine-parity.test.js:3151-3156 at the landing (cited :3160-3164).
-- passage: Restoring the committed version or blessing the one on disk is a change to the board, which the freeze forbids while the contest stands.
-- passage: Reading the pre-contest version out of the store's history changes no board, but naming one of two versions authoritative is settling the contest, which is the seat ruling on its own collision.
+- reason: Pinned in test/doctrine-parity.test.js ("is a change to the board, which the freeze forbids while the contest stands"); blessing the board changes it under the freeze, and naming it authoritative settles the seat's own collision. The store's history and its third reason left on 2026-10-11 with the store's git channel (`docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4).
+- passage: Blessing it is a change to the board, which the freeze forbids while the contest stands.
+- passage: And naming it authoritative is settling the contest, which is the seat ruling on its own collision.
 - flag: stale
 
 ### c4.C078
-- key: Carry in the routing message the time the contest was observed, the evidence time of the last pass line this seat wrote, and the uncommitted window.
+- key: Carry in the routing message the time the contest was observed and the evidence time of the last pass line this seat wrote.
 - class: mechanic
 - source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: 33c0bed 2026-08-26, the anchor; ebf5ee0 2026-08-28 named the uncommitted window.
 - verdict: keep
-- reason: No finding. The anchor is what lets the operator name a version and read which commitments a version from history can be missing.
-- passage: So the routing message carries an anchor instead of either version: the time the contest was observed, the evidence time of the seat's own last pass line, and the uncommitted window since the store's last sync.
+- reason: No finding. The anchor is what lets the operator read which lines on the board a claimant wrote after the contest began.
+- passage: So the routing message carries an anchor instead of the board: the time the contest was observed and the evidence time of the seat's own last pass line.
 - flag: weak-reason
 
 ### c4.C079
-- key: Where the store holds no history at all, report that state instead of pointing the operator at a version the store does not hold.
+- key: Treat the board on disk as the contest's one copy, which may carry lines either claimant wrote since the contest began.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:99
-- provenance: ebf5ee0 2026-08-28, the no-history state off Windows and on an uninitialized store.
+- provenance: ebf5ee0 2026-08-28, the no-history state; restated on 2026-10-11 by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4, which left the board no history at all.
 - verdict: keep
-- reason: A routing message that named a pre-contest version on a store with no commits would send the operator to an artifact that does not exist.
-- passage: A store with no history has no earlier version to name, and the routing message reports that state.
+- reason: With no earlier version anywhere, the operator rules on the one copy, and the premise tells them it may already hold a claimant's lines.
+- passage: The board on disk is its one copy, and it may carry lines either claimant wrote since the contest began.
 - flag: weak-reason
 
 ### c4.C080
@@ -4017,15 +3850,6 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - reason: Line 22 applies the words bar to the aggregation and to the Etiquette fold in terms; this is the third statement of the bar in one file and goes with c4.C091, the pointer clause remaining.
 - proposed: (via A112) Reduce line 103's two-bars passage to its pointer clause ("It takes the board's own two line bars at this point of use, per the operator-interface bullet above") and drop the restated path rewrite and the restated reach disclaimer.
 - baseline-test: yes
-
-### c4.C093
-- key: Treat the doctor's memory-sync line reading FAIL as a stop rather than proceeding with the manual push.
-- class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:85
-- provenance: ff59e19 2026-09-01, the memory-system gate scoped to the outbound half in the sentence that carries this stop.
-- verdict: keep
-- reason: The one-clause stop at the push a seat is about to make; the kit-doctor skill owns the FAIL classes and memory-system SKILL.md:66 states the same stop as the sync path's owner. Nothing enforces it, the doctor prints and the session reads, so it is not superseded.
-- passage: the doctor's memory-sync line reading PASS or FIXED with a FAIL a stop rather than a push
 
 ### W001
 - key: Relay an operator decision down with the operator's words quoted and the channel and time they arrived named, which makes it the operator's word deferred, and keep the board free of operator words.
@@ -4298,3 +4122,12 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - verdict: keep
 - reason: The whole gate is the one run that cannot overlap another on a machine, so a session running one outside a moment the doctrine names costs the machine's wall clock for a run the lane rule did not ask for. The seat records slot holders from what it was told or read and has no request-and-grant step, so it can only tell the session which lane the moment takes. The moments stay in the doctrine's gate bullet alone, so this bullet restates none of them.
 - passage: - **Machine-resource arbitration.** Suite-slot contention and the shared-surface claims nobody else stewards. A whole gate holds a suite slot only at a moment the doctrine's gate bullet names. The seat tells a session it is told of or reads running one at any other moment that the moment takes the targeted lane.
+
+### M001
+- key: Treat the board, the registry and the admin requests as this machine's own, which nothing copies off it and no other machine reads.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:10
+- provenance: `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4, 2026-10-11, which retired the file memory store and its git channel, the one path that had carried the coordinator directory to other machines.
+- verdict: keep
+- reason: A seat that still read the directory as shared would write for readers it no longer has and wait on a copy that never arrives; the readership precondition (c3.C004) and the warranted-channel rule (c4.C013) both rest on this scope.
+- passage: The board, the registry and the admin requests are this machine's own: nothing copies them off it, and no other machine reads them.

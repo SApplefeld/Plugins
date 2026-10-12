@@ -166,10 +166,14 @@ export const SEGMENT_MAX = 64;
 // where it only answered, `none` where the nudge's submit failed or the turn
 // ended with no answer.
 //
-// The next belongs to the step watch's question. A `turn_score_label` is the
-// label the turn scorer gave the whole turn, written at that turn's end
-// against each step-drift call the turn made that asked about the entry the
-// scorer labelled. A turn the scorer left without a label writes none.
+// The next two belong to the step watch's two questions. A
+// `turn_score_label` is the label the turn scorer gave the whole turn,
+// written at that turn's end against each step-drift call the turn made that
+// asked about the entry the scorer labelled. A turn the scorer left without a
+// label writes none. A `next_step_tools` is what the step after a step-effort
+// call did, written once against that call: the names of the tools that step
+// called, joined with commas, `answer` where it called no tool, or `none`,
+// written at the turn's end, where no step came after it.
 //
 // The last belongs to the turn-score question. A `next_trigger` is what
 // opened the next turn in the same session, written at that turn's start
@@ -189,13 +193,13 @@ export type OutcomeKind =
   | "record_delivered_within" | "next_prompt_kind" | "haiku_kind" | "haiku_score"
   | "applied_since_call" | "recall_acted" | "nudge_acted"
   | "haiku_decision" | "acted"
-  | "turn_score_label" | "next_trigger";
+  | "turn_score_label" | "next_step_tools" | "next_trigger";
 export const OUTCOME_KINDS: readonly OutcomeKind[] = [
   "next_score", "ask_marker", "lead_blocked", "chapter_within", "next_speaker", "continued_unprompted",
   "record_delivered_within", "next_prompt_kind", "haiku_kind", "haiku_score",
   "applied_since_call", "recall_acted", "nudge_acted",
   "haiku_decision", "acted",
-  "turn_score_label", "next_trigger",
+  "turn_score_label", "next_step_tools", "next_trigger",
 ];
 
 // The value every `ask_marker` outcome line carries, whatever the caller passes.

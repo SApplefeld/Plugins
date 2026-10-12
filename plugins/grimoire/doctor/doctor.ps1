@@ -7,33 +7,37 @@
 # Verifies core setup (execution policy, files left under the plugin's former
 # name, doctrine import and freshness, kaizen signpost, git hooks on a clone),
 # the ANTHROPIC_API_KEY hazard, the hook layer (hook-canary wiring, node, the
-# memq shim), the memory store's sync repo and its allowlist, the embedder
-# behind semantic memory search, the .kit/ state directory's exposure, the
-# shared memory database on the host, the auto-compaction window, the retired
-# sidecar's task and state folder, the output style, a status-line setting that
-# still names the kit's launcher, and the plugin's install.
+# memq shim), the .kit/ state directory's exposure, the shared memory database
+# on the host, the loopback embedding server, the auto-compaction window, the
+# retired sidecar's task and state folder, the output style, a status-line
+# setting that still names the kit's launcher, and the plugin's install.
 #
 #   .\doctor.ps1              Check only; prints PASS/WARN/FAIL with remediations.
 #   .\doctor.ps1 -Fix         Also applies the safe durable repairs (execution
 #                             policy, the memq shim into ~\.claude\bin,
-#                             the memory store's sync repo and allowlist,
-#                             signpost + git hooks on a clone, a memq db-sync
+#                             signpost + git hooks on a clone, a memq db-refresh
 #                             where the memory database step warns, the move
 #                             of files left under the plugin's former name
 #                             and the rewrite of a CLAUDE.md import line that
 #                             is exactly that name's token, and, each behind
 #                             its own consent prompt, the autoCompactWindow
 #                             and outputStyle values written into user
-#                             settings.json and the plugin install). Behind
+#                             settings.json, the plugin install, and the
+#                             embedding server's install into
+#                             ~\.claude\kit-embedding-server, its scheduled
+#                             task and its config block, where it deletes and
+#                             refetches a download whose SHA-256 differs from
+#                             its pin). Behind
 #                             one more consent prompt it disarms the retired
 #                             sidecar: it unregisters the scheduled task
 #                             claude-kit-sidecar-daemon, stops that daemon's
 #                             node process under the kit clone, and removes
 #                             ~\.claude\kit-sidecar with everything in it.
-#                             Beyond that folder it deletes only files its own
+#                             Beyond those folders it deletes only files its own
 #                             run wrote: the temp file a failed signpost write
-#                             or import-line rewrite left, and the settings
-#                             writer's temp file and pre-write backup.
+#                             or import-line rewrite left, the embedding block
+#                             writer's temp file, and the settings writer's
+#                             temp file and pre-write backup.
 #   .\doctor.ps1 -Fix -Yes    Pre-answers the consent prompts -Fix already
 #                             requested, for unattended runs. It authorizes
 #                             nothing by itself.
@@ -144,20 +148,16 @@ $claudeDir = Join-Path $env:USERPROFILE ".claude"
 # uses the PATH predicate it defines.
 . (Join-Path $PSScriptRoot "install-memq-shim.ps1")
 
-# Memory-sync allowlist, state, and initialization helpers, beside this
-# script. It resolves no paths of its own: this script is the only caller that
-# knows the real store root, and passes it in.
-. (Join-Path $PSScriptRoot "install-memory-sync.ps1")
-
-# Embedder probe, install, and index-health helpers, beside this script. It
-# resolves no paths of its own either: this script is the only caller that
-# knows the real embedder root and store root, and passes both in.
-. (Join-Path $PSScriptRoot "install-embedder.ps1")
-
 # Auto-compaction-window writer for user settings.json, beside this script.
 # It resolves no paths of its own: this script passes the settings path in,
 # and the test suite passes a sandbox path.
 . (Join-Path $PSScriptRoot "install-compact-window.ps1")
+
+# Embedding-server state, install and config-block writer, beside this
+# script. It resolves no paths of its own: the Embedding server step passes
+# the install root, the config path and the task name in, and the test suite
+# passes a fixture home's.
+. (Join-Path $PSScriptRoot "install-embedding-server.ps1")
 
 # Append a directory to the durable user PATH, and to this process's PATH so
 # the current run sees it too. Every kit PATH repair goes through this one
@@ -845,8 +845,8 @@ else {
     Report "FAIL" "Hook canary" ($gaps + @("The cache canary probe cannot run without this wiring.", (Get-PayloadClause)))
 }
 
-# --- Node. Every kit hook is a 'node ...' command, and the memq shim, Embedder
-# --- and Memory database steps below run under node too, so an unresolved node
+# --- Node. Every kit hook is a 'node ...' command, and the memq shim and
+# --- Memory database steps below run under node too, so an unresolved node
 # --- is a FAIL here and those steps skip on it.
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($null -eq $nodeCmd) {
@@ -859,10 +859,10 @@ else {
     Report "PASS" "Node" @("node resolves on PATH.")
 }
 
-# --- Installed copy. On a clone, the memq shim, Memory sync and Embedder
-# --- checks below also read the expected value of the kit copy this machine
-# --- has installed, so a machine that matches the install and not the checkout
-# --- in hand reads as trailing that checkout rather than as broken, and -Fix
+# --- Installed copy. On a clone, the memq shim check below
+# --- also reads the expected value of the kit copy this machine has installed,
+# --- so a machine that matches the install and not the checkout in hand
+# --- reads as trailing that checkout rather than as broken, and -Fix
 # --- installs nothing there. The installed copy is the one the memq shim
 # --- itself runs: the checkout's own scripts\memq-shim.js is required under
 # --- node as a module, and its resolveMemq() answers
@@ -870,17 +870,17 @@ else {
 # --- inside the -e source, as the hook load check above does it, and that
 # --- source holds no double quote, which Windows PowerShell 5.1 mangles in a
 # --- native argument. No answer, a node failure, or an answer naming this
-# --- payload itself reads as no installed copy, and the three checks then
-# --- read exactly as they do without one.
+# --- payload itself reads as no installed copy, and the check then
+# --- reads exactly as it does without one.
 # ---
-# --- The lookup runs only when one of those checks first reads the machine
+# --- The lookup runs only when that check first reads the machine
 # --- short of this checkout (a resolving shim with a file missing or
-# --- differing, a drifted sync allowlist file, or an embedder the checkout
-# --- reads absent or unusable), and its answer is kept for the rest of the
-# --- run, so a healthy run spawns no node for it. The resolver's stderr is
-# --- kept rather than dropped: it carries the note naming which marketplace's
-# --- copy it chose when several offer one, which is whose code the checks
-# --- below then load, so a trailing INFO prints it.
+# --- differing), and
+# --- its answer is kept for the rest of the run, so a healthy run spawns no
+# --- node for it. The resolver's stderr is kept rather than dropped: it
+# --- carries the note naming which marketplace's copy it chose when several
+# --- offer one, which is whose code the check below then loads, so a trailing
+# --- INFO prints it.
 $installedRoot = $null
 $script:InstalledKitRootRead = $false
 $script:InstalledKitRoot = $null
@@ -949,13 +949,12 @@ else {
     # checkout, so -Fix performs the reinstall the FAIL's remedy names.
     #
     # The installed copy judges with its own install-memq-shim.ps1, run in its
-    # own dynamic module as the Memory sync step does it, because the shim's
-    # file set and the wrapper texts are defined in that file rather than read
-    # from the payload's scripts. Every file that copy's own helpers name as
-    # copied must exist in its scripts: the status function skips a copy it
-    # cannot find, which would count a bin file as matching a copy that ships
-    # none. An absent script, a missing function, or a throw reads as not
-    # trailing.
+    # own dynamic module, because the shim's file set and the wrapper texts are
+    # defined in that file rather than read from the payload's scripts. Every
+    # file that copy's own helpers name as copied must exist in its scripts:
+    # the status function skips a copy it cannot find, which would count a bin
+    # file as matching a copy that ships none. An absent script, a missing
+    # function, or a throw reads as not trailing.
     $memqTrailing = $false
     if ($memqShim.Resolves -and ($memqShim.Missing.Count -gt 0 -or $memqShim.Stale.Count -gt 0)) {
         $installedRoot = Get-InstalledKitRoot
@@ -1101,818 +1100,13 @@ else {
     }
 }
 
-# --- Memory sync. The memory store is ~\.claude itself, which also holds
-# --- .credentials.json, settings.json, history.jsonl, and every session
-# --- transcript, so the sync repo carries an allowlist that excludes
-# --- everything and re-includes only the memory tiers and the coordinator
-# --- directory. That allowlist is the entire barrier between syncing
-# --- memories and publishing credentials, which is why this check
-# --- re-derives it on every run and proves the
-# --- negative directly (check-ignore on the sensitive files, a dry-run add,
-# --- the tracked-file list, and committed history) rather than trusting a file
-# --- that merely looks right. Any drift is a FAIL, never a warning. Every leak
-# --- probe is printed in every state the section can report, because the
-# --- states where the allowlist is least trustworthy are exactly the ones
-# --- where a staged or committed secret most needs naming.
-# ---
-# --- install-memory-sync.ps1 (dot-sourced near the top of this script) owns
-# --- the canonical text, the state reading, and the initialization, so the
-# --- repo test suite exercises the same functions against a redirected store
-# --- root. -Fix is additive: it initializes the repo, writes the two managed
-# --- files, and commits what the allowlist admits. It never replaces a .git
-# --- it did not create, and never rewrites a .gitignore or .gitattributes
-# --- that does not carry the doctor's marker line.
-
-# The leak probes as report lines, plus what to do about them, plus what to say
-# when a probe could not answer. Every branch of the section below prints all
-# three, because a report that names a broken allowlist without naming what is
-# already staged or committed under it reads as reassurance, and a report whose
-# leak list is empty because a probe errored reads as a clean index.
-function Get-MemorySyncReportLines {
-    param($Status)
-    $leaks = @()
-    foreach ($probe in $Status.NotIgnored) { $leaks += ("Not ignored: " + (Get-SanitizedLine $probe 200)) }
-    foreach ($path in ($Status.Unexpected | Select-Object -First 5)) { $leaks += ("An add would stage: " + (Get-SanitizedLine $path 200)) }
-    if ($Status.Unexpected.Count -gt 5) { $leaks += ("... and $($Status.Unexpected.Count - 5) more path(s) an add would stage.") }
-    foreach ($path in ($Status.Tracked | Select-Object -First 5)) { $leaks += ("Already tracked: " + (Get-SanitizedLine $path 200)) }
-    if ($Status.Tracked.Count -gt 5) { $leaks += ("... and $($Status.Tracked.Count - 5) more tracked path(s).") }
-    foreach ($path in ($Status.HistoryPaths | Select-Object -First 5)) { $leaks += ("In committed history: " + (Get-SanitizedLine $path 200)) }
-    if ($Status.HistoryPaths.Count -gt 5) { $leaks += ("... and $($Status.HistoryPaths.Count - 5) more path(s) in committed history.") }
-
-    # A path in history is its own remedy: untracking leaves the blob
-    # reachable, so only a rewrite removes it, and anything secret it held is
-    # spent.
-    $fixes = @("Untrack what should not be there (git rm --cached) and re-run this check; the doctor removes nothing.")
-    if ($Status.HistoryPaths.Count -gt 0) {
-        $fixes += "A path already committed stays reachable after git rm --cached: rewrite the history (or start the repository over) and rotate every credential that ever appeared in it."
-    }
-
-    # A probe that did not answer is the difference between a clean index and
-    # an unread one, and the two are indistinguishable from an empty result
-    # set, so the count says how much of the negative was actually proven.
-    $unproven = @()
-    if ($Status.IsRepo -and -not $Status.ProbesRan) {
-        $unproven += ("Only " + $Status.ProbesAnswered + " of " + $Status.ProbesAttempted +
-            " direct probes could answer, so the lines above are not a full account of what this repository holds and the negative is unproven.")
-        $unproven += @($Status.Notes | ForEach-Object { Get-SanitizedLine $_ 200 })
-    }
-    # Outside a repository there is no probe to run and no index to read, so
-    # any note is what the status has to say about the store root itself.
-    $context = @()
-    if (-not $Status.IsRepo) { $context += @($Status.Notes | ForEach-Object { Get-SanitizedLine $_ 200 }) }
-    return @{ Leaks = $leaks; Fixes = $fixes; Unproven = $unproven; Context = $context }
-}
-
-# Whether a push from this store would reach the branch another machine's pull
-# reads. Split by what an operator choice can explain: a detached HEAD, a
-# branch tracking nothing, an upstream on some other remote, and a push.default
-# that refuses this pair of branch names or refuses to push at all are broken in
-# ways nobody opts into, so they block. A second branch on origin is the
-# reported silent case, but a backup or an abandoned branch explains it too, so
-# it is named rather than failed on: a check that exits 1 over a stale ref
-# teaches the operator to stop reading this section.
-function Get-MemorySyncDestinationLines {
-    param($Status)
-    $blocking = @()
-    $advisory = @()
-
-    if ($Status.Detached) {
-        $blocking += "HEAD is detached, so commits here belong to no branch and a push sends nothing."
-    }
-    elseif ($Status.Branch -ne "" -and $Status.Upstream -eq "") {
-        $blocking += ("Branch " + (Get-SanitizedLine $Status.Branch 200) +
-            " tracks no upstream, so the close-out's pull and push have no destination.")
-    }
-    elseif ($Status.Upstream -ne "" -and -not $Status.Upstream.StartsWith("origin/")) {
-        $blocking += ("Branch " + (Get-SanitizedLine $Status.Branch 200) + " tracks " +
-            (Get-SanitizedLine $Status.Upstream 200) + ", which is not the origin reported above.")
-    }
-
-    # A branch that tracks a real branch on origin and still cannot publish to
-    # it. The sync runner's push leg is a bare `git push`, so what happens to
-    # this store's memories is push.default's to decide, and every check above
-    # reads clean in each of the states below.
-    #
-    # git compares the raw branch.<name>.merge value against refs/heads/<local
-    # branch> byte for byte, so the comparison is ordinal over the raw ref: a
-    # case-only difference and a short form (`merge = main`) are both refusals
-    # a normalized or case-insensitive comparison would call a match.
-    $mergeRef = [string]$Status.UpstreamMergeRef
-    $pairMismatch = ($Status.Branch -ne "" -and $mergeRef -ne "" -and
-        -not [string]::Equals("refs/heads/" + $Status.Branch, $mergeRef, [System.StringComparison]::Ordinal))
-
-    # The rename remedy is printed as a runnable command only where pasting it
-    # is safe. Get-SanitizedLine guarantees printable ASCII, which is the
-    # character set shell metacharacters live in, and git accepts `;`, `&&`,
-    # `|`, `$()` and quotes in a branch name, so both names must also be within
-    # a charset that carries none of them and must survive the sanitizer
-    # unchanged, truncation marker included. Each name must also open on an
-    # alphanumeric: a leading `-` carries no shell meaning at all, but git
-    # reads it as an option, so a branch named `-f` composes
-    # `git branch -m -f <upstream>`, a forced rename that clobbers an existing
-    # ref rather than the rename this line advertises. A merge ref outside
-    # refs/heads/ names no branch to rename to at all. Where any of that fails
-    # the finding is still reported, in prose: refusing to print a command is
-    # the answer, not quoting it.
-    $renameSafe = ($pairMismatch -and
-        $mergeRef.StartsWith("refs/heads/", [System.StringComparison]::Ordinal) -and
-        $Status.Branch -match '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -and
-        $Status.UpstreamBranch -match '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -and
-        (Get-SanitizedLine $Status.Branch 200) -eq $Status.Branch -and
-        (Get-SanitizedLine $Status.UpstreamBranch 200) -eq $Status.UpstreamBranch)
-    $renameFix = @()
-    if ($renameSafe) {
-        $renameFix += ("Fix: rename the local branch to match its upstream (git branch -m " +
-            (Get-SanitizedLine $Status.Branch 200) + " " + (Get-SanitizedLine $Status.UpstreamBranch 200) +
-            ") in the store root.")
-    }
-    elseif ($pairMismatch) {
-        $renameFix += ("Fix: rename the local branch " + (Get-SanitizedLine $Status.Branch 200) + " to " +
-            (Get-SanitizedLine $Status.UpstreamBranch 200) +
-            " in the store root. These branch names carry characters that make a pasted command unsafe, so no runnable command is printed here.")
-    }
-
-    # The value is matched case-sensitively because git parses it that way and
-    # errors on anything it does not recognize, `Simple` included.
-    $pushDefault = [string]$Status.PushDefault
-    $setPushDefaultFix = "Fix: set push.default to simple in the store root (git config push.default simple)."
-    if ($pushDefault -ceq "upstream" -or $pushDefault -ceq "tracking") {
-        # The push follows the upstream ref whatever the two names are, so a
-        # differing pair costs nothing and is not a finding.
-    }
-    elseif ($pushDefault -ceq "simple") {
-        if ($pairMismatch) {
-            # Fatal on every run, while every check above it reads clean.
-            $blocking += ("Branch " + (Get-SanitizedLine $Status.Branch 200) + " tracks " +
-                (Get-SanitizedLine $Status.Upstream 200) +
-                ", and push.default simple refuses a push whose branch names differ, so the store's automated push fails on every run.")
-            $blocking += $renameFix
-        }
-    }
-    elseif ($pushDefault -ceq "matching") {
-        if ($pairMismatch) {
-            # The quietest of the set: matching updates only branches carrying
-            # the same name on both ends, so a differing pair matches nothing
-            # and the runner records a success for a push that published
-            # nothing.
-            $blocking += ("Branch " + (Get-SanitizedLine $Status.Branch 200) + " tracks " +
-                (Get-SanitizedLine $Status.Upstream 200) +
-                ", and push.default matching updates only branches that carry the same name on both ends, so the store's automated push exits successfully while publishing nothing to the branch this store pulls from.")
-            $blocking += $renameFix
-        }
-    }
-    elseif ($pushDefault -ceq "nothing") {
-        # Names are irrelevant here: a bare push under this setting errors out
-        # for want of a refspec, matched pair or not.
-        $blocking += "push.default is set to nothing, so a bare push errors out for want of a refspec and the store's automated push fails on every run, whatever the branch names are."
-        $blocking += $setPushDefaultFix
-    }
-    elseif ($pushDefault -ceq "current") {
-        if ($pairMismatch) {
-            # The push succeeds, and lands on a branch named after the local
-            # one rather than on the upstream this store pulls from. Advisory
-            # rather than blocking: the memories are published, just where no
-            # other machine reads them.
-            $advisory += ("Branch " + (Get-SanitizedLine $Status.Branch 200) + " tracks " +
-                (Get-SanitizedLine $Status.Upstream 200) +
-                ", and push.default current publishes to the branch on origin named after the local branch, so this store's memories land somewhere the other machines never pull from.")
-            $advisory += $renameFix
-        }
-    }
-    else {
-        $blocking += ("push.default is set to " + (Get-SanitizedLine $pushDefault 200) +
-            ", which git does not recognize, so it refuses every push in this store as a malformed config value.")
-        $blocking += $setPushDefaultFix
-    }
-
-    $others = @($Status.RemoteBranches | Where-Object { $_ -ne $Status.Upstream })
-    if ($Status.Upstream -ne "" -and $others.Count -gt 0) {
-        $advisory += ("This machine tracks " + (Get-SanitizedLine $Status.Upstream 200) + ", and origin also carries " +
-            (($others | Select-Object -First 5 | ForEach-Object { Get-SanitizedLine $_ 200 }) -join ", ") +
-            ". A machine pushing to one of those never reaches this store, and neither side reports an error.")
-        $advisory += "That reads local refs as of the last fetch; this check makes no network call."
-    }
-    return @{ Blocking = $blocking; Advisory = $advisory }
-}
-
-# The paths a fetched upstream commit writes into this machine's own
-# coordinator directory, as report lines. The sync runner refuses such an
-# intake and records the reason code alone, its only output channel being the
-# state file, so this is where the operator who has to repair the remote learns
-# WHICH commit and WHICH paths: the runner leaves the fetched tip in place for
-# exactly that reason. The read is the runner's own
-# (Get-MemorySyncInboundForeignPaths), so the report cannot name a different
-# set than the refusal acted on.
-#
-# No ahead/behind count is read first: the diff runs from the merge base of
-# HEAD and the fetched tip, which is the tip itself when the upstream is not
-# ahead, so an in-sync or ahead-only store produces an empty diff by
-# construction and no lines here. Every string comes out of the store, so each
-# is sanitized like the installer's notes are.
-#
-# The classification is by path alone, so the pushing machine may be this one:
-# a commit this machine published, met by a local HEAD that has since moved
-# back (a reset during a repair, a store restored from backup or a snapshot, a
-# re-clone of an older state), reads exactly like a peer writing in. The remote
-# is correct in that case and the store is behind it, so the lines name both
-# repairs and leave the operator, who knows which state the box is in, to pick.
-function Get-MemorySyncInboundOwnLines {
-    param([Parameter(Mandatory = $true)][hashtable]$Status)
-    if (-not $Status.IsRepo -or -not $Status.IsOwnRepo -or $Status.Upstream -eq "") { return @() }
-    $revUp = Invoke-MemorySyncGit -StoreRoot $Status.StoreRoot -Arguments @("rev-parse", "--verify", "@{upstream}")
-    $upstreamSha = if ($revUp.Output.Count -gt 0) { ([string]$revUp.Output[-1]).Trim() } else { "" }
-    if ($revUp.Code -ne 0 -or $upstreamSha -cnotmatch $script:MemorySyncObjectIdPattern) { return @() }
-    $machine = ""
-    try { $machine = [string](Get-MemorySyncMachineName) } catch { $machine = "" }
-    $found = Get-MemorySyncInboundForeignPaths -StoreRoot $Status.StoreRoot -Ref $upstreamSha -Machine $machine
-    if (-not $found.Ok -or @($found.Paths).Count -eq 0) { return @() }
-    $paths = @($found.Paths)
-    $named = (($paths | Select-Object -First 5 | ForEach-Object { Get-SanitizedLine $_ 200 }) -join ", ")
-    if ($paths.Count -gt 5) { $named += " (and " + ($paths.Count - 5) + " more)" }
-    return @(
-        ("The fetched commit " + (Get-SanitizedLine $upstreamSha 200) + " on " + (Get-SanitizedLine $Status.Upstream 200) +
-            " writes " + $paths.Count + " path(s) inside this machine's own coordinator directory, which only this machine writes: " + $named),
-        ("The sync refuses that intake rather than rebasing it, so the store stays gated until one of two repairs is made, " +
-            "and which one depends on where those paths were written."),
-        ("If another machine wrote them, the correction is made on that machine by hand with git (commit the undo and push it directly): " +
-            "its own sync gate refuses to stage a write under this machine's coordinator directory, so the kit's channel cannot carry the fix."),
-        ("If this machine pushed them itself and its HEAD has since moved back (a reset, a restore from a backup or a snapshot, a re-clone of an older state), " +
-            "the remote is correct and the repair is local: bring HEAD back up to the upstream rather than changing the remote.")
-    )
-}
-
-# The report a machine name that reads blank earns, and the state it describes.
-# Neither direction of the sync can tell this machine's coordinator directory
-# from another's without the name, so the installer refuses every commit and the
-# runner refuses every intake, and the two states the runner can record (a
-# failed commit and an unproven read) name none of that.
-#
-# These lines carry a verdict rather than riding as detail. A store that commits
-# nothing and rebases nothing is a store not syncing at all, and the reports
-# below print detail under a summary line the operator reads as the verdict, so
-# a line saying so under a PASS would be the failure with a caption on it. The
-# reading is the installer's own (Get-MemorySyncMachineName), and it needs no
-# repository state, so it answers on a store with no upstream and no remote at
-# all: a blank name stops the sync whether or not the branch tracks anything.
-function Get-MemorySyncMachineNameLines {
-    $machine = ""
-    try { $machine = [string](Get-MemorySyncMachineName) } catch { $machine = "" }
-    if ($machine.Trim() -ne "") { return @() }
-    return @(
-        ("This machine's own name reads blank, so the sync can tell neither a staged nor an incoming coordinator path " +
-            "from another machine's: nothing is committed and nothing is rebased until the machine name resolves."),
-        "Fix: give this machine a host name the system resolves (the sync reads [System.Net.Dns]::GetHostName()), then re-run this check."
-    )
-}
-
-$syncStatus = Get-MemorySyncStatus -StoreRoot $claudeDir
-$syncFixNotes = @()
-$syncReported = $false
-
-if (-not $syncStatus.GitAvailable) {
-    Report "WARN" "Memory sync" @(
-        "git is not on PATH, so the memory store's sync repo cannot be checked or initialized.",
-        "Install git and re-run the doctor; every other check above is unaffected."
-    )
-}
-else {
-    $syncForeign = @()
-    if ($syncStatus.IgnoreState -eq "Foreign") { $syncForeign += ".gitignore" }
-    if ($syncStatus.AttrState -eq "Foreign") { $syncForeign += ".gitattributes" }
-    # A repository at the store root that the doctor did not create is nobody
-    # else's to write in, and a managed file the doctor did not write is left
-    # as found, which means the installer's canonical-allowlist gate refuses to
-    # stage anything there. Neither case is offered a -Fix, because the repair
-    # the prompt describes is one the installer will not perform.
-    $syncAdoptable = ((-not $syncStatus.IsRepo) -or $syncStatus.IsOwnRepo) -and ($syncForeign.Count -eq 0)
-    # Every repairable state of both managed files, so a check that prints
-    # "re-run with -Fix" is one -Fix actually acts on. A missing file counts:
-    # a repo recognized by its config marker with no .gitignore on disk has no
-    # rules at all, which is the state most in need of the repair.
-    #
-    # The last clause is what closes the steady-state hole: a repository
-    # already canonical on both managed files never used to reach
-    # Install-MemorySyncRepo at all, so -Fix committed nothing beyond the
-    # first heal that made it canonical, and every memory a session wrote
-    # afterward stayed local until the next drift. Dirty is true only inside
-    # an owned repo (Get-MemorySyncStatus leaves it false outside one), so
-    # this clause cannot fire for a repo $syncAdoptable would refuse anyway.
-    $syncNeedsWork = $syncAdoptable -and ((-not $syncStatus.IsRepo) -or
-        $syncStatus.IgnoreState -eq "Missing" -or $syncStatus.IgnoreState -eq "Drift" -or
-        $syncStatus.AttrState -eq "Missing" -or $syncStatus.AttrState -eq "Drift" -or
-        $syncStatus.Dirty)
-
-    # Trailing: a managed file drifted from the allowlist this checkout derives
-    # while both read canonical against the allowlist the installed copy
-    # derives. The installed copy's derivation runs in its own dynamic module,
-    # so its functions and its script-scope values never replace this script's
-    # own. A trailing store is healthy for the kit this machine runs, so its
-    # drift is no gap here and -Fix skips Install-MemorySyncRepo whole: that
-    # installer restores any managed file reading drifted against this
-    # checkout's derivation before it commits, which would install this
-    # checkout's allowlist on the machine. Any failure to derive reads as no
-    # installed copy.
-    $syncTrailing = $false
-    if ($syncStatus.IsRepo -and $syncStatus.IsOwnRepo -and
-        ($syncStatus.IgnoreState -eq "Drift" -or $syncStatus.AttrState -eq "Drift")) {
-        $installedRoot = Get-InstalledKitRoot
-    }
-    if ($null -ne $installedRoot -and $syncStatus.IsRepo -and $syncStatus.IsOwnRepo -and
-        ($syncStatus.IgnoreState -eq "Drift" -or $syncStatus.AttrState -eq "Drift")) {
-        $installedSyncScript = Join-Path $installedRoot "doctor\install-memory-sync.ps1"
-        if (Test-Path -LiteralPath $installedSyncScript -PathType Leaf) {
-            try {
-                $installedSyncModule = New-Module -ScriptBlock { param($SyncScript) . $SyncScript; Export-ModuleMember } -ArgumentList $installedSyncScript
-                $installedSyncStates = @(& $installedSyncModule {
-                    param($StoreRoot)
-                    foreach ($managed in (Get-MemorySyncManagedFiles)) {
-                        Get-MemorySyncFileState -Path (Join-Path $StoreRoot $managed.Name) -Expected $managed.Text
-                    }
-                } $claudeDir)
-                $syncTrailing = ($installedSyncStates.Count -eq 2 -and @($installedSyncStates | Where-Object { $_ -ne "Canonical" }).Count -eq 0)
-            }
-            catch { $syncTrailing = $false }
-        }
-    }
-    $syncTrailLines = @()
-    if ($syncTrailing) {
-        $syncTrailLines += ("The allowlist matches the one the installed copy derives and differs from this checkout's, so it trails the checkout in hand: " + (Get-SanitizedLine $installedRoot 200))
-        if ($Fix) {
-            $syncTrailLines += ("-Fix left this store as found: the commit of pending memory changes runs from the installed copy's doctor, " + (Get-SanitizedLine (Join-Path $installedRoot "doctor\doctor.cmd") 200) + " -Fix.")
-        }
-        $syncTrailLines += @($script:InstalledKitResolverNotes | ForEach-Object { Get-SanitizedLine $_ 200 })
-    }
-
-    if ($Fix -and $syncNeedsWork -and -not $syncTrailing) {
-        # Three shapes, not two: the prompt must never describe a repair that
-        # is not happening, so a canonical repo that only needs its pending
-        # changes committed asks about exactly that, never about restoring an
-        # allowlist that is already right.
-        #
-        # Every shape names both parts of the store the commit carries. The
-        # allowlist admits the memory tiers and the coordinator directory, so
-        # a prompt naming only the tiers asks consent for less than the commit,
-        # and the sync runner's later push that carries it, actually publish.
-        $syncQuestion = if (-not $syncStatus.IsRepo) {
-            "Initialize $claudeDir as the memory-sync git repository (allowlist plus one commit of the memory tiers and the coordinator directory)?"
-        }
-        elseif ($syncStatus.IgnoreState -ne "Canonical" -or $syncStatus.AttrState -ne "Canonical") {
-            "Restore the canonical memory-sync allowlist in $claudeDir and commit the memory tiers and the coordinator directory?"
-        }
-        else {
-            "Commit $($syncStatus.DirtyCount) pending change(s) to the memory tiers and the coordinator directory in $claudeDir through the gated allowlist?"
-        }
-        if (Get-Consent $syncQuestion) {
-            $syncInstall = Install-MemorySyncRepo -StoreRoot $claudeDir
-            # The installer's notes name paths and quote git's output, both of
-            # which come from the store rather than from this script, so they
-            # are sanitized like every other store-derived string before
-            # reaching a report a human reads to make a security decision.
-            if (-not $syncInstall.Ok) {
-                # Re-read before reporting: a refusal can follow an init or an
-                # add, so the repository the operator is being told about is
-                # the one on disk now, not the one the attempt started from.
-                $syncStatus = Get-MemorySyncStatus -StoreRoot $claudeDir
-                $syncFailed = Get-MemorySyncReportLines $syncStatus
-                # A blank machine name is why the installer refuses every
-                # commit, so the remedy rides this refusal too. The reading is
-                # the installer's own and needs no repository state, and the
-                # function is called here rather than reading the tail variable
-                # the check-mode branches share, which is assigned further down
-                # and past this return path.
-                Report "FAIL" "Memory sync" (@($syncInstall.Notes | ForEach-Object { Get-SanitizedLine $_ 200 }) +
-                    $syncFailed.Leaks +
-                    $(if ($syncFailed.Leaks.Count -gt 0) { $syncFailed.Fixes } else { @() }) +
-                    $syncFailed.Unproven + $syncFailed.Context + (Get-MemorySyncMachineNameLines) +
-                    (Get-MemorySyncInboundOwnLines $syncStatus))
-                $syncReported = $true
-            }
-            else {
-                $syncFixNotes += $syncInstall.Notes
-                # Re-read after writing: the report describes the state on disk
-                # now, never the state that prompted the repair.
-                $syncStatus = Get-MemorySyncStatus -StoreRoot $claudeDir
-                $syncForeign = @()
-                if ($syncStatus.IgnoreState -eq "Foreign") { $syncForeign += ".gitignore" }
-                if ($syncStatus.AttrState -eq "Foreign") { $syncForeign += ".gitattributes" }
-            }
-        }
-    }
-
-    if (-not $syncReported) {
-        $syncGaps = @()
-        foreach ($pair in @(@(".gitignore", $syncStatus.IgnoreState), @(".gitattributes", $syncStatus.AttrState))) {
-            if ($pair[1] -eq "Drift" -and -not $syncTrailing) { $syncGaps += "$($pair[0]) differs from the allowlist this doctor derives." }
-            if ($pair[1] -eq "Missing" -and $syncStatus.IsRepo) { $syncGaps += "$($pair[0]) is missing." }
-        }
-        $syncReport = Get-MemorySyncReportLines $syncStatus
-        $syncLeaks = $syncReport.Leaks
-        # The leak fixes ride wherever the leaks do, and the unproven lines
-        # ride everywhere, because an empty leak list means nothing when a
-        # probe could not answer.
-        # An upstream commit writing this machine's own coordinator directory is
-        # a finding about the remote rather than about this store's allowlist,
-        # so it rides every branch below as a named path and changes no
-        # verdict: the store's own state is exactly what the branch says it is,
-        # and what the operator gains here is the commit and the paths the
-        # runner's reason code alone cannot carry. An in-sync store produces no
-        # lines, so nothing changes for a healthy report.
-        $syncInboundOwn = Get-MemorySyncInboundOwnLines $syncStatus
-        # A blank machine name is the other finding this section carries, and
-        # unlike the inbound lines it sets a verdict: it rides the tail here so
-        # the FAIL branches below name it beside their own finding, and it has
-        # its own branch further down for the store that is otherwise healthy.
-        # A box whose name resolves produces no lines either way.
-        $syncMachineBlank = Get-MemorySyncMachineNameLines
-        $syncTail = $(if ($syncLeaks.Count -gt 0) { $syncReport.Fixes } else { @() }) + $syncReport.Unproven +
-            $syncInboundOwn + $syncMachineBlank
-        # Notes from the installer quote paths and git output, so they carry
-        # the same sanitization every other store-derived string does.
-        $syncFixLines = @($syncFixNotes | ForEach-Object { Get-SanitizedLine $_ 200 })
-
-        if ($syncForeign.Count -gt 0) {
-            # Someone else's file: rewriting it would destroy their rules, so
-            # the doctor names it and stops. No -Fix is offered here, because
-            # none is going to run. The leak probes are printed all the same:
-            # this is a state in which the rules are unknown, which is when
-            # what an add would stage and what is already committed matter
-            # most.
-            Report "FAIL" "Memory sync" ($syncFixLines + @(
-                ("$claudeDir holds a " + ($syncForeign -join " and a ") + " the doctor did not write, so the memory-sync allowlist cannot be trusted."),
-                "The store root holds .credentials.json, settings.json, history.jsonl, and every session transcript.",
-                "Review that file by hand; move it aside to let the doctor write the canonical allowlist."
-            ) + $syncLeaks + $syncTail)
-        }
-        elseif ($syncStatus.IsRepo -and -not $syncStatus.IsOwnRepo) {
-            # A repository here that carries no doctor-written allowlist was
-            # created by someone else (an operator versioning their dotfiles at
-            # the store root). Writing an allowlist and committing into it
-            # would put the memory tiers and the coordinator directory, and
-            # whatever that repo had staged, in a commit and possibly a push
-            # nobody asked for.
-            Report "FAIL" "Memory sync" ($syncFixLines + @(
-                "$claudeDir is already a git repository the doctor did not create, and it carries no memory-sync allowlist.",
-                "The store root holds .credentials.json, settings.json, history.jsonl, and every session transcript, all of which that repository can stage.",
-                "Review it by hand; the doctor writes nothing into a repository it did not create."
-            ) + $syncLeaks + $syncTail)
-        }
-        elseif (-not $syncStatus.IsRepo) {
-            # The machine lines ride here because this branch's only advice is
-            # to re-run with -Fix, and a blank machine name is exactly what the
-            # installer that recipe invokes refuses on, so without them the
-            # operator is sent to a repair that cannot run. The reading needs
-            # no repository state, which is what lets it answer on a store root
-            # that is not a repository at all.
-            Report "WARN" "Memory sync" (@(
-                "$claudeDir is not a git repository, so the memory store does not sync across machines.",
-                "Fix: re-run doctor with -Fix (initializes the repo with the gated allowlist from $(Get-PayloadCopyName) and commits the memory tiers and the coordinator directory)."
-            ) + $syncReport.Context + $syncMachineBlank)
-        }
-        elseif ($syncGaps.Count -gt 0) {
-            # A missing or drifted allowlist is the other state in which the
-            # rules cannot be trusted, so the leak probes are printed here for
-            # the same reason they are printed above: what an add would reach
-            # and what is already staged or committed is the whole question.
-            # Both gaps are this payload's readings: a drifted file is judged
-            # against the text its install-memory-sync.ps1 derives, and a
-            # missing one against the managed-file set that file names, so
-            # the report names that copy either way.
-            Report "FAIL" "Memory sync" ($syncFixLines + $syncGaps + @(
-                "Until it matches, an add in $claudeDir can stage credentials, settings, and session transcripts.",
-                "Fix: re-run doctor with -Fix (restores the canonical allowlist from $(Get-PayloadCopyName))."
-            ) + $syncLeaks + $syncTail + @(Get-PayloadClause))
-        }
-        elseif ($syncLeaks.Count -gt 0) {
-            Report "FAIL" "Memory sync" ($syncFixLines + $syncLeaks + @(
-                "The allowlist reads as expected, but the repository state above puts non-memory paths in reach of a push."
-            ) + $syncTail + $syncTrailLines)
-        }
-        elseif (-not $syncStatus.ProbesRan) {
-            # A probe that could not run proves nothing, and this is the report
-            # the operator reads before giving the store a remote, so an
-            # unanswerable probe is a failure rather than a warning: a warning
-            # exits 0 under a "healthy" summary line.
-            # The inbound lines and a blank machine name ride here too: an
-            # unanswerable probe is about the allowlist, an upstream writing
-            # this machine's own coordinator directory is about the remote, and
-            # a name that reads blank is about the box, so an operator hitting
-            # more than one needs each of them. The first is read from the
-            # repo's refs and HEAD and the second from the machine, neither of
-            # which the leak probes' failure disturbs.
-            Report "FAIL" "Memory sync" (@(
-                "The allowlist matches on disk, but what this repository would actually publish is unverified."
-            ) + $syncReport.Unproven + $syncInboundOwn + $syncMachineBlank + $syncTrailLines)
-        }
-        elseif ($syncMachineBlank.Count -gt 0) {
-            # Everything about the allowlist reads clean, and the store still
-            # syncs nothing in either direction, so this is the last branch that
-            # can hold a finding before the healthy reports begin. It fails
-            # rather than warns for the reason the unproven branch above does: a
-            # warning exits 0 under a summary line, and the reports below this
-            # one end by handing the operator a push recipe for a store that
-            # cannot commit.
-            Report "FAIL" "Memory sync" ($syncFixLines + $syncMachineBlank + $syncInboundOwn + $syncTrailLines)
-        }
-        else {
-            $syncDetail = @(
-                ("Allowlist canonical; " + $syncStatus.Probed.Count + " sensitive path(s) proven ignored, an add would stage memory paths only, and no non-memory blob is reachable in committed history.")
-            )
-            if ($syncStatus.Remote -ne "") { $syncDetail += ("origin: " + (Get-SanitizedLine (Get-RedactedRemote $syncStatus.Remote) 200)) }
-            # The branches below carry $syncDetail rather than $syncTail, so the
-            # inbound lines join it here to reach them; an in-sync store adds
-            # nothing.
-            $syncDetail += $syncInboundOwn
-            # Reached either from a plain check (no -Fix) or from a -Fix run
-            # whose commit succeeded and cleared the worktree: $syncStatus was
-            # re-read after that commit, so Dirty is already false there and
-            # this line adds nothing beside the FIXED notes above it. A check
-            # that stayed silent about pending, uncommitted memories would
-            # tell an operator the store is fine while it holds unsynced work;
-            # check mode cannot commit them, but it can say they are there.
-            if ($syncStatus.Dirty) {
-                # The count leads with a string, never bare: "$int + ' text'"
-                # asks PowerShell to add an integer to a string and throws,
-                # where "'' + $int + ' text'" concatenates as intended.
-                # A trailing store's commit is the installed copy's doctor's
-                # to make, since -Fix from this checkout skips the installer.
-                $syncDirtyFix = if ($syncTrailing) { "Fix: run the installed copy's doctor with -Fix (commits them through the allowlist it derives)." } else { "Fix: re-run doctor with -Fix (commits them through the gated allowlist)." }
-                $syncDetail += ("" + $syncStatus.DirtyCount + " uncommitted change(s) under the allowlist, not yet committed. " + $syncDirtyFix)
-            }
-            $syncDetail += $syncTrailLines
-            # The allowlist is sound from here down, so nothing below is a leak.
-            # What is left to prove is that the store publishes somewhere: every
-            # probe above can read clean on a store that syncs nowhere, which is
-            # a passing report on a memory tier no other machine will ever see.
-            $syncDest = Get-MemorySyncDestinationLines $syncStatus
-
-            if ($syncStatus.Remote -eq "") {
-                Report "WARN" "Memory sync" ($syncFixLines + $syncDetail + @(
-                    "No origin remote, so the store is versioned locally and replicates nowhere: nothing this machine records leaves it, and nothing another machine records arrives.",
-                    "Fix: add the private remote (git -C `"$claudeDir`" remote add origin <url>) and push the branch with -u."
-                ))
-            }
-            elseif ($syncDest.Blocking.Count -gt 0) {
-                # The remedy below repairs the three findings that leave this
-                # store without a usable destination on origin: a HEAD on no
-                # branch, a branch tracking nothing, and a branch tracking some
-                # remote other than origin. It is withheld from every other
-                # finding, which carries its own remedy, because running
-                # `push -u origin <branch>` against a branch whose upstream on
-                # origin is already correct creates a second branch there and
-                # repoints the upstream at it, which is exactly the silent
-                # cross-machine divergence the advisory check above reports.
-                $syncDestFix = @()
-                if ($syncStatus.Detached -or $syncStatus.Upstream -eq "" -or
-                    -not $syncStatus.Upstream.StartsWith("origin/")) {
-                    $syncDestFix += "Fix: put HEAD on the sync branch and give it an upstream (git -C `"$claudeDir`" push -u origin <branch>)."
-                }
-                Report "FAIL" "Memory sync" ($syncFixLines + $syncDetail + $syncDest.Blocking + $syncDest.Advisory + $syncDestFix)
-            }
-            elseif (-not $syncStatus.DestinationRead) {
-                Report "WARN" "Memory sync" ($syncFixLines + $syncDetail + @(
-                    "The branch this store would push to could not be read, so whether it reaches any other machine is unverified."
-                ))
-            }
-            elseif ($syncDest.Advisory.Count -gt 0) {
-                Report "WARN" "Memory sync" ($syncFixLines + $syncDetail + $syncDest.Advisory)
-            }
-            elseif (-not $syncStatus.RemoteBranchesRead -or $syncStatus.RemoteBranches.Count -eq 0) {
-                # The sole-branch claim below rests on having read origin's
-                # branches. An unreadable or empty set is not evidence of one
-                # branch, and saying so from zero observations is the same
-                # mistake as reading an empty leak probe as a clean index.
-                Report "WARN" "Memory sync" ($syncFixLines + $syncDetail + @(
-                    ("Branch " + (Get-SanitizedLine $syncStatus.Branch 200) + " tracks " +
-                        (Get-SanitizedLine $syncStatus.Upstream 200) + ", but no remote-tracking branch for origin could be read here, so whether this store shares a branch with the other machines is unverified."),
-                    "Fix: run git -C `"$claudeDir`" fetch origin, then re-run this check."
-                ))
-            }
-            else {
-                $syncDetail += ("Destination: " + (Get-SanitizedLine $syncStatus.Branch 200) + " tracks " +
-                    (Get-SanitizedLine $syncStatus.Upstream 200) + ", the only branch on origin.")
-                if ($syncFixLines.Count -gt 0) {
-                    # The commit's other half, stated rather than left to
-                    # inference: this block reports a commit directly beside an
-                    # "origin:" line and a "Destination:" line naming the branch
-                    # this store tracks, and a commit reported beside a
-                    # destination with nothing said about publication reads as
-                    # published. The push lives in the sync runner alone
-                    # (sync-store.ps1), so a -Fix run's outcome is local, and
-                    # both carriers of the commit are named.
-                    #
-                    # This is the only branch that may carry the recipe, and the
-                    # reason is the whole point of the report it sits in. Every
-                    # other branch reachable from here is a FAIL or a WARN,
-                    # including the FAIL raised because a non-memory blob is
-                    # reachable in committed history, where handing the operator
-                    # a push command would hand them the exact act the leak
-                    # probes exist to stop. Only here has the store proven both
-                    # that it publishes nothing it should not and that it has a
-                    # destination to publish to, so only here is a push the
-                    # right next step. $claudeDir is the doctor's own derived
-                    # path rather than a store-supplied string, so it embeds
-                    # raw like the other Fix lines in this section: sanitizing
-                    # it would silently strip a non-ASCII profile name out of a
-                    # command the operator is meant to copy.
-                    Report "FIXED" "Memory sync" ($syncFixLines + $syncDetail + @(
-                        "Committed, not pushed: the commit is local until something carries it, either the background sync runner at the next session start or the manual push below.",
-                        "Manual push: git -C `"$claudeDir`" pull --rebase, then git -C `"$claudeDir`" push."
-                    ))
-                }
-                elseif ($syncTrailing) { Report "INFO" "Memory sync" $syncDetail }
-                else { Report "PASS" "Memory sync" $syncDetail }
-            }
-        }
-    }
-}
-
-# --- Embedder (semantic memory search). memq find's semantic channel needs an
-# --- in-process embedding stack that ships outside the plugin payload (the kit
-# --- core stays dependency-free), so this section reports whether it is
-# --- installed, installs it under -Fix, and reports the derived index's health
-# --- without ever sweeping or writing it: the index rebuilds itself, and a
-# --- doctor that touched it while reporting on it would have changed the thing
-# --- it was reporting.
-# ---
-# --- install-embedder.ps1 (dot-sourced near the top of this script) owns the
-# --- probe, the install, and the index-health reading, so the repo test suite
-# --- exercises the same functions against a redirected embedder root and store
-# --- root. probeEmbedder's three states get three different reports: 'absent'
-# --- is nothing installed yet, 'unusable' is a broken or incomplete install (a
-# --- repair, never mistaken for a fresh install), and 'ready' is a working
-# --- semantic channel. Absence is a WARN, not a FAIL: memq find degrades to its
-# --- lexical channel with a loud line, so a machine without the stack is a
-# --- working install with a named gap, the same reading every other optional
-# --- capability in this doctor gets.
-# "kit-embedder" mirrors memory-index.js's EMBEDDER_DIR constant and
-# memq.js's OPERATOR_DIR-style literal duplication: PowerShell cannot import a
-# CommonJS constant, so the two sides of this contract are pinned by comment
-# rather than by a shared definition, the same way $script:EmbedderConsentSizeMB
-# in install-embedder.ps1 is a measured figure rather than a computed one.
-$embedderRoot = Join-Path $claudeDir "kit-embedder"
-$embedderScript = Join-Path $pluginRoot "scripts\memory-index.js"
-
-if ($null -eq $nodeCmd) {
-    Report "INFO" "Embedder (semantic search)" @("Skipped (node unresolved; the Node check above already FAILs on that, and the embedder probe runs under node).")
-}
-elseif (-not (Test-Path -LiteralPath $embedderScript)) {
-    Report "FAIL" "Embedder (semantic search)" @("memory-index.js not found at $embedderScript; this plugin payload is incomplete.")
-}
-else {
-    $embedProbe = Get-EmbedderProbe -MemoryIndexPath $embedderScript -EmbedderRoot $embedderRoot -NodeExe $nodeCmd.Source
-    $embedFixNotes = @()
-    $embedReported = $false
-
-    # Trailing: the absent and unusable readings are judged against this
-    # checkout's memory-index.js (the package it names and the model files it
-    # expects), so on a clone a machine healthy for the kit it runs can read
-    # either. Where it does, the same probe runs against the installed copy's
-    # memory-index.js, with the same embedder root and node, and a 'ready'
-    # there reads INFO: that copy's memq is the one this machine runs, and
-    # -Fix offers no install, since installing this checkout's stack is the
-    # change the operator did not ask for by running a checkout. No installed
-    # copy, no memory-index.js in it, a throw, or any other reading leaves
-    # the step exactly as it reads without one. 'probe-failed' against this
-    # checkout never looks, since this payload's own module could not answer.
-    $embedTrailing = $false
-    $embedInstalledProbe = $null
-    if ($embedProbe.status -eq 'absent' -or $embedProbe.status -eq 'unusable') {
-        $installedRoot = Get-InstalledKitRoot
-        if ($null -ne $installedRoot) {
-            $installedEmbedderScript = Join-Path $installedRoot "scripts\memory-index.js"
-            if (Test-Path -LiteralPath $installedEmbedderScript -PathType Leaf) {
-                try {
-                    $embedInstalledProbe = Get-EmbedderProbe -MemoryIndexPath $installedEmbedderScript -EmbedderRoot $embedderRoot -NodeExe $nodeCmd.Source
-                    $embedTrailing = ($null -ne $embedInstalledProbe -and $embedInstalledProbe.status -eq 'ready')
-                }
-                catch { $embedTrailing = $false }
-            }
-        }
-    }
-
-    # Gated on 'absent' or 'unusable' specifically, never on "not ready":
-    # 'probe-failed' (the module present but unloadable, an incomplete plugin
-    # payload) also reads not-ready, and offering a fresh install there would
-    # promise a multi-hundred-megabyte download that cannot fix a payload
-    # problem, ending in FAIL regardless. 'probe-failed' takes its own report
-    # in the switch below instead, and never reaches a consent prompt.
-    if ($Fix -and -not $embedTrailing -and ($embedProbe.status -eq 'absent' -or $embedProbe.status -eq 'unusable')) {
-        if ($null -eq (Get-Command npm -ErrorAction SilentlyContinue)) {
-            # The consent prompt must not promise a repair the installer will
-            # refuse to perform: Install-Embedder itself checks for npm and
-            # returns Ok=false without ever prompting, so this mirrors that
-            # refusal before a prompt is even offered, the same shape the
-            # memq shim's "no payload to run" WARN takes. No prompt is shown,
-            # and this rides as an extra note on the ordinary absent/unusable
-            # report below rather than replacing it, so the index-health lines
-            # every other state gets still print here too.
-            $embedFixNotes = @(
-                "npm is not on PATH, so the embedding stack cannot be installed.",
-                "Install Node.js (which ships npm) and re-run doctor -Fix."
-            )
-        }
-        else {
-            $embedQuestion = if ($embedProbe.status -eq 'unusable') {
-                "Repair the local embedding stack at $embedderRoot (re-downloads the missing model files; the full install is about $($script:EmbedderConsentSizeMB) MB on disk)?"
-            }
-            else {
-                "Install the local embedding stack into $embedderRoot (about $($script:EmbedderConsentSizeMB) MB on disk; enables memq find's semantic channel)?"
-            }
-            if (Get-Consent $embedQuestion) {
-                $embedInstall = Install-Embedder -PluginRoot $pluginRoot -EmbedderRoot $embedderRoot -NodeExe $nodeCmd.Source
-                # Re-probe either way: the report below must describe the
-                # install as it actually stands after this attempt, never as
-                # the attempt hoped it would.
-                $embedProbe = Get-EmbedderProbe -MemoryIndexPath $embedderScript -EmbedderRoot $embedderRoot -NodeExe $nodeCmd.Source
-                $embedInstallNotes = @($embedInstall.Notes | ForEach-Object { Get-SanitizedLine $_ 300 })
-                if (-not $embedInstall.Ok) {
-                    Report "FAIL" "Embedder (semantic search)" ($embedInstallNotes + @(
-                        "Semantic channel inactive; memq find serves lexical results only, with a loud absence line naming the remedy.",
-                        "The install directory is left in place for diagnosis; the doctor deletes nothing."
-                    ))
-                    $embedReported = $true
-                }
-                else {
-                    $embedFixNotes = $embedInstallNotes
-                }
-            }
-        }
-    }
-
-    if (-not $embedReported) {
-        # A trailing machine's index is read through the installed copy's
-        # memory-index.js and judged against the model identity that copy
-        # reads as installed, since that copy's memq builds it.
-        $embedIndexScript = if ($embedTrailing) { $installedEmbedderScript } else { $embedderScript }
-        $embedIndexHealth = Get-EmbedderIndexHealth -MemoryIndexPath $embedIndexScript -EmbedderRoot $embedderRoot -StoreRoot $claudeDir -NodeExe $nodeCmd.Source
-        $embedIndexProbe = if ($embedTrailing) { $embedInstalledProbe } else { $embedProbe }
-        $embedIndexLines = @((Get-EmbedderIndexHealthLines -IndexHealth $embedIndexHealth -Probe $embedIndexProbe) | ForEach-Object { Get-SanitizedLine $_ 300 })
-
-        # The absent and unusable readings are judged against this payload's
-        # memory-index.js (the package it names and the model files it
-        # expects), so those two name the copy. The probe-failed reading
-        # compares nothing: the payload's own module could not answer.
-
-        if ($embedTrailing) {
-            $embedAgainstCheckout = if ($embedProbe.status -eq 'unusable') {
-                "reads installed but not usable (" + (Get-SanitizedLine ([string]$embedProbe.detail) 300) + ")"
-            }
-            else { "reads not installed" }
-            Report "INFO" "Embedder (semantic search)" (@(
-                ("Installed: $(Get-SanitizedLine ([string]$embedInstalledProbe.packageName) 80)@$(Get-SanitizedLine ([string]$embedInstalledProbe.packageVersion) 40), model $(Get-SanitizedLine ([string]$embedInstalledProbe.model) 80) ($(Get-SanitizedLine ([string]$embedInstalledProbe.dtype) 80)) at $(Get-SanitizedLine ([string]$embedInstalledProbe.packageDir) 200), ready for the installed copy's memory-index.js."),
-                ("Against this checkout's memory-index.js it " + $embedAgainstCheckout + ", so it trails the checkout in hand: " + (Get-SanitizedLine $installedRoot 200)),
-                "-Fix from this checkout installs nothing here; the installed copy's doctor is the one that judges this machine."
-            ) + $embedIndexLines + @($script:InstalledKitResolverNotes | ForEach-Object { Get-SanitizedLine $_ 200 }))
-        }
-        else {
-            switch ($embedProbe.status) {
-                'ready' {
-                    # packageVersion comes from a package.json this doctor did not
-                    # author, the same as every other foreign string reaching this
-                    # report, so it takes the same sanitize pass before printing.
-                    $embedDetail = @(
-                        ("Installed: $($embedProbe.packageName)@$(Get-SanitizedLine ([string]$embedProbe.packageVersion) 40), model $($embedProbe.model) ($($embedProbe.dtype)) at $($embedProbe.packageDir)."),
-                        "Semantic channel active; memq find blends lexical and semantic results."
-                    ) + $embedIndexLines
-                    if ($embedFixNotes.Count -gt 0) { Report "FIXED" "Embedder (semantic search)" ($embedFixNotes + $embedDetail) }
-                    else { Report "PASS" "Embedder (semantic search)" $embedDetail }
-                }
-                'unusable' {
-                    Report "WARN" "Embedder (semantic search)" ($embedFixNotes + @(
-                        ("Installed but not usable: " + (Get-SanitizedLine ([string]$embedProbe.detail) 300)),
-                        "This is a repair, not a fresh install.",
-                        ("Fix: " + $embedProbe.remedy),
-                        "Semantic channel inactive; memq find serves lexical results only, with a loud absence line naming the remedy."
-                    ) + $embedIndexLines + @(Get-PayloadClause))
-                }
-                'absent' {
-                    Report "WARN" "Embedder (semantic search)" ($embedFixNotes + @(
-                        "Not installed; memq find serves lexical results only, with a loud absence line naming the remedy.",
-                        ("Fix: " + $embedProbe.remedy + "  (about $($script:EmbedderConsentSizeMB) MB on disk)")
-                    ) + $embedIndexLines + @(Get-PayloadClause))
-                }
-                default {
-                    # 'probe-failed': the child node process itself could not
-                    # answer, an incomplete plugin payload rather than an
-                    # ordinary absent-or-broken install. Named as its own state so
-                    # it is never mistaken for either.
-                    Report "FAIL" "Embedder (semantic search)" (@(
-                        "Could not probe the embedder install: " + (Get-SanitizedLine ([string]$embedProbe.detail) 300)
-                    ) + $embedIndexLines)
-                }
-            }
-        }
-    }
-}
-
-# --- Nothing may be inserted between the embedder section above and the
-# --- `# --- .kit/ exposure.` marker below. test/embedder-install.test.js runs
-# --- real doctor code by extracting the text between the embedder section's
-# --- own marker comment and that marker, then asserting on the reports that
-# --- region emits, so a check placed in this gap silently joins that
-# --- extracted section and fails those cases with a report count they never
-# --- asked for. Add new checks after the `# --- .kit/ exposure.` marker
-# --- instead.
+# --- Nothing may be inserted between the `# --- Installed copy.` marker above
+# --- and the `# --- .kit/ exposure.` marker below. test/doctor-payload.test.js
+# --- runs real doctor code by extracting the text between those two markers
+# --- and asserting on the reports that region emits, so a check placed in this
+# --- gap silently joins that extracted section and fails those cases with a
+# --- report count they never asked for. Add new checks after the
+# --- `# --- .kit/ exposure.` marker instead.
 
 # --- .kit/ exposure. The kit's project-local state lives in .kit/, and every
 # --- file it holds is machine-local by intent: compact-consent.json carries
@@ -1987,22 +1181,20 @@ else {
 }
 
 # --- Memory database. The shared SQL Server index on the virtualization host
-# --- holds the fleet's semantic index, one usage row per memory, the outcome
-# --- journal and curation queries
-# --- over the markdown memory store, and a machine reaches it through the
+# --- holds the fleet's memory records, one usage row per memory, the outcome
+# --- journal and curation queries, and a machine reaches it through the
 # --- client config at ~\.claude\kit-memory-db.json. A machine with no config
-# --- is an ordinary machine running on its own store, which is INFO. With one,
+# --- is a machine with no memory store, which is INFO. With one,
 # --- this step runs the host probe beside the installer under -Quick (every
 # --- check but the latency measurement) and reads mem.usp_Health under the
-# --- config's own publisher login, then reports the local queue's depth and
-# --- the age of the last clean publish, so a machine that has silently fallen back
-# --- to its own store for a week says so here. FAIL is any FAIL line from the
-# --- probe or a health call that did not answer; WARN is a queue holding rows,
-# --- a last clean publish older than seven days, or a prerequisite (pwsh, node)
+# --- config's own publisher login, then reports the local queue's depth, so a
+# --- machine whose writes have silently queued says so here. FAIL is any FAIL
+# --- line from the probe or a health call that did not answer; WARN is a queue
+# --- holding rows or a queue that could not be counted, or a prerequisite (pwsh, node)
 # --- missing so the host was not checked; PASS is everything else. Under -Fix
-# --- any WARN the health call raised runs memq db-sync inline, which publishes
-# --- the store and drains the queue, and reports FIXED on a clean publish; on
-# --- an unmapped login the sync's own FAIL lines say what it could not do.
+# --- any WARN the health call raised runs memq db-refresh inline, which drains
+# --- the queue and refreshes the snapshot, and reports FIXED on a clean run; on
+# --- an unmapped login the refresh's own FAIL lines say what it could not do.
 # ---
 # --- The probe carries #Requires -Version 7.0 (it reads an HTTP refusal as a
 # --- result, which only pwsh's -SkipHttpErrorCheck can), while this doctor
@@ -2012,15 +1204,14 @@ else {
 # --- probe, the health call or a failure prints is foreign text on this
 # --- channel and takes Get-SanitizedLine at this report's own cap.
 # "kit-memory-db.json" mirrors memory-database.js's CONFIG_FILE constant and
-# "kit-memory-db-queue.sqlite" its QUEUE_FILE, pinned by comment for the
-# reason the embedder section states. The queue is not read here: the health
+# "kit-memory-db-queue.sqlite" its QUEUE_FILE, pinned by comment because
+# PowerShell cannot import a CommonJS constant. The queue is not read here: the health
 # script below hands the store root to the client, which counts the queue's
 # rows itself and creates no queue where none exists.
 $dbConfigPath = Join-Path $claudeDir "kit-memory-db.json"
 $dbProbeScript = Join-Path $pluginRoot "db\Test-MemoryDatabaseHost.ps1"
 $dbClientScript = Join-Path $pluginRoot "scripts\memory-database.js"
 $dbMemqScript = Join-Path $pluginRoot "scripts\memq.js"
-$dbStaleDays = 7
 
 # One line, no double quotes: it rides as a node -e argument through the
 # PowerShell native-command call. The client reads the config at the path it
@@ -2061,7 +1252,8 @@ else {
 
         # mem.usp_Health under the config's publisher login, with the queue depth
         # beside it. A last line that will not parse as JSON is the child having
-        # failed, for the reason the embedder probe reads the same shape.
+        # failed: stderr is merged in, so a warning landing last at exit 0
+        # cannot pass for an answer.
         $healthOutput = & $nodeCmd.Source -e $script:MemoryDatabaseHealthScript $dbClientScript $dbConfigPath $claudeDir 2>&1
         $healthCode = $LASTEXITCODE
         $healthLines = @($healthOutput | ForEach-Object { [string]$_ })
@@ -2106,23 +1298,12 @@ else {
                 foreach ($entry in $sandboxes) {
                     if ([string]$entry.sandbox -eq $env:COMPUTERNAME) { $own = $entry; break }
                 }
-                $lastPublishText = [string]$own.lastPublish
-                $publishAge = $null
-                if ($lastPublishText -ne "") {
-                    $parsedPublish = [DateTimeOffset]::MinValue
-                    if ([DateTimeOffset]::TryParse($lastPublishText, [System.Globalization.CultureInfo]::InvariantCulture,
-                            [System.Globalization.DateTimeStyles]::None, [ref]$parsedPublish)) {
-                        $publishAge = [DateTimeOffset]::UtcNow - $parsedPublish
-                    }
-                }
-                $publishWord = if ($null -eq $publishAge) { "never" } else { [math]::Floor($publishAge.TotalDays).ToString() + " day(s) ago" }
+                # The health answer's lastPublish is not read: no client
+                # records a publish run, and the queue depth below is the
+                # signal for writes that have not reached the host.
                 $dbLines += ("Sandbox " + (Get-SanitizedLine ([string]$own.sandbox) 40) + ": " +
                     (Get-SanitizedLine ([string]$own.records) 20) + " record(s), " +
-                    (Get-SanitizedLine ([string]$own.embeddings) 20) + " embedding(s), last clean publish " + $publishWord + ".")
-                if ($null -eq $publishAge -or $publishAge.TotalDays -gt $dbStaleDays) {
-                    $dbWarned = $true
-                    $dbLines += "The last clean publish is older than $dbStaleDays days, so the shared index may not hold this machine's store as it stands. memq db-sync prints what the last run could not deliver."
-                }
+                    (Get-SanitizedLine ([string]$own.embeddings) 20) + " embedding(s).")
             }
         }
         # The queue depth rides on the health answer whatever the host said,
@@ -2134,7 +1315,7 @@ else {
             }
             elseif ([int]$health.queueDepth -gt 0) {
                 $dbWarned = $true
-                $dbLines += ("Queue: " + [int]$health.queueDepth + " row(s) wait in the local queue and publish on the next memq db-sync.")
+                $dbLines += ("Queue: " + [int]$health.queueDepth + " row(s) wait in the local queue and drain on the next memq db-refresh.")
             }
             else {
                 $dbLines += "Queue: empty."
@@ -2142,30 +1323,133 @@ else {
         }
 
         if ($dbFailed) {
-            Report "FAIL" "Memory database" ($dbLines + @("Fix: bring the host up or repair the config, then run memq db-sync; the local store is unaffected either way."))
+            Report "FAIL" "Memory database" ($dbLines + @("Fix: bring the host up or repair the config, then run memq db-refresh; the local queue holds this machine's writes either way."))
         }
         elseif ($dbWarned -and $Fix) {
-            # The publish inline, through the payload's own memq under the same
-            # node: it publishes every record, drains the queue and exits non-zero
-            # for what failed, so the exit code is the verdict and its lines are
-            # the detail.
-            $syncOutput = & $nodeCmd.Source $dbMemqScript db-sync 2>&1
+            # The refresh inline, through the payload's own memq under the same
+            # node: it drains the queue, refreshes the snapshot and exits
+            # non-zero for what failed, so the exit code is the verdict and its
+            # lines are the detail.
+            $syncOutput = & $nodeCmd.Source $dbMemqScript db-refresh 2>&1
             $syncCode = $LASTEXITCODE
             $syncLines = @($syncOutput | ForEach-Object { Get-SanitizedLine ([string]$_) 120 } | Where-Object { $_ -ne "" })
             if ($syncCode -eq 0) {
-                Report "FIXED" "Memory database" ($dbLines + @("Ran memq db-sync:") + @($syncLines | ForEach-Object { "  " + $_ }))
+                Report "FIXED" "Memory database" ($dbLines + @("Ran memq db-refresh:") + @($syncLines | ForEach-Object { "  " + $_ }))
             }
             else {
-                Report "FAIL" "Memory database" ($dbLines + @("memq db-sync exited $syncCode" + ":") + @($syncLines | ForEach-Object { "  " + $_ }))
+                Report "FAIL" "Memory database" ($dbLines + @("memq db-refresh exited $syncCode" + ":") + @($syncLines | ForEach-Object { "  " + $_ }))
             }
         }
         elseif ($dbWarned) {
-            Report "WARN" "Memory database" ($dbLines + @("Fix: run memq db-sync, or re-run doctor -Fix to run it from here (a full publish, inline, up to 15 minutes)."))
+            Report "WARN" "Memory database" ($dbLines + @("Fix: run memq db-refresh, or re-run doctor -Fix to run it from here (the queue drain and the snapshot refresh, inline)."))
         }
         else {
             Report "PASS" "Memory database" $dbLines
         }
     }
+}
+
+# The markdown memory tiers under the store root, projects\<p>\memory,
+# memory-types and memory-operator, and the two store-root leftovers
+# memory-index.jsonl and kit-embedder, are history: the memory database holds
+# every record and no kit reader opens them. A machine still holding one is
+# told so once, as INFO, with the command that removes exactly what was found,
+# one line per path found, each anchored on that literal path. The doctor removes nothing and -Fix does
+# not run the command: the files are the operator's and the decision is theirs.
+# A project tier is named only where it holds a record file outside its
+# pending directory and other than its MEMORY.md: the pending directory is a
+# run's live state, and MEMORY.md is the operator's own notes file. The
+# command printed for a project is one removal of the tier's .md files, never
+# the directory, so what it leaves is everything else: MEMORY.md, the pending
+# directory, usage.jsonl, and outcomes.jsonl, which is pre-cutover outcome
+# history a later plan imports. Two things the old tiers held are carried
+# over before the removals, under their own heading: memq reads a project's
+# type from the declarations file `memq declare-type` writes, no longer from
+# a Project-Type line in MEMORY.md, so wherever a MEMORY.md still carries
+# one, record files or not, the operator is handed the search that finds
+# every such line and told to declare each in its checkout; and the tag
+# registry now lives at the store root as memory-tag-registry.md, so wherever
+# memory-types holds one the move that carries it there is printed. The
+# shared tiers and the root leftovers are then removed whole. A printed path
+# is the raw one, single quotes doubled inside the literal, so the command
+# names the file that is there; only the line an operator reads takes
+# Get-SanitizedLine.
+# The migration marker at memory-migrated.json, where there is one, says when
+# the publish that moved these records ran and how many twins it counted, so
+# the operator can weigh the removal against it. Every displayed path and
+# marker value takes Get-SanitizedLine; a path inside a printed command is raw.
+$oldTierLines = @()
+$oldTierCommands = @()
+$oldCarryLines = @()
+$oldTypeLineFound = $false
+$oldProjectsRoot = Join-Path $claudeDir "projects"
+if (Test-Path -LiteralPath $oldProjectsRoot -PathType Container) {
+    foreach ($oldProject in @(Get-ChildItem -LiteralPath $oldProjectsRoot -Directory -Force -ErrorAction SilentlyContinue)) {
+        $oldMemDir = Join-Path $oldProject.FullName "memory"
+        if (-not (Test-Path -LiteralPath $oldMemDir -PathType Container)) { continue }
+        $oldPendingPrefix = (Join-Path $oldMemDir "pending") + [System.IO.Path]::DirectorySeparatorChar
+        $oldIndexPath = Join-Path $oldMemDir "MEMORY.md"
+        $oldRecords = @(Get-ChildItem -LiteralPath $oldMemDir -Recurse -File -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -ieq ".md" -and -not $_.FullName.StartsWith($oldPendingPrefix, [System.StringComparison]::OrdinalIgnoreCase) -and -not [string]::Equals($_.FullName, $oldIndexPath, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ((Test-Path -LiteralPath $oldIndexPath -PathType Leaf) -and
+            ($null -ne (Select-String -LiteralPath $oldIndexPath -Pattern '^Project-Type:' -Quiet -ErrorAction SilentlyContinue))) {
+            $oldTypeLineFound = $true
+        }
+        if ($oldRecords.Count -eq 0) { continue }
+        $oldTierLines += ("Old tier: " + (Get-SanitizedLine $oldMemDir 260) + " still holds " + $oldRecords.Count + " record file(s).")
+        $quotedMemDir = $oldMemDir.Replace("'", "''")
+        $oldTierCommands += ("Get-ChildItem -LiteralPath '" + $quotedMemDir + "' -Recurse -File -Force -Filter '*.md' | Where-Object { -not `$_.FullName.StartsWith('" +
+            ($oldPendingPrefix).Replace("'", "''") + "', [System.StringComparison]::OrdinalIgnoreCase) -and `$_.FullName -ne '" +
+            $oldIndexPath.Replace("'", "''") + "' } | Remove-Item -Force")
+    }
+    if ($oldTypeLineFound) {
+        # The wildcard stands in the one segment the operator's own project
+        # names fill, under the quoted root every other printed path takes,
+        # its own wildcard characters escaped so -Path reads them literally.
+        $oldCarryLines += ("Select-String -Path '" + [System.Management.Automation.WildcardPattern]::Escape($oldProjectsRoot).Replace("'", "''") + "\*\memory\MEMORY.md' -Pattern '^Project-Type:'")
+        $oldCarryLines += "(each hit is a project whose type memq no longer reads from MEMORY.md: run ``memq declare-type <type>`` in that project's checkout)"
+    }
+}
+foreach ($oldShared in @("memory-types", "memory-operator")) {
+    $oldSharedDir = Join-Path $claudeDir $oldShared
+    if (-not (Test-Path -LiteralPath $oldSharedDir -PathType Container)) { continue }
+    $oldRegistryPath = Join-Path $oldSharedDir "tag-registry.md"
+    if ($oldShared -eq "memory-types" -and (Test-Path -LiteralPath $oldRegistryPath -PathType Leaf)) {
+        $oldCarryLines += ("Move-Item -LiteralPath '" + $oldRegistryPath.Replace("'", "''") +
+            "' -Destination '" + (Join-Path $claudeDir "memory-tag-registry.md").Replace("'", "''") + "'")
+    }
+    $oldRecords = @(Get-ChildItem -LiteralPath $oldSharedDir -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -ieq ".md" })
+    if ($oldRecords.Count -eq 0) { continue }
+    $oldTierLines += ("Old tier: " + (Get-SanitizedLine $oldSharedDir 260) + " still holds " + $oldRecords.Count + " record file(s).")
+    $oldTierCommands += ("Remove-Item -LiteralPath '" + $oldSharedDir.Replace("'", "''") + "' -Recurse -Force")
+}
+foreach ($oldLeaf in @("memory-index.jsonl", "kit-embedder")) {
+    $oldLeafPath = Join-Path $claudeDir $oldLeaf
+    if (-not (Test-Path -LiteralPath $oldLeafPath)) { continue }
+    $oldTierLines += ("Old store file: " + (Get-SanitizedLine $oldLeafPath 260) + " is still present.")
+    $oldTierCommands += ("Remove-Item -LiteralPath '" + $oldLeafPath.Replace("'", "''") + "' -Recurse -Force")
+}
+if ($oldTierLines.Count -gt 0 -or $oldCarryLines.Count -gt 0) {
+    $oldMarkerPath = Join-Path $claudeDir "memory-migrated.json"
+    $oldMarkerLine = "No migration marker at " + (Get-SanitizedLine $oldMarkerPath 260) + ": no publish of these files is recorded on this machine."
+    if (Test-Path -LiteralPath $oldMarkerPath -PathType Leaf) {
+        $oldMarker = $null
+        try { $oldMarker = [System.IO.File]::ReadAllText($oldMarkerPath) | ConvertFrom-Json } catch { $oldMarker = $null }
+        if ($null -eq $oldMarker) {
+            $oldMarkerLine = "Migration marker: present at " + (Get-SanitizedLine $oldMarkerPath 260) + " but could not be read."
+        }
+        else {
+            $oldMarkerLine = "Migration marker: the publish ran at " + (Get-SanitizedLine ([string]$oldMarker.migratedAt) 40) +
+                " and counted " + (Get-SanitizedLine ([string]$oldMarker.twinCount) 20) + " twin(s)."
+        }
+    }
+    $oldCarryBlock = @()
+    if ($oldCarryLines.Count -gt 0) { $oldCarryBlock = @("Carry over first:") + @($oldCarryLines | ForEach-Object { "  " + $_ }) }
+    $oldRemoveBlock = @()
+    if ($oldTierCommands.Count -gt 0) { $oldRemoveBlock = @("Remove with:") + @($oldTierCommands | ForEach-Object { "  " + $_ }) }
+    Report "INFO" "Memory database" (@("Old memory files: the memory database holds every record it reads; carry over and remove these when you are ready. A project tier's outcomes.jsonl is kept as pre-cutover outcome history that a later plan imports, and no command below names it. The doctor removes nothing and -Fix does not run this.") +
+        $oldTierLines + @($oldMarkerLine) + $oldCarryBlock + $oldRemoveBlock)
 }
 
 # --- Auto-compaction window. The boundary-gated compaction feature needs the
@@ -2329,6 +1613,192 @@ else {
     }
     else {
         Report "PASS" "Auto-compaction window" $detail
+    }
+}
+
+# --- Embedding server. A machine that holds its own memory database serves its
+# --- own embeddings from llama.cpp's CPU server on loopback, installed under
+# --- ~\.claude\kit-embedding-server and started at boot by the scheduled task
+# --- KitEmbeddingServer. This step reads the embedding block of the client
+# --- config at ~\.claude\kit-memory-db.json and lands in one of six states
+# --- (install-embedding-server.ps1 defines them): no-config and remote read
+# --- INFO, since a machine with no config has nothing to embed into and a
+# --- remote url is the Memory database step's probe's to read; ready reads
+# --- PASS with the server's working set and one call's time, or WARN where no
+# --- task is registered, since another process then owns the port and only
+# --- the operator knows whether to stop it; starting reads WARN saying to
+# --- wait; silent reads WARN naming what -Fix does; mismatch reads FAIL with
+# --- no fix, since the config and the server disagree and only the operator
+# --- knows which is right. Under -Fix, behind one consent prompt naming both
+# --- downloads and their size, a silent server is installed where the install
+# --- root is absent and repaired where it is present, a stopped task is
+# --- started and a running one restarted once where the kit's own server
+# --- does not answer the full check, and the embedding block is
+# --- written where the config has none. A loopback block naming another url
+# --- or model is replaced only behind a second, -Interactive prompt, since it
+# --- is a value the operator chose. A config with no url is read against
+# --- the url -Fix writes. Without -Fix this step opens no connection except to
+# --- the loopback url and reads no pin. Outside the install root it deletes
+# --- only the embedding block writer's own temp file. Every string the server, the config, the task or the log carries
+# --- takes Get-SanitizedLine.
+# "kit-memory-db.json" mirrors memory-database.js's CONFIG_FILE constant, as
+# the Memory database step's own path does.
+$embeddingConfigPath = Join-Path $claudeDir "kit-memory-db.json"
+$embeddingInstallRoot = Join-Path $claudeDir "kit-embedding-server"
+$embeddingTaskName = "KitEmbeddingServer"
+$embeddingPort = Get-EmbeddingServerPort
+$embedding = Get-EmbeddingServerState -ConfigPath $embeddingConfigPath -InstallRoot $embeddingInstallRoot -TaskName $embeddingTaskName -Port $embeddingPort
+$embeddingTimeoutMs = $embedding.TimeoutMs
+$embeddingUrlText = Get-SanitizedLine $embedding.Url 200
+$embeddingModelText = Get-SanitizedLine $embedding.Model 120
+$embeddingKitUrl = "http://127.0.0.1:" + $embeddingPort
+
+# The task's readings, one line, for every state that read them.
+$embeddingTaskLine = $null
+if ($null -ne $embedding.TaskReadError) {
+    $embeddingTaskLine = "Task ${embeddingTaskName}: could not be read: " + (Get-SanitizedLine $embedding.TaskReadError 200)
+}
+elseif ($embedding.TaskRegistered -eq $true) {
+    $embeddingStarted = "never started"
+    if ($embedding.TaskLastStart -is [datetime]) { $embeddingStarted = "last started " + $embedding.TaskLastStart.ToString("yyyy-MM-dd HH:mm:ss") }
+    $embeddingTaskLine = "Task ${embeddingTaskName}: registered, " + (Get-SanitizedLine $embedding.TaskState 40) + ", " + $embeddingStarted + "."
+}
+elseif ($embedding.TaskRegistered -eq $false) {
+    $embeddingTaskLine = "Task ${embeddingTaskName}: not registered."
+}
+$embeddingTaskLines = @()
+if ($null -ne $embeddingTaskLine) { $embeddingTaskLines = @($embeddingTaskLine) }
+
+# A loopback block naming another url or model is a value the operator chose:
+# -Fix replaces it only behind a second prompt that a person answers.
+$embeddingRewrite = ""
+if (-not $embedding.BlockMissing -and (Test-EmbeddingServerConfigDiffers -ConfigPath $embeddingConfigPath -Port $embeddingPort)) {
+    $embeddingRewrite = "replace the embedding block in $embeddingConfigPath, url $embeddingUrlText and model " + $(if ($embeddingModelText -ne "") { $embeddingModelText } else { "(none)" }) +
+        ", with url $embeddingKitUrl and model " + $script:EmbeddingServerModelId
+}
+
+# Whether -Fix restarts the kit's task. Where the task is registered and
+# running with no drift, the kit's own server decides: the task is restarted
+# once unless that server answers the full check at the kit's url, listing the
+# kit's model and answering one vector of the expected width. Where the config
+# names the kit's url and model, the state read was that check, so its reading
+# is reused. Where it names another, -Fix runs the check at the kit's url after
+# consent; check mode never does. A drifted task is registered again and
+# started, so it is never restarted.
+$embeddingRestartable = ($embedding.TaskRegistered -eq $true -and $embedding.TaskRunning -eq $true -and @($embedding.TaskDrift).Count -eq 0)
+$embeddingReadKit = ($embedding.Url -eq $embeddingKitUrl -and $embedding.Model -eq $script:EmbeddingServerModelId)
+$embeddingRestart = ($embeddingRestartable -and $embeddingReadKit -and $embedding.State -ne "ready")
+
+# What -Fix does for a silent server, in the order it does it.
+$embeddingFixActions = @()
+if ($embedding.InstallPresent) { $embeddingFixActions += "repairs the install at $embeddingInstallRoot (refetching only a file whose SHA-256 differs from its pin)" }
+else { $embeddingFixActions += "installs llama.cpp's CPU server and the bge-m3 Q8 model into $embeddingInstallRoot" }
+if ($embedding.TaskRegistered -ne $true) { $embeddingFixActions += "registers the scheduled task $embeddingTaskName and starts it" }
+elseif (@($embedding.TaskDrift).Count -gt 0) { $embeddingFixActions += "registers the scheduled task $embeddingTaskName again, since its " + (@($embedding.TaskDrift) -join ", ") + " differs from the kit's definition, and starts it" }
+elseif ($embeddingRestart) { $embeddingFixActions += "restarts the running task once and prints the last 20 lines of server.log" }
+elseif ($embeddingRestartable -and -not $embeddingReadKit) { $embeddingFixActions += "checks the kit's own server at $embeddingKitUrl and restarts its task once where it does not answer completely, printing the last 20 lines of server.log" }
+elseif ($embedding.TaskRunning -ne $true) { $embeddingFixActions += "starts the stopped task" }
+if ($embedding.BlockMissing) { $embeddingFixActions += "writes the embedding block into $embeddingConfigPath" }
+if ($embeddingRewrite -ne "") { $embeddingFixActions += "asks, in a second prompt a person at a console must answer, to " + $embeddingRewrite }
+
+$embeddingNeedsFix = ($embedding.State -eq "silent") -or
+    ($embedding.State -eq "ready" -and $embedding.TaskRegistered -eq $true -and $embedding.BlockMissing)
+
+if ($embedding.State -eq "no-config") {
+    Report "INFO" "Embedding server" @("No client config at $embeddingConfigPath; this machine has no memory database configured, so it has nothing to embed into.")
+}
+elseif ($embedding.State -eq "remote") {
+    if ($null -ne $embedding.ConfigError) {
+        Report "INFO" "Embedding server" @("The client config at $embeddingConfigPath could not be read (" + (Get-SanitizedLine $embedding.ConfigError 200) + "); the Memory database step reports it, and this step checks only a loopback server.")
+    }
+    else {
+        Report "INFO" "Embedding server" @("The config names the embedding server at $embeddingUrlText, which is not this machine; the Memory database step's probe reads it.")
+    }
+}
+elseif ($embedding.State -eq "mismatch") {
+    $embeddingDisagree = if ($embedding.Model -eq "") {
+        "$embeddingUrlText/v1/models lists " + (Get-SanitizedLine ($embedding.Ids -join ", ") 200) + ", and the config's embedding block names no model to compare it with."
+    }
+    elseif ($embedding.Ids -notcontains $embedding.Model) {
+        "$embeddingUrlText/v1/models does not list $embeddingModelText, the identity the config names; it lists " + (Get-SanitizedLine ($embedding.Ids -join ", ") 200) + "."
+    }
+    else {
+        "$embeddingUrlText/v1/embeddings answered a vector of " + $embedding.Width + " floats, and the client expects 1024."
+    }
+    Report "FAIL" "Embedding server" (@($embeddingDisagree) + $embeddingTaskLines + @(
+        "The config and the server disagree, and only you know which is right, so -Fix changes neither: correct the config's embedding block or the server, then re-run the doctor."
+    ))
+}
+elseif ($embedding.State -eq "starting") {
+    $embeddingAge = [int]((Get-Date) - $embedding.TaskLastStart).TotalSeconds
+    $embeddingHealth = if ($null -ne $embedding.HealthStatus) { "answered HTTP " + $embedding.HealthStatus } else { "has not answered" }
+    Report "WARN" "Embedding server" (@(
+        "The task $embeddingTaskName started $embeddingAge second(s) ago and $embeddingUrlText/health $embeddingHealth; the model is still loading.",
+        "Wait a minute and run the doctor again."
+    ) + $embeddingTaskLines)
+}
+elseif ($embedding.State -eq "ready" -and $embedding.TaskRegistered -ne $true) {
+    if ($null -ne $embedding.TaskReadError) {
+        $embeddingUnmanaged = "$embeddingUrlText lists $embeddingModelText and answers one vector of 1024 floats, but the scheduled task $embeddingTaskName could not be read, so whether the kit's task runs this server is unknown."
+        $embeddingRemedy = "The server may be the kit's own, so leave it running and re-run the doctor once the task can be read. -Fix does not touch it."
+    }
+    else {
+        $embeddingUnmanaged = "$embeddingUrlText lists $embeddingModelText and answers one vector of 1024 floats, but no scheduled task $embeddingTaskName is registered, so the server is unmanaged: another process owns the port and nothing here brings it back at boot."
+        $embeddingRemedy = "Only you know whether to stop that process; stop it and re-run doctor with -Fix to install the kit's server, or leave it as it is. -Fix does not touch it."
+    }
+    Report "WARN" "Embedding server" (@($embeddingUnmanaged) + $embeddingTaskLines + @($embeddingRemedy))
+}
+elseif ($embedding.State -eq "ready" -and -not $embeddingNeedsFix) {
+    $embeddingWorkingSet = if ($null -ne $embedding.WorkingSetMB) { "working set " + $embedding.WorkingSetMB + " MB" } else { "working set unread" }
+    Report "PASS" "Embedding server" (@(
+        "$embeddingUrlText lists $embeddingModelText and answers one vector of 1024 floats in " + $embedding.CallMs + " ms; $embeddingWorkingSet."
+    ) + $embeddingTaskLines)
+}
+else {
+    # Silent, or ready with no embedding block in the config: the two states
+    # -Fix acts on. The pins are read here and nowhere else.
+    if ($embedding.State -eq "silent") {
+        $embeddingFound = @("Nothing complete answered at $embeddingUrlText within $embeddingTimeoutMs ms: " + $embedding.Detail)
+    }
+    else {
+        $embeddingFound = @("$embeddingUrlText lists $embeddingModelText and answers one vector of 1024 floats, but the config at $embeddingConfigPath names no embedding url, so the memory client cannot reach it.")
+    }
+    $embeddingConsent = $false
+    $embeddingPins = $null
+    if ($Fix) {
+        $embeddingPins = @(Get-EmbeddingServerPins)
+        $embeddingConsent = Get-Consent (Get-EmbeddingServerConsentQuestion -Pins $embeddingPins -InstallRoot $embeddingInstallRoot -TaskName $embeddingTaskName -ConfigRewrite $embeddingRewrite)
+    }
+    if ($embeddingConsent) {
+        # Replacing the operator's own url or model asks again, and -Yes does
+        # not answer it; held, the install goes ahead and the block stays.
+        $embeddingRewriteConsent = $false
+        if ($embeddingRewrite -ne "") {
+            $embeddingRewriteConsent = Get-Consent ("Then " + $embeddingRewrite + "?") -Interactive
+        }
+        if ($embeddingRestartable -and -not $embeddingReadKit) {
+            $embeddingKitAnswers = Test-EmbeddingServerAnswers -BaseUrl $embeddingKitUrl -Model $script:EmbeddingServerModelId -TimeoutMs $embeddingTimeoutMs
+            $embeddingRestart = -not ($embeddingKitAnswers.Complete -and $embeddingKitAnswers.Identity -and $embeddingKitAnswers.Width -eq $script:EmbeddingServerDimensions)
+        }
+        $embeddingInstall = Install-EmbeddingServer -InstallRoot $embeddingInstallRoot -ConfigPath $embeddingConfigPath -TaskName $embeddingTaskName `
+            -Pins $embeddingPins -Port $embeddingPort -TimeoutMs $embeddingTimeoutMs -Restart:$embeddingRestart -HoldConfigRewrite:(-not $embeddingRewriteConsent)
+        if ($embeddingInstall.Ok) {
+            $embeddingWorkingSet = if ($null -ne $embeddingInstall.WorkingSetMB) { "working set " + $embeddingInstall.WorkingSetMB + " MB" } else { "working set unread" }
+            Report "FIXED" "Embedding server" ($embeddingInstall.Notes + @(
+                "The server lists " + $script:EmbeddingServerModelId + " and answers one vector of 1024 floats in " + $embeddingInstall.CallMs + " ms; $embeddingWorkingSet."
+            ))
+        }
+        elseif ($embeddingInstall.Unfinished) {
+            Report "WARN" "Embedding server" ($embeddingFound + $embeddingInstall.Notes)
+        }
+        else {
+            Report "FAIL" "Embedding server" ($embeddingFound + $embeddingInstall.Notes)
+        }
+    }
+    else {
+        Report "WARN" "Embedding server" ($embeddingFound + $embeddingTaskLines + @(
+            "Fix: re-run doctor with -Fix, which " + ($embeddingFixActions -join ", then ") + "."
+        ))
     }
 }
 
