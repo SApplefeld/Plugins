@@ -2,9 +2,10 @@
 # Installs or upgrades the shared memory index on a SQL Server host: the mem
 # schema, its full-text catalog and index, every procedure, the three roles,
 # the five logins and the sandbox rows. Re-runnable: every script under
-# Schema, FullText, Procedures, Security and Version guards its own creation
-# or is a repeatable ALTER, GRANT or DENY, so a second run against an
-# installed host applies no change and says so on its own output.
+# Schema, FullText, Procedures, Security and Version guards its own creation,
+# is a repeatable ALTER, GRANT or DENY, or is a data repair whose predicate
+# matches no row once applied, so a second run against an installed host
+# applies no change and says so on its own output.
 #
 # The script order is the directory order Schema, FullText, Procedures,
 # Security, Version, and inside each directory the ordinal order of the file names,
@@ -173,7 +174,30 @@ $ErrorActionPreference = 'Stop'
 # where a host installed it, since the procedure no longer calls it. The client's
 # RECALL_SCHEMA_VERSION reads this number back through mem.usp_Health, and
 # `memq recall-candidates` sends no recall to a host below it.
-$script:SchemaVersion = 10
+#
+# Version 11 is where an in-place rewrite moves a record's update time.
+# mem.usp_PutRecord writes NULL to [FileModifiedDt] when it overwrites a live
+# row, so mem.usp_ListIndex lists the rewrite's own instant rather than the
+# file time of the row's last publish. Schema/160-ClearRewrittenFileTime.sql
+# clears the file time on every row an older procedure rewrote in place, and
+# runs as a no-op once none is left. Version 11 also creates
+# mem.usp_ListArchived, which lists the records archived inside a window for
+# the archived group of `memq recent`. A version 10 host takes it in place,
+# keeping every row, and every other procedure keeps its parameters and its
+# result. The client's ARCHIVED_SCHEMA_VERSION reads this number back through
+# mem.usp_Health, and `memq recent` sends no archived read to a host below it.
+#
+# Version 12 is where the database records a pair of records judged two
+# different facts. mem.PairVerdict holds one row per judged pair, keyed on the
+# store and the two names in order; mem.usp_PutPairVerdict writes it, and
+# mem.usp_ListPairVerdicts lists the verdicts whose two records stand live,
+# unarchived and unchanged since the judgment, so a rewrite or a retirement
+# of either record lapses the verdict. A version 11 host takes it in place,
+# creating the table and the two procedures and changing no other object, so
+# every row stays. The client's PAIR_VERDICT_SCHEMA_VERSION reads this number
+# back through mem.usp_Health, and `memq decay-scan` reads no verdict from a
+# host below it.
+$script:SchemaVersion = 12
 
 # The five logins the Security scripts create, each with the role it joins
 # and the sandbox it publishes for. The logins file carries these three

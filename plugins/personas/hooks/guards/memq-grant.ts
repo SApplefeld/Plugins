@@ -70,7 +70,7 @@ const ESCAPED_QUOTE = /\\["']/;
 // names, each refusing the grant when set at all.
 export const PRELOAD_ENV = ["NODE_OPTIONS", "NODE_PATH", "NODE_REPL_EXTERNAL_MODULE"] as const;
 
-// The verbs the grant covers: memq's subcommands less the twelve withheld.
+// The verbs the grant covers: memq's subcommands less the thirteen withheld.
 // Withheld for what they destroy: delete-type and delete-operator (a shared
 // record's row out of every read) and forget (a project record's). Withheld
 // for what they author: anchor (a record's drift claim), triggers (when a
@@ -79,7 +79,9 @@ export const PRELOAD_ENV = ["NODE_OPTIONS", "NODE_PATH", "NODE_REPL_EXTERNAL_MOD
 // withheld on). Withheld because no
 // fleet worker's task asks for them: db-refresh and meter-drain (the
 // module's own processes), db-promote and db-curate (the curator's act), and
-// jev-calibration (the operator's reading). find is withheld pending a
+// jev-calibration (the operator's reading), and two-facts (the verdict the
+// scan's pairs block withholds a pair by, and that block stands down on this
+// vector). find is withheld pending a
 // decision on granting it. An allowlist, so a verb the CLI gains later is
 // withheld until listed here.
 const GRANTED_VERBS: ReadonlySet<string> = new Set([

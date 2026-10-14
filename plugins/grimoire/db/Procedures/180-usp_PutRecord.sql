@@ -38,9 +38,16 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_PutRecord
 		AUTHOR:		Scott Applefeld
 		DATE:		October 3rd, 2026
-		VERSION:	v1.3
+		VERSION:	v1.4
 	*********************************************************************************************
-		NOTES:		v1.3 - 10/05/2026
+		NOTES:		v1.4 - 10/12/2026 - SCOTT APPLEFELD
+							Schema version 11. An overwrite of a live row writes NULL to
+							[FileModifiedDt], as the insert into a deleted row already does.
+							After a memq rewrite no file holds the row's content, so
+							mem.usp_ListIndex's COALESCE([FileModifiedDt], [UpdatedDt])
+							falls to [UpdatedDt] and lists the rewrite's own instant.
+
+							v1.3 - 10/05/2026
 							An insert into a deleted row holding the file key deletes that
 							row's mem.RecordUsage row with its embeddings, so a new record
 							taking a deleted record's name starts with no usage. Its
@@ -270,6 +277,7 @@ BEGIN	-- PROCEDURE
 														THEN R.[BodyHash]
 														ELSE CONVERT(VARCHAR(128), HASHBYTES('SHA2_256', @p_Body), 2)
 												  END
+						,[FileModifiedDt]		= NULL
 						,[Tags]					= COALESCE(@p_Tags, R.[Tags])
 						,[SupersedesName]		= COALESCE(@p_Supersedes, R.[SupersedesName])
 						,[Author]				= COALESCE(@p_Author, R.[Author])

@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the operating manual for the kit memory store's extension layer: the memory records the shared memory database holds plus an outcome journal, used-tracking, tags, a decay lifecycle, a shared project-type tier, an operator tier, and the `memq` CLI that reaches all of them. It owns the moments where a session touches that store beyond reading one record: recalling the whole store at effort start or a seat takeover, reporting what the store recorded during a session, logging an action outcome, stamping a memory applied, tagging, running or reading the decay pass, pinning against decay, writing or repairing or deleting a shared-tier record, recording file anchors and recognition triggers on a record, and interpreting a refusal when a memory write is denied. It also owns how `memq` resolves which store answers from a given working directory, which verbs stand down on a network share, and how each verb's output and exit status must be read. Load class: `named-trigger` - the frontmatter description says to use it when working with the store beyond plain memory files and lists the specific verbs, fields and error states that trigger it, so it is loaded before one of those acts rather than at session start or at every plan run.
 
-Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 (`skills.memory-system.c2.md`); lines 147-208 (`skills.memory-system.c3.md`); lines 209-255 (`skills.memory-system.c4.md`); lines 256-316 (`skills.memory-system.c5.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`T` entries below, their source lines read at that pass's fix rounds 1 and 2). Amended on 2026-09-25 by `docs/plans/claude-kit_persona-memory-port_spec_v1.md` sections 3, 5 and 6 (`D` entries below). Redrafted on 2026-09-26 by section 6 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c3de1f16` with its fix round at `894c89d4`, so every live entry's `passage:` line quotes the text at `894c89d4` and the `flag:` lines record that pass's flags. Redrafted on 2026-10-01 by section 5 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied that plan's cut list, so every live entry's `passage:` line quotes the text that section landed, and the entries its drop rows retired carry `ruled: cut 2026-09-30`. Amended on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and `memq` its one door (`E` entries below); an entry whose rule that section kept in new words reads `rewrite` with its `passage:` quoting the new text, and an entry whose passage that section deleted reads `retire`, with a `superseded-by:` line only where an `E` entry's passage carries its rule. Amended on 2026-10-04 by section 6 of the same plan, which made `delete-type` and `delete-operator` mark the record's database row deleted rather than remove files (`E007` and `E008` below), and respelled the `forget` row to match the soft delete it already sent (`E009` below). Amended on 2026-10-04 by section 7 of the same plan, which stands a store root that is not the machine's own down from the memory database (`E010` below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the markdown tiers, the store's git channel, the local search index, the write-door hook on the tier files, the type lock and the journal rollup with its malformed-line flag, and left `memq` reading no outcome journal: c1.C021, c1.C089, c2.C044 to c2.C051, c2.C099, c2.C141, c2.C142, c3.C021, c3.C041, c3.C043, c3.C093, c3.C108, c4.C077, c5.C035, c5.C052, c5.C053, c5.C056, c5.C057, c5.C058, c5.C064, c5.C070, c5.C074, c5.C080 to c5.C083, c5.C086, c5.C088, c5.C093, c5.C094, c5.C096, c5.C099, c5.C105, c5.C106, S015, S016, S021 and T001 deleted with their subjects; c1.C031, c1.C035, c1.C057, c1.C077, c1.C088, c1.C092, c1.C093, c1.C110, c2.C064, c2.C071, c2.C101, c2.C120, c3.C001, c3.C032, c3.C036, c4.C083, c5.C059, c5.C098, S006 and S007 rewritten to their passages as they now read, with their keys reworded where the key named a removed flag, path or reader; and the keys, reasons or provenance of c2.C067, c3.C006, c3.C033, c3.C035, c3.C044, c3.C103, c4.C032, c4.C043, c4.C082, D002 and E001 reworded where they stated the sync, the guard or a removed verb as present.
+Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 (`skills.memory-system.c2.md`); lines 147-208 (`skills.memory-system.c3.md`); lines 209-255 (`skills.memory-system.c4.md`); lines 256-316 (`skills.memory-system.c5.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`T` entries below, their source lines read at that pass's fix rounds 1 and 2). Amended on 2026-09-25 by `docs/plans/claude-kit_persona-memory-port_spec_v1.md` sections 3, 5 and 6 (`D` entries below). Redrafted on 2026-09-26 by section 6 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c3de1f16` with its fix round at `894c89d4`, so every live entry's `passage:` line quotes the text at `894c89d4` and the `flag:` lines record that pass's flags. Redrafted on 2026-10-01 by section 5 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied that plan's cut list, so every live entry's `passage:` line quotes the text that section landed, and the entries its drop rows retired carry `ruled: cut 2026-09-30`. Amended on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record and `memq` its one door (`E` entries below); an entry whose rule that section kept in new words reads `rewrite` with its `passage:` quoting the new text, and an entry whose passage that section deleted reads `retire`, with a `superseded-by:` line only where an `E` entry's passage carries its rule. Amended on 2026-10-04 by section 6 of the same plan, which made `delete-type` and `delete-operator` mark the record's database row deleted rather than remove files (`E007` and `E008` below), and respelled the `forget` row to match the soft delete it already sent (`E009` below). Amended on 2026-10-04 by section 7 of the same plan, which stands a store root that is not the machine's own down from the memory database (`E010` below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the markdown tiers, the store's git channel, the local search index, the write-door hook on the tier files, the type lock and the journal rollup with its malformed-line flag, and left `memq` reading no outcome journal: c1.C021, c1.C089, c2.C044 to c2.C051, c2.C099, c2.C141, c2.C142, c3.C021, c3.C041, c3.C043, c3.C093, c3.C108, c4.C077, c5.C035, c5.C052, c5.C053, c5.C056, c5.C057, c5.C058, c5.C064, c5.C070, c5.C074, c5.C080 to c5.C083, c5.C086, c5.C088, c5.C093, c5.C094, c5.C096, c5.C099, c5.C105, c5.C106, S015, S016, S021 and T001 deleted with their subjects; c1.C031, c1.C035, c1.C057, c1.C077, c1.C088, c1.C092, c1.C093, c1.C110, c2.C064, c2.C071, c2.C101, c2.C120, c3.C001, c3.C032, c3.C036, c4.C083, c5.C059, c5.C098, S006 and S007 rewritten to their passages as they now read, with their keys reworded where the key named a removed flag, path or reader; and the keys, reasons or provenance of c2.C067, c3.C006, c3.C033, c3.C035, c3.C044, c3.C103, c4.C032, c4.C043, c4.C082, D002 and E001 reworded where they stated the sync, the guard or a removed verb as present. Amended by `docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md` section 3 on 2026-10-12 (`N` entries below; c1.C077, c3.C016, c3.C033, c3.C036, S006 and S007 amended in place, carrying its provenance), and by its sections 1 and 2 the same day (c1.C086, c1.C052 and c3.C077 amended in place). Amended by `docs/archive/claude-kit_memq-recent-and-get-repairs_spec_v1.md` section 3 on 2026-10-12 (c2.C039 rewritten in place, carrying its provenance). Amended by `docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md` section 2 on 2026-10-12, which added `memq two-facts` and the scan's withholding of a judged pair (c1.C086, N003 and N006 rewritten in place, carrying its provenance). Amended by `docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md` section 4 on 2026-10-14, which named the persona plugin's `[PAIR DRAFTS]` block (N010 added, N003 and N004 reworded in place).
 
 ### c1.C001
 - key: Load this skill before any work on the kit memory store that goes beyond plain memory files.
@@ -528,9 +528,9 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - source: plugins/grimoire/skills/memory-system/SKILL.md:28
 - provenance: 426bf68 2026-08-26, the memory-anchors-and-frontmatter-guard plan.
 - verdict: rewrite
-- landed: f92e99ec section 5
-- reason: The row is the verb's reference entry and the anchors section at line 184 owns its semantics whole; the row's usage and one-line what stay. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: Record which files a project memory is about, at the bytes they hold now: a list of `<path>@<sha>` entries, merged into any existing list with fresh hashes.
+- landed: 859d3e25 section 2
+- reason: The row is the verb's reference entry and the anchors section at line 184 owns its semantics whole; the row's usage and one-line what stay. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep. Amended on 2026-10-12 by section 2 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which added `--prune-missing`.
+- passage: Record which files a project memory is about, at the bytes they hold now: a list of `<path>@<sha>` entries, merged into any existing list with fresh hashes. `--prune-missing` first drops each carried entry whose file is gone, the repair for a renamed or deleted file, and lets the call name no path.
 
 ### c1.C053
 - key: Never type a 40-hex hash by hand for an anchor; let `memq anchor` compute it.
@@ -785,14 +785,15 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: The same for the operator tier, with the same refusals, body channels, `--supersedes` pointer, `--update` repair and `--replace`.
 
 ### c1.C077
-- key: Scope an operator fact to one box with `--machine <name>`, set at creation like `--tag` and `--supersedes`.
+- key: Scope an operator fact to one box with `--machine <name>`, set at creation or by `--replace` like `--tag` and `--supersedes`.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:31
-- provenance: 6cbb24a 2026-08-03, which added the machine scope to the operator tier.
-- verdict: keep
-- reason: No finding. The scope is set at creation and `--update` carrying it is refused, so a fact scoped wrong costs a delete and a rewrite; the decision has to be made before the call.
+- provenance: 6cbb24a 2026-08-03, which added the machine scope to the operator tier. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names `--replace` as the other way the three fields are set; the verdict before it was keep.
+- verdict: rewrite
+- landed: 5e0e049e section 3
+- reason: The scope is set at creation or by a `--replace` that states the record whole, and `--update` carrying it is refused, so a fact scoped wrong costs a whole rewrite; the decision has to be made before the call.
 - passage: `--machine` scopes the fact to one box.
-- passage: Like `--tag` and `--supersedes`, it is set at creation, and `--update` carrying any of them is refused.
+- passage: Like `--tag` and `--supersedes`, it is set at creation or by `--replace`, and `--update` carrying any of them is refused.
 
 ### c1.C078
 - key: Point an operator-tier `--supersedes` at an operator-tier record only; a type-tier name is a miss here.
@@ -879,15 +880,15 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: On stderr it adds the anchor-drift block, then the neighbour-pairs block of live same-tier records at or above the overlap floor.
 
 ### c1.C086
-- key: Read the neighbour-pairs block after the drift block: a per-tier heading, the highest-scoring live same-tier pairs at or above `FLEET_NEIGHBOUR_FLOOR`, capped at `PAIRS_SHOWN` with a counted remainder.
+- key: Read the neighbour-pairs block after the drift block: a per-tier heading, the highest-scoring live same-tier pairs at or above `FLEET_NEIGHBOUR_FLOOR`, capped by default at `PAIRS_SHOWN` with a counted remainder, which `--pairs <n|all>` lifts, and with a pair recorded by `memq two-facts` withheld while both records stand unchanged and counted on the heading.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:34
 - provenance: 91111b3 2026-09-05, which made the scan nominate live near-duplicate pairs after its drift block; documented at a3d8fbf 2026-09-06; the floor named as `FLEET_NEIGHBOUR_FLOOR` on 2026-10-04 by the finishing pass of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which removed the local `NEIGHBOUR_FLOOR`.
 - verdict: rewrite
 - landed: d2c43f1 section 22
-- reason: No finding. The bounds a reader needs to judge the block are what it does not show: that it never covers the pending tier and withholds pairs already joined by a pointer or split by machine scope, so an absent pair is not evidence of no duplicate. Flipped from keep to rewrite at section 22's close: c1.C122's retire dropped the antecedent 'its neighbour-pairs block', so the sentence was respelled to stand as landed. Landed as the proposal below.
+- reason: No finding. The bounds a reader needs to judge the block are what it does not show: that it never covers the pending tier and withholds pairs already joined by a pointer or split by machine scope, so an absent pair is not evidence of no duplicate. Flipped from keep to rewrite at section 22's close: c1.C122's retire dropped the antecedent 'its neighbour-pairs block', so the sentence was respelled to stand as landed. Landed as the proposal below. Amended on 2026-10-12 by section 1 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which added `--pairs <n|all>`: the key now names the cap as the default the flag lifts, and the proposal below stays as it landed at d2c43f1. Rewritten on 2026-10-12 by section 2 of docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md, which added `memq two-facts`: a judged pair is one more pair the block does not show, so the passage names it beside the pointer and machine-scope bounds, and the heading's count of judged pairs keeps the listing's total legible.
 - proposed: The neighbour-pairs block prints on stderr after the drift block, one tier at a time and never the pending tier: a heading counting the pairs and the records it could not check (`memq: neighbour pairs (project): 1 pair, 1 of 3 records not checked`), then the highest-scoring pairs of live same-tier records at or above `FLEET_NEIGHBOUR_FLOOR` as `memq: pair  <name>  <name>  <score>`, a `pinned:` mark naming each pinned member and a `machine:` scope where one carries it, capped at `PAIRS_SHOWN` with a counted remainder, and `memq: no neighbour pairs (<tier>)` for a tier read whole with none.
-- passage: That block never reads the pending tier and withholds pairs a `supersedes:` pointer joins or `machine:` scopes split, so a missing pair is no evidence of no duplicate.
+- passage: That block never reads the pending tier and withholds pairs a `supersedes:` pointer joins or `machine:` scopes split, so a missing pair is no evidence of no duplicate. It also withholds a pair recorded with `memq two-facts` while both records stand unchanged, and counts those on the tier's heading.
 
 ### c1.C087
 - key: Expect `decay-scan`'s stdout and exit code to be the same with the neighbour block as without it.
@@ -1692,13 +1693,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Delete the four sentences from "A create proceeds" to "carrying a body at all"; the mechanics live in this ledger under C038.
 
 ### c2.C039
-- key: Read `memq recent` for what happened to the store lately; it groups by write surface, states every group's count even at zero, and dates archived files by the rename rather than the mtime.
+- key: Read `memq recent` for what happened to the store lately; it groups by write surface, states every group's count even at zero, and lists the records archived inside the window in a last group.
 - class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:58
-- provenance: 31240d3 2026-08-01, the session-recap section that wired `recent` into close-out.
-- verdict: keep
-- reason: The verb groups and dates; reading the grouping as provenance (c2.C137) is the caller's act, and the close-out reports the digest by surface on that basis (A073 to A075).
-- passage: `memq recent` reports what the store recorded lately, grouped by write surface, and each group states its count even at zero.
+- source: plugins/grimoire/skills/memory-system/SKILL.md:69
+- provenance: 31240d3 2026-08-01, the session-recap section that wired `recent` into close-out; docs/archive/claude-kit_memq-recent-and-get-repairs_spec_v1.md section 3 2026-10-12, on the operator's ruling of 2026-10-12 that the archived group ships.
+- verdict: rewrite
+- landed: f2e8d557 section 3
+- reason: The verb groups and dates; reading the grouping as provenance (c2.C137) is the caller's act, and the close-out reports the digest by surface on that basis (A073 to A075). The file-store digest listed each tier's archive moves, and the database port dropped them because `mem.usp_ListIndex` returns live rows alone. The group reads `mem.usp_ListArchived` in the index's one spawn and writes nothing to the snapshot, which holds live rows alone. The procedure cuts its window at 90 days and the coverage line says so, and a host below version 11 answers the other groups while this one names the installer (memq.js, `cmdRecent`). The skill names the group alone and leaves the 90-day cut and the version gate to that coverage line, which states each where it applies.
+- passage: `memq recent` reports what the store recorded lately by write surface, each group stating its count even at zero. Archived records come last.
 
 ### c2.C040
 - key: Do not read the file group's `added` label as "this memory is new"; an edit to an old memory reports `added` too.
@@ -2942,13 +2944,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: the mandatory description rewrites the one every project reads, so pass the one the record should keep.
 
 ### c3.C016
-- key: Delete and rewrite the record when it needs different tags, a different machine scope, or a different pointer, because repair refuses `--tag`, `--supersedes`, `--trigger` and `--machine`.
+- key: Rewrite the record whole with `--replace`, or delete and rewrite it, when it needs different tags, a different machine scope, or a different pointer, because repair refuses `--tag`, `--supersedes`, `--trigger` and `--machine`.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:159
-- provenance: 8f2b500 2026-08-08 set tags at creation and named the delete-and-rewrite remedy; 752dbce, b5c0a98 and 9b1180b widened the creation-only set to machine, pointer and triggers.
-- verdict: keep
+- provenance: 8f2b500 2026-08-08 set tags at creation and named the delete-and-rewrite remedy; 752dbce, b5c0a98 and 9b1180b widened the creation-only set to machine, pointer and triggers. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names `--replace` beside the delete and fresh write; the verdict before it was keep.
+- verdict: rewrite
+- landed: 5e0e049e section 3
 - reason: This is the whole creation-only field set with its remedy; row 30's tags clause is the narrower copy (A035 to A037).
-- passage: Repair refuses `--tag`, `--supersedes`, `--trigger` and, on the operator twin, `--machine`, so such a change is a delete and a fresh write.
+- passage: Repair refuses `--tag`, `--supersedes`, `--trigger` and, on the operator twin, `--machine`, so such a change is a `--replace` or a delete and a fresh write.
 
 ### c3.C017
 - key: Declare recognition triggers after creation with `memq triggers <name> <type>:<pattern> --operator` or `--type=<type>`, which merges into the existing line, or writes it whole under `--replace --confirm-shared`.
@@ -3103,16 +3106,16 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: **Deletion marks a record's row deleted and erases nothing.** The row stays in the memory database with the deleted mark, and a body copy a machine's snapshot fetched earlier stays on that machine's disk. Rotate anything it carried that it should not have, since the delete is not a redaction.
 
 ### c3.C033
-- key: Expect the prompt-free grant in `hooks/memq-grant.js` to own the list of shapes that get no grant on the unattended vector.
+- key: Expect the prompt-free grant in `hooks/memq-grant.js` to own the list of shapes withheld on the engine's write-gated spawn vector with the store signals set.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:216, "Seventeen shapes get no grant there"
-- provenance: 752dbce 2026-08-22 made the grant hook the enforcement point with six shapes; b5c0a98, c0a1388, 0d1e610, 2b6e936 and 9b1180b 2026-09-03 grew the list to twelve, each addition a reviewer-found reach; the persona-memory-port plan's section 5 added `forget`, the project-tier delete, and its section 6 named the four database verbs the hook already withheld, which the paragraph had left out, so the count then read seventeen as `docs/security-model.md` counted it; the passage now names the hook as the list's owner rather than counting.
+- provenance: 752dbce 2026-08-22 made the grant hook the enforcement point with six shapes; b5c0a98, c0a1388, 0d1e610, 2b6e936 and 9b1180b 2026-09-03 grew the list to twelve, each addition a reviewer-found reach; the persona-memory-port plan's section 5 added `forget`, the project-tier delete, and its section 6 named the four database verbs the hook already withheld, which the paragraph had left out, so the count then read seventeen as `docs/security-model.md` counted it; the passage now names the hook as the list's owner rather than counting. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names the vector and its two variables as the condition the grant binds on (kaizen issue 585); the bypass-mode sentences it added are N001.
 - verdict: rewrite
-- landed: d2c43f1 section 22
+- landed: ad41f892 section 3
 - reason: The list stays because a withheld shape on that vector is silence rather than a refusal, so the list is what a worker can consult; the per-shape reasons move here, since hooks/memq-grant.js:43-73 and 501-651 carry every one of them and test/memq-grant.test.js pins each shape (A068 to A070).
 - proposed: (via A068) Compress the paragraph to the twelve withheld shapes, the granted rest, the silence rule and the recognition-debt and pointer handoffs, pointing at `hooks/memq-grant.js` for each shape's reason.
 - baseline-test: yes
-- passage: Under the engine store signals memq runs under the prompt-free grant in `hooks/memq-grant.js`, which owns the list of withheld shapes.
+- passage: **The engine's write-gated spawn vector, with `KIT_MEMORY_ROOT` and `KIT_MEMORY_ROOT_ALLOW_DATA=1` set, gets a bounded subset of this CLI.** There memq runs under the prompt-free grant in `hooks/memq-grant.js`, which owns the list of withheld shapes.
 - flag: stale
 
 ### c3.C034
@@ -3134,13 +3137,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: A withheld shape is not denied but silent, and with nobody there to approve it the command is lost.
 
 ### c3.C036
-- key: Leave a fleet-written record's recognition debt to an attended session, since the add lands without `--trigger`, names the missing declaration on stderr, and only the withheld `triggers` verb can merge one in later.
+- key: On the engine vector, leave a record's recognition debt to an attended session, since the add lands without `--trigger`, names the missing declaration on stderr, and only the withheld `triggers` verb can merge one in later.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:166
-- provenance: 2b6e936 2026-09-02, when the `--trigger` option was refused on the unattended vector after its own spec's claim that it widened nothing was disproved.
-- verdict: keep
+- provenance: 2b6e936 2026-09-02, when the `--trigger` option was refused on the unattended vector after its own spec's claim that it widened nothing was disproved. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names the worker by the vector it runs on rather than as any fleet worker; the verdict before it was keep.
+- verdict: rewrite
+- landed: ad41f892 section 3
 - reason: The handoff to an attended session is a human act no program performs, guarding a recognition line that reaches every project and machine (A076 to A079).
-- passage: So a fleet worker leaves a withheld shape to an attended session, such as `find`, `--type=<type>`, a delete, a body-carrying update, `--body-file`, `--supersedes`, `--trigger`, `triggers`, `anchor` or `declare-type`.
+- passage: So a worker on that vector leaves a withheld shape to an attended session, such as `find`, `--type=<type>`, a delete, a body-carrying update, `--body-file`, `--supersedes`, `--trigger`, `triggers`, `anchor` or `declare-type`.
 
 ### c3.C037
 - key: Re-run the whole `add` from an attended session to give a record a `supersedes:` pointer, or delete and rewrite one that already landed without it, since the field is creation-only and `--update` refuses it.
@@ -3535,11 +3539,11 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - source: plugins/grimoire/skills/memory-system/SKILL.md:197
 - provenance: 426bf68 2026-08-26, the worktree pairing: records come from the main checkout's store and hash the main checkout's files.
 - verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The rule and its one-clause reason stay; the defence of the pairing as coherent rather than an oversight (one record hashing a different tree per worktree would report drift about which directory a session opened in) lives here (A163).
+- landed: 5c575827 section 2
+- reason: The rule and its one-clause reason stay; the defence of the pairing as coherent rather than an oversight (one record hashing a different tree per worktree would report drift about which directory a session opened in) lives here (A163). Amended on 2026-10-12 by section 2 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which added `--prune-missing`.
 - proposed: Keep the rule with its one-clause reason; move the coherent-pairing defence to the ledger.
 - baseline-test: yes
-- passage: In a linked worktree, anchors hash the main checkout's files and are no check on the worktree's own edits, so re-anchor from the main checkout once the merge has landed.
+- passage: In a linked worktree, anchors hash the main checkout's files and are no check on the worktree's own edits, so re-anchor from the main checkout once the merge has landed. A renamed or deleted file leaves its entry on the record as `missing`, since the merge only adds, and `memq anchor <name> [<new path>...] --prune-missing` drops every carried entry whose file is gone, merges the paths given and names each path dropped on stderr. An entry whose file exists with other bytes is kept at its recorded hash, as is one the check could not examine and one the anchor grammar refuses, which is never walked. A record carrying more than 32 entries is refused whole. With `--operator` the flag runs against the store root.
 
 ### c3.C078
 - key: Read a drift line as the memory being unverified rather than wrong, since any byte counts and no surface has read the record's prose or the file's.
@@ -6107,21 +6111,21 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: The pass runs at close-out, called from `finishing-work` step 8, and never unprompted outside one.
 
 ### S006
-- key: Treat a decay stamp older than 14 days, or an absent one, as the trigger finishing-work step 8 owns.
+- key: Treat a decay stamp older than 14 days, or an absent one, as the archive pass's trigger, which finishing-work step 8 calls.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: 8e22ff4 2026-07-31; the absent-is-due clause was a review fix for a backstop inert on a store that had never run a close-out; 55c5abc 2026-09-09 renumbered the owning step from 7 to 8, a change this claim shares with c5.C062's supersession.
+- provenance: 8e22ff4 2026-07-31; the absent-is-due clause was a review fix for a backstop inert on a store that had never run a close-out; 55c5abc 2026-09-09 renumbered the owning step from 7 to 8, a change this claim shares with c5.C062's supersession. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names the archive pass as the cadence the stamp gates.
 - verdict: rewrite
-- landed: d2c43f1 section 22
+- landed: ad41f892 section 3
 - reason: The predicate stays verbatim, since the SessionStart hook's own threshold is 30 days and the 14-day reading lives only here; the safe change is rewording the owner clause so step 8 calls the pass rather than owning its trigger.
 - proposed: Keep the predicate and its absent-is-due parenthetical as written; reword the owner clause so finishing-work step 8 is the caller.
-- passage: It is due when the decay stamp, `~/.claude/memory-snapshot/decay-stamp`, is older than 14 days, or absent (a machine where no pass has ever run is due, not exempt).
+- passage: The archive pass is due when the decay stamp, `~/.claude/memory-snapshot/decay-stamp`, is older than 14 days, or absent (a machine where no pass has ever run is due, not exempt).
 
 ### S007
-- key: Run the pass in order: `decay-scan` reports, your judgment picks, `decay-prune` with archive flags archives, `decay-done` stamps.
+- key: Run the archive pass in order: `decay-scan` reports, your judgment picks, `decay-prune` with archive flags archives, `decay-done` stamps.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: 8e22ff4 2026-07-31, the plan's Approach: decay is deterministically scanned, human-judged and close-out-triggered; re-extracted at 55c5abc 2026-09-09.
+- provenance: 8e22ff4 2026-07-31, the plan's Approach: decay is deterministically scanned, human-judged and close-out-triggered; re-extracted at 55c5abc 2026-09-09. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which made this the archive pass's run beside the hygiene step; the passage is unchanged.
 - verdict: rewrite
 - landed: d2c43f1 section 22
 - reason: The verbs report, mutate and stamp separately and no driver runs them in order; the judgment step between scan and prune is the session's. Flipped from keep to rewrite at section 22's close: S008's rewrite lifted the summarize rule out of the parenthetical, so the sentence was respelled to stand as landed. Landed as the proposal below.
@@ -6418,3 +6422,104 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: keep
 - reason: The client config and the login come from the home directory while the store root moves with `KIT_MEMORY_ROOT`, so a redirected process would read and write the machine's own records under the machine's login. `hostConfig` (`scripts/memory-database.js`) refuses before any probe, down marker, queue row or snapshot write, through the one predicate `storeRootServesDatabase`, and every record verb reaches the host through it. A write that landed nowhere exits 1, and a read exits 0 because such a process has no shared record by design rather than by fault. The read verbs read neither the host nor the home snapshot there, and the session hook and the recognition nudge read no snapshot either. The line is the shared tiers' answer, so a `get` the pending tier answers prints none, and the sentence claims no database a machine without a config lacks. The pending tier is file-based and never meets the door, so engine runs keep it. The shared deletes and the store-signal flags refuse earlier under the same signals, so the door never reaches them.
 - passage: **A store root that is not this machine's own reaches no memory database.** A database config, where the machine has one, answers for the machine's own store. So where `KIT_MEMORY_ROOT` names another root, every record write refuses with exit 1, and `get`, `find`, `recall` and `recent` serve no shared record with exit 0. A verb that reaches for the shared tiers names the root on one stderr line, and session start prints that line once in place of its memory blocks. A run's pending tier still writes and reads as it does anywhere, and a `get` its pending record answers prints no such line.
+
+### N001
+- key: In a session in bypass permission mode without the store signals, run every memq verb, and repair, supersede and archive shared-tier records through the four remedies on the operator's ruling of 2026-10-12.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:172, "A session in bypass permission mode"
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12, on the operator's ruling of 2026-10-12 recorded in that plan's `## Intent`; kaizen issue 585.
+- verdict: keep
+- landed: 36ff5b09 section 3
+- reason: The grant hook emits an allow for one shape and is silent on the rest, so under bypass mode it withholds nothing, and memq's own refusals key on `storeSignalsPresent()`, which a session without the two variables fails. A reader of the withheld list alone took it as binding every fleet worker (kaizen issue 585). The liaison seat runs in `default` mode with an allow list (`plugins/personas/README.md`), so it is named out.
+- passage: A session in bypass permission mode without those two variables, which is every seat of the personas fleet but the liaison, runs every verb and holds the judgment the grant would hold. The operator ruled on 2026-10-12 that such a session may repair, supersede and archive shared-tier records through the four remedies above.
+
+### N002
+- key: Run the hygiene step at every close-out and the archive pass when it is due, never hanging the hygiene step on the decay stamp.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:225
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; the plan's Intent states why the stamp cannot carry the step.
+- verdict: keep
+- landed: 05d1edf6 section 3
+- reason: The stamp is one per machine, so a step hung on it would show ten pairs per tier a fortnight per machine and never drain the backlog. The scan writes no record and no stamp, so running it every time leaves the archive pass due when it was.
+- passage: The decay pass has two cadences: the hygiene step at every close-out, and the archive pass when it is due.
+- passage: The hygiene step never waits on the decay stamp, which is one per machine and shared by every session on it. The scan writes no record and no stamp, so it leaves the archive pass's due date alone.
+
+### N003
+- key: Disposition every pair the neighbour-pairs block shows by the Shared-Tier Repair and Removal routing rule, recording a pair that is two facts with `memq two-facts <a> <b>` and the pair's tier flag, reading both records of every listed pair with `memq get <name> --operator|--type=<type> --no-stamp`, bare for a project record, before the first verdict and again before the write, and never archiving a pinned record.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:228
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; rewritten by docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md section 2 2026-10-12, which added `memq two-facts`.
+- verdict: rewrite
+- landed: 05d1edf6 section 3
+- reason: The block nominates and picks no remedy, so the routing is the session's judgment over the two bodies, and the routing paragraph (c3.C027, c3.C028) owns it rather than a second list here. Every session reading the same tier reads the same strongest pairs, the type tier by its declared type and the project tier by its project key, so a pair another session already worked is skipped rather than worked twice. A pin binds `decay-prune` and not the delete verbs (Pinning), so a pinned record is never archived and a pinned member judged redundant is the operator's. A pair left as two facts with nothing recorded stayed in the default listing at every scan, so the step re-read it each close-out and never drained; a recorded verdict takes it out of the listing, and its lapse on either record's change returns a pair whose facts may have converged. The verdict was keep before this rewrite. Reworded on 2026-10-14 by section 4 of `docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md`, which cut words from the paragraph to pay for N010's sentence under the corpus cap: the sentence that every session reading the same tier sees the same top pairs went, since the reason above states it and no step turns on it, and the other cuts kept every rule and flag. Reworded on 2026-10-14 by docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md's finishing pass: every listed pair's records are read before the first verdict, so a `[PAIR DRAFTS]` block that the persona plugin delivers on a later tool result lands while the pairs are still open, rather than after the session has judged them by hand.
+- passage: In the hygiene step `decay-scan` reports. Disposition each listed pair by the routing rule above.
+- passage: Read both records of every listed pair before the first verdict, with `memq get <name> --operator|--type=<type> --no-stamp`, bare for a project record. Record a two-facts pair with `memq two-facts <a> <b> --operator|--type=<type>`, bare for a project pair. It leaves the listing until a record changes. Read both again before any write, skipping a pair that changed. A pinned record is never archived and, judged redundant, goes to the operator.
+
+### N004
+- key: In a shared-tier pair, repair a member whose fact is right and whose wording is poor, archive the redundant member under the `--confirm-shared` rules, and hand a never-true record and a credential-carrying record to the operator; take a project-tier pair through `forget`, `put --replace` or `decay-prune --archive`.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:227
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12, on the operator's ruling of 2026-10-12, which names repair, supersede and archive for shared-tier records and not delete.
+- verdict: keep
+- landed: 05d1edf6 section 3
+- reason: The ruling grants repair, supersede and archive for shared-tier records and not delete, so a shared delete stays the operator's, and a credential is a delete plus a rotation whatever else is true (c3.C030's paragraph). Inside a pair the partner already holds the current fact, so archiving the redundant member loses nothing and needs no pointer. Superseding within a pair is a `--replace` rewrite of the newer member, which clears every field a `--replace` clears: its anchors, an existing pointer and its author, and its triggers and machine scope unless restated (memq.js, the add verbs' field composition). So the routine step does not supersede. `--archive-operator` refuses without `--confirm-shared`, so the archive points at that paragraph's rules. The project tier is the session's own, so `forget` stays open there.
+- passage: In a shared-tier pair, repair a member with the right fact and poor wording. Archive the member whose fact its partner already holds, with `decay-prune --archive-operator|--archive-type <name>` under the `--confirm-shared` rules below, needing no pointer. A never-true shared record goes to the operator, and a credential-bearing one at once for delete and rotation. A project-tier pair takes `forget`, `put --replace` or `decay-prune --archive`.
+
+### N005
+- key: Re-read every record the drift block names against its file, then re-anchor it from the main checkout with `memq anchor <name> [<path>...] --prune-missing`, with `--operator` for an operator record, or route it through the remedies.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:229
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; section 2 of the same plan added `--prune-missing`.
+- verdict: keep
+- landed: 5e0e049e section 3
+- reason: A drift line says the record is unverified, not wrong, so the file is read first. A renamed or deleted file leaves a `missing` entry that only the prune drops, an operator record's anchors resolve against the store root, and anchors hash the main checkout's files (c3.C077).
+- passage: Re-read every record the drift block names against its file. Then re-anchor it from the main checkout with `memq anchor <name> [<path>...] --prune-missing`, adding `--operator` for an operator record, or route it through the remedies.
+
+### N006
+- key: Ask for `decay-scan --pairs all` when draining a backlog.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:228
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; section 1 of the same plan added `--pairs <n|all>`; rewritten by docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md section 2 2026-10-12, which added `memq two-facts`.
+- verdict: rewrite
+- landed: 05d1edf6 section 3
+- reason: A backlog drains only when every found pair is listed. The widening by `--pairs <10+k>` went with this rewrite: a two-facts pair is now recorded and leaves the listing (N003), so the default ten no longer repeats the pairs a session judged. The verdict was keep before this rewrite.
+- passage: A backlog takes `--pairs all`, redirected to a `.kit/` file.
+
+### N007
+- key: Report the hygiene step as partial, never clean, where the pairs block says its pairs are not listed or not checked, or a tier heading counts records not checked.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:229
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; the lines are memq.js's `fleetPairsBlock` and `printNeighbourPairsBlock`.
+- verdict: keep
+- landed: 05d1edf6 section 3
+- reason: The block prints one line and no pairs when the memory database does not rank them or the check throws, and a tier whose records went partly unchecked takes a counted heading; a step that saw fewer pairs than the tier holds otherwise reads as a clean one.
+- passage: A pairs block whose pairs are not listed or not checked, or a tier heading counting unchecked records, makes the step partial, never clean, in the close-out.
+
+### N008
+- key: On the engine's write-gated spawn vector, leave the hygiene step to an attended session.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:229
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; the stand-down is memq.js's `pinnedRootStandDown`, and the withheld remedies are `hooks/memq-grant.js`'s.
+- verdict: keep
+- landed: 05d1edf6 section 3
+- reason: The pairs block stands down on the presence of `KIT_MEMORY_ROOT`, and the grant withholds every shared-tier remedy but archive and a description-only `--update`, since it screens `--update` only beside `--body`, so a worker there has neither the pairs nor the shared means to work them.
+- passage: On the engine vector that block stands down, and a worker there leaves the step to an attended session.
+
+### N009
+- key: Leave the pre-write `find` to an attended session on the engine's write-gated spawn vector, and run it yourself in bypass permission mode.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:237
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; kaizen issue 585.
+- verdict: keep
+- landed: ad41f892 section 3
+- reason: The grant hook withholds `find` and is its only lock, so on that vector the command is lost rather than prompted; in bypass mode the hook binds nothing and memq refuses nothing without the store signals.
+- passage: On the engine's write-gated spawn vector `find` is withheld, so there that search is an attended session's, and a session in bypass permission mode runs it.
+
+### N010
+- key: Read a `[PAIR DRAFTS]` block on a later tool result after the hygiene step's `decay-scan` as the persona plugin's draft per pair, with any command, a reading of two cut bodies.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:228
+- provenance: docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md section 4 2026-10-14; the block is `plugins/personas/hooks/pair-drafter.ts`'s `PAIR_DRAFTS_HEAD` and the drain described in the persona README's pair-drafts bullet.
+- verdict: keep
+- reason: The persona plugin drafts a disposition for each listed pair from a warm fork, so a session meets drafts in the transcript with no rule naming them. The drafts are the fork's reading of each body cut to 600 code points, and the block's own head calls them data, so a session that applied one without reading both records would write from a cut. The sentence carries no read rule of its own, since N003's read of every listed pair before the first verdict covers the block's pairs, so the rule stays in one place. The block is named in the skill and not in `finishing-work` because the memory-system skill owns the hygiene step's routing.
+- passage: A later tool result's `[PAIR DRAFTS]` block carries the persona plugin's draft per pair, with any command, a reading of two cut bodies.

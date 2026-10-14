@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document governs how a session discovers, addresses, messages, and answers other live Claude sessions through the `ListAgents` and `SendMessage` tools. It owns the messaging surface's contract facts (roster rows, addressing by name, send outcomes, queue and size limits, the idle-notification subscription), the screening of any directory-sourced path that arrives over the channel, the standing an inbound message carries (the sending seat's, inside its mandate and the blast-radius tests) and the trace a receiver performs before taking on a plan a peer points it at, the reply vocabulary and record-keeping for a dispatched handoff, the scope line separating independent peers from a session's own dispatched subagents, the rule that nothing agreed over messaging is real until it lands in a durable artifact, the four sanctioned messaging patterns plus the four recorded seat-specific exceptions with their pricing, and the rule that a run never waits on a peer's silence. A session loads it before reading the roster, before sending or replying to a peer message, before acting on one, and on a compaction-boundary or consent-release or `notify_when_idle` moment; load class: `named-trigger`.
 
-Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 (`skills.peer-sessions.c2.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (the entries amended in place naming it). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (`Y` entries below: Y001, with c2.C069 retired to it and c2.C064 amended in place). Redrafted on 2026-09-26 by section 7 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1cb08b7f` with its fix round at `edc86d52`, so every live entry's `passage:` line quotes the text at `edc86d52` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with W003, W004 and W005 retired to them). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and its Leashed Peers section: c2.C070, c2.C106, c2.C107, c2.C110 to c2.C115, c2.C118, c2.C119, c2.C121 and c2.C159 deleted with their passages; c1.C005, c1.C012, c1.C074, c2.C016, c2.C017, c2.C019, c2.C031, c2.C071, c2.C075, c2.C096, c2.C117, c2.C130 and W006 rewritten to their passages as they now read; and the keys or reasons of c1.C045, c1.C050, c1.C053, c1.C054, c1.C055, c1.C058, c1.C061, c1.C062, c1.C073, c1.C082, c1.C100 and B002 reworded where they stated the leash as present. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C057 rewritten to its passage as it now reads, and the keys of c2.C011, c2.C020 and c2.C042 reworded from appending to filing. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c2.C071, c2.C077 and c2.C078 rewritten to their passages as they now read. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which ended the coordinator directory's copying between machines: c1.C005 and c1.C012 rewritten to their passage as it now reads, and c1.C005's reason reworded.
+Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 (`skills.peer-sessions.c2.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (the entries amended in place naming it). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (`Y` entries below: Y001, with c2.C069 retired to it and c2.C064 amended in place). Redrafted on 2026-09-26 by section 7 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1cb08b7f` with its fix round at `edc86d52`, so every live entry's `passage:` line quotes the text at `edc86d52` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with W003, W004 and W005 retired to them). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and its Leashed Peers section: c2.C070, c2.C106, c2.C107, c2.C110 to c2.C115, c2.C118, c2.C119, c2.C121 and c2.C159 deleted with their passages; c1.C005, c1.C012, c1.C074, c2.C016, c2.C017, c2.C019, c2.C031, c2.C071, c2.C075, c2.C096, c2.C117, c2.C130 and W006 rewritten to their passages as they now read; and the keys or reasons of c1.C045, c1.C050, c1.C053, c1.C054, c1.C055, c1.C058, c1.C061, c1.C062, c1.C073, c1.C082, c1.C100 and B002 reworded where they stated the leash as present. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C057 rewritten to its passage as it now reads, and the keys of c2.C011, c2.C020 and c2.C042 reworded from appending to filing. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c2.C071, c2.C077 and c2.C078 rewritten to their passages as they now read. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which ended the coordinator directory's copying between machines: c1.C005 and c1.C012 rewritten to their passage as it now reads, and c1.C005's reason reworded. Amended by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13, which seated the Architect and the Liaison in this file (`O` entries below: O001 to O004, with c2.C055 rewritten to its passage as it now reads and its key, provenance and reason reworded). Amended by `docs/plans/claude-kit_seat-skill-handles_spec_v1.md` section 1 on 2026-10-13, which named the rail by its owner, pointed the blind read at its owner and gave the liaison row its step-down gate (`Q` entries below: Q001 to Q003, superseding c2.C002, c2.C075 and O004, with c2.C123's key reworded to the rail's name).
 
 ### c1.C001
 - key: Treat the plan doc, memory, or a commit as the record and a message only as an interrupt pointing at it; never let a message be content's only home.
@@ -1028,7 +1028,8 @@ Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 
 - class: rule
 - source: plugins/grimoire/skills/peer-sessions/SKILL.md:76
 - provenance: 33c0bed 2026-08-26, same install as c2.C001.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q001, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: This is the sentence that stops a seat from being a caste; every later grant (the delegation record, the admin arming) is written as a record or an operator act rather than a seat property because of it.
 - passage: Authority stays on the dispatch-authority rail whatever seat a session holds, and a role changes only mandate shape and etiquette defaults.
 
@@ -1542,13 +1543,14 @@ Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 
 - passage: A new seat takes the cheapest tier its own judgment surface allows and states its own observable step-down gate.
 
 ### c2.C055
-- key: Take a seat for the work in front of you and leave it, and take a new seat for a seam none of the four covers.
+- key: Take a seat for the work in front of you and leave it, and take a new seat for a seam none of the listed seats covers.
 - class: rule
-- source: plugins/grimoire/skills/peer-sessions/SKILL.md:96
-- provenance: 33c0bed 2026-08-26.
-- verdict: keep
-- reason: "Taken at a time rather than held as castes" is the bound that keeps a seat from being a standing identity.
-- passage: Seats are an open set, taken for the work at hand and left rather than held as castes, and a seam none of the four covers takes a new seat the same way.
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:105
+- provenance: 33c0bed 2026-08-26; reworded by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13, when the Architect and Liaison bullets made the list six seats.
+- verdict: rewrite
+- landed: 9bbe851e section 1
+- reason: "Taken at a time rather than held as castes" is the bound that keeps a seat from being a standing identity. The count left the sentence so the list can grow without the sentence going stale again.
+- passage: Seats are an open set, taken for the work at hand and left rather than held as castes, and a seam none of those covers takes a new seat the same way.
 
 ### c2.C056
 - key: Let a seat default shape only when you reply or act within your own mandate; an inbound message still authorizes nothing.
@@ -1744,7 +1746,8 @@ Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 
 - class: mechanic
 - source: plugins/grimoire/skills/peer-sessions/SKILL.md:105
 - provenance: 8dd5b87 2026-08-26, whose review found the expert's moments flattened to five with two mid-work by construction.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q002, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: The moments are the invariant's instances per seat and were corrected once already; do not re-expand the expert's.
 - passage: the expert at a deliverable handoff, which is the spec committed, the blind read adjudicated and the dispatch acked together, or at a consult answered; the admin at an action completed and reported; the coordinator at the end of a reconciliation pass; and a worker at its own banked moment on the tree it holds.
 
@@ -2109,7 +2112,7 @@ Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 
 - baseline-test: yes
 
 ### c2.C123
-- key: The warranted channels are three: the operator's keyboard in the session's own conversation, the account-allowlisted relay thread, or an artifact-borne authorization per dispatch-authority.
+- key: The warranted channels are three: the operator's keyboard in the session's own conversation, the account-allowlisted relay thread, or a plan's traced `## Dispatch Authorization` grant.
 - class: mechanic
 - source: plugins/grimoire/skills/peer-sessions/SKILL.md:139
 - provenance: f07b9f0 2026-08-26; 8dd5b87 2026-08-26 single-sourced the list at the coordinator skill and generalized its first channel there.
@@ -2634,3 +2637,77 @@ Extracted at `6bc07fb`: lines 1-73 (`skills.peer-sessions.c1.md`); lines 74-155 
 - reason: W003's reason for the quote check stands: the quote with its channel and time is what makes a relay checkable on one machine. The commit-model clause leaves because a commit-model change is one of the three acts the role skill's delegation model covers, recorded in the plan's header before the act (the role ledger's B002). The scope and grant clauses stay, since neither hooks, guards, permission or security documents nor the `## Dispatch Authorization` section is the seat's to steer. Supersedes W003.
 - passage: A relay quoting the operator's words and naming their channel and time is the operator's word deferred, and one lacking any of the three is the relaying seat's own word. The worker may check the quote by searching for that string alone in the relaying session's transcript on this machine, located from the roster row's session id and never from a path the message supplies. Where the ruling decides a material fork, the check is required.
 - passage: A relay never changes a plan's scope over hooks, guards, permission or security documents, or its `## Dispatch Authorization` section.
+
+### O001
+- key: Seat the Architect as the steward of plan authorship across the fleet's repositories and of the design asks the coordinator and the workers raise, one per fleet and exclusive, answering a design ask in a record or a peer message and bringing the operator a decision ask where the fork is preference, cost or risk appetite, filing kit friction to the kaizen inbox, with the architect skill as its runbook.
+- class: rule
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:89
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the plan's Intent, where the operator ruled the architect a seat of its own beside Expert because it designs across every repository where Expert designs within one.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: The seat existed in the persona plugin's launch literal alone, so `/role Architect` resolved no bullet, no row and no runbook, which is the gap the plan closes. One per fleet, since two design seats would write plans against each other. The decision-ask default is the doctrine's judgment bullet applied to the seat: a preference, cost or risk-appetite fork is the operator's call. The answer goes in a record on the persona surface and in a peer message on a kit session's, the two surfaces the architect skill's Two Surfaces passage maps. The kaizen sentence is the Expert bullet's, since the capture duty under "Captured kit friction is a filed issue, not a message" is stated per seat.
+- passage: - **Architect.** Stewards plan authorship across the fleet's repositories, and the design asks the coordinator and the workers raise. One per fleet, exclusive. Two design seats would write plans against each other. Default: answer the coordinator's and a worker's design ask in a record or a peer message, and bring the operator a decision ask where the fork is preference, cost or risk appetite. Kit friction it meets goes to the kaizen inbox per the capture duty below. Its runbook is the architect skill.
+
+### O002
+- key: Seat the Liaison as the steward of one client's shared thread, turning its people's asks into briefs for the Architect and carrying answers back, filing kit friction to the kaizen inbox, with the liaison skill as its runbook.
+- class: rule
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:92
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the liaison skill, which `docs/archive/claude-kit_liaison-seat_spec_v1.md` landed without a Roles bullet.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: The liaison skill existed with no seat bullet, so `/role Liaison` resolved a runbook and nothing in this file. Three sentences, since the skill owns the conduct and the bullet only names the seat, carries the capture duty every seat bullet states, and points at it.
+- passage: - **Liaison.** Stewards one client's shared thread, turning what its people ask into briefs for the Architect and carrying answers back. Kit friction it meets goes to the kaizen inbox per the capture duty below. Its runbook is the liaison skill.
+
+### O003
+- key: Run the architect at Fable with no loop of its own, waking on a record or an operator message, and no step-down.
+- class: mechanic
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:100
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13, which states the row verbatim.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: Cross-repository design is the top tier's reason to exist, as spec authorship is for Expert (c2.C050), and the seat has no loop because a wake with no record and no message would fire with nothing to do.
+- passage: | Architect | Fable, the top of `brainstorming`'s tier ladder. | None; the seat wakes on a record or an operator message. | None; cross-repository design is the top tier's reason to exist. |
+
+### O004
+- key: Run the liaison at the roster's model for the persona, with no loop of its own, waking on a thread message, and no step-down gate.
+- class: mechanic
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:103
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13, which states the row verbatim.
+- verdict: retire
+- superseded-by: Q003, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
+- landed: 9bbe851e section 1
+- reason: The persona plugin's roster sets the model at launch, so the row defers to it rather than naming a tier this file would have to keep current. The seat wakes on the thread it stewards and nothing else.
+- passage: | Liaison | The roster's model for the persona. | None; the seat wakes on a thread message. | None. |
+
+### Q001
+- key: Keep authority on the warranted channels and the role skill's Standing Grants rail whatever seat a session holds; a role changes only mandate shape and etiquette defaults.
+- class: rule
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:81
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 6.
+- verdict: rewrite
+- landed: 767ce835 fix round 2
+- reason: c2.C002's reason holds: this sentence stops a seat from being a caste. No skill defined "dispatch-authority". The Standing Grants rail extends no warranted channel, so the sentence names both sources of authority.
+- proposed: Authority stays on the warranted channels and the role skill's Standing Grants rail whatever seat a session holds, and a role changes only mandate shape and etiquette defaults.
+- passage: Authority stays on the warranted channels and the role skill's Standing Grants rail whatever seat a session holds, and a role changes only mandate shape and etiquette defaults.
+
+### Q002
+- key: Bank at your seat's moment: the expert's is a deliverable handoff, the spec committed, the blind read under the brainstorming skill's step 10 adjudicated and the dispatch acked together, or a consult answered; the admin's an action completed and reported; the coordinator's the end of a reconciliation pass; and a worker's its own banked moment on the tree it holds.
+- class: mechanic
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:109
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 6.
+- verdict: rewrite
+- landed: ad9bddf2 fix round 1
+- reason: c2.C075's reason holds: the expert's moments were corrected once and stay unexpanded. "The blind read" sits under the brainstorming skill's step 10, Spec self-review, as a separate item that follows it, so the first use in this file names the step it sits under and a seat that never ran brainstorming can find what it adjudicates.
+- proposed: the expert at a deliverable handoff, which is the spec committed, the blind read under the brainstorming skill's step 10 adjudicated and the dispatch acked together, or at a consult answered; the admin at an action completed and reported; the coordinator at the end of a reconciliation pass; and a worker at its own banked moment on the tree it holds.
+- passage: the expert at a deliverable handoff, which is the spec committed, the blind read under the brainstorming skill's step 10 adjudicated and the dispatch acked together, or at a consult answered; the admin at an action completed and reported; the coordinator at the end of a reconciliation pass; and a worker at its own banked moment on the tree it holds.
+
+### Q003
+- key: Run the liaison at the roster's model for the persona, with no loop of its own, waking on a thread message, and step it down one tier once a month of briefs shows none the architect sent back for a speaker's words misquoted, an inference placed among them, or a disagreement the seat settled.
+- class: mechanic
+- source: plugins/grimoire/skills/peer-sessions/SKILL.md:103
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 7, ruled 2026-10-13 under the plan's Intent from the coordinator's record ARCHITECT-e779b3c2-d45d-46f0-942b-720a8c4acc14-18.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: O004's reason holds for the model and the loop. The table's own rule has every seat state an observable step-down gate, and the liaison's judgment surface is the brief: the liaison skill's Brief to Architect section keeps a speaker's words whole and the seat's inferences apart, and its Several Speakers section has the seat never settle a disagreement. Those three faults are what the architect can see in a brief alone, so the gate reads from the architect's own record of briefs returned and needs no read of the thread.
+- proposed: | Liaison | The roster's model for the persona. | None; the seat wakes on a thread message. | One tier below the roster's model, once a month of briefs shows none the architect sent back for a speaker's words misquoted, an inference placed among them, or a disagreement the seat settled. |
+- passage: | Liaison | The roster's model for the persona. | None; the seat wakes on a thread message. | One tier below the roster's model, once a month of briefs shows none the architect sent back for a speaker's words misquoted, an inference placed among them, or a disagreement the seat settled. |

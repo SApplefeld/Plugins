@@ -7,9 +7,11 @@
 // Two indexes come from one snapshot. The first holds every `cmd:` trigger the
 // rows declare, in the nudge's tiers, matched against a Bash or PowerShell
 // command by the nudge's containment rule; the memory-recognition question
-// asks in shadow over it. The second, nudgeIndexOf's, holds every trigger
-// kind and file anchor a row declares, and the nudge matches a tool call, a
-// prompt and a started subagent against it (the nudge section below).
+// is asked live over it, and a record answered skip has its `cmd:` hits
+// withheld from the tool-call nudge (nudgeHitsWithheld). The second,
+// nudgeIndexOf's, holds every trigger kind and file anchor a row declares,
+// and the nudge matches a tool call, a prompt and a started subagent against
+// it (the nudge section below).
 //
 // Both indexes admit the rows and entries memq's own readers admit: a row's
 // name through memq's isMemoryFilename, and its triggers and anchors through
@@ -69,7 +71,7 @@ export const RECOGNITION_NAME_MAX = 80;
 // fence, and memq reads no triggers from a block that never closes.
 export const RECOGNITION_ROW_TEXT_MAX = 65_536;
 
-// Rows one tier's index takes, the shadow's and the nudge's alike: the first
+// Rows one tier's index takes, the question's and the nudge's alike: the first
 // that many rows carrying a string name, in name order, before any is screened.
 export const RECOGNITION_ROWS_MAX = 512;
 
@@ -1311,6 +1313,28 @@ export function nudgeText(hits: readonly NudgeHit[], boundary: NudgeBoundary, el
 // double quote cut at 256 characters, and the boundary.
 export function nudgeEventDetail(hit: NudgeHit, boundary: NudgeBoundary): { name: string; tier: string; type: string; pattern: string; boundary: string } {
   return { name: hit.name, tier: hit.tier, type: hit.type, pattern: hit.pattern.replace(/[^\x20-\x7E]/g, "").replace(/"/g, "").slice(0, 256), boundary };
+}
+
+// --- The recognition gate ---
+
+// The key a nudge hit's record is asked under, recognitionKeyOf over its tier
+// and its name without the `.md` nudgeRowRecord adds, so a `cmd:` hit joins
+// the `cmd:` index's match of the same row by record.
+export function nudgeHitRecordKey(hit: { tier: RecognitionTier; name: string }): string {
+  return recognitionKeyOf({ tier: hit.tier, name: hit.name.slice(0, -3) });
+}
+
+// A tool-call boundary's hits split by the recognition gate, each list in
+// the order given: a `cmd:` hit whose record `skipped` holds, under
+// nudgeHitRecordKey, is withheld, and every other hit is kept. The question
+// is asked about a `cmd:` match, so its skip answers for that trigger kind
+// alone: the same record's `err:`, `glob:` or other trigger hit, or its
+// anchor hit, is kept.
+export function nudgeHitsWithheld(hits: readonly NudgeHit[], skipped: ReadonlySet<string>): { kept: NudgeHit[]; withheld: NudgeHit[] } {
+  const kept: NudgeHit[] = [];
+  const withheld: NudgeHit[] = [];
+  for (const hit of hits) (hit.type === "cmd" && skipped.has(nudgeHitRecordKey(hit)) ? withheld : kept).push(hit);
+  return { kept, withheld };
 }
 
 // --- SHA-256 ---

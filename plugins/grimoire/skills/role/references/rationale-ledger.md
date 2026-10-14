@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the role skill: it defines the `/role <Seat>` seat-takeover ritual and is the owning contract for two things other skills point at, the coordinator-directory contract (what lives in `~/.claude/coordinator/<machine>/` and who may write each file) and the standing-grant rail (how an operational grant the operator has made standing is held, switched on, and resolved). Within the range read, it owns these moments: taking or handing off a seat, writing or reading a session registry entry, deciding who may write, stamp, or delete a coordinator file, reading and auditing the time stamps those files carry, gating how a working directory and other identifying fields are spelled in a registry entry, and the push moments at which a session rewrites its entry. Load class: `named-trigger` - the frontmatter says to use it when taking a seat with `/role <Seat>`, when writing or reading a session registry entry, or when resolving whether a seat holds a standing grant.
 
-Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.role.c2.md`); lines 66-99 (`skills.role.c3.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Redrafted on 2026-09-26 by section 7 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1ba7029d` with its fix round at `edc86d52`, so every live entry's `passage:` line quotes the text at `edc86d52` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with c3.C066 retired to B001 and B003). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C041 deleted with its passage, and the keys or reasons of c3.C063, c3.C065 and c3.C085 reworded where they stated the leash or its arming as present. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c3.C043 and c3.C044 rewritten to their passage as it now reads, and c3.C044's key reworded from appending to filing. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel, so the coordinator directory is this machine's own: c1.C007, c1.C028, c1.C055, c1.C056, c3.C049 and B003 rewritten to their passages as they now read, with c3.C049's key and reason and B003's reason reworded; c1.C029, c1.C030, c1.C031, c1.C032, c1.C064, c1.C065 and c2.C014 deleted, since the copying they describe is gone; and the reasons of c1.C014, c2.C035, c3.C007, c3.C008, c3.C012, c3.C066 and c3.C070, the provenance of c3.C066, the keys of c3.C012 and c3.C092 reworded, and c3.C066's passage on the push member dropped, where they stated that copying as present.
+Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.role.c2.md`); lines 66-99 (`skills.role.c3.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Redrafted on 2026-09-26 by section 7 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1ba7029d` with its fix round at `edc86d52`, so every live entry's `passage:` line quotes the text at `edc86d52` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with c3.C066 retired to B001 and B003). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C041 deleted with its passage, and the keys or reasons of c3.C063, c3.C065 and c3.C085 reworded where they stated the leash or its arming as present. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c3.C043 and c3.C044 rewritten to their passage as it now reads, and c3.C044's key reworded from appending to filing. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel, so the coordinator directory is this machine's own: c1.C007, c1.C028, c1.C055, c1.C056, c3.C049 and B003 rewritten to their passages as they now read, with c3.C049's key and reason and B003's reason reworded; c1.C029, c1.C030, c1.C031, c1.C032, c1.C064, c1.C065 and c2.C014 deleted, since the copying they describe is gone; and the reasons of c1.C014, c2.C035, c3.C007, c3.C008, c3.C012, c3.C066 and c3.C070, the provenance of c3.C066, the keys of c3.C012 and c3.C092 reworded, and c3.C066's passage on the push member dropped, where they stated that copying as present. Amended by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13, which put the Architect in the chain and named the architect and liaison skills as seat runbooks (`O` entries below: O001, with c3.C015 rewritten to its passage as it now reads and its key, provenance and reason reworded, and c3.C059's key reworded to the chain as it now reads). Amended by `docs/plans/claude-kit_seat-skill-handles_spec_v1.md` section 1 on 2026-10-13, which named the handles the ritual resolves: the registry entry's session id and `none` values, the relaunch instruction, the launch-invocation and delegation records' names, the wake's owner and the rail's name (`Q` entries below: Q001 to Q009, superseding c1.C043, F005, c3.C004, c3.C016, c3.C063, c3.C070, c3.C071 and c3.C072, with c3.C065's key reworded to the rail's name). Its fix round on the same date rewrote c1.C052 in place to the `none` value.
 
 ### c1.C001
 - key: Load this skill before taking a seat, reading or writing a session registry entry, claiming or checking the heavy-process slot, or resolving a standing grant.
@@ -423,7 +423,8 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - class: mechanic
 - source: plugins/grimoire/skills/role/SKILL.md:27
 - provenance: fb0f194 2026-08-28, the registry shape shipped and is pinned field by field (test/doctrine-parity.test.js:2387).
-- verdict: keep
+- verdict: retire
+- superseded-by: Q001, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: no finding. The test/doctrine-parity.test.js:2387 cite sits at :2378 at the landing; prefer the test's name over its line.
 - passage: A registered session's file is `registry/<session-id>.md`, in exactly this shape:
 
@@ -507,13 +508,15 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - passage: An absolute `Workdir:` is allowed only where the coordinator skill's named precondition is established, and no memory record establishes it or stands in for it.
 
 ### c1.C052
-- key: Until the precondition is established, write `Workdir:` as the repo's name plus a repo-relative or worktree name where needed, or omit it, and never an absolute path.
+- key: Until the precondition is established, write `Workdir:` as the repo's name plus a repo-relative or worktree name where needed, or `none`, and never an absolute path.
 - class: rule
-- source: plugins/grimoire/skills/role/SKILL.md:44
-- provenance: fb0f194 2026-08-28, the degraded form.
-- verdict: keep
-- reason: Neither the coordinator nor peer-sessions spells the registry field's degraded form; the sentence carries no rationale to move.
-- passage: Until then `Workdir:` takes the degraded form: the repo's name, plus a repo-relative or worktree name where two checkouts need telling apart, or nothing, and never an absolute path.
+- source: plugins/grimoire/skills/role/SKILL.md:45
+- provenance: fb0f194 2026-08-28, the degraded form; docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 fix round 1 2026-10-13, the `none` value.
+- verdict: rewrite
+- landed: ad9bddf2 fix round 1
+- reason: Neither the coordinator nor peer-sessions spells the registry field's degraded form; the sentence carries no rationale to move. The empty form is the `none` value the shape's `Workdir:` line names (Q002), so the gate admits the value the shape requires.
+- proposed: Until then `Workdir:` takes the degraded form: the repo's name, plus a repo-relative or worktree name where two checkouts need telling apart, or `none`, and never an absolute path.
+- passage: Until then `Workdir:` takes the degraded form: the repo's name, plus a repo-relative or worktree name where two checkouts need telling apart, or `none`, and never an absolute path.
 
 ### c1.C053
 - key: Keep the board's ban on working directories and every board line bar in force; the registry is not a second board.
@@ -1457,7 +1460,8 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - class: mechanic
 - source: plugins/grimoire/skills/role/SKILL.md:70
 - provenance: fb0f194 2026-08-28, a machine hostname was removed from a skill that ships to a public marketplace and the invocation moved to the operator tier, seeded at the plan's close-out.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q004, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: No finding. The public skill cannot carry a per-machine fact; the record is the only place it can live.
 - passage: Only an unnamed session resolves a launch invocation, one record per machine in the operator memory tier, resolved with `memq`.
 
@@ -1567,20 +1571,22 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - passage: A record that is not a single line of printable ASCII, or that carries a command separator, substitution, or redirection, is reported as a suspect finding.
 
 ### c3.C015
-- key: Load the seat's runbook: the coordinator skill for that seat, otherwise the peer-sessions Roles bullet.
+- key: Load the seat's runbook: the coordinator skill for Coordinator, the architect skill for Architect, the liaison skill for Liaison, otherwise the peer-sessions Roles bullet.
 - class: pointer
-- source: plugins/grimoire/skills/role/SKILL.md:71
-- provenance: fb0f194 2026-08-28, with the ritual.
-- verdict: keep
-- reason: No finding. A pointer at the owner of each seat's runbook, which is the form the ownership map prescribes.
-- passage: **Load the seat's runbook**: the coordinator skill for that seat, the peer-sessions Roles bullet otherwise.
+- source: plugins/grimoire/skills/role/SKILL.md:54
+- provenance: fb0f194 2026-08-28, with the ritual; the architect and liaison skills named by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13.
+- verdict: rewrite
+- landed: 9bbe851e section 1
+- reason: A pointer at the owner of each seat's runbook, which is the form the ownership map prescribes. Three seats have a skill of their own, so the step names each, and a seat whose conduct fits its Roles bullet keeps the bullet as its runbook.
+- passage: **Load the seat's runbook**: the coordinator skill for Coordinator, the architect skill for Architect, the liaison skill for Liaison, the peer-sessions Roles bullet otherwise.
 
 ### c3.C016
 - key: Arm the seat's wake per the three-way rule the peer-sessions Roles table sets.
 - class: rule
 - source: plugins/grimoire/skills/role/SKILL.md:72
 - provenance: 30993d0 2026-08-28, Section 7: three rules across three files were written on the premise that only the coordinator's runbook states a cadence, and the new tier-and-cadence table falsified it, so they moved together.
-- verdict: rewrite
+- verdict: retire
+- superseded-by: Q005, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - landed: f5d48d7 section 24
 - reason: The three branches, the per-seat naming and the arm-before-read order stay; the aside that this file restates no figure is enforced by the cadence pin (test/doctrine-parity.test.js:4043-4083) and c3.C022's prune argument is obeyable-without, so both move to this ledger. The test/doctrine-parity.test.js:4043-4083 cite sits at the Admin-cadence test at 4039-4098 at the landing; prefer the test's name over its line. Its landing respelled c3.C018's keep sentence; c3.C018 records the flip.
 - proposed: Keep the three branches, the per-seat naming (C020, C021) and the arm-before-read order (C023); move the figure aside and the staleness-prune rationale (C022) to the ledger.
@@ -2029,7 +2035,7 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - passage: What the rail can never reach, stated as its own exclusion list rather than left to each grant's: it extends no warranted channel, the coordinator skill's closed list of three standing unchanged; it establishes no privacy precondition, the Workdir readership bar above deliberately record-proof and standing whatever record exists; it lifts no harness floor and no no-laundering rule; and it widens no grant past what its owning skill spells out. The list is the rail's boundary and it is closed by design.
 
 ### c3.C059
-- key: As a delegated seat, treat scoped direction from the seats above you in the Coordinator-Expert-Worker chain as ordinary in-charter direction.
+- key: As a delegated seat, treat scoped direction from the seats above you in the chain, Coordinator to Expert and Architect to Worker, as ordinary in-charter direction.
 - class: rule
 - source: plugins/grimoire/skills/role/SKILL.md:91
 - provenance: fb0f194 2026-08-28, the seat-infrastructure plan's delegation model, from the operator's scope amendment (docs/archive/claude-kit_seat-infrastructure_spec_v1.md:165).
@@ -2073,7 +2079,8 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - class: rule
 - source: plugins/grimoire/skills/role/SKILL.md:85
 - provenance: fb0f194 2026-08-28, the model's scope sentence from the operator's amendment.
-- verdict: rewrite
+- verdict: retire
+- superseded-by: Q006, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - landed: 6a900e7f section 5
 - reason: The passage scopes delegation by the plans whose dispatch the rail covers; the scope and its bounds are unchanged. Role owns the scope; the doctrine's copy is parity-pinned against role as the always-loaded copy (test/doctrine-parity.test.js:265-269) and peer-sessions cites the rail as the limit. Owner keeps whole, pinned copy keeps its copy. At the landing the doctrine's stop-for-a-yes bullet points at the role skill for the delegation instance's scope and exclusions rather than carrying a pinned copy (its scope and push-exclusion asserts left test/doctrine-parity.test.js:265-269 in the doctrine section, Chapter 1), and peer-sessions cites the rail as the limit; role owns the scope and states it whole.
 - passage: delegated direction covers planning, scoping, sequencing, and dispatching execution of sections of plans whose dispatch the dispatch-authority rail covers, a plan's `## Dispatch Authorization` section with its grant traced or the plan taken by the peer-sessions chain handoff.
@@ -2089,7 +2096,7 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - passage: A seat acting on delegation states the bound it is holding
 
 ### c3.C065
-- key: Authorize nothing through delegation that the dispatch-authority rail does not cover, leaving the rail's trace untouched.
+- key: Authorize nothing through delegation that the Standing Grants rail does not cover, leaving the rail's trace untouched.
 - class: rule
 - source: plugins/grimoire/skills/role/SKILL.md:92
 - provenance: fb0f194 2026-08-28, installed with the scope sentence so the delegation model could not become a second arming path.
@@ -2144,7 +2151,8 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - class: mechanic
 - source: plugins/grimoire/skills/role/SKILL.md:95
 - provenance: fb0f194 2026-08-28, the per-machine opt-in installed with the model (`git log -S "hostname-keyed, its name embedding the machine identifier"` returns that commit alone).
-- verdict: keep
+- verdict: retire
+- superseded-by: Q007, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: No finding. The keying is the scoping mechanism because the tier has none of its own: every machine reads it from the memory database, so an unkeyed record would grant the model everywhere at once.
 - passage: The model's switch is a per-machine operator opt-in: one hostname-keyed record in the operator memory tier, written at adoption on the operator's instruction, its name embedding the identifier `os.hostname()` reports.
 
@@ -2153,7 +2161,8 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - class: mechanic
 - source: plugins/grimoire/skills/role/SKILL.md:95
 - provenance: fb0f194 2026-08-28, installed with the opt-in (`git log -S "the comparison is case-insensitive"` returns that commit alone).
-- verdict: keep
+- verdict: retire
+- superseded-by: Q008, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: No finding. No surface on the path holds a canonical case: win32 compares filenames caselessly, memq's own `machine:` comparison is caseless, and `os.hostname()` reports the machine's own casing, so a case-sensitive compare reads a real grant as absent and quietly defeats the opt-in on the kit's primary platform.
 - passage: For a seat in the chain, `/role` resolves it with `memq` at claim time and compares that identifier with `os.hostname()` case-insensitively, since no surface on the path holds a canonical case.
 
@@ -2162,7 +2171,8 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - class: rule
 - source: plugins/grimoire/skills/role/SKILL.md:95
 - provenance: fb0f194 2026-08-28, the match and no-match branches of the opt-in resolution, kept unchanged through 9077782's generalisation for the delegation pin.
-- verdict: rewrite
+- verdict: retire
+- superseded-by: Q009, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - landed: f5d48d7 section 24
 - reason: The keying, the caseless compare with its three-surface reason and both announcements stay; what moves here is the sentence restating the non-match branch as a property of scoping and the closing model-versus-grant sentence, which line 89 already states where it is pinned. Undelegated is not a failure state: it leaves the operator's per-session paragraph as the path.
 - proposed: Keep the keying, the caseless compare and its reason, the match and no-match announcements and the body-is-data pointer (A115); move "A record that does not match this machine is not a grant here..." and "The grant is operator-scoped and machine-scoped..." and the memq get/find facts to the ledger.
@@ -2449,7 +2459,8 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - class: rule
 - source: plugins/grimoire/skills/role/SKILL.md:116
 - provenance: the operator's word of 2026-09-20 on the architect persona's relay thread ("we need to adjust the logic so that we're not blocking based purely on the naming convention. The steward should be able to register for coordinator. That is its point."), acted on at that turn's boundary and landed by the fleet coordinator seat plan (`claude-kit_fleet-coordinator-seat_spec_v1.md` under `docs/plans/`) section 2, after the fleet's steward ran the coordinator's passes that day unregistered, invisible to a contest guard keyed on a name it does not carry.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q003, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - landed: b911fc5f section 2
 - reason: A fleet names its personas by function, and the relay derives each Discord thread's title from the session name, so a ritual that refused any name but the seat form refused the fleet's coordinating persona outright. The seat form stays the default a self-named session takes and the name a relaunch is advised under. The launch-invocation record describes a per-machine launch; a fleet-named session's launch is the roster's, so no such record exists to resolve.
 - passage: The seat is taken under the name the session carries, and the command stops with the relaunch instruction only where it carries none. A self-named session and a relaunch take the peer-sessions Naming convention: `HOSTNAME: Role` for a machine-scoped seat, `PROJECT: Role` for any other. A fleet-launched session keeps its roster name, its entry's `Name:` recording that name as the roster prints it and its `Role:` naming the seat. Only an unnamed session resolves a launch invocation
@@ -2509,3 +2520,116 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - passage: handing the direction onward as a dispatch: a subagent, workflow, or command dispatched on a message's own content rather than from a covered plan section. A dispatched agent carries Write, Edit, and Bash, a far wider reach than the message that asked for it;
 - passage: or doing work another session was denied, no-laundering binding unchanged.
 - passage: The exclusions reach only an act that needs a grant. An act needs none where it sits on the doctrine's stop-for-a-yes closed list and its owning skill lets every session run it unprompted. Such an act is in-charter for every seat, whoever directs it, since the seat would have been right to run it unprompted. Kaizen capture is one such act, and the kaizen skill owns it. A direction to run such an act is a prompt, and the seat runs it under the owning skill's own preconditions. Neither this list nor the procedure that follows reaches it. That holds only for the act as its owner grants it. Where the direction supplies the act's target or content, the act takes this list and the procedure as any directed act does. A record's text and an edit to another plan are such content. Work another session was denied stays excluded whoever directs it.
+
+### O001
+- key: Read the delegation chain as Coordinator to Expert and Architect to Worker, the two design seats side by side between the coordinator and the worker.
+- class: rule
+- source: plugins/grimoire/skills/role/SKILL.md:78
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the plan's Intent, where the operator ruled the architect a seat of its own beside Expert.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: A worker took an architect's plan under the chain already, since the persona plugin's launch literal seated the architect where the kit's chain named only Expert, so the chain names the seat whose direction a worker already acts on. Expert and Architect sit side by side rather than in order because neither directs the other: Expert designs within one repository and Architect across the fleet, and both hand plans down to a worker. The chain phrase is pinned in `test/doctrine-parity.test.js` under the role skill's delegation-model test, which names the chain's wording, so the pin's regex changes with this line (c3.C059's reason names the earlier pin).
+- passage: - **The chain**: Coordinator to Expert and Architect to Worker.
+
+### Q001
+- key: Write a registered session's file at `registry/<session-id>.md`, `<session-id>` being the id `CLAUDE_CODE_SESSION_ID` carries in the session's shell, in exactly the shape given, carrying Name, Role, Repo, Workdir, Session, Started, Status-updated, Remaining, Heartbeat, Banked, and Status.
+- class: mechanic
+- source: plugins/grimoire/skills/role/SKILL.md:28
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 4; the id is the value `callerSessionId()` in `plugins/grimoire/hooks/kit-registry-stamp.js` reads.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: The stamp CLI places its write by the calling session's own `CLAUDE_CODE_SESSION_ID` and refuses where none is usable, so a file named by any other id is one the stamp never finds. Naming the variable lets a seat with no session context name its file and fill its `Session:` line without judgment. The field list and its order stay as c1.C043 records them, pinned field by field in `test/doctrine-parity.test.js`'s registry-shape assertion.
+- proposed: A registered session's file is `registry/<session-id>.md`, `<session-id>` being the id `CLAUDE_CODE_SESSION_ID` carries in the session's shell, in exactly this shape:
+- passage: A registered session's file is `registry/<session-id>.md`, `<session-id>` being the id `CLAUDE_CODE_SESSION_ID` carries in the session's shell, in exactly this shape:
+
+### Q002
+- key: Write `Repo:` as the one repository the seat's work lives in, or `none` where its asks name no single repository, never a list, and write `Workdir: none` beside a `none` repo.
+- class: mechanic
+- source: plugins/grimoire/skills/role/SKILL.md:33
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 4.
+- verdict: rewrite
+- landed: ad9bddf2 fix round 1
+- reason: The architect skill states that the seat designs across every repository on the fleet and that its own directory is not a repository, so a shape fixing one repository's name left that seat no value to write, and the Coordinator's asks name no single repository either. One fixed token rather than a list keeps the field a single value a reader compares. The shape line states the value and the gating paragraph states which seats take it, so the gate admits the value the shape requires. `Workdir:` follows `Repo:` because a checkout belongs to a repository, and the shape's lines stay in the order `test/doctrine-parity.test.js`'s registry-shape assertion pins.
+- proposed: Repo: <the one repository the seat's work lives in, or none, never a list>
+- proposed: Workdir: <the checkout, in the form the paragraph below gates, or none beside a none repo>
+- proposed: A seat whose asks name no single repository, as the Coordinator's and the Architect's do, takes `Repo: none` and `Workdir: none`.
+- passage: Repo: <the one repository the seat's work lives in, or none, never a list>
+- passage: Workdir: <the checkout, in the form the paragraph below gates, or none beside a none repo>
+- passage: A seat whose asks name no single repository, as the Coordinator's and the Architect's do, takes `Repo: none` and `Workdir: none`.
+
+### Q003
+- key: Take the seat under the name the session carries; where it carries none, stop with the relaunch instruction, the command's own stop text telling the operator to relaunch under a name of the peer-sessions Naming convention; a fleet-named session keeps its roster name, and its entry's `Role:` says which seat it holds.
+- class: rule
+- source: plugins/grimoire/skills/role/SKILL.md:53
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 2.
+- verdict: rewrite
+- landed: ad9bddf2 fix round 1
+- reason: F005's reason holds for the fleet-named session and the seat form. A seat reading "the relaunch instruction" alone cannot tell whether it names a file, a record or text it composes, so the step states that the instruction is the command's own stop text and what it tells the operator, which leaves nothing to resolve. The convention's two forms take their own sentence, so the instruction reads whole before them.
+- proposed: The seat is taken under the name the session carries. Where it carries none, the command stops with its relaunch instruction, its own stop text telling the operator to relaunch the session under a name of the peer-sessions Naming convention. The convention's forms are `HOSTNAME: Role` for a machine-scoped seat and `PROJECT: Role` for any other. A self-named session takes that convention too. A fleet-launched session keeps its roster name, its entry's `Name:` recording that name as the roster prints it and its `Role:` naming the seat.
+- passage: The seat is taken under the name the session carries. Where it carries none, the command stops with its relaunch instruction, its own stop text telling the operator to relaunch the session under a name of the peer-sessions Naming convention. The convention's forms are `HOSTNAME: Role` for a machine-scoped seat and `PROJECT: Role` for any other. A self-named session takes that convention too. A fleet-launched session keeps its roster name, its entry's `Name:` recording that name as the roster prints it and its `Role:` naming the seat.
+
+### Q004
+- key: Resolve the launch invocation, only for an unnamed session, from the operator-tier record `<hostname>-launch-invocation` with `memq get <name> --operator`, the name being a convention the ritual never checks against this machine.
+- class: mechanic
+- source: plugins/grimoire/skills/role/SKILL.md:53
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 2 and the Assumptions entry for the launch-invocation record's form.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: c3.C004's reason holds: the public skill cannot carry a per-machine fact. A record identified by description is resolved by judgment, so it takes a name a seat can type, in the form the delegation record's name takes (Q007). The name is unchecked: `memq get` applies no machine filter and the ritual compares nothing, so `docs/security-model.md`'s seat-rituals paragraph, "the ritual runs no machine comparison", stays true, and the prose description and metacharacter screens (c3.C007) remain the whole control.
+- proposed: Only an unnamed session resolves a launch invocation, from the operator-tier record `<hostname>-launch-invocation`, its `<hostname>` spelled as the switch paragraph below states, read with `memq get <name> --operator`. That name is a convention the ritual never checks against this machine.
+- passage: Only an unnamed session resolves a launch invocation, from the operator-tier record `<hostname>-launch-invocation`, its `<hostname>` spelled as the switch paragraph below states, read with `memq get <name> --operator`. That name is a convention the ritual never checks against this machine.
+
+### Q005
+- key: Arm the seat's wake, the wake the standing-watch skill's Wake mechanics section governs, per the three-way rule the peer-sessions Roles table sets.
+- class: rule
+- source: plugins/grimoire/skills/role/SKILL.md:55
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 3.
+- verdict: rewrite
+- landed: ad9bddf2 fix round 1
+- reason: c3.C016's reason holds for the three-way rule and the arm-before-read order. The step named a wake without saying what arms one, and the standing-watch skill's Wake mechanics section owns both of its forms, the timer and the self-authored wake prompt, so the step points there rather than restating it and names the wake rather than one form.
+- proposed: **Arm the seat's wake**, the wake the standing-watch skill's Wake mechanics section governs, per the three-way rule the peer-sessions Roles table sets.
+- passage: **Arm the seat's wake**, the wake the standing-watch skill's Wake mechanics section governs, per the three-way rule the peer-sessions Roles table sets.
+
+### Q006
+- key: Confine delegated direction to planning, scoping, sequencing, and dispatching execution of sections of plans whose dispatch the Standing Grants rail covers.
+- class: rule
+- source: plugins/grimoire/skills/role/SKILL.md:79
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 6.
+- verdict: rewrite
+- landed: 767ce835 fix round 2
+- reason: c3.C063's reason holds for the scope and its bounds. No skill defined "dispatch-authority", and this skill's Standing Grants section owns the rail, so the rail takes that section's name here. The Standing Grants rail is switched by one operator-tier record and extends no warranted channel, so an artifact grant, which has no record, is named by its owners rather than placed on the rail.
+- proposed: delegated direction covers planning, scoping, sequencing, and dispatching execution of sections of plans whose dispatch the Standing Grants rail covers: a plan taken on its `## Dispatch Authorization` grant, which the curating-docs skill defines, traced as the peer-sessions skill states, or by the peer-sessions chain handoff.
+- passage: delegated direction covers planning, scoping, sequencing, and dispatching execution of sections of plans whose dispatch the Standing Grants rail covers: a plan taken on its `## Dispatch Authorization` grant, which the curating-docs skill defines, traced as the peer-sessions skill states, or by the peer-sessions chain handoff.
+
+### Q007
+- key: Switch the delegation model on with one operator-tier record named `<hostname>-standing-delegation-granted`, `<hostname>` being the identifier `os.hostname()` reports, lowercased, written at adoption on the operator's instruction.
+- class: mechanic
+- source: plugins/grimoire/skills/role/SKILL.md:90
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 1 and the Assumptions entry for the record's pattern, read from `memq find delegat --all`.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: c3.C070's reason holds for the keying. The rail's identification rule needs a name that resolves to one record or to none with no judgment, and a record described only as hostname-keyed with the identifier embedded admitted any name carrying the identifier. The pattern is the one most of the operator tier's delegation records carry, and a machine whose record carries another name resolves none and announces undelegated, which is the safe failure. The name is written lowercased while the comparison stays caseless (Q008).
+- proposed: The model's switch is a per-machine operator opt-in: one record in the operator memory tier, written at adoption on the operator's instruction and named `<hostname>-standing-delegation-granted`, `<hostname>` being the identifier `os.hostname()` reports, lowercased.
+- passage: The model's switch is a per-machine operator opt-in: one record in the operator memory tier, written at adoption on the operator's instruction and named `<hostname>-standing-delegation-granted`, `<hostname>` being the identifier `os.hostname()` reports, lowercased.
+
+### Q008
+- key: Resolve the record with `memq get <name> --operator` at claim time and compare the identifier the name carries against `os.hostname()` case-insensitively.
+- class: mechanic
+- source: plugins/grimoire/skills/role/SKILL.md:90
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 1.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: c3.C071's reason holds for the caseless compare. Naming the verb with its tier flag gives the seat a command it can run, where `memq` alone left it a choice of verb.
+- proposed: For a seat in the chain, `/role` resolves it with `memq get <name> --operator` at claim time and compares the name's identifier with `os.hostname()` case-insensitively, since no surface on the path holds a canonical case.
+- passage: For a seat in the chain, `/role` resolves it with `memq get <name> --operator` at claim time and compares the name's identifier with `os.hostname()` case-insensitively, since no surface on the path holds a canonical case.
+
+### Q009
+- key: Announce delegated and apply the chain where the identifiers match; announce undelegated where no record of that name answers or the record embeds another machine's identifier.
+- class: rule
+- source: plugins/grimoire/skills/role/SKILL.md:90
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 1.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: c3.C072's reason holds. "Of that name" makes a record under any other name a no-answer, so a seat never weighs whether a differently named record counts.
+- proposed: On a match the seat announces itself delegated and follows the chain. Where no record of that name answers, or the record names another machine, it announces undelegated, and the operator's per-session paragraph remains the path.
+- passage: On a match the seat announces itself delegated and follows the chain. Where no record of that name answers, or the record names another machine, it announces undelegated, and the operator's per-session paragraph remains the path.

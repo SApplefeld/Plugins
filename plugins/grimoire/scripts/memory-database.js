@@ -1240,6 +1240,38 @@ function textLiteral(variable, value, width) {
 // stderr, so a server notice ahead of a result set shifts every index by one.
 const RESULT_TAG = 'kitdb-json=';
 
+// The SELECT that sends one answer line: the tag, then the hex of the
+// expression's own bytes.
+//
+// sqlcmd writes what it sends down a pipe in the console's code page, such as
+// 437, and converts a character the page lacks by best fit: U+2192 becomes
+// byte 0x1A, a C0 control byte that JSON.parse refuses inside a string. -f
+// cannot switch the page for the process that sets it, and each spawn here
+// gets a fresh hidden console. Hex never leaves ASCII, so the line arrives as
+// the server wrote it whatever the page, and parseResultLines decodes it.
+//
+// That decode reads the bytes as UTF-16LE, which holds only while every
+// wrapped expression is NVARCHAR, and each one is. Every [Json] table
+// variable this module declares is NVARCHAR(MAX). A COALESCE with an N-less
+// literal such as 'null' still resolves to NVARCHAR by type precedence. And
+// FOR JSON returns NVARCHAR(MAX).
+//
+// Both arguments are T-SQL text this module writes, never a value a record or
+// a caller supplies: `expression` is the column or subquery, and `tail` the
+// rest of the SELECT after FROM, its WHERE included.
+function resultLine(expression, tail) {
+    return ";SELECT '" + RESULT_TAG + "' + CONVERT(VARCHAR(MAX), CAST(" + expression + ' AS VARBINARY(MAX)), 2)'
+        + (tail ? ' FROM ' + tail : '');
+}
+
+// A tagged line's payload is hex digits and nothing else, their count a
+// multiple of four so the bytes are whole UTF-16 code units. The digits are
+// matched as one flat class and the count checked apart: a repeated group
+// such as (?:[0-9A-F]{4})* takes a stack frame per repetition and overflows
+// on a line of about eight million digits, an answer of two million
+// characters, which would read as a line that was not JSON.
+const RESULT_HEX_RE = /^[0-9A-Fa-f]*$/;
+
 // Whether the tool's output carries a message the server sent back, which is
 // what tells a batch the server rejected from a host this client never reached.
 //
@@ -1349,6 +1381,10 @@ function runBatch(config, batch, options) {
         return { ok: false, cause: 'outage', detail: 'the budget was spent before this spawn, so none was made' };
     }
 
+    // The output side needs no code page because every tagged line is hex, as
+    // resultLine states, and the input side needs none because textLiteral
+    // admits printable ASCII only and payloadLiteral escapes every other
+    // character as \uXXXX, so the batch is ASCII whatever it carries.
     const args = ['-S', config.server, '-d', config.database, '-b', '-I', '-N', '-x', '-y', '0',
         '-l', String(seconds), '-t', String(seconds)];
     if (config.windowsAuth) args.push('-E');
@@ -1369,7 +1405,9 @@ function runBatch(config, batch, options) {
             input: batch + '\n',
             timeout: killMs,
             windowsHide: true,
-            maxBuffer: 64 * 1024 * 1024
+            // Each UTF-16 code unit of an answer crosses the pipe as four hex
+            // digits, so 256 MB holds an answer short of 64 million code units.
+            maxBuffer: 256 * 1024 * 1024
         });
     } catch (err) {
         return { ok: false, cause: 'outage', detail: 'could not run sqlcmd: ' + errText(err) };
@@ -1392,13 +1430,27 @@ function runBatch(config, batch, options) {
                 + ': ' + memqLib().sanitize(output.replace(/\s+/g, ' '), 300)
         };
     }
+    return parseResultLines(output);
+}
+
+// The rows of one answer, as {ok, rows} or the refusal below, read from the
+// tagged lines in everything the tool printed. Each tagged line carries the
+// hex of a JSON text's UTF-16LE bytes, which resultLine states, and a line
+// with no tag is the tool's own and is skipped.
+function parseResultLines(output) {
     const rows = [];
     for (const line of output.split(/\r?\n/)) {
         const text = line.trimEnd();
         if (!text.startsWith(RESULT_TAG)) continue;
+        const hex = text.slice(RESULT_TAG.length);
+        let row;
         try {
-            rows.push(JSON.parse(text.slice(RESULT_TAG.length)));
+            row = hex.length % 4 === 0 && RESULT_HEX_RE.test(hex)
+                ? JSON.parse(Buffer.from(hex, 'hex').toString('utf16le')) : undefined;
         } catch {
+            row = undefined;
+        }
+        if (row === undefined) {
             // The batch reached the server and the server answered, so this is
             // not a host that was away: it is an answer in a shape this client
             // cannot read, which is the same version skew a refusal is and takes
@@ -1406,9 +1458,10 @@ function runBatch(config, batch, options) {
             return {
                 ok: false,
                 cause: 'refused',
-                detail: 'a result line was not JSON, so the answer could not be read'
+                detail: 'a result line was not the hex of a JSON text, so the answer could not be read'
             };
         }
+        rows.push(row);
     }
     return { ok: true, rows };
 }
@@ -1458,7 +1511,7 @@ function callProcedure(config, procedure, parameters, options) {
         ';DECLARE @Answer TABLE ( [Json] NVARCHAR(MAX) NULL )',
         ';INSERT INTO @Answer ( [Json] ) EXEC mem.' + procedure
             + (argumentList.length > 0 ? ' ' + argumentList.join(', ') : ''),
-        ";SELECT '" + RESULT_TAG + "' + COALESCE([Json], 'null') FROM @Answer"
+        resultLine("COALESCE([Json], 'null')", '@Answer')
     ].join('\n');
     const run = deps.runBatch || runBatch;
     return run(config, batch, { budgetMs, killMs: opts.killMs, procedure });
@@ -1732,7 +1785,7 @@ function queryBatch(procedure, vector, text, limit, model, includeArchived, scop
         modelLiteral,
         ';DECLARE @Answer TABLE ( [Json] NVARCHAR(MAX) NULL )',
         ';INSERT INTO @Answer ( [Json] ) EXEC mem.' + procedure + ' ' + argumentList,
-        ';SELECT \'' + RESULT_TAG + '\' + COALESCE([Json], \'null\') FROM @Answer'
+        resultLine("COALESCE([Json], 'null')", '@Answer')
     );
     return lines.join('\n');
 }
@@ -2818,7 +2871,7 @@ function recordBatch(kind, row) {
             ';SELECT ' + read + ' FROM OPENJSON(@Row) WITH ( ' + columns + ' ) J',
             ';DECLARE @Answer TABLE ( [Json] NVARCHAR(MAX) NULL )',
             ';INSERT INTO @Answer ( [Json] ) EXEC mem.' + procedure + ' ' + argumentList,
-            ";SELECT '" + RESULT_TAG + "' + COALESCE([Json], 'null') FROM @Answer"
+            resultLine("COALESCE([Json], 'null')", '@Answer')
         ].join('\n')
     };
 }
@@ -3962,7 +4015,20 @@ const READ_PROCEDURES = {
     index: ['usp_ListIndex', INDEX_FIELDS],
     get: ['usp_GetRecord', GET_FIELDS]
 };
-function versionedBatch(kind, rows, gate, search) {
+
+// The schema version that carries mem.usp_ListArchived, and the floor the
+// archived leg of an index read stands down below. The leg runs inside the
+// batch's record gate under a gate of its own, so a host at the record
+// version and below this one still answers the index, and the reader names
+// the installer for the archived rows alone.
+const ARCHIVED_SCHEMA_VERSION = 11;
+
+// The most days mem.usp_ListArchived reads, which it cuts a longer window to
+// itself. The batch bounds the days it sends to the same number, and a caller
+// asking for more says on its own line that the read was cut.
+const ARCHIVED_DAYS_MAX = 90;
+
+function versionedBatch(kind, rows, gate, search, archivedDays) {
     const [procedure, fields] = READ_PROCEDURES[kind];
     const declared = fields.map(([, variable, type]) => variable + ' ' + type).join(', ');
     const read = fields.map(([, variable]) => variable + ' = J.' + variable.replace('@', '[') + ']').join(', ');
@@ -3974,7 +4040,7 @@ function versionedBatch(kind, rows, gate, search) {
         payloadLiteral('@Rows', rows),
         ';DECLARE @Health TABLE ( [Json] NVARCHAR(MAX) NULL )',
         ';INSERT INTO @Health ( [Json] ) EXEC mem.usp_Health',
-        ";SELECT '" + RESULT_TAG + "' + COALESCE([Json], 'null') FROM @Health",
+        resultLine("COALESCE([Json], 'null')", '@Health'),
         ';DECLARE @Gate INT = ' + String(gate),
         ';DECLARE @Version INT = ( SELECT TOP ( 1 ) TRY_CAST(JSON_VALUE([Json], \'$.schemaVersion\') AS INT) FROM @Health )',
         ';DECLARE @Answer TABLE ( [Json] NVARCHAR(MAX) NULL )',
@@ -3987,7 +4053,7 @@ function versionedBatch(kind, rows, gate, search) {
             + columns + ' ) J WHERE R.[key] = \'' + String(at) + '\'');
         lines.push(';INSERT INTO @Answer ( [Json] ) EXEC mem.' + procedure + ' ' + argumentList);
     }
-    lines.push(";SELECT '" + RESULT_TAG + "' + COALESCE([Json], 'null') FROM @Answer");
+    lines.push(resultLine("COALESCE([Json], 'null')", '@Answer'));
     // The search leg, inside the same gate: the query text and the vector the
     // caller embedded ride one payload the batch casts into the procedure's
     // types, the query batch's own shape, and the key the index call read is
@@ -4018,7 +4084,7 @@ function versionedBatch(kind, rows, gate, search) {
                 ';DELETE FROM @Nearest',
                 ';INSERT INTO @Nearest ( [Json] ) EXEC mem.usp_Nearest @p_Vector = @QueryVector, @p_Limit = @Limit,'
                     + ' @p_ModelIdentity = @Model',
-                ";SELECT '" + RESULT_TAG + "' + COALESCE(( SELECT TOP ( 1 ) [Json] FROM @Nearest ), '[]')"
+                resultLine("COALESCE(( SELECT TOP ( 1 ) [Json] FROM @Nearest ), '[]')")
             );
         }
     } else if (search !== undefined && search !== null) {
@@ -4041,10 +4107,63 @@ function versionedBatch(kind, rows, gate, search) {
         lines.push(';INSERT INTO @Search ( [Json] ) EXEC mem.usp_Search @p_QueryText = @QueryText, @p_QueryVector = @QueryVector,'
             + ' @p_Limit = @Limit, @p_ModelIdentity = @Model, @p_ProjectKey = @ProjectKey'
             + (tag !== null ? ', @p_Tag = @Tag' : ''));
-        lines.push(";SELECT '" + RESULT_TAG + "' + COALESCE([Json], 'null') FROM @Search");
+        lines.push(resultLine("COALESCE([Json], 'null')", '@Search'));
+    }
+    // The archived leg, inside the same gate and under its own at
+    // ARCHIVED_SCHEMA_VERSION: one mem.usp_ListArchived call over the key the
+    // index call read, for whole days. Each of its rows rides wrapped as
+    // {archived: row}, an object holding an object under a key no index row
+    // carries, where a search answer is an array, which is how a reader tells
+    // the three apart in one result stream.
+    if (kind === 'index' && Number.isFinite(archivedDays)) {
+        const days = Math.max(1, Math.min(ARCHIVED_DAYS_MAX, Math.ceil(archivedDays)));
+        lines.push(
+            ';DECLARE @ArchivedGate INT = ' + String(ARCHIVED_SCHEMA_VERSION),
+            ';DECLARE @Days INT = ' + String(days),
+            ';DECLARE @Archived TABLE ( [Json] NVARCHAR(MAX) NULL )',
+            ';IF @Version >= @ArchivedGate',
+            'BEGIN',
+            ';INSERT INTO @Archived ( [Json] ) EXEC mem.usp_ListArchived @p_ProjectKey = @ProjectKey, @p_Days = @Days',
+            resultLine('( SELECT [archived] = JSON_QUERY(A.[Json]) FOR JSON PATH, WITHOUT_ARRAY_WRAPPER )',
+                '@Archived A WHERE A.[Json] IS NOT NULL'),
+            'END'
+        );
     }
     lines.push('END');
     return { procedure, batch: lines.join('\n') };
+}
+
+// Whether an answer row is the archived leg's wrapper rather than an index or
+// record row.
+function isArchivedWrap(row) {
+    return row !== null && typeof row === 'object' && !Array.isArray(row)
+        && row.archived !== null && typeof row.archived === 'object' && !Array.isArray(row.archived);
+}
+
+// One archived row as this client hands it on, or null for a row missing a
+// field it must have: a name, one of the three tiers, and an update time that
+// parses. A row that fails is dropped rather than repaired, queryHit's rule
+// for a value crossing this boundary.
+function archivedRow(row) {
+    if (typeof row.name !== 'string' || row.name === '') return null;
+    if (row.tier !== 'project' && row.tier !== 'type' && row.tier !== 'operator') return null;
+    if (typeof row.updated !== 'string' || !Number.isFinite(Date.parse(row.updated))) return null;
+    return { name: row.name, tier: row.tier, typeName: typeof row.typeName === 'string' ? row.typeName : null, updated: row.updated };
+}
+
+// The archived leg's answer as {archived, archivedDetail}: the rows where the
+// host carries mem.usp_ListArchived, or null with the sentence naming the
+// installer where its version is below ARCHIVED_SCHEMA_VERSION, the version
+// the batch sent the leg nothing under.
+function archivedAnswer(schemaVersion, objects) {
+    if (schemaVersion < ARCHIVED_SCHEMA_VERSION) {
+        return {
+            archived: null,
+            archivedDetail: 'the memory database reports schema version ' + schemaVersion + ' where the archived group needs version '
+                + ARCHIVED_SCHEMA_VERSION + ', so the host listed no archived record; re-run plugins/grimoire/db/Install-MemoryDatabase.ps1 against the host'
+        };
+    }
+    return { archived: objects.filter(isArchivedWrap).map((wrap) => archivedRow(wrap.archived)).filter((row) => row !== null), archivedDetail: null };
 }
 
 // One read in one spawn, as {ok, schemaVersion, rows, server} or {ok: false,
@@ -4078,7 +4197,7 @@ function hostRead(kind, rows, options, search) {
             detail: hostDownDetail()
         };
     }
-    const made = versionedBatch(kind, rows, RECORD_SCHEMA_VERSION, search);
+    const made = versionedBatch(kind, rows, RECORD_SCHEMA_VERSION, search, opts.archivedDays);
     if (made === null) {
         return {
             ok: false,
@@ -4121,14 +4240,20 @@ function hostRead(kind, rows, options, search) {
     const arrays = after.filter((row) => Array.isArray(row));
     const nearest = search !== undefined && search !== null && search.mode === 'nearest';
     const hits = (rows, procedure) => rows.map((row) => queryHit(row, procedure)).filter((hit) => hit !== null);
-    return {
+    const objects = after.filter((row) => row !== null && typeof row === 'object' && !Array.isArray(row));
+    const asked = kind === 'index' && Number.isFinite(opts.archivedDays);
+    const answer = {
         ok: true,
         schemaVersion,
         server: config.server,
-        rows: after.filter((row) => row !== null && typeof row === 'object' && !Array.isArray(row)),
+        rows: asked ? objects.filter((row) => !isArchivedWrap(row)) : objects,
         search: nearest || arrays.length === 0 ? null : hits(arrays[0], 'usp_Search'),
         lists: nearest ? arrays.map((rows) => hits(rows, 'usp_Nearest')) : null
     };
+    // The archived rows ride out only where a caller asked for them, as
+    // `archived` and `archivedDetail` beside the index rows.
+    if (asked) Object.assign(answer, archivedAnswer(schemaVersion, objects));
+    return answer;
 }
 
 // Questions put to the host by meaning, each text embedded through the
@@ -4372,6 +4497,10 @@ function getRecords(keys, options) {
 // stands down below.
 const RECALL_SCHEMA_VERSION = 10;
 
+// The schema version that carries mem.PairVerdict and its two procedures, and
+// the floor the decay scan's verdict read stands down below.
+const PAIR_VERDICT_SCHEMA_VERSION = 12;
+
 // The most rows mem.usp_Recall serves. It clamps a larger request itself, so
 // asking for more reads to a caller as a short answer rather than a clamp.
 const RECALL_LIMIT_MAX = 30;
@@ -4446,7 +4575,7 @@ function recallBatch(query, model) {
         payloadLiteral('@Recall', payload),
         ';DECLARE @Health TABLE ( [Json] NVARCHAR(MAX) NULL )',
         ';INSERT INTO @Health ( [Json] ) EXEC mem.usp_Health',
-        ";SELECT '" + RESULT_TAG + "' + COALESCE([Json], 'null') FROM @Health",
+        resultLine("COALESCE([Json], 'null')", '@Health'),
         ';DECLARE @Gate INT = ' + String(RECALL_SCHEMA_VERSION),
         ';DECLARE @Version INT = ( SELECT TOP ( 1 ) TRY_CAST(JSON_VALUE([Json], \'$.schemaVersion\') AS INT) FROM @Health )',
         ';DECLARE @Answer TABLE ( [Json] NVARCHAR(MAX) NULL )',
@@ -4465,7 +4594,7 @@ function recallBatch(query, model) {
         ';INSERT INTO @Answer ( [Json] ) EXEC mem.usp_Recall @p_ProjectKey = @ProjectKey, @p_Space = @Space,'
             + ' @p_Tags = @Tags, @p_Subjects = @Subjects, @p_QueryText = @QueryText, @p_QueryVector = @QueryVector,'
             + ' @p_ModelIdentity = @Model, @p_Limit = @Limit, @p_MatchTriggers = @MatchTriggers',
-        ";SELECT '" + RESULT_TAG + "' + COALESCE([Json], 'null') FROM @Answer",
+        resultLine("COALESCE([Json], 'null')", '@Answer'),
         'END'
     ].join('\n');
 }
@@ -4670,6 +4799,184 @@ async function recallCandidates(query, options) {
         }
     }
     return { ok: true, schemaVersion, server: config.server, rows, vectorDetail, namedFailed: null };
+}
+
+// ------------------------------------------------------ the pair verdicts --
+//
+// The two-facts verdicts `memq decay-scan` withholds judged pairs by, read in
+// one spawn under their own gate, and the one write `memq two-facts` records a
+// verdict through. A verdict names its two records by name in one store, and
+// mem.usp_ListPairVerdicts returns only the verdicts whose two records stand
+// unchanged since the judgment, so the client applies no lapse rule of its own.
+
+// The width mem.usp_ListPairVerdicts and mem.usp_PutPairVerdict declare
+// @p_TypeName at.
+const PAIR_VERDICT_TYPE_WIDTH = 400;
+
+// The batch: the project key and the type name ride one payload literal, read
+// out of it with JSON_VALUE into variables of the procedure's own widths, and
+// the EXEC line names only those variables, recallBatch's shape. The batch
+// runs mem.usp_Health and emits its row, then calls the procedure only where
+// that row's version meets PAIR_VERDICT_SCHEMA_VERSION.
+function pairVerdictBatch(projectKey, typeName) {
+    return [
+        ';SET NOCOUNT ON',
+        payloadLiteral('@Verdicts', { projectKey, typeName }),
+        ';DECLARE @Health TABLE ( [Json] NVARCHAR(MAX) NULL )',
+        ';INSERT INTO @Health ( [Json] ) EXEC mem.usp_Health',
+        resultLine("COALESCE([Json], 'null')", '@Health'),
+        ';DECLARE @Gate INT = ' + String(PAIR_VERDICT_SCHEMA_VERSION),
+        ';DECLARE @Version INT = ( SELECT TOP ( 1 ) TRY_CAST(JSON_VALUE([Json], \'$.schemaVersion\') AS INT) FROM @Health )',
+        ';DECLARE @Answer TABLE ( [Json] NVARCHAR(MAX) NULL )',
+        ';IF @Version >= @Gate',
+        'BEGIN',
+        ';DECLARE @ProjectKey NVARCHAR(' + PROJECT_KEY_WIDTH + ') = JSON_VALUE(@Verdicts, \'$.projectKey\')',
+        ';DECLARE @TypeName NVARCHAR(' + PAIR_VERDICT_TYPE_WIDTH + ') = JSON_VALUE(@Verdicts, \'$.typeName\')',
+        ';INSERT INTO @Answer ( [Json] ) EXEC mem.usp_ListPairVerdicts @p_ProjectKey = @ProjectKey, @p_TypeName = @TypeName',
+        resultLine("COALESCE([Json], 'null')", '@Answer'),
+        'END'
+    ].join('\n');
+}
+
+// One verdict as this client hands it on, or null for a row missing a field it
+// must have: one of the three tiers, a type store's segment, and two different
+// non-empty names. The names come back in JavaScript's ordinal order, whatever
+// order the server kept them in: the server orders them under the database's
+// case-insensitive collation, which can disagree with an ordinal compare, and
+// the scan keys its own pairs ordinally. A row that fails is dropped rather
+// than repaired, queryHit's rule for a value crossing this boundary.
+function pairVerdictRow(row) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return null;
+    if (row.tier !== 'project' && row.tier !== 'type' && row.tier !== 'operator') return null;
+    if (typeof row.nameA !== 'string' || row.nameA === '' || typeof row.nameB !== 'string' || row.nameB === '') return null;
+    if (row.nameA === row.nameB) return null;
+    const segment = typeof row.segment === 'string' && row.segment !== '' ? row.segment : null;
+    if (row.tier === 'type' && segment === null) return null;
+    const ordered = row.nameA < row.nameB;
+    return {
+        tier: row.tier,
+        segment: row.tier === 'type' ? segment : null,
+        nameA: ordered ? row.nameA : row.nameB,
+        nameB: ordered ? row.nameB : row.nameA
+    };
+}
+
+// The standing two-facts verdicts of the project store `projectKey` names, the
+// type store `typeName` names where it is given, and the operator store, as
+// {ok: true, schemaVersion, server, pairs} with one {tier, segment, nameA,
+// nameB} per verdict, the names in ordinal order, or {ok: false, cause,
+// detail, server}. The causes are recallCandidates': standDown (no config, or
+// a redirected store root), down (a fresh host marker, no spawn), unreachable
+// (a transport fault, which leaves the marker), refused (a key this client
+// will not send, a host that threw over the batch, or an answer with no list)
+// and schema (a host below PAIR_VERDICT_SCHEMA_VERSION, whose version rides
+// out as `schemaVersion`). So a caller tells an unread list from an empty one:
+// a host holding no verdict answers ok with no pairs.
+function listPairVerdicts(projectKey, typeName, options) {
+    const opts = options || {};
+    const loaded = hostConfig(opts);
+    if (!loaded.ok) {
+        return { ok: false, cause: 'standDown', standDown: loaded.reason, detail: loaded.detail, path: loaded.path };
+    }
+    const config = loaded.config;
+    const deps = opts.deps || {};
+    const now = (typeof deps.now === 'function') ? deps.now : Date.now;
+    const refused = (detail) => ({ ok: false, cause: 'refused', server: config.server, detail });
+    const key = filled(projectKey) ? String(projectKey) : null;
+    const type = filled(typeName) ? String(typeName) : null;
+    if (key !== null && key.length > PROJECT_KEY_WIDTH) {
+        return refused('the project key is longer than ' + PROJECT_KEY_WIDTH + ' characters, so no verdict was asked for');
+    }
+    if (type !== null && type.length > PAIR_VERDICT_TYPE_WIDTH) {
+        return refused('the type name is longer than ' + PAIR_VERDICT_TYPE_WIDTH + ' characters, so no verdict was asked for');
+    }
+    if (hostMarkedDown(now())) return { ok: false, cause: 'down', server: config.server, detail: hostDownDetail() };
+    const budgetMs = Number.isFinite(opts.budgetMs) ? opts.budgetMs : config.timeoutMs;
+    const run = (deps.runBatch || runBatch)(config, pairVerdictBatch(key, type),
+        { budgetMs, procedure: 'usp_ListPairVerdicts' });
+    if (!run.ok) {
+        if (hostAnswered(run.cause)) return refused(run.detail);
+        markHostDown();
+        return { ok: false, cause: 'unreachable', server: config.server, detail: run.detail };
+    }
+    const schemaVersion = Number(counted(run.rows).schemaVersion);
+    if (!(Number.isFinite(schemaVersion) && schemaVersion >= PAIR_VERDICT_SCHEMA_VERSION)) {
+        const found = Number.isFinite(schemaVersion) ? 'schema version ' + schemaVersion : 'no schema version at all';
+        const below = {
+            ok: false,
+            cause: 'schema',
+            server: config.server,
+            detail: 'the memory database reports ' + found + ' where the two-facts verdicts need version '
+                + PAIR_VERDICT_SCHEMA_VERSION + ', so the host listed no verdict; re-run '
+                + 'plugins/grimoire/db/Install-MemoryDatabase.ps1 against the host'
+        };
+        if (Number.isFinite(schemaVersion)) below.schemaVersion = schemaVersion;
+        return below;
+    }
+    const answer = run.rows.length > 1 ? run.rows[1] : undefined;
+    if (!Array.isArray(answer)) {
+        return refused('the memory database answered the two-facts verdicts with no list, so none was read');
+    }
+    return { ok: true, schemaVersion, server: config.server, pairs: answer.map(pairVerdictRow).filter((row) => row !== null) };
+}
+
+// Record that two records of one store are two different facts, through
+// mem.usp_PutPairVerdict, as {ok: true, server, status, name} or {ok: false,
+// cause, detail, server}. `tier` is project, type or operator; a project
+// verdict needs `projectKey` and a type verdict `typeName`, and the other key
+// is not sent. The two names are held to the recall's record-name grammar and
+// sent in ordinal order. `status` is the procedure's: stored, or absent or
+// archived with `name` the record that answered so, where nothing was written.
+//
+// The causes are listPairVerdicts', with refused also covering a call this
+// client will not send and a status it does not read. A write that does not
+// reach the host is not queued: the pair lists again at the next scan, which
+// costs one more judgment.
+function putPairVerdict(tier, projectKey, typeName, nameA, nameB, options) {
+    const opts = options || {};
+    const loaded = hostConfig(opts);
+    if (!loaded.ok) {
+        return { ok: false, cause: 'standDown', standDown: loaded.reason, detail: loaded.detail, path: loaded.path };
+    }
+    const config = loaded.config;
+    const deps = opts.deps || {};
+    const now = (typeof deps.now === 'function') ? deps.now : Date.now;
+    const refused = (detail) => ({ ok: false, cause: 'refused', server: config.server, detail });
+    if (tier !== 'project' && tier !== 'type' && tier !== 'operator') {
+        return refused('a verdict is recorded in the project, type or operator tier, so none was sent');
+    }
+    const named = (n) => typeof n === 'string' && n.length <= RECALL_NAME_CAP && RECALL_NAME_PATTERN.test(n);
+    if (!named(nameA) || !named(nameB)) {
+        return refused('a verdict names two records, each a record name of at most ' + RECALL_NAME_CAP
+            + ' characters from [A-Za-z0-9_.-], so none was sent');
+    }
+    if (nameA === nameB) return refused('a verdict names two different records, so none was sent');
+    const parameters = { '@p_Tier': tier };
+    if (tier === 'project') {
+        if (!filled(projectKey)) return refused('a project verdict needs the project key, so none was sent');
+        parameters['@p_ProjectKey'] = String(projectKey);
+    } else if (tier === 'type') {
+        if (!filled(typeName)) return refused('a type verdict needs the type name, so none was sent');
+        parameters['@p_TypeName'] = String(typeName);
+    }
+    const ordered = nameA < nameB;
+    parameters['@p_NameA'] = ordered ? nameA : nameB;
+    parameters['@p_NameB'] = ordered ? nameB : nameA;
+    if (hostMarkedDown(now())) return { ok: false, cause: 'down', server: config.server, detail: hostDownDetail() };
+    const run = callProcedure(config, 'usp_PutPairVerdict', parameters,
+        { deps, budgetMs: config.timeoutMs, textWidth: PROJECT_KEY_WIDTH });
+    if (!run.ok) {
+        if (hostAnswered(run.cause)) {
+            return refused('the memory database refused this usp_PutPairVerdict call: ' + run.detail);
+        }
+        markHostDown();
+        return { ok: false, cause: 'unreachable', server: config.server, detail: run.detail };
+    }
+    const status = counted(run.rows).status;
+    if (status === 'stored') return { ok: true, server: config.server, status, name: null };
+    const m = typeof status === 'string' ? /^(absent|archived):(.+)$/.exec(status) : null;
+    if (m === null) return refused('the memory database answered the verdict with a status this client does not read');
+    return { ok: true, server: config.server, status: m[1], name: m[2] };
 }
 
 // Embed one record the host just stored, from the body the writer sent, as
@@ -5464,6 +5771,9 @@ module.exports = {
     RECORD_SCHEMA_VERSION,
     METER_SCHEMA_VERSION,
     RECALL_SCHEMA_VERSION,
+    PAIR_VERDICT_SCHEMA_VERSION,
+    ARCHIVED_SCHEMA_VERSION,
+    ARCHIVED_DAYS_MAX,
     RECALL_LIMIT_MAX,
     RECALL_SUBJECTS_MAX,
     RECALL_SUBJECT_CAP,
@@ -5471,6 +5781,8 @@ module.exports = {
     RECALL_NAMES_MAX,
     RECALL_NAME_CAP,
     recallCandidates,
+    listPairVerdicts,
+    putPairVerdict,
     METER_LOCK_FILE,
     METER_LOCK_STALE_MS,
     METER_ABANDON_MS,
@@ -5510,6 +5822,8 @@ module.exports = {
     payloadCallMs,
     carriesServerMessage,
     runBatch,
+    resultLine,
+    parseResultLines,
     callProcedure,
     embedBatch,
     QUERY_TEXT_CAP,

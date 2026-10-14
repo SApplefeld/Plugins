@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the completion pass for a finished effort: it governs the ordered steps that take an effort from "the last section compiles" to verified behavior, the advisory reviews, an adversarial review, documentation that matches reality, and a closed plan doc. It owns the moments where finishing reviewers are dispatched and at what model and effort, where a gate that cannot run at its assigned tier is confirmed unavailable and what ladder of retry, compensation or fallback follows, where a dispatched agent is judged wedged, never-started, faulted or merely quiet and what liveness readings and windows decide that, where the tree-state bracket around the reviewing rounds is captured and compared, and where the finishing pass opens its compaction boundary. Its load class is `named-trigger`: the frontmatter says to use it when all sections of a plan in docs/plans/ are implemented, or when the operator says wrap up, finish, close out, or hand off.
 
-Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 (`skills.finishing-work.c2.md`); lines 66-110 (`skills.finishing-work.c3.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/archive/claude-kit_review-tier-decay_spec_v1.md` on 2026-09-10 (`U` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`V` entries below, their source lines read at that pass's fix rounds 1 to 3). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 2 on 2026-09-20 (W001 to W008 below, the entries amended in place carrying its provenance, and the retired entries naming it). Amended by `docs/archive/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md` on 2026-09-20 (W009 to W013 below, renumbered from that plan's own W001 to W005 where the two amendments opened the same series in parallel). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (P001 below, with S112 retired to it), and by that plan's section 4 on 2026-09-22 (P002 and P003 below). Amended by `docs/plans/claude-kit_capacity-gate_spec_v1.md` on 2026-09-24, section 2's rule written up by section 4 (Z001 below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (W012 below, amended in place). Redrafted on 2026-09-26 by section 4 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `9b437a2e` with its fix round at `a7ae70e2`, so every live entry's `passage:` line quotes the text at `a7ae70e2`, the `flag:` lines record that pass's flags, and A002 below is the body-header rule that fix round restated. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which placed the Jev promise check over the Goal before the final adversarial review (`B` entries below). Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below, with S221 retired to it, S222's passage re-pointed, A002's key reworded and P003's reason retensed). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: S025 deleted with its passage, c3.C158 and W012 rewritten to their passages as they now read, and c1.C036's and c3.C038's reasons reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the finishing pass's boundary declaration, which replaced S025's `open` call). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2 on 2026-10-06 (`F` entries below: F001, the integration-branch merge before step 1, and F002, the Commit-and-Push push on the targeted lane, with S233, S234 and S235 retired to F002), which made step 1's full-suite run the plan's one whole gate and sent step 6, step 7's merges and every push to the lanes the doctrine names. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 2 on 2026-10-06 (`G` entries below: G001, the integration branch's owner at the base ref, G002, the base named on the pull request open, and G003, a stacked pull request retargeted when its parent merges, with S033, S219 and S229 amended in place). Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 5 on 2026-10-06 (G003 amended in place, its arm again waiting on a pull request that is not a draft). Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 3 on 2026-10-06 (`H` entry below: H001, step 1's red file re-run at the integration branch's head). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and left `memq` reading no outcome journal: step 8's closing paragraph left the file, so c3.C142 to c3.C150 are deleted with it, and c3.C118 with its passage; c3.C121 rewritten to its passage as it now reads.
+Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 (`skills.finishing-work.c2.md`); lines 66-110 (`skills.finishing-work.c3.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/archive/claude-kit_review-tier-decay_spec_v1.md` on 2026-09-10 (`U` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`V` entries below, their source lines read at that pass's fix rounds 1 to 3). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 2 on 2026-09-20 (W001 to W008 below, the entries amended in place carrying its provenance, and the retired entries naming it). Amended by `docs/archive/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md` on 2026-09-20 (W009 to W013 below, renumbered from that plan's own W001 to W005 where the two amendments opened the same series in parallel). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (P001 below, with S112 retired to it), and by that plan's section 4 on 2026-09-22 (P002 and P003 below). Amended by `docs/plans/claude-kit_capacity-gate_spec_v1.md` on 2026-09-24, section 2's rule written up by section 4 (Z001 below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (W012 below, amended in place). Redrafted on 2026-09-26 by section 4 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `9b437a2e` with its fix round at `a7ae70e2`, so every live entry's `passage:` line quotes the text at `a7ae70e2`, the `flag:` lines record that pass's flags, and A002 below is the body-header rule that fix round restated. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which placed the Jev promise check over the Goal before the final adversarial review (`B` entries below). Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below, with S221 retired to it, S222's passage re-pointed, A002's key reworded and P003's reason retensed). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: S025 deleted with its passage, c3.C158 and W012 rewritten to their passages as they now read, and c1.C036's and c3.C038's reasons reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the finishing pass's boundary declaration, which replaced S025's `open` call). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2 on 2026-10-06 (`F` entries below: F001, the integration-branch merge before step 1, and F002, the Commit-and-Push push on the targeted lane, with S233, S234 and S235 retired to F002), which made step 1's full-suite run the plan's one whole gate and sent step 6, step 7's merges and every push to the lanes the doctrine names. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 2 on 2026-10-06 (`G` entries below: G001, the integration branch's owner at the base ref, G002, the base named on the pull request open, and G003, a stacked pull request retargeted when its parent merges, with S033, S219 and S229 amended in place). Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 5 on 2026-10-06 (G003 amended in place, its arm again waiting on a pull request that is not a draft). Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 3 on 2026-10-06 (`H` entry below: H001, step 1's red file re-run at the integration branch's head). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and left `memq` reading no outcome journal: step 8's closing paragraph left the file, so c3.C142 to c3.C150 are deleted with it, and c3.C118 with its passage; c3.C121 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md` section 3 on 2026-10-12 (`N` entries below; c3.C109, c3.C125, c3.C131, c3.C140, S241 and S242 amended in place, carrying its provenance). Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 1 on 2026-10-13, which moved the advisory lenses and the scope adjudicator to Opus (c1.C003, c1.C105, S006, S010, S078, S091, S093, T018, W001 and W008 rewritten in place, carrying its provenance, and S087's reason reworded). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 2 on 2026-10-13, which runs the final adversarial review at Opus where every section is cleared and waives it for one cleared section (c1.C003, c3.C043, S006, S008, S010, S074, S076, S078, S079, T001, B001, F001 and S093 rewritten in place, and c3.C044, S083, S092 and P002 retired, carrying its provenance). Amended by that plan's finishing pass on 2026-10-13 (`E` entries below: E001 and E002, the cleared definition, and E003 to E005, step 3's waiver, cleared and uncleared cases).
 
 ### c1.C001
 - key: Run the finishing steps in order.
@@ -36,10 +36,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Tell the finishing reviewers what the per-section reviews covered and what changed since, so they spend budget on cross-section cohesion and deltas.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:10
-- provenance: 830ff28 2026-06-17 installed the prior-coverage brief rule; 0faeb51 2026-09-06 added the below-Fable and ungated carve-outs when the hybrid tier ladder made some per-section rounds clear nothing.
-- verdict: keep
-- reason: The brief-content rule and step 3's charge are two surfaces of one rule and no hook composes a finishing brief; the carve-outs are the hybrid ladder's own consequence and go stale only if that ladder changes.
-- passage: When per-section reviews cleared parts of the changeset, tell the finishing reviewers what they covered and what changed since, so their budget goes to cross-section cohesion and deltas. A round executing-work's reviewer rule aimed below Fable, or one that ended ungated, cleared nothing.
+- provenance: 830ff28 2026-06-17 installed the prior-coverage brief rule; 0faeb51 2026-09-06 added the below-Fable and ungated carve-outs when the hybrid tier ladder made some per-section rounds clear nothing; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 keyed the carve-out on each lens's ceiling; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 replaced the carve-out sentence with the cleared definition.
+- verdict: rewrite
+- reason: The brief-content rule and step 3's charge are two surfaces of one rule and no hook composes a finishing brief. What counts as cleared is the definition that follows this sentence at finishing-work:10 ("A section is cleared when its last review round ran its lens at Fable"), since a round below Fable ran a weaker check than the finishing pass runs over the same lens.
+- proposed: A dispatch executing-work's reviewer rule aimed below its lens's ceiling, or one whose gate ended ungated, cleared nothing.
+- proposed: Replace that sentence with "A section is cleared when its last review round ran its lens at Fable and ended the loop under the terminal condition in executing-work's `references/findings.md`."
+- passage: When per-section reviews cleared parts of the changeset, tell the finishing reviewers what they covered and what changed since, so their budget goes to cross-section cohesion and deltas.
+- landed: 0517ce00 section 1
+- landed: 22dcfd78 section 2
 
 ### c1.C004
 - key: Eliminate true duplication of review effort, never coverage.
@@ -273,13 +277,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: An id such as `claude-opus-4-8` satisfies the requested alias when it carries that family's prefix or a stronger family's.
 
 ### c1.C029
-- key: Compare a dispatch that passed no override against the session's own model.
+- key: Compare a dispatch that passed no override against its charter's `model:` line, or the session's own model where the charter names none.
 - class: mechanic
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:16
-- provenance: 8a2daa8 2026-08-26.
-- verdict: keep
-- reason: No finding. Inheriting is requesting the session model.
-- passage: A dispatch that passed no override requested the session's own model.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:22
+- provenance: 8a2daa8 2026-08-26; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md finishing pass 2026-10-13 named the charter's `model:` line once four reviewer charters pinned opus.
+- verdict: rewrite
+- reason: An override-less dispatch runs at its charter's `model:` line where one is set (Q001 under each reviewer charter's heading in the executing-work ledger), so the tally compares against that line; reading the session's model there would turn a correct Opus run of a pinned reviewer on a Fable-led session into a false unavailability.
+- proposed: A dispatch that passed no override requested its charter's `model:` line, or the session's own model where the charter names none.
+- passage: A dispatch that passed no override requested its charter's `model:` line, or the session's own model where the charter names none.
+- landed: 45b8c2eb finishing
 
 ### c1.C030
 - key: Route a tally showing zero counts satisfying the requested alias to trigger one.
@@ -995,11 +1001,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: For a review-class dispatch whose pair is met, compensate the round rather than falling back.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:30
-- provenance: e2752d1 2026-08-11 for compensation over a bare fallback; d66c58d 2026-08-23 for routing the pair by class; 0faeb51 2026-09-06 for the re-aim carve-out.
-- verdict: keep
-- reason: executing-work:397 says the compensation row exists for a Fable gate confirmed per this rule and nothing else, so the route is finishing-work's; c1.C106 bounds it rather than contradicting it.
-- passage: A review-class pair compensates rather than falls back, per the route below, and a per-section reviewer aimed below Fable re-aims one tier up per executing-work's rule instead.
-- flag: stale
+- provenance: e2752d1 2026-08-11 for compensation over a bare fallback; d66c58d 2026-08-23 for routing the pair by class; 0faeb51 2026-09-06 for the re-aim carve-out; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 keyed the re-aim on each lens's ceiling.
+- verdict: rewrite
+- reason: executing-work's compensation row exists for a Fable gate confirmed per this rule or measured exhausted by executing-work's capacity reading, so the route is finishing-work's; a reviewer below its own lens's ceiling re-aims instead, since a tier above it is still open.
+- proposed: a per-section reviewer aimed below its lens's ceiling re-aims one tier up per executing-work's rule instead.
+- passage: A review-class pair compensates rather than falls back, per the route below, and a per-section reviewer aimed below its lens's ceiling re-aims one tier up per executing-work's rule instead.
+- landed: f9389aff section 1
 
 ### c1.C106
 - key: Take the compensation route only where its dispatch sits at a different tier from any tier the chain ruled out; otherwise end the round, record it as ungated with the chain and each shape, and surface it in the close-out.
@@ -2783,25 +2790,26 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: `git mv` the plan from `docs/plans/` into `docs/archive/`, act on the docs-curator's cross-reference gaps, prune `docs/backlog.md` of items this effort completed into the quarter's archive snapshot, and refresh the `docs/README.md` index.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:72
-- provenance: b49a47b 2026-06-19 and fa5df56 2026-08-09, the close path's mechanics as restated in finishing-work.
+- provenance: b49a47b 2026-06-19 and fa5df56 2026-08-09, the close path's mechanics as restated in finishing-work; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 deleted the trailing sentence c3.C044 carried, so the passage ends at the index refresh.
 - verdict: rewrite
 - landed: d549e65 section 5
 - reason: curating-docs owns the mechanic and its close path refreshes both `docs/README.md` and `docs/plans/README.md`, which this partial copy drops (A045, real); the safe change is to keep the invocation and a one-line summary and take the steps from curating-docs (A044).
 - proposed: (via A044) Replace the four-item mechanic with "invoke curating-docs and run its close path in full (archive move, cross-references, backlog prune including items the spec names as covered, index refresh)".
 - baseline-test: yes
-- passage: run its close path in full: the archive, the cross-references, the backlog prune (including items the spec names as covered) and the index refresh. A plan is not closed until it has left `docs/plans/`.
+- passage: run its close path in full: the archive, the cross-references, the backlog prune (including items the spec names as covered) and the index refresh.
 
 ### c3.C044
 - key: Do not call a plan closed until it has left `docs/plans/`.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:72
-- provenance: a00a4ea 2026-08-06, stated beside the operator-pending rule; curating-docs names closing in place as its antipattern.
-- verdict: rewrite
+- provenance: a00a4ea 2026-08-06, stated beside the operator-pending rule; curating-docs names closing in place as its antipattern; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 deleted the sentence, its rule standing on S206 and c3.C043.
+- verdict: retire
 - landed: d549e65 section 5
-- reason: curating-docs owns the taxonomy and stop-docs-hygiene.js is the backstop for a Complete plan left in docs/plans/, so the sentence folds into the curating-docs pointer (A047) rather than standing as a second statement.
+- reason: The sentence restated two passages that stay: step 7's docs predicate (S206, "while the plan still sits in `docs/plans/`", finishing-work:164) holds the pull request until the plan has left, and the curating-docs close path c3.C043 points at is what moves it.
 - proposed: (via A047) Fold "a plan is not closed until it has left docs/plans/" into the curating-docs pointer sentence.
+- proposed: Delete the sentence "A plan is not closed until it has left `docs/plans/`."
 - baseline-test: yes
-- passage: A plan is not closed until it has left `docs/plans/`.
+- landed: 22dcfd78 section 2
 
 ### c3.C045
 - key: Carry every item the prune's aging check names, older than 90 days, by name and date into the close-out status with its promote, retire or keep question.
@@ -3422,16 +3430,16 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: take it and name in the close-out status what it covered, why it was owed and what it found.
 
 ### c3.C109
-- key: Order this step sweep, then after-query, then decay pass, then recap.
+- key: Order this step sweep, then after-query, then the hygiene step and any archive pass, then recap.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:96
-- provenance: 6f26849 2026-08-26, which corrected the after-query's slot after both review lenses converged that the spec's placement after the decay pass was wrong.
+- provenance: 6f26849 2026-08-26, which corrected the after-query's slot after both review lenses converged that the spec's placement after the decay pass was wrong. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which split the decay pass into the hygiene step at every close-out and the archive pass when due; both sit where the decay pass sat, so these reasons hold for each.
 - verdict: rewrite
-- landed: d549e65 section 5
+- landed: ad41f892 section 3
 - reason: The order leads its paragraph and its reasons live here. Sweep before decay: applied stamps are the evidence the decay thresholds extend on, and a later sweep could stamp a memory the same close-out just archived (1f4934e). After-query before decay: `decay-scan` cannot see a pointer written after it for fourteen days, `find` withholds archived records and would hand a clean zero for the wrong reason, and `add-type` and `add-operator` refuse a `--supersedes` target only the archive holds (6f26849). Both before the recap so late writes land in its counts.
 - proposed: Lead with "The order inside this step is sweep, then after-query, then decay pass, then recap"; move C110's reasons to the ledger.
 - baseline-test: yes
-- passage: The order inside this step is sweep, then after-query, then decay pass, then recap.
+- passage: The order inside this step is sweep, then after-query, then the hygiene step and any archive pass, then recap.
 
 ### c3.C110
 - key: Run the sweep before the decay pass because applied stamps are the evidence the decay thresholds extend on, and a later sweep could stamp a memory the same close-out had just archived for idleness; run it before the recap so late stamps land in the counts.
@@ -3579,10 +3587,11 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Second, summarize each summarize candidate keeping its index description: edit a project-tier candidate in place, and put a type- or operator-tier candidate through `add-type` or `add-operator` with `--update`, a body flag and `--confirm-shared`.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:104
-- provenance: ae2c70a 2026-08-22, which found the skill prescribing two hand edits the shared tiers bar.
-- verdict: keep
+- provenance: ae2c70a 2026-08-22, which found the skill prescribing two hand edits the shared tiers bar. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which points at the section for both cadences, the hygiene step and the archive pass; the verdict before it was keep.
+- verdict: rewrite
+- landed: ad41f892 section 3
 - reason: No finding. The shared tiers refuse a hand edit under the tier lock, so the `--update` path is the only one that lands.
-- passage: The memory-system skill's Running the Decay Pass owns when it is due and the pass whole.
+- passage: The memory-system skill's Running the Decay Pass owns both cadences whole.
 
 ### c3.C126
 - key: Decide which archive candidates are done.
@@ -3635,10 +3644,11 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Take the exact `--confirm-shared` condition from the memory-system skill.
 - class: pointer
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:104
-- provenance: ae2c70a 2026-08-22.
-- verdict: keep
+- provenance: ae2c70a 2026-08-22. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which points at the section for both cadences; the `--confirm-shared` condition stays in that section; the verdict before it was keep.
+- verdict: rewrite
+- landed: ad41f892 section 3
 - reason: No finding. A pointer at the owner of the flag's condition.
-- passage: The memory-system skill's Running the Decay Pass owns when it is due and the pass whole.
+- passage: The memory-system skill's Running the Decay Pass owns both cadences whole.
 
 ### c3.C132
 - key: Do not combine both shared tiers in one call, since that pre-supplies the flag and waives the second look silently, while a pass that needed the flag and omitted it refuses having changed nothing, costing a round and no work.
@@ -3723,16 +3733,16 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - baseline-test: yes
 
 ### c3.C140
-- key: After the memory writes, the after-query and any decay pass, run `memq recent --since <the session's span>` and carry its digest into the close-out status, labeled by surface.
+- key: After the memory writes, the after-query, the hygiene step and any archive pass, run `memq recent --since <the session's span>` and carry its digest into the close-out status, labeled by surface.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:106
-- provenance: 31240d3 2026-08-01, the session-recap plan: finishing-work owns the trigger and the run, memory-system describes the command.
+- provenance: 31240d3 2026-08-01, the session-recap plan: finishing-work owns the trigger and the run, memory-system describes the command. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names the hygiene step that now runs at every close-out beside any archive pass.
 - verdict: rewrite
-- landed: d549e65 section 5
+- landed: ad41f892 section 3
 - reason: The run stays; its why lives here: the digest names the journal entries, the applied stamps and the memory files added or updated across every tier, so the close-out's memory claim is checkable against the store's own counts and a session that banked nothing says so in numbers.
 - proposed: Keep C140 and C141; move the checkability sentence to the ledger.
 - baseline-test: yes
-- passage: After the memory writes, the after-query and any decay pass, run `memq recent --since <the session's span>` and carry its digest into the close-out status, labeled by surface.
+- passage: After the memory writes, the after-query, the hygiene step and any archive pass, run `memq recent --since <the session's span>` and carry its digest into the close-out status, labeled by surface.
 
 ### c3.C141
 - key: Report the digest and never paraphrase it into a claim it does not make.
@@ -4042,14 +4052,19 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - proposed: Drop the trailing "since the curator writes under docs/ while the reviewers are reading the changeset" clause from line 8; the reason stays at line 38 and in the ledger.
 
 ### S006
-- key: Dispatch every finishing reviewer at its dispatch table row.
+- key: Dispatch the advisory reviews at dispatch table row "Finishing advisory" and the final adversarial review and the document lenses at "Finishing reviews", the capacity reading taken by the Fable-aimed dispatches alone.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:12
-- provenance: 00c340e 2026-07-02 set the finishing reviews to the fable override, d156f46 2026-07-31 made it unconditional, e00d1e3 2026-09-05 fixed high through the Workflow route, 0faeb51 2026-09-06 folded the per-step clauses into this intro; 55c5abc 2026-09-09 excluded step 4's goal read, which that step routes at the charter's own effort.
-- verdict: keep
-- reason: The reviewers' frontmatter efforts are the Agent-tool defaults for per-section rounds and the finishing route sets its row's effort per call; the goal read is excluded because its charter pins its own effort, which test/dispatch-table.test.js's effort map holds in place, so the Agent tool reaches it without Workflow.
-- passage: Dispatch every finishing reviewer at dispatch table row "Finishing reviews"
-- passage: Step 4's goal read takes that reading too, but is the one exception to this row, and routes itself.
+- provenance: 00c340e 2026-07-02 set the finishing reviews to the fable override, d156f46 2026-07-31 made it unconditional, e00d1e3 2026-09-05 fixed high through the Workflow route, 0faeb51 2026-09-06 folded the per-step clauses into this intro; 55c5abc 2026-09-09 excluded step 4's goal read, which that step routes at the charter's own effort; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 split the advisory lenses onto their own Opus row, on ASSISTANT's seven-day transcript audit on SCOTT-CLAUDE reported 2026-10-13: reviewers drew 58% of the operator's Fable use, the security and performance lenses 18% of it; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 sent the final adversarial review to this row only where a section is uncleared, and dropped the goal-read exception sentence.
+- verdict: rewrite
+- reason: The finishing lenses take two ceilings: the security and performance lenses run on Opus, and the final adversarial review and the document lenses on Fable, so the whole changeset keeps one Fable correctness check while the advisory lenses stop drawing Fable, which as ASSISTANT's usage audit reports drew 18% of the operator's Fable use against 58% for all reviewers. The capacity reading guards Fable alone. The final adversarial review takes the Fable row only where a section is uncleared, step 3 stating the cleared cases. The goal read takes none of these rows because step 4 dispatches it at its own row, "Scope adjudicator", whose charter pins its own effort, which test/dispatch-table.test.js's effort map holds in place.
+- proposed: Dispatch the advisory reviews (step 2) at dispatch table row "Finishing advisory", and the final adversarial review (step 3) and the document lenses step 3 runs at dispatch table row "Finishing reviews".
+- proposed: The Fable-aimed dispatches alone take executing-work's capacity reading (its step 1) first.
+- proposed: Dispatch the advisory reviews (step 2) at dispatch table row "Finishing advisory", and step 3's document lenses, and its final adversarial review where any section is uncleared, at dispatch table row "Finishing reviews".
+- passage: Dispatch the advisory reviews (step 2) at dispatch table row "Finishing advisory", and step 3's document lenses, and its final adversarial review where any section is uncleared, at dispatch table row "Finishing reviews".
+- passage: The Fable-aimed dispatches alone take executing-work's capacity reading (its step 1) first.
+- landed: f9389aff section 1
+- landed: 22dcfd78 section 2
 
 ### S007
 - key: Run the finishing reviewers at the top model because a fresh-eyes strong-model verdict is what makes plan-covered implementation safe.
@@ -4065,10 +4080,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Fill the Reviewer Dispatch template for those reviewers.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:12
-- provenance: e2752d1 2026-08-11 brought the Workflow route in for compensation, e00d1e3 2026-09-05 made it the finishing reviews' own route; 55c5abc 2026-09-09 left it unchanged.
-- verdict: keep
+- provenance: e2752d1 2026-08-11 brought the Workflow route in for compensation, e00d1e3 2026-09-05 made it the finishing reviews' own route; 55c5abc 2026-09-09 left it unchanged; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 joined it to S010's fallback in one sentence naming the template's owner.
+- verdict: rewrite
 - reason: The Agent tool has no effort parameter on the pinned harness version, so the route is the only way to run a row's effort, and executing-work's dispatch table points here.
-- passage: Fill the Reviewer Dispatch template.
+- proposed: Fill executing-work's Reviewer Dispatch template, and where Workflow is unavailable take that file's Agent-tool route at the row's own model.
+- passage: Fill executing-work's Reviewer Dispatch template, and where Workflow is unavailable take that file's Agent-tool route at the row's own model.
+- landed: 22dcfd78 section 2
 
 ### S009
 - key: Use Workflow because effort `high` sits above the reviewers' frontmatter defaults and the Agent tool cannot set effort.
@@ -4081,13 +4098,17 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - proposed: Drop "high sits above the reviewers' frontmatter defaults and the Agent tool cannot set effort, so" from line 12, leaving the route as a plain instruction.
 
 ### S010
-- key: Where Workflow is unavailable, fall back to the Agent tool at model 'fable' with frontmatter effort, and record the effort it ran at beside the row's.
+- key: Where Workflow is unavailable, fall back to the Agent tool at the row's own model with frontmatter effort, and record the effort it ran at beside the row's.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:12
-- provenance: e2752d1 2026-08-11, after the review found the no-Workflow path giving away a model tier for free, e00d1e3 2026-09-05 reworded it to frontmatter effort; 55c5abc 2026-09-09 left it unchanged.
-- verdict: keep
-- reason: The finishing instance of executing-work's general fallback, carrying the model that rule cannot name; reducing it to a bare pointer recreates the e2752d1 under-specification.
-- passage: Where Workflow is unavailable, use the Agent tool at `model: 'fable'` and frontmatter effort, recording the effort it ran at beside the row's.
+- provenance: e2752d1 2026-08-11, after the review found the no-Workflow path giving away a model tier for free, e00d1e3 2026-09-05 reworded it to frontmatter effort; 55c5abc 2026-09-09 left it unchanged; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 named the row's own model; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 shortened it to a pointer at executing-work's Agent-tool route, sharing S008's sentence.
+- verdict: rewrite
+- reason: The finishing instance of executing-work's general fallback; the two finishing rows name different models, so the fallback reads the model off the row rather than naming one, which would send the advisory lenses to Fable. The effort it ran at is recorded by that route's own sentence in executing-work's `references/review.md`, "The Chapter records the effort the review ran at beside its row's effort."
+- proposed: Where Workflow is unavailable, use the Agent tool at the row's own model and frontmatter effort, recording the effort it ran at beside the row's.
+- proposed: Fill executing-work's Reviewer Dispatch template, and where Workflow is unavailable take that file's Agent-tool route at the row's own model.
+- passage: Fill executing-work's Reviewer Dispatch template, and where Workflow is unavailable take that file's Agent-tool route at the row's own model.
+- landed: f9389aff section 1
+- landed: 22dcfd78 section 2
 
 ### S011
 - key: Bracket steps 1 through 4 with the tree-state check.
@@ -4689,10 +4710,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec, with the fable model override.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:56
-- provenance: f8c0649 2026-06-10 for the whole-changeset dispatch, d156f46 2026-07-31 for the unconditional fable override; 55c5abc 2026-09-09 changed the line elsewhere.
-- verdict: keep
-- reason: Line 12 owns the tier for every finishing reviewer; this owns which agent and what scope.
-- passage: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec, with the fable model override, after executing-work's capacity reading.
+- provenance: f8c0649 2026-06-10 for the whole-changeset dispatch, d156f46 2026-07-31 for the unconditional fable override; 55c5abc 2026-09-09 changed the line elsewhere; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 moved the fable override and the capacity reading into step 3's cleared and uncleared cases.
+- verdict: rewrite
+- reason: Line 12's rows and the cases after this sentence own the tier; this owns which agent and what scope.
+- proposed: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec.
+- passage: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec.
+- landed: 22dcfd78 section 2
 
 ### S075
 - key: The finishing gate always runs the top model whatever tiers wrote the sections.
@@ -4708,10 +4731,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Where the unavailability rule confirms this gate cannot run at the fable tier here, take that rule's compensated re-dispatch; otherwise run it on the route above.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:56
-- provenance: e2752d1 2026-08-11 for compensation over a bare fallback (c2.C046, c2.C047), 53d9040 2026-08-15 reduced three states to two; 55c5abc 2026-09-09 changed the line elsewhere.
-- verdict: keep
+- provenance: e2752d1 2026-08-11 for compensation over a bare fallback (c2.C046, c2.C047), 53d9040 2026-08-15 reduced three states to two; 55c5abc 2026-09-09 changed the line elsewhere; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 dropped "above" and the closing "Otherwise run it on the route above.", since step 3's cases say where the review runs.
+- verdict: rewrite
 - reason: The phrase "the compensated re-dispatch that rule defines" is pinned single-source by test/doctrine-parity.test.js, which is why step 4 points at this route rather than copying it; both older entries are superseded by this one.
-- passage: Where the unavailability rule above confirms this gate cannot be run at the fable tier here, or that reading returned `-> downgrade`, take the compensated re-dispatch that rule defines, recorded as that rule states. Otherwise run it on the route above.
+- proposed: Where the unavailability rule confirms this gate cannot be run at the fable tier here, or that reading returned `-> downgrade`, take the compensated re-dispatch that rule defines, recorded as that rule states.
+- passage: Where the unavailability rule confirms this gate cannot be run at the fable tier here, or that reading returned `-> downgrade`, take the compensated re-dispatch that rule defines, recorded as that rule states.
+- landed: 22dcfd78 section 2
 
 ### S077
 - key: When the changeset touches C# or T-SQL, also pass the csharp-style or sql-style absolute paths, resolved by executing-work's Dispatch Brief ladder.
@@ -4723,23 +4748,29 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: When the changeset touches C# or T-SQL, also pass the csharp-style path, the sql-style path or both, as absolute paths, resolved by executing-work's Dispatch Brief ladder.
 
 ### S078
-- key: Aim this pass at cross-section cohesion, leftover debris, missed spec items, and local issues in sections aimed below Fable or left ungated, read whole.
+- key: Aim this pass at cross-section cohesion, leftover debris, missed spec items, and local issues in sections aimed below a lens's ceiling or left ungated, read whole.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:56
-- provenance: f8c0649 2026-06-10 for the cohesion and debris charge, 0faeb51 2026-09-06 for the below-Fable and ungated carve-out; 55c5abc 2026-09-09 changed the line elsewhere.
-- verdict: keep
-- reason: Line 10 tells the orchestrator what to tell the reviewers; this fixes the scope the dispatch is charged with.
-- passage: This pass reads the changeset whole for cross-section cohesion, leftover debris such as dead code, stale TODOs and orphaned files, spec items that fell through, and local issues in sections the rule aimed below Fable or whose round ended ungated.
+- provenance: f8c0649 2026-06-10 for the cohesion and debris charge, 0faeb51 2026-09-06 for the below-Fable and ungated carve-out; 55c5abc 2026-09-09 changed the line elsewhere; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 keyed the carve-out on a lens's ceiling; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 named the uncleared sections line 10 defines in place of the below-ceiling carve-out.
+- verdict: rewrite
+- reason: Line 10 tells the orchestrator what to tell the reviewers; this fixes the scope the dispatch is charged with, and an uncleared section, as line 10 defines it, holds local issues no Fable check read.
+- proposed: local issues in sections the rule aimed below a lens's ceiling or whose round ended ungated.
+- proposed: local issues in uncleared sections.
+- passage: This pass reads the changeset whole for cross-section cohesion, leftover debris such as dead code, stale TODOs and orphaned files, spec items that fell through, and local issues in uncleared sections.
+- landed: f4a26dd3 section 1
+- landed: 22dcfd78 section 2
 
 ### S079
 - key: When the deliverable is documents, also dispatch `prose-reviewer` over every document in scope, beside or instead of the code adversarial pass.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:56
-- provenance: a5fce80 2026-08-18, document-review battery; 55c5abc 2026-09-09 changed the line elsewhere.
-- verdict: keep
+- provenance: a5fce80 2026-08-18, document-review battery; 55c5abc 2026-09-09 changed the line elsewhere; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 named its row, "Finishing reviews", in place of "by the same route".
+- verdict: rewrite
 - reason: Which agent, over what, when; the tier rides by pointer.
-- passage: When the deliverable is documents, also dispatch `prose-reviewer` over every document in scope by the same route, beside or instead of the code adversarial pass as warranted.
+- proposed: When the deliverable is documents, also dispatch `prose-reviewer` over every document in scope at dispatch table row "Finishing reviews", beside or instead of the code adversarial pass as warranted.
+- passage: When the deliverable is documents, also dispatch `prose-reviewer` over every document in scope at dispatch table row "Finishing reviews", beside or instead of the code adversarial pass as warranted.
 - flag: weak-reason
+- landed: 22dcfd78 section 2
 
 ### S080
 - key: Have the prose pass read each document whole, never as a diff.
@@ -4776,11 +4807,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Ride the writing-style skill and `references/ai-tells.md` absolute paths in that brief, resolved as the adversarial dispatch resolves its paths.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:56
-- provenance: ba1060b 2026-08-18; the field class dates to kaizen 2026-07-30-reviewer-style-skill-paths; 55c5abc 2026-09-09 changed the line elsewhere.
-- verdict: keep
-- reason: A field whose omission is invisible is named at the dispatch that fills it.
-- passage: The `prose-register` skill and `references/ai-tells.md` absolute paths ride in it, resolved as the adversarial dispatch above.
+- provenance: ba1060b 2026-08-18; the field class dates to kaizen 2026-07-30-reviewer-style-skill-paths; 55c5abc 2026-09-09 changed the line elsewhere; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 deleted the sentence, the Document Review Brief carrying the field.
+- verdict: retire
+- reason: The Document Review Brief the preceding sentence fills names the field itself: executing-work's `references/review.md` lists "The prose-register skill's absolute path plus its references/ai-tells.md, resolved by the same ladder as the Dispatch Brief's style-skill bullet" (review.md:51), so the dispatch filling the template meets it there.
+- proposed: Delete the sentence "The `prose-register` skill and `references/ai-tells.md` absolute paths ride in it, resolved as the adversarial dispatch above."
 - flag: weak-reason
+- landed: 22dcfd78 section 2
 
 ### S084
 - key: The reviewer reports an unreadable style path and skips the by-name tell hunt, so a brief omitting those paths ships without its tell lens and still reports a completed run.
@@ -4816,7 +4848,7 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:56
 - provenance: a5fce80 2026-08-18 for the not-re-run rule, 0faeb51 2026-09-06 for keeping the one-up section read and accepting the loss; 55c5abc 2026-09-09 changed the line elsewhere.
 - verdict: keep
-- reason: A section aimed below Fable keeps its section-time blind read at the one-up tier and this whole read accepts that loss; a finishing blind read would buy a duplicate.
+- reason: Each section keeps its section-time blind read, one tier up from its writer and Opus at most, and this whole read accepts that loss; a finishing blind read would buy a duplicate.
 - passage: No blind reviewer runs here
 
 ### S088
@@ -4851,28 +4883,35 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Dispatch it at dispatch table row "Scope adjudicator".
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:58
-- provenance: 55c5abc 2026-09-09, Section 6; the route is the charter's pin rather than a compensation notch.
-- verdict: keep
-- reason: test/dispatch-table.test.js's effort map pins the scope-adjudicator's frontmatter effort, so the value cannot drift while the sentence asserts it.
-- passage: at dispatch table row "Scope adjudicator", after executing-work's capacity reading.
+- provenance: 55c5abc 2026-09-09, Section 6; the route is the charter's pin rather than a compensation notch; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 dropped the capacity reading, which a fable override alone takes, once the row read opus.
+- verdict: rewrite
+- reason: test/dispatch-table.test.js's effort map pins the scope-adjudicator's frontmatter effort, so the value cannot drift while the sentence asserts it; the row carries the model, opus, so no capacity reading precedes it.
+- proposed: at dispatch table row "Scope adjudicator".
+- passage: at dispatch table row "Scope adjudicator".
+- landed: f9389aff section 1
 
 ### S092
 - key: Carry the `Trace target:` line executing-work's step 3 states for every dispatch holding the plan's what.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:58
-- provenance: 55c5abc 2026-09-09, Section 6; executing-work's step 3 enumerates the adversarial lens, the security lens and the scope adjudicator as the line's carriers.
-- verdict: keep
-- reason: Already the pointer at executing-work's step 3, which owns the enumeration.
-- passage: It carries the `Trace target:` line executing-work's step 3 states for every dispatch that holds the plan's what.
+- provenance: 55c5abc 2026-09-09, Section 6; executing-work's step 3 enumerates the adversarial lens, the security lens and the scope adjudicator as the line's carriers; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 deleted the sentence, its rule standing on executing-work's carrier list and the adjudicator's charter.
+- verdict: retire
+- reason: The pointer restated two carriers: executing-work's `references/review.md` names the scope adjudicator among the line's carriers ("The adversarial lens, the security lens, the performance lens and the scope adjudicator carry a `Trace target:` line", review.md:17), and the adjudicator charter's "Your Brief" section carries the same Goal, Intent record and acceptance bullets.
+- proposed: Delete the sentence "It carries the `Trace target:` line executing-work's step 3 states for every dispatch that holds the plan's what."
+- landed: 22dcfd78 section 2
 
 ### S093
-- key: Where the unavailability rule confirms fable cannot run here, take step 3's compensated re-dispatch with `grimoire:scope-adjudicator` as its `agentType`.
+- key: Where the unavailability rule confirms opus cannot run here, the goal read ends ungated, recorded as that rule records an ungated end.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:58
-- provenance: 55c5abc 2026-09-09, Section 6 round 1's blind Major that the goal read stated no unavailability route; the fix points at step 3's route because a duplicate of its pinned phrase reddened doctrine-parity's single-source pin at fix round 1.
-- verdict: keep
-- reason: The route is step 3's by pointer and the agentType is the one fact this dispatch adds; restating the route would break the single-source pin.
-- passage: take step 3's compensated re-dispatch, recorded as step 3 records it, with `grimoire:scope-adjudicator` as its `agentType`.
+- provenance: 55c5abc 2026-09-09, Section 6 round 1's blind Major that the goal read stated no unavailability route; the fix points at step 3's route because a duplicate of its pinned phrase reddened doctrine-parity's single-source pin at fix round 1; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 replaced the compensated re-dispatch with the ungated end, landed at f9389aff section 1; its finishing pass 2026-10-13 dropped the passage's reason clause to fit the corpus cap after the #603 merge, the reason staying in this entry; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 dropped the record clause, which S100's sentence carries.
+- verdict: rewrite
+- reason: Compensation runs at opus, the tier this dispatch is aimed at, so an opus ruled out leaves no lower rung, and the unavailability rule forbids compensating at a tier the chain ruled out; the ungated record is the one route left. How the ungated end is recorded is S100's sentence later in the step.
+- proposed: the goal read ends ungated, recorded as that rule records an ungated end.
+- proposed: the goal read ends ungated.
+- passage: the goal read ends ungated.
+- landed: 194f099b finishing
+- landed: 22dcfd78 section 2
 
 ### S094
 - key: Build the brief to the charter's whole-changeset shape: the plan's what, its `## Intent` record where the plan carries one, the base ref this pass established, and the two questions.
@@ -6342,25 +6381,25 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Where the effort wrote or corrected any memory and a `consolidate-memory` skill is in the session's catalog, offer a pass in one line.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:96
-- provenance: c289f91 2026-07-12, the predicate-gated consolidation offer; moved by 55c5abc 2026-09-09.
+- provenance: c289f91 2026-07-12, the predicate-gated consolidation offer; moved by 55c5abc 2026-09-09. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which renamed the fold-in "tidying" so it is not read as the decay pass's hygiene step.
 - verdict: rewrite
-- landed: d549e65 section 5
+- landed: 36ff5b09 section 3
 - reason: No `consolidate-memory` skill ships in the kit (the name occurs only in this SKILL.md and its ledger), so the offer never fires and S242's fold-in is the whole live rule; the offer arm drops.
 - proposed: drop the offer arm; keep the fold-in as the standing act, named in the close-out.
 - baseline-test: yes
-- passage: Fold the hygiene, merging duplicates, fixing stale facts and pruning the index, into the memory edits you made, and name it in the close-out.
+- passage: Fold the tidying, merging duplicates, fixing stale facts and pruning the index, into the memory edits you made, and name it in the close-out.
 
 ### S242
-- key: Where that skill is absent, fold the same hygiene, merging duplicates, fixing stale facts and pruning the index, into the memory edits you already made, and say nothing.
+- key: Where that skill is absent, fold the same tidying, merging duplicates, fixing stale facts and pruning the index, into the memory edits you already made, and say nothing.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:96
-- provenance: c289f91 2026-07-12; moved by 55c5abc 2026-09-09. Shares c3.C101's supersession with S241.
+- provenance: c289f91 2026-07-12; moved by 55c5abc 2026-09-09. Shares c3.C101's supersession with S241. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which renamed the fold-in "tidying" so it is not read as the decay pass's hygiene step.
 - verdict: rewrite
-- landed: d549e65 section 5
+- landed: 36ff5b09 section 3
 - reason: The fold-in is the live rule and stays as a plain instruction, named in the close-out, rather than as the absent skill's fallback.
 - proposed: "Fold the hygiene, merging duplicates, fixing stale facts and pruning the index, into the memory edits you made, and name it in the close-out."
 - baseline-test: yes
-- passage: Fold the hygiene, merging duplicates, fixing stale facts and pruning the index, into the memory edits you made, and name it in the close-out.
+- passage: Fold the tidying, merging duplicates, fixing stale facts and pruning the index, into the memory edits you made, and name it in the close-out.
 
 ### S243
 - key: First make sure any kit friction from this effort is in the kaizen inbox, whether captured along the way or traced to the kit from a Chapter Surprise.
@@ -6410,10 +6449,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: End a fix round on executing-work's terminal condition, step 4's "The loop ends on the class of what remains".
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:54
-- provenance: 5620b2b 2026-09-07 pointed the fix rounds at the terminal condition, 9463de7 2026-09-09 rewrote the line for Section 4, 55c5abc 2026-09-09 widened the coverage to step 4's items after Section 6's round 1 found the rule naming only steps 2 and 3 as fix sources; 6983398 2026-09-10 left the sentence unchanged.
-- verdict: keep
-- reason: The terminal condition is executing-work's by pointer; the coverage names every place this pass runs a fix round, including the goal read's items.
-- passage: A fix round this pass runs, here, at step 3 or on step 4's items, takes executing-work's step 4 loop (`skills/executing-work/SKILL.md` under the kit plugin root): it ends on `The loop ends on the class of what remains` and stops on that step's review-round backstop, with the changeset the base ref defines standing where that skill reads the section's files.
+- provenance: 5620b2b 2026-09-07 pointed the fix rounds at the terminal condition, 9463de7 2026-09-09 rewrote the line for Section 4, 55c5abc 2026-09-09 widened the coverage to step 4's items after Section 6's round 1 found the rule naming only steps 2 and 3 as fix sources; 6983398 2026-09-10 left the sentence unchanged; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 dropped the quoted terminal condition, which rides the step 4 loop the sentence points at.
+- verdict: rewrite
+- reason: The terminal condition is executing-work's and rides the step 4 loop this sentence points at; the coverage names every place this pass runs a fix round, including the goal read's items.
+- proposed: A fix round this pass runs, here, at step 3 or on step 4's items, takes executing-work's step 4 loop (`skills/executing-work/SKILL.md` under the kit plugin root), stopping on that step's review-round backstop, with the changeset the base ref defines standing where that skill reads the section's files.
+- passage: A fix round this pass runs, here, at step 3 or on step 4's items, takes executing-work's step 4 loop (`skills/executing-work/SKILL.md` under the kit plugin root), stopping on that step's review-round backstop, with the changeset the base ref defines standing where that skill reads the section's files.
+- landed: 22dcfd78 section 2
 
 ### T002
 - key: Stop fix rounds on executing-work's step 4 review-round backstop, counted over this pass's own rounds.
@@ -6561,13 +6602,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: The hold and the design stop each open with a fixed first line naming the pass: `BLOCKED: the finishing pass holds a new-requirement Major; the judge recommends an ask` and `BLOCKED: the finishing pass hit a design stop; the judge recommends an ask`.
 
 ### T018
-- key: Put "the judge returned NEEDS_CONTEXT twice" in place of the recommendation clause where two returns ruled on nothing.
+- key: Put "the judge returned NEEDS_CONTEXT twice" in place of the recommendation clause where two returns ruled on nothing, and "the judge could not run" where the judge's gate ended ungated.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:54
-- provenance: 6983398 2026-09-10, finishing fix round 1 of the review-loop-provenance plan.
-- verdict: keep
-- reason: Mirrors executing-work's own pair of `NEEDS_CONTEXT twice` lines with the pass in the unit slot; one clause, and nothing else states the finishing form.
-- passage: Where two returns ruled on nothing, `the judge returned NEEDS_CONTEXT twice` replaces the recommendation clause.
+- provenance: 6983398 2026-09-10, finishing fix round 1 of the review-loop-provenance plan; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 added the ungated clause once the judge, aimed at Opus, could end ungated.
+- verdict: rewrite
+- reason: Mirrors executing-work's own `NEEDS_CONTEXT twice` and `could not run` lines with the pass in the unit slot; an Opus-aimed judge has no lower compensation, so its ungated end needs a stated first line here too.
+- proposed: Where two returns ruled on nothing, `the judge returned NEEDS_CONTEXT twice` replaces the recommendation clause, and `the judge could not run` replaces it where the judge's gate ended ungated.
+- passage: Where two returns ruled on nothing, `the judge returned NEEDS_CONTEXT twice` replaces the recommendation clause, and `the judge could not run` replaces it where the judge's gate ended ungated.
+- landed: 0517ce00 section 1
 
 ### T019
 - key: Route a spec-traceable or fix-introduced Major through the fix-or-present rule, and never a new-requirement one.
@@ -6802,13 +6845,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - flag: stale
 
 ### W001
-- key: Dispatch both advisory lenses in one `agent()` wave with step 3's adversarial lens, the step numbers ordering the reading of the returns rather than the dispatch.
+- key: Dispatch both advisory lenses in one `agent()` wave with step 3's adversarial lens, each at its own row's model.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md
-- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20.
-- verdict: keep
-- reason: The plan's Approach puts every lens of a round in one `agent()` wave so the orchestrator reads the round together, and the preamble already licensed steps 2 and 3 in parallel. Saying so at the step is what stops a reader serializing three dispatches on the step numbers alone.
-- passage: Send them in one `agent()` wave with step 3's adversarial lens.
+- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 named each dispatch's model and the reach of the reading and compensation, landed at 0517ce00 section 1; its finishing pass 2026-10-13 dropped the reach sentence to fit the corpus cap after the #603 merge, since the preamble's dispatch paragraph and the Compensating paragraph already confine both to the Fable-aimed dispatches.
+- verdict: rewrite
+- reason: The plan's Approach puts every lens of a round in one `agent()` wave so the orchestrator reads the round together, and the preamble already licensed steps 2 and 3 in parallel. The wave mixes models, the advisory lenses on Opus and the adversarial lens on Fable, so the step names each dispatch's row; the preamble says which dispatches the capacity reading and compensation reach.
+- proposed: Send them in one `agent()` wave with step 3's adversarial lens, each at its own row's model.
+- passage: Send them in one `agent()` wave with step 3's adversarial lens, each at its own row's model.
+- landed: 194f099b finishing
 
 ### W002
 - key: Take executing-work's advisory disposition for every advisory finding here, written on this pass's interim board entry, with the relevance ruling on a fix-now lean and on every cited security Critical.
@@ -6865,13 +6910,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: A fix delta from step 4's items takes the adversarial lens alone. No fix-delta round takes an advisory lens or re-dispatches the goal read.
 
 ### W008
-- key: Name the performance reviewer among the agents the compensation route re-dispatches as.
+- key: Name the adversarial reviewer as the common agent the compensation route re-dispatches as.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md
-- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20.
-- verdict: keep
-- reason: The list is the common cases rather than the boundary, the rule being the agent the stopped dispatch ran as. The performance lens joins it because this pass now dispatches it at fable, so it is exactly as compensable as the other two, and a list missing it invites a reader to fall back instead.
-- passage: Name `agentType` as the scoped agent the dispatch being compensated ran as, whichever reviewer that was (`grimoire:adversarial-reviewer`, `grimoire:security-reviewer` and `grimoire:performance-reviewer` the common three).
+- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 dropped the security and performance lenses from the list once they were aimed at Opus.
+- verdict: rewrite
+- reason: The list is the common cases rather than the boundary, the rule being the agent the stopped dispatch ran as. Compensation re-dispatches a Fable gate ruled out at opus, so only a Fable-aimed lens is compensable.
+- proposed: whichever Fable-aimed reviewer that was (`grimoire:adversarial-reviewer` the common one).
+- passage: Name `agentType` as the scoped agent the dispatch being compensated ran as, whichever Fable-aimed reviewer that was (`grimoire:adversarial-reviewer` the common one).
+- landed: f4a26dd3 section 1
 
 ### W009
 - key: Evaluate the wedge hallmark at three moments for every in-flight dispatch whatever model it runs at: the completion notification for any dispatch the `WAITING:` line named, a timer wake the session armed, and the first re-block after either.
@@ -6934,10 +6981,11 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Ride the voice reference's absolute path in the prose pass's Document Review Brief where the `Voice:` line names one.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:150
-- provenance: docs/plans/claude-kit_prose-register_spec_v1.md section 4, which added the voice reference input to the prose-reviewer's charter and to both dispatch sites that fill its brief.
-- verdict: keep
-- reason: S083 names the skill and catalog paths at the dispatch that fills them, and this field is owed the same naming for the same reason. The charter checks a named voice against its reference and inherits no skills, so a brief omitting the path ships the pass with its voice lens off and still reports a completed run.
-- passage: Where the `Voice:` line names a voice reference in that skill, its absolute path rides in it too.
+- provenance: docs/plans/claude-kit_prose-register_spec_v1.md section 4, which added the voice reference input to the prose-reviewer's charter and to both dispatch sites that fill its brief; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 deleted the sentence, the Document Review Brief carrying the field.
+- verdict: retire
+- reason: The Document Review Brief names this field itself: executing-work's `references/review.md` lists "The voice reference's absolute path where the Voice: value names one, resolved by the same ladder" (review.md:54), so the dispatch filling the template meets it there, as S083's paths do.
+- proposed: Delete the sentence "Where the `Voice:` line names a voice reference in that skill, its absolute path rides in it too."
+- landed: 22dcfd78 section 2
 
 ### P003
 - key: Write the pull request body in the prose register, as the commit body is written.
@@ -6971,11 +7019,13 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Before the final adversarial review, write a promises file holding one entry per Goal sentence, run the promises check against it over the changeset's source files, re-read each promise over 0.6, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:96
-- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent.
-- verdict: keep
+- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 ran the promise check before the review's waiver as well as before its dispatch.
+- verdict: rewrite
 - landed: 549de22b section 3
 - reason: The section checks read each section's own promises, and only a reading over the Goal asks whether the sections together built what the plan set out to. Quoting the closing line leaves the reading in the record whatever it said, so a not-checked run is visible rather than silent.
-- passage: Before this dispatch, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
+- proposed: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
+- passage: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
+- landed: 22dcfd78 section 2
 
 ### D001
 - key: Title a pull request with an UPPERCASE prefix naming the part of the system the work changes, then the doctrine's heading form, the prefix never `PLAN`.
@@ -7000,10 +7050,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Fetch and merge the integration branch into the working branch before step 1, surfacing sibling-session conflicts, under Branch-and-PR and under Commit-and-Push on a worktree branch.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:70
-- provenance: `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2, 2026-10-06, on the operator's word of 2026-10-05 that a plan needs one whole gate; a kaizen note of 2026-09-23 recorded the second gate a trunk that moved during the pass cost at step 7. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md`'s finishing pass, 2026-10-06: a stacked branch takes G003's read and retarget at this update and merges whether or not an arm stands, while its merge keeps this entry's gate and its push and arm wait for step 7, on the architect persona's consult ruling recorded under that plan's Intent.
-- verdict: keep
+- provenance: `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2, 2026-10-06, on the operator's word of 2026-10-05 that a plan needs one whole gate; a kaizen note of 2026-09-23 recorded the second gate a trunk that moved during the pass cost at step 7. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md`'s finishing pass, 2026-10-06: a stacked branch takes G003's read and retarget at this update and merges whether or not an arm stands, while its merge keeps this entry's gate and its push and arm wait for step 7, on the architect persona's consult ruling recorded under that plan's Intent; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 dropped the closing "and the merge rests on that gate as above", which restated the paragraph's second sentence.
+- verdict: rewrite
 - reason: Step 1's full-suite run is the plan's one whole gate, so the tree it reads has to hold the trunk's commits, or step 7's update is a merge that run never read. Taking the trunk in first makes step 1 read the merged tree and leaves step 7's update to the doctrine's merge rule. A stacked branch's base may have merged or moved since the run began, and a retarget changes which branch this update merges, so it first re-reads and retargets the base by G003. It merges whether or not an arm stands, since step 1's run must read the tree that lands, and its push and arm wait for step 7, where an armed OPEN pull request's push already takes the state read's case, so the plan still pays one whole gate. Review-Only commits nothing, and Commit-and-Push in the main checkout already has its commits on the trunk, so neither has a branch to merge into. The merge sentence names the whole gate because the parity test's integration sweep requires a lane word on a merging paragraph.
-- passage: Fetch, and where it moved, merge it into the working branch, surfacing sibling-session conflicts. The merge rests on step 1's whole gate, which reads the merged tree. It applies under Branch-and-PR, under Commit-and-Push only on a worktree branch, and never under Review-Only. A branch whose pull request is based on another branch first takes step 7's stacked-parent bullet's read and retarget, so the integration branch this update fetches and merges is the one the pull request now has. It takes the base in whether or not an arm stands, since step 1's gate must read the tree that lands, and the merge rests on that gate as above. The bullet's push and arm wait for step 7, where the push carrying this merge takes the state read's armed OPEN case where an arm stands.
+- proposed: It takes the base in whether or not an arm stands, since step 1's gate must read the tree that lands.
+- passage: Fetch, and where it moved, merge it into the working branch, surfacing sibling-session conflicts. The merge rests on step 1's whole gate, which reads the merged tree. It applies under Branch-and-PR, under Commit-and-Push only on a worktree branch, and never under Review-Only. A branch whose pull request is based on another branch first takes step 7's stacked-parent bullet's read and retarget, so the integration branch this update fetches and merges is the one the pull request now has. It takes the base in whether or not an arm stands, since step 1's gate must read the tree that lands. The bullet's push and arm wait for step 7, where the push carrying this merge takes the state read's armed OPEN case where an arm stands.
+- landed: 22dcfd78 section 2
 
 ### F002
 - key: A push still owed under Commit-and-Push takes the targeted lane over what changed since step 1's whole gate, and a pull it needs first takes the doctrine's merge rule.
@@ -7050,3 +7102,73 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - landed: 489dade7 section 3, with its fix round at a7122a73 and the finishing pass's at b6137279
 - reason: Step 1 said a red run is re-run whole. Without the bound to the plan's own red and these sentences, a finishing pass holding only a trunk red re-runs the whole gate after the trunk's fix lands, the second whole run the one-gate rule removed, or hands off before that fix exists. The merge that takes the fix in is the doctrine's merge rule's one exception, on the operator's ruling of 2026-10-06: it takes the targeted lane over the files the fix changed even where the plan changed one of them too, since the fix's own pull request has just run them. The testing skill owns the re-run's mechanics, so this sentence points there.
 - passage: Each red file first re-runs at the integration branch's head, per the base-head bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root. A red run of the plan's own is fixed and re-run whole, and a fix after a green run takes the targeted lane. A red the trunk carries too is fixed on its own pull request or becomes a spec, and the handoff waits on one or the other. The plan's branch takes that fix in on the targeted lane over the files the fix changed, the one exception to the doctrine's merge rule.
+
+### N001
+- key: Run the hygiene step at every close-out, and the archive pass when it is due.
+- class: rule
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:188
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12.
+- verdict: keep
+- landed: ad41f892 section 3
+- reason: The two cadences are the memory-system skill's Running the Decay Pass, which owns them; step 8 is where the close-out calls them, and c3.C125's pointer names the owner.
+- passage: **Run the hygiene step at every close-out, and the archive pass when it is due.**
+
+### N002
+- key: Disposition the pairs `decay-scan` shows and repair the drift it reports at every close-out, whether or not the archive pass is due.
+- class: rule
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:188
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12.
+- verdict: keep
+- landed: ad41f892 section 3
+- reason: A step hung on the machine's one decay stamp would reach ten pairs per tier a fortnight, so the duplicate backlog would grow; the scan writes no record and no stamp, so running it every close-out costs a read.
+- passage: The hygiene step dispositions the pairs `decay-scan` shows and repairs the drift it reports, whether or not the archive pass is due.
+
+### E001
+- key: Count a section cleared when its last review round ran its lens at Fable and ended the loop under findings.md's terminal condition, its lens being the prose-reviewer for a document-pair-only section and the adversarial-reviewer otherwise.
+- class: rule
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:10
+- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13, which replaced the below-ceiling and ungated carve-out with this definition; its finishing pass 2026-10-13 wrote this entry.
+- verdict: keep
+- landed: 22dcfd78 section 2
+- reason: The final adversarial review exists so every line gets one Fable correctness read. A section whose last round read its lines at Fable and closed under the terminal condition has had that read, so the finishing pass need not buy it again. A round aimed below Fable or ended ungated did not, so it clears nothing, which is the carve-out this definition replaced.
+- passage: A section is cleared when its last review round ran its lens at Fable and ended the loop under the terminal condition in executing-work's `references/findings.md`. Its lens is the prose-reviewer where executing-work's Audience rule gives it the document pair alone, else the adversarial-reviewer.
+
+### E002
+- key: Keep a section cleared only while every hunk on its files after the clearing round, the Minor pass's included, is body prose under findings.md's definition.
+- class: rule
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:10
+- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13; its finishing pass 2026-10-13 narrowed prose to body prose and dropped "therefore" to pay for the word.
+- verdict: keep
+- landed: 22dcfd78 section 2
+- reason: A hunk after the clearing round had no Fable read, so it un-clears its section unless it is the prose findings.md lets close on the author re-read. Body prose leaves out machine-read frontmatter, whose hunk changes what a harness does, a gap the finishing pass's security lens found. A delta reviewed below Fable un-clears the section the same way.
+- passage: Every hunk on its files after that round, the Minor pass's included, must be body prose under `findings.md`'s definition. A fix delta reviewed below Fable leaves its section uncleared, and a prose-only one does not.
+
+### E003
+- key: Waive the final adversarial review where the effort's one section is cleared, record the waiver on the review line, and never waive the advisory fold.
+- class: rule
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:98
+- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13; its finishing pass 2026-10-13 wrote this entry.
+- verdict: keep
+- landed: 22dcfd78 section 2
+- reason: With one cleared section the final review would re-read lines the section's Fable round already read, and there is no seam between sections to read. The record line keeps the waiver visible in the Chapter. The fold carries the advisory lenses' scope, which the section round's correctness lens never read, so it stays.
+- passage: Where the effort's one section is cleared, this review is waived, recorded as `review: adversarial waived (section <n> cleared at round <m>)`, and the fold above is never waived.
+
+### E004
+- key: Where several sections are all cleared, dispatch the final adversarial review at the "Finishing adversarial, cleared" row, with no fable override or capacity reading.
+- class: rule
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:98
+- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13; its finishing pass 2026-10-13 scoped the case to several sections, so a one-section effort reaches E003's waiver alone, and dropped a "no" to pay for the word.
+- verdict: keep
+- landed: 22dcfd78 section 2
+- reason: Every line of a fully cleared changeset has had its Fable read, so what is left to read is the seams between sections, which an Opus whole-changeset read covers. No Fable dispatch runs, so no capacity reading is owed.
+- passage: Where several sections are all cleared, dispatch at dispatch table row "Finishing adversarial, cleared", with no fable override or capacity reading.
+
+### E005
+- key: Where any section is uncleared, pass the fable model override to the final adversarial review after executing-work's capacity reading.
+- class: rule
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:98
+- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13; its finishing pass 2026-10-13 wrote this entry.
+- verdict: keep
+- landed: 22dcfd78 section 2
+- reason: An uncleared section's lines have had no Fable read, so the final review supplies one. The capacity reading comes first because every Fable dispatch takes it.
+- passage: Where any section is uncleared, pass the fable model override after executing-work's capacity reading.

@@ -55,6 +55,9 @@ export type BeatSession = {
   isOwner: boolean;
   turnStartedAt: number | null;
   workdir: string;
+  // The instant the prompt cache is read as warm until, or null where no
+  // main request has been stamped; stampCommons writes it into the entry.
+  cacheWarmUntil: number | null;
   meterBeatInFlight: boolean;
   meterLastTurnId: string;
 };
@@ -133,11 +136,12 @@ export async function stampSupervisorFile(host: Pick<BeatHost, "writeFile">, ses
   await host.writeFile(path, JSON.stringify({ sessionId: sess.mySessionId, lastSeen: at, turnStartedAt: sess.turnStartedAt }));
 }
 
-// The session's own commons entry: its turn state and workdir stamped onto
-// it and its lastSeen refreshed, its claims left as they are. Creates the
-// entry with no claims when absent. One process writes this key, but the
-// claim writes in hooks/commons.ts and this stamp each read-modify-write it
-// across an await, ordered by the event loop rather than by a lock.
+// The session's own commons entry: its turn state, workdir and cache
+// warm-until instant stamped onto it and its lastSeen refreshed, its claims
+// left as they are. Creates the entry with no claims when absent. One process
+// writes this key, but the claim writes in hooks/commons.ts and this stamp
+// each read-modify-write it across an await, ordered by the event loop rather
+// than by a lock.
 async function stampCommons(store: CommonsStore, sess: BeatSession, at: number): Promise<void> {
   const key = commonsKey(sess.mySessionId);
   const raw = await store.get(key);
@@ -146,6 +150,7 @@ async function stampCommons(store: CommonsStore, sess: BeatSession, at: number):
     : { sessionId: sess.mySessionId, lastSeen: at, claims: [], turnStartedAt: null, workdir: "" };
   existing.turnStartedAt = sess.turnStartedAt;
   existing.workdir = sess.workdir;
+  existing.cacheWarmUntil = sess.cacheWarmUntil;
   existing.lastSeen = at;
   await store.set(key, existing);
 }

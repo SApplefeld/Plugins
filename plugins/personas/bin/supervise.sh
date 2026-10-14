@@ -250,7 +250,7 @@ SUPERVISOR_STOP_RETRY_BUDGET_S="${supervisorStopRetryBudgetS:-30}"
 CHANNEL_LOG_RETENTION_DAYS="${channelLogRetentionDays:-14}"
 # How many whole days a decision journal file under the home directory is kept
 # after its last write before the journal sweep removes it. Ninety days, which
-# covers the memory-value pass and the recall reading with room to spare.
+# covers the recall reading with room to spare.
 JOURNAL_RETENTION_DAYS="${journalRetentionDays:-90}"
 # v2 spec Section 0 item 3 Part B (operator decision, DISCUSSION.md Round
 # 136 addendum): the worker's own main thread - where PR #17's kill path
@@ -577,10 +577,9 @@ else
     exit 1
   fi
   export ARCHITECT_PERSONA
-  # One name for both seats builds the coordinator's role instruction and the
-  # architect's charter into a single priming write, each telling that session
-  # what the other denies: route design asks to the architect, and answer the
-  # coordinator by naming yourself. emit_settings_json refuses the pair on the
+  # One name for both seats builds the coordinator's and the architect's role
+  # instructions into a single priming write, one session told it holds two
+  # exclusive seats. emit_settings_json refuses the pair on the
   # other branch, and on this branch both names are read back from the same
   # provided file, so the pair is refused here too.
   if [ -n "$ARCHITECT_PERSONA" ] && [ "$ARCHITECT_PERSONA" = "$COORDINATOR_PERSONA" ]; then
@@ -590,7 +589,7 @@ else
   # The liaison's name travels the same two branches under the architect's
   # rule, through the same shared read: no default, the persona class, and
   # "default" refused, so a mis-set name is a refused launch named in the log.
-  # A name another seat holds builds two contradicting charters into one
+  # A name another seat holds builds two seats' role instructions into one
   # priming write, so either pair is refused here as emit_settings_json refuses
   # it on the other branch.
   if ! LIAISON_PERSONA="$(read_settings_liaison_persona "$SETTINGS_FILE" "$DEV_MODE" 2>>"$LOG")"; then

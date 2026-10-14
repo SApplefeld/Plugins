@@ -1623,7 +1623,9 @@ else {
 # --- config at ~\.claude\kit-memory-db.json and lands in one of six states
 # --- (install-embedding-server.ps1 defines them): no-config and remote read
 # --- INFO, since a machine with no config has nothing to embed into and a
-# --- remote url is the Memory database step's probe's to read; ready reads
+# --- remote url is the Memory database step's probe's to read; the no-config
+# --- state reads the task too, and names a still-registered one with the
+# --- command that removes it, which only the operator runs; ready reads
 # --- PASS with the server's working set and one call's time, or WARN where no
 # --- task is registered, since another process then owns the port and only
 # --- the operator knows whether to stop it; starting reads WARN saying to
@@ -1705,7 +1707,14 @@ $embeddingNeedsFix = ($embedding.State -eq "silent") -or
     ($embedding.State -eq "ready" -and $embedding.TaskRegistered -eq $true -and $embedding.BlockMissing)
 
 if ($embedding.State -eq "no-config") {
-    Report "INFO" "Embedding server" @("No client config at $embeddingConfigPath; this machine has no memory database configured, so it has nothing to embed into.")
+    $embeddingNoConfigLines = @("No client config at $embeddingConfigPath; this machine has no memory database configured, so it has nothing to embed into.")
+    # The task line is added only where a task is registered or its reading
+    # failed; a machine with no task keeps the one sentence.
+    if ($embedding.TaskRegistered -eq $true -or $null -ne $embedding.TaskReadError) { $embeddingNoConfigLines += $embeddingTaskLines }
+    if ($embedding.TaskRegistered -eq $true) {
+        $embeddingNoConfigLines += "The task starts the embedding server at boot with nothing to embed into. The doctor removes nothing and -Fix does not run this; remove it with: Unregister-ScheduledTask -TaskName $embeddingTaskName -TaskPath \ -Confirm:`$false"
+    }
+    Report "INFO" "Embedding server" $embeddingNoConfigLines
 }
 elseif ($embedding.State -eq "remote") {
     if ($null -ne $embedding.ConfigError) {

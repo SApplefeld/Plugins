@@ -15,8 +15,8 @@
 //
 // Five line kinds and no others: `call` records the request, `answer` records
 // what came back beside what Haiku said, `outcome` records a signal the
-// plugin produced later, `rendering` records what the recall shadow would
-// have put in front of a prompt, one line per prompt, and `event` records a
+// plugin produced later, `rendering` records what the recall chain put in
+// front of a prompt as its memory block, one line per prompt, and `event` records a
 // fact the plugin observed on its own, under a name from a closed set, with
 // no question behind it. Every field is present on every line of its kind,
 // and a value that does not apply is null, so a load can read a column per
@@ -148,11 +148,8 @@ export const SEGMENT_MAX = 64;
 // whether Jev answered or the call failed, so the journal sets Jev's answers
 // and its failures alike against what Haiku said.
 //
-// The next three belong to the three memory questions, each written as the
-// string true or false. An `applied_since_call` answers memory-value: whether
-// the record the call was about was present and stamped applied at or after
-// the call, as the daily pass reads it thirty to thirty-seven days later. A
-// `recall_acted` answers memory-recall: whether the session opened the record
+// The next two belong to the two memory questions, each written as the
+// string true or false. A `recall_acted` answers memory-recall: whether the session opened the record
 // or stamped it applied before its next prompt. A `nudge_acted` answers
 // memory-recognition: whether the session opened the record within three
 // tool calls.
@@ -166,16 +163,12 @@ export const SEGMENT_MAX = 64;
 // where it only answered, `none` where the nudge's submit failed or the turn
 // ended with no answer.
 //
-// The next two belong to the step watch's two questions. A
-// `turn_score_label` is the label the turn scorer gave the whole turn,
-// written at that turn's end against each step-drift call the turn made that
-// asked about the entry the scorer labelled. A turn the scorer left without a
-// label writes none. A `next_step_tools` is what the step after a step-effort
-// call did, written once against that call: the names of the tools that step
+// The next belongs to the step watch's question. A `next_step_tools` is what
+// the step after a step-effort call did, written once against that call: the names of the tools that step
 // called, joined with commas, `answer` where it called no tool, or `none`,
 // written at the turn's end, where no step came after it.
 //
-// The last belongs to the turn-score question. A `next_trigger` is what
+// The next belongs to the turn-score question. A `next_trigger` is what
 // opened the next turn in the same session, written at that turn's start
 // against the score call: `nudge`, `ask-answered` for an answer to an open ask
 // whether delivered as a record or typed by the operator, `delivery` for any
@@ -186,20 +179,34 @@ export const SEGMENT_MAX = 64;
 // turn ended with another turn still open, or saw one start during its end,
 // carries none.
 //
+// The last belongs to the stale-result question. A `rerun_within` is whether
+// the session called a tool result's tool again on the same input after a
+// live compaction pass dropped or cut that result, written once against the
+// call whose verdict was applied: `true` at a matching main-loop tool call
+// within thirty calls, `false` at the call after the thirtieth or at the
+// next compaction, whichever comes first.
+//
+// Older files also carry `applied_since_call` and `turn_score_label` lines,
+// the outcomes of memory-value and step-drift, two questions no site asks.
+// Neither is a kind here, so the writer refuses both, and a reader of the
+// journal meets them only as history.
+//
 // The union and the array carry the same members in the same order: a member
 // in the union alone compiles and is refused by writeOutcome at runtime.
 export type OutcomeKind =
   | "next_score" | "ask_marker" | "lead_blocked" | "chapter_within" | "next_speaker" | "continued_unprompted"
   | "record_delivered_within" | "next_prompt_kind" | "haiku_kind" | "haiku_score"
-  | "applied_since_call" | "recall_acted" | "nudge_acted"
+  | "recall_acted" | "nudge_acted"
   | "haiku_decision" | "acted"
-  | "turn_score_label" | "next_step_tools" | "next_trigger";
+  | "next_step_tools" | "next_trigger"
+  | "rerun_within";
 export const OUTCOME_KINDS: readonly OutcomeKind[] = [
   "next_score", "ask_marker", "lead_blocked", "chapter_within", "next_speaker", "continued_unprompted",
   "record_delivered_within", "next_prompt_kind", "haiku_kind", "haiku_score",
-  "applied_since_call", "recall_acted", "nudge_acted",
+  "recall_acted", "nudge_acted",
   "haiku_decision", "acted",
-  "turn_score_label", "next_step_tools", "next_trigger",
+  "next_step_tools", "next_trigger",
+  "rerun_within",
 ];
 
 // The value every `ask_marker` outcome line carries, whatever the caller passes.
@@ -289,15 +296,13 @@ function utcDay(at: number): string {
 
 // The folder one persona's journal files sit in under a home directory. The
 // persona passes through segment, as at journalOf below, since this is where
-// a persona name becomes part of a path. Exported for hooks/index.ts's daily
-// outcome pass, which lists this folder to read the calls it answers, so the
-// writer and that reader name one folder.
+// a persona name becomes part of a path.
 export function journalDirOf(home: string, persona: string): string {
   return joined(home, JOURNAL_DIR, segment(persona));
 }
 
-// The journal file names the daily outcome pass reads, told from anything else
-// in the folder: the day, a dash, a session segment, then either `.jsonl`
+// The journal file names the writer produces, told from anything else in the
+// folder: the day, a dash, a session segment, then either `.jsonl`
 // alone, the unnumbered name a journal from before the segments carries, or a
 // dot, a segment number of four or more digits and `.jsonl`. A session segment
 // never carries a dot, so the number splits off without ambiguity, and the
@@ -775,32 +780,31 @@ export async function writeOutcome(host: JournalHost, record: OutcomeRecord): Pr
 // with one prompt's text.
 export const RENDERING_TEXT_MAX = 2_000;
 
-// What the recall shadow would have shown for one prompt, written once per
-// prompt. `promptSeq` is the prompt's number in its session, which a skip
-// line names its predecessor by. `judged` names the records today's memq
-// judged read showed, in printed order, and `procedure` the records
-// usp_Recall returned, in its fused order, or null where the procedure was
-// absent, with `procedureAbsent` the reason. `shown` holds the records the
-// rendering holds, in rendering order, each with its rendered text's length
-// and whether its body was shown whole rather than as a pointer line.
-// `calls` maps each candidate's name to the stamp id of its memory-recall
-// call line, so a reader joins a rendering to its candidates' verdicts and
-// outcomes by stamp id rather than by time. `rendering` is the text the
-// prompt would have carried. A prompt whose shadow did not run writes the
-// same line with `skipped` naming why and `skippedFor` the prompt whose
-// chain was still collecting, or null where the reason names no prompt,
-// and its lists empty; it rides this kind because every reader of the
-// journal's kinds already passes a rendering line it does not read.
+// What the recall chain showed for one prompt, written once per prompt.
+// `promptSeq` is the prompt's number in its session, which a skip line names
+// its predecessor by. `procedure` names the records usp_Recall returned, in
+// its fused order, or null where the procedure was absent, with
+// `procedureAbsent` the reason. `shown` holds the records the rendering
+// holds, in rendering order, each with its rendered text's length and
+// whether its body was shown whole rather than as a pointer line. `calls`
+// maps each candidate's name to the stamp id of its memory-recall call line,
+// so a reader joins a rendering to its candidates' verdicts and outcomes by
+// stamp id rather than by time. `rendering` is the text the prompt carried
+// as its memory block. A prompt whose chain injected nothing for a reason
+// writes the same line with `skipped` naming why (`stand-down`, `chain-busy`,
+// `overtaken` or `budget`) and `skippedFor` the prompt whose chain was still
+// collecting, or null where the reason names no prompt, and its lists empty;
+// it rides this kind because every reader of the journal's kinds already
+// passes a rendering line it does not read.
 export type RenderingRecord = {
   persona: string;
   session: string;
   promptSeq: number;
   promptHead: string;
-  judged: readonly string[];
   procedure: readonly string[] | null;
   procedureAbsent: string | null;
-  // The named read's failure, memq's own sentence, where the procedure
-  // answered and the --name records could not be read; null otherwise.
+  // A column older files carry: the failure of the retired --name read,
+  // which no chain makes now, so the writer sets it null on every line.
   namedFailed: string | null;
   shown: ReadonlyArray<{ name: string; characters: number; whole: boolean }>;
   calls: Readonly<Record<string, string>>;
@@ -842,7 +846,6 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
     session: journalText(record.session),
     promptSeq: countOf(record.promptSeq),
     promptHead: journalText(record.promptHead),
-    judged: names(record.judged) ?? [],
     procedure: names(record.procedure),
     procedureAbsent: textOrNull(record.procedureAbsent),
     namedFailed: textOrNull(record.namedFailed),
@@ -879,12 +882,14 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
 // grant) and the failure's text. A
 // `recognition_nudge` is one record the memory-recognition nudge pointed at,
 // with the record's name, its tier, the trigger type (`anchor` for a file
-// anchor), the pattern as printable ASCII and the boundary it fired at.
+// anchor), the pattern as printable ASCII and the boundary it fired at. A
+// `recognition_withheld` is one such pointer the live memory-recognition
+// answer withheld, with the same fields.
 //
 // The union and the array carry the same members in the same order: a member
 // in the union alone compiles and is refused by writeEvent at runtime.
-export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge";
-export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge"];
+export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge" | "recognition_withheld";
+export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge", "recognition_withheld"];
 
 // A value an event's detail may carry: a string, a number, a boolean or null.
 export type EventDetailValue = string | number | boolean | null;

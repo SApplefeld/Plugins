@@ -27,6 +27,6 @@ BEGIN
 		 [Version]
 		,[Notes]		)
 	SELECT	 [Version]	= $(KitSchemaVersion)
-			,[Notes]	= N'The database recalls candidate records for a prompt: mem.usp_Recall ranks the caller''s visible records by a trigger match, full text and a vector pass, and returns each with a head of its body.'
+			,[Notes]	= N'A pair of records judged two different facts is recorded: mem.PairVerdict holds one row per judged pair, mem.usp_PutPairVerdict writes it, and mem.usp_ListPairVerdicts lists the verdicts whose two records stand live and unchanged since the judgment, so memq decay-scan withholds a judged pair until either record is rewritten or retired.'
 END
 GO

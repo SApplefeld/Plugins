@@ -18,13 +18,13 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    **No run of this session's is in flight during the round, so any contention left is somebody else's.** Where this repo has exactly one shared resource a reviewer's build or run would block on, and anything holds it, a sibling session's suite or build among them, carry the Dispatch Brief's workspace-constraint line into every reviewer brief. It names the process holding the resource and the operations it puts off-limits.
 
-   **A section's first review round runs every reviewer one tier up from the section's writer tier, Fable the ceiling.** Round 1 is the full roster: the code pair, the document pair, or both where the Audience rule above summons both, plus each advisory lens whose trigger holds. Every later round is one dispatch at the writer's tier, carrying what its round 1 brief carried: the prose-reviewer where the fix delta touched only deliverable documents the Audience rule names, else the adversarial-reviewer.
+   **A section's first review round runs every reviewer one tier up from the section's writer tier, capped at its lens's ceiling.** The ceiling is Opus for the blind, security and performance reviewers and the scope adjudicator, and Fable for every other lens. Round 1 is the full roster: the code pair, the document pair, or both where the Audience rule above summons both, plus each advisory lens whose trigger holds. Every later round is one dispatch at the writer tier, carrying what its round 1 brief carried: the prose-reviewer where the fix delta touched only deliverable documents the Audience rule names, else the adversarial-reviewer.
 
-   A Critical from a correctness lens that survives adjudication, in any round, re-raises the next round to round 1's roster, rows and tier, the tier re-read against the writer tier in force when it dispatches. A re-raised round that returns no such Critical hands the next round back to one lens. After a tier escalation the escalated tier is the writer tier. A later round over a haiku writer runs at sonnet, the reviewer floor.
+   A Critical from a correctness lens that survives adjudication, in any round, re-raises the next round to round 1's roster, rows and tier, the tier re-read against the writer tier in force when it dispatches. A re-raised round that returns no such Critical hands the next round back to one lens. After a tier escalation the escalated tier is the writer tier, as a dispatched fix writer's is over its delta.
 
-   An inline section's writer tier is the session's model, which built it, and an untiered section takes whatever tier built it. The reviewer's tier rides as an explicit model override on every dispatch, and a `fable` override takes step 1's capacity reading first. The one inheriting case is a Fable reviewer on a Fable-led session, which passes no override and takes no reading. A first-aim gate that could not be run at its fable tier here is confirmed per finishing-work's unavailability rule or measured by step 1's capacity reading, compensated per dispatch table row "Gate compensation", and recorded. A per-section reviewer below Fable whose tier could not run, confirmed the same way, re-aims one tier up, Fable the ceiling, one dispatch at a time with the ladder's one retry. A chain whose re-aim at fable is itself ruled out ends that dispatch's gate ungated. A re-aim, an ungated end and the document pair with its readers count go on the Chapter's review line in the template's form. A re-aim or an ungated end is neither pass nor failure for step 1's escalation ladder.
+   An inline section's writer tier is the session's model, which built it, and an untiered section takes whatever tier built it. The reviewer's tier rides as an explicit model override on every dispatch, save a Fable reviewer on a Fable-led session. A first-aim gate that could not be run at its fable tier here is confirmed per finishing-work's unavailability rule or measured by step 1's capacity reading, compensated per dispatch table row "Gate compensation", and recorded. A gate aimed at its Opus ceiling that could not run there, confirmed per finishing-work's unavailability rule, ends ungated with no lower compensation, recorded as finishing-work records an ungated end. A per-section reviewer below its lens's ceiling whose tier could not run, confirmed the same way, re-aims one tier up, one dispatch at a time with the ladder's one retry. A chain whose re-aim at that ceiling is itself ruled out ends that dispatch's gate ungated. A re-aim or an ungated end is neither pass nor failure for step 1's escalation ladder.
 
-   **Never pre-judge the review:** do not tell a reviewer what to flag, what to ignore, or how to rate a finding ("treat as Minor", "the plan chose this"). Let each reviewer surface it and adjudicate per responding-to-review. **A repo-wide defect class is neither pre-judging nor contamination.** The test is the blind-reviewer's own: would the sentence read identically for every diff in this repository? A standing property passes and may ride in any dispatch, the blind one included. A sentence that would change with the section is barred from the blind dispatch, and barred everywhere as pre-judging when it carries a rating.
+   **Never pre-judge the review:** do not tell a reviewer what to flag, what to ignore, or how to rate a finding ("treat as Minor", "the plan chose this"). Let each reviewer surface it and adjudicate per responding-to-review. **A repo-wide defect class is neither pre-judging nor contamination.** The test is the blind-reviewer's own property test above. A standing property passes and may ride in any dispatch, the blind one included. A sentence that would change with the section is barred from the blind dispatch, and barred everywhere as pre-judging when it carries a rating.
 
    **Bracket every round with a tree-state capture.** Run `git status --porcelain` before you dispatch and again when the round returns, and compare the two before acting on a single finding. Two deltas are no incident. One is in a concurrent section's declared files while a live dispatch for that section covers them, checked against the live dispatches the interim board entry records with what each was asked, where one has been written. The other is a write this session made under steps 4 through 8 or the interim-board ritual, its authorship established by reading the delta's content, never by its path. Any other delta is an incident: restore the tree, record the delta and the agent that produced it in the Chapter, treat that agent's findings as suspect pending a re-review against the restored tree, and jot a kaizen note.
 
@@ -59,16 +59,19 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    | The dispatch | Model | Effort | Route |
    |---|---|---|---|
-   | **Round 1 pair** over an opus or fable writer: `adversarial-reviewer`, `blind-reviewer`, `blind-reader`, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
-   | **Round 1 security** over an opus or fable writer, `security-reviewer` | fable | `medium` (frontmatter default) | Agent tool |
-   | **Round 1 performance** over an opus or fable writer, `performance-reviewer` | fable | `medium` (frontmatter default) | Agent tool |
-   | **Scope adjudicator**, in every shape step 4 and finishing-work dispatch it, `scope-adjudicator` | fable | `high` (frontmatter default) | Agent tool |
+   | **Round 1 pair** over an opus or fable writer: `adversarial-reviewer`, `blind-reader`, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
+   | **Round 1 blind** over an opus or fable writer, `blind-reviewer` | opus | `low` (frontmatter default) | Agent tool |
+   | **Round 1 security** over an opus or fable writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
+   | **Round 1 performance** over an opus or fable writer, `performance-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
+   | **Scope adjudicator**, in every shape step 4 and finishing-work dispatch it, `scope-adjudicator` | opus | `high` (frontmatter default) | Agent tool |
    | **Below-fable round 1**: reviewers one tier above a haiku- or sonnet-tier writer, whichever lens | sonnet or opus | `medium` | `Workflow` |
    | **Fable later round**: one lens over a fable writer, `adversarial-reviewer` or `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
    | **Below-fable later round**: one lens over a haiku, sonnet or opus writer | the writer's tier, sonnet the floor | `medium` | `Workflow` |
    | **Below-fable re-aim**: a per-section reviewer re-aimed after its tier was ruled out, landing below fable | one tier up | `medium` | `Workflow` |
    | **Fable re-aim**: the same, landing on fable | fable | `medium` | `Workflow` |
-   | **Finishing reviews** over the whole changeset | fable | `medium` | `Workflow`, per finishing-work |
+   | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | `Workflow`, per finishing-work |
+   | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | `Workflow`, per finishing-work |
+   | **Finishing advisory**: the security and performance lenses over the whole changeset | opus | `medium` | `Workflow`, per finishing-work |
    | **Gate compensation** for a Fable gate ruled out | opus | `high` | `Workflow`, per finishing-work |
    | **Haiku implementer**, `implementer-haiku` | haiku | `medium` (frontmatter default) | Agent tool |
    | **Sonnet implementer**, `implementer-sonnet` | sonnet | `medium` (frontmatter default) | Agent tool |
@@ -81,7 +84,7 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
    | **Other below-fable dispatch** without a frontmatter effort | opus or sonnet | `medium` | `Workflow` where used |
    | **Other fable dispatch**, the same at fable | fable | `medium` | `Workflow` where used |
 
-   An agent no row names runs at its frontmatter effort, or with none set, on the route its own skill gives it. The scope adjudicator's row is its charter's own pin, and the below-fable rows are the rule's own levels, neither compensation.
+   An agent no row names runs at its frontmatter effort, or with none set, on the route its own skill gives it.
 
    **Dispatching on the Workflow route.** On v2.1.205 the Agent tool takes a model override but has no effort parameter. So any dispatch whose row names `Workflow` as its route goes through `Workflow`'s `agent()`. Every such call fills this template:
 
@@ -106,5 +109,5 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    Where the Workflow route is unavailable in a session, the dispatch and any re-aim of it take the Agent tool at the row's own model override and the agent's frontmatter effort. The Chapter records the effort the review ran at beside its row's effort.
 
-   **Compensation belongs to gate-shaped work and never to plan-following work.** It reaches the consultant and the scope adjudicator, gates with no backstop, and never an implementer.
+   **Compensation belongs to gate-shaped work and never to plan-following work.** It reaches a Fable-aimed gate, the consultant among them, and never an implementer.
 

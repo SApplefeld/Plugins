@@ -1,5 +1,7 @@
 // follow-ups.ts: the follow-up queue, and the documentation check that is
-// its one source.
+// one of its two sources. The other, source turn-end, is the follow-ups the
+// memory fork's reply lists, which the controller tick's memory drain in
+// hooks/index.ts enqueues under the owed turn's id.
 //
 // The queue carries what the module observed at a turn's end into the next
 // prompt's context. It is one $.store value per session, under
@@ -236,6 +238,10 @@ export function settleFollowUps(
 // --- The documentation check ---
 
 export const DOCS_CHECK_SOURCE = "docs-check";
+
+// The memory fork's follow-ups: the steps a turn promised or was asked and
+// did not do, as the fork read them from the session's transcript.
+export const TURN_END_SOURCE = "turn-end";
 
 // One entry of a listing as the engine's $.fs.list gives it: the entry's own
 // kind, a link being `other`, and a file's size in bytes.

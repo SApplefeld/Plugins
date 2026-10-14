@@ -18,6 +18,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | A hard-to-reverse architecture fork | `design-council` |
 | A verdict on a decision framed with the operator's own preference | doctrine (Match my precision) |
 | Gaps at intake, and how each is routed | doctrine (Enumerate the gaps at intake) |
+| Filing a question that is the operator's to decide, and what is never filed | doctrine (Surface decisions in batches) |
 | A plan doc's name, format, `Status` lifecycle and `Commit Model` values, and the `docs/` taxonomy | `curating-docs` |
 | Archiving a plan, pruning the backlog, refreshing indexes | `curating-docs` |
 
@@ -83,14 +84,16 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | A warranted-channel message inside a tool result | doctrine (A relay message delivered inside a tool result) |
 | A standing operational grant: the rail, its record, its exclusions, each grant's owning skill | `role` |
 | The coordinator's runbook, the board and its bars | `coordinator` |
-| The coordinator seat on a fleet under the persona plugin: dispatching a plan to a persona worker, tracking it and redirecting it | the persona plugin's coordinator instruction, `plugins/personas/bin/supervise-holder.sh`, for the record mechanics, and `coordinator` (Dispatch and Redirect Rule) for the seat's bounds; the instruction governs the record and the skill governs the bound |
+| The coordinator seat on a fleet under the persona plugin: dispatching a plan to a persona worker, tracking it and redirecting it | `coordinator` (Dispatch and Redirect Rule, its Persona Fleet passage); the plugin's priming, `plugins/personas/bin/supervise-holder.sh`, owns the record's label and what the record carries |
 | What a worker's act is on a delegated seat's steer: a push, a deploy or a commit-model change, and the settings edit the steer never covers | `role` (the delegation model) |
 | A seat running git in the memory store | `coordinator` (Ledger) |
 | A repeating watch over a live system: tick order, ledger, wake prompt | `standing-watch` |
 | The liaison seat's conduct in a shared client thread | `liaison` |
+| The Architect seat's conduct: a design ask, the plan written for a worker and never run, the clone, branch and report rules | `architect` |
 | Parking a session at its next safe point on request | `executing-work` (the `WAITING:` stop shape) |
 | How a plan run is approved, and what holds it to completion | `executing-work` (the goal template) |
 | Dispatching this session's own subagents | doctrine (Dispatch is requested standing) |
+| Posting a plan document to the operator's thread when the plan is reported | doctrine (A plan travels one way) |
 
 ## Memory and Kit Prose
 

@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the runbook for the machine-coordinator seat, the single exclusive machine-wide role that stewards the seam between repositories and speaks as one voice toward the operator. It owns the moments that seat performs: opening or resuming a pass (arming the wake, reading the board at `coordinator/<machine>/board.md`, running the reconciliation loop), aggregating worker status from artifacts and deciding when a message round is warranted, funnelling a declared BLOCKED to the operator as a decision brief and naming the reply address, dispositioning kaizen inbox notes, arbitrating machine resources, dispatching plans across repos and tracking and redirecting the work in flight, refusing within-repo oversight and routing it to the expert seat, and running an operator-declared update window from declaration through drain, report, park, and cancel. It also owns the disclosure bars on everything the seat sends up, the path screens on stranger-supplied paths, and the dedup rules for briefs and stubs. A session loads it under load class `named-trigger`: its own frontmatter says to use it when taking or resuming the coordinator seat, running a coordination loop over live sessions, running a reconciliation pass, dispatching or redirecting cross-repo work, arbitrating machine-resource contention, or handing the seat to a successor.
 
-Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`skills.coordinator.c2.md`); lines 67-84 (`skills.coordinator.c3.md`); lines 85-103 (`skills.coordinator.c4.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (c1.C123 below, amended in place). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (c2.C065 amended in place, and c2.C066 retired with no successor here, its rule being the peer-sessions ledger's Y001). Redrafted on 2026-09-26 by section 5 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `642c1008` with its fix round at `4f01b65b`, so every live entry's `passage:` line quotes the text at `4f01b65b` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`B` entries below, with c1.C046, c2.C073, c2.C087, c3.C033, c4.C003 and c4.C015 retired by supersession, and c1.C004, c1.C092, c2.C012, c2.C075, c2.C077, c2.C086, c3.C087, c4.C061, c4.C063 and c4.C068 amended in place). Amended by the same plan's section 2 on 2026-10-02 (B016 to B019 below). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and the BLOCKED funnel's reading of `goal-blocked` events and goal state: c1.C057 to c1.C061, c1.C068 to c1.C072, c1.C076, c1.C126, c1.C127, c2.C003, c2.C075 and c2.C094 deleted with their passages; c1.C004, c1.C055, c1.C056, c1.C062, c1.C063, c1.C065, c1.C067, c1.C073, c1.C075, c1.C077, c1.C085, c1.C110, c1.C123, c2.C076, c3.C017, c3.C088, c4.C085, W001, W002, B001, B002 and B004 rewritten to their passages as they now read; and c1.C103's key reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the funnel's sentence on a blocker traced only through a worker's registry entry or plan doc; c4.C083's reason names the Blocked Peers rule). At the plan's finishing pass, B002 was re-synced to the seat's sentence pointing at executing-work's goal template, and c1.C033's key no longer names the events file. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C095 rewritten to its passage as it now reads, and the keys or reasons of c1.C048, c1.C049 and c1.C050 reworded where they stated the note files or an append as present. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel, so the board, the registry and the admin requests are this machine's own and nothing copies them off it: c3.C073 to c3.C082, c4.C002, c4.C007 to c4.C012 and c4.C093 deleted with their passages and subjects; c1.C005, c3.C001, c3.C002, c3.C004, c3.C005, c3.C014, c3.C072, c4.C001, c4.C013, c4.C060, c4.C077, c4.C078 and c4.C079 rewritten to their passages as they now read, with the keys of c1.C005, c3.C001, c3.C004, c3.C005, c4.C013, c4.C077, c4.C078 and c4.C079 reworded; the keys, reasons or provenance of c1.C010, c1.C021, c2.C011, c2.C012, c3.C003, c3.C006, c4.C001 and c4.C060, and the reasons of six entries naming a replicated or synced board, reworded where they stated the copying as present; and M001 added for the sentence naming the directory this machine's own.
+Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`skills.coordinator.c2.md`); lines 67-84 (`skills.coordinator.c3.md`); lines 85-103 (`skills.coordinator.c4.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (c1.C123 below, amended in place). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (c2.C065 amended in place, and c2.C066 retired with no successor here, its rule being the peer-sessions ledger's Y001). Redrafted on 2026-09-26 by section 5 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `642c1008` with its fix round at `4f01b65b`, so every live entry's `passage:` line quotes the text at `4f01b65b` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`B` entries below, with c1.C046, c2.C073, c2.C087, c3.C033, c4.C003 and c4.C015 retired by supersession, and c1.C004, c1.C092, c2.C012, c2.C075, c2.C077, c2.C086, c3.C087, c4.C061, c4.C063 and c4.C068 amended in place). Amended by the same plan's section 2 on 2026-10-02 (B016 to B019 below). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and the BLOCKED funnel's reading of `goal-blocked` events and goal state: c1.C057 to c1.C061, c1.C068 to c1.C072, c1.C076, c1.C126, c1.C127, c2.C003, c2.C075 and c2.C094 deleted with their passages; c1.C004, c1.C055, c1.C056, c1.C062, c1.C063, c1.C065, c1.C067, c1.C073, c1.C075, c1.C077, c1.C085, c1.C110, c1.C123, c2.C076, c3.C017, c3.C088, c4.C085, W001, W002, B001, B002 and B004 rewritten to their passages as they now read; and c1.C103's key reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the funnel's sentence on a blocker traced only through a worker's registry entry or plan doc; c4.C083's reason names the Blocked Peers rule). At the plan's finishing pass, B002 was re-synced to the seat's sentence pointing at executing-work's goal template, and c1.C033's key no longer names the events file. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C095 rewritten to its passage as it now reads, and the keys or reasons of c1.C048, c1.C049 and c1.C050 reworded where they stated the note files or an append as present. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel, so the board, the registry and the admin requests are this machine's own and nothing copies them off it: c3.C073 to c3.C082, c4.C002, c4.C007 to c4.C012 and c4.C093 deleted with their passages and subjects; c1.C005, c3.C001, c3.C002, c3.C004, c3.C005, c3.C014, c3.C072, c4.C001, c4.C013, c4.C060, c4.C077, c4.C078 and c4.C079 rewritten to their passages as they now read, with the keys of c1.C005, c3.C001, c3.C004, c3.C005, c4.C013, c4.C077, c4.C078 and c4.C079 reworded; the keys, reasons or provenance of c1.C010, c1.C021, c2.C011, c2.C012, c3.C003, c3.C006, c4.C001 and c4.C060, and the reasons of six entries naming a replicated or synced board, reworded where they stated the copying as present; and M001 added for the sentence naming the directory this machine's own. Amended by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13, which moved the persona fleet's dispatch conduct from the plugin's launch literal into the Dispatch and Redirect Rule (`O` entries below: O001 to O009, with B004 rewritten to its passage as it now reads and its key, provenance and reason reworded). Amended by the same plan's section 2 on 2026-10-13, which moved the coordinator persona's remaining seat conduct, the fleet tools, the notices, the design routing to the architect and the liaison's status answer, from the launch literal into the Persona Fleet passage (O011 to O016 below, with O009 rewritten to its passage as it now reads). Amended by `docs/plans/claude-kit_seat-skill-handles_spec_v1.md` section 1 on 2026-10-13, which named the standing-watch skill as the chassis and its Wake mechanics section as the wake's owner, the opt-in record by its name and the rail by its owner's (`Q` entries below: Q001 to Q005, superseding c1.C014, c1.C018, c2.C076 and c2.C088; B005's key reworded and its passage split around Q005's sentence and O010's two; c1.C004's key reworded to the rail's name).
 
 ### c1.C001
 - key: Load this skill when taking or resuming the machine-coordinator seat, running a coordination loop over live sessions, or coordinating the machine's sessions across repos.
@@ -47,7 +47,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - passage: That skill also defines what a role claim confers, legibility and nothing more, which seats exist, and where colliding claims route.
 
 ### c1.C004
-- key: Take the seat's authority from the dispatch-authority rail, the `## Dispatch Authorization` section whose format the curating-docs skill owns.
+- key: Take the seat's artifact-borne authority from the `## Dispatch Authorization` section whose format the curating-docs skill owns.
 - class: pointer
 - source: plugins/grimoire/skills/coordinator/SKILL.md:8
 - provenance: 33c0bed 2026-08-26, standing operator grants removed from the board after two rounds of caveats each opened a hole, so authority lives only on the artifact that carries it.
@@ -152,7 +152,8 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - class: mechanic
 - source: plugins/grimoire/skills/coordinator/SKILL.md:10
 - provenance: ebf5ee0 2026-08-28, cadence became event-driven wakes behind a 4-hour reconciliation heartbeat when the board moved into the store.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q001, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: The figure is pinned here by test/doctrine-parity.test.js (peer-sessions prices the status round against it, and the role-boundary marker's age bound equals it), so it cannot be pointed away (A012, A013).
 - passage: The seat is event-driven, waking on the BLOCKED funnel's messages and the operator's pings.
 - passage: A reconciliation timer every 4 hours is its heartbeat, the chassis's step-1 safety arm.
@@ -193,7 +194,8 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:14
 - provenance: ebf5ee0 2026-08-28, the cold start became a numbered tick order with the arm first because a crash mid-read leaves no timer behind.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q002, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: The role skill's step 3 cites this as "the coordinator skill's cold-start order held for every seat", so this is the owner of the seat's tick order, the override the ownership map names (A018 to A020).
 - passage: 1. **Arm the wake first**, before any read, on any restart, so a crash mid-read still leaves a timer.
 
@@ -1981,7 +1983,8 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - class: mechanic
 - source: plugins/grimoire/skills/coordinator/SKILL.md:75
 - provenance: 33c0bed 2026-08-26.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q003, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: A pointer at both owners the ownership map names for the section and the trace. No finding.
 - passage: It hands artifact-authorized plans per dispatch-authority: the curating-docs skill owns the authorization section, and the peer-sessions skill owns the receiver's trace.
 
@@ -2094,7 +2097,8 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - class: mechanic
 - source: plugins/grimoire/skills/coordinator/SKILL.md:65
 - provenance: 33c0bed 2026-08-26 installed the list; 8dd5b87 2026-08-26 generalized the first channel at this source so every seat's reading became correct. Amended by `docs/plans/claude-kit_liaison-seat_spec_v1.md` section 2 on 2026-09-30: the relay channel narrowed to an operator-class event, since a broker host may list participant accounts beside the operator's.
-- verdict: keep
+- verdict: retire
+- superseded-by: Q004, docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1
 - reason: Peer-sessions, the role skill and the standing-grants rail all name this skill as the list's owner. The park skill's "two" for a lift is a subset the window paragraph at line 33 states in the same words, not a conflict (A134). Parity at the landing: park:56 spells the lift's two channels as 'the operator's keyboard in this session's conversation or the account-allowlisted relay' where line 33 spells 'their keyboard in the seat's own session or the account-allowlisted relay thread', the same channels and not the same words (park's phrase occurs 0 times in this document).
 - passage: The warranted channels are a closed list of three: the operator's keyboard in the session's own conversation, an operator-class or unclassed event in the account-allowlisted relay thread, and an artifact-borne authorization per dispatch-authority.
 - flag: stale
@@ -3952,22 +3956,25 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - passage: **A redirect is a steer to work in flight: pause, reorder the queue, drop, or resume on the operator's yes, inside the plan's stated Goal.** Four things go to the operator instead: a steer past the Goal, a decision the plan does not cover, a steer that would take more than two rounds to land, and a worker's reading that drifts from the Goal.
 
 ### B004
-- key: Send a redirect by the worker's own channel: a persona worker's record under the persona plugin's coordinator instruction, which owns the record mechanics, the one-record-per-cycle and urgent-flag rules and the round count; a peer message under the chain for a kit session, one bounded line per redirect to the worker it steers.
+- key: Send a redirect by the worker's own channel: a persona worker's record, whose label and standing are the persona plugin's priming's and whose use is the Persona Fleet passage's; a peer message under the chain for a kit session, one bounded line per redirect to the worker it steers.
 - class: pointer
 - source: plugins/grimoire/skills/coordinator/SKILL.md:77
-- provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1.
-- verdict: keep
-- reason: The record mechanics are the plugin's own, and restating them here would be a second carrier. The peer-sessions skill leaves to a seat's runbook any further message its function needs, so this runbook prices the kit-session case itself, at one bounded line per redirect, since the status round's trigger, a stale `Status-updated:` stamp, cannot reach a worker the seat has just dispatched.
-- passage: For a persona worker the record mechanics, the one-record-per-cycle and urgent-flag rules and the counting of rounds are the persona plugin's coordinator instruction's own, and this runbook points at it. A kit session takes a redirect as scoped direction under the chain by peer message, one bounded line per redirect to the worker it steers, a price this runbook sets itself, since the peer-sessions skill leaves to a seat's runbook any further message its function needs.
+- provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1; rewritten by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13, which moved the dispatch conduct from the plugin's launch literal into this skill.
+- verdict: rewrite
+- landed: 9bbe851e section 1
+- reason: The label a record arrives under and the standing it carries are what the plugin writes at launch, so they stay the plugin's; what the seat does with a record is seat conduct and lives in this skill (O001 to O009), where a kit session running `/role Coordinator` with no plugin loaded can read it. The peer-sessions skill leaves to a seat's runbook any further message its function needs, so this runbook prices the kit-session case itself, at one bounded line per redirect, since the status round's trigger, a stale `Status-updated:` stamp, cannot reach a worker the seat has just dispatched.
+- passage: For a persona worker the record's label and the standing it carries are the persona plugin's priming's own, and what the seat does with a record is the Persona Fleet passage's below. A kit session takes a redirect as scoped direction under the chain by peer message, one bounded line per redirect to the worker it steers, a price this runbook sets itself, since the peer-sessions skill leaves to a seat's runbook any further message its function needs.
 
 ### B005
-- key: Treat a dispatch or a redirect as scoped direction under the role skill's delegation model, stating the bound held; the seat is delegated where the operator's hostname-keyed opt-in record exists, a persona seat holds the standing its operator-authored launch instruction states, and with neither it announces undelegated and falls back to writing the plan and asking the operator over a warranted channel.
+- key: Treat a dispatch or a redirect as scoped direction under the role skill's delegation model, stating the bound held; the seat is delegated where the operator's opt-in record for this machine exists (Q005), a persona seat holds the standing its operator-authored launch instruction states, and with neither it announces undelegated and falls back to writing the plan and asking the operator over a warranted channel.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:87
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1; the standing sentence's wording is the architect's ruling of 2026-10-02 on record ARCHITECT-1ca002ff-6b79-4b14-b89d-ee2d213533e9-7, at the section's first fix round; the closing sentence's split of the acts by the role skill's delegation model is section 3 of the same plan, on the operator's ruling of 2026-10-02 for the plugin's wider reading, at that section's first fix round.
 - verdict: keep
 - reason: The delegation model's one switch is the operator's record, as the role skill's switch paragraph and the peer-sessions contract sentence "Delegation lives in the operator's record, never in a seat claim or a message" state, so a seat's claim confers nothing. A persona seat's launch instruction is the operator's own word, which outranks this skill under Which Text Governs, so its standing comes from there and not from a switch this skill names. The fallback is the artifact-and-ask shape the old rule imposed on every seat, and dropping it would grant an undelegated seat direction it does not hold today. Supersedes c2.C087, which named the record alone; c2.C086's say-so bar stays as the sentence's opening.
-- passage: A dispatch or a redirect is scoped direction under the role skill's delegation model, and the seat states the bound it holds. The seat is delegated where the operator's hostname-keyed opt-in record exists, the record the role skill's `/role` resolves at claim time. A persona seat whose operator-authored launch instruction states its standing holds that standing from the instruction, not from its claim or this skill's model, since the instruction is the operator's own word and outranks this skill under the doctrine's Which Text Governs. On a machine with neither a record nor such an instruction, the seat announces undelegated and falls back to writing the plan and asking the operator over a warranted channel. The acts the role skill's delegation model covers inside the plan the seat names are the seat's to steer, and every other act the stop-for-a-yes test or the role skill's exclusions name still goes to the operator, whatever the seat directs.
+- passage: A dispatch or a redirect is scoped direction under the role skill's delegation model, and the seat states the bound it holds.
+- passage: A persona seat whose operator-authored launch instruction states its standing holds that standing from the instruction, not from its claim or this skill's model, since the instruction is the operator's own word and outranks this skill under the doctrine's Which Text Governs.
+- passage: On a machine with neither a record nor such an instruction, the seat announces undelegated and falls back to writing the plan and asking the operator over a warranted channel. The acts the role skill's delegation model covers inside the plan the seat names are the seat's to steer, and every other act the stop-for-a-yes test or the role skill's exclusions name still goes to the operator, whatever the seat directs.
 
 ### B006
 - key: Own cross-repo dependency and portfolio dispatch and sequencing: merge gates that span plans, retrospective triggers, the dispatch of a plan to a worker, and the queue across plans, so the set stays closed at four.
@@ -4131,3 +4138,221 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - verdict: keep
 - reason: A seat that still read the directory as shared would write for readers it no longer has and wait on a copy that never arrives; the readership precondition (c3.C004) and the warranted-channel rule (c4.C013) both rest on this scope.
 - passage: The board, the registry and the admin requests are this machine's own: nothing copies them off it, and no other machine reads them.
+
+### O001
+- key: Queue a plan to a persona worker as a record naming the plan's branch, its pull request and the plan document's path, at once from the architect seat's report.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:79
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal in `plugins/personas/bin/supervise-holder.sh`, under the plan's split rule.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: The worker checks the branch out when the entry becomes active, because the plan document exists on no other branch until the pull request merges, and the worker adds the entry with that path, so a record missing any of the three names a plan the worker cannot reach. The passage leads in bold as the sibling paragraphs of the Dispatch and Redirect Rule do.
+- passage: **On a fleet under the persona plugin, the seat queues a plan to a worker as a record naming the plan's branch, its pull request and the plan document's path, `docs/plans/` and the reported filename, at once from the architect seat's report.** The worker checks the branch out when the entry becomes active. The plan document exists on no other branch until the pull request merges. A record missing any of the three leaves the worker nothing to start.
+
+### O002
+- key: Read the route a queued plan takes and its one veto from the doctrine's plan-travel bullet, and hold no plan for the operator's yes.
+- class: pointer
+- source: plugins/grimoire/skills/coordinator/SKILL.md:79
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the doctrine's plan-travel bullet, which makes the operator's word on a channel the only veto and the queue wait on no approval.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: The route and its veto are the doctrine's and are pointed at by the bullet's lead rather than restated; what this passage adds is the reason a hold would be a defect rather than caution. The queue-at-once act itself is O001's bold lead.
+- passage: The route and its one veto are the doctrine's plan-travel bullet's, opening "A plan travels one way". A seat that held a plan for the operator's yes would hold it against that route.
+
+### O003
+- key: Report a queued plan to the operator on the seat's own channel alone, naming the plan's filename and, only where the architect's record says the file posted, the architect's channel as where to read it, and post nothing into a worker's channel.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:79
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal, whose report carries no file since the seat's directory holds no checkout to post one from.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: A worker's channel is its own report line to the operator, so a second voice on it reads as steering the operator never gave. The report names where the document can be read because the seat cannot post it itself.
+- passage: The seat reports a queued plan to the operator on its own channel alone, and posts nothing into a worker's channel. A worker's channel is the worker's own report line. A second voice on it reads as steering the operator never gave. The report names the plan's filename, and names the architect's channel as where to read the document only where the architect's record says the file posted.
+
+### O004
+- key: Mark no pull request ready from the coordinator seat, and read which pull requests the architect hands the operator from the architect skill.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:79
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal ("You mark nothing yourself").
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: The finishing pass marks a worker's pull request and the architect hands the operator its own, which the architect skill's Draft Pull Request passage names and this passage points at rather than restating, so a mark from this seat takes a step the plan-travel bullet and the hand-over rule give to another seat.
+- passage: The seat marks no pull request ready itself. A worker's finishing pass marks its own pull request, and the architect hands the operator its own, as the architect skill states. A mark from the seat would take a step neither the plan-travel bullet nor the hand-over rule gives it.
+
+### O005
+- key: Read a worker's state from files, the working directory `agentic_inbox` returns as `workdir` and the `.agentic-personas.json` there that holds its goal tree, never by asking in a record, and judge a worker by its entry's lead and its plan document rather than its round count.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:81
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal, which names `agentic_inbox`'s `workdir` and the `.agentic-personas.json` in it; the plugin README's "Plan entries: judged from the record", which states that a plan entry spends no rounds.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: The Reconciliation Pass's own sources, the roster, the registry and the board, hold no persona worker's goal tree, so the passage names the plugin's two files itself. They are what the worker's controller writes, so they are current when a worker's answer would cost it a turn. A plan entry's round count never moves, so a judgment on it reads nothing.
+- passage: The seat reads a worker's state from files, never by asking the worker in a record. The plugin's `agentic_inbox` returns the seat's records to that worker and the worker's working directory as `workdir`, and the `.agentic-personas.json` in that directory holds its goal tree. A worker's answer would cost it a turn, and the files are current without one. The seat judges a worker by its entry's lead and its plan document, never by the entry's round count. A plan entry never spends a round.
+
+### O006
+- key: Put every steer to one worker in one cycle in one record, and reserve the urgent flag for a real stop or redirect.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:83
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: A second record in a cycle reaches a worker still working the first, and a flag spent on routine steers stops marking the one that must interrupt.
+- passage: A steer is one record per worker per cycle, and the urgent flag is reserved for a real stop or redirect. A second record in a cycle reaches a worker still working the first. An urgent flag on a routine steer teaches the worker to read the flag as noise.
+
+### O007
+- key: Count a round against the worker's resolutions, so a steer two resolved records have not landed goes to the operator rather than into a third round.
+- class: mechanic
+- source: plugins/grimoire/skills/coordinator/SKILL.md:83
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal, where a round is one record and the worker's `agentic_resolve` on it; the redirect rule's two-round bound (B003).
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: A reply is not a resolution, so counting replies would end a round the worker still holds open. The bound itself is the redirect rule's, and these sentences state only what a round is.
+- passage: A round is counted against the worker's resolutions, one record and the worker's `agentic_resolve` on it. A steer that two resolved records have not landed is the two-round bound's third, and it goes to the operator as the redirect rule above states.
+
+### O008
+- key: Queue in three shapes, pending, paused and reprioritize; treat an entry that reads paused with a release condition in its reason as a queue mistake, dropped and added again as pending with the same plan path, several in their old order, never resumed; and read the plugin's "Queued work stays pending" passage for what each shape does to the tree.
+- class: pointer
+- source: plugins/grimoire/skills/coordinator/SKILL.md:85
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal, which names the mistake by its shape, a paused entry with a release condition in its reason, and the re-add in the old order; the plugin README's "Queued work stays pending", which states the shapes and the re-add.
+- verdict: keep
+- landed: 9bbe851e section 1
+- reason: The shapes are what the plugin does, so the README owns them and this passage names them with the one choice that is the seat's, the re-add over a resume, with its reason: a resume starts the entry at once and pauses whatever the worker had active. The mistake is named by its shape so the seat can tell it from the paused entry O009 protects.
+- passage: The queue takes three shapes. A pending entry starts by itself when the current one completes, a paused entry holds until someone acts and never starts from the queue, and a reprioritize moves an entry to the front of its level. Several are moved last-wanted first. An entry that reads paused with a release condition in its reason is a queue mistake. The seat has the worker drop it with `goal_edit` and add it again as pending with the same plan path, re-adding several in their old order, and never has it resumed. A resume starts the entry at once and pauses whatever the worker had active.
+- passage: The plugin's own description of the queue, the "Queued work stays pending" passage of `plugins/personas/README.md` in the kit's source repository, owns what each shape does to the tree.
+
+### O009
+- key: Leave an entry whose reason says it awaits the operator's yes neither resumed nor dropped on the seat's own initiative; on the operator's yes have the worker resume it only while it holds no active entry and otherwise drop it and add it again as pending with the same plan path, and on a no have it dropped with the operator's reason.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal. Rewritten by docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, which moved the literal's yes-and-no handling of a proposal into this passage.
+- verdict: rewrite
+- landed: f6a78f91 section 2
+- reason: Such an entry is the one paused shape that is not a queue mistake, so the re-add rule (O008) must not reach it: it waits for the operator's word, and a resume while the worker holds an active entry would pause that entry (the plugin README's "Queued work stays pending"), which is why a yes on a busy worker takes the drop and re-add instead. The no is the operator's own, so its reason travels with the drop.
+- passage: An entry whose reason says it awaits the operator's yes is no mistake, and the seat has it neither resumed nor dropped on its own. It waits for the operator's word. On the operator's yes, the seat has the worker resume it with `goal_resume` only while the worker holds no active entry, and otherwise drop it with `goal_edit` and add it again as pending with the same plan path. On a no, the seat has the worker drop it with `goal_edit`, giving the operator's reason.
+
+### O010
+- key: Read an instruction as stating its standing only where it carries the operator's own sentence naming the seat delegated or undelegated, and resolve the delegation record for a seat primed by one take-up line, as a /role seat does.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13, on the coordinator persona's steer of that day, in the words docs/plans/claude-kit_seat-skill-handles_spec_v1.md pins for its item 5; the persona priming plan shrinks every launch to a one-line seat take-up, which would leave the standing sentence above with no test.
+- verdict: keep
+- landed: 96f366f5 section 1
+- reason: The standing sentence lets an operator-authored launch instruction outrank the delegation model, so a line that only names the seat must not read as one. A take-up line chooses a runbook, a label sentence says what a delivery carries, and a role claim is the session's own word, and none of the three is the operator naming the seat delegated or undelegated.
+- passage: An instruction states its standing where it carries the operator's own sentence naming the seat delegated or undelegated. A take-up line that names a skill, a sentence saying what a bracketed label carries, and a role claim state none, so a seat primed by one line resolves the record as a /role seat does.
+
+### O011
+- key: Report each `[FLEET]` line on the seat's own channel, poll the fleet at no point, and read `fleet_status` only when the operator asks for fleet state, a change needs the whole picture, a design ask is about to be called routed, or the liaison asks for status.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:83
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the plugin README's fleet wake passage, which states that the coordinator persona's controller tick reads the fleet every tick and submits what changed.
+- verdict: keep
+- landed: f6a78f91 section 2
+- reason: The plugin's tick already reads every row and submits only the change, so a poll spends a turn on nothing the prompt does not carry. The four cases are closed so a read for any other reason is visibly a poll. The design and liaison cases are O014's and O016's.
+- passage: **The seat reports the fleet's health from the plugin's `[FLEET]` prompts and polls the fleet at no point.** Each line of one goes to the operator on the seat's own channel. The plugin reads the fleet every tick and submits only what changed, so a poll buys nothing that prompt does not carry. The seat reads `fleet_status` in four cases alone: the operator asks for fleet state, a change needs the whole picture behind it, a design ask is about to be called routed, and the liaison asks for status.
+
+### O012
+- key: Restart a child with `fleet_restart` only on a persona a fleet reading shows stuck or the operator names, end a running turn with `fleet_interrupt` only on a row showing `turnState` `in turn` with `turnRunningMs` far past its work's need or on a persona the operator names, break in by interrupting and then sending the record, and report every use to the operator.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:85
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the plugin README's `fleet_restart` and `fleet_interrupt` passages, which own what each tool does and who may call it.
+- verdict: keep
+- landed: f6a78f91 section 2
+- reason: What each tool does is its own description's and is pointed at rather than restated. The trigger reads the two fields `fleet_status` returns for a turn, and never the heartbeat, which republishes on its own cadence whatever the turn is doing. An interrupt is preferred because it keeps the conversation a restart loses. Either tool ends work the operator may be watching, so every use is reported.
+- passage: A stuck persona takes the fleet tools, whose own descriptions state what each does and who may call it. The seat restarts a persona's child with `fleet_restart` only where a fleet reading shows it stuck or the operator names it. It ends a running turn with `fleet_interrupt` only on a row `fleet_status` shows with `turnState` `in turn` and a `turnRunningMs` far past what its work needs, or on a persona the operator names. The interrupt keeps the persona's conversation, where a restart loses it. To break in with something critical, the seat interrupts the turn and then sends its record, which arrives as that persona's next prompt. Every use of either tool goes to the operator. Each one ends work the operator may be watching.
+
+### O013
+- key: Tell the operator of each `[FINDING]`, `[PROPOSAL]` or `[STARTED]` notice in one line, route none to a worker, keep a finding or proposal on the board as an open escalation until settled, note a started plan as an active effort, and open a record sent on a notice with its instruction.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:91
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the plugin's own refusal of a worker's act under a record that opens with a notice's lead, which the coordinator's launch literal states as a plugin fact.
+- verdict: keep
+- landed: f6a78f91 section 2
+- reason: A notice is a worker's report and no escalation to weigh, so it reaches the operator rather than another worker. The commitment categories are closed at six (B009), so a finding or proposal rides as the open escalation it is and a started plan as an active effort. A record that opened with a notice's lead would count as no coordinator turn and its act would be refused.
+- passage: **A worker's notice goes to the operator and to no other worker.** A notice is a record whose text after its label opens with `[FINDING]`, `[PROPOSAL]` or `[STARTED]`, and the seat neither weighs it nor routes it to a worker. The seat tells the operator in one line who the label names and what the notice says. A finding or a proposal rides the board as an open escalation until settled, by the operator's word alone where the fleet names no architect. A `[STARTED]` notice says that persona queued a plan to start on its own, and the seat notes it as an active effort. A record the seat sends on a notice opens with its instruction itself. A record opening with a notice's lead counts as no coordinator turn, so the worker's act under it would be refused.
+
+### O014
+- key: On a fleet that names an architect, send a record turning on a design decision to the architect's name from the seat's priming with its repository, tell the operator it was routed, and read `fleet_status` before calling it routed, reporting an architect row with no live claim as undelivered and a reply with no such row as unconfirmed.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the plugin README's inbox gates, under which `agentic_say` accepts a record to a persona no session holds.
+- verdict: keep
+- landed: f6a78f91 section 2
+- reason: Design is the architect seat's function, as within-repo oversight is the expert seat's under c1.C092's paragraph. The architect's name is launch-only, so it stays in the priming and the skill names where to read it. The plugin accepts the send whether or not anyone holds the persona, so routed is claimed only on a live claim, and a missing row is told apart from a row with no claim.
+- passage: **On a fleet that names an architect, a record that turns on a design decision goes to the architect seat.** The kinds are an operator design question, a worker escalation its plan does not cover, a spec, an assessment, a plan review, a consult, and the finishing judgment on a high-stakes effort. A design ask none of those names goes there as well. The seat sends it with `agentic_say` to the architect's name from the seat's priming, carrying the ask and its repository, and tells the operator it routed it. The plugin accepts that send whether or not a session holds the architect persona, so the seat reads `fleet_status` before it calls the ask routed. An architect row holding no live claim means no architect is live, and the seat tells the operator the ask is undelivered. A reply with no row for that persona leaves the delivery unconfirmed.
+
+### O015
+- key: Forward a finding or proposal to the architect lead first with no separate routed notice, and close it and its board note on the architect's answer with no outcome relayed, settling the note alone after the 24-hour sweep, relay any other answer to the escalating worker as a coordinator record or to the operator, and relay an answer the plugin refused to send direct in a record that quotes the worker's record id and disclaims a coordinator steer.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the architect skill's Answering Records passage, which sends a refused direct answer to this seat naming the worker's persona and quoting its record id.
+- verdict: keep
+- landed: a0e75459 section 2
+- reason: The architect's weighing keys on a notice's lead, so the lead travels first. A relayed answer is a coordinator record, which otherwise carries the operator's delegated authority, so the relay of an answer the worker asked for itself says it carries none. The notice's one line is already the operator's whole account of the routing, so a second line would double it. A record the sweep removed can no longer be resolved, so its board note settles on its own.
+- passage: A finding or a proposal goes to the architect unchanged, its lead first and its arrival label after it, since the architect's weighing keys on that lead. The seat closes it with `agentic_resolve` when the architect answers, settling its board note at the same time, and relays no outcome to its sender. Where the record has already left the store on the plugin's 24-hour sweep, the seat settles the board note alone. It sends no separate routed notice for a finding or a proposal, since the one line it already sent the operator is the whole of what routing tells them. The architect's answer to any other ask goes to the worker that escalated as a coordinator record, or to the operator on the seat's own channel where the ask was the operator's. An architect answer naming a worker's persona and quoting that worker's record id reaches the seat because the plugin refused its direct send to that worker. The seat relays it to that worker in a coordinator record that opens by saying it relays the architect's answer to the worker's own question, quotes that record id, and states that it carries no coordinator steer. A coordinator record otherwise carries the operator's delegated authority, and this one carries none.
+
+### O016
+- key: Answer the liaison seat's status ask with the fleet's state in plain words sent to the liaison's name from the seat's priming, reading `fleet_status` for it, and close the record.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the liaison skill, under which the liaison asks this seat for the fleet's state on behalf of the people in its thread.
+- verdict: keep
+- landed: f6a78f91 section 2
+- reason: A status ask is neither a finding to weigh nor an escalation to route, so it takes an answer. The liaison relays it to people outside the fleet, which is why it is written plainly. The liaison's name is launch-only and stays in the priming.
+- passage: A status ask from the liaison seat is answered rather than weighed or routed. The seat sends the fleet's state in plain words with `agentic_say` to the liaison's name from the seat's priming, reading `fleet_status` for it, and then closes the record with `agentic_resolve`. The liaison relays that answer to its thread, so it is written for people outside the fleet.
+
+### Q001
+- key: Run the seat event-driven on BLOCKED funnel messages and operator pings, with a reconciliation timer every 4 hours behind them as the step-1 safety arm of the standing-watch skill, which this runbook calls the chassis.
+- class: mechanic
+- source: plugins/grimoire/skills/coordinator/SKILL.md:12
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 3.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: c1.C014's reason holds: the figure is pinned by `test/doctrine-parity.test.js`, which reads "reconciliation timer" within a short window of "every 4 hours" and of "heartbeat", so the sentence keeps all three together. The standing-watch skill never calls itself the chassis, so the first use names the skill and every later use in this runbook reads as that skill.
+- proposed: The seat is event-driven, waking on the BLOCKED funnel's messages and the operator's pings.
+- proposed: A reconciliation timer every 4 hours is its heartbeat, the step-1 safety arm of the standing-watch skill, which this runbook calls the chassis.
+- passage: The seat is event-driven, waking on the BLOCKED funnel's messages and the operator's pings.
+- passage: A reconciliation timer every 4 hours is its heartbeat, the step-1 safety arm of the standing-watch skill, which this runbook calls the chassis.
+
+### Q002
+- key: Arm the wake first, as the standing-watch skill's Wake mechanics section states, before any read, on any restart.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:16
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 3.
+- verdict: rewrite
+- landed: 8bdc3a45 section 1
+- reason: c1.C018's reason holds: this is the cold-start order the role skill's step 3 cites. The standing-watch skill's Wake mechanics section owns how a wake is armed, so the step points there rather than leaving the verb unresolved; the Chassis paragraph's own sentence naming that section stands beside it.
+- proposed: 1. **Arm the wake first**, as the standing-watch skill's Wake mechanics section states, before any read, on any restart, so a crash mid-read still leaves a timer.
+- passage: 1. **Arm the wake first**, as the standing-watch skill's Wake mechanics section states, before any read, on any restart, so a crash mid-read still leaves a timer.
+
+### Q003
+- key: Hand artifact-authorized plans on their `## Dispatch Authorization` grant, the curating-docs skill owning that section and peer-sessions owning the receiver's trace.
+- class: mechanic
+- source: plugins/grimoire/skills/coordinator/SKILL.md:75
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 6.
+- verdict: rewrite
+- landed: 767ce835 fix round 2
+- reason: c2.C076's reason holds for the two owners. No skill defined "dispatch-authority". The Standing Grants rail is switched by one operator-tier record and extends no warranted channel, so an artifact grant, which has no record, is named by its owners rather than placed on the rail.
+- proposed: It hands artifact-authorized plans on their `## Dispatch Authorization` grant: the curating-docs skill owns that section, and the peer-sessions skill owns the receiver's trace.
+- passage: It hands artifact-authorized plans on their `## Dispatch Authorization` grant: the curating-docs skill owns that section, and the peer-sessions skill owns the receiver's trace.
+
+### Q004
+- key: Treat the warranted channels as a closed list of three: the operator's keyboard in the session's own conversation, an operator-class or unclassed event in the account-allowlisted relay thread, and a plan's traced `## Dispatch Authorization` grant.
+- class: mechanic
+- source: plugins/grimoire/skills/coordinator/SKILL.md:103
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 6.
+- verdict: rewrite
+- landed: 767ce835 fix round 2
+- reason: c2.C088's reason holds: the list and its three members are unchanged, and the third channel is named by its owners, as Q003 states.
+- proposed: The warranted channels are a closed list of three: the operator's keyboard in the session's own conversation, an operator-class or unclassed event in the account-allowlisted relay thread, and an artifact-borne authorization, a plan's `## Dispatch Authorization` grant traced as the peer-sessions skill states.
+- passage: The warranted channels are a closed list of three: the operator's keyboard in the session's own conversation, an operator-class or unclassed event in the account-allowlisted relay thread, and an artifact-borne authorization, a plan's `## Dispatch Authorization` grant traced as the peer-sessions skill states.
+
+### Q005
+- key: Read the seat as delegated where the operator's opt-in record for this machine, `<hostname>-standing-delegation-granted`, exists, the record the role skill's `/role` resolves at claim time, its name spelled as the role skill's switch paragraph states.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 1.
+- verdict: rewrite
+- landed: ad9bddf2 fix round 1
+- reason: B005's reason holds for the switch. The role skill's switch paragraph names the record, so a seat reading this runbook alone takes the same name rather than a description it would match by judgment, and the pointer at that paragraph gives it the spelling, the hostname lowercased. B005 keeps the paragraph's other claims, and O010 the standing test between them.
+- proposed: The seat is delegated where the operator's opt-in record for this machine, `<hostname>-standing-delegation-granted`, exists, the record the role skill's `/role` resolves at claim time. That name is spelled as the role skill's switch paragraph states.
+- passage: The seat is delegated where the operator's opt-in record for this machine, `<hostname>-standing-delegation-granted`, exists, the record the role skill's `/role` resolves at claim time. That name is spelled as the role skill's switch paragraph states.

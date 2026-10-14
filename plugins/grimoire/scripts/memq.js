@@ -14,7 +14,8 @@
 //   memq recent [--since <n>d|<n>h]
 //   memq unstamped [--since <n>d|<n>h]
 //   memq touch <name> --applied [--type|--type=<type>|--operator]
-//   memq anchor <name> <path>... [--operator]
+//   memq anchor <name> <path>... [--operator] [--prune-missing]
+//   memq anchor <name> --prune-missing [--operator]
 //   memq triggers <name> <type>:<pattern>... [--type|--type=<type>|--operator]
 //   memq triggers <name> [<type>:<pattern>...] --replace
 //                 [(--type|--type=<type>|--operator) --confirm-shared]
@@ -34,7 +35,7 @@
 //   memq forget <name> --confirm
 //   memq delete-type <type> <name> --confirm-shared
 //   memq delete-operator <name> --confirm-shared
-//   memq decay-scan
+//   memq decay-scan [--pairs <n|all>]
 //   memq decay-prune [--archive <name>]... [--archive-type <name>]...
 //                    [--archive-operator <name>]... [--confirm-shared]
 //   memq decay-done
@@ -359,14 +360,17 @@ const DECAY_STAMP_FILE = 'decay-stamp';
 const DECLARERS_SHOWN = 10;   // declaring-project names listed before the remainder is counted
 const PINNED_SHOWN = 10;      // pinned memories listed by decay-scan before the remainder is counted
 const DRIFT_SHOWN = 10;       // drifted memories listed by decay-scan before the remainder is counted
-// Pairs listed per tier by decay-scan before the remainder is counted. At the
-// block enumerations' value because it answers the same question they do, and it
-// is load-bearing here in a way it is not for them: a tier's pair count is
-// quadratic in its live records, so a tier holding a few hundred of them has
-// tens of thousands of candidate pairs, and an uncapped listing would put all of
-// them on a stream a model reads. The strongest scores are what the cap keeps,
-// since the block is read to pick a remedy and the remainder is counted so the
-// size of what went unlisted is still visible.
+// Pairs listed per tier by decay-scan before the remainder is counted, when the
+// call does not ask for more. At the block enumerations' value because it
+// answers the same question they do, and it is load-bearing here in a way it is
+// not for them: a tier's pair count is quadratic in its live records, so a tier
+// holding a few hundred of them has tens of thousands of candidate pairs, and an
+// unasked-for uncapped listing would put all of them on a stream a model reads.
+// The strongest scores are what the cap keeps, since the block is read to pick a
+// remedy and the remainder is counted so the size of what went unlisted is still
+// visible. `--pairs <n|all>` replaces the cap for one call, a session's own ask
+// to drain the backlog; the pairs found are already bounded by the nearest
+// neighbours asked per record, so holding them all stays cheap.
 const PAIRS_SHOWN = 10;
 // Anchor paths named on one drift line before the remainder is counted. Lower
 // than the block enumerations above for SUPERSEDED_SHOWN's reason: these ride
@@ -522,8 +526,8 @@ const SEMANTIC_SHOWN = 10;             // semantic hits displayed, after ranking
 // list is filtered to the model identity that produced it, so the new model's
 // rows are not ranked against the old model's until a re-embed pass has run.
 //
-// Measured through the host's own embedding endpoint on ten pairs written in the
-// register memq records use. Unrelated text ran 0.2622 to 0.4239, and related
+// Measured through the fleet host's BAAI/bge-m3 endpoint on ten pairs written in
+// the register memq records use. Unrelated text ran 0.2622 to 0.4239, and related
 // text 0.4616 to 0.7299. This value sits in the gap between the two, near the
 // bottom of it, because on the neighbours block the floor labels and never
 // gates: a floor set low costs a word on a line the author already reads, and
@@ -532,7 +536,12 @@ const SEMANTIC_SHOWN = 10;             // semantic hits displayed, after ranking
 // Ten pairs of one author's composition is a seed, not the store's own
 // distribution. It is retuned when a shared store holds enough published
 // records to read a real distribution off.
-const FLEET_NEIGHBOUR_FLOOR = 0.45;    // the same judgment on the configured embedding model, measured on its endpoint
+//
+// A machine serving its own BAAI/bge-m3-Q8_0 build through the doctor's loopback
+// install applies this same number unmeasured: no pair has been embedded on that
+// model. The measurement that checks it rides the backlog's item on the memory
+// store's invented constants.
+const FLEET_NEIGHBOUR_FLOOR = 0.45;    // the same judgment on the configured embedding model, measured on the fleet host's BAAI/bge-m3
 
 // The admission floor over the shared index: the similarity below which a row
 // is noise rather than an answer. The measurement above puts the host's
@@ -4291,6 +4300,37 @@ function anchorRootReal(root) {
 // walk of the same path. `rootWord` names the root in those words, the
 // project root unless a caller resolving against the store root says so.
 function anchorEntryState(rootReal, entry, meter, rootWord) {
+    const walked = anchorEntryWalk(rootReal, entry, rootWord);
+    if (walked.full === undefined) return walked;
+    const full = walked.full;
+    // The read is metered inside the hash, on the bytes it actually read, so
+    // a caller's budget counts the I/O this spent rather than a size some
+    // other moment's stat reported. Nothing about the cost reaches the row
+    // this returns: the row is about the anchor's state.
+    const current = blobSha(full, meter);
+    if (current === null) {
+        return {
+            current: null, state: 'unreadable',
+            // The hash answers null for several conditions and reports which
+            // it met to nobody, so this names them as the possibilities they
+            // are rather than asserting one: a file over the read cap, a file
+            // whose size moved while it was read, a permission or read
+            // failure, and a build of Node whose sha1 is refused outright.
+            reason: 'it could not be hashed: a file over ' + ANCHOR_READ_CAP
+                + ' bytes is past what an anchor reads, and a file that could not be'
+                + ' opened or read, one whose size changed while it was read, and a'
+                + ' Node built in FIPS mode all end here too'
+        };
+    }
+    return { current, state: current === entry.sha ? 'fresh' : 'changed', reason: null };
+}
+
+// The walk half of `anchorEntryState`, stopping short of the hash: the
+// answer row (`missing` or `unreadable`, with its words) where the walk
+// ends in one, and `{full}` for a path that reached a regular file. A caller
+// that only needs to know whether a file is there asks this and never reads
+// its bytes.
+function anchorEntryWalk(rootReal, entry, rootWord) {
     const rootName = typeof rootWord === 'string' ? rootWord : 'project root';
     const parts = entry.path.split('/');
     const full = path.join(rootReal, ...parts);
@@ -4344,26 +4384,7 @@ function anchorEntryState(rootReal, entry, meter, rootWord) {
             };
         }
     }
-    // The read is metered inside the hash, on the bytes it actually read, so
-    // a caller's budget counts the I/O this spent rather than a size some
-    // other moment's stat reported. Nothing about the cost reaches the row
-    // this returns: the row is about the anchor's state.
-    const current = blobSha(full, meter);
-    if (current === null) {
-        return {
-            current: null, state: 'unreadable',
-            // The hash answers null for several conditions and reports which
-            // it met to nobody, so this names them as the possibilities they
-            // are rather than asserting one: a file over the read cap, a file
-            // whose size moved while it was read, a permission or read
-            // failure, and a build of Node whose sha1 is refused outright.
-            reason: 'it could not be hashed: a file over ' + ANCHOR_READ_CAP
-                + ' bytes is past what an anchor reads, and a file that could not be'
-                + ' opened or read, one whose size changed while it was read, and a'
-                + ' Node built in FIPS mode all end here too'
-        };
-    }
-    return { current, state: current === entry.sha ? 'fresh' : 'changed', reason: null };
+    return { full };
 }
 
 // The state of each anchor in an already-parsed `anchors:` value, in the
@@ -5161,7 +5182,8 @@ function usage(problem) {
         + '       memq recent [--since <n>d|<n>h]\n'
         + '       memq unstamped [--since <n>d|<n>h]\n'
         + '       memq touch <name> --applied [--type|--type=<type>|--operator]\n'
-        + '       memq anchor <name> <path>... [--operator]\n'
+        + '       memq anchor <name> <path>... [--operator] [--prune-missing]\n'
+        + '       memq anchor <name> --prune-missing [--operator]\n'
         + '       memq triggers <name> <type>:<pattern>... [--type|--type=<type>|--operator]\n'
         + '       memq triggers <name> [<type>:<pattern>...] --replace\n'
         + '                     [(--type|--type=<type>|--operator) --confirm-shared]\n'
@@ -5181,7 +5203,9 @@ function usage(problem) {
         + '       memq forget <name> --confirm\n'
         + '       memq delete-type <type> <name> --confirm-shared\n'
         + '       memq delete-operator <name> --confirm-shared\n'
-        + '       memq decay-scan\n'
+        + '       memq decay-scan [--pairs <n|all>]\n'
+        + '       memq two-facts <a> <b> [--type|--type=<type>|--operator]\n'
+        + '                (records the pair as two facts; decay-scan withholds it while both stand unchanged)\n'
         + '       memq decay-prune [--archive <name>]... [--archive-type <name>]...\n'
         + '                        [--archive-operator <name>]... [--confirm-shared]\n'
         + '       memq decay-done\n'
@@ -6588,9 +6612,7 @@ async function cmdRecallCandidates(argv, options) {
 }
 
 // `memq applied <name>... [--type|--type=<type>|--operator]`: whether each
-// named record is live in one tier and when it was last stamped applied, for
-// the persona module's daily applied_since_call pass, which spawns this verb
-// and reads stdout.
+// named record is live in one tier and when it was last stamped applied.
 //
 // It prints one line per name, in the order asked, tab-separated: the name,
 // `present` or `absent`, then the record's lastApplied as ISO-8601 UTC, or
@@ -6694,6 +6716,108 @@ function cmdApplied(argv, options) {
     }
     process.stdout.write(read.answers.map((a) => a.name + '\t' + (a.present ? 'present' : 'absent')
         + '\t' + (a.lastApplied === null ? '-' : a.lastApplied) + '\n').join(''));
+}
+
+// `memq two-facts <a> <b> [--type|--type=<type>|--operator]`: record that two
+// records of one tier are two different facts, so `decay-scan` withholds the
+// pair while both stand unchanged and counts it on the tier's heading.
+//
+// The tier flags take applied's spellings and refusals: `--operator` the
+// operator tier, bare `--type` the project's declared type and `--type=<type>`
+// the type named, and no flag the project tier under projectKey(cwd), the key
+// decay-scan reads its verdicts under. The two names are record names in the
+// store's own grammar, and two spellings of one name are refused, since a
+// record is not two facts with itself.
+//
+// It writes one row through mem.usp_PutPairVerdict and changes no record, so
+// it takes no --confirm-shared. It prints one line on stdout where the verdict
+// was stored and exits 0. A name the tier holds no live record of, or holds
+// archived, is one stderr line and exit 1, nothing written. A host that does
+// not answer, a store root that is not this machine's own among them, is the
+// client's sentence on stderr and exit 1, and nothing is queued: the pair lists
+// again at the next scan.
+function cmdTwoFacts(argv, options) {
+    const opts = options || {};
+    const names = [];
+    let fromType = false;
+    let namedType = null;
+    let fromOperator = false;
+    for (const a of argv) {
+        if (a === '--type' || a.startsWith('--type=')) {
+            if (fromType) return usage('--type is given once, as --type or --type=<type>');
+            fromType = true;
+            if (a !== '--type') {
+                namedType = a.slice('--type='.length);
+                if (!isTypeName(namedType)) return usage(TYPE_NAME_RULE);
+            }
+        } else if (a === '--operator') {
+            if (fromOperator) return usage('--operator is given once');
+            fromOperator = true;
+        } else if (a.startsWith('--')) return usage('unknown option ' + sanitize(a, 40));
+        else names.push(a);
+    }
+    if (names.length !== 2) return usage('two-facts takes exactly two names and was given ' + names.length);
+    if (fromType && fromOperator) return usage('two-facts records one tier: give --type or --operator, not both');
+    for (const name of names) {
+        if (!isMemoryFilename(name + '.md')) {
+            return usage('name must be characters from [A-Za-z0-9_.-], at most '
+                + (MEMORY_FILE_CAP - 3) + ', and not the memory index');
+        }
+    }
+    if (names[0].toLowerCase() === names[1].toLowerCase()) return usage('two-facts takes two different names');
+    // applied's refusal of the named spelling under the engine's store
+    // signals, after the name gates and before anything is resolved.
+    if (namedType !== null && storeSignalsPresent()) {
+        return usage(namedTypeRefusedBySignals('a verdict there is recorded in a tier no project on this vector'
+            + ' opted into'));
+    }
+    // applied's guard, on applied's exclusions: the operator tier and a named
+    // type resolve no store from the working directory, and every other form
+    // would reach the synchronous walk under an unpinned network share. Here
+    // the store was not asked, so the exit is the not-answered one.
+    if (!fromOperator && namedType === null && pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
+        process.stderr.write('memq: this call\'s working directory names a network share, so its '
+            + 'project store was not resolved; nothing was read\n');
+        process.exitCode = 1;
+        return;
+    }
+    const cwd = process.cwd();
+    let tier;
+    let label;
+    let key = null;
+    let type = null;
+    if (fromOperator) {
+        tier = 'operator';
+        label = OPERATOR_LABEL;
+    } else if (fromType) {
+        type = namedType !== null ? namedType : projectType(cwd);
+        if (type === null) {
+            process.stderr.write(noDeclaredTypeText('--type'));
+            process.exitCode = 1;
+            return;
+        }
+        tier = 'type';
+        label = 'type:' + sanitize(type, TYPE_CAP);
+    } else {
+        tier = 'project';
+        label = 'project';
+        key = projectKey(cwd);
+    }
+    const sent = memoryDatabase.putPairVerdict(tier, key, type, names[0], names[1],
+        { config: opts.config, configPath: opts.configPath, deps: opts.deps });
+    if (!sent.ok) {
+        const detail = sent.cause === 'standDown' ? memoryDatabase.standDownText(sent) : sent.detail;
+        process.stderr.write('memq: ' + shownText(detail, DB_SYNC_REASON_CAP) + '\n');
+        process.exitCode = 1;
+        return;
+    }
+    if (sent.status !== 'stored') {
+        process.stderr.write('memq: two-facts not recorded: ' + sanitize(sent.name, NAME_CAP) + ' is '
+            + sent.status + ' in the ' + label + ' tier\n');
+        process.exitCode = 1;
+        return;
+    }
+    process.stdout.write('memq: two-facts ' + names[0] + ' ' + names[1] + ' recorded (' + label + ')\n');
 }
 
 // One displayed line per hit of the fenced cross-store channel, indented under
@@ -7831,9 +7955,12 @@ function indexSections(rows, key) {
 // The index for the working directory's key: from the host in one spawn, the
 // fetched rows written through to index.json, or from the snapshot with the
 // fallback line printed, as {source, key, rows, search, searchDetail,
-// server}. Null where the verb has nothing to read from, the reason printed
-// with exit 1: no database, a refusal, a host below the gate, or an outage
-// with no snapshot taken on this machine. `query` is the text to search by
+// server}, and from the host alone `archived` and `archivedDetail` where the
+// caller passed `archivedDays`: the archived rows the same spawn listed, or
+// null with the reason, and never written to the snapshot. Null where the
+// verb has nothing to read from, the reason printed with exit 1: no
+// database, a refusal, a host below the gate, or an outage with no snapshot
+// taken on this machine. `query` is the text to search by
 // meaning beside the index, or null; under the snapshot there is no vector,
 // so `search` is null and the rows alone answer. Under a store root that is
 // not the machine's own the index is empty, with source `redirected` and the
@@ -7847,7 +7974,8 @@ const SHARED_TIERS_UNREAD = 'project, type and operator tiers: not read, since t
 async function indexForVerb(cwd, query, options) {
     const opts = options || {};
     const key = projectKey(cwd);
-    const read = await memoryDatabase.readIndex(key, query, { config: opts.config, deps: opts.deps });
+    const read = await memoryDatabase.readIndex(key, query,
+        { config: opts.config, deps: opts.deps, archivedDays: opts.archivedDays });
     if (!read.ok && read.cause === 'standDown' && read.standDown === 'redirected') {
         reportHostUnread(read);
         return { source: 'redirected', key, rows: [], search: null, searchDetail: null, server: null };
@@ -7858,7 +7986,12 @@ async function indexForVerb(cwd, query, options) {
             process.stderr.write('memq: the snapshot index was not written (' + shownText(written.detail, 200)
                 + '), so an outage answers from the previous one\n');
         }
-        return { source: 'host', key, rows: read.rows, search: read.search, searchDetail: read.searchDetail, server: read.server };
+        const found = { source: 'host', key, rows: read.rows, search: read.search, searchDetail: read.searchDetail, server: read.server };
+        if (Number.isFinite(opts.archivedDays)) {
+            found.archived = Array.isArray(read.archived) ? read.archived : null;
+            found.archivedDetail = typeof read.archivedDetail === 'string' ? read.archivedDetail : null;
+        }
+        return found;
     }
     if (read.cause !== 'down' && read.cause !== 'unreachable') {
         reportHostUnread(read);
@@ -8793,7 +8926,8 @@ function byRecentThenName(a, b) {
 // carries and no other reader summarizes) to the one with the most (memory
 // records, which `find`, `recall`, and the session's own index all reach), so
 // the last printed is
-// the first cut. A cut surface keeps its newest lines and ends with a counted
+// the first cut. The archived records print after the memory records, so
+// that group is the first cut of all. A cut surface keeps its newest lines and ends with a counted
 // remainder naming the narrowing move, because a truncation the output does
 // not announce is a silent one, the failure shape this module refuses
 // everywhere. The coverage lines, the remainder lines, and the fence are the
@@ -8858,8 +8992,8 @@ function recentLabel(row) {
 // memq recent: everything the store recorded inside a time window, as one
 // bounded digest, for a session recap. Where `recall` answers what the store
 // holds, this answers what happened to it lately, so it groups by write
-// surface rather than by tier: records applied and read, and records added
-// or updated, each group opening with a coverage line
+// surface rather than by tier: records applied and read, records added
+// or updated, and records archived, each group opening with a coverage line
 // that states its count even at zero, because an idle surface is a stated
 // fact rather than a silent absence.
 //
@@ -8872,6 +9006,8 @@ function recentLabel(row) {
 //   applied  <name>  (project)  <age>
 //   memory records: <n> added or updated in the last <window>
 //   added|updated  <name>  (<tier>)  <age>
+//   archived records: <n> in the last <window>
+//   archived  <name>  (<tier>)  <age>
 //
 // Every tier of the store contributes: the project tier, the declared type
 // tier and the operator tier from the index rows, and, inside a run, that
@@ -8888,6 +9024,16 @@ function recentLabel(row) {
 // question the count serves is about the store, not about which tier
 // answered. A record's added or updated line keys on its row's update time,
 // labeled by recentLabel, and a pending record on its file's.
+//
+// The archived group is mem.usp_ListArchived's rows, asked in the same spawn
+// as the index and never written to the snapshot: one line per record
+// archived inside the window, keyed on the row's update time, which the
+// archive wrote. The procedure reads at most ARCHIVED_DAYS_MAX days, so a
+// longer window says on the coverage line that this group was cut to it. A
+// host below ARCHIVED_SCHEMA_VERSION answers the other groups, and this
+// group's coverage line names the installer in place of a count. A snapshot
+// holds no archived row, so a digest the snapshot answered says the group was
+// not read.
 //
 // recent is stamp-free, the `recall` and `find` posture: it reads the index
 // and the pending tier's file stats, never serves a body, so it
@@ -8914,8 +9060,9 @@ function recentLabel(row) {
 // An empty tier is a normal empty state, and finding nothing is an answer, so
 // only argument errors and an index nothing could serve exit nonzero. Under a
 // redirected store root the shared tiers' index is
-// not read, so the applied group's coverage line says so in place of a count
-// and the record group counts the pending tier alone.
+// not read, so the applied group's coverage line says so in place of a count,
+// the record group counts the pending tier alone, and the archived group's
+// line says it was not read.
 async function cmdRecent(argv, options) {
     const opts = options || {};
     let since = null;
@@ -8943,7 +9090,7 @@ async function cmdRecent(argv, options) {
     }
     const cwd = process.cwd();
     const memDir = projectMemoryDir(cwd);
-    const read = await indexForVerb(cwd, null, opts);
+    const read = await indexForVerb(cwd, null, { ...opts, archivedDays: window.ms / DAY_MS });
     if (read === null) return;
     const tiers = indexTiers(read.rows, cwd);
     const now = Date.now();
@@ -9027,10 +9174,47 @@ async function cmdRecent(argv, options) {
             narrow
         }
     ];
+    // Records archived inside the window, from the archived rows the index's
+    // spawn listed, each under the span of its tier so its line takes that
+    // tier's label and fence. A type row of a type this project does not
+    // declare is not this project's, as indexTiers reads the live ones.
+    const archivedCap = memoryDatabase.ARCHIVED_DAYS_MAX * DAY_MS;
+    const archivedFrom = now - Math.min(window.ms, archivedCap);
+    const archivedRows = [];
+    for (const row of Array.isArray(read.archived) ? read.archived : []) {
+        const span = row.tier === 'project' ? spans.find((t) => t.isProject)
+            : row.tier === 'operator' ? spans.find((t) => t.isOperator)
+                : row.typeName === tiers.declaredType ? spans.find((t) => t.isType) : undefined;
+        const ms = rowMs(row.updated);
+        if (span === undefined || ms === null || ms < archivedFrom) continue;
+        archivedRows.push({ name: row.name, tier: span, ms });
+    }
+    const archivedLines = archivedRows
+        .sort(byRecentThenName)
+        .map((r) => r.tier.indent + 'archived  ' + sanitize(r.name, NAME_CAP)
+            + '  ' + r.tier.label + '  ' + recallAgeColumn(r.ms, now));
+    let archivedCoverage;
+    if (read.source === 'redirected') {
+        archivedCoverage = 'archived records: not read, since this store root is not this machine\'s own';
+    } else if (read.source === 'snapshot') {
+        archivedCoverage = 'archived records: not read, since this digest came from the snapshot,'
+            + ' which holds no archived record';
+    } else if (!Array.isArray(read.archived)) {
+        archivedCoverage = 'archived records: not read, since ' + shownText(read.archivedDetail, DB_SYNC_REASON_CAP);
+    } else if (window.ms > archivedCap) {
+        archivedCoverage = 'archived records: ' + archivedLines.length + ' in the last ' + memoryDatabase.ARCHIVED_DAYS_MAX
+            + 'd, the most this group reads; the window asked was ' + window.label;
+    } else {
+        archivedCoverage = 'archived records: ' + archivedLines.length + ' in the last ' + window.label;
+    }
+    surfaces.push({ name: 'archived record', coverage: archivedCoverage, lines: archivedLines, narrow });
+
     const pinContributed = appliedRecords.some((r) => r.tier.isProject)
-        || recordRows.some((r) => r.tier.isProject);
-    const typeShown = appliedRecords.some((r) => r.tier.isType) || recordRows.some((r) => r.tier.isType);
-    const operatorShown = appliedRecords.some((r) => r.tier.isOperator) || recordRows.some((r) => r.tier.isOperator);
+        || recordRows.some((r) => r.tier.isProject) || archivedRows.some((r) => r.tier.isProject);
+    const typeShown = appliedRecords.some((r) => r.tier.isType) || recordRows.some((r) => r.tier.isType)
+        || archivedRows.some((r) => r.tier.isType);
+    const operatorShown = appliedRecords.some((r) => r.tier.isOperator) || recordRows.some((r) => r.tier.isOperator)
+        || archivedRows.some((r) => r.tier.isOperator);
     const fence = digestFenceLine(pinned !== null && pinContributed ? pinned : null,
         typeShown ? tiers.declaredType : null, operatorShown);
     process.stdout.write(recentDigest(surfaces, fence, RECENT_MAX_LINES).join('\n') + '\n');
@@ -9437,6 +9621,11 @@ function anchorPathSha(rootReal, given, rootWord) {
 // shape, which `anchorOperator` below states: a record whose `machine:` names
 // this host, with its paths resolved against the store root.
 //
+// `--prune-missing` drops every entry the record carries whose file is not
+// there under the root, and lets the verb run with no path. Missing is
+// `anchorEntryState`'s word and nothing else counts: a file that changed and
+// a path that could not be examined are both kept.
+//
 // Every path is judged and hashed before the lock is taken and before
 // anything at all is written, so one refusal leaves the record exactly as it
 // was. What the lock bounds is the record's rewrite and never the tree those
@@ -9447,6 +9636,7 @@ function cmdAnchor(argv, options) {
     const opts = options || {};
     let name = null;
     let toOperator = false;
+    let prune = false;
     const given = [];
     for (const a of argv) {
         // Both spellings of the type flag, because a caller who learned
@@ -9461,12 +9651,16 @@ function cmdAnchor(argv, options) {
                 + ' anchor to');
         }
         else if (a === '--operator') toOperator = true;
+        else if (a === '--prune-missing') prune = true;
         else if (a.startsWith('--')) return usage('unknown option ' + sanitize(a, 40));
         else if (name === null) name = a;
         else given.push(a);
     }
     if (name === null) return usage('anchor needs a <name>');
-    if (given.length === 0) return usage('anchor needs at least one <path> to anchor');
+    if (given.length === 0 && !prune) {
+        return usage('anchor needs at least one <path> to anchor, or --prune-missing to drop the'
+            + ' entries whose file is gone');
+    }
     // The store's own definition of a memory file decides what may be
     // anchored, so the index and any name that could leave the memory
     // directory are refused here exactly as they are everywhere else.
@@ -9477,7 +9671,7 @@ function cmdAnchor(argv, options) {
     }
     // The operator form reads no working directory, so it answers ahead of
     // the network-share hoist below, `touch`'s and `triggers`' asymmetry.
-    if (toOperator) return anchorOperator(name, file, given, opts);
+    if (toOperator) return anchorOperator(name, file, given, opts, prune);
 
     // This hoist sits ahead of projectKey(cwd): that call's own first
     // statement is projectSegment(cwd), which reaches worktreeMainRoot's
@@ -9552,7 +9746,8 @@ function cmdAnchor(argv, options) {
     // key: the host answers whether it holds the name, so no record file is
     // read.
     if (pendingHoldsRefusal(cwd, name, 'anchor')) return;
-    anchorThrough('project', { projectKey: projectKey(cwd) }, name, ' in the project tier', computed, '', opts);
+    anchorThrough('project', { projectKey: projectKey(cwd) }, name, ' in the project tier', computed, '', opts,
+        prune ? { rootReal, rootWord: 'project root' } : null);
 }
 
 // The record's own half of `anchor`: the paths this run hashed merged into the
@@ -9577,7 +9772,7 @@ function cmdAnchor(argv, options) {
 // two anchor calls on one record at one moment can lose one's entries;
 // re-running declares them again. The host answers refused with no
 // description for a name it no longer holds, the "no such memory" answer.
-function anchorThrough(tier, store, name, where, computed, tierNote, opts) {
+function anchorThrough(tier, store, name, where, computed, tierNote, opts, prune) {
     const shown = '\'' + sanitize(name, NAME_CAP) + '\'' + where;
     const read = memoryDatabase.readRecord({ tier, ...store, name }, { config: opts.config, deps: opts.deps });
     if (!read.ok) {
@@ -9600,7 +9795,39 @@ function anchorThrough(tier, store, name, where, computed, tierNote, opts) {
         const sha = at > 0 ? entry.slice(at + 1) : '';
         if (seen.has(fsKey(entryPath))) continue;
         seen.set(fsKey(entryPath), merged.length);
-        merged.push({ path: entryPath, sha, carried: true });
+        merged.push({ path: entryPath, sha, carried: true, text: entry });
+    }
+    // The prune runs over the carried entries alone, ahead of the merge. The
+    // list is the host row's, which a session that is not this one wrote, so
+    // it is held to what a reader reads before any entry is walked: more than
+    // ANCHOR_ENTRIES_MAX entries are refused whole, and an entry the reader's
+    // gate refuses (parseAnchors: the <path>@<40 hex> shape, the entry cap and
+    // the path grammar, plus the tier's `admits` rule on the store form) is
+    // kept without being walked, so what the walk reports is never an answer
+    // about a path the grammar bars. An entry goes only when the walk reads it
+    // `missing`: a changed file and an unreadable path both stay, since the
+    // walk is the one rule that tells a deleted file from a check that did not
+    // happen. The walk stops short of the hash, since presence is all this asks.
+    const dropped = [];
+    if (prune) {
+        if (merged.length > ANCHOR_ENTRIES_MAX) {
+            process.stderr.write('memq: ' + shown + ' carries ' + merged.length
+                + ' anchors and a reader reads ' + ANCHOR_ENTRIES_MAX + ', so the rest would go'
+                + ' unchecked and none was walked (nothing written)\n');
+            process.exitCode = 1;
+            return;
+        }
+        for (let i = merged.length - 1; i >= 0; i--) {
+            const one = parseAnchors(merged[i].text).items;
+            const gated = one.length !== 1 || one[0].path === null || one[0].path !== merged[i].path
+                || (typeof prune.admits === 'function' && !prune.admits(merged[i].path));
+            if (gated) continue;
+            if (anchorEntryWalk(prune.rootReal, merged[i], prune.rootWord).state !== 'missing') continue;
+            dropped.unshift(merged[i].path);
+            merged.splice(i, 1);
+        }
+        seen.clear();
+        merged.forEach((e, i) => seen.set(fsKey(e.path), i));
     }
     for (const entry of computed) {
         const key = fsKey(entry.path);
@@ -9620,39 +9847,61 @@ function anchorThrough(tier, store, name, where, computed, tierNote, opts) {
         process.exitCode = 1;
         return;
     }
-    noteArchivedRecord(read.record, shown);
-    const value = merged.map((e) => e.path + '@' + e.sha);
-    const answered = memoryDatabase.writeThrough(memoryDatabase.recordEntry({
+    // A carried entry is written back as the record held it, so an entry the
+    // reader's gate refuses keeps its exact text rather than a respelling.
+    const value = merged.map((e) => (e.carried ? e.text : e.path + '@' + e.sha));
+    // A prune that named no path and dropped none has nothing to say to the
+    // host, and a write would turn an absent column into an empty one.
+    const writes = !(prune && computed.length === 0 && dropped.length === 0);
+    if (writes) noteArchivedRecord(read.record, shown);
+    const answered = !writes ? null : memoryDatabase.writeThrough(memoryDatabase.recordEntry({
         tier, ...store, name, anchors: value, replace: true
     }), { config: opts.config, deps: opts.deps, queue: false, probed: read.schemaVersion });
-    if (answered.state === 'unreachable') {
+    if (writes && answered.state === 'unreachable') {
         reportMergeUnsent(answered, 're-run once it answers', 'run memq db-refresh to drain it, then re-run');
         return;
     }
-    if (reportUndelivered(answered, 'the anchors of ' + shown)) return;
-    if (answered.answer.status === 'refused') {
+    if (writes && reportUndelivered(answered, 'the anchors of ' + shown)) return;
+    if (writes && answered.answer.status === 'refused') {
         process.stderr.write('memq: the memory database holds no record named ' + shown
             + ', so nothing was anchored\n');
         process.exitCode = 1;
         return;
     }
-    // Printed as written. Every path on it passed the grammar, which bars the
-    // whitespace, the invisible characters and the quote a display gate exists
-    // to remove, and `sanitize` would strip the non-ASCII characters the
-    // grammar deliberately admits, naming a different file than the one
-    // anchored.
-    process.stdout.write('anchors: ' + value.join(', ') + '\n');
+    // Written as the entries stand, and printed through `anchorShown`. A path
+    // this run hashed passed the grammar, which bars the whitespace, the
+    // invisible characters and the quote a display gate exists to remove, so
+    // it prints as written, where `sanitize` would strip the non-ASCII
+    // characters the grammar deliberately admits and name a different file
+    // than the one anchored. A carried path was written by some other session
+    // and may fail the grammar, so it goes through the display rule.
+    process.stdout.write('anchors: '
+        + merged.map((e) => (e.carried ? anchorShown(e.path) + '@' + sanitize(e.sha, ANCHOR_ENTRY_CAP) : e.path + '@' + e.sha)).join(', ')
+        + '\n');
     // Which entries this run actually hashed, on stderr, where this file puts
     // a fact about a result rather than the result. The line on stdout reads
     // as one statement about the present, and it is not: an entry carried
     // over from the record was hashed whenever it was last anchored, and this
     // run says nothing about whether that file still holds those bytes.
-    const carried = merged.filter((e) => e.carried).map((e) => e.path);
-    process.stderr.write('memq: hashed now: ' + computed.map((e) => e.path).join(', ')
+    const carried = merged.filter((e) => e.carried).map((e) => anchorShown(e.path));
+    process.stderr.write('memq: hashed now: ' + (computed.length > 0 ? computed.map((e) => e.path).join(', ') : 'nothing')
         + (carried.length > 0
             ? '; carried from the record at the hash it already held: ' + carried.join(', ')
             : '')
         + tierNote + '\n');
+    if (prune) {
+        process.stderr.write(dropped.length > 0
+            ? 'memq: dropped from the record, nothing is at the path: ' + dropped.map(anchorShown).join(', ') + '\n'
+            : 'memq: dropped nothing: no entry the record carried is missing'
+                + (writes ? '' : ', so nothing was written') + '\n');
+    }
+}
+
+// A carried anchor path as it prints. The record's list is another session's
+// text, so a path the grammar refuses prints through `sanitize` and one it
+// admits prints as written.
+function anchorShown(entryPath) {
+    return isAnchorPath(entryPath) ? entryPath : sanitize(entryPath, ANCHOR_PATH_CAP);
 }
 
 // Every path judged against one root and hashed, as the entries to merge, or
@@ -9720,7 +9969,7 @@ function anchorComputed(rootReal, given, rootWord, admits) {
 // No lock is taken, since the write goes to the memory database, and no
 // working directory is read, so neither the network-share hoist nor a store
 // pin reaches this form.
-function anchorOperator(name, file, given, opts) {
+function anchorOperator(name, file, given, opts, prune) {
     const where = ' in the operator tier';
     const shown = '\'' + sanitize(name, NAME_CAP) + '\'' + where;
     // The machine rule, read from the record's own row in the memory database
@@ -9761,7 +10010,8 @@ function anchorOperator(name, file, given, opts) {
     // judges before the path is walked or hashed.
     const computed = anchorComputed(rootReal, given, 'store root', isStoreAnchorPath);
     if (computed === null) return;
-    anchorThrough('operator', {}, name, where, computed, ' (operator tier)', opts);
+    anchorThrough('operator', {}, name, where, computed, ' (operator tier)', opts,
+        prune ? { rootReal, rootWord: 'store root', admits: isStoreAnchorPath } : null);
 }
 
 // memq triggers <name> <entry>...: record the deterministic recognition
@@ -10738,7 +10988,7 @@ function neighbourPairsHeading(label, note) {
 
 // Strongest first, then the two names. The order is total over the pairs of one
 // tier, since no two of them carry the same two names, which is what lets the
-// listing below keep the strongest PAIRS_SHOWN as it goes and print the same
+// listing below keep the strongest `shown` as it goes and print the same
 // lines a sorted whole list would have sliced.
 function pairOrder(x, y) {
     return y.score - x.score
@@ -10746,15 +10996,61 @@ function pairOrder(x, y) {
         || (x.b.name < y.b.name ? -1 : x.b.name > y.b.name ? 1 : 0);
 }
 
+// The key a two-facts verdict and a listed pair are matched by: the two names
+// lowercased, in JavaScript's ordinal order, joined by a newline, which no
+// record name holds. The server resolves a verdict's names under the
+// database's case-insensitive collation and keeps them as the caller typed
+// them, so the key folds case as that collation does for the ASCII a record
+// name is limited to. Both sides order here rather than trusting the other's
+// order, since the collation's order can disagree with an ordinal compare.
+function pairKey(x, y) {
+    const a = x.toLowerCase();
+    const b = y.toLowerCase();
+    return a < b ? a + '\n' + b : b + '\n' + a;
+}
+
+// The two-facts verdicts the pairs block withholds, read once per scan through
+// the client's version-gated read, as a Map from tier (project, type,
+// operator) to a Set of pairKey keys. `asked` is {projectKey, typeName}, the
+// scan's own key and declared type, and a type verdict counts only for that
+// type, its segment compared without case as the server matched it. A read
+// that does not answer, a host below the verdict gate among them, prints one
+// line and answers empty sets, so every pair lists: a verdict that could not
+// be read never costs the scan its pairs. Where the host holds no verdict,
+// nothing is said.
+function judgedPairSets(asked, options) {
+    const sets = new Map([['project', new Set()], ['type', new Set()], ['operator', new Set()]]);
+    let read;
+    try {
+        read = memoryDatabase.listPairVerdicts(asked.projectKey, asked.typeName, options);
+    } catch (err) {
+        read = { ok: false, cause: 'refused', detail: failureText(err) };
+    }
+    if (!read.ok) {
+        const detail = typeof read.detail === 'string' && read.detail !== '' ? read.detail : String(read.cause);
+        process.stderr.write('memq: two-facts verdicts not read (' + shownText(detail, FLEET_REASON_CAP)
+            + '); judged pairs are listed\n');
+        return sets;
+    }
+    for (const v of read.pairs) {
+        if (v.tier === 'type' && (typeof asked.typeName !== 'string'
+            || v.segment.toLowerCase() !== asked.typeName.toLowerCase())) continue;
+        sets.get(v.tier).add(pairKey(v.nameA, v.nameB));
+    }
+    return sets;
+}
+
 // One tier's reading: its heading, the pair lines under it, and the counted
 // remainder. Nothing here loads or ranks anything of its own.
 //
-// Only the strongest PAIRS_SHOWN pairs are held, with a running count of every
-// pair above the floor beside them. The cap is what a reader sees either way,
-// and the tier is the one place in this pass where the candidate set grows with
-// the square of the records: holding every qualifying pair to sort it would
-// allocate tens of thousands of objects for a tier of a few hundred records, to
-// print the PAIRS_SHOWN of them a reader gets.
+// Only the strongest `shown` pairs are held, with a running count of every
+// pair above the floor beside them. `shown` is PAIRS_SHOWN unless the call asked
+// for another count, or for Infinity, which keeps them all. The cap is what a
+// reader sees either way, and the tier is the one place in this pass where the
+// candidate set grows with the square of the records: holding every qualifying
+// pair to sort it would allocate tens of thousands of objects for a tier of a
+// few hundred records, to print the PAIRS_SHOWN of them a reader gets by
+// default.
 //
 // `t.memories` is the tier's index rows, and they are the whole of what this
 // reads: the record set, each record's `machine:` scope and its pin all come
@@ -10769,7 +11065,15 @@ function pairOrder(x, y) {
 // The nomination this block makes is acted on by superseding or deleting one of
 // the pair, which is why a floor set below a model's noise costs a record rather
 // than a word.
-function printTierPairs(t, source) {
+//
+// `judgedPairs` is the tier's two-facts verdicts as a Set of pairKey keys, from
+// judgedPairSets. A pair a verdict names is withheld after the floor and scope
+// checks and counted on the heading, so `found` still counts every pair above
+// the floor and the listing, `--pairs all` included, holds unjudged pairs only.
+// A tier whose every pair is judged prints its heading and no pair line, since
+// pairs were found.
+function printTierPairs(t, source, shown, judgedPairs) {
+    const verdicts = judgedPairs instanceof Set ? judgedPairs : new Set();
     const held = [];
     let unchecked = 0;
     for (const mem of t.memories) {
@@ -10795,6 +11099,7 @@ function printTierPairs(t, source) {
     }
     const top = [];
     let found = 0;
+    let judged = 0;
     for (let i = 0; i < held.length; i++) {
         for (let j = i + 1; j < held.length; j++) {
             const a = held[i];
@@ -10817,14 +11122,25 @@ function printTierPairs(t, source) {
             // record scoped to no box, which contradicts no scoped record.
             if (scopeB !== null && foreignMachine(scopeA, scopeB)) continue;
             found += 1;
+            if (verdicts.has(pairKey(a.name, b.name))) {
+                judged += 1;
+                continue;
+            }
             const pair = { a, b, score, scope: scopeA === null ? scopeB : scopeA };
-            if (top.length === PAIRS_SHOWN && pairOrder(pair, top[PAIRS_SHOWN - 1]) >= 0) continue;
+            // Every pair is listed, so every pair is held and sorted once below,
+            // rather than walked into place one at a time.
+            if (shown === Infinity) {
+                top.push(pair);
+                continue;
+            }
+            if (top.length === shown && pairOrder(pair, top[shown - 1]) >= 0) continue;
             let at = top.length;
             while (at > 0 && pairOrder(pair, top[at - 1]) < 0) at -= 1;
             top.splice(at, 0, pair);
-            if (top.length > PAIRS_SHOWN) top.pop();
+            if (top.length > shown) top.pop();
         }
     }
+    if (shown === Infinity) top.sort(pairOrder);
     const records = held.length + unchecked;
     // The unchecked count with the tier's own total behind it, in one wording
     // whatever the pair count is: a count with no total cannot be told from a
@@ -10859,8 +11175,13 @@ function printTierPairs(t, source) {
     // it, with nothing on the stream to say which describes the tier. Composed,
     // the write either lands whole or does not land, so what a throw costs is the
     // tier and never the tier's account of itself.
+    //
+    // The judged count follows the pair count, because it is a part of it: a
+    // reader told only how many pairs exist would read a short listing as a
+    // cut, and one told nothing would never learn the verdicts are holding.
     let out = neighbourPairsHeading(t.label,
         found + ' pair' + (found === 1 ? '' : 's')
+        + (judged > 0 ? ', ' + judged + ' judged two facts and not listed' : '')
         + (unchecked > 0 ? ', ' + notChecked : ''));
     // The pin is the row's own column, the one the candidate walk above
     // classifies the same record by, so the two blocks cannot disagree about
@@ -10881,9 +11202,11 @@ function printTierPairs(t, source) {
     // The remainder counted in the pinned and drift blocks' shape, the tail
     // every enumeration on this stream ends in: the strongest scores are above
     // and what a reader loses is the weakest of a list they already know the
-    // length of.
-    if (found > top.length) {
-        out += 'memq: pair  ... and ' + (found - top.length) + ' more\n';
+    // length of. The judged pairs are not in the remainder: the heading
+    // counts them, and no `--pairs` count would list them.
+    const listable = found - judged;
+    if (listable > top.length) {
+        out += 'memq: pair  ... and ' + (listable - top.length) + ' more\n';
     }
     process.stderr.write(out);
 }
@@ -10951,12 +11274,13 @@ function printTierPairs(t, source) {
 // the same cap the pinned and drift lines hold theirs to.
 //
 // The heading leads with the pair count and the listing tails off after
-// PAIRS_SHOWN with a counted remainder, the rule every other enumeration on this
-// stream follows. It matters more here than anywhere else in the pass, because a
-// tier's pairs grow with the square of its live records rather than with the
-// records themselves: an operator tier of a few hundred records offers tens of
-// thousands of candidate pairs, and the count on the heading is what tells a
-// reader which of those two magnitudes the block they are reading came from.
+// PAIRS_SHOWN, or after the `--pairs` count where the call gave one, with a
+// counted remainder, the rule every other enumeration on this stream follows. It
+// matters more here than anywhere else in the pass, because a tier's pairs grow
+// with the square of its live records rather than with the records themselves:
+// an operator tier of a few hundred records offers tens of thousands of
+// candidate pairs, and the count on the heading is what tells a reader which of
+// those two magnitudes the block they are reading came from.
 
 // The shared index as a pair source: each record's nearest neighbours as the
 // host ranked them, read as a similarity between two of this tier's records.
@@ -11005,10 +11329,10 @@ const FLEET_PAIRS_NEAREST = 10;
 // embedded in one call where it fits, and the nearest scans in as few spawns as
 // the payloads allow. Where that read does not answer, the block is one line
 // saying no pairs are listed and why, and nothing else.
-async function fleetPairsBlock(tiers, options) {
+async function fleetPairsBlock(tiers, options, shown = PAIRS_SHOWN) {
     const records = tiers.reduce((n, t) => n + t.memories.length, 0);
     if (records === 0) {
-        for (const t of tiers) printTierPairs(t, fleetPairSource(new Map()));
+        for (const t of tiers) printTierPairs(t, fleetPairSource(new Map()), shown);
         return;
     }
     // Each record is queried by the database client's text composition, the
@@ -11027,6 +11351,15 @@ async function fleetPairsBlock(tiers, options) {
             + answered.reason + ')\n');
         return;
     }
+    // The two-facts verdicts, read once and only once the host has ranked the
+    // pairs: a block that lists nothing has no pair to withhold, and a read
+    // spent there would add a spawn and a line about verdicts to a block that
+    // already said why it is empty. A caller naming no `verdicts` withholds
+    // nothing.
+    const opts = options || {};
+    const judged = opts.verdicts
+        ? judgedPairSets(opts.verdicts, { config: opts.config, configPath: opts.configPath, deps: opts.deps })
+        : null;
     // The age clause the search block's own note carries, for the same reason:
     // the host ranks each record as its sandbox last published it, so a pair
     // this block nominates is a pair between two published states rather than
@@ -11068,7 +11401,8 @@ async function fleetPairsBlock(tiers, options) {
                 // tier counts it unchecked.
                 if (near.has(key)) scores.set(key, near);
             }
-            printTierPairs(span.tier, fleetPairSource(scores));
+            printTierPairs(span.tier, fleetPairSource(scores), shown,
+                judged === null ? null : judged.get(span.tier.tier));
         } catch (err) {
             process.stderr.write(neighbourPairsHeading(span.tier.label,
                 'not checked (the check failed: ' + failureText(err) + ')'));
@@ -11076,7 +11410,7 @@ async function fleetPairsBlock(tiers, options) {
     }
 }
 
-async function neighbourPairsBlock(tiers, options) {
+async function neighbourPairsBlock(tiers, options, shown) {
     const standDown = pinnedRootStandDown();
     if (standDown !== null) {
         for (const t of tiers) {
@@ -11084,7 +11418,7 @@ async function neighbourPairsBlock(tiers, options) {
         }
         return;
     }
-    await fleetPairsBlock(tiers, options);
+    await fleetPairsBlock(tiers, options, shown);
 }
 
 // The block, guarded whole. The read answers every expected host and embedder
@@ -11098,18 +11432,47 @@ async function neighbourPairsBlock(tiers, options) {
 // tier's own printing is caught there and named with that tier, so a line here
 // is an answer about the block rather than about a tier that already printed a
 // reading.
-async function printNeighbourPairsBlock(tiers, options) {
+async function printNeighbourPairsBlock(tiers, options, shown) {
     try {
-        await neighbourPairsBlock(tiers, options);
+        await neighbourPairsBlock(tiers, options, shown);
     } catch (err) {
         process.stderr.write('memq: neighbour pairs not checked (the check failed: '
             + failureText(err) + ')\n');
     }
 }
 
+// A --pairs value as the count of pairs a tier lists: a positive whole number
+// with no leading zero, so one count has one spelling, or `all`, which is
+// Infinity. Null for anything else.
+function parsePairsShown(value) {
+    if (value === 'all') return Infinity;
+    return /^[1-9][0-9]*$/.test(value) ? Number(value) : null;
+}
+
+// decay-scan takes one option, --pairs <n|all> or --pairs=<n|all>, given once,
+// and no word. Every fault is refused here, before the working directory is
+// resolved or the index read.
 async function cmdDecayScan(argv, options) {
     const opts = options || {};
-    if (argv.length > 0) return usage('decay-scan takes no arguments');
+    let shown = PAIRS_SHOWN;
+    let pairsGiven = false;
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (a !== '--pairs' && !a.startsWith('--pairs=')) {
+            return usage('decay-scan takes no arguments but --pairs <n|all>');
+        }
+        if (pairsGiven) return usage('--pairs is given once');
+        pairsGiven = true;
+        let value;
+        if (a === '--pairs') {
+            value = argv[++i];
+            if (value === undefined) return usage('--pairs needs a value: --pairs <n|all>');
+        } else {
+            value = a.slice('--pairs='.length);
+        }
+        shown = parsePairsShown(value);
+        if (shown === null) return usage('--pairs takes a positive whole number or all: --pairs <n|all>');
+    }
     if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
         process.stderr.write('memq: this call\'s working directory names a network share, so its '
             + 'project key was not resolved (a synchronous walk under it risks hanging for the '
@@ -11184,8 +11547,11 @@ async function cmdDecayScan(argv, options) {
         anchorsRoot === null ? ANCHOR_ROOTLESS_PIN : ANCHOR_TIER_UNEXAMINED));
     process.stderr.write(storeDriftBlock(storeAnchorDrift(null, tiers.operator, memoryRoot())));
 
-    // The neighbour pairs, after the drift block and before the candidate list.
-    await printNeighbourPairsBlock(pairTiers, { config: opts.config, deps: opts.deps });
+    // The neighbour pairs, after the drift block and before the candidate list,
+    // withholding the pairs the two-facts verdicts of this key and declared
+    // type name, which the block reads once the host has ranked the pairs.
+    await printNeighbourPairsBlock(pairTiers, { config: opts.config, deps: opts.deps,
+        verdicts: { projectKey: read.key, typeName: tiers.declaredType } }, shown);
 
     const lines = summarize.concat(archive);
     if (lines.length === 0) {
@@ -13946,6 +14312,7 @@ function main() {
             process.exitCode = 1;
         });
     }
+    else if (cmd === 'two-facts') cmdTwoFacts(rest);
     else if (cmd === 'decay-prune') cmdDecayPrune(rest);
     else if (cmd === 'decay-done') cmdDecayDone(rest);
     else if (cmd === 'declare-type') cmdDeclareType(rest);
@@ -14080,6 +14447,7 @@ module.exports = {
     fleetMemoryLine,
     fleetMemoryBlock,
     fleetPairsBlock,
+    parsePairsShown,
     printNeighbourBlock,
     neighbourBlock,
     FLEET_PAIRS_BUDGET_MS,
@@ -14099,6 +14467,7 @@ module.exports = {
     cmdMeterDrain,
     cmdRecallCandidates,
     cmdApplied,
+    cmdTwoFacts,
     cmdLog,
     cmdTouch,
     cmdAnchor,

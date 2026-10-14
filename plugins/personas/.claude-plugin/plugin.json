@@ -80,7 +80,7 @@
       "type": "number",
       "default": 600000,
       "title": "Ask re-ask suppress window (ms)",
-      "description": "How long after an ask closes, or the operator's reply or the timeout lifts its hold, before the worker's ASK: line can re-open the same question on the same entry (ms). Default 10min."
+      "description": "How long after an ask closes, or the operator's reply or the timeout lifts its hold, before the worker can re-open the same question on the same entry, by ask_open or an ASK: line (ms). Default 10min."
     },
     "channelRecordWindow": {
       "type": "number",
@@ -122,25 +122,25 @@
       "type": "string",
       "default": "shadow",
       "title": "Jev shadow mode",
-      "description": "off or shadow, and shadow is the default. shadow has the decision seam put each closed question the plugin already asks Haiku to Jev as well, beside it, and write the answer to the decision journal, acting on nothing it gets back. off makes no such call and writes no journal line. The supervisor refuses any other value rather than writing it, so a typo stops that launch instead of quietly disabling the seam."
+      "description": "off or shadow, and shadow is the default. shadow has the decision seam ask Jev its questions and write each answer to the decision journal. A question jevLive names, the two memory questions, and the compaction question under a live compactionPass act on the answer, and every other question acts on nothing it gets back. off makes no such call and writes no journal line. The supervisor refuses any other value rather than writing it, so a typo stops that launch instead of quietly disabling the seam."
     },
     "compactionPass": {
       "type": "string",
-      "default": "shadow",
+      "default": "live",
       "title": "Compaction pass",
-      "description": "off, shadow or live, and shadow is the default. shadow has the module ask Jev on its heartbeat whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live is read and acts as shadow. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off the pass asks nothing, writes one compaction_pass_disabled line per armed session, and writes no line at a compaction."
+      "description": "off, shadow or live, and live is the default. shadow has the module ask Jev on its heartbeat whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live plans the same way and then acts: at an automatic compaction or its precompute it hands up the plan's message list in place of the engine's summary where the plan covers the transcript and its kept estimate is at or under target, and otherwise takes the summary. At an expired cache it starts one marked compaction per idle stretch, only where the plan would drop at least 20,000 tokens, and that compaction cuts or skips and never summarizes. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off a pass that is not off asks nothing, writes one compaction_pass_disabled line per armed session, and writes no line at a compaction."
     },
     "guards": {
       "type": "string",
-      "default": "shadow",
+      "default": "live",
       "title": "Before-tool guards",
-      "description": "off, shadow or live, and shadow is the default. shadow has the module's tool.call hook run every registered before-tool guard on each call, write each verdict to the decision journal as a guard_verdict line beside the kit command hook's verdict for the same call as a guard_shadow line, and let the call run. live returns a guard's deny as the call's result and refuses a call whose guard failed, naming the guards the call matched. off runs no guard. The after-call hooks run whatever the value. Any other value is read as off, with one decision saying so."
+      "description": "off, shadow or live, and live is the default. shadow has the module's tool.call hook run every registered before-tool guard on each call, write each verdict to the decision journal as a guard_verdict line beside the kit command hook's verdict for the same call as a guard_shadow line, and let the call run. live returns a guard's deny as the call's result and refuses a call whose guard failed, naming the guards the call matched. off runs no guard. The after-call hooks run whatever the value. Any other value is read as off, with one decision saying so."
     },
     "jevLive": {
       "type": "string",
-      "default": "",
+      "default": "controller-decision,turn-score,memory-kind,turn-disposition",
       "title": "Jev live questions",
-      "description": "Comma-separated question-set ids, each one of PROMOTABLE_SET_IDS, naming which question may read Jev's live answer through liveAsk instead of always shadowing it. Empty by default: no question is live. An id outside the promotable set is dropped, logged as one jev_live_invalid decision naming it."
+      "description": "Comma-separated question-set ids, each one of PROMOTABLE_SET_IDS, naming which question may read Jev's live answer through liveAsk instead of always shadowing it. The default names controller-decision, turn-score, memory-kind and turn-disposition. A configured value replaces the default whole, so an empty value makes no question live. An id outside the promotable set is dropped, logged as one jev_live_invalid decision naming it."
     },
     "restartRecap": {
       "type": "string",

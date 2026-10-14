@@ -3,9 +3,22 @@
 	SCRIPT:		Security/010-Roles.sql
 	AUTHOR:		Scott Applefeld
 	DATE:		September 17th, 2026
-	VERSION:	v1.6
+	VERSION:	v1.8
 *************************************************************************************************
-	NOTES:		v1.6 - 10/06/2026 - SCOTT APPLEFELD
+	NOTES:		v1.8 - 10/12/2026 - SCOTT APPLEFELD
+						mem_publisher gains EXECUTE on mem.usp_PutPairVerdict, which
+						records that two records of one store are two different facts,
+						and mem.usp_ListPairVerdicts, which lists the verdicts that
+						still stand for memq decay-scan. mem_curator is denied both,
+						since the curator never publishes.
+
+				v1.7 - 10/12/2026 - SCOTT APPLEFELD
+						mem_publisher gains EXECUTE on mem.usp_ListArchived, which lists
+						the caller's visible archived records inside a window for memq
+						recent. mem_curator is denied it, since the curator never
+						publishes.
+
+				v1.6 - 10/06/2026 - SCOTT APPLEFELD
 						mem_publisher gains EXECUTE on mem.usp_Recall, which ranks the
 						caller's visible records for one prompt and returns each with a
 						head of its body. mem_curator is denied it, since the curator
@@ -107,6 +120,9 @@ GO
 ;GRANT EXECUTE ON OBJECT::mem.usp_PutSessionBeat	TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_ListDailyUsage	TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_Recall			TO mem_publisher
+;GRANT EXECUTE ON OBJECT::mem.usp_ListArchived	TO mem_publisher
+;GRANT EXECUTE ON OBJECT::mem.usp_PutPairVerdict	TO mem_publisher
+;GRANT EXECUTE ON OBJECT::mem.usp_ListPairVerdicts	TO mem_publisher
 GO
 
 ;DENY SELECT ON SCHEMA::mem TO mem_publisher
@@ -156,6 +172,9 @@ GO
 ;DENY EXECUTE ON OBJECT::mem.usp_PutSessionBeat		TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_ListDailyUsage		TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_Recall				TO mem_curator
+;DENY EXECUTE ON OBJECT::mem.usp_ListArchived		TO mem_curator
+;DENY EXECUTE ON OBJECT::mem.usp_PutPairVerdict		TO mem_curator
+;DENY EXECUTE ON OBJECT::mem.usp_ListPairVerdicts	TO mem_curator
 GO
 
 /************************************************************************************************

@@ -238,14 +238,16 @@ const ESCAPED_QUOTE = /\\["']/;
 const PRELOAD_ENV = ['NODE_OPTIONS', 'NODE_PATH', 'NODE_REPL_EXTERNAL_MODULE'];
 
 // The verbs a prompt-free allow covers, which is memq's own subcommand list
-// minus the twelve this grant does not extend to. memq dispatches log, find,
-// get, recall, judged, recent, unstamped, touch, anchor, triggers,
-// add-type, add-operator, put, forget, delete-type, delete-operator,
-// decay-scan, decay-prune, decay-done, declare-type, db-refresh, db-promote,
-// db-curate, jev-calibration and meter-drain, and the twelve absent here are
-// the two shared-tier deletes, find, anchor, triggers, db-refresh,
-// db-promote, db-curate, jev-calibration, forget, meter-drain and
-// declare-type.
+// minus the thirteen this grant does not extend to. memq dispatches log, find,
+// get, recall, recall-candidates, judged, applied, recent, unstamped, touch,
+// anchor, triggers, add-type, add-operator, put, forget, delete-type,
+// delete-operator, decay-scan, two-facts, decay-prune, decay-done, declare-type, db-refresh,
+// db-promote, db-curate, jev-calibration and meter-drain, and the thirteen
+// absent here are the two shared-tier deletes, find, anchor, triggers,
+// two-facts, db-refresh, db-promote, db-curate, jev-calibration, forget,
+// meter-drain and declare-type. two-facts records the verdict the scan's
+// pairs block withholds a pair by, and that block stands down on this
+// vector, so a worker here has no pair to judge.
 //
 // anchor is the fourth, and it is withheld on what it authors rather than on
 // what it destroys: it rewrites a record of the project tier in place, at a

@@ -1107,6 +1107,34 @@ function Set-EmbeddingServerConfigBlock {
     }
 }
 
+# Fills the task fields of a state from the task reader. A reader that throws
+# leaves the task unregistered and its message in TaskReadError, so the read
+# never fails the caller. TaskDrift is read only with -ReadDrift.
+function Read-EmbeddingServerTaskInto {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)][scriptblock]$TaskReader,
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [Parameter(Mandatory = $true)][string]$InstallRoot,
+        [Parameter(Mandatory = $true)][string]$UserId,
+        [switch]$ReadDrift
+    )
+    try {
+        $reading = & $TaskReader $TaskName
+        $State.TaskRegistered = [bool]$reading.Registered
+        if ($State.TaskRegistered) {
+            $State.TaskRunning = [bool]$reading.Running
+            $State.TaskLastStart = $reading.LastStart
+            $State.TaskState = [string]$reading.State
+            if ($ReadDrift) { $State.TaskDrift = @(Get-EmbeddingServerTaskDrift -Reading $reading -InstallRoot $InstallRoot -UserId $UserId) }
+        }
+    }
+    catch {
+        $State.TaskRegistered = $false
+        $State.TaskReadError = $_.Exception.Message
+    }
+}
+
 # The server's state as the doctor reads it, one of six:
 #   no-config  no client config file.
 #   remote     a url whose host is not loopback, or a config that will not
@@ -1121,7 +1149,9 @@ function Set-EmbeddingServerConfigBlock {
 # url is read against the loopback url and identity -Fix would write, and
 # BlockMissing says so. Where the url is loopback the task's registration,
 # running state, last start time and the fields that differ from the kit's
-# definition (TaskDrift) are read too. The calls share one budget, the
+# definition (TaskDrift) are read too. In no-config the task is read the same
+# way except for TaskDrift, which stays empty since no install root is
+# expected there; remote reads no task. The calls share one budget, the
 # config's timeoutMs unless -TimeoutMs names another, returned as TimeoutMs.
 # /health, asked only where the task started within the cold-start bound, gets
 # what is left of it but never less than its own floor, the smaller of 1000 ms
@@ -1161,7 +1191,11 @@ function Get-EmbeddingServerState {
     }
     $config = Read-EmbeddingServerConfig -ConfigPath $ConfigPath
     if ($TimeoutMs -le 0) { $state.TimeoutMs = $config.TimeoutMs }
-    if (-not $config.Exists) { $state.State = "no-config"; return $state }
+    if (-not $config.Exists) {
+        $state.State = "no-config"
+        Read-EmbeddingServerTaskInto -State $state -TaskReader $TaskReader -TaskName $TaskName -InstallRoot $InstallRoot -UserId $UserId
+        return $state
+    }
     if ($null -ne $config.Error) { $state.State = "remote"; $state.ConfigError = $config.Error; return $state }
     if ($config.HasUrl) {
         $state.Url = $config.Url
@@ -1174,20 +1208,7 @@ function Get-EmbeddingServerState {
     }
     if (-not (Test-EmbeddingUrlIsLoopback -Url $state.Url)) { $state.State = "remote"; return $state }
 
-    try {
-        $reading = & $TaskReader $TaskName
-        $state.TaskRegistered = [bool]$reading.Registered
-        if ($state.TaskRegistered) {
-            $state.TaskRunning = [bool]$reading.Running
-            $state.TaskLastStart = $reading.LastStart
-            $state.TaskState = [string]$reading.State
-            $state.TaskDrift = @(Get-EmbeddingServerTaskDrift -Reading $reading -InstallRoot $InstallRoot -UserId $UserId)
-        }
-    }
-    catch {
-        $state.TaskRegistered = $false
-        $state.TaskReadError = $_.Exception.Message
-    }
+    Read-EmbeddingServerTaskInto -State $state -TaskReader $TaskReader -TaskName $TaskName -InstallRoot $InstallRoot -UserId $UserId -ReadDrift
 
     $answers = Test-EmbeddingServerAnswers -BaseUrl $state.Url -Model $state.Model -TimeoutMs $state.TimeoutMs
     $state.Ids = $answers.Ids

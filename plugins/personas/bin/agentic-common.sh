@@ -229,7 +229,7 @@ emit_settings_json() {
   # guards is the before-tool guard seam's switch: off runs no guard, shadow
   # journals each verdict and lets the call run, live returns a guard's deny.
   # An unset or empty GUARDS omits the key, and the plugin reads a missing key
-  # as shadow. A set value outside the three is refused the way JEV_MODE's is,
+  # as live. A set value outside the three is refused the way JEV_MODE's is,
   # rather than reaching the child where the seam would fold it to off.
   local guards_opts=""
   if [ -n "${GUARDS:-}" ]; then
@@ -260,11 +260,12 @@ emit_settings_json() {
     recap_opts=",\"restartRecap\":\"$RESTART_RECAP\""
   fi
   # jevLive names, by id, which questions PROMOTABLE_SET_IDS ships
-  # may read Jev's live answer; empty by default, so a fresh install promotes
-  # nothing. An unset or empty JEV_LIVE omits the key, the same "leave it out"
-  # state jevMode's own check above uses, rather than writing an empty string
-  # that would still read as "nothing promoted" but would make a byte-for-byte
-  # comparison against a hand-edited file fail for no behavioral reason.
+  # may read Jev's live answer. An unset or empty JEV_LIVE, or one holding
+  # only commas and whitespace, omits the key, the same "leave it out" state
+  # jevMode's own check above uses, so the file leaves the plugin to its own
+  # default, which names controller-decision, turn-score, memory-kind and
+  # turn-disposition. This emitter never writes an empty jevLive, which the
+  # plugin would read as no question live.
   if [ -n "${JEV_LIVE:-}" ]; then
     local jev_live_ids
     jev_live_ids=$(jev_live_to_csv emit_settings_json "$JEV_LIVE") || return 1
@@ -337,10 +338,9 @@ emit_settings_json() {
       echo "ERROR: emit_settings_json: ARCHITECT_PERSONA must not be 'default'" >&2
       return 1
     fi
-    # One persona cannot hold both seats. The two names gate two standing
-    # instructions that contradict each other in one priming write: route
-    # design asks to the architect, and answer the coordinator by naming
-    # yourself, with a standing goal held and not held at once.
+    # One persona cannot hold both seats. The two names gate two role
+    # instructions, and one priming write carrying both tells one session it
+    # holds two exclusive seats.
     if [ "$architect_persona" = "$coordinator_persona" ]; then
       echo "ERROR: emit_settings_json: ARCHITECT_PERSONA and COORDINATOR_PERSONA are both '$architect_persona'; one persona cannot hold both seats" >&2
       return 1
@@ -353,8 +353,8 @@ emit_settings_json() {
   # empty variable omits the key and no persona receives the charter; the same
   # character class and valid_persona_name check; "default" refused for the
   # same reason; and a name another seat holds refused, since that persona's one
-  # priming write would carry two standing instructions that contradict each
-  # other. The coordinator's name counts as held even when it is the default,
+  # priming write would tell one session it holds two exclusive seats. The
+  # coordinator's name counts as held even when it is the default,
   # because the launch still resolves it. A liaison also needs an architect
   # named beside it, which the last check below states.
   local liaison_persona="${LIAISON_PERSONA:-}"

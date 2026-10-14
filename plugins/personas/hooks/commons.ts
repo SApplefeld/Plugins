@@ -28,6 +28,7 @@ export interface CommonsEntry {
   claims: CommonsClaim[];
   turnStartedAt?: number | null; // the session's clock at turn.start, null between turns
   workdir?: string; // the directory the session runs in, "" when unknown
+  cacheWarmUntil?: number | null; // the instant the session's prompt cache is read as warm until, null before a main request; absent in an older build's entry
 }
 
 // The per-turn fields a session publishes beside its claims, so a session in

@@ -156,19 +156,13 @@ export const TURN_DELIVERED_THRESHOLD = 0.5;
 // for the record to reach delivered before it is written false.
 export const RECORD_OUTCOME_TURNS = 3;
 
-// --- The three memory sets ---
+// --- The two memory sets ---
 //
 // Asked about a persona's stored memory, each over a state whose fields the
-// caller writes under the constants below. memory-value's state is one text
-// with each field on a line of its own, opened by its field name, since it is
-// asked through the seam's `ask` entry point, which takes a string. None has a
-// Haiku counterpart, and each is asked in shadow. Each is measured against an
-// outcome the plugin writes true or false.
+// caller writes under the constants below. Neither has a Haiku counterpart,
+// and each is asked live at its own site rather than through the live list.
+// Each is measured against an outcome the plugin writes true or false.
 
-// Asked of a memory candidate before it is stored: would a future session act
-// differently for having it. Measured against applied_since_call, whether the
-// record was stamped applied at or after the call.
-export const MEMORY_VALUE = "memory-value";
 // Asked of each recall candidate before a prompt reaches the model: does this
 // record change what the session should do next. Measured against
 // recall_acted, whether the session opened the record or stamped it applied
@@ -181,34 +175,17 @@ export const MEMORY_RECOGNITION = "memory-recognition";
 
 // Each memory set's option ids, the caller's one constant, journaled as a
 // closed vocabulary the way TURN_OPEN_OPTIONS is.
-export const MEMORY_VALUE_OPTIONS: readonly string[] = Object.freeze(["keep", "keep-as-preference", "discard"]);
 export const MEMORY_RECALL_OPTIONS: readonly string[] = Object.freeze(["show", "hold"]);
 export const MEMORY_RECOGNITION_OPTIONS: readonly string[] = Object.freeze(["nudge", "skip"]);
 
-// The fields of the memory-value state: the candidate's text, which text that
-// is, the text that opened the turn, how the turn ended, the active goal's
-// title, and the name the record is stored under. The candidate is the fact
-// the turn distilled, with the source `distilled`, or the turn's exchange
-// where the kind gate or the distill discarded it, with the source
-// `exchange`, so a gold pass scores the two populations apart. The name is
-// empty wherever no record was stored. The accuracy population is source
-// `distilled` with a non-empty record name: a passive reader's turn and a
-// failed write are asked on a distilled fact with an empty name, stored no
-// record, and fall outside it.
-export const MEMORY_VALUE_STATE_CANDIDATE = "candidateText";
-export const MEMORY_VALUE_STATE_SOURCE = "candidateSource";
-export const MEMORY_VALUE_STATE_TRIGGER = "turnTrigger";
-export const MEMORY_VALUE_STATE_OUTCOME = "turnOutcome";
-export const MEMORY_VALUE_STATE_GOAL = "activeGoalTitle";
-export const MEMORY_VALUE_STATE_RECORD = "recordName";
 // The fields of the memory-recall state: the head of the prompt, then the
 // candidate record's name, description, tags and the first 600 characters of
-// its body, then which list the candidate came from. The source is `judged`
-// for a record only today's memq judged read returned, `procedure` for one
-// only usp_Recall returned, and `both` for one on both lists, so a gold pass
-// scores the two retrievals apart; the question's instructions do not name
-// it, since where a record came from says nothing about whether it bears on
-// the prompt.
+// its body, then which list the candidate came from. The recall chain reads
+// one list, usp_Recall's rows, so the source reads `procedure` on every
+// candidate; the field stays so a gold pass over earlier journal files, where
+// it also read `judged` or `both`, scores the retrievals apart. The question's
+// instructions do not name it, since where a record came from says nothing
+// about whether it bears on the prompt.
 export const MEMORY_RECALL_STATE_PROMPT = "promptHead";
 export const MEMORY_RECALL_STATE_RECORD = "recordName";
 export const MEMORY_RECALL_STATE_DESCRIPTION = "description";
@@ -226,16 +203,6 @@ export const MEMORY_RECOGNITION_STATE_DESCRIPTION = "description";
 
 // --- The step watch's set ---
 //
-// Asked in shadow at every fourth step whose response carried an answer,
-// counting only those steps, over the objective of the entry active at that
-// step and the head of that answer: is the turn still on the objective
-// mid-way. No Haiku counterpart asks it and no branch reads its answer. A
-// call that asked about the entry the turn scorer labels is measured against
-// the label the scorer gives the whole turn, which hooks/index.ts writes as
-// its turn_score_label outcome at the turn's end.
-export const STEP_DRIFT = "step-drift";
-export const STEP_DRIFT_OPTIONS: readonly string[] = Object.freeze(["on-goal", "drift"]);
-
 // Asked at every main-loop step of an owner's turn whose response arrived,
 // over stepEffortStateText's state of the step just finished: how hard should
 // the next request think, relative to the session's own effort. The reading
@@ -264,8 +231,7 @@ export const QUESTION_SET_IDS: readonly string[] = Object.freeze([
   CONTROLLER_DECISION, PLAN_SWITCH, TURN_SCORE, MEMORY_KIND,
   BLOCK_OWNER,
   TURN_OPEN, TURN_DISPOSITION,
-  MEMORY_VALUE, MEMORY_RECALL, MEMORY_RECOGNITION,
-  STEP_DRIFT,
+  MEMORY_RECALL, MEMORY_RECOGNITION,
   TOOL_RESULT_STALE,
   STEP_EFFORT,
 ]);
@@ -285,10 +251,10 @@ export const QUESTION_SET_IDS: readonly string[] = Object.freeze([
 // of Haiku's, and its promotion bar is the gold pass's agreement on version
 // 3 calls. The step effort is here because the step watch reads its live
 // answer as the effort of the session's next model request, and its
-// promotion bar is the gold pass's agreement with the hand labels. The three
-// memory sets above are absent: each is asked in shadow, and its promotion is
-// a ruling on a gold pass. Declared after every id it names, since a const is
-// not readable before its declaration runs.
+// promotion bar is the gold pass's agreement with the hand labels. The two
+// memory sets above are absent: each is named live at its own site, and its
+// promotion is a ruling on a gold pass. Declared after every id it names,
+// since a const is not readable before its declaration runs.
 export const PROMOTABLE_SET_IDS: readonly string[] = Object.freeze([TURN_OPEN, TURN_DISPOSITION, MEMORY_KIND, TURN_SCORE, CONTROLLER_DECISION, STEP_EFFORT]);
 
 // The sets asked at a plan entry's turn end, in the order the request
@@ -314,17 +280,17 @@ export const MAX_OPTIONS = 255;
 // here for the other half of the same reason: its ids are the caller's one
 // constant, and a load reads that column as a closed vocabulary. The two turn
 // record sets are here on that ground and one more: a live answer's choice is
-// read into a branch by option id. The three memory sets are here on the
+// read into a branch by option id. The two memory sets are here on the
 // block owner's ground: each set's ids are its caller's one constant, and a
-// load reads that column as a closed vocabulary. The step watch's two sets are
-// here on the same ground, and so is the compaction pass's set, whose verdict
+// load reads that column as a closed vocabulary. The step watch's set is here
+// on the same ground, and so is the compaction pass's set, whose verdict
 // the pass reads into an apply by option id. The plan switch is absent
 // because its option ids are the caller's pending plan ids rather than the
 // catalog's.
 export const FIXED_OPTION_SETS: readonly string[] = Object.freeze([
   CONTROLLER_DECISION, TURN_SCORE, MEMORY_KIND, BLOCK_OWNER, TURN_OPEN, TURN_DISPOSITION,
-  MEMORY_VALUE, MEMORY_RECALL, MEMORY_RECOGNITION,
-  STEP_DRIFT, TOOL_RESULT_STALE, STEP_EFFORT,
+  MEMORY_RECALL, MEMORY_RECOGNITION,
+  TOOL_RESULT_STALE, STEP_EFFORT,
 ]);
 
 // A Score's levels are positions rather than names, so what an override of
@@ -353,7 +319,7 @@ export const SHIPPED_QUESTIONS: Readonly<Record<string, ResolvedQuestion>> = {
     instructions: "An autonomous worker session has gone idle. Given its goal, its recent scores, how long it has been idle and its last answer, which action should the controller take now?",
     options: {
       "nudge": "Send the plain nudge, which names the idle time and tells the worker to re-read the objective and take the next concrete step. The worker is on the objective and either has a next step or is honestly waiting on work of its own for it: it reported a step done and the plan holds the next one, it ended on an intermediate status, or it waits on an implementer, a reviewer, a test run or a workflow it dispatched for this objective, whether or not the last answer shows that wait ending. A plan entry whose work reads finished still takes this, since on a plan entry complete is not offered. A wait on something that is not coming, or on a person, is idle-gap-nudge, not this.",
-      "idle-gap-nudge": "Send the idle-gap nudge, which tells the worker the controller read no real fork, to re-read the plan document, and to state any genuine fork as a line ASK: <question>? Recommend: <choice>; nobody is asked unless the worker writes that line. The worker is stalled: its last answer says it needs a decision or reports a blocker it cannot clear itself, it waits on a person or on another session rather than on work it dispatched, it repeats the same step or the same wait across nudges with no progress, or it is working on something other than the objective the state names. A first wait on the worker's own dispatched work is nudge, not this.",
+      "idle-gap-nudge": "Send the idle-gap nudge, which tells the worker the controller read no real fork, to re-read the plan document, and to file any genuine fork with ask_open, naming the choice it proceeds on as its recommend; nobody is asked unless the worker files one. The worker is stalled: its last answer says it needs a decision or reports a blocker it cannot clear itself, it waits on a person or on another session rather than on work it dispatched, it repeats the same step or the same wait across nudges with no progress, or it is working on something other than the objective the state names. A first wait on the worker's own dispatched work is nudge, not this.",
       "complete": "Mark the goal done now and activate the next one: a task entry whose objective the last answer shows finished in full. Offered only on a task entry, since a plan entry's done is read from its plan document. A step, a section, a review round or a commit landed with the objective still open is nudge, not this.",
       "switch": "Set the current goal aside and activate one of the pending plans the state lists: the current goal cannot move while a pending plan can, the operator has set the current plan aside, or the worker itself says a pending plan is the one to take up. Offered only where the state lists pending plans. A current goal waiting on an approval its own order requires before the next plan is idle-gap-nudge, not this.",
     },
@@ -449,20 +415,8 @@ export const SHIPPED_QUESTIONS: Readonly<Record<string, ResolvedQuestion>> = {
       "blocked_or_waiting": "It cannot finish its own current task until something else happens: a person's decision it asked for, another agent's answer, or a background task or subagent of its own still running.",
     },
   },
-  // The three memory sets name their state's fields through the field
+  // The two memory sets name their state's fields through the field
   // constants, so the instruction and the state a caller builds read one name.
-  [MEMORY_VALUE]: {
-    id: MEMORY_VALUE,
-    version: SHIPPED_VERSION,
-    overrideRefused: null,
-    primitive: "choice",
-    instructions: `\`${MEMORY_VALUE_STATE_CANDIDATE}\` is a memory candidate from an autonomous persona session's last turn: a fact distilled from that turn where \`${MEMORY_VALUE_STATE_SOURCE}\` reads distilled, or the turn's exchange itself where it reads exchange. The other fields describe that turn and name the record the candidate is stored under, empty where none was stored. Would a future session act differently for having this memory?`,
-    options: {
-      "keep": "Yes, as a fact or a lesson: it records something about the project, the tools or the work that a later session would otherwise get wrong or have to find out again.",
-      "keep-as-preference": "Yes, as a preference: it records how the operator wants something done, a standing choice rather than a fact about the work.",
-      "discard": "No: it describes what happened this turn, repeats what the goal or the record name already says, or holds nothing a later step would use.",
-    },
-  },
   [MEMORY_RECALL]: {
     id: MEMORY_RECALL,
     version: SHIPPED_VERSION,
@@ -483,20 +437,6 @@ export const SHIPPED_QUESTIONS: Readonly<Record<string, ResolvedQuestion>> = {
     options: {
       "nudge": "It does: it holds something the session should know after running a command of that kind, such as a hazard, a required flag or a known failure.",
       "skip": "It does not: the pattern is too common for this record to be about such a command, or the record says nothing that changes how a command of that kind is run or read.",
-    },
-  },
-  // Asked over stepDriftStateText's state, the objective and the head of one
-  // step's answer. The two options mirror turn-score's on-goal and drift, read
-  // on one response of the turn rather than on its end.
-  [STEP_DRIFT]: {
-    id: STEP_DRIFT,
-    version: SHIPPED_VERSION,
-    overrideRefused: null,
-    primitive: "choice",
-    instructions: "This is one response from the middle of an autonomous worker's turn. Given the goal objective, is the worker still working on it?",
-    options: {
-      "on-goal": "The response works on the objective or keeps it correctly in hand: a step taken, a check made, a dispatch or a wait on the worker's own work for the objective, or a short side note beside that work.",
-      "drift": "The response has gone elsewhere: it works on something unrelated to the objective, sets the objective aside with no instruction to, or waits on work that serves a different plan.",
     },
   },
   // Asked over toolResultStaleStateText's state, one old tool result's facts.
@@ -639,20 +579,6 @@ export function turnScoreStateText(prompt: string, answer: string, objective: st
     `Worker answered: ${stateValue(answer).slice(0, TURN_SCORE_ANSWER_MAX)}\n\n` +
     `Goal objective: ${stateValue(objective)}\n\n` +
     `Tools: ${stateValue(turnScoreToolsLine(tools))}`;
-}
-
-// --- The step-drift state ---
-//
-// The state step-drift is asked over: the objective of the turn's entry,
-// then the head of one step's answer, a blank line between, and no question sentence.
-// Each value goes through stateValue, the objective being stored text and the
-// answer model text, so no value can write a third part. The cut is applied
-// to the collapsed answer, so the bound counts the text as it is sent.
-export const STEP_DRIFT_ANSWER_MAX = 1200;
-
-export function stepDriftStateText(objective: string, answer: string): string {
-  return `Goal objective: ${stateValue(objective)}\n\n` +
-    `Step answered: ${stateValue(answer).slice(0, STEP_DRIFT_ANSWER_MAX)}`;
 }
 
 // --- The step-effort state ---

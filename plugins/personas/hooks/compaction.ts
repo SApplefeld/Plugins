@@ -31,6 +31,7 @@
 // members hooks/index.ts builds over `$.fs` in a top-level adapter.
 
 import { bracketSafeText, oneLine } from "./agent-state";
+import { COMPACT_CACHE_LIFE_S, COMPACT_CACHE_MARGIN_S } from "./cache-clock";
 import { fnv1aHash } from "./cost-ledger";
 import { jsonTextOf, TOOL_RESULT_STALE_INPUT_MAX, TOOL_RESULT_STALE_RESULT_MAX } from "./question-catalog";
 
@@ -445,9 +446,12 @@ export function checkpointCommandClause(installPath: unknown, home: unknown): { 
 
 // --- The pass: constants ---
 
-// The context percent at or above which the timer computes a plan. Below it
-// a compaction is far enough off that the verdicts would go stale, and the
-// asks would cost calls for nothing.
+// The fill at or above which the timer computes a plan, as a percent of the
+// token count at which auto-compaction runs, or of the model's window where
+// the engine reports no such threshold (passFillPercentOf reads it). At 50 the
+// plan is built once the session is halfway to its next automatic
+// compaction. Below it a compaction is far enough off that the verdicts would
+// go stale, and the asks would cost calls for nothing.
 export const COMPACT_PASS_FLOOR_PERCENT = 50;
 
 // How many messages must arrive after a plan before the timer recomputes
@@ -463,11 +467,12 @@ export const COMPACT_TAIL_MESSAGES = 20;
 export const COMPACT_ASK_BATCH = 20;
 
 // The prompt cache's life on the one-hour tier, and the margin past it at
-// which the module reads the cache as expired, both in seconds. The engine
-// reports expiry only at a resumed start and a model switch, so an idle
-// running session is read from the module's own clock.
-export const COMPACT_CACHE_LIFE_S = 3600;
-export const COMPACT_CACHE_MARGIN_S = 300;
+// which the module reads the cache as expired, both in seconds, held in
+// cache-clock.ts beside the clock's own reading and re-exported here under
+// the same names. The engine reports expiry only at a resumed start and a
+// model switch, so an idle running session is read from the module's own
+// clock.
+export { COMPACT_CACHE_LIFE_S, COMPACT_CACHE_MARGIN_S };
 
 // The size estimate's rate, characters per token, and the share of the
 // auto-compaction threshold (or of the window, where no threshold is read) a
@@ -493,6 +498,21 @@ export const COMPACT_REFERENCE_TOKEN_CHARS = 120;
 export const SKILL_TOOL = "Skill";
 export const SKILL_BODY_OPENING = "Base directory for this skill:";
 
+// The instructions of the module's own marked compaction: the text the timer
+// passes as the arguments of `/compact` at an expired cache, which reaches
+// the session.compact hook as its instructions on a `manual` trigger. A
+// compaction carrying exactly this text is cut by the plan or skipped, and
+// never summarized.
+export const COMPACT_CUT_MARKER = "kit-tool-cut";
+
+// The least estimated saving, in tokens, for which an expired cache starts a marked compaction.
+export const COMPACT_CUT_MIN_SAVED_TOKENS = 20_000;
+
+// How many main-loop tool calls after a live pass a dropped or cut result is
+// watched for a call of the same tool on the same input, which writes its
+// rerun_within outcome true. The call after the window writes false.
+export const COMPACT_RERUN_WINDOW_CALLS = 30;
+
 // --- The pass: shapes ---
 
 // A verdict on one tool result: keep it as it is, cut its text to one line,
@@ -508,8 +528,8 @@ export function isToolVerdict(value: unknown): value is ToolVerdict {
 // One message in the rows form, as $.session.messages() returns it and as
 // session.compact's e.messages carries it: the fields the pass reads, with
 // the engine's handle where the hook supplied one.
-export type PassToolUse = { tool_use_id: string; tool: string; input?: unknown; text?: string; isError?: boolean };
-export type PassToolResult = { tool_use_id: string; text: string; isError?: boolean };
+export type PassToolUse = { tool_use_id: string; tool: string; input?: unknown; text?: string; isError?: boolean; result?: unknown };
+export type PassToolResult = { tool_use_id: string; text: string; isError?: boolean; result?: unknown };
 export type PassMessage = {
   role: "user" | "assistant";
   text: string;
@@ -518,10 +538,12 @@ export type PassMessage = {
   handle?: string;
 };
 
-// One cached verdict: what is applied, what Jev answered, and whether the
-// stamp fell on the journal's holdout split, where the applied verdict is
-// keep whatever Jev said.
-export type CachedVerdict = { verdict: ToolVerdict; answered: string; holdout: boolean };
+// One cached verdict: what is applied, what Jev answered, whether the stamp
+// fell on the journal's holdout split, where the applied verdict is keep
+// whatever Jev said, and the stamp id of the ask that answered it, which a
+// rerun_within outcome is written against. An entry cached before the stamp
+// was kept carries none, and its result is applied with no outcome.
+export type CachedVerdict = { verdict: ToolVerdict; answered: string; holdout: boolean; stampId?: string };
 
 // What the pass knows about one result it is about to ask about.
 export type ResultCandidate = {
@@ -566,7 +588,10 @@ export type CompactionPlan = {
   targetTokens: number | null;
 };
 
-// What applying a plan to a message list produced.
+// What applying a plan to a message list produced. `changed` is each call
+// whose result was dropped or cut, with its tool and input. `paired` is
+// whether every call that had its result in the list still has it there,
+// directly after the assistant message carrying the call, or has lost both.
 export type ApplyResult = {
   messages: PassMessage[];
   counts: { keep: number; cut: number; drop: number };
@@ -575,7 +600,8 @@ export type ApplyResult = {
   droppedChars: number;
   skillKept: number;
   skillSuperseded: number;
-  alternates: boolean;
+  changed: Array<{ id: string; tool: string; input: unknown }>;
+  paired: boolean;
 };
 
 // --- The pass: reading a transcript ---
@@ -609,15 +635,15 @@ export function inputHeadOf(input: unknown): string {
 }
 
 // The characters a message costs in the context: its text, each tool call's
-// name, input and recorded text, and each result's text. A kept skill body
-// adds its body's size, read from the API form at survey time, since the
-// rows carry no body.
+// name and input, and each result's text. A row's tool call carries its
+// result's text too, and only once answered, so that text is counted once,
+// on the result. A kept skill body adds its body's size, read from the API
+// form at survey time, since the rows carry no body.
 export function messageChars(message: PassMessage, skillBodyChars: Readonly<Record<string, number>> = {}): number {
   let n = typeof message.text === "string" ? message.text.length : 0;
   for (const u of message.toolUses ?? []) {
     n += u.tool.length;
     try { n += (JSON.stringify(u.input) ?? "").length; } catch { /* an input that cannot be stringified costs its name alone */ }
-    if (typeof u.text === "string") n += u.text.length;
   }
   for (const r of message.toolResults ?? []) {
     n += typeof r.text === "string" ? r.text.length : 0;
@@ -672,6 +698,58 @@ export function skillBodiesOf(api: unknown): Record<string, number> {
     for (const id of ids) out[id] = Math.ceil(bodyChars / ids.length);
   }
   return out;
+}
+
+// The tool results a live pass must keep whole, by tool_use_id, read from a
+// transcript's Messages API form: every tool_result in a user message that
+// carries a block the rows do not, which is any block but text and
+// tool_result, or a tool_result whose content holds any block but text, as
+// an image or a document does. A touched message is rebuilt from the rows,
+// so keeping each of its results leaves it untouched with its handle. The
+// join to the rows is by id, as for skillBodiesOf, since the two forms'
+// indexes do not align. Never throws on what the engine answered.
+export function protectedResultIdsOf(api: unknown): string[] {
+  const ids = new Set<string>();
+  if (!Array.isArray(api)) return [];
+  for (const message of api) {
+    if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "user") continue;
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    const held: string[] = [];
+    let other = false;
+    for (const block of content) {
+      if (!block || typeof block !== "object") continue;
+      const b = block as { type?: unknown; tool_use_id?: unknown; content?: unknown };
+      if (b.type === "tool_result") {
+        if (typeof b.tool_use_id === "string") held.push(b.tool_use_id);
+        if (Array.isArray(b.content) && b.content.some((inner) => !inner || typeof inner !== "object" || (inner as { type?: unknown }).type !== "text")) other = true;
+      } else if (b.type !== "text") {
+        other = true;
+      }
+    }
+    if (other) for (const id of held) ids.add(id);
+  }
+  return [...ids].sort();
+}
+
+// The tool_use_ids of every tool_result block in a transcript's Messages API
+// form, sorted. The engine answers at most its newest 4096 messages, so a
+// result the hook holds and this list lacks is one whose message the
+// protected-results read never saw. Never throws on what the engine answered.
+export function apiResultIdsOf(api: unknown): string[] {
+  const ids = new Set<string>();
+  if (!Array.isArray(api)) return [];
+  for (const message of api) {
+    if (!message || typeof message !== "object") continue;
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (!block || typeof block !== "object") continue;
+      const b = block as { type?: unknown; tool_use_id?: unknown };
+      if (b.type === "tool_result" && typeof b.tool_use_id === "string") ids.add(b.tool_use_id);
+    }
+  }
+  return [...ids].sort();
 }
 
 // The identifiers a tool input names: the string values of its fields, split
@@ -823,6 +901,31 @@ export function targetTokensOf(usage: unknown): number | null {
   return null;
 }
 
+// The fill the pass's floor reads, out of a `$.session.usage({ breakdown })`
+// answer: the breakdown's `totalTokens` as a percent of its
+// `autoCompactThreshold`, the token count at which auto-compaction runs, so
+// the floor sits at the same share of the way to the next automatic
+// compaction whatever auto-compaction window the session is configured
+// with. Where the answer carries no positive threshold or no finite
+// totalTokens, the answer's `context.percent`, a percent of the model's
+// window, as percentOf reads it. Null where neither is read, a rejected call
+// passed here as undefined among them. Not rounded, so a fill a fraction
+// under the floor reads under it.
+export function passFillPercentOf(usage: unknown): number | null {
+  if (typeof usage !== "object" || usage === null) return null;
+  const context = (usage as { context?: unknown }).context;
+  if (typeof context !== "object" || context === null) return null;
+  const breakdown = (context as { breakdown?: unknown }).breakdown;
+  if (typeof breakdown === "object" && breakdown !== null) {
+    const threshold = (breakdown as { autoCompactThreshold?: unknown }).autoCompactThreshold;
+    const total = (breakdown as { totalTokens?: unknown }).totalTokens;
+    if (typeof threshold === "number" && Number.isFinite(threshold) && threshold > 0 && typeof total === "number" && Number.isFinite(total)) {
+      return total / threshold * 100;
+    }
+  }
+  return percentOf(usage);
+}
+
 // A plan over a surveyed transcript from the verdict cache: each judged
 // result outside the tail takes its cached verdict, a superseded skill body
 // drops, and everything else keeps. The plan is applied to the rows once
@@ -869,9 +972,10 @@ export function buildPlan(
 
 // Why a plan does not apply to a message list, or null where it does: no
 // plan, keys that do not open the list, a kept estimate over the target or
-// no target to read it against, and an apply that broke a role alternation
-// the list had.
-export type PlanRefusal = "no-plan" | "prefix" | "over-target" | "no-target" | "alternation";
+// no target to read it against, and an apply that would leave a kept tool
+// result not directly after the assistant message carrying its call, or a
+// kept call without its result.
+export type PlanRefusal = "no-plan" | "prefix" | "over-target" | "no-target" | "pairing";
 
 export function planRefusal(
   plan: CompactionPlan | null,
@@ -882,7 +986,7 @@ export function planRefusal(
   if (plan === null) return "no-plan";
   if (!covers) return "prefix";
   if (plan.targetTokens === null) return "no-target";
-  if (applied !== null && rolesAlternate(messages) && !applied.alternates) return "alternation";
+  if (applied !== null && !applied.paired) return "pairing";
   const keptTokens = applied === null ? plan.keptTokens : tokensOf(applied.keptChars);
   if (keptTokens > plan.targetTokens) return "over-target";
   return null;
@@ -899,6 +1003,15 @@ export function cacheExpired(nowMs: number, lastMainTurnEndedMs: number, turnOpe
   return nowMs - lastMainTurnEndedMs > (COMPACT_CACHE_LIFE_S + COMPACT_CACHE_MARGIN_S) * 1000;
 }
 
+// Whether a covering plan saves enough to start a marked compaction at an
+// expired cache: its estimated dropped tokens at least
+// COMPACT_CUT_MIN_SAVED_TOKENS, so a transcript already cut is not cut again
+// for little. A cut at an automatic compaction takes no minimum, since the
+// alternative there is the summary.
+export function cutWorthStarting(droppedTokens: number): boolean {
+  return Number.isFinite(droppedTokens) && droppedTokens >= COMPACT_CUT_MIN_SAVED_TOKENS;
+}
+
 // --- The pass: applying a plan ---
 
 // The one line a cut result keeps: the tool, the head of its input, the
@@ -909,30 +1022,46 @@ export function cutLine(tool: string, inputHead: string, size: number): string {
   return `Result of ${bracketSafeText(oneLine(tool))} ${bracketSafeText(oneLine(inputHead)).slice(0, COMPACT_INPUT_HEAD_MAX)} (${Math.max(0, Math.floor(size))} characters) dropped at compaction.`;
 }
 
-// Whether the roles alternate, user and assistant in turn, over a list.
-export function rolesAlternate(messages: readonly PassMessage[]): boolean {
-  for (let i = 1; i < messages.length; i += 1) if (messages[i].role === messages[i - 1].role) return false;
-  return true;
+// Whether a result text is already a cut line in cutLine's shape: one line
+// opening "Result of " and closing with its size and "dropped at
+// compaction.". Such a result was cut by an earlier pass, so a later pass
+// keeps it rather than cutting it again.
+export function isCutLine(text: string): boolean {
+  return /^Result of [^\r\n]* \(\d+ characters\) dropped at compaction\.$/.test(text);
 }
 
 // Applies a plan to a message list, as a copy, and never to the list it was
 // handed. A drop removes the tool_use block from its assistant message and
 // the matching tool_result block from the user message answering it; a cut
-// replaces the result's text with the one line above. A message the apply
-// emptied, its blocks gone and its text empty, is removed, and its pair
-// with it, the user message after an assistant and the assistant before a
-// user, so roles still alternate where they did. The first message is
+// replaces the result's text, and the call's copy of it, with the one line
+// above and drops the stored record of both. The pair rule: an assistant
+// message after the first that carries no text and whose every call drops
+// would be emptied, and it goes, with the user message after it, only where
+// that user message carries no text and holds nothing but results that
+// drop; otherwise its drops are applied as cuts, so both messages stay and
+// no text the session was given is deleted. A user message goes only with
+// its emptied assistant message: where an assistant message that stays,
+// having text or being the first, has every call dropping and the user
+// message after it would empty, its calls are cut instead. Any other
+// message the apply emptied is removed alone, and the first message is
 // always kept. A message untouched keeps its handle and so stays the
 // engine's own; a touched one carries none, so the engine builds it. A
 // result the plan names as a kept skill body takes keep whatever verdict the
-// plan holds for it, and so does one the plan does not name and one whose
-// call has no result in the list. Pure.
+// plan holds for it, and so does one the plan does not name, one whose call
+// has no result in the list, and one whose result is already a cut line, so
+// a result is cut once across passes, and so does each id in `protect`,
+// which the live pass fills from protectedResultIdsOf and the shadow
+// estimate leaves empty. `paired` reads the output against the list handed
+// in: each call whose result the list held keeps both, its result in the
+// message directly after its call's, or loses both. Pure.
 export function applyPlan(
   messages: readonly PassMessage[],
   plan: { verdicts: Readonly<Record<string, ToolVerdict>>; skillKept: readonly string[]; skillBodyChars?: Readonly<Record<string, number>> },
+  protect: readonly string[] = [],
 ): ApplyResult {
   const bodyChars = plan.skillBodyChars ?? {};
   const kept = new Set(plan.skillKept);
+  const protectedIds = new Set(protect);
   const out: PassMessage[] = messages.map((m) => ({
     ...m,
     toolUses: (m.toolUses ?? []).map((u) => ({ ...u })),
@@ -940,6 +1069,7 @@ export function applyPlan(
   }));
   const touched = new Set<number>();
   const counts = { keep: 0, cut: 0, drop: 0 };
+  const changed: ApplyResult["changed"] = [];
   let skillKept = 0;
   let skillSuperseded = 0;
   let droppedChars = 0;
@@ -947,17 +1077,44 @@ export function applyPlan(
   // message holds it.
   const resultAt = new Map<string, number>();
   for (let i = 0; i < out.length; i += 1) for (const r of out[i].toolResults ?? []) if (!resultAt.has(r.tool_use_id)) resultAt.set(r.tool_use_id, i);
+  // The verdict a call takes before the pair rule: keep for a kept skill
+  // body and for a call with no result in the list, which is in flight or
+  // unanswered, so a verdict on it changes nothing.
+  const alreadyCut = new Set<string>();
+  for (const m of out) for (const r of m.toolResults ?? []) if (isCutLine(r.text)) alreadyCut.add(r.tool_use_id);
+  const verdictOf = (id: string): ToolVerdict => (kept.has(id) || protectedIds.has(id) || !resultAt.has(id) || alreadyCut.has(id) ? "keep" : (plan.verdicts[id] ?? "keep"));
+  // The pair rule, decided before any block moves: the calls of an
+  // assistant message that would be emptied, where the user message after
+  // it carries anything but their dropped results, are cut instead; and so
+  // are the calls of an assistant message that stays, where the user
+  // message after it would empty and so go alone.
+  const asCut = new Set<string>();
+  for (let i = 0; i < out.length; i += 1) {
+    const message = out[i];
+    const uses = message.toolUses ?? [];
+    if (message.role !== "assistant" || uses.length === 0) continue;
+    if (!uses.every((u) => verdictOf(u.tool_use_id) === "drop")) continue;
+    const after = out[i + 1];
+    const afterEmpties = after !== undefined && after.role === "user" && after.text === ""
+      && (after.toolResults ?? []).every((r) => verdictOf(r.tool_use_id) === "drop" && !asCut.has(r.tool_use_id));
+    const stays = i === 0 || message.text !== "";
+    if (stays) {
+      if (afterEmpties) for (const u of uses) asCut.add(u.tool_use_id);
+      continue;
+    }
+    const pairs = afterEmpties && uses.every((u) => resultAt.get(u.tool_use_id) === i + 1);
+    if (!pairs) for (const u of uses) asCut.add(u.tool_use_id);
+  }
   for (let i = 0; i < out.length; i += 1) {
     const message = out[i];
     if (message.role !== "assistant" || message.toolUses === undefined || message.toolUses.length === 0) continue;
     const remaining: PassToolUse[] = [];
     for (const u of message.toolUses) {
       const id = u.tool_use_id;
-      const verdict: ToolVerdict = kept.has(id) ? "keep" : (plan.verdicts[id] ?? "keep");
+      const planned = verdictOf(id);
+      const verdict: ToolVerdict = planned === "drop" && asCut.has(id) ? "cut" : planned;
       if (kept.has(id) && u.tool === SKILL_TOOL) skillKept += 1;
       const at = resultAt.get(id);
-      // A call with no result in the list is in flight or unanswered, so a
-      // verdict on it changes nothing and counts as keep.
       if (verdict === "keep" || at === undefined) {
         remaining.push(u);
         counts.keep += 1;
@@ -965,10 +1122,12 @@ export function applyPlan(
       }
       const holder = out[at];
       const result = (holder.toolResults ?? []).find((r) => r.tool_use_id === id);
+      changed.push({ id, tool: u.tool, input: u.input });
       if (verdict === "drop") {
         if (u.tool === SKILL_TOOL) skillSuperseded += 1;
         counts.drop += 1;
-        droppedChars += u.tool.length + inputHeadOf(u.input).length + (typeof u.text === "string" ? u.text.length : 0);
+        droppedChars += u.tool.length;
+        try { droppedChars += (JSON.stringify(u.input) ?? "").length; } catch { /* an input that cannot be stringified saves its name alone, as messageChars costs it */ }
         if (result !== undefined) {
           droppedChars += result.text.length + (bodyChars[id] ?? 0);
           holder.toolResults = (holder.toolResults ?? []).filter((r) => r.tool_use_id !== id);
@@ -984,32 +1143,135 @@ export function applyPlan(
         const line = cutLine(u.tool, inputHeadOf(u.input), result.text.length);
         droppedChars += Math.max(0, result.text.length - line.length);
         result.text = line;
+        delete result.result;
+        u.text = line;
+        delete u.result;
         touched.add(at);
+        touched.add(i);
       }
     }
     message.toolUses = remaining;
   }
-  // An emptied message goes with its pair, never the first message.
-  const remove = new Set<number>();
+  // An emptied message goes, never the first message. The pair rule above
+  // drops a call only where its assistant message and the user message after
+  // it empty together, and cuts it otherwise, so the two go together.
   const emptied = (i: number): boolean => touched.has(i) && out[i].text === "" && (out[i].toolUses ?? []).length === 0 && (out[i].toolResults ?? []).length === 0;
-  for (let i = 1; i < out.length; i += 1) {
-    if (!emptied(i)) continue;
-    remove.add(i);
-    if (out[i].role === "assistant" && i + 1 < out.length && out[i + 1].role === "user") remove.add(i + 1);
-    if (out[i].role === "user" && i - 1 >= 1 && out[i - 1].role === "assistant") remove.add(i - 1);
-  }
   const result: PassMessage[] = [];
   let keptChars = 0;
   for (let i = 0; i < out.length; i += 1) {
     const message = out[i];
-    if (remove.has(i)) {
-      if (!emptied(i)) droppedChars += messageChars(message, bodyChars);
-      continue;
-    }
+    if (i > 0 && emptied(i)) continue;
     if (touched.has(i)) delete message.handle;
     if (message.toolResults === undefined) delete message.toolResults;
     keptChars += messageChars(message, bodyChars);
     result.push(message);
   }
-  return { messages: result, counts, keptCount: result.length, keptChars, droppedChars, skillKept, skillSuperseded, alternates: rolesAlternate(result) };
+  // The pairing read: every call the list held with its result keeps both,
+  // the result directly after the call, or loses both.
+  const calledIn = new Set<string>();
+  for (const m of messages) for (const u of m.toolUses ?? []) calledIn.add(u.tool_use_id);
+  const useOut = new Map<string, number>();
+  const resultOut = new Map<string, number>();
+  for (let i = 0; i < result.length; i += 1) {
+    for (const u of result[i].toolUses ?? []) useOut.set(u.tool_use_id, i);
+    for (const r of result[i].toolResults ?? []) resultOut.set(r.tool_use_id, i);
+  }
+  let paired = true;
+  for (const id of resultAt.keys()) {
+    if (!calledIn.has(id)) continue;
+    const u = useOut.get(id);
+    const r = resultOut.get(id);
+    if ((u === undefined) !== (r === undefined) || (u !== undefined && r !== u + 1)) paired = false;
+  }
+  return { messages: result, counts, keptCount: result.length, keptChars, droppedChars, skillKept, skillSuperseded, changed, paired };
+}
+
+// The one line the engine prints for a marked compaction the plan could not
+// cut, naming why. No summary runs on a marked compaction, so the
+// conversation stands as it was.
+export function cutSkipText(why: string): string {
+  return `The persona module's tool cut did not run: ${bracketSafeText(oneLine(why))}. The conversation is unchanged.`;
+}
+
+// --- The pass: the rerun outcome ---
+
+// One dropped or cut result the tool.call hook watches after a live pass:
+// its call's id, tool and input hash, the stamp of the ask its verdict came
+// from, and how many more main-loop calls may still match it.
+export type RerunEntry = { id: string; tool: string; hash: string; stampId: string; left: number };
+
+// A tool input's hash for the rerun match: its JSON with every object's keys
+// in sorted order, so one input spelled in two key orders hashes once, under
+// the FNV-1a hash the stand-in keys use. An input that cannot be stringified
+// hashes as the empty text.
+export function toolInputHash(input: unknown): string {
+  let text = "";
+  try {
+    text = JSON.stringify(input, (_key: string, value: unknown) => (value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value as Record<string, unknown>).sort().map((k) => [k, (value as Record<string, unknown>)[k]]))
+      : value)) ?? "";
+  } catch {
+    text = "";
+  }
+  return fnv1aHash(text).toString(16);
+}
+
+// The tool's own arguments out of a tool.call event, which spreads them
+// beside the keys the engine reserves: everything but `tool`,
+// `tool_use_id`, `consent` and `agentId`, in an object with no prototype so
+// no argument name can reach one.
+export function toolCallInputOf(e: unknown): Record<string, unknown> {
+  const input: Record<string, unknown> = Object.create(null);
+  if (!e || typeof e !== "object") return input;
+  for (const [k, v] of Object.entries(e as Record<string, unknown>)) {
+    if (k === "tool" || k === "tool_use_id" || k === "consent" || k === "agentId") continue;
+    input[k] = v;
+  }
+  return input;
+}
+
+// The entries a live pass leaves to watch: each dropped or cut call whose
+// cached verdict carries the stamp of its ask. A superseded skill body,
+// which no ask judged, and a verdict cached before stamps were kept carry
+// none, so no outcome could be joined to them and they are not watched.
+export function rerunEntriesOf(changed: ApplyResult["changed"], cache: Readonly<Record<string, CachedVerdict>>): RerunEntry[] {
+  const entries: RerunEntry[] = [];
+  for (const c of changed) {
+    const cached = Object.hasOwn(cache, c.id) ? cache[c.id] : undefined;
+    const stampId = cached?.stampId;
+    if (typeof stampId !== "string" || stampId === "") continue;
+    entries.push({ id: c.id, tool: c.tool, hash: toolInputHash(c.input), stampId, left: COMPACT_RERUN_WINDOW_CALLS });
+  }
+  return entries;
+}
+
+// The watch list as the store holds it: each well-formed entry, and an empty
+// list for anything else, so a value the store lost or never held watches
+// nothing. Never throws on what the store answered.
+export function rerunListOf(value: unknown): RerunEntry[] {
+  if (!Array.isArray(value)) return [];
+  const entries: RerunEntry[] = [];
+  for (const v of value) {
+    if (!v || typeof v !== "object") continue;
+    const e = v as Record<string, unknown>;
+    if (typeof e.id !== "string" || typeof e.tool !== "string" || typeof e.hash !== "string" || typeof e.stampId !== "string") continue;
+    if (typeof e.left !== "number" || !Number.isFinite(e.left)) continue;
+    entries.push({ id: e.id, tool: e.tool, hash: e.hash, stampId: e.stampId, left: e.left });
+  }
+  return entries;
+}
+
+// One main-loop tool call counted against the watch list. An entry with no
+// calls left writes false, which happens at the call after the last of its
+// COMPACT_RERUN_WINDOW_CALLS; an entry of the call's tool and input hash
+// writes true; and every other entry stays open with one call fewer left.
+export function settleRerunCall(entries: readonly RerunEntry[], tool: string, hash: string): { open: RerunEntry[]; outcomes: Array<{ stampId: string; value: "true" | "false" }> } {
+  const open: RerunEntry[] = [];
+  const outcomes: Array<{ stampId: string; value: "true" | "false" }> = [];
+  for (const entry of entries) {
+    if (entry.left <= 0) outcomes.push({ stampId: entry.stampId, value: "false" });
+    else if (entry.tool === tool && entry.hash === hash) outcomes.push({ stampId: entry.stampId, value: "true" });
+    else open.push({ ...entry, left: entry.left - 1 });
+  }
+  return { open, outcomes };
 }

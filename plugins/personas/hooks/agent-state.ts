@@ -487,7 +487,7 @@ export interface MonitorState {
     selfReview: { count: number; estTokens: number };
     planner: { count: number; estTokens: number };
     nudge: { count: number };
-    forkUsage: null | { inputTokens: number; outputTokens: number };
+    forkUsage: null | ForkUsage;
     consecutiveSkips: number;
     nudgeWindow: { start: number; count: number };
     callWindow: { start: number; count: number };
@@ -639,6 +639,53 @@ function isShownMemory(value: unknown): value is ShownMemory {
     && typeof entry.name === "string" && entry.name !== ""
     && (typeof entry.goalId === "string" || entry.goalId === null)
     && Number.isFinite(entry.shownAt);
+}
+
+// The three kinds a memory record is written under, the kind gate's labels
+// less discard.
+export type MemoryKind = "fact" | "preference" | "lesson";
+export const MEMORY_KINDS: readonly MemoryKind[] = Object.freeze(["fact", "preference", "lesson"]);
+
+// One turn end the kind gate read as a fact, a preference or a lesson, whose
+// record the controller tick's memory drain still owes. turnId is the turn's
+// id, kind the gate's label, promptHead and answerHead the head of the prompt
+// and of the answer the gate saw, turnHead the head of the text the turn
+// itself opened with, and at the clock the turn ended at. The
+// drain writes the record by a fork of the session's transcript while the
+// prompt cache is warm, and by a Haiku completion over the two heads
+// otherwise; hooks/memory-writer.ts states both.
+export interface MemoryOwed {
+  turnId: string;
+  kind: MemoryKind;
+  promptHead: string;
+  answerHead: string;
+  turnHead?: string;
+  at: number;
+}
+
+// The most owed items the state holds at once. The oldest goes first.
+export const MEMORY_OWED_MAX = 4;
+
+// Whether a stored entry is an owed item: a string turn id, one of the three
+// kinds, string heads, a turn head absent or a string, and a finite clock.
+export function isMemoryOwed(value: unknown): value is MemoryOwed {
+  const entry = value as Partial<MemoryOwed> | null;
+  return !!entry && typeof entry === "object"
+    && typeof entry.turnId === "string"
+    && (MEMORY_KINDS as readonly unknown[]).includes(entry.kind)
+    && typeof entry.promptHead === "string" && typeof entry.answerHead === "string"
+    && (entry.turnHead === undefined || typeof entry.turnHead === "string")
+    && Number.isFinite(entry.at);
+}
+
+// What the session's forks have cost, summed over every fork result the memory
+// drain read that carried a usage object: the API's input, output and
+// cache-read counts, in the ledger's spelling, a missing count read as zero.
+// Null until the first such result.
+export interface ForkUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
 }
 
 // Who opened an ask: the worker's own ASK: line, or one of the three asks the
@@ -908,6 +955,7 @@ export interface AgentState {
   tasks: TaskItem[]; // beside the tree, each keyed to a goal; see TaskItem
   turnRecords: TurnRecord[]; // beside the tree, one message each; see TurnRecord
   shownMemories: ShownMemory[]; // the store's records the read showed; see ShownMemory
+  memoryOwed: MemoryOwed[]; // the turn ends whose record the memory drain still owes, oldest first; see MemoryOwed
   activeGoalId: string | null;
   longTermGoals: LongTermGoal[]; // beside the tree, never in it; see LongTermGoal
   autonomy: AutonomyLevel; // set only by goal_autonomy; see AUTONOMY_LEVELS
@@ -1081,6 +1129,7 @@ export function createDefaultState(persona: string, sessionId: string): AgentSta
     tasks: [],
     turnRecords: [],
     shownMemories: [],
+    memoryOwed: [],
     activeGoalId: null,
     longTermGoals: [],
     autonomy: "propose",
@@ -1544,6 +1593,7 @@ export function parseState(json: string): AgentState {
       tasks: [],
       turnRecords: [],
       shownMemories: [],
+      memoryOwed: [],
       activeGoalId,
       longTermGoals: [],
       autonomy: "propose",
@@ -1723,6 +1773,18 @@ export function parseState(json: string): AgentState {
   if (typeof state.monitor.cost.capNoticeWindowStart !== "number") {
     state.monitor.cost.capNoticeWindowStart = 0;
   }
+  // The fork ledger: null stays null, as does any value that is not an
+  // object, since no fork has been summed into it; an object keeps each count
+  // that is a finite number and reads a missing or malformed count as 0, so
+  // a ledger a build before the cache-read count wrote loads whole.
+  const forkUsage = (state.monitor.cost as { forkUsage?: unknown }).forkUsage;
+  if (forkUsage !== null && typeof forkUsage === "object") {
+    const count = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+    const held = forkUsage as Partial<ForkUsage>;
+    state.monitor.cost.forkUsage = { inputTokens: count(held.inputTokens), outputTokens: count(held.outputTokens), cacheReadInputTokens: count(held.cacheReadInputTokens) };
+  } else {
+    state.monitor.cost.forkUsage = null;
+  }
 
   // The fleet watcher's reading is dropped from anything this file carries.
   // The watcher holds its reading in session memory and reads it back from
@@ -1800,6 +1862,12 @@ function enforceInvariants(state: AgentState): void {
   // is cut to SHOWN_MEMORIES_MAX from the front, as recordShownMemory cuts it.
   const shown = (state as { shownMemories?: unknown }).shownMemories;
   state.shownMemories = Array.isArray(shown) ? shown.filter(isShownMemory).slice(-SHOWN_MEMORIES_MAX) : [];
+
+  // The owed items, filled the same way: a stored value that is not a list
+  // reads as an empty one, an entry that is not an owed item is dropped, and
+  // the list is cut to MEMORY_OWED_MAX from the front, oldest first.
+  const owed = (state as { memoryOwed?: unknown }).memoryOwed;
+  state.memoryOwed = Array.isArray(owed) ? owed.filter(isMemoryOwed).slice(-MEMORY_OWED_MAX) : [];
 
   // A fold count, kept on every load only where it is a positive integer,
   // since a count of no child or a value of another type names no fold. A
