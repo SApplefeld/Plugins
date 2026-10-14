@@ -23,6 +23,9 @@ import type { Registry } from "../registry.ts";
 // tailer, which imports this module type-only, so the modules stay acyclic at run time.
 import { crossSessionDelivery } from "../tail.ts";
 import type { EchoMemory, EchoSlot, PeerTraffic, PromptSource } from "../tail.ts";
+import type { AttachmentMode } from "./attachments.ts";
+import { REPLY_FILE_REASONS, readReplyFile } from "./reply-file.ts";
+import type { ReplyFile, ReplyFileSystem } from "./reply-file.ts";
 import type { ThreadWriter } from "./writer.ts";
 import type { CallOutcome } from "../discord/transport.ts";
 
@@ -184,6 +187,19 @@ export type OutboundRouterOptions = {
   receipts?: {
     pickedUp: (threadId: string, at: number) => void;
     answered: (threadId: string, at: number) => void;
+  };
+  /**
+   * How a file a reply names is read: the file system, the platform whose path rules apply, the
+   * attachment mode and the cap, which are the inbound intake's own setting and cap, so one number
+   * and one switch bound a file in either direction. Absent, a reply naming a file is refused as
+   * `disabled`, since a router with no reader can attach nothing; a reply naming none never reads
+   * it. The broker always passes it, so absence is a test's shape.
+   */
+  replyFile?: {
+    fs: ReplyFileSystem;
+    platform: NodeJS.Platform;
+    mode: AttachmentMode;
+    maxBytes: number;
   };
 };
 
@@ -448,12 +464,17 @@ function isTaskNotification(text: string): boolean {
   return withoutInvisible(text).trimStart().startsWith(TASK_NOTIFICATION);
 }
 
-/** Why a reply could not be posted, in the terms the relay reports back to Claude. */
+/**
+ * Why a reply could not be posted, in the terms the relay reports back to Claude. `file-refused`
+ * carries the sentence from `REPLY_FILE_REASONS`, which the relay prints to the model verbatim, and
+ * means nothing was posted.
+ */
 export type ReplyResult =
   | { status: "sent" }
   | { status: "no-session" }
   | { status: "no-thread" }
-  | { status: "failed"; error: string };
+  | { status: "failed"; error: string }
+  | { status: "file-refused"; reason: string };
 
 /**
  * What a mirror post carries: the operator's console prompt, or the turn's final assistant reply.
@@ -464,8 +485,12 @@ export type ReplyResult =
 export type { MirrorKind };
 
 export type OutboundRouter = {
-  /** Posts one reply from the session currently held by this process token. */
-  reply: (processToken: string, text: string) => Promise<ReplyResult>;
+  /**
+   * Posts one reply from the session currently held by this process token. `file` is a path the
+   * session named, read under its own working directory and attached to the reply's last message;
+   * a file the reader refuses is reported as `file-refused` and nothing posts.
+   */
+  reply: (processToken: string, text: string, file?: string) => Promise<ReplyResult>;
   /**
    * Posts one mirrored prompt or reply from the session currently held by this process token.
    *
@@ -614,10 +639,13 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   // The no-thread answer carries the session it resolved, which the caller has no other way to
   // name in a log line: the only other thing it holds is the process token, and that is the key a
   // post is authenticated by rather than something to write down.
+  //
+  // The located session carries its recorded working directory, which the reply tool reads a named
+  // file under. It is an instruction to open a directory and is never logged or rendered here.
   function locate(
     processToken: string,
   ):
-    | { sessionId: string; threadId: string }
+    | { sessionId: string; threadId: string; workdir: string | null }
     | { status: "no-session" }
     | { status: "no-thread"; sessionId: string } {
     const record = options.registry.current(processToken);
@@ -630,7 +658,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
     // at all.
     if (threadId === null) return { status: "no-thread", sessionId: record.sessionId };
 
-    return { sessionId: record.sessionId, threadId };
+    return { sessionId: record.sessionId, threadId, workdir: record.workdir };
   }
 
   // Per-thread ordering, held here because this router is the one place every conversation-carrying
@@ -771,22 +799,32 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
    * `lastMessageId` is the id of the run's final message, carried only when the whole run landed
    * and Discord's response yielded one: it is what the interim path remembers as the target of
    * the next chunk's edit, and a mid-run id would name a message with newer ones below it.
+   *
+   * `file`, which only the reply tool passes, rides the run's final message and no earlier one, so
+   * the text stands above the attachment the way Discord draws a paste. A run that lands its text
+   * and fails on that message reports the count it reached like any other, and that count is what
+   * tells the model the file did not land while the text did.
    */
   async function postRun(
     threadId: string,
     messages: string[],
+    file?: ReplyFile,
   ): Promise<{ landed: number; error: string | null; lastMessageId: string | null }> {
     let landed = 0;
     let lastMessageId: string | null = null;
     let waited = 0;
-    for (const message of messages) {
+    for (const [index, message] of messages.entries()) {
       // Between posts and never before the first, so a run of one message spends nothing. Taken
       // whether or not the previous message had to be waited out: a reactive wait is evidence the
       // bucket emptied, not a reason for the next post to skip the spacing that keeps it full.
       if (landed > 0) await sleep(RUN_PACE_MS);
+      const attached =
+        file !== undefined && index === messages.length - 1
+          ? { name: file.name, data: file.bytes, contentType: file.contentType }
+          : undefined;
       // The waiting is the run's: what one message's refusals cost counts against the next's.
       const attempt = await postThroughRateLimits(
-        () => options.mirrorWriter.reply(threadId, message),
+        () => options.mirrorWriter.reply(threadId, message, attached),
         waited,
         { now, sleep },
       );
@@ -822,10 +860,11 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   async function deliver(
     threadId: string,
     messages: string[],
+    file?: ReplyFile,
   ): Promise<{ landed: number; error: string | null; lastMessageId: string | null }> {
     return inOrder(threadId, () => {
       narration.delete(threadId);
-      return postRun(threadId, messages);
+      return postRun(threadId, messages, file);
     });
   }
 
@@ -1122,12 +1161,36 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   }
 
   return {
-    async reply(processToken, text) {
+    async reply(processToken, text, file) {
       const located = locate(processToken);
       // Rebuilt rather than passed along, so the session `locate` resolved for the log line below
       // stays here: this result is serialized back to the relay and read by the model, and the
       // relay is told why a reply did not land, never what the broker knows about the session.
       if ("status" in located) return { status: located.status };
+
+      // The file, read and bounded before anything renders or posts, so a refusal is never a
+      // half-posted reply: the model is told the cause and sends once more with the argument
+      // fixed. The log carries the session and the cause and never the path, which is the
+      // model's own words about the session's disk.
+      let attachment: ReplyFile | undefined;
+      if (file !== undefined) {
+        const read =
+          options.replyFile === undefined
+            ? { file: null, refused: "disabled" as const }
+            : await readReplyFile({
+                workdir: located.workdir,
+                path: file,
+                maxBytes: options.replyFile.maxBytes,
+                mode: options.replyFile.mode,
+                platform: options.replyFile.platform,
+                fs: options.replyFile.fs,
+              });
+        if (read.refused !== null) {
+          log(`routing: the reply from session ${located.sessionId} was refused its file: ${read.refused}`);
+          return { status: "file-refused", reason: REPLY_FILE_REASONS[read.refused] };
+        }
+        attachment = read.file;
+      }
 
       // Rendered by the same machinery the mirror below is rendered by, and for the same reasons:
       // both paths post into the one thread, so a reply tool call is the other way a line that
@@ -1146,7 +1209,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       // on. Alert paths hold their own writer and never come through this router.
       // The reply's arrival, read before the run so a prompt typed while it lands is later than it.
       const arrivedAt = now();
-      const run = await deliver(located.threadId, messages);
+      const run = await deliver(located.threadId, messages, attachment);
       if (run.error === null) {
         // The raw pre-render text, recorded only now that the run landed whole, the same rule
         // the mirror's own record follows: an answer the transport refused is not in front of

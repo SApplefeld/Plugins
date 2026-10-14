@@ -129,6 +129,12 @@ export type ThreadMessenger = {
     threadId: string;
     text: string;
     /**
+     * One file attached to this one message. Left unset on every write but a reply that named a
+     * file, because a message with a file goes out as a multipart request and every other post
+     * stays the plain JSON request it has always been.
+     */
+    file?: { name: string; data: Uint8Array; contentType: string };
+    /**
      * The Discord users this one message may resolve as mentions: every operator, or none. Left
      * unset on every write but the broker's alerts (the permission prompt, the question alert, the
      * blocked alert and the model-change alert), the messages in this system meant to reach a

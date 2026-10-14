@@ -12,6 +12,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { absoluteLocalPath } from "./intake.ts";
 import { MAX_BACKGROUND_TASKS, MAX_BACKGROUND_TASK_ID_LENGTH } from "./registry.ts";
 import type {
   BackgroundTask,
@@ -182,7 +183,8 @@ function isSessionRecord(value: unknown): value is SessionRecord {
     absentOrString(value.openingModel) &&
     absentOrString(value.model) &&
     absentOrNumber(value.contextTokens) &&
-    absentOrString(value.title)
+    absentOrString(value.title) &&
+    absentOrString(value.workdir)
     // `downgrade` and `backgroundTasks` are deliberately unvalidated here: they are the nested
     // fields, and cleanRecord reduces a malformed one at field level (to null and to the readable
     // entries) rather than letting it reject the snapshot whole.
@@ -211,6 +213,9 @@ function cleanRecord(record: SessionRecord): SessionRecord {
   // Widened for the same reason: a snapshot written before item 1 shipped carries no key for it at
   // all, and it lands as null here rather than as undefined on a record every surface reads.
   const lineage: string | null | undefined = record.lineage;
+  // Widened for the same reason: a snapshot written before the working directory was recorded
+  // carries no key for it.
+  const workdir: string | null | undefined = record.workdir;
   return {
     ...record,
     sessionId: clean(record.sessionId),
@@ -260,6 +265,13 @@ function cleanRecord(record: SessionRecord): SessionRecord {
     // itself here is what keeps it out of the validator above, where any clause is a
     // whole-snapshot rejection that would cost every session on the host its thread binding.
     backgroundTasks: tasksOrEmpty(record.backgroundTasks),
+    // Restored through the intake's absolute-local-path reader, never `clean`: this is an
+    // instruction to open a directory, `clean` would cap a long one into a different directory, and
+    // the state file is one anything running as this user can rewrite. Absent, null, and a string the
+    // reader refuses (a UNC root, a relative path, an over-long one) all land as null. A value that
+    // is not a string never reaches here: the validator above rejects the snapshot, as it does for
+    // every other scalar field.
+    workdir: absoluteLocalPath(workdir),
   };
 }
 
@@ -351,6 +363,7 @@ function persisted(record: SessionRecord): PersistedRecord {
     downgrade: record.downgrade,
     backgroundTasks: record.backgroundTasks,
     title: record.title,
+    workdir: record.workdir,
   };
 }
 

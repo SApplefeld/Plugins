@@ -93,8 +93,9 @@ message in a session's thread is saved on this host and the session is told wher
 paste that Discord turned into `message.txt` arrives as the words of the message instead, where it
 fits the relay's pipe. "Attachments" in `operations.md` gives that limit. Three settings in
 `broker.env` bound it. `CHANNEL_ATTACHMENTS` decides who may send a file: `operator`, the default,
-`all` to admit participants too, or `off`. `CHANNEL_ATTACHMENT_MAX_BYTES` caps one file, 10,485,760
-bytes (10 MiB) by default. `CHANNEL_ATTACHMENT_RETAIN_DAYS` decides how long a saved file is kept,
+`all` to admit participants too, or `off`, which also stops a session attaching a file to its
+reply. `CHANNEL_ATTACHMENT_MAX_BYTES` caps one file in either direction, 10,485,760 bytes (10 MiB)
+by default. `CHANNEL_ATTACHMENT_RETAIN_DAYS` decides how long a saved file is kept,
 14 days by default. Like every setting there, each takes effect when the broker restarts. Saved
 files sit in an `attachments` folder beside the broker's state file, never in a project. An
 interactive session asks permission to read one, and that prompt reaches Discord like any other.
@@ -356,6 +357,12 @@ installed-hook checks find no hook of this project's and stay silent: the one co
 `-NoMirror` relies on. And the hook timeouts and headers are whatever the plugin sends, not the
 values in `hooks/settings-fragment.json` and its pins. The fragment stays in the repository as the
 `settings` owner's template.
+
+A `plugin` host also relies on the adapter for a session's start directory. The broker reads it from
+the `cwd` field of the `SessionStart` post, and it bounds the one file a session's reply may carry
+("A session can send one file" in `operations.md`). Where the adapter's `SessionStart` post carries
+no `cwd`, every file a session names is refused as `this session's working directory is not recorded
+or no longer exists`, and the reply's text is not posted either.
 
 **Switch a host only when the persona plugin is known to carry the hooks.** Removing them first
 leaves every session started afterwards unannounced, with no question answerable from Discord. The

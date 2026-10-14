@@ -10,16 +10,19 @@
 //   POST /relay/reply
 //     X-Channel-Process-Token: the same token
 //     X-Channel-Reply-Key:     the key the stream's `hello` carried
-//     body: {"text": "..."}
-//     -> 200 {"status": "sent" | "no-session" | "no-thread" | "failed"}, with the head written
-//        before the run starts and a newline heartbeat every REPLY_HEARTBEAT_MS until it resolves.
+//     body: {"text": "...", "file": "<absolute path>"}, the file optional and left off when none
+//     -> 200 {"status": "sent" | "no-session" | "no-thread" | "failed" | "file-refused"}, with the
+//        head written before the run starts and a newline heartbeat every REPLY_HEARTBEAT_MS until
+//        it resolves. A file-refused body carries the "reason" sentence the relay shows the model,
+//        and means nothing was posted.
 //        The outcome rides the body alone, because the status line is on the wire long before the
 //        outcome is known; the heartbeats are insignificant leading whitespace to the JSON parser
 //        at the other end, and they are what the relay's idle timer measures instead of run length.
 //        A caller that is already gone gets no head and no heartbeat: the run goes ahead and its
 //        outcome is logged, since nothing written to a closed connection reaches anyone.
 //     -> 403 when the key does not match the pipe currently held for that token
-//     -> 400 or 413 on a body that is unreadable or past the cap, both decided before the head
+//     -> 400 or 413 on a body that is unreadable, past the cap, or carries a file that is not a
+//        string, each decided before the head
 //
 //   POST /relay/permission
 //     the same two headers
@@ -313,6 +316,15 @@ export function createRelayRoutes(
         send(response, 400, { error: "body has no text string" });
         return;
       }
+      // Optional, and handed on unread when present: whether the path is absolute, local and
+      // inside the session's directory is the router's to decide, since only it knows the session.
+      // A present field of the wrong shape is a malformed body, refused before the head like one
+      // with no text.
+      const file = fields.file;
+      if (file !== undefined && typeof file !== "string") {
+        send(response, 400, { error: "file is not a string" });
+        return;
+      }
 
       // The head goes out before the run does. A reply waits on its thread's ordering chain and
       // nothing bounds what is queued ahead of it, so a route that wrote nothing until the run
@@ -343,7 +355,7 @@ export function createRelayRoutes(
         response.on("close", () => clearInterval(beating));
       }
 
-      const result = await options.outbound.reply(processToken, text).finally(() => {
+      const result = await options.outbound.reply(processToken, text, file).finally(() => {
         if (heartbeat !== null) clearInterval(heartbeat);
       });
       // A run paces itself and can outlive the relay's wait for it, and the relay destroys the
@@ -352,9 +364,14 @@ export function createRelayRoutes(
       // the run finished, because the relay's ceiling tells the model not to send the message
       // again: this line is the only place a reply that failed after its caller left is ever
       // reported, to anyone. The status and its cause are the whole of it, the way every line here
-      // carries cause and never the message.
+      // carries cause and never the message. A refused file's reason names no path either.
       if (response.writableEnded || response.destroyed) {
-        const cause = result.status === "failed" ? `: ${result.error}` : "";
+        const cause =
+          result.status === "failed"
+            ? `: ${result.error}`
+            : result.status === "file-refused"
+              ? `: ${result.reason}`
+              : "";
         log(
           `relay: a ${route} run settled ${result.status} after its caller had closed the ` +
             `connection${cause}`,

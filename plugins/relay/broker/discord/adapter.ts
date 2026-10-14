@@ -33,6 +33,11 @@ export type RawRequest = (input: {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /** Absent on the verbs that carry none: the pin read, the pin, and the unpin. */
   body?: Record<string, unknown>;
+  /**
+   * Absent, never an empty list, on every write but a post that carries a file. A file makes the
+   * request a multipart one, with `body` riding along as its JSON part.
+   */
+  files?: readonly { name: string; data: Uint8Array; contentType: string }[];
 }) => Promise<RawResult>;
 
 /**
@@ -287,8 +292,13 @@ export function createDiscordTransport(
     route: string,
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     body?: Record<string, unknown>,
+    file?: { name: string; data: Uint8Array; contentType: string },
   ): Promise<CallOutcome<unknown>> {
-    return classify(await request({ route, method, body }));
+    // `files` is left off entirely when there is no file, as `body` is left off the verbs that
+    // carry none.
+    return classify(
+      await request({ route, method, body, ...(file === undefined ? {} : { files: [file] }) }),
+    );
   }
 
   return {
@@ -355,22 +365,28 @@ export function createDiscordTransport(
       threadId,
       text,
       mentionUserIds,
+      file,
     }): Promise<CallOutcome<{ messageId: string | null }>> => {
-      const posted = await write(`/channels/${threadId}/messages`, "POST", {
-        content: text,
-        // The empty `parse` list still stands: no mention class is resolved from the content, so
-        // `@everyone`, `@here`, a role, and any user the text happens to name all stay inert. An
-        // alert adds the operators' IDs to the users list, which is a whitelist and not a
-        // widening: those IDs are the only mentions Discord will resolve, and the renderer has
-        // escaped the mention syntax out of every untrusted field, so the only mentions in the
-        // message are the ones the broker wrote. An empty list resolves nobody, as an absent one
-        // does.
-        allowed_mentions:
-          mentionUserIds === undefined || mentionUserIds.length === 0
-            ? NO_MENTIONS
-            : { ...NO_MENTIONS, users: [...mentionUserIds] },
-        flags: SUPPRESS_EMBEDS,
-      });
+      const posted = await write(
+        `/channels/${threadId}/messages`,
+        "POST",
+        {
+          content: text,
+          // The empty `parse` list still stands: no mention class is resolved from the content, so
+          // `@everyone`, `@here`, a role, and any user the text happens to name all stay inert. An
+          // alert adds the operators' IDs to the users list, which is a whitelist and not a
+          // widening: those IDs are the only mentions Discord will resolve, and the renderer has
+          // escaped the mention syntax out of every untrusted field, so the only mentions in the
+          // message are the ones the broker wrote. An empty list resolves nobody, as an absent one
+          // does.
+          allowed_mentions:
+            mentionUserIds === undefined || mentionUserIds.length === 0
+              ? NO_MENTIONS
+              : { ...NO_MENTIONS, users: [...mentionUserIds] },
+          flags: SUPPRESS_EMBEDS,
+        },
+        file,
+      );
       if (posted.status !== "ok") return posted;
 
       // Unlike postCard, a body with no readable id is not a failure: the message already landed

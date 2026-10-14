@@ -40,12 +40,13 @@ export type VerdictHandler = (verdict: PermissionVerdict) => void;
 /**
  * What one reply came to. `sent` is the only success.
  *
- * The first four are the broker's own words for the outcome, read out of the response body. The
- * last is the relay's alone and never arrives on the wire: it is what a reply comes to when the
- * broker was still answering at the ceiling on one reply, so the run may be part-way up the thread
- * and the answer must not be sent again.
+ * All but `still-posting` are the broker's own words for the outcome, read out of the response
+ * body; `file-refused` is a reply whose named file the broker would not attach, so nothing posted,
+ * and it carries the broker's reason. `still-posting` is the relay's alone and never arrives on the
+ * wire: it is what a reply comes to when the broker was still answering at the ceiling on one
+ * reply, so the run may be part-way up the thread and the answer must not be sent again.
  */
-export type ReplyStatus = "sent" | "no-session" | "no-thread" | "failed" | "still-posting";
+export type ReplyStatus = "sent" | "no-session" | "no-thread" | "failed" | "file-refused" | "still-posting";
 
 /**
  * What one restart request came to. The first two are the broker's own answers, read out of the
@@ -115,7 +116,12 @@ export type BrokerClient = {
   permissionTimeoutMs: number;
   start: () => void;
   stop: () => void;
-  reply: (text: string) => Promise<{ status: ReplyStatus; error?: string }>;
+  /**
+   * Posts one reply, with the file at `file` attached where one is named. The path is sent as
+   * given and the broker decides whether it may leave; `reason` is the broker's sentence for a
+   * refusal, present only where the broker wrote one.
+   */
+  reply: (text: string, file?: string) => Promise<{ status: ReplyStatus; error?: string; reason?: string }>;
   /**
    * Hands the broker one permission prompt to put in front of the operator. It resolves when the
    * broker has taken the prompt, not when the operator answers: the answer arrives whenever they
@@ -202,8 +208,16 @@ function isSavedPath(entry: unknown): entry is string {
     typeof entry === "string" &&
     path.isAbsolute(entry) &&
     path.resolve(entry) === entry &&
-    !/[\u0000-\u001f\u007f]/.test(entry)
+    !holdsControlCharacter(entry)
   );
+}
+
+/**
+ * Whether a path holds a C0 control character or DEL. One test for every path that crosses the
+ * pipe, in either direction, since a newline in one would break out of a line of text.
+ */
+export function holdsControlCharacter(value: string): boolean {
+  return /[\u0000-\u001f\u007f]/.test(value);
 }
 
 export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
@@ -420,8 +434,8 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
             try {
               const parsed = JSON.parse(raw) as { status?: unknown; error?: unknown; reason?: unknown };
               // `error` is why a request failed and `reason` is why a decided one was refused.
-              // The restart route is the one that gives a reason, and it is carried as the
-              // broker wrote it, since the model reads it as the answer.
+              // The restart route and a reply whose file was refused give a reason, and it is
+              // carried as the broker wrote it, since the model reads it as the answer.
               finish({
                 status: typeof parsed.status === "string" ? parsed.status : "failed",
                 error: typeof parsed.error === "string" ? parsed.error : undefined,
@@ -470,9 +484,16 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       request = null;
     },
 
-    async reply(text) {
-      const answer = await post("/relay/reply", { text }, replyIdleMs, replyCeilingMs);
-      return { status: answer.status as ReplyStatus, error: answer.error };
+    async reply(text, file) {
+      // The key is left off rather than sent empty when no file is named, so a reply without one is
+      // the body an older broker's route has always read.
+      const body = file === undefined ? { text } : { text, file };
+      const answer = await post("/relay/reply", body, replyIdleMs, replyCeilingMs);
+      return {
+        status: answer.status as ReplyStatus,
+        error: answer.error,
+        ...(answer.reason === undefined ? {} : { reason: answer.reason }),
+      };
     },
 
     async permissionRequest(request) {

@@ -298,28 +298,32 @@ function backgroundTasks(payload: Record<string, unknown>): readonly BackgroundT
 }
 
 /**
- * Longest transcript path accepted. Well past the longest real one observed on this machine (206
- * characters) and past the classic Windows MAX_PATH, so a deep checkout still fits; what it
- * bounds is storage, not legitimate traffic.
+ * Longest absolute path accepted from a payload field (the transcript path and the working
+ * directory). Well past the longest real transcript path observed on this machine (206 characters)
+ * and past the classic Windows MAX_PATH, so a deep checkout still fits; what it bounds is storage,
+ * not legitimate traffic.
  */
 const MAX_TRANSCRIPT_PATH_LENGTH = 1024;
 
 // C0 and DEL, the same class clean() strips; local because clean() also caps at MAX_FIELD_LENGTH,
-// which is exactly what a path must not have done to it (see transcriptPathField).
+// which is exactly what a path must not have done to it (see absoluteLocalPath).
 const PATH_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
 
 /**
- * The transcript path, read under its own rules because it is an instruction to open a file, not
- * a display string. Control characters are stripped and the result trimmed, as clean() does, but
- * every other deviation is refused whole rather than normalized: a path cut at a cap would never
- * open and would leave only a rate-limited pass-failed line forever, indistinguishable from a
- * genuinely unreadable file, and a UNC path opened on Windows initiates an outbound SMB
- * connection carrying the operator's credentials. Refused means the tailer never learns a path
- * for that session, which is a legible failure. Accepted shapes are exactly what the hooks send:
- * an absolute local path, drive-letter or POSIX.
+ * A value read as an absolute local path, under its own rules because it is an instruction to open
+ * a file or a directory, not a display string. Control characters are stripped and the result
+ * trimmed, as clean() does, but every other deviation is refused whole rather than normalized: a
+ * path cut at a cap would never open and would leave only a rate-limited pass-failed line forever,
+ * indistinguishable from a genuinely unreadable file, and a UNC path opened on Windows initiates an
+ * outbound SMB connection carrying the operator's credentials, as a UNC directory would. Refused
+ * means the reader returns null and the consumer never learns a path for that session, which is a
+ * legible failure. Accepted shapes are exactly what the hooks send: an absolute local path,
+ * drive-letter or POSIX.
+ *
+ * Exported because the registry snapshot's restore is a second hostile boundary for the same
+ * values, and must refuse exactly what the wire refuses.
  */
-function transcriptPathField(payload: Record<string, unknown>): string | null {
-  const value = payload["transcript_path"];
+export function absoluteLocalPath(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const path = value.replace(PATH_CONTROL_CHARACTERS, "").trim();
   if (path === "" || path.length > MAX_TRANSCRIPT_PATH_LENGTH) return null;
@@ -330,6 +334,11 @@ function transcriptPathField(payload: Record<string, unknown>): string | null {
   if (UNC_ROOT.test(path)) return null;
   if (!/^[A-Za-z]:[\\/]/.test(path) && !path.startsWith("/")) return null;
   return path;
+}
+
+/** One named payload field, read through `absoluteLocalPath`. */
+function pathField(payload: Record<string, unknown>, name: string): string | null {
+  return absoluteLocalPath(payload[name]);
 }
 
 /**
@@ -426,9 +435,12 @@ export function parseIntake(
       toolInput: toolInputPreview(fields),
       // Through its own reader rather than payloadString: a path is opened, not displayed, so a
       // malformed one is refused whole instead of normalized into a different path (see
-      // transcriptPathField). It is used only as an argument to a read: the tailer holds it in
+      // absoluteLocalPath). It is used only as an argument to a read: the tailer holds it in
       // memory and nothing persists or publishes it.
-      transcriptPath: transcriptPathField(fields),
+      transcriptPath: pathField(fields, "transcript_path"),
+      // The session's launch directory, through the same reader and for the same reason: it is an
+      // instruction to open a directory. Only a SessionStart's value is kept by the registry.
+      workdir: pathField(fields, "cwd"),
       // Read from `Stop` alone, because that is the event whose payload carries the table. Every
       // other event says nothing about the roster and leaves it exactly as the last turn reported
       // it, which is what null means here.
@@ -653,11 +665,12 @@ export type HandlerOptions = {
  * too: it is operator prose off the transcript, held for one display surface, and a debugging route
  * that anything on this machine can read is not that surface. The open-turn stamp is withheld the
  * same way: it is held for the typing keeper alone, and no consumer of this route reads it. The
- * harness notice is withheld too: it is held for the card alone. The
+ * harness notice is withheld too: it is held for the card alone. The working directory is withheld
+ * as well: it is an instruction to open a directory, held for the broker's own reads. The
  * title, unlike the goal, is published on purpose: it is session identity of the same class as
  * `name`, which this route already publishes, not operator prose held for one display surface.
  */
-export type PublicSessionRecord = Omit<SessionRecord, "processToken" | "goal" | "turnActiveAt" | "harnessNotice">;
+export type PublicSessionRecord = Omit<SessionRecord, "processToken" | "goal" | "turnActiveAt" | "harnessNotice" | "workdir">;
 
 export function redact(record: SessionRecord): PublicSessionRecord {
   // Field by field rather than by deleting from a copy, so a field added to SessionRecord has to

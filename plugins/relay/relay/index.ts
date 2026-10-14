@@ -13,14 +13,17 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { DEFAULT_PORT } from "../broker/config.ts";
 import { runDirectly } from "../broker/entrypoint.ts";
-import { createBrokerClient } from "./broker.ts";
-import type { ReplyStatus, RestartOutcome } from "./broker.ts";
+import { createBrokerClient, holdsControlCharacter } from "./broker.ts";
+import type { BrokerClient, ReplyStatus, RestartOutcome } from "./broker.ts";
 import {
   PermissionRequestNotificationSchema,
   channelCapabilities,
   permissionNotification,
 } from "./permission.ts";
 import { INSTRUCTIONS, REPLY_TOOL_NAME, RESTART_TOOL_NAME, TOOLS, channelNotification } from "./protocol.ts";
+
+/** The longest file path a reply may name, the same bound the broker reads a path under. */
+const MAX_FILE_PATH_LENGTH = 1024;
 
 /** What the model is told when a reply had nowhere to land. */
 const REPLY_FAILURES: Record<string, string> = {
@@ -39,7 +42,7 @@ const REPLY_FAILURES: Record<string, string> = {
  * An error is the signal that invites another attempt, so it is set on every outcome that had
  * nowhere to land and withheld from the one that may already be part-way up the thread.
  */
-export function replyToolResult(status: ReplyStatus): CallToolResult {
+export function replyToolResult(status: ReplyStatus, reason?: string): CallToolResult {
   if (status === "sent") {
     return { content: [{ type: "text", text: "Sent to this session's thread." }] };
   }
@@ -58,11 +61,66 @@ export function replyToolResult(status: ReplyStatus): CallToolResult {
       ],
     };
   }
+  if (status === "file-refused") {
+    // The broker's sentence for why, carried as written, since it names what to fix and never the
+    // path. Without one the model is still told the file was not attached and nothing posted.
+    const text =
+      typeof reason === "string"
+        ? `Not sent: the file was not attached: ${reason}. Nothing was posted.`
+        : "Not sent: the file was not attached. Nothing was posted.";
+    return { content: [{ type: "text", text }], isError: true };
+  }
   // Own properties only. `status` is a string off the wire, so a plain lookup would resolve
   // `constructor` or `toString` through the prototype chain and carry a function where the model
   // expects one of the sentences above.
   const text = Object.hasOwn(REPLY_FAILURES, status) ? REPLY_FAILURES[status] : REPLY_FAILURES.failed;
   return { content: [{ type: "text", text }], isError: true };
+}
+
+/**
+ * One call of the reply tool, from its arguments to what the model is told.
+ *
+ * Held apart from the server wiring, as the result mapping is, so the checks that answer the model
+ * without asking the broker can be driven on their own. `watched` is whether this process holds a
+ * process token from the launch wrapper.
+ */
+export async function replyToolCall(
+  args: Record<string, unknown> | undefined,
+  watched: boolean,
+  reply: BrokerClient["reply"],
+): Promise<CallToolResult> {
+  const message = args?.message;
+  if (typeof message !== "string" || message.trim() === "") {
+    return { content: [{ type: "text", text: "reply needs a non-empty message." }], isError: true };
+  }
+  // Absent is no file. Present, only its shape is judged here, since the relay knows no session
+  // and no disk: whether the path is absolute, local and inside the session's working directory
+  // is the broker's to decide. Judged before the launch wrapper is, since the model can fix an
+  // argument and cannot fix how its session was started.
+  const file = args?.file;
+  if (
+    file !== undefined &&
+    (typeof file !== "string" || file === "" || file.length > MAX_FILE_PATH_LENGTH || holdsControlCharacter(file))
+  ) {
+    return { content: [{ type: "text", text: "file must be a path of at most 1,024 characters." }], isError: true };
+  }
+  if (!watched) {
+    // Answered here rather than by opening a socket the broker would have nothing to match: this
+    // session was started without the launch wrapper, so no thread exists anywhere for it.
+    return {
+      content: [
+        {
+          type: "text",
+          text: "Not sent: this session was not started through the launch wrapper, so it has no Discord thread.",
+        },
+      ],
+      isError: true,
+    };
+  }
+  // Whatever chat_id was passed is left where it is. The broker routes by session, which is what
+  // lets an unprompted reply, sent with no chat_id at all, still reach the right thread.
+  const result = await reply(message, file);
+  return replyToolResult(result.status, result.reason);
 }
 
 /** What the model is told when the restart tool was called by a session no broker watches. */
@@ -229,27 +287,7 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
     if (request.params.name !== REPLY_TOOL_NAME) {
       return { content: [{ type: "text", text: `Unknown tool ${request.params.name}.` }], isError: true };
     }
-    const message = request.params.arguments?.message;
-    if (typeof message !== "string" || message.trim() === "") {
-      return { content: [{ type: "text", text: "reply needs a non-empty message." }], isError: true };
-    }
-    if (!processToken) {
-      // Answered here rather than by opening a socket the broker would have nothing to match: this
-      // session was started without the launch wrapper, so no thread exists anywhere for it.
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Not sent: this session was not started through the launch wrapper, so it has no Discord thread.",
-          },
-        ],
-        isError: true,
-      };
-    }
-    // Whatever chat_id was passed is left where it is. The broker routes by session, which is what
-    // lets an unprompted reply, sent with no chat_id at all, still reach the right thread.
-    const result = await broker.reply(message);
-    return replyToolResult(result.status);
+    return replyToolCall(request.params.arguments, Boolean(processToken), broker.reply);
   });
 
   // The stream is opened only once the connection is initialized. Claude Code probes a stdio

@@ -1,4 +1,5 @@
 // Broker entry point. Run as source under Node's type stripping: `node broker/index.ts`.
+import { open as openFile, realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import path from "node:path";
@@ -100,6 +101,7 @@ import { createResponseGateJournal } from "./routing/response-gate.ts";
 import { createInteractionRouter } from "./routing/interactions.ts";
 import { createOutboundRouter } from "./routing/outbound.ts";
 import type { ReplyResult } from "./routing/outbound.ts";
+import type { ReplyFileSystem } from "./routing/reply-file.ts";
 import { createReceiptTracker } from "./routing/receipts.ts";
 import type { ReceiptTracker } from "./routing/receipts.ts";
 import { createRelayRoutes } from "./routing/http.ts";
@@ -1232,10 +1234,42 @@ export async function startBroker(
   // The bridge of the channel the voice sits in, set by each join and cleared by its leave, so
   // the outbound router's voice tap below reaches whichever bridge is current and none between.
   let voiceBridge: VoiceBridge | null = null;
+  // The file system a reply's named file is read through, built once here the way the inbound
+  // intake's fetch and write are, so the router's reader takes a seam a test can stand a fake in.
+  // `read` opens the file, reads at most `limit` bytes and closes it whatever the read did; the
+  // reader asks for the cap plus one, so a file that grew past the cap is still bounded.
+  const replyFileSystem: ReplyFileSystem = {
+    realpath: (target) => realpath(target),
+    stat: (target) => stat(target),
+    read: async (target, limit) => {
+      const handle = await openFile(target, "r");
+      try {
+        const buffer = Buffer.alloc(limit);
+        let filled = 0;
+        // Until the buffer is full or the file ends: one read is not promised the whole count.
+        while (filled < limit) {
+          const { bytesRead } = await handle.read(buffer, filled, limit - filled, filled);
+          if (bytesRead === 0) break;
+          filled += bytesRead;
+        }
+        return buffer.subarray(0, filled);
+      } finally {
+        await handle.close();
+      }
+    },
+  };
   const outbound = createOutboundRouter({
     registry,
     threadFor: (sessionId) => threadFor(sessionId),
     mirrorWriter,
+    // The same switch and the same cap the inbound intake below is built with, so one setting and
+    // one number bound a file in either direction.
+    replyFile: {
+      fs: replyFileSystem,
+      platform: process.platform,
+      mode: config.attachments,
+      maxBytes: config.attachmentMaxBytes,
+    },
     taskNotifications: config.taskNotifications,
     peerMessages: config.peerMessages,
     log: note,

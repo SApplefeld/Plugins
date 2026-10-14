@@ -126,12 +126,15 @@ const PASTE_NAME = "message.txt";
  * text extension the content type is not consulted, since Discord derives it from the same
  * extension. For an image or a document the reported media type must also be the one named here,
  * so that a file wearing an image's extension over another kind of content is refused.
+ *
+ * Exported because the reply file reader admits exactly these kinds in the other direction, and
+ * importing the lists is what keeps the two from drifting.
  */
-const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
+export const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
   ".txt", ".md", ".json", ".csv", ".log", ".xml", ".yaml", ".yml", ".sql", ".cs", ".js", ".ts",
   ".py", ".ps1", ".sh", ".html", ".css",
 ]);
-const TYPED_EXTENSIONS: ReadonlyMap<string, string> = new Map([
+export const TYPED_EXTENSIONS: ReadonlyMap<string, string> = new Map([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],

@@ -34,7 +34,11 @@ export type ThreadWriter = {
    * landed, and the id it carries on success, when Discord's response yielded one, is the target
    * of a later `edit` on the same message.
    */
-  reply: (threadId: string, text: string) => Promise<CallOutcome<{ messageId: string | null }>>;
+  reply: (
+    threadId: string,
+    text: string,
+    file?: { name: string; data: Uint8Array; contentType: string },
+  ) => Promise<CallOutcome<{ messageId: string | null }>>;
   /**
    * Rewrites a message this writer posted. Spends its own budget, separate from `reply`, `notice`,
    * and `alert`: a message PATCH is a different Discord rate bucket from the create-message POST
@@ -154,6 +158,7 @@ export function createThreadWriter(options: ThreadWriterOptions): ThreadWriter {
     threadId: string,
     text: string,
     mentionUserIds: readonly string[] = [],
+    file?: { name: string; data: Uint8Array; contentType: string },
   ): Promise<CallOutcome<{ messageId: string | null }>> {
     return withBudget(postBudget, "a post", threadId, async () => {
       const body = neutralize(text);
@@ -164,6 +169,8 @@ export function createThreadWriter(options: ThreadWriterOptions): ThreadWriter {
         threadId,
         text: body,
         ...(mentionUserIds.length === 0 ? {} : { mentionUserIds: [...mentionUserIds] }),
+        // Likewise left off unless a reply named a file, so a plain post never becomes multipart.
+        ...(file === undefined ? {} : { file }),
       });
     });
   }
@@ -189,7 +196,7 @@ export function createThreadWriter(options: ThreadWriterOptions): ThreadWriter {
   }
 
   return {
-    reply: (threadId, text) => post(threadId, text),
+    reply: (threadId, text, file) => post(threadId, text, [], file),
     edit,
 
     async notice(threadId, text) {

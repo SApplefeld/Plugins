@@ -66,18 +66,34 @@ export function outcomeOfError(error: unknown): RawResult {
   return { kind: "failed", error: describe(error) };
 }
 
+/**
+ * What `queueRequest` is handed for one request. Separate from the request function so the
+ * absent-key discipline is testable without a client.
+ *
+ * `body` is left off the verbs that carry none rather than sent as an empty object: a body on a GET
+ * or a DELETE is a request shape the route does not define. `files` is left off the same way, so a
+ * post with no file hands the library exactly the request it was handed before files existed. Each
+ * file maps to the library's `RawFile` (`name`, `data`, `contentType`).
+ */
+export function queueInputOf(input: Parameters<RawRequest>[0]) {
+  return {
+    fullRoute: input.route as `/${string}`,
+    method: VERBS[input.method],
+    body: input.body,
+    ...(input.files === undefined
+      ? {}
+      : {
+          files: input.files.map(({ name, data, contentType }) => ({ name, data, contentType })),
+        }),
+  };
+}
+
 export function createRestRequest(token: string): RawRequest {
   const rest = new REST({ version: "10", rejectOnRateLimit: () => true }).setToken(token);
 
-  return async ({ route, method, body }) => {
+  return async ({ route, method, body, files }) => {
     try {
-      const response = await rest.queueRequest({
-        fullRoute: route as `/${string}`,
-        method: VERBS[method],
-        // Left off the verbs that carry none rather than sent as an empty object: a body on a GET or
-        // a DELETE is a request shape the route does not define.
-        body,
-      });
+      const response = await rest.queueRequest(queueInputOf({ route, method, body, files }));
       return {
         kind: "response",
         status: response.status,

@@ -290,6 +290,16 @@ export type SessionRecord = {
    * rename cannot clobber it. `displayName` prefers this over `name` when it is set.
    */
   title: string | null;
+  /**
+   * The directory the session was launched in, as its SessionStart payload's `cwd` reported it
+   * through the absolute-local-path reader, and null when none was reported or the reader refused
+   * it. Written on every SessionStart, a start naming none clearing it, and left as it was by every
+   * other event. It is an instruction to open a directory, as a transcript path is an instruction
+   * to open a file: it is never rendered, never logged and never published on `GET /sessions`.
+   * Persisted, because a restart keeps a live session and must still know where its files may come
+   * from.
+   */
+  workdir: string | null;
 };
 
 export type HookEvent = "SessionStart" | "PreToolUse" | "PostToolUse" | "Stop";
@@ -317,6 +327,12 @@ export type HookIntake = {
    * in-memory map, never stored on a SessionRecord, never persisted, and never published.
    */
   transcriptPath: string | null;
+  /**
+   * The payload's `cwd` after the absolute-local-path reader, or null when absent or refused. Only
+   * a SessionStart's value is kept, on `SessionRecord.workdir`. Absent reads as null, which is what
+   * every intake not built from a hook payload is.
+   */
+  workdir?: string | null;
   /**
    * The session's in-flight work as this payload reported it, or null when the payload said nothing
    * about it. Null leaves the roster standing; an empty array clears it.
@@ -596,6 +612,9 @@ export function createRegistry(options: RegistryOptions): Registry {
       previous.state = "live";
       previous.source = intake.source ?? previous.source;
       previous.name = intake.sessionName ?? previous.name;
+      // Unlike the source and the name, never kept from an earlier start: a directory the latest
+      // start did not vouch for is not one a reply may send from.
+      previous.workdir = intake.workdir ?? null;
       previous.lastHookAt = now();
       previous.lastEngagementAt = now();
       return previous;
@@ -666,6 +685,7 @@ export function createRegistry(options: RegistryOptions): Registry {
       turnActiveAt: null,
       harnessNotice: null,
       title: null,
+      workdir: intake.workdir ?? null,
     };
     sessions.set(sessionId, record);
     // A fresh record starts fresh announcement bookkeeping: a held change or a changed flag from
