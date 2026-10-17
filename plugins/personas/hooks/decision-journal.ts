@@ -179,12 +179,18 @@ export const SEGMENT_MAX = 64;
 // turn ended with another turn still open, or saw one start during its end,
 // carries none.
 //
-// The last belongs to the stale-result question. A `rerun_within` is whether
+// The next belongs to the stale-result question. A `rerun_within` is whether
 // the session called a tool result's tool again on the same input after a
 // live compaction pass dropped or cut that result, written once against the
 // call whose verdict was applied: `true` at a matching main-loop tool call
 // within thirty calls, `false` at the call after the thirtieth or at the
 // next compaction, whichever comes first.
+//
+// The last belongs to the skill pick question. A `next_skill` names the
+// distinct skills the session's main loop invoked in the turn the prompt
+// opened, joined with commas in invocation order, or `none` where it invoked
+// no skill. It is written once against the call, at the turn's end, or at the
+// next prompt where that turn never completed.
 //
 // Older files also carry `applied_since_call` and `turn_score_label` lines,
 // the outcomes of memory-value and step-drift, two questions no site asks.
@@ -199,14 +205,14 @@ export type OutcomeKind =
   | "recall_acted" | "nudge_acted"
   | "haiku_decision" | "acted"
   | "next_step_tools" | "next_trigger"
-  | "rerun_within";
+  | "rerun_within" | "next_skill";
 export const OUTCOME_KINDS: readonly OutcomeKind[] = [
   "next_score", "ask_marker", "lead_blocked", "chapter_within", "next_speaker", "continued_unprompted",
   "record_delivered_within", "next_prompt_kind", "haiku_kind", "haiku_score",
   "recall_acted", "nudge_acted",
   "haiku_decision", "acted",
   "next_step_tools", "next_trigger",
-  "rerun_within",
+  "rerun_within", "next_skill",
 ];
 
 // The value every `ask_marker` outcome line carries, whatever the caller passes.
@@ -875,7 +881,7 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
 // is one before-tool guard's verdict on one call, with the guard, the tool,
 // `deny` or `allow`, the deny's reason and the guard's own milliseconds, and
 // for the memq grant on tool.check `allow` or `silent`; a `guard_shadow` sets
-// a guard's verdict beside the kit command hook's for the same call, with the
+// a guard's verdict beside the command verdict for the same call, with the
 // call's id as `call`, `module` and `command` each `deny` or `allow` and
 // `agree`; a `guard_error` is a guard's or an after hook's own failure, with
 // the guard, the phase (`before`, `after`, `catch`, or `check` for the
@@ -884,12 +890,19 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
 // with the record's name, its tier, the trigger type (`anchor` for a file
 // anchor), the pattern as printable ASCII and the boundary it fired at. A
 // `recognition_withheld` is one such pointer the live memory-recognition
-// answer withheld, with the same fields.
+// answer withheld, with the same fields. A `stretch_distillation` is one
+// attempt of the stretch fork at an admitted compaction, or one reuse of its
+// cached answer: the trigger, the outcome (`answered`, `reused` or
+// `fallback`), the fallback's reason, the counts of records written,
+// duplicate and failed, of memory verdicts applied, confirmed, misled,
+// unused and off the shown set, of items dropped and follow-ups queued,
+// whether the summarizer was briefed, the fork's three usage counts and its
+// milliseconds, each count a flat key since the detail map nests nothing.
 //
 // The union and the array carry the same members in the same order: a member
 // in the union alone compiles and is refused by writeEvent at runtime.
-export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge" | "recognition_withheld";
-export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge", "recognition_withheld"];
+export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge" | "recognition_withheld" | "stretch_distillation";
+export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge", "recognition_withheld", "stretch_distillation"];
 
 // A value an event's detail may carry: a string, a number, a boolean or null.
 export type EventDetailValue = string | number | boolean | null;

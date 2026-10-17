@@ -40,7 +40,7 @@ BEGIN	-- PROCEDURE
 							that row is answered with its archived flag, so an archived
 							record is still read by name. The machine an operator record is
 							scoped to is read from mem.Record for the row the visible set
-							chose, since the visible set carries no machine.
+							chose, by that row's record id.
 
 							Returns no row, or one row, one column [Json], holding {recordId,
 							tier, projectKey, typeName, name, description, body, tags,

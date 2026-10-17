@@ -859,6 +859,91 @@ else {
     Report "PASS" "Node" @("node resolves on PATH.")
 }
 
+# --- Persona plugin. The per-call guards (docs writes, read-only seats, the
+# --- push and PR checks, the memq grant) live in the personas plugin's module,
+# --- so a machine without it installed and enabled runs no guard at all. This
+# --- reads ~/.claude/plugins/installed_plugins.json for a key whose plugin half
+# --- is personas, from any marketplace, with at least one install entry. It
+# --- merges enabledPlugins across three tiers, a later one overriding an
+# --- earlier per key: ~/.claude/settings.json, then .claude\settings.json and
+# --- .claude\settings.local.json under the working directory. The key is
+# --- enabled when its merged value is true. A tier file that is absent is
+# --- skipped, and one that is unreadable, not a JSON object, or holding an
+# --- enabledPlugins that is not an object reads as not enabled. Managed
+# --- settings are not read. This is the reading the hook canary makes, with
+# --- the doctor's working directory in place of the session's cwd. Keys match
+# --- ordinally and case-sensitively, as the canary's JavaScript does, and a key
+# --- printed here goes through Get-SanitizedLine, since the project and local
+# --- tiers sit in a repository the operator merely opened.
+$personasInstalledPath = Join-Path $claudeDir "plugins\installed_plugins.json"
+$personasCwd = (Get-Location).Path
+$personasTierPaths = @(
+    (Join-Path $claudeDir "settings.json"),
+    (Join-Path $personasCwd ".claude\settings.json"),
+    (Join-Path $personasCwd ".claude\settings.local.json")
+)
+$personasInstalledObj = $null
+$personasGaps = @()
+if (-not (Test-Path -LiteralPath $personasInstalledPath)) { $personasGaps += "$personasInstalledPath not found." }
+else {
+    try {
+        $personasInstalledObj = Get-Content -LiteralPath $personasInstalledPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+    }
+    catch { $personasGaps += "$personasInstalledPath could not be read or parsed: " + (Get-SanitizedLine $_.Exception.Message 200) }
+}
+$personasEnabled = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::Ordinal)
+$personasTiersRead = @()
+foreach ($personasTier in $personasTierPaths) {
+    if (-not (Test-Path -LiteralPath $personasTier -PathType Leaf)) { continue }
+    $personasTierObj = $null
+    try {
+        $personasTierObj = Get-Content -LiteralPath $personasTier -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+    }
+    catch {
+        $personasGaps += "$personasTier could not be read or parsed: " + (Get-SanitizedLine $_.Exception.Message 200)
+        continue
+    }
+    if (-not ($personasTierObj -is [System.Management.Automation.PSCustomObject])) {
+        $personasGaps += "$personasTier does not hold a JSON object."
+        continue
+    }
+    $personasTiersRead += $personasTier
+    if (-not ($personasTierObj.PSObject.Properties.Name -contains "enabledPlugins")) { continue }
+    if (-not ($personasTierObj.enabledPlugins -is [System.Management.Automation.PSCustomObject])) {
+        $personasGaps += "$personasTier holds an enabledPlugins that is not an object."
+        continue
+    }
+    foreach ($personasProp in $personasTierObj.enabledPlugins.PSObject.Properties) { $personasEnabled[$personasProp.Name] = $personasProp.Value }
+}
+$personasInstalledKeys = @()
+if ($personasInstalledObj -is [System.Management.Automation.PSCustomObject] -and
+    $personasInstalledObj.plugins -is [System.Management.Automation.PSCustomObject]) {
+    $personasInstalledKeys = @($personasInstalledObj.plugins.PSObject.Properties |
+        Where-Object { [string]::Equals($_.Name.Split([char]'@')[0], "personas", [System.StringComparison]::Ordinal) -and ($_.Value -is [System.Array]) -and ($_.Value.Count -gt 0) } |
+        ForEach-Object { $_.Name })
+}
+$personasEnabledKey = $null
+if ($personasGaps.Count -eq 0) {
+    foreach ($personasKey in $personasInstalledKeys) {
+        $personasValue = $null
+        if ($personasEnabled.TryGetValue($personasKey, [ref]$personasValue) -and ($personasValue -is [bool]) -and $personasValue) { $personasEnabledKey = $personasKey; break }
+    }
+}
+if ($null -ne $personasEnabledKey) {
+    Report "PASS" "Persona plugin" @((Get-SanitizedLine $personasEnabledKey 120) + " is installed and enabled, so the persona module's per-call guards run.")
+}
+else {
+    if ($personasGaps.Count -eq 0) {
+        if ($personasInstalledKeys.Count -eq 0) { $personasGaps += "$personasInstalledPath has no personas@<marketplace> entry." }
+        else {
+            $personasKeysText = ($personasInstalledKeys | ForEach-Object { Get-SanitizedLine $_ 120 }) -join ", "
+            $personasTiersText = if ($personasTiersRead.Count -gt 0) { $personasTiersRead -join ", " } else { "no settings file present" }
+            $personasGaps += "$personasKeysText is installed but no settings tier enables it (read: $personasTiersText)."
+        }
+    }
+    Report "FAIL" "Persona plugin" (@("The personas plugin is not installed and enabled, so no per-call guard runs: the docs-write, read-only, merged-PR push and PR docs guards and the memq grant live in its module.") + $personasGaps + @("Fix: claude plugin install personas@applefeld --scope user, then restart Claude Code."))
+}
+
 # --- Installed copy. On a clone, the memq shim check below
 # --- also reads the expected value of the kit copy this machine has installed,
 # --- so a machine that matches the install and not the checkout in hand
@@ -1110,8 +1195,7 @@ else {
 
 # --- .kit/ exposure. The kit's project-local state lives in .kit/, and every
 # --- file it holds is machine-local by intent: compact-consent.json carries
-# --- the session id an operator released, and memory-recognition-nudges.jsonl
-# --- carries one line per nudge naming the record and its moment, so a
+# --- the session id an operator released, so a
 # --- listing, a backup or a git ls-files discloses what has run here without
 # --- opening much.
 # --- (The role-boundary marker lives under the home directory's own .kit,

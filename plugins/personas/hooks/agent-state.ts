@@ -110,7 +110,7 @@ export interface GoalNode {
                     // turn goal_create ran in. Absent where the root came from
                     // any other turn or the envelope named no author. The
                     // value is sender-written text, cut at write to
-                    // ASKED_BY_MAX_CHARS in hooks/index.ts and
+                    // ASKED_BY_MAX_CHARS in hooks/channel-text.ts and
                     // unfolded, so any reader that puts it into a model's
                     // context folds it through bracketSafeText first.
   planningRounds: number; // root only: number of planning events
@@ -678,6 +678,79 @@ export function isMemoryOwed(value: unknown): value is MemoryOwed {
     && Number.isFinite(entry.at);
 }
 
+// One record the stretch fork may give a verdict on: shown to the session
+// since the last compaction that ran, by the recall block or by a `memq get`
+// the session ran. `tier` is where the record was read from, null where the
+// get named no tier, and `typeName` the type a type tier names. `applied` is
+// true once the session or the goal-close check stamped it, so the fork's
+// applied verdict never stamps twice. `logged` is true once a fork's
+// confirmed or misled verdict on it reached the store as an outcome line,
+// so a later fork in the same stretch logs no second line and queues no
+// second misled follow-up for it. hooks/stretch-distillation.ts feeds the
+// list and reads it.
+export interface StretchShown {
+  name: string;
+  tier: "project" | "type" | "operator" | null;
+  typeName: string | null;
+  at: number;
+  applied: boolean;
+  logged: boolean;
+}
+
+// One record written to the store since the last compaction that ran, by
+// name and the opening line of its text, listed in the stretch fork's prompt
+// so the fork asks for what is missing rather than re-deriving it.
+export interface StretchWritten {
+  name: string;
+  head: string;
+}
+
+// The stretch fork's answer, cached on the session for the compaction that
+// follows a precompute over the same transcript: `key` names the transcript
+// the fork read and `brief` the sentence its answer composed for the
+// summarizer, or null where it composed none.
+export interface StretchForkCache {
+  key: string;
+  brief: string | null;
+}
+
+// The most shown and the most written records the two lists hold. The oldest
+// goes first.
+export const STRETCH_SHOWN_MAX = 100;
+export const STRETCH_WRITTEN_MAX = 20;
+
+const STRETCH_TIERS: readonly unknown[] = Object.freeze(["project", "type", "operator", null]);
+
+// Whether a stored entry is a shown record for the stretch fork: a non-empty
+// name, one of the three tiers or null, a type name that is a string or
+// null, a finite clock, a boolean applied, and a logged that is a boolean or
+// absent, since a store written before the field existed carries none and
+// the load fills it false.
+export function isStretchShown(value: unknown): value is StretchShown {
+  const entry = value as Partial<StretchShown> | null;
+  return !!entry && typeof entry === "object"
+    && typeof entry.name === "string" && entry.name !== ""
+    && STRETCH_TIERS.includes(entry.tier)
+    && (typeof entry.typeName === "string" || entry.typeName === null)
+    && Number.isFinite(entry.at)
+    && typeof entry.applied === "boolean"
+    && (typeof entry.logged === "boolean" || entry.logged === undefined);
+}
+
+// Whether a stored entry is a written record: a non-empty name and a string
+// head.
+export function isStretchWritten(value: unknown): value is StretchWritten {
+  const entry = value as Partial<StretchWritten> | null;
+  return !!entry && typeof entry === "object" && typeof entry.name === "string" && entry.name !== "" && typeof entry.head === "string";
+}
+
+// Whether a stored value is the fork cache: a string key and a brief that is
+// a string or null.
+export function isStretchForkCache(value: unknown): value is StretchForkCache {
+  const entry = value as Partial<StretchForkCache> | null;
+  return !!entry && typeof entry === "object" && typeof entry.key === "string" && (typeof entry.brief === "string" || entry.brief === null);
+}
+
 // What the session's forks have cost, summed over every fork result the memory
 // drain read that carried a usage object: the API's input, output and
 // cache-read counts, in the ledger's spelling, a missing count read as zero.
@@ -709,13 +782,17 @@ export type AskClosedBy = "ask_close" | `record ${string}` | "goal_done" | "goal
 // One question to the operator, on the ledger the persona keeps in its state.
 // The ledger is the owner's truth about its asks; the commons record of the
 // same id is a mirror a reader session answers through. Every field is
-// present on every entry, null where it has no value yet, because the Discord
+// present on every entry, null where it has no value, save `recommend` and
+// `entryTitle`, which hold the empty string, because the Discord
 // relay reads this file whole and lists an open entry's fields. `question` is
-// the worker's line whole, "Recommend:" included, stored as given, since the
-// relay renders it. `recommend` is the text after "Recommend:", which is the
+// the worker's line whole, "Recommend:" included, folded to one line at its
+// line breaks, since the relay renders it. `recommend` is the text after "Recommend:", which is the
 // assumption the work proceeds on. `blocking` is whether the work is stopped
 // on the answer; it is cleared by a lift and never set again. `answer` is a
-// note of at most ASK_ANSWER_MAX characters taken at close.
+// note of at most ASK_ANSWER_MAX characters taken at close. `brief` is the
+// decision brief drafted for the operator from the session's transcript after
+// the turn that filed the ask, null from the open until one is written and
+// null for good on an ask that owes none.
 export interface AskEntry {
   id: string; // ask-<nodeId>-<ms>
   nodeId: string;
@@ -731,6 +808,7 @@ export interface AskEntry {
   closedAt: number | null;
   closedBy: AskClosedBy | null;
   answer: string | null;
+  brief: string | null;
 }
 
 // The most open entries the ledger holds at once; an open past it is refused.
@@ -743,6 +821,43 @@ export const ASKS_MAX = 64;
 export const ASK_CLOSED_KEEP_MS = 7 * 24 * 60 * 60_000;
 // The longest a close note runs.
 export const ASK_ANSWER_MAX = 300;
+
+// One ask whose decision brief the controller tick still owes: the ledger
+// entry's id, the node it rose from, the clock it was owed at, and the clock
+// of the first turn end after that, absent until a turn ends. A worker's
+// accepted ask owes one, by either route; the controller's own three asks
+// carry fixed questions and owe none.
+export interface AskBriefOwed {
+  askId: string;
+  nodeId: string;
+  at: number;
+  endedAt?: number;
+}
+
+// The most owed briefs the state holds at once. The oldest goes first.
+export const ASK_BRIEF_OWED_MAX = 8;
+
+// Whether a stored entry is an owed brief: a non-empty string ask id, a
+// string node id, a finite clock, and a turn-end clock that is absent or
+// finite.
+function isAskBriefOwed(value: unknown): value is AskBriefOwed {
+  const entry = value as Partial<AskBriefOwed> | null;
+  return !!entry && typeof entry === "object"
+    && typeof entry.askId === "string" && entry.askId !== ""
+    && typeof entry.nodeId === "string"
+    && Number.isFinite(entry.at)
+    && (entry.endedAt === undefined || Number.isFinite(entry.endedAt));
+}
+
+// Stamps `now` as the turn end on each owed brief that has none, so each
+// brief's life counts from the end of the turn that owed it. An item saved
+// mid-turn and reloaded by a later session, after a crash or a takeover, takes
+// that session's first turn end instead, which lengthens its life by the gap,
+// or drops as old at an idle tick ahead of that end where the gap already
+// exceeds the life.
+export function stampAskBriefTurnEnd(state: AgentState, now: number): void {
+  for (const owed of state.askBriefOwed) if (owed.endedAt === undefined) owed.endedAt = now;
+}
 
 // The question a seeded entry carries. The version 8 store held one ask id and
 // no question, since the question lived in the commons record alone, so the
@@ -809,9 +924,27 @@ export function openAsk(state: AgentState, opening: AskOpening, now: number): As
     closedAt: null,
     closedBy: null,
     answer: null,
+    brief: null,
   };
   state.asks.push(entry);
   return entry;
+}
+
+// Owes the brief for `entry` at `now`, newest last, stamped with `endedAt` as
+// its turn end where the owing turn has already ended, and holds the list to
+// ASK_BRIEF_OWED_MAX by dropping from the front, each dropped item logged
+// under one ask_brief_dropped decision naming its ask.
+export function oweAskBrief(state: AgentState, entry: AskEntry, now: number, endedAt?: number): void {
+  state.askBriefOwed.push(endedAt === undefined ? { askId: entry.id, nodeId: entry.nodeId, at: now } : { askId: entry.id, nodeId: entry.nodeId, at: now, endedAt });
+  const dropped = state.askBriefOwed.splice(0, Math.max(0, state.askBriefOwed.length - ASK_BRIEF_OWED_MAX));
+  for (const old of dropped) {
+    state.decisions.push({
+      timestamp: now,
+      loop: "monitor",
+      action: "ask_brief_dropped",
+      detail: `ask ${old.askId}: the queue held ${ASK_BRIEF_OWED_MAX}, so the oldest owed brief made way for the newest`,
+    });
+  }
 }
 
 // Closes the open entry `id` names with `status`, the route that closed it and
@@ -827,6 +960,18 @@ export function closeAsk(state: AgentState, id: string, status: AskClosedStatus,
   entry.closedBy = closedBy;
   entry.answer = answer === null ? null : answer.slice(0, ASK_ANSWER_MAX);
   return entry;
+}
+
+// Snapshots the fields a close or a fill rewrites on each of `entries` (question,
+// recommend, status, closedAt, closedBy) and returns a function that puts them
+// back on the same objects. For a caller whose save may be refused after it has
+// edited the ledger. `answer` is not held, so a caller that writes an answer
+// holds and restores it itself.
+export function askEntriesRestorer(entries: AskEntry[]): () => void {
+  const held = entries.map((entry) => ({ entry, question: entry.question, recommend: entry.recommend, status: entry.status, closedAt: entry.closedAt, closedBy: entry.closedBy }));
+  return () => {
+    for (const { entry, ...fields } of held) Object.assign(entry, fields);
+  };
 }
 
 // Clears `blocking` on the open entry `id` names and returns it, or null where
@@ -893,7 +1038,8 @@ function isAskEntry(value: unknown): value is AskEntry {
     && finiteOrNull(entry.closedAt)
     && stringOrNull(entry.closedBy)
     && closeFieldsAgree
-    && stringOrNull(entry.answer);
+    && stringOrNull(entry.answer)
+    && stringOrNull(entry.brief);
 }
 
 // The ledger as a load fills it. A stored list keeps every value that is an
@@ -907,13 +1053,22 @@ function isAskEntry(value: unknown): value is AskEntry {
 // object, so no store write carries a slot nothing reads. The owner start's
 // reconcile fills the seeded question from the record or closes the entry as
 // expired. A second load finds the key and seeds nothing, whatever the slot
-// holds.
+// holds. A stored object with no brief key, as every entry a version 9 store
+// wrote is, takes a null brief before the entry check reads it, which is the
+// version 9 to 10 step; a brief already stored, null or a string, is kept.
 function fillAsks(state: AgentState, now: number): void {
   const stored = (state as { asks?: unknown }).asks;
   const slot = (state as { pendingAskId?: unknown }).pendingAskId;
   delete (state as { pendingAskId?: unknown }).pendingAskId;
   if (stored !== undefined) {
-    state.asks = Array.isArray(stored) ? stored.filter(isAskEntry) : [];
+    if (!Array.isArray(stored)) {
+      state.asks = [];
+      return;
+    }
+    for (const value of stored) {
+      if (value !== null && typeof value === "object" && !("brief" in value)) (value as { brief?: unknown }).brief = null;
+    }
+    state.asks = stored.filter(isAskEntry);
     return;
   }
   if (typeof slot !== "string" || slot === "") {
@@ -941,11 +1096,12 @@ function fillAsks(state: AgentState, now: number): void {
     closedAt: null,
     closedBy: null,
     answer: null,
+    brief: null,
   }];
 }
 
 export interface AgentState {
-  version: 9;
+  version: 10;
   persona: string;
   activeSessionId: string;
   epoch: number;
@@ -956,12 +1112,16 @@ export interface AgentState {
   turnRecords: TurnRecord[]; // beside the tree, one message each; see TurnRecord
   shownMemories: ShownMemory[]; // the store's records the read showed; see ShownMemory
   memoryOwed: MemoryOwed[]; // the turn ends whose record the memory drain still owes, oldest first; see MemoryOwed
+  stretchShown: StretchShown[]; // the records shown since the last compaction that ran, the stretch fork's stampable set; see StretchShown
+  stretchWritten: StretchWritten[]; // the records written since the last compaction that ran, listed in the stretch fork's prompt; see StretchWritten
+  stretchFork: StretchForkCache | null; // the stretch fork's answer, for the compaction that reuses a precompute's transcript; see StretchForkCache
   activeGoalId: string | null;
   longTermGoals: LongTermGoal[]; // beside the tree, never in it; see LongTermGoal
   autonomy: AutonomyLevel; // set only by goal_autonomy; see AUTONOMY_LEVELS
   monitor: MonitorState;
   nudge: NudgeBudget;
   asks: AskEntry[]; // the ledger of asks to the operator, open and recently closed; see AskEntry
+  askBriefOwed: AskBriefOwed[]; // the worker asks whose decision brief the controller tick still owes, oldest first; see AskBriefOwed
   decisions: Array<{
     timestamp: number;
     loop: "memory" | "goal" | "monitor" | "worker";
@@ -1119,7 +1279,7 @@ export function previousSessionsText(state: AgentState): string {
 export function createDefaultState(persona: string, sessionId: string): AgentState {
   const now = Date.now();
   return {
-    version: 9,
+    version: 10,
     persona,
     activeSessionId: sessionId,
     epoch: 1,
@@ -1130,10 +1290,14 @@ export function createDefaultState(persona: string, sessionId: string): AgentSta
     turnRecords: [],
     shownMemories: [],
     memoryOwed: [],
+    stretchShown: [],
+    stretchWritten: [],
+    stretchFork: null,
     activeGoalId: null,
     longTermGoals: [],
     autonomy: "propose",
     asks: [],
+    askBriefOwed: [],
     monitor: {
       sessionStart: now,
       turnCount: 0,
@@ -1583,7 +1747,7 @@ export function parseState(json: string): AgentState {
     }
 
     const state: AgentState = {
-      version: 9,
+      version: 10,
       persona: old.persona,
       activeSessionId: old.activeSessionId,
       epoch: old.epoch,
@@ -1594,10 +1758,14 @@ export function parseState(json: string): AgentState {
       turnRecords: [],
       shownMemories: [],
       memoryOwed: [],
+      stretchShown: [],
+      stretchWritten: [],
+      stretchFork: null,
       activeGoalId,
       longTermGoals: [],
       autonomy: "propose",
       asks: [],
+      askBriefOwed: [],
       monitor: old.monitor ?? {
         sessionStart: now,
         turnCount: 0,
@@ -1624,8 +1792,10 @@ export function parseState(json: string): AgentState {
     // list, is the fillTasks call below, the v5 to v6 step, the turn records,
     // is the fillTurnRecords call beside it, the v6 to v7 step, the shown
     // records, is enforceInvariants, the v7 to v8 step is the fold the
-    // first store write runs, as the v7 to v8 step below states, and the v8
-    // to v9 step, the ask ledger, is the fillAsks call.
+    // first store write runs, as the v7 to v8 step below states, the v8 to
+    // v9 step, the ask ledger, is the fillAsks call, and the v9 to v10 step
+    // is the brief fill inside fillAsks and the owed list enforceInvariants
+    // fills.
     const state = parsed as unknown as AgentState;
     if (!state.monitor.env) {
       state.monitor.env = {
@@ -1634,7 +1804,7 @@ export function parseState(json: string): AgentState {
         errors: { consecutiveErrorTurns: 0, toolErrorsLastTurn: 0 },
       };
     }
-    state.version = 9;
+    state.version = 10;
     if (!state.nudge) {
       state.nudge = { lastNudgeAt: 0, consecutiveNudgesWithoutOnGoal: 0 };
     }
@@ -1693,7 +1863,16 @@ export function parseState(json: string): AgentState {
     parsed.version = 9;
   }
 
-  if (parsed.version !== 9) {
+  // v9 to v10 migration: add the brief on each ask entry, which fillAsks
+  // below sets null on an entry stored without one, and the owed brief list,
+  // which enforceInvariants seeds empty on a store that lacks it. Both fills
+  // leave a value already stored as it is, so a second load changes nothing.
+  // It runs after the v8 to v9 step, so a version 8 store takes both.
+  if (parsed.version === 9) {
+    parsed.version = 10;
+  }
+
+  if (parsed.version !== 10) {
     throw new Error(`Unsupported AgentState version: ${parsed.version}`);
   }
 
@@ -1868,6 +2047,24 @@ function enforceInvariants(state: AgentState): void {
   // the list is cut to MEMORY_OWED_MAX from the front, oldest first.
   const owed = (state as { memoryOwed?: unknown }).memoryOwed;
   state.memoryOwed = Array.isArray(owed) ? owed.filter(isMemoryOwed).slice(-MEMORY_OWED_MAX) : [];
+
+  // The stretch fork's two lists and its cache, filled the same way: a stored
+  // value that is not a list reads as an empty one, an entry of the wrong
+  // shape is dropped, each list is cut to its cap from the front, and a cache
+  // that is not a key and a brief reads as none. A shown entry stored with no
+  // logged field loads with it false, so no verdict on it reads as logged.
+  const stretchShown = (state as { stretchShown?: unknown }).stretchShown;
+  state.stretchShown = Array.isArray(stretchShown) ? stretchShown.filter(isStretchShown).slice(-STRETCH_SHOWN_MAX).map((s) => ({ ...s, logged: s.logged === true })) : [];
+  const stretchWritten = (state as { stretchWritten?: unknown }).stretchWritten;
+  state.stretchWritten = Array.isArray(stretchWritten) ? stretchWritten.filter(isStretchWritten).slice(-STRETCH_WRITTEN_MAX) : [];
+  const stretchFork = (state as { stretchFork?: unknown }).stretchFork;
+  state.stretchFork = isStretchForkCache(stretchFork) ? { key: stretchFork.key, brief: stretchFork.brief } : null;
+
+  // The owed briefs, filled the same way: a stored value that is not a list
+  // reads as an empty one, an entry that is not an owed brief is dropped, and
+  // the list is cut to ASK_BRIEF_OWED_MAX from the front, oldest first.
+  const owedBriefs = (state as { askBriefOwed?: unknown }).askBriefOwed;
+  state.askBriefOwed = Array.isArray(owedBriefs) ? owedBriefs.filter(isAskBriefOwed).slice(-ASK_BRIEF_OWED_MAX) : [];
 
   // A fold count, kept on every load only where it is a positive integer,
   // since a count of no child or a value of another type names no fold. A

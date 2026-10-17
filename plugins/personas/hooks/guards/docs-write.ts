@@ -1,5 +1,5 @@
 // docs-write.ts: the before-tool guard that keeps a non-curator subagent from
-// writing into docs/. It is the kit's docs-write-guard.js ported whole.
+// writing into docs/.
 //
 // Only a main session (interactive, or the bare "claude" agent type a
 // background job runs as) and the docs-curator agent curate docs/. Reviewers,

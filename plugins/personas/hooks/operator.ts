@@ -56,6 +56,8 @@ export interface AskRecord {
   status: AskStatus;
   reraisedAt?: number; // plan item 5 (D5b, bullet 3): set the one time this ask
                         // was re-raised into the thread past the bounded window.
+  brief?: string; // the decision brief the ledger entry carries, mirrored onto the
+                  // shared record for a reader to draw; see updateAskRecordBrief.
 }
 
 // --- Constants ---
@@ -268,6 +270,25 @@ export async function writeAskRecord(
   };
   const key = askKey(persona, askId);
   await store.set(key, record);
+}
+
+/**
+ * Write a decision brief onto an ask record. The owner session is the writer.
+ * Only an open record takes it: a record that is missing, does not parse or
+ * is closed is left as it stands. Returns whether the brief was written.
+ */
+export async function updateAskRecordBrief(
+  store: CommonsStore,
+  persona: string,
+  askId: string,
+  brief: string,
+): Promise<boolean> {
+  const key = askKey(persona, askId);
+  const record = parseStoreRecord<AskRecord>(await store.get(key));
+  if (!record || record.status !== "open") return false;
+  record.brief = brief;
+  await store.set(key, record);
+  return true;
 }
 
 /**

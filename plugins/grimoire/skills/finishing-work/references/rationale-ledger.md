@@ -6012,7 +6012,7 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - proposed: one sentence naming both conditions with "the predicate, not your read of whether the docs feel done" as its clause.
 - baseline-test: yes
 - passage: Do not open the PR, mark one ready, or make the Commit-and-Push final push while the plan still sits in `docs/plans/` or `git status` shows uncommitted `docs/` changes. The predicate decides, not your read of whether the docs feel done.
-- passage: `hooks/pr-docs-guard.js` fires on the create command only, so before `gh pr ready` read `git status` yourself.
+- passage: `pr-docs` fires on the create command only, so before `gh pr ready` read `git status` yourself.
 
 ### S207
 - key: Treat "open the PR, clean docs after", "docs can be a follow-up PR" and "the code is committed, tidy docs next" as red flags that you are about to strand the docs.

@@ -278,7 +278,7 @@ const TAG_ENTITIES = { quot: '"', amp: '&', lt: '<', gt: '>', apos: "'" };
  * The whole tag sits on one line: a line break inside an attribute value,
  * between two pairs, or before the closing '>' breaks it.
  * Returns null where the text does not open with a whole tag. This is the rule
- * channelEnvelopeAttributes in hooks/index.ts applies, which a .mjs script
+ * channelEnvelopeAttributes in hooks/channel-text.ts applies, which a .mjs script
  * cannot import from TypeScript.
  * @param {string} content
  * @returns {{attributes: [string, string][], end: number}|null}
@@ -320,7 +320,7 @@ function taggedWords(content) {
 }
 
 /**
- * Who sent a tagged record, by the rule channelSenderOf in hooks/index.ts
+ * Who sent a tagged record, by the rule channelSenderOf in hooks/channel-text.ts
  * applies: a tag that does not parse whole, or that names sender_class more
  * than once, is a participant's with no author, since either shape can come
  * from author text the envelope did not escape. A whole tag with no

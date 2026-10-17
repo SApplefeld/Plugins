@@ -12,7 +12,10 @@
 // Built at each call site rather than cached in session state: `$` is
 // rebuilt on a plugin reload and a cached closure set would hold the old one.
 
-import type { FsEntry, HttpInit, HttpResponse } from "claude-code";
+import type { ApiMessage, CommandRunArgs, CommandRunResult, FsEntry, HttpInit, HttpResponse, SessionMessage, SessionUsage, SessionUsageArgs, StateRead, StateSetResult, StateValue } from "claude-code";
+
+// The compaction pass's verdict cache, as hooks/personas.d.ts declares it.
+type CompactionVerdicts = StateValue<"personas", "compactionVerdicts">;
 
 export interface PluginHost {
   // $.env.get("TYPESAFE_API_KEY"): the Jev bearer key, undefined where unset.
@@ -37,6 +40,27 @@ export interface PluginHost {
   // hook's dispatch budget keeps running through, so a sleep raced beside a
   // call carries a signal its race fires once the call settles first.
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
+  // $.state.get({ plugin: "personas", key: "compactionVerdicts" }): the
+  // verdict cache and its version, the value undefined where never written.
+  getCompactionVerdicts(): Promise<StateRead<CompactionVerdicts>>;
+  // $.state.set({ plugin: "personas", key: "compactionVerdicts" }, value).
+  setCompactionVerdicts(value: CompactionVerdicts): Promise<StateSetResult>;
+  // $.store.get(key): the value under key, undefined where unset.
+  getStore(key: string): Promise<unknown>;
+  // $.store.set(key, value): rejects on a value that is not JSON data.
+  setStore(key: string, value: unknown): Promise<void>;
+  // $.store.delete(key).
+  deleteStore(key: string): Promise<void>;
+  // $.session.usage(args): the context window's fill, with
+  // context.breakdown where args asks for one.
+  sessionUsage(args?: SessionUsageArgs): Promise<SessionUsage>;
+  // $.session.messages(args): the main conversation, as rows with no
+  // argument and in the Messages API form with { as: "api" }.
+  sessionMessages(): Promise<SessionMessage[]>;
+  sessionMessages(args: { as: "api" }): Promise<ApiMessage[]>;
+  // $.command.run(args): queued until the session is idle, and rejects an
+  // unknown name.
+  runCommand(args: CommandRunArgs): Promise<CommandRunResult>;
 }
 
 // Every member above returns a promise, and that holds for engine calls whose

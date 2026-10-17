@@ -1,6 +1,5 @@
 // agent-class.ts: the policy class of an agent type, which the before-tool
-// guards key on. It is the kit's reviewAgentClass (kit-agent-identity-lib.js)
-// ported whole: the read-only judgment seats are `strict`, the QA verifier is
+// guards key on. The read-only judgment seats are `strict`, the QA verifier is
 // `gate`, and every other type, the main session's absent type included, is
 // governed by nothing.
 //

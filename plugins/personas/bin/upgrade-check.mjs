@@ -878,14 +878,16 @@ export function pre(flags) {
   const newFirstLine = newTypes ? (newTypes.split(LINE_TERMINATOR)[0] || '') : '';
   const typesProblem = childProblem(typesRun);
   const missing = [indexText ? '' : indexPath, toolsText !== null ? '' : toolsPath].filter(Boolean);
+  // The missing-files row and the pass row lead with what each exists to name,
+  // the missing files or the build's first line. The row's length cap cuts from
+  // the end, so it reaches the long scratch paths behind that first. The problem
+  // row names no file, so it keeps the command first.
   if (typesProblem) {
     record('2. types', 'fail', probeCommand + ' ' + typesProblem);
   } else if (missing.length) {
-    record('2. types', 'fail', probeCommand + ' exited ' + typesRun.status + ' and wrote no ' + missing.join(' and no ') + ': ' + evidenceLine(typesRun.stderr || typesRun.stdout));
+    record('2. types', 'fail', 'wrote no ' + missing.join(' and no ') + ' after ' + probeCommand + ' exited ' + typesRun.status + ': ' + evidenceLine(typesRun.stderr || typesRun.stdout));
   } else {
     const firstOutput = (typesRun.stdout || typesRun.stderr || '').split(LINE_TERMINATOR).find((line) => line.trim()) || '';
-    // The build's first line leads, so the row's length cap cuts a long
-    // scratch path rather than the line naming the build.
     record('2. types', 'pass', 'first line: ' + evidenceLine(newFirstLine) + '; exit ' + typesRun.status + ' (' + evidenceLine(firstOutput).slice(0, 120) + '); joined ' + indexPath + ' and ' + toolsPath + ' into ' + newTypesPath);
   }
 

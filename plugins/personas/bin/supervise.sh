@@ -245,6 +245,11 @@ SUPERVISOR_GATE_WAIT_S="${supervisorGateWaitS:-120}"
 # stop reports the tree alive or unverifiable. Thirty seconds, a quarter of
 # the pre-launch gate's default bound; a suite shortens it.
 SUPERVISOR_STOP_RETRY_BUDGET_S="${supervisorStopRetryBudgetS:-30}"
+# How long kill_holder waits for a holder this supervisor launched to end on
+# its MSYS TERM before the ticks-matched force kill, in seconds. Two seconds:
+# an idle holder ends on the signal at once. Zero is allowed, and skips the
+# wait to a single check; a suite sets it.
+SUPERVISOR_HOLDER_TERM_WAIT_S="${supervisorHolderTermWaitS:-2}"
 # How many whole days a channel log file in the work directory is kept after
 # its last write before the channel log sweep removes it. Two weeks.
 CHANNEL_LOG_RETENTION_DAYS="${channelLogRetentionDays:-14}"
@@ -367,6 +372,12 @@ if ! positive_number "$SUPERVISOR_GATE_WAIT_S"; then
 fi
 if ! positive_number "$SUPERVISOR_STOP_RETRY_BUDGET_S"; then
   echo "ERROR: supervisorStopRetryBudgetS '$SUPERVISOR_STOP_RETRY_BUDGET_S' is not a whole number of seconds greater than zero (digits only, no leading zero, at most 9 digits)" >&2
+  exit 1
+fi
+# The holder's TERM wait takes the shared rule with one exception: a lone 0
+# passes, since zero is a single check rather than a zero-length loop.
+if [ "$SUPERVISOR_HOLDER_TERM_WAIT_S" != "0" ] && ! positive_number "$SUPERVISOR_HOLDER_TERM_WAIT_S"; then
+  echo "ERROR: supervisorHolderTermWaitS '$SUPERVISOR_HOLDER_TERM_WAIT_S' is not a whole number of seconds of zero or more (digits only, no leading zero except a lone 0, at most 9 digits)" >&2
   exit 1
 fi
 if ! positive_number "$SUPERVISOR_PS_WAIT_STEP_MS" || [ "$SUPERVISOR_PS_WAIT_STEP_MS" -gt 1000 ]; then
@@ -3627,31 +3638,115 @@ child_wrapper() {
 }
 
 # --- Helper: kill the holder so the child reads end of input ---
-# The graceful stop's pipe close, ticks-first for every holder with a recorded
-# pair. Where the holder's Windows pid and start ticks are recorded, at launch
-# or read from a handle at adoption, the kill is the ticks-matched
+# The graceful stop's pipe close. A holder this supervisor launched itself is
+# ended by a signal first and a forced kill second; any other holder takes the
+# forced kill alone.
+#
+# The MSYS `kill -0` at entry is consulted only for an own-launched holder, and
+# only as a skip: an own holder that no longer answers is already gone, since
+# it leaves on its own a poll after the child dies, and nothing is killed.
+#
+# The TERM rung. An own-launched holder whose Windows pid was recorded at
+# launch is sent an MSYS TERM. The `kill -0` proves only that the pid answered
+# a moment ago: a holder that exits and is reaped after it can hand its MSYS
+# pid to another process, and a signal then reaches whatever holds it. So the
+# TERM is sent only where the pid's Windows pid, read through
+# resolve_windows_pid, still equals the one recorded at launch. The window left
+# open is the few lines between that read and the signal, and nothing forks
+# inside it: the wait's clock starts after the signal. The rung then polls
+# `kill -0` every 100 ms for up to supervisorHolderTermWaitS seconds, and a
+# holder gone inside the wait is logged with the milliseconds it took and
+# nothing more is killed. The wait's clock is bash's own `EPOCHREALTIME`, read
+# with either `.` or `,` as its decimal separator since the locale picks it, so
+# the wait's only fork is the `sleep`. The wait has two bounds, and the first
+# reached ends it: the elapsed time on that clock, and a count of
+# supervisorHolderTermWaitS * 10 polls, the number of 100 ms polls the wait
+# allows. A bash with no `EPOCHREALTIME`, or an empty one, reads the clock as
+# 0, so the elapsed time stays 0, the count alone ends the wait, and a holder
+# gone inside it is logged at 0 ms whatever it took. A `sleep` that fails to
+# fork spins the loop through its polls at once and then ends the wait, so the
+# rung moves on early rather than never. A wait of 0 still polls once. A
+# holder still answering, or a pid that no longer maps to the recorded
+# Windows pid, is logged and falls to the
+# force rung where its start ticks were read. Where they were not, the rung is
+# the whole kill: the holder is logged and nothing more is killed, since no
+# ticks-matched kill can name it and a TERM to a pid that no longer maps
+# reaches another process.
+#
+# The force rung. Where the holder's Windows pid and start ticks are recorded,
+# at launch or read from a handle at adoption, the kill is the ticks-matched
 # kill_process_snapshot, the same identity-guarded kill the KILL phase uses, so
 # a Windows pid recycled onto another process is never signalled and any
-# supervisor can do it without an MSYS signal. The MSYS `kill -0` is consulted
-# only for a holder this supervisor launched itself, and only as a skip: an
-# own holder that no longer answers is already gone, since it leaves on its
-# own a poll after the child dies, and nothing is killed. It never licenses a
-# signal. The MSYS TERM survives only for an own-launched holder whose ticks
-# were never read. Its one guard is the `kill -0` at entry, which proves the
-# pid answered a moment before the signal and nothing more: a holder that
-# exits and is reaped between that check and the TERM can hand its pid to
-# another process inside that window, and the signal then reaches whatever
-# holds it. The window is the few lines between the check and the signal, and
-# it stays open only while the launch's ticks read, which ensure_holder_ticks
-# retries, has not landed. An adopted holder with no recorded ticks is left
+# supervisor can do it without an MSYS signal. It is an adopted holder's one
+# rung, since that holder's MSYS pid was never this supervisor's to read. For
+# an own-launched holder one ticks-matched survivor read follows, and a holder
+# still running under its recorded pair is logged by its Windows pid: a forced
+# kill that lands inside a fork can leave a half-copied holder that holds the
+# child's input open. A read that completes and finds the holder gone logs it
+# gone after the force rung. A read that did not complete is logged
+# as unknown rather than read as the holder gone.
+#
+# The MSYS TERM with no Windows guard survives only for an own-launched holder
+# whose Windows pid was never recorded. Its one guard is the `kill -0` at
+# entry, which proves the pid answered a moment before the signal and nothing
+# more, so the reaped-holder window above is open for it. An own holder with a
+# Windows pid and no ticks ends after the TERM rung, with nothing more killed,
+# and never reaches this TERM. An adopted holder with no recorded ticks is left
 # alone and named, never signalled by an unverified pid.
 kill_holder() {
   if [ "${HOLDER_OWN_LAUNCH:-}" = "1" ] && [ -n "${HOLDER_LAUNCH_PID:-}" ] && ! kill -0 "$HOLDER_LAUNCH_PID" 2>/dev/null; then
     log "HOLDER: holder pid $HOLDER_LAUNCH_PID is already gone, so nothing is killed"
     return 0
   fi
+  if [ "${HOLDER_OWN_LAUNCH:-}" = "1" ] && [ -n "${HOLDER_LAUNCH_PID:-}" ] && [ -n "${HOLDER_WINPID:-}" ]; then
+    local holder_now_winpid term_wait_s term_now_us term_start_ms term_waited_ms term_passes
+    holder_now_winpid=$(resolve_windows_pid "$HOLDER_LAUNCH_PID")
+    if [ "$holder_now_winpid" = "$HOLDER_WINPID" ]; then
+      term_wait_s="$SUPERVISOR_HOLDER_TERM_WAIT_S"
+      kill -TERM "$HOLDER_LAUNCH_PID" 2>/dev/null || true
+      term_now_us="${EPOCHREALTIME:-0}"
+      term_now_us="${term_now_us//[.,]/}"
+      term_start_ms=$((term_now_us / 1000))
+      term_passes=0
+      while :; do
+        term_now_us="${EPOCHREALTIME:-0}"
+        term_now_us="${term_now_us//[.,]/}"
+        term_waited_ms=$((term_now_us / 1000 - term_start_ms))
+        if ! kill -0 "$HOLDER_LAUNCH_PID" 2>/dev/null; then
+          log "HOLDER: term ended holder pid $HOLDER_LAUNCH_PID in $term_waited_ms ms"
+          return 0
+        fi
+        term_passes=$((term_passes + 1))
+        [ "$term_waited_ms" -lt $((term_wait_s * 1000)) ] && [ "$term_passes" -le $((term_wait_s * 10)) ] || break
+        sleep 0.1 >/dev/null 2>&1
+      done
+      if [ -z "${HOLDER_TICKS:-}" ]; then
+        log "HOLDER: term did not end holder pid $HOLDER_LAUNCH_PID within $term_wait_s s; no ticks were read, so no force kill follows"
+        return 0
+      fi
+      log "HOLDER: term did not end holder pid $HOLDER_LAUNCH_PID within $term_wait_s s; force kill follows"
+    else
+      if [ -z "${HOLDER_TICKS:-}" ]; then
+        log "HOLDER: holder pid $HOLDER_LAUNCH_PID no longer maps to winpid $HOLDER_WINPID; no ticks were read, so nothing is killed"
+        return 0
+      fi
+      log "HOLDER: holder pid $HOLDER_LAUNCH_PID no longer maps to winpid $HOLDER_WINPID; force kill follows"
+    fi
+  fi
   if [ -n "${HOLDER_WINPID:-}" ] && [ -n "${HOLDER_TICKS:-}" ]; then
     kill_process_snapshot "$HOLDER_WINPID,$HOLDER_TICKS" || true
+    if [ "${HOLDER_OWN_LAUNCH:-}" = "1" ]; then
+      local holder_survivors holder_survivors_rc
+      holder_survivors=$(check_snapshot_survivors "$HOLDER_WINPID,$HOLDER_TICKS")
+      holder_survivors_rc=$?
+      if [ -n "$holder_survivors" ]; then
+        log "HOLDER: holder winpid $HOLDER_WINPID survives the force kill; a half-copied holder may hold the child's input"
+      elif [ "$holder_survivors_rc" -ne 0 ]; then
+        log "HOLDER: survivor read for holder winpid $HOLDER_WINPID did not complete, so its survival is unknown"
+      else
+        log "HOLDER: holder winpid $HOLDER_WINPID is gone after the force kill"
+      fi
+    fi
     return 0
   fi
   if [ "${HOLDER_OWN_LAUNCH:-}" = "1" ] && [ -n "${HOLDER_LAUNCH_PID:-}" ]; then

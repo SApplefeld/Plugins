@@ -209,9 +209,10 @@
 // carries the reasoning and the trust boundary); every other shape, including
 // a submodule's, keeps the working directory's own derivation.
 //
-// Node core modules only, CommonJS, UTF-8 throughout, with four named
-// exceptions, all fixed kit-shipped siblings under hooks/ and all required
-// below alongside the built-ins: kit-network-lib.js for namesNetworkShare and
+// Node core modules only, CommonJS, UTF-8 throughout, with six named
+// exceptions, all fixed kit-shipped siblings and all required below alongside
+// the built-ins: four under hooks/ and two beside this file. Under hooks/,
+// kit-network-lib.js for namesNetworkShare and
 // screenRecordedPath, both re-exported under this file's own names; kit-plan-lib.js for
 // isSessionIdShaped, the one definition of what a harness session id looks
 // like; kit-read-lib.js for the bounded directory listing every kit walk
@@ -220,25 +221,29 @@
 // takes the OS account name out of what this CLI prints: a whole value rendered
 // at a cap this file passes, a composed line elided, and that same line on a
 // second pass after a strip has deleted from it, since a model
-// reads its stdout. Every consumer inside
+// reads its stdout. Beside this file, memory-database.js, the shared index's
+// client, and jev-judge.js, the fleet memory block's judge. Every consumer inside
 // this file already holds them at no extra cost once required here, and
 // requiring them rather than restating what they hold is what keeps the
 // separator test (Standing Amendment 2), the session-id grammar and the
 // listing bound single-sourced between this file and the hooks that ask the
 // same questions without needing memq for anything else.
-// test/memq-grant.test.js pins this file to exactly this one contiguous
-// top-of-file requires block plus the dynamic code loads inside find's
-// channels; these three lines are the former, not the latter, because their
-// targets are fixed kit-shipped siblings rather than a directory the command
-// line names. This is a load-time coupling: a require failure for any of the
-// four (an install missing the file, a hand-edited plugin cache) throws
-// before any of this file's own code runs, refusing every verb rather than
-// only the ones that call into it. Those four are the siblings whose absence
-// can take this whole file down; everything else loaded at the top of it is a
-// Node built-in. None of the four requires this file at its own module scope,
-// so the block adds no load-time cycle: kit-compact-lib.js reaches back here
-// for a transcript path, and that require sits inside the function that needs
-// it and runs long after either file has finished loading.
+// test/memory-database.test.js pins this file to exactly one top-of-file load
+// region: the built-ins, then the siblings inside their guard, with no code
+// load anywhere else; the siblings belong in it because their targets are
+// fixed kit-shipped siblings rather than a directory the command line names.
+// This is a load-time coupling: a require failure for any of the
+// six (an install missing the file, a hand-edited plugin cache) is caught by
+// the guard's try. Run as a CLI, the guard sets libraryLoadFailed, prints one
+// sentence and exits 1 without running the dispatch, so every verb is refused
+// rather than only the ones that call into the failed sibling. Loaded as a
+// module, the throw rides on to the loader. Those six are the siblings whose
+// absence can take this whole file down; everything else loaded at the top of
+// it is a Node built-in. None of the six requires this file at its own module
+// scope, so the block adds no load-time cycle: kit-compact-lib.js, the
+// database client and the judge reach back here for a transcript path or the
+// shared-write lock, and each of those requires sits inside the function that
+// needs it and runs long after either file has finished loading.
 
 'use strict';
 
@@ -246,12 +251,12 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-// The five siblings, bound through a guard that splits the two ways this file is
-// loaded. Four are hooks/ libraries and the fifth is the shared index's client,
-// which sits beside this file: it is bound here rather than required inside the
-// writers that use it so that every module this CLI can load is named in one
-// place, which is the property the grant hook's screen rests on. That client
-// loads memq back, and it defers its own require to the first call for exactly
+// The six siblings, bound through a guard that splits the two ways this file is
+// loaded. Four are hooks/ libraries and the other two sit beside this file: the
+// shared index's client and the fleet block's judge. They are bound here rather
+// than required inside the writers that use them so that every module this CLI can
+// load is named in one place, which is the property the grant guard's screen rests on.
+// That client loads memq back, and it defers its own require to the first call for exactly
 // that reason. Run as a CLI, a require that throws is printed by the runtime, and
 // that leg runs before the descriptor wrapper and the handlers at the bottom of
 // this file are installed: Node's `Require stack:` names every module path it
@@ -2180,8 +2185,8 @@ function noDeclaredTypeText(flag) {
 // engine's store signals, in one wording for both, because a caller meets one
 // rule whichever verb they spelled it on.
 //
-// It is the screen the grant hook states over the same spelling, stated again
-// in the process that would do the work: the hook judges its own environment
+// It is the screen the grant guard states over the same spelling, stated again
+// in the process that would do the work: the guard judges its own environment
 // and this judges the child's, and where the two disagree this is the half
 // that binds, which is why every other store-mutating screened flag carries
 // its pair here. What makes the pair cheap is the bare spelling: `--type`
@@ -5934,13 +5939,15 @@ const FLEET_REASON_CAP = 300;
 // One answered row as this channel's hit shape, or null where the row names a
 // tier this version cannot place.
 //
-// The sandbox name lands where the foreign-machine label sits on a local hit,
-// and it is admitted through the same gate that label's value is: a machine name
-// is a charset-closed identifier, the store's own writer gate, and a value that
-// gate refuses carries nothing worth labelling a row with. Only a foreign
-// sandbox is labelled, foreignMachine deciding it on the case-insensitive
-// comparison the NetBIOS and DNS rule sets, so a row this machine published
-// reads exactly as a local hit does.
+// The row's own machine scope lands under the machine label and the publishing
+// sandbox under the sandbox label, two different facts. Each is admitted through
+// the same gate: a machine name is a charset-closed identifier, the store's own
+// writer gate, and a value that gate refuses carries nothing worth labelling a
+// row with. Only a foreign scope is labelled, foreignMachine deciding it on the
+// case-insensitive comparison the NetBIOS and DNS rule sets, so a row with no
+// scope, or this machine's scope, reads exactly as a local hit does. The scope
+// is never filled from the sandbox: a host below schema version 13 returns no
+// machine key, and its hit carries no machine label.
 //
 // The applied tally is zero rather than counted. The host applies its own
 // applied boost inside the ranking, and the distinct-day count that boost was
@@ -5965,6 +5972,7 @@ function fleetStoreToken(tier, segment) {
 function fleetHit(row, localMachine) {
     if (!FLEET_TIERS.has(row.tier)) return null;
     const sandbox = machineIdentityOrNull(row.sandbox);
+    const scope = machineIdentityOrNull(row.machine);
     return {
         recordId: row.recordId,
         name: row.name,
@@ -5982,7 +5990,7 @@ function fleetHit(row, localMachine) {
         score: row.score,
         appliedDays: 0,
         appliedLastMs: null,
-        machine: foreignMachine(sandbox, localMachine) ? sandbox : null,
+        machine: foreignMachine(scope, localMachine) ? scope : null,
         sandbox,
         description: row.description,
         // The floors this row's similarity is judged against, bound here
@@ -10205,9 +10213,9 @@ function cmdTriggers(argv, options) {
     // prior one kept, so on a fleet worker the correction is as final as a
     // deletion and would be made with nobody in the loop.
     // The grant that environment carries for `node <abspath>/memq.js ...`
-    // (hooks/memq-grant.js) withholds this verb wholesale, so a replace
+    // (the personas module's memq-grant guard) withholds this verb wholesale, so a replace
     // reaching here in a fleet worker has already fallen through to the
-    // ordinary permission flow. The two are not redundant: the hook judges its
+    // ordinary permission flow. The two are not redundant: the guard judges its
     // own environment and this check judges the child's, and where the two
     // disagree this is the half that binds, which is why the refusal is
     // stated in both places rather than moved to either. The asymmetry that
@@ -12318,10 +12326,10 @@ async function cmdAddType(argv, options) {
     // A body repair is refused outright under the engine's store signals, the
     // pair that says this process was pointed at a fleet store deliberately.
     // That environment carries a standing grant for
-    // `node <abspath>/memq.js ...` (hooks/memq-grant.js). That hook withholds
+    // `node <abspath>/memq.js ...` (the personas module's memq-grant guard). That guard withholds
     // the grant from this shape as well, so a repair reaching here in a fleet
     // worker has already fallen through to the ordinary permission flow. The
-    // two are not redundant: the hook judges its own environment and this
+    // two are not redundant: the guard judges its own environment and this
     // check judges the child's, and where the two disagree this is the half
     // that binds, so the refusal is stated in both places rather than moved
     // to either. The grant's accepted risk was
@@ -12345,7 +12353,7 @@ async function cmdAddType(argv, options) {
     // The file channel is refused under the engine's store signals, the pair
     // that says this process was pointed at a fleet store deliberately. That
     // environment carries a standing grant for `node <abspath>/memq.js ...`
-    // (hooks/memq-grant.js), whose accepted risk is that the arguments after
+    // (the personas module's memq-grant guard), whose accepted risk is that the arguments after
     // the script path are memq's argv and memq's own validation is the
     // control over them; the bound that rests on is that a granted invocation
     // reaches the redirected store and not the machine. --body-file reads a
@@ -12387,7 +12395,7 @@ async function cmdAddType(argv, options) {
     }
     // A recognition trigger is refused under the same signals, and on what
     // the line reaches rather than on what the record holds. The store's
-    // standing grant for a fleet worker (hooks/memq-grant.js) withholds the
+    // standing grant for a fleet worker (the personas module's memq-grant guard) withholds the
     // `triggers` verb outright, on the ground that the line it writes is what
     // decides when a memory is put in front of a session, so a worker could
     // aim recognition on a tier every project on the machine reads and every
@@ -13438,11 +13446,11 @@ function cmdForget(argv, options) {
 // it resolves the project directory as every project verb does, a store pin
 // included, and a pin is honored only under these same signals, so the
 // refusal would leave a pinned project store with no delete at all. The grant
-// hook's allowlist is its one lock on the unattended vector.
+// guard's allowlist is its one lock on the unattended vector.
 // The standing grant that environment carries for `node <abspath>/memq.js
-// ...` (hooks/memq-grant.js) withholds itself from both verbs by name, so one
+// ...` (the personas module's memq-grant guard) withholds itself from both verbs by name, so one
 // reaching here in a fleet worker has already fallen through to the ordinary
-// permission flow. That hook judges its own environment while this check
+// permission flow. That guard judges its own environment while this check
 // judges the child's, and where the two disagree this is the half that binds,
 // which is why the refusal is stated in both places rather than moved to
 // either; the risk accepted on the grant's original terms was

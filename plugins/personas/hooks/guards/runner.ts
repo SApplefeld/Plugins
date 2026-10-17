@@ -1,5 +1,5 @@
 // runner.ts: the seam the before-tool guards and the after-call hooks plug
-// into, with the merge rules the kit's hook dispatcher applied. The module's
+// into, with the rules that merge their answers. The module's
 // tool.call handler calls runBefore ahead of next(e) and runAfter on its
 // result; the handler owns the mode, the journal and the deny, and this file
 // owns registration, matching, concurrency and the merge.
@@ -55,9 +55,10 @@ export type BeforeVerdict = { deny?: string; context?: string[]; reason?: string
 
 export interface BeforeGuard {
   readonly name: string;
-  // The fixed phrase the kit command hook this guard shadows opens its
-  // refusal with. Under shadow the command hook's verdict for the same call
-  // reads deny where this phrase is in next(e)'s error text.
+  // The fixed phrase the retired kit command hook for this guard opened its
+  // refusal with. Under shadow the command verdict for the same call reads
+  // deny where this phrase is in next(e)'s error text, which no command hook
+  // in the current kit writes.
   readonly commandPhrase?: string;
   matches(e: GuardCall): boolean;
   decide(e: GuardCall, ctx: GuardContext): BeforeVerdict | Promise<BeforeVerdict>;
@@ -198,8 +199,8 @@ async function settledOrThrow<T>(names: readonly string[], phase: "before" | "af
 
 /**
  * Runs every guard matching `e` concurrently against one context, built
- * through `ctxOf` once and only where a guard matches, and merges as the
- * dispatcher did: any deny wins and the denies' reasons join on a blank line,
+ * through `ctxOf` once and only where a guard matches, and merges them: any
+ * deny wins and the denies' reasons join on a blank line,
  * else the contexts join in registration order, and no match is `{}`.
  * `observe` receives each matched guard's verdict. A guard whose matcher or
  * decide throws rejects the whole run with a GuardError naming it, and a
@@ -275,8 +276,8 @@ export async function runAfter(
 const COMMAND_HOOK_ERROR_LEAD = /^(?:Error: )?PreToolUse:[^\s:]+ hook error:/;
 
 /**
- * The kit command hook's verdict for a call, read from what next(e) resolved
- * to: deny where the guard has a phrase and the result is a refusal carrying
+ * The command verdict for a call, the retired kit hook's, read from what
+ * next(e) resolved to: deny where the guard has a phrase and the result is a refusal carrying
  * it, in a `{ deny }` from beneath, or in an error result's text that opens
  * with core's command-hook refusal lead and carries the phrase after it, else
  * allow. A tool's own error output that echoes the phrase, with no such lead,

@@ -1,6 +1,5 @@
 // merged-pr-push.ts: the before-tool guard that refuses a push to a branch
-// whose pull request has already merged. It is the kit's
-// merged-pr-push-guard.js ported whole.
+// whose pull request has already merged.
 //
 // Once a pull request merges, its feature branch is frozen: a further push
 // strands off the integration branch with no signal. This blocks a `git push`
@@ -10,11 +9,10 @@
 // It blocks only on a positive MERGED. Anything else allows: not a push, a
 // branch deletion, an integration branch, a branch name outside the
 // allowlist, no CLI, no PR, a query that fails, exits non-zero or runs past
-// its bound (3 seconds for git, 8 for the host query). The hook's
-// test-only switch that lifted those bounds is not ported.
+// its bound (3 seconds for git, 8 for the host query). No switch lifts those
+// bounds.
 //
-// The hook stripped every GIT_* variable from its queries' environment, since
-// a GIT_DIR or GIT_CONFIG_GLOBAL the session carries would redirect the git
+// A GIT_DIR or GIT_CONFIG_GLOBAL the session carries would redirect the git
 // reads the decision rests on. A child spawned here inherits the host's
 // environment and cannot have a name removed from it, so the guard reads the
 // closed set GIT_ENV_REDIRECTS names instead and, where one is set, allows

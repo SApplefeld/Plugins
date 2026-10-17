@@ -1,6 +1,5 @@
-// memq-grant.ts: the permission grant for the kit's own memq CLI, the kit's
-// memq-grant.js ported whole and answered on tool.check rather than as a
-// PreToolUse hook. Under the engine's write-gated spawn vector Bash refuses
+// memq-grant.ts: the permission grant for the kit's own memq CLI, answered on
+// tool.check. Under the engine's write-gated spawn vector Bash refuses
 // `node <script>` even for memq, so a fleet worker there loses memory recall
 // and outcome logging. The grant answers allow for exactly one command shape
 // and is silent on everything else.

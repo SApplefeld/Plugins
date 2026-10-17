@@ -27,6 +27,6 @@ BEGIN
 		 [Version]
 		,[Notes]		)
 	SELECT	 [Version]	= $(KitSchemaVersion)
-			,[Notes]	= N'A pair of records judged two different facts is recorded: mem.PairVerdict holds one row per judged pair, mem.usp_PutPairVerdict writes it, and mem.usp_ListPairVerdicts lists the verdicts whose two records stand live and unchanged since the judgment, so memq decay-scan withholds a judged pair until either record is rewritten or retired.'
+			,[Notes]	= N'A search or nearest row carries the record''s own machine scope: mem.udf_VisibleRecords projects mem.Record''s [Machine], and mem.usp_Search and mem.usp_Nearest return it as the row''s machine key beside the sandbox key, which names the sandbox that published the row, so memq labels a shared hit with the machine the record is scoped to rather than its publisher.'
 END
 GO

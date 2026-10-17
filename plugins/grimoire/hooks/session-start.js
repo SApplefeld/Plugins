@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // SessionStart hook: compaction/startup recovery plus additive advisory blocks.
-// The payload composes eight blocks in all: the post-compaction re-load
-// instruction, the in-progress plan inventory, a parked-plan (Status: Ready)
+// The payload composes nine blocks in all: the post-compaction re-load
+// instruction, a line naming the guards a claude --agent main thread runs
+// without, the in-progress plan inventory, a parked-plan (Status: Ready)
 // listing, a docs-library hygiene nudge over unarchived Complete plans, a
 // qualifier when the docs/plans/ scan read only part of the directory, a
 // kit-repo plugin-view staleness line, a backlog block (any project with a
 // docs/backlog.md), and a shared-checkout advisory when another session of this
 // project has written a transcript recently. The backlog block and the
 // shared-checkout advisory each have two mutually exclusive spellings, a full
-// reading and a partial one, so the emitters number ten and the blocks eight.
+// reading and a partial one, so the emitters number eleven and the blocks nine.
 // Scans docs/plans/ for in-progress plan docs and injects an instruction to
 // re-read them (including Chapters) before any work proceeds. Fires on
 // startup, resume, and (critically) after compaction.
@@ -556,6 +557,22 @@ function main() {
 
     const cwd = payload.cwd || process.cwd();
     const source = payload.source || 'startup';
+
+    // The main thread of a session started with `claude --agent <type>`
+    // carries agent_type with no agent_id on every hook payload, this one
+    // included (the engine's SessionStart hook input declares the field).
+    // The persona module's docs-write and read-only guards read a caller's
+    // type from the agent list, which names subagents alone, so they never
+    // see this thread's type and neither governs it. The block below says so
+    // once, at start, since nothing else in the session will. A payload
+    // carrying agent_id is a subagent's and gets no block. The type is
+    // harness data bound for the context channel, so it is printed only
+    // in printable ASCII and bounded, and a type with nothing printable left
+    // is named (unnamed) rather than printed empty.
+    const agentType = typeof payload.agent_type === 'string' ? payload.agent_type.trim() : '';
+    const agentMainThread = agentType !== '' && !payload.agent_id
+        ? agentType.replace(/[^\x20-\x7E]/g, '').trim().slice(0, 80).trim() || '(unnamed)'
+        : null;
     const plansDir = path.join(cwd, 'docs', 'plans');
 
     // Find In-Progress and Ready plan docs, and count Complete-but-unarchived
@@ -686,11 +703,20 @@ function main() {
     // this payload's emitters.
     if (!reload && activePlans.length === 0 && readyPlans.length === 0
         && !plansBounded && completedUnarchived === 0 && !backlog
-        && !siblings && !pluginView) return;
+        && !siblings && !pluginView && agentMainThread === null) return;
 
     const blocks = [];
 
     if (reload) blocks.push(reload);
+
+    if (agentMainThread !== null) {
+        blocks.push(`This session was started with claude --agent, so its main thread runs as the`
+            + ` ${agentMainThread} agent type. The docs-write and read-only guards govern subagents by`
+            + ` type and cannot see the main thread's type, so neither applies to this thread: a`
+            + ` write under docs/ or a tree-mutating command here is refused by no guard. The`
+            + ` \`--agent\` main thread entry in docs/security-model.md's threat model states the`
+            + ` residual. Reminder, not a blocker.`);
+    }
 
     if (activePlans.length > 0) {
         const lines = activePlans.map(

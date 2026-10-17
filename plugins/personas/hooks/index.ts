@@ -25,7 +25,7 @@
 // never that it exited. A claim is non-destructive: the epoch bump makes
 // the old holder yield on its next write.
 
-import type { AgentSpawnInput, AgentSpawnResult, HttpInit, Next, ProcessRunInit, ProcessRunResult, PromptSubmitResult, Register, ToolCallInput, ToolCallResult } from "claude-code";
+import type { AgentSpawnInput, AgentSpawnResult, CommandRunArgs, HttpInit, Next, ProcessRunInit, ProcessRunResult, PromptSubmitInput, PromptSubmitResult, Register, SessionUsageArgs, StateValue, ToolCallInput, ToolCallResult } from "claude-code";
 import type { PluginHost } from "./host";
 import {
   createDefaultState,
@@ -36,7 +36,6 @@ import {
   foldablePlans,
   applyFold,
   activateNext,
-  isActivationEligible,
   isPlanningDue,
   isRootFinished,
   previousRoundBlocked,
@@ -47,7 +46,6 @@ import {
   MEMORY_MAX,
   PLAN_PATH_PATTERN,
   PLAN_PATH_REQUIRED_FORM,
-  resolvePlanPath,
   planHolderOf,
   openGoals,
   hasStartableWork,
@@ -64,16 +62,15 @@ import {
   newTaskId,
   reapTurnRecords,
   openTurnRecord,
-  clampTurnRecordText,
-  newTurnRecordId,
   bracketSafeText,
   LINE_TERMINATOR,
   oneLine,
   recordPreviousSession,
   previousSessionsText,
   recordShownMemory,
-  openAsk,
+  stampAskBriefTurnEnd,
   closeAsk,
+  askEntriesRestorer,
   liftAsk,
   openAskEntries,
   openBlockingAsks,
@@ -83,7 +80,7 @@ import {
 } from "./agent-state";
 import { readPlanRecord, resolvePlanDir } from "./plan-record";
 import type { PlanRecordReading } from "./plan-record";
-import type { AgentState, AskEntry, AskOpener, AskOpenRefusal, AutonomyLevel, FleetHealthMemo, GoalNode, LongTermGoal, NudgeBudget, EnvGit, EnvState, SentFinding, SentPlanRecord, TaskItem, TurnRecord, TurnRecordStamp } from "./agent-state";
+import type { AgentState, AskEntry, AutonomyLevel, GoalNode, LongTermGoal, NudgeBudget, EnvState, TaskItem } from "./agent-state";
 import {
   claimResource,
   readAllClaims,
@@ -119,7 +116,6 @@ import {
   readReplyRecord,
   writeReplyRecord,
   listAskRecords,
-  writeAskRecord,
   readAskRecord,
   reconcileOpenAsks,
   askKey,
@@ -136,16 +132,16 @@ import {
   KAIZEN_LONG_TURN_MS,
   KAIZEN_MESSAGE_WAIT_MS,
 } from "./self-review";
-import { estimateTokens, fnv1aHash, effectiveWindowCount, bumpWindow, backoffFactor, shouldRunClassify, meterTurnLine, type MeterTurnInput } from "./cost-ledger";
+import { meterTurnLine, type MeterTurnInput } from "./cost-ledger";
 // The one stamp of every liveness file from one instant, and the meter
 // beat's helpers the turn line shares with it.
-import { stampBeat, stampSupervisorFile, meterSessionKnown, meterDirOf, type BeatHost, type HeartbeatEntry } from "./beat";
+import { stampBeat, meterSessionKnown, meterDirOf, type BeatHost, type HeartbeatEntry } from "./beat";
 // The fleet reading the fleet_status tool and the coordinator's wake share,
 // and the wake's comparison over it.
-import { fleetLineText, fleetPromptText, fleetReadingOf, liveClaimsOf, readFleetRows, readRosterFile, rosterRunDir, FLEET_RESTART_MIN_INTERVAL_MS, FLEET_RESTART_REASON_MAX, type FleetLine, type RosterEntry } from "./fleet";
+import { fleetPromptText, type FleetLine } from "./fleet";
 // The free-text bound, and the readers of a caught error and of a file's
 // byte-order mark, which this file shares with the fleet reading.
-import { boundedText, safeErrorText, stripBom, FREE_TEXT_MAX } from "./text";
+import { boundedText, safeErrorText } from "./text";
 // The single source of the label arrays the three $.model.classify sites below
 // pass to Haiku, so the question catalog and those calls cannot drift, plus
 // the question set ids the shadow and live calls name and the resolver they
@@ -160,36 +156,11 @@ import {
   TURN_SCORE,
   MEMORY_KIND,
   PLAN_SWITCH_NO_MATCH,
-  PLAN_HEALTH_SET_IDS,
-  SHIPPED_QUESTIONS,
-  PLAN_HEALTH_STATE_CLOSING,
-  PLAN_HEALTH_STATE_RECENT,
   PROMOTABLE_SET_IDS,
-  TURN_OPEN,
-  TURN_OPEN_OPTIONS,
-  TURN_DISPOSITION,
-  TURN_DISPOSITION_OPTIONS,
-  TURN_DELIVERED_THRESHOLD,
   RECORD_OUTCOME_TURNS,
-  MEMORY_RECALL,
-  MEMORY_RECALL_OPTIONS,
-  MEMORY_RECALL_STATE_PROMPT,
-  MEMORY_RECALL_STATE_RECORD,
-  MEMORY_RECALL_STATE_DESCRIPTION,
-  MEMORY_RECALL_STATE_TAGS,
-  MEMORY_RECALL_STATE_BODY,
-  MEMORY_RECALL_STATE_SOURCE,
-  MEMORY_RECOGNITION,
-  MEMORY_RECOGNITION_OPTIONS,
-  MEMORY_RECOGNITION_STATE_TRIGGER,
-  MEMORY_RECOGNITION_STATE_RECORD,
-  MEMORY_RECOGNITION_STATE_DESCRIPTION,
   STEP_EFFORT,
   STEP_EFFORT_OPTIONS,
   stepEffortStateText,
-  TOOL_RESULT_STALE,
-  TOOL_RESULT_STALE_OPTIONS,
-  toolResultStaleStateText,
   kaizenLine,
   turnScoreStateText,
   type TurnScoreTools,
@@ -203,33 +174,28 @@ import {
 // Haiku-paired sites below put to Haiku, and also carries the one plan
 // health question no classifier asks, plus the journal that records every
 // answer.
-import { ask, askAll, COMPLETE_TIMEOUT_MS, heldFailure, holdFor, HOLD_HEADROOM_MS, HOLD_TIMEOUT, SHADOW_TIMEOUT_MS, shadowBoundMs, type ChoiceAnswer, type HoldHost, type HoldTimeout, type JevAnswer, type QuestionAsk, type QuestionResolver, type SeamFailureReason, type SeamResult, type SeamSetResult } from "./decision-seam";
-import { newStampId, segment, splitOf, writeCall, writeAnswers, writeOutcome, writeRendering, writeEvent, ASK_MARKER_VALUE, type JournalWrite, type OutcomeKind } from "./decision-journal";
+import { COMPLETE_TIMEOUT_MS, holdFor, type HoldHost } from "./decision-seam";
+import { segment, writeEvent, type JournalWrite } from "./decision-journal";
 // The in-process recognition index the memory-recognition ask matches, the
 // gate its answer sets, and the memory-recognition nudge's index, match,
 // claim and text.
-import { recognitionIndexOf, recognitionKeyOf, recognitionMatches, recognitionScopeOf, shellCommandOf, RECOGNITION_OPS_MAX, RECOGNITION_SCOPE_RETRY_MS, RECOGNITION_SCOPE_SCRIPT, RECOGNITION_ACT_WINDOW, nudgeClaim, nudgeCollectHits, nudgeDedupKey, nudgeElisionsOf, nudgeEventDetail, nudgeHitsWithheld, nudgeIndexOf, nudgeMarkerKeys, nudgeMarkerOf, nudgeStrictSeat, nudgeSubjectsOf, nudgeText, type NudgeBoundary, type NudgeHit, type NudgeMarker, type NudgePayload, type NudgeRecord, type NudgeSubjects, type RecognitionIndex, type RecognitionMatch, type RecognitionScope, type RecognitionTier } from "./recognition";
+import { RECOGNITION_OPS_MAX, nudgeClaim, nudgeCollectHits, nudgeDedupKey, nudgeElisionsOf, nudgeEventDetail, nudgeHitsWithheld, nudgeMarkerKeys, nudgeMarkerOf, nudgeStrictSeat, nudgeSubjectsOf, nudgeText, type NudgeBoundary, type NudgeMarker, type NudgePayload } from "./recognition";
 // The one builder of a prompt's context blocks, for a typed prompt and for a
 // delivered inbox record.
-import { assembleContext, deliveredRecordText, deliveryWithContext, type ContextSources } from "./context-assembly";
-import { cacheModelSwitch, cacheReading, cacheTick, type CacheClockState } from "./cache-clock";
-// The turn-end memory writer's pure parts: the owed queue's two moves, the
-// fork's prompt and the fallback's, the reader of the fork's reply, the cut
-// of its follow-ups and the fork ledger's sum. The model calls, the put and
-// the decisions are below, in the memory block of turn.complete and in
-// drainMemoryOwed.
-import { addForkUsage, forkUsageOf, memoryFallbackPrompt, memoryTurnHead, memoryWriterFollowUps, memoryWriterPrompt, MEMORY_OWED_LIFE_MS, MEMORY_OWED_MAX, parseMemoryWriterReply, pushMemoryOwed, takeMemoryOwed, WRITER_TAG_FORK, WRITER_TAG_HAIKU, type MemoryOwed, type MemoryWriterReply } from "./memory-writer";
-// The close-out pair drafter's pure parts: the scan reader, the fork's
-// prompt, the reader of its reply and the [PAIR DRAFTS] block. The owe, the
-// reads, the fork call, the decisions and the delivery are below, in
-// drainPairDraftOwed, the heartbeat tick and the tool.call handler.
-import { pairDrafterPrompt, pairDraftsBlock, pairTierFlag, parsePairDrafterReply, parseScanPairs, type ScanPair } from "./pair-drafter";
+import { assembleContext, deliveryWithContext, type ContextSources } from "./context-assembly";
+import { cacheModelSwitch, type CacheClockState } from "./cache-clock";
+import { FORK_IDLE } from "./fork-watch";
+import { compactionPassEvent, compactionPassOptionOf, compactionPassReading, compactionPassShadow, compactionPassStep, compactionPlanDetail, compactionReadingDetail, compactionRerunAtCompaction, compactionSummaryUsageDetail, newCompactionPassState, type CompactionPassDeps, type CompactionPassOption, type CompactionPassReading } from "./compaction-pass";
+import { endStretchAtCompaction, markStretchApplied, stretchInstructions, WRITER_TAG_STRETCH, type StretchDeps } from "./stretch-distillation";
+import { boundaryBankCompactionBoundary, boundaryKitInstallPathOf, boundaryKitMemq, boundaryKitNodeRun, firstFailureToday, MEMQ_UNAVAILABLE_LINES, type KitBoundaryDeps, type KitMemqOptions, type KitMemqResult } from "./memq-boundary";
 // The follow-up queue a turn's end fills and the next prompt's context
-// lists, and its two sources: the documentation check and the memory fork.
-import { docsCheckFindings, enqueueFollowUps, markFollowUpsShown, readFollowUps, settleFollowUps, unshownFollowUps, writeFollowUps, followUpId, followUpPathNames, FOLLOW_UPS_MAX, TURN_END_SOURCE, type DocsCheckFs, type FollowUpDecide, type FollowUpEntry } from "./follow-ups";
+// lists, and its three sources: the documentation check, the memory fork and
+// the stretch fork.
+import { docsCheckFindings, enqueueFollowUps, markFollowUpsShown, readFollowUps, settleFollowUps, unshownFollowUps, writeFollowUps, followUpId, followUpPathNames, FOLLOW_UPS_MAX, type DocsCheckFs, type FollowUpDecide, type FollowUpEntry } from "./follow-ups";
+import { skillPickPrompt, skillPickStart } from "./skill-pick";
 // The compaction veto's rule, the release marker reads behind it, and the
 // texts the skip and the reminder render.
-import { COMPACT_CUT_MARKER, COMPACT_PASS_FLOOR_PERCENT, COMPACT_PLAN_STALE_MESSAGES, COMPACT_REMINDER_INTERVAL_MS, COMPACT_VALVE_PERCENT, CONSENT_MAX_AGE_MS, ROLE_BOUNDARY_MAX_AGE_MS, apiResultIdsOf, applyPlan, breakdownPercentOfWindow, buildPlan, cacheExpired, checkpointCommandClause, consentPath, consumeMarker, cutSkipText, cutWorthStarting, decideCompaction, isToolVerdict, keysPrefix, markerMatches, markerMomentHolds, passFillPercentOf, percentOf, planRefusal, protectedResultIdsOf, readMarker, rerunEntriesOf, rerunListOf, roleBoundaryPath, settleRerunCall, skipReasonText, surveyTranscript, targetTokensOf, tokensOf, toolCallInputOf, toolInputHash, type ApplyResult, type CachedVerdict, type CompactionFs, type CompactionPlan, type PassMessage, type PercentSource, type PlanRefusal, type RerunEntry } from "./compaction";
+import { COMPACT_CUT_MARKER, COMPACT_REMINDER_INTERVAL_MS, COMPACT_VALVE_PERCENT, CONSENT_MAX_AGE_MS, ROLE_BOUNDARY_MAX_AGE_MS, apiResultIdsOf, breakdownPercentOfWindow, cacheExpired, consentPath, consumeMarker, cutSkipText, cutWorthStarting, decideCompaction, keysPrefix, markerMatches, markerMomentHolds, percentOf, protectedResultIdsOf, readMarker, roleBoundaryPath, skipReasonText, tokensOf, type CompactionFs, type PercentSource } from "./compaction";
 // The seam the before-tool guards and the after-call hooks plug into, run
 // around next(e) in the tool.call handler.
 import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore, type AfterHook, type BeforeGuard, type GuardCall, type GuardContext, type GuardHost, type GuardResult, type GuardVerdictRecord } from "./guards/runner";
@@ -237,6 +203,7 @@ import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore
 // memory-recognition nudge.
 import { formatterHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
 import { childEnvOf, gitHooksPathOf } from "./spawn";
+import { newSpawnTypes, recordSpawnType, spawnLogLine, spawnTypeOf, type SpawnTypes } from "./spawn-types";
 // The four deny guards the kit's command hooks hold, ported, and the path
 // host their tree reads go through.
 import { pathOpsOf, readonlyAgentGuard, type LexHost } from "./guards/readonly-agent";
@@ -245,6 +212,36 @@ import { prDocsGuard } from "./guards/pr-docs";
 import { GIT_ENV_REDIRECTS, mergedPrPushGuard } from "./guards/merged-pr-push";
 // The memq grant, answered on tool.check.
 import { MEMQ_GRANT_REASON, memqGrantMatches, memqGrantable, type MemqGrantDeps } from "./guards/memq-grant";
+import { ATTACHMENT_WITHHELD, bodyFileRefusal, PROMPT_WITHHELD, SPAWN_WITHHELD, scrubAttachment, scrubContextBlocks, scrubPrompt, scrubServed, scrubSpawn, scrubText, seedFiles, seedVault, setRedactorOn, toolCallBack, toolCallDown, toolCallRefusal, withheldContextBlocks, withheldToolResult, type SeedFile, type ToolCallDown } from "./redactor";
+import { type ExpectedTurn, turnTextEquals, findExpectedTurn, type ChannelSender as ChannelSenderFromModule, OPERATOR_SENDER, ASKED_BY_MAX_CHARS as ASKED_BY_MAX_CHARSFromModule, channelSenderOf as channelSenderOfFromModule, TASK_TEXT_MAX_CHARS as TASK_TEXT_MAX_CHARSFromModule, TASK_ID_MAX_CHARS as TASK_ID_MAX_CHARSFromModule, type SubmitOutcome, removeExpectedTurn, CHANNEL_SEGMENT_PATTERN, CHANNEL_SEGMENT_MAX_BYTES, channelSegmentPath } from "./channel-text";
+import { TURN_PLAN_EDITS_MAX as TURN_PLAN_EDITS_MAXFromModule, namesPlanDocument, planPathUnderCwd as planPathUnderCwdFromModule, reactivateAskedEntry, isPlanEntry, PLAN_CHECKOUT_TIMEOUT_MS, closingLeafObjective, planStatusText } from "./plan-route";
+import { MEMQ_WRITE_TIMEOUT_MS, type RecallInjection, recallGetNamesOf as recallGetNamesOfFromModule, RECOGNITION_CHECK_EVERY_MS, type NudgePrepared, nudgeToolPayload } from "./recall-text";
+import { STATE_NOT_LOADED_STORE_CAUSE, parsePersonaStore, HEARTBEAT_FILENAME, PERSONA_STORE_FILENAME, YIELD_LOG_FILENAME, GOAL_HISTORY_FILENAME, METER_DRAIN_EVERY_MS, METER_DRAIN_TIMEOUT_MS, personaStoreId as personaStoreIdFromModule } from "./store-files";
+import { isWorkTool, isNudgeCountWork, type StepWatch, stepWatchOf, nextStepToolsValue, stepEffortRewrite, TURN_TOOL_RING_MAX, type TurnToolFlags, freshTurnToolFlags, RECAP_TIMEOUT_MS, RECAP_RECENT_MS, RECAP_OPERATOR_MS, recapTimeOf, recapAgeText } from "./turn-state-text";
+import { ASK_MARKER_LINE, ASK_MARKER_LINE_BREAK, askRecommendOf, unnamedExpiredAskQuestion, readStatusLine } from "./worker-ask";
+import { type HookBudget, type LiveAskResult as LiveAskResultFromModule, filterJevLive as filterJevLiveFromModule, JEV_LIVE_DEFAULT as JEV_LIVE_DEFAULTFromModule } from "./jev-live";
+import type { SessionState } from "./session-state";
+import { liveAsk as liveAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, openLedgerAsk as openLedgerAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule, type AskJournalDeps, type AskLayerDeps } from "./ask-layer";
+import { addGoalEntry as addGoalEntryFromModule, closeTurnRecordAtTurnEnd as closeTurnRecordAtTurnEndFromModule, holdMessageAsRecord as holdMessageAsRecordFromModule, promoteOpenRecord as promoteOpenRecordFromModule, promotePlanTouchingRecord as promotePlanTouchingRecordFromModule, settleExpiredDispositionStamps as settleExpiredDispositionStampsFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, type RecordsDeps } from "./records";
+import { drainAskBriefOwed as drainAskBriefOwedFromModule, drainMemoryOwed as drainMemoryOwedFromModule, drainPairDraftOwed as drainPairDraftOwedFromModule, drainSupervisorMailbox as drainSupervisorMailboxFromModule, noteMemoryOwedDropped as noteMemoryOwedDroppedFromModule, noteMemoryWrite as noteMemoryWriteFromModule, notePairDraftsDropped as notePairDraftsDroppedFromModule, writeMemoryRecord as writeMemoryRecordFromModule, type DrainsDeps } from "./drains";
+import { recallInjection as recallInjectionFromModule, recognitionAsk as recognitionAskFromModule, recognitionScopeRetry as recognitionScopeRetryFromModule, settleRecallOutcomes as settleRecallOutcomesFromModule, settleRecognitionOutcomes as settleRecognitionOutcomesFromModule, startRecognitionLoad as startRecognitionLoadFromModule, type RecallDeps } from "./recall";
+import { controllerTick, drainInbox, heartbeatTick, type TickContext } from "./controller-tick";
+import { serveToolCall, type EffortAct, type ToolCallContext } from "./tool-call";
+import { serveTurnComplete, type TurnCompleteContext } from "./turn-complete";
+
+// Names this module exports whose bodies live in the concern modules above.
+export type ChannelSender = ChannelSenderFromModule;
+export const ASKED_BY_MAX_CHARS = ASKED_BY_MAX_CHARSFromModule;
+export function channelSenderOf(...args: Parameters<typeof channelSenderOfFromModule>): ReturnType<typeof channelSenderOfFromModule> { return channelSenderOfFromModule(...args); }
+export const TASK_TEXT_MAX_CHARS = TASK_TEXT_MAX_CHARSFromModule;
+export const TASK_ID_MAX_CHARS = TASK_ID_MAX_CHARSFromModule;
+export const TURN_PLAN_EDITS_MAX = TURN_PLAN_EDITS_MAXFromModule;
+export function planPathUnderCwd(...args: Parameters<typeof planPathUnderCwdFromModule>): ReturnType<typeof planPathUnderCwdFromModule> { return planPathUnderCwdFromModule(...args); }
+export function recallGetNamesOf(...args: Parameters<typeof recallGetNamesOfFromModule>): ReturnType<typeof recallGetNamesOfFromModule> { return recallGetNamesOfFromModule(...args); }
+export function personaStoreId(...args: Parameters<typeof personaStoreIdFromModule>): ReturnType<typeof personaStoreIdFromModule> { return personaStoreIdFromModule(...args); }
+export type LiveAskResult = LiveAskResultFromModule;
+export function filterJevLive(...args: Parameters<typeof filterJevLiveFromModule>): ReturnType<typeof filterJevLiveFromModule> { return filterJevLiveFromModule(...args); }
+export const JEV_LIVE_DEFAULT = JEV_LIVE_DEFAULTFromModule;
 
 // --- Module-scope session identity ---
 // The loader requires `persist` and `activate` to be top-level functions.
@@ -288,7 +285,22 @@ function hostOf(dp: any): PluginHost {
     listDir: (path: string) => dp.fs.list(path),
     fetch: (url: string, init?: HttpInit) => dp.http.fetch(url, init),
     sleep: (ms: number, signal?: AbortSignal) => dp.clock.sleep(ms, { signal }),
+    getCompactionVerdicts: () => dp.state.get({ plugin: "personas", key: "compactionVerdicts" }),
+    setCompactionVerdicts: (value: StateValue<"personas", "compactionVerdicts">) => dp.state.set({ plugin: "personas", key: "compactionVerdicts" }, value),
+    getStore: (key: string) => dp.store.get(key),
+    setStore: (key: string, value: unknown) => dp.store.set(key, value),
+    deleteStore: (key: string) => dp.store.delete(key),
+    sessionUsage: (args?: SessionUsageArgs) => dp.session.usage(args),
+    sessionMessages: (args?: { as: "api" }) => dp.session.messages(args),
+    runCommand: (args: CommandRunArgs) => dp.command.run(args),
   };
+}
+
+// The running hook's HookBudget (hooks/jev-live.ts), read from the engine's
+// `next` handle. It stays in this module, since no sibling module receives
+// `next`.
+function hookBudgetOf(next: any): HookBudget {
+  return { live: true, remainingMs: () => next.budget.remainingMs };
 }
 
 /**
@@ -311,39 +323,9 @@ function holdHostOf(dp: any, budget: HookBudget): HoldHost {
   };
 }
 
-// What a hook handler hands down to the calls it makes: a reader of the
-// engine's remaining budget for the hook, and whether the handler is still
-// running. A handler that hands one down builds it at its start and clears
-// `live` in a finally as it returns. The engine meters a hook only from its
-// call to its return, so a shadow fired once the handler has returned, from a
-// chain that outlived the dispatch, races the flat shadow bound, and only a
-// shadow fired while `live` holds takes the share of the budget.
-type HookBudget = { live: boolean; readonly remainingMs: () => number };
-
-function hookBudgetOf(next: any): HookBudget {
-  return { live: true, remainingMs: () => next.budget.remainingMs };
-}
-
-// The bound a shadow call fired at this moment races: its share of the hook's
-// budget while the handler runs, read now, and the flat SHADOW_TIMEOUT_MS
-// where the handler has returned or there is no hook, as on a timer.
-function shadowMsOf(budget: HookBudget | undefined): number {
-  return budget !== undefined && budget.live ? shadowBoundMs(budget.remainingMs) : SHADOW_TIMEOUT_MS;
-}
-
 // The wait rule's one decision writer, for holdHostOf and for liveAsk's hold.
 function pushHoldDecision(action: string, detail: string): void {
   sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action, detail });
-}
-
-/**
- * A held model call's answer, or a throw where the hold gave up on it. Each
- * model call site in a hook already treats a call that rejects as failed,
- * through its own catch, so a hold that ran out takes that same path.
- */
-function answeredOrThrow<T>(held: T | HoldTimeout): T {
-  if (held === HOLD_TIMEOUT) throw new Error("the wait rule gave up on the call");
-  return held;
 }
 
 /**
@@ -539,173 +521,27 @@ function noteJevCallLine(write: JournalWrite, result: { latencyMs: number | null
   if (typeof ms === "number" && Number.isSafeInteger(ms) && ms >= 0) jevTurnLatencyMs += ms;
 }
 
-/**
- * Start one shadow measurement beside a Haiku call that has already returned,
- * and journal it once it settles. Returns the stamp id its lines carry, or
- * null where the kill switch is off, which is also what the two outcome
- * joiners read as having no call to cite.
- *
- * Nothing here is awaited by the caller, so a slow, failing or hung Jev cannot
- * delay the tick or the turn it sits in. Nothing it produces reaches a branch,
- * a state field, a decision action or a nudge text: Haiku has already decided
- * by the time this runs, and the only state it touches is the one decision an
- * unwritable journal earns.
- *
- * `mode` off stops the writing as well as the sending. The seam would answer
- * an off call with an off result and the journal would write it, which on a
- * machine where the operator turned Jev off is a file per session per day
- * saying so.
- */
-// `resolve` is the resolver the seam reads the question through, the host's
-// own by default. The controller passes the resolver that already answered
-// for this tick, so the option descriptions its state embeds and the
-// criteria the request carries come from one resolution rather than two
-// reads of the override layer that could straddle an edit.
-//
-// `onResult`, where given, receives the seam's result once its journal lines
-// are written, so a chain that is itself unawaited can read a shadow verdict
-// for its own journal row. It is called exactly once on every path but the
-// kill switch's null return: with null where a host broke the seam's or the
-// journal's never-rejects contract, so a waiter on it always settles. A
-// throw inside it on the result path is caught below with the rest of the
-// chain.
-function shadowAsk(
-  host: PluginHost,
-  site: string,
-  questionSetId: string,
-  optionIds: readonly string[],
-  state: string,
-  mode: string,
-  haikuValue: string | null,
-  resolve: QuestionResolver = resolverOf(host),
-  onResult?: (result: SeamResult | null) => void,
-  budget?: HookBudget,
-): string | null {
-  // The bound is read here, as the call fires and before any await, so a
-  // shadow fired from a running handler takes its share of that hook's budget
-  // as it stands now, and the seam's own awaits cannot move the reading past
-  // the handler's return. The exact string `shadow` and nothing else. The seam's other sending
-  // mode, `live`, is its own internal mode: liveAsk chooses it per question
-  // and hands it to the seam directly, and it is not a settings value. So a
-  // settings file hand-edited to `live` reads here as off, which sends
-  // nothing and writes no line saying so.
-  if (mode !== "shadow") return null;
-  // Read once here rather than in the continuation: these name the session the
-  // call was made in, and the continuation runs after the caller has returned.
-  const persona = sess.persona;
-  const session = sess.mySessionId;
-  // Minted when the call starts rather than when it settles, so a joiner
-  // always has an id to cite even where its outcome line reaches the file
-  // before this call's own line does.
-  const stampId = newStampId(persona, session);
-  const shadowMs = shadowMsOf(budget);
-  void ask(host, questionSetId, optionIds, state, mode, haikuValue, resolve, shadowMs)
-    .then(async (result: SeamResult) => {
-      const callWrite = await writeCall(host, {
-        stampId,
-        persona,
-        session,
-        site,
-        questionSet: questionSetId,
-        mode,
-        result,
-      });
-      noteJevCallLine(callWrite, result);
-      noteJournalWrite(callWrite, site);
-      // A failed call has no answer to record, and writeAnswers would write
-      // nothing for it anyway.
-      if (result.ok) {
-        noteJournalWrite(await writeAnswers(host, {
-          persona,
-          session,
-          answers: [{
-            callStampId: stampId,
-            questionId: result.questionId,
-            questionVersion: result.questionVersion,
-            overrideRefused: result.overrideRefused,
-            primitive: result.primitive,
-            value: result.answer.choice,
-            probabilities: result.answer.probabilities,
-            confidence: result.answer.confidence,
-            haikuValue: result.haikuValue,
-          }],
-        }), site);
-      }
-      if (onResult) onResult(result);
-    })
-    .catch(() => {
-      // The seam and the journal each hold a never-rejects contract, so this
-      // catches a host that broke one rather than a path either module takes.
-      // It stays because no caller awaits this chain: a rejection with nothing
-      // attached is an unhandled rejection, which ends the process rather than
-      // losing one measurement. The hook still fires, with no result, so a
-      // waiter on it is never left pending.
-      if (onResult) {
-        try { onResult(null); } catch { /* the waiter's own throw; nothing awaits this chain */ }
-      }
-    });
-  return stampId;
+// The ask layer in hooks/ask-layer.ts. Each wrapper calls its body there
+// over deps built at the call, with `sess` itself as the session, so a body
+// reads each field at the moment it reads it. The suite calls liveAsk off
+// this module.
+type AfterDeps<F> = F extends (deps: any, ...rest: infer R) => any ? R : never;
+function askJournalDepsOf(): AskJournalDeps {
+  return { session: sess, noteJevCallLine, noteJournalWrite, pushHoldDecision };
 }
-
-// What liveAsk returns for a call it put live: the stamp id its journal lines
-// carry, with the validated answer or the reason the call failed. `rejected`
-// is liveAsk's own reason for a host that broke the seam's never-rejects
-// contract, and is kept out of SeamFailureReason, which is the seam's set.
-export type LiveAskResult =
-  | { stampId: string; answer: ChoiceAnswer }
-  | { stampId: string; reason: SeamFailureReason | "rejected" };
-
-/**
- * The one entry point for a question that may be asked live, and the only
- * wrapper whose return a branch may read. Takes shadowAsk's arguments with
- * the live list in place of Haiku's value, since no classifier answers these
- * questions.
- *
- * Where `jevMode` is not `shadow`, or `jevLive` does not name the question,
- * this is shadowAsk with the same arguments: the question is journaled in
- * shadow, nothing is awaited, and the return is null. Where both hold, the
- * seam is awaited in mode `live`, the call and answer lines are written with
- * that mode, and the return carries the stamp id those lines carry, with
- * either the validated answer or the reason the call failed. The reason is
- * the seam's own closed failure reason, read off the result's `ok` rather
- * than off a list of reasons so a reason added to the seam is a failure here
- * too, or `rejected` where a host broke the seam's never-rejects contract.
- *
- * So null means only that the question was not live, and a caller that
- * needs nothing but the answer reads a `reason` return as it reads null: the
- * question's stated default. A caller that joins something to the live call,
- * or names why it fell back, reads the stamp id and the reason as well.
- *
- * A live call is awaited on the hook that asked it, and `event` names that
- * hook's event. `budget` is that hook's own, built by hookBudgetOf. The one
- * exception is step-effort's call, which turn.step fires and never awaits,
- * under the turn.step.effort event with an unmetered budget, so its hold
- * runs on a detached chain. The call holds through holdFor at the
- * wait rule's Jev figure for that event, held under the hook's remaining
- * budget, from the moment this is called, which covers the key read, the
- * override resolver and the request alike; that hold is the call's one
- * bound, since the seam's live mode races no timer of its own. Where the hold
- * gives up, the call's line is written as a timeout with the time held, and
- * the return carries the `timeout` reason. The hold's timer is aborted when
- * the call answers first. The two journal writes are not awaited: they ride
- * a detached chain, as shadowAsk's do, since an append rewrites the day's
- * file and queues behind every pending append to it, and a hook holding for
- * that would hold past the budget. Nothing here can throw into the path,
- * given the one precondition the caller owes: `jevLive` is an array. The
- * list is read with `includes` and nothing here checks its shape, since the
- * shape belongs to the settings read that turns the configured value into
- * this list, filtered to the promotable set. `jevMode` is read before the
- * list, so under `off` a question the list names is not sent either.
- *
- * `onStamp` is how a caller learns the stamp id before the await, on both
- * paths, including the not-live one whose null return carries none: it is
- * called once per call with the stamp id the journal lines carry, or null
- * where no line was written at all (the kill switch off, which mints no id).
- * The comment at the call itself names the one case where a minted id
- * reaches no line. A caller with no outcome to write passes nothing.
- *
- * Exported so the test suite can call it directly over the fake host.
- */
+function askLayerDepsOf(dp: any): AskLayerDeps {
+  return {
+    session: sess,
+    noteJevCallLine,
+    noteJournalWrite,
+    pushHoldDecision,
+    store: commonsStoreOf(dp),
+    persist: () => persist(dp),
+    submitStillWaitingReraise: (expectedTurns: ExpectedTurn[], due: readonly AskEntry[]) => submitStillWaitingReraise(dp, expectedTurns, due),
+    toast: (text: string) => dp.ui.toast(text),
+  };
+}
+function shadowAsk(...args: AfterDeps<typeof shadowAskFromModule>): string | null { return shadowAskFromModule(askJournalDepsOf(), ...args); }
 export async function liveAsk(
   host: PluginHost,
   event: string,
@@ -718,296 +554,78 @@ export async function liveAsk(
   jevLive: readonly string[],
   onStamp?: (stampId: string | null) => void,
 ): Promise<LiveAskResult | null> {
-  if (jevMode !== "shadow" || !jevLive.includes(questionSetId)) {
-    const shadowStampId = shadowAsk(host, site, questionSetId, optionIds, state, jevMode, null, undefined, undefined, budget);
-    if (onStamp) onStamp(shadowStampId);
-    return null;
-  }
-  // The seam's live mode is chosen here, per question, and never read from
-  // the settings: `jevMode` admits `shadow` alone as a sending value.
-  const mode = "live";
-  const persona = sess.persona;
-  const session = sess.mySessionId;
-  const stampId = newStampId(persona, session);
-  // Handed over before the await, so a caller holds the stamp whatever the
-  // request then does: a result carrying a failure reason writes its call line
-  // all the same, and the outcome that joins it is about what the plugin
-  // observed rather than about an answer that came back. The one stamp that
-  // joins nothing is the catch below: a host that broke the seam's never-
-  // rejects contract sends this call back before any line is written, and the
-  // caller is already holding the id. A labelling pass reads that as an
-  // outcome line whose call line is absent.
-  if (onStamp) onStamp(stampId);
-  const heldFrom = Date.now();
-  const hold: HoldHost = { sleep: (ms: number, signal: AbortSignal) => host.sleep(ms, signal), decide: pushHoldDecision, remainingMs: budget.remainingMs };
-  let held: SeamResult | HoldTimeout;
-  try {
-    held = await holdFor(hold, event, "jev", ask(host, questionSetId, optionIds, state, mode, null, resolverOf(host)));
-  } catch {
-    // As in shadowAsk: the seam never rejects, so this catches a host that
-    // broke that contract. This await sits on a hook's path, so the catch is
-    // what keeps a broken host from throwing into it. The reason is this
-    // wrapper's own, since no seam reason names a call that never resolved.
-    return { stampId, reason: "rejected" };
-  }
-  const result: SeamResult = held === HOLD_TIMEOUT ? heldFailure(questionSetId, Date.now() - heldFrom, null) : held;
-  // The journal writes ride a detached chain, as shadowAsk's do, so the hook
-  // that awaited the answer is not held for them.
-  void writeCall(host, {
-    stampId,
-    persona,
-    session,
-    site,
-    questionSet: questionSetId,
-    mode,
-    result,
-  })
-    .then(async (write) => {
-      noteJevCallLine(write, result);
-      noteJournalWrite(write, site);
-      // A failed call has no answer to record, and writeAnswers would write
-      // nothing for it anyway.
-      if (!result.ok) return;
-      noteJournalWrite(await writeAnswers(host, {
-        persona,
-        session,
-        answers: [{
-          callStampId: stampId,
-          questionId: result.questionId,
-          questionVersion: result.questionVersion,
-          overrideRefused: result.overrideRefused,
-          primitive: result.primitive,
-          value: result.answer.choice,
-          probabilities: result.answer.probabilities,
-          confidence: result.answer.confidence,
-          haikuValue: null,
-        }],
-      }), site);
-    })
-    .catch(() => {
-      // The journal holds a never-rejects contract, so this catches a host
-      // that broke it rather than a path the module takes. It stays because
-      // no caller awaits this chain: a rejection with nothing attached is an
-      // unhandled rejection, which ends the process rather than losing one
-      // measurement.
-    });
-  return result.ok ? { stampId, answer: result.answer } : { stampId, reason: result.reason };
+  return liveAskFromModule(askJournalDepsOf(), host, event, budget, site, questionSetId, optionIds, state, jevMode, jevLive, onStamp);
 }
-
-// The plan health request: block-owner, asked at a plan entry's turn end.
-// The journal site its call line carries.
-const PLAN_HEALTH_SITE = "plan-health";
-// How many of an entry's closing texts the request's state carries, and the
-// most characters any closing text carries in that state: the one cut bounds
-// the request's closingText, each entry of its recent list, and so the
-// journal's state column, which is exempt from the field clamp.
-const PLAN_HEALTH_RECENT_MAX = 5;
-const PLAN_HEALTH_TEXT_MAX = 1000;
-
-/**
- * The answer line's three value columns for one answer, by its shape. A
- * Choice's value is the option id it chose, a Score's its position on the
- * levels, a Noul's the probability of yes; the last carries no distribution
- * and no confidence.
- */
-function journalValuesOf(answer: JevAnswer): { value: string; probabilities: Record<string, number>; confidence: number | null } {
-  if (answer.type === "choice") return { value: answer.choice, probabilities: answer.probabilities, confidence: answer.confidence };
-  if (answer.type === "score") return { value: String(answer.score), probabilities: answer.probabilities, confidence: answer.confidence };
-  return { value: String(answer.noul), probabilities: {}, confidence: null };
-}
-
-/**
- * Start the plan health measurement at the end of a turn on a plan entry:
- * block-owner alone, in one request over one state, journaled once it
- * settles as one call line and one answer line. Returns the stamp id its
- * lines carry, or null where the kill switch is off, which is also what the
- * next_speaker joiner reads as having no call to cite.
- *
- * Not awaited by the caller, for the reason shadowAsk is not: a slow,
- * failing or hung Jev cannot delay the turn's end. Nothing it produces
- * reaches a branch, a state field, a decision action or a nudge text; the
- * only state it touches is the one decision an unwritable journal earns.
- * There is no Haiku value beside the answer, since no classifier asks it:
- * what it is measured against is the next_speaker outcome the plugin writes
- * from what it observes afterwards.
- */
-function shadowAskPlanHealth(
-  host: PluginHost,
-  closingText: string,
-  recentClosingTexts: readonly string[],
-  mode: string,
-  budget?: HookBudget,
-): string | null {
-  if (mode !== "shadow") return null;
-  // Read as the call fires, for shadowAsk's reason.
-  const shadowMs = shadowMsOf(budget);
-  const persona = sess.persona;
-  const session = sess.mySessionId;
-  const stampId = newStampId(persona, session);
-  // PLAN_HEALTH_SET_IDS decides both the sets this request asks and the
-  // questionSet its call line journals. Each ask takes its primitive and
-  // option ids from the set's shipped catalog entry, and the seam resolves
-  // its wording through the catalog's resolver.
-  const asks: readonly QuestionAsk[] = PLAN_HEALTH_SET_IDS.map((questionSetId): QuestionAsk => {
-    const shipped = SHIPPED_QUESTIONS[questionSetId];
-    return shipped.primitive === "choice"
-      ? { questionSetId, primitive: "choice", optionIds: Object.keys(shipped.options) }
-      : { questionSetId, primitive: shipped.primitive };
-  });
-  // The one state the request carries, whose fields a question names by
-  // their field names. The replay's byte-identity check in
-  // .kit/jev-gold/replay.mjs rebuilds this object from the journaled text and
-  // compares it byte for byte, so it holds while recentClosingTexts stays in
-  // the state and the two fields keep this order.
-  const state = {
-    [PLAN_HEALTH_STATE_CLOSING]: closingText,
-    [PLAN_HEALTH_STATE_RECENT]: recentClosingTexts,
-  };
-  void askAll(host, asks, state, mode, resolverOf(host), shadowMs)
-    .then(async (result: SeamSetResult) => {
-      const callWrite = await writeCall(host, {
-        stampId,
-        persona,
-        session,
-        site: PLAN_HEALTH_SITE,
-        questionSet: PLAN_HEALTH_SET_IDS.join(","),
-        mode,
-        result,
-      });
-      noteJevCallLine(callWrite, result);
-      noteJournalWrite(callWrite, PLAN_HEALTH_SITE);
-      if (!result.ok) return;
-      noteJournalWrite(await writeAnswers(host, {
-        persona,
-        session,
-        answers: result.answers.map((answered) => ({
-          callStampId: stampId,
-          questionId: answered.questionId,
-          questionVersion: answered.questionVersion,
-          overrideRefused: answered.overrideRefused,
-          primitive: answered.primitive,
-          ...journalValuesOf(answered.answer),
-          haikuValue: null,
-        })),
-      }), PLAN_HEALTH_SITE);
-    })
-    .catch(() => {
-      // As in shadowAsk: nothing awaits this chain, so a host that broke a
-      // never-rejects contract is caught here rather than ending the process.
-    });
-  return stampId;
-}
-
-/**
- * Join one signal the plugin produced onto the shadow call held for it. Not
- * awaited, for the reason shadowAsk is not, and the value it writes is read
- * from nothing the journal returns.
- */
-function shadowOutcome(host: PluginHost, callStampId: string, kind: OutcomeKind, value: string): void {
-  void writeOutcome(host, { persona: sess.persona, session: sess.mySessionId, callStampId, kind, value })
-    .then((write) => noteJournalWrite(write, kind))
-    .catch(() => { /* as in shadowAsk: nothing awaits this chain. */ });
-}
-
-// --- The compaction pass ---
-//
-// The pass judges each old tool result as keep, cut or drop through the
-// tool-result-stale question, on the heartbeat timer and never inside a
-// hook, and builds a plan the session.compact hook reads. Its rule lives in
-// hooks/compaction.ts; what sits here is the state the timer and the hook
-// share, the Jev asks through shadowAsk, and the journal lines.
-
-// The site label the pass's call lines carry. The verdict cache lives in
-// $.state under compactionVerdicts, declared in hooks/personas.d.ts, and
-// each call names that key as a literal, which the plugin validator requires.
-const COMPACTION_SITE = "compaction";
-
-// The pass option's three values. Any other value reads as off.
-type CompactionPassOption = "off" | "shadow" | "live";
-
-// The option as the configuration spells it: one of the three, or off with
-// the value that was refused, so session.start can log it once.
-function compactionPassOptionOf(value: unknown): { option: CompactionPassOption; invalid: string | null } {
-  if (value === undefined) return { option: "live", invalid: null };
-  if (value === "off" || value === "shadow" || value === "live") return { option: value, invalid: null };
-  return { option: "off", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
-}
-
-// The pass's state. Module state, per loaded plugin instance and so per
-// session, as sess is. The plan and the latches live in memory alone: a
-// reload loses the plan, which the next tick above the floor rebuilds from
-// the verdict cache, and the cache itself lives in $.state, which the host
-// keeps across a reload, so a result is asked about once per session.
-const compactionPass: {
-  // The plan as last built, or null before the first build.
-  plan: CompactionPlan | null;
-  // The verdict cache, read from $.state at the first tick that needs it.
-  cache: Record<string, CachedVerdict> | null;
-  // Counts up at every verdict that lands, and the count the plan was built
-  // at, so a tick folds landed verdicts into the plan without new messages.
-  cacheVersion: number;
-  planCacheVersion: number;
-  // Whether a tick's step is running, so a slow engine read never lets two
-  // overlap.
-  busy: boolean;
-  // Whether the once-per-session disabled line has been written.
-  disabledJournaled: boolean;
-  // When the last main-thread turn ended, in Date.now() milliseconds, as the
-  // meter row carries it, or 0 where none has; the cache clock runs from it.
-  lastMainTurnEndedAt: number;
-  // Whether the current idle stretch has had its cold_cache line, and under
-  // live its marked compaction. A turn ending opens a new stretch.
-  coldCacheJournaled: boolean;
-  // The rerun watch list, the results a live pass dropped or cut, as read
-  // from $.store at the first call that needs it and written through at
-  // every change, or null before that read.
-  rerun: RerunEntry[] | null;
-} = { plan: null, cache: null, cacheVersion: 0, planCacheVersion: -1, busy: false, disabledJournaled: false, lastMainTurnEndedAt: 0, coldCacheJournaled: false, rerun: null };
+function shadowAskPlanHealth(...args: AfterDeps<typeof shadowAskPlanHealthFromModule>): string | null { return shadowAskPlanHealthFromModule(askJournalDepsOf(), ...args); }
+function shadowOutcome(...args: AfterDeps<typeof shadowOutcomeFromModule>): void { shadowOutcomeFromModule(askJournalDepsOf(), ...args); }
 
 // The prompt-cache clock (hooks/cache-clock.ts), never persisted, so a fresh
 // process outside a turn reads cold until its first main turn.step. Exported for the tests.
 export const cacheClock: CacheClockState = { lastMainRequestAt: null, lastForkAt: null };
 const cacheWatch = { warmSeen: false };
 
-// The verdict cache, read from $.state once and held. A read that fails or
-// holds no map starts an empty cache, which re-asks what the host lost.
-async function compactionVerdictCache(dp: any): Promise<Record<string, CachedVerdict>> {
-  if (compactionPass.cache !== null) return compactionPass.cache;
-  let held: unknown;
-  try {
-    held = (await dp.state.get({ plugin: "personas", key: "compactionVerdicts" })).value;
-  } catch {
-    held = undefined;
-  }
-  const cache: Record<string, CachedVerdict> = Object.create(null);
-  if (held && typeof held === "object" && !Array.isArray(held)) {
-    for (const id of Object.keys(held as Record<string, unknown>)) {
-      if (!Object.hasOwn(held as Record<string, unknown>, id)) continue;
-      const v: unknown = (held as Record<string, unknown>)[id];
-      if (v && typeof v === "object" && isToolVerdict((v as { verdict?: unknown }).verdict)) {
-        const entry = v as { verdict: string; answered?: unknown; holdout?: unknown; stampId?: unknown };
-        cache[id] = {
-          verdict: entry.verdict as CachedVerdict["verdict"],
-          answered: typeof entry.answered === "string" ? entry.answered : entry.verdict,
-          holdout: entry.holdout === true,
-          ...(typeof entry.stampId === "string" ? { stampId: entry.stampId } : {}),
-        };
-      }
-    }
-  }
-  compactionPass.cache = cache;
-  return cache;
+// The compaction pass (hooks/compaction-pass.ts). Its state is module state,
+// per loaded plugin instance and so per session, as sess is.
+const compactionPass = newCompactionPassState();
+
+// What the compaction pass reaches, over a hook- or timer-bound `$` for
+// hostOf's reason: the host, the pass's state, the persona and session its
+// journal lines name, the monitor decision writer, and the seam and journal
+// helpers it hands the host to. Built at each call, so the persona and the
+// session are the ones the call was made in.
+function compactionPassDepsOf(dp: any): CompactionPassDeps {
+  return {
+    host: hostOf(dp),
+    pass: compactionPass,
+    persona: sess.persona,
+    sessionId: sess.mySessionId,
+    decide: (action: string, detail: string) => {
+      sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action, detail });
+    },
+    shadowAsk,
+    shadowOutcome,
+    noteJournalWrite,
+  };
 }
 
-// The guards option's three values. Any other value reads as off.
+// The stretch fork's deps over `$`, built at each call as compactionPassDepsOf is.
+function stretchDepsOf(dp: any): StretchDeps {
+  return {
+    host: hostOf(dp),
+    persona: sess.persona,
+    sessionId: sess.mySessionId,
+    state: sess.state,
+    fork: (prompt: string) => dp.model.fork({ prompt: scrubText(prompt).text }),
+    writeRecord: async (text: string, kind: string) => {
+      const written = await writeMemoryRecord(dp, text, { kind, source: "distilled", createdAt: Date.now(), writerTag: WRITER_TAG_STRETCH });
+      noteMemoryWrite(written, text);
+      return written.outcome;
+    },
+    memq: (args: string[]) => kitMemq(dp, args, { timeoutMs: MEMQ_WRITE_TIMEOUT_MS }),
+    enqueue: async (inputs) => {
+      if (inputs.length === 0 || !meterSessionKnown(sess.mySessionId)) return;
+      const store = commonsStoreOf(dp);
+      const queue = await readFollowUps(store, sess.mySessionId);
+      if (queue !== null) await writeFollowUps(store, sess.mySessionId, enqueueFollowUps(queue, inputs, Date.now(), "compaction", pushFollowUpDecision));
+    },
+    persist: () => persist(dp),
+    decide: (action: string, detail: string) => {
+      sess.state.decisions.push({ timestamp: Date.now(), loop: "memory", action, detail });
+    },
+    noteJournalWrite,
+  };
+}
+
+// The guards option's three values. Any other value reads as live, so a
+// misspelt setting disarms no guard.
 type GuardsOption = "off" | "shadow" | "live";
 
-// The option as the configuration spells it: one of the three, or off with
+// The option as the configuration spells it: one of the three, or live with
 // the value that was refused, so session.start can log it once.
-function guardsOptionOf(value: unknown): { option: GuardsOption; invalid: string | null } {
+export function guardsOptionOf(value: unknown): { option: GuardsOption; invalid: string | null } {
   if (value === undefined) return { option: "live", invalid: null };
   if (value === "off" || value === "shadow" || value === "live") return { option: value, invalid: null };
-  return { option: "off", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
+  return { option: "live", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
 }
 
 /**
@@ -1142,10 +760,9 @@ async function guardWindowsOf(dp: any): Promise<boolean> {
   }
 }
 
-// The module's own before guards for one call, the four the kit's command
-// hooks hold, built over the hook-bound `$` for hostOf's reason. They run
-// beside the guards runner.ts holds registered, in the same runBefore pass,
-// after those.
+// The module's own before guards for one call, the four deny guards, built
+// over the hook-bound `$` for hostOf's reason. They run beside the guards
+// runner.ts holds registered, in the same runBefore pass, after those.
 function moduleBeforeGuards(dp: any): BeforeGuard[] {
   const lexHost = () => guardLexHostOf(dp);
   return [
@@ -1216,8 +833,8 @@ function memqGrantDepsOf(dp: any): MemqGrantDeps {
  * next(e) alone; shadow decides, journals a guard_verdict line for a call
  * the grant matches and calls next(e); live decides and, on the one shape,
  * answers allow with the grant's reason unless the verdict beneath is a
- * deny, which stands, since the kit's PreToolUse allow never overrode
- * another hook's deny; every other call is next(e)'s. A grant that throws
+ * deny, which stands, since a grant only widens permission and never
+ * overrules a refusal; every other call is next(e)'s. A grant that throws
  * journals a guard_error line and grants nothing: silence is a grant's safe
  * failure in every mode.
  */
@@ -1257,15 +874,17 @@ async function guardCwdOf(dp: any): Promise<string> {
  * runs in, read from $.agent.list() for `agentId`; and the host. Built once
  * per call, and only for a call some guard or after hook matches.
  *
- * The agent type is absent on the main loop, and on a loop the list names no
- * row for: a workflow's agents and the engine's own forks carry ids no list
- * names, so a guard tells such a loop from the main loop by `e.agentId`.
+ * The agent type is absent on the main loop. On a loop the list names no row
+ * for, it is the type the agent.spawn hook recorded for `agentId` in
+ * `spawnTypes`, since a workflow's agents carry ids no list names; a listed
+ * row's type wins over the recorded one. The engine's own forks carry ids
+ * neither names, so a guard tells such a loop from the main loop by `e.agentId`.
  * Rejects where `agentId` is set and the list itself fails, by throwing or
  * answering no array, since the call's loop is then unknowable; the runner
  * turns the rejection into a GuardError naming the matched guards and the
  * handler fails closed.
  */
-async function guardContextOf(dp: any, agentId: unknown): Promise<GuardContext> {
+async function guardContextOf(dp: any, agentId: unknown, spawnTypes: SpawnTypes): Promise<GuardContext> {
   const cwd = await guardCwdOf(dp);
   let agentType: string | undefined;
   if (typeof agentId === "string" && agentId.length > 0) {
@@ -1278,6 +897,7 @@ async function guardContextOf(dp: any, agentId: unknown): Promise<GuardContext> 
     if (!Array.isArray(list)) throw new Error(`the agent type of ${agentId} is unresolved: $.agent.list() answered no list`);
     const row = (list as { id?: unknown; type?: unknown }[]).find((a) => a && a.id === agentId);
     if (row && typeof row.type === "string") agentType = row.type;
+    else agentType = spawnTypeOf(spawnTypes, agentId);
   }
   return { cwd, ...(agentType === undefined ? {} : { agentType }), host: guardHostOf(dp) };
 }
@@ -1320,31 +940,79 @@ function moduleAfterHooks(dp: any, modelMade: boolean, askRecognition?: () => Pr
   return hooks;
 }
 
+// plugin.json's `redactor` switch, read at register; off, no hook here scrubs.
+let redactorOn = true;
+
+// next(e) for a tool call with the redactor around it: placeholders restored
+// on the way down, the answer scrubbed before this module reads it. A step
+// that throws refuses the call before the tool ran and withholds after.
+async function redactedToolNext(dp: any, e: ToolCallInput, next: Next<"tool.call">): Promise<ToolCallResult> {
+  nextRan.add(e);
+  if (!redactorOn) return next(e);
+  let down: ToolCallDown;
+  try { down = toolCallDown(e); } catch { return withheldToolResult(); }
+  const r = await next(down.input);
+  try {
+    const back = toolCallBack(e.tool, r, down.handed, next.budget.remainingMs);
+    if (back.hidden > 0) dp.ui.notice(e.tool_use_id, `redactor: hid ${back.hidden} value(s)`);
+    return back.r;
+  } catch { return withheldToolResult(r); }
+}
+
+// The tool calls whose next(e) redactedToolNext ran. The tool.call handler's
+// answer for any other call was served by this module.
+const nextRan = new WeakSet<object>();
+
+// The tool.call handler's answer, scrubbed where it holds text the tool's own
+// scrub never saw: the whole answer of a call this module served, and every
+// context line it added to a tool's scrubbed answer, the guards', the after
+// hooks' and a delivered record's. A scan that throws withholds the answer.
+function servedAnswer(dp: any, e: ToolCallInput, next: Next<"tool.call">, r: ToolCallResult): ToolCallResult {
+  try {
+    const back = scrubServed(r, !nextRan.has(e), next.budget?.remainingMs ?? Infinity);
+    if (back.hidden > 0) dp.ui.notice(e.tool_use_id, `redactor: hid ${back.hidden} value(s)`);
+    return back.r;
+  } catch { return withheldToolResult(r); }
+}
+
+// next(e) for a prompt with the redactor around it: text and context go down
+// scrubbed, after this module's own reading, and a scan that throws drops it.
+async function redactedSubmitNext(dp: any, e: PromptSubmitInput, next: Next<"prompt.submit">): Promise<PromptSubmitResult> {
+  if (!redactorOn) return next(e);
+  let down: { e: PromptSubmitInput; hidden: number };
+  try { down = scrubPrompt(e, next.budget.remainingMs); } catch { return PROMPT_WITHHELD; }
+  if (down.hidden > 0) dp.ui.toast(`redactor: hid ${down.hidden} value(s) from the prompt`);
+  return next(down.e);
+}
+
 /**
  * The guard and after-hook region around next(e) for one tool call, the
  * part of the tool.call handler every arming tier runs. Answers `early`,
  * the result that stands in for next(e) where a guard refused the call under
  * live or the hook's budget ran out first, or `r`, next(e)'s result with the
- * guards' and after hooks' contexts leading its own. `askRecognition`, where
- * the handler passes one, is handed to the recognition nudge's after hook.
+ * guards' and after hooks' contexts leading its own. `spawnTypes` is the
+ * register call's map of started subagents to their types, for the guard
+ * context. `askRecognition`, where the handler passes one, is handed to the
+ * recognition nudge's after hook.
  */
-async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, guardsOption: GuardsOption, askRecognition?: () => Promise<void>): Promise<{ early: ToolCallResult } | { r: ToolCallResult }> {
+async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, guardsOption: GuardsOption, spawnTypes: SpawnTypes, askRecognition?: () => Promise<void>): Promise<{ early: ToolCallResult } | { r: ToolCallResult }> {
   // The before-tool guards, on every call whatever its loop. Each matched
   // guard's verdict is journaled; under live a deny is this call's result
   // and under shadow the call runs and each guard's verdict is set beside
-  // the kit command hook's, read off next(e)'s result. A guard's own
+  // the command verdict read off next(e)'s result, which reads deny only on
+  // the retired kit hook's refusal phrase. A guard's own
   // failure, in its matcher, its decide or the shared context, is a
   // GuardError from the runner: it is journaled in the before phase and,
   // under live, refuses the call naming the guard. Under live the context
   // a guard allows with rides the result ahead of every other context line
-  // on it. Under shadow the kit command hook's verdict is the call's, so a
+  // on it. Under shadow the call's own verdict stands, so a
   // guard's context stays off the result and its allow's reason rides the
   // guard_verdict line alone.
   const guardCall = e as unknown as Parameters<typeof matchingBeforeGuards>[0];
   // One context per call, built at the first guard or after hook that
   // matches and shared by the rest.
   let guardCtx: Promise<GuardContext> | null = null;
-  const guardCtxOf = (): Promise<GuardContext> => (guardCtx ??= guardContextOf(dp, e.agentId));
+  const guardCtxOf = (): Promise<GuardContext> => (guardCtx ??= guardContextOf(dp, e.agentId, spawnTypes));
   const guardVerdicts: GuardVerdictRecord[] = [];
   let guardContext: string[] = [];
   let beforeGuards: BeforeGuard[] = [];
@@ -1389,7 +1057,7 @@ async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, g
     return { early: { deny: `the tool.call hook's budget ran out before the call reached its tool${beforeGuards.length > 0 ? `, with ${beforeGuards.map((g) => g.name).join(", ")} matched` : ""}, and the dispatch went on without it` } };
   }
 
-  let r = await next(e);
+  let r = await redactedToolNext(dp, e, next);
   if (guardsOption === "shadow") {
     // The call's id rides each line, so a reading names the call where the
     // two verdicts disagree.
@@ -1437,745 +1105,51 @@ async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, g
   return { r };
 }
 
-// One compaction_pass event line. The detail is flat, as the journal's
-// event line takes it.
-async function compactionPassEvent(dp: any, detail: Record<string, string | number | boolean | null>): Promise<void> {
-  noteJournalWrite(await writeEvent(hostOf(dp), {
-    persona: sess.persona,
-    session: sess.mySessionId,
-    event: "compaction_pass",
-    detail,
-  }), "compaction_pass");
-}
+// The ledger's withdraw of a lifted entry and its open, in hooks/ask-layer.ts,
+// over askLayerDepsOf's deps.
+function withdrawLiftedAskBy(dp: any, ...args: AfterDeps<typeof withdrawLiftedAskByFromModule>) { return withdrawLiftedAskByFromModule(askLayerDepsOf(dp), ...args); }
+function openLedgerAsk(dp: any, ...args: AfterDeps<typeof openLedgerAskFromModule>) { return openLedgerAskFromModule(askLayerDepsOf(dp), ...args); }
 
-// A plan's counts as a line carries them.
-function compactionPlanDetail(plan: CompactionPlan | null): Record<string, number | null> {
-  if (plan === null) {
-    return { keep: 0, cut: 0, drop: 0, holdout: 0, unjudged: 0, keptCount: null, keptTokens: null, droppedTokens: null, targetTokens: null, skillKept: 0, skillSuperseded: 0, planRows: null };
-  }
+// The record layer in hooks/records.ts. Each wrapper calls its body there
+// over deps built at the call, with `sess` itself as the session, so a body
+// reads each field at the moment it reads it. countResetSinceNudgeOpened
+// crosses as a getter and a setter, since activate here writes it too. The
+// wording call's model request stays in this file, since
+// test-personas/redactor-module-test.mjs reads every model call here for its
+// scrubText.
+function recordsDepsOf(dp: any): RecordsDeps {
   return {
-    keep: plan.counts.keep,
-    cut: plan.counts.cut,
-    drop: plan.counts.drop,
-    holdout: plan.counts.holdout,
-    unjudged: plan.unjudged,
-    keptCount: plan.keptCount,
-    keptTokens: plan.keptTokens,
-    droppedTokens: plan.droppedTokens,
-    targetTokens: plan.targetTokens,
-    skillKept: plan.skillKept.length,
-    skillSuperseded: plan.skillSuperseded,
-    planRows: plan.rowCount,
-  };
-}
-
-// The pass's tick, run from the heartbeat in every armed session, owner or
-// reader. An unarmed session starts no heartbeat, so it asks nothing and
-// holds no plan. Under off it does nothing. Where the seam's mode sends
-// nothing, no plan can exist, so it journals one disabled line per session
-// and does nothing more. With no turn open it reads the
-// usage with its breakdown and, where a plan stands and the cache has
-// expired, reads the rows and journals one cold_cache line for the idle
-// stretch if the plan still covers them, and under live starts one marked
-// compaction beside it. Then, where the fill reaches the floor, read against
-// the auto-compaction threshold, and where no plan stands, ten
-// messages have arrived since the last one, or verdicts have landed since
-// it was built, it reads both forms of the transcript, surveys them, asks
-// tool-result-stale of at most COMPACT_ASK_BATCH results that hold no
-// verdict, each through shadowAsk as its own call of site compaction, and
-// builds the plan from the cache as it stands. A verdict lands through the
-// ask's result hook, into the cache and $.state, keep where its stamp is a
-// holdout. The asks are never awaited here: the next tick folds what landed.
-// Every failure is caught and counted as one decision, since $.clock.every
-// swallows a rejection and nobody would receive it.
-async function compactionPassStep(dp: any, option: CompactionPassOption, jevMode: string, turnOpen: () => boolean, now: number): Promise<void> {
-  if (option === "off" || compactionPass.busy) return;
-  compactionPass.busy = true;
-  try {
-    if (jevMode !== "shadow") {
-      if (!compactionPass.disabledJournaled) {
-        compactionPass.disabledJournaled = true;
-        noteJournalWrite(await writeEvent(hostOf(dp), {
-          persona: sess.persona,
-          session: sess.mySessionId,
-          event: "compaction_pass_disabled",
-          detail: { option, jevMode },
-        }), "compaction_pass_disabled");
-      }
-      return;
-    }
-    if (turnOpen()) return;
-    // One usage read per idle tick, with the breakdown, so the floor reads
-    // the fill against the auto-compaction threshold and the plan's target
-    // comes from the same reading.
-    let usage: unknown;
-    try {
-      usage = await dp.session.usage({ breakdown: "summary" });
-    } catch {
-      usage = undefined;
-    }
-    const fill = passFillPercentOf(usage);
-    let rows: PassMessage[] | null = null;
-    const readRows = async (): Promise<PassMessage[] | null> => {
-      if (rows !== null) return rows;
-      try {
-        const read: unknown = await dp.session.messages();
-        rows = Array.isArray(read) ? (read as PassMessage[]) : null;
-      } catch {
-        rows = null;
-      }
-      return rows;
-    };
-    // The expired-cache reading, over the plan as it stands.
-    const standing = compactionPass.plan;
-    if (standing !== null && !compactionPass.coldCacheJournaled && cacheExpired(now, compactionPass.lastMainTurnEndedAt, turnOpen())) {
-      const current = await readRows();
-      if (current !== null && !turnOpen() && keysPrefix(standing.keys, current)) {
-        compactionPass.coldCacheJournaled = true;
-        // Under live the plan must save at least COMPACT_CUT_MIN_SAVED_TOKENS
-        // for this moment to start a cut; a live line declining for that
-        // reason names it as its why.
-        const startCut = option === "live" && cutWorthStarting(standing.droppedTokens);
-        await compactionPassEvent(dp, {
-          trigger: "cold_cache",
-          option,
-          plan: "covering",
-          why: option === "live" && !startCut ? "under-minimum" : null,
-          ...compactionPlanDetail(standing),
-          tokensAfter: null,
-          idleS: Math.floor((now - compactionPass.lastMainTurnEndedAt) / 1000),
-          messages: current.length,
-        });
-        // Under live the same moment starts the marked compaction, once per
-        // idle stretch since the line above is. The engine runs it through
-        // this module's session.compact, which cuts by the plan or skips, and
-        // never summarizes. Not awaited: the command queues until the session
-        // is idle, and a refusal is counted as one decision.
-        if (startCut) {
-          void Promise.resolve()
-            .then(() => dp.command.run({ command: "compact", args: COMPACT_CUT_MARKER }))
-            .catch((err: unknown) => {
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "compaction_pass_failed",
-                detail: boundedText(safeErrorText(err)),
-              });
-            });
-          // The queued compaction reads the plan as it stands, and the hook
-          // drops the plan once it runs, so this tick builds no new one.
-          return;
-        }
-      }
-    }
-    // The pass, from the floor up.
-    if (fill === null || fill < COMPACT_PASS_FLOOR_PERCENT) return;
-    const current = await readRows();
-    if (current === null) return;
-    const cache = await compactionVerdictCache(dp);
-    // Stale where no plan stands, where ten messages arrived since it was
-    // built, where verdicts landed since, or where its keys no longer open
-    // the rows, as after a compaction that shrank the transcript.
-    const stale = standing === null
-      || current.length - standing.rowCount >= COMPACT_PLAN_STALE_MESSAGES
-      || compactionPass.planCacheVersion !== compactionPass.cacheVersion
-      || !keysPrefix(standing.keys, current);
-    if (!stale) return;
-    let api: unknown;
-    try {
-      api = await dp.session.messages({ as: "api" });
-    } catch {
-      api = [];
-    }
-    if (turnOpen()) return;
-    const survey = surveyTranscript(current, api, cache);
-    for (const candidate of survey.ask) {
-      const id = candidate.id;
-      let stampId: string | null = null;
-      stampId = shadowAsk(hostOf(dp), COMPACTION_SITE, TOOL_RESULT_STALE, TOOL_RESULT_STALE_OPTIONS, toolResultStaleStateText(candidate), jevMode, null, undefined, (result) => {
-        if (result === null || !result.ok || result.primitive !== "choice") return;
-        const answered = result.answer.choice;
-        if (!isToolVerdict(answered)) return;
-        const holdout = stampId !== null && splitOf(stampId) === "holdout";
-        cache[id] = { verdict: holdout ? "keep" : answered, answered, holdout, ...(stampId !== null ? { stampId } : {}) };
-        compactionPass.cacheVersion += 1;
-        // Written through as it lands, so a reload between a verdict and the
-        // next tick re-asks nothing. A refused write costs one re-ask after a
-        // reload and nothing else.
-        void Promise.resolve()
-          .then(() => dp.state.set({ plugin: "personas", key: "compactionVerdicts" }, cache))
-          .catch(() => { /* $.state unavailable; the cache in memory still serves this session */ });
-      });
-    }
-    compactionPass.plan = buildPlan(current, survey, cache, targetTokensOf(usage), now);
-    compactionPass.planCacheVersion = compactionPass.cacheVersion;
-  } catch (err) {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "compaction_pass_failed",
-      detail: boundedText(safeErrorText(err)),
-    });
-  } finally {
-    compactionPass.busy = false;
-  }
-}
-
-// The shadow branch, run by the session.compact hook on an allowed auto or
-// precompute compaction of the main conversation once next has resolved.
-// With a plan whose keys open the hook's messages, it applies the plan to a
-// copy and reads the kept estimate against the target; the hook's own result
-// is never changed here. One compaction_pass line records what the plan
-// would have kept beside what the summary kept, or why no plan applied: no
-// plan, a prefix mismatch, no target, an estimate over the target, or an
-// apply that would split a call from its result. No Jev call and no model
-// call runs here: the plan is read as the timer left it.
-async function compactionPassShadow(dp: any, e: { trigger: string; messages?: unknown }, result: { tokensAfter?: number; skip?: string }, option: CompactionPassOption): Promise<void> {
-  const reading = compactionPassReading(e.messages);
-  await compactionPassEvent(dp, {
-    trigger: e.trigger,
-    option,
-    ...compactionReadingDetail(reading),
-    tokensAfter: typeof result.tokensAfter === "number" ? result.tokensAfter : null,
-    messages: reading.messages.length,
-  });
-}
-
-// The plan read against a compaction's messages: whether it covers them,
-// the copy it applies to, and why it does not apply where it does not. The
-// shadow line and the live hand-up both read this one. `protect` names the
-// results the live pass keeps whole; the shadow line passes none. Pure over
-// the plan as the timer left it.
-type CompactionPassReading = { plan: CompactionPlan | null; messages: PassMessage[]; applied: ApplyResult | null; why: PlanRefusal | null };
-function compactionPassReading(raw: unknown, protect: readonly string[] = []): CompactionPassReading {
-  const plan = compactionPass.plan;
-  const messages: PassMessage[] = Array.isArray(raw) ? (raw as PassMessage[]) : [];
-  const covers = plan !== null && keysPrefix(plan.keys, messages);
-  const applied: ApplyResult | null = plan !== null && covers ? applyPlan(messages, plan, protect) : null;
-  return { plan, messages, applied, why: planRefusal(plan, messages, applied, covers) };
-}
-
-// The compaction_pass line's plan fields for one reading.
-function compactionReadingDetail(reading: CompactionPassReading): Record<string, string | number | boolean | null> {
-  const applied = reading.applied;
-  return {
-    plan: reading.why === null ? "applied" : "none",
-    why: reading.why,
-    ...compactionPlanDetail(reading.plan),
-    ...(applied === null ? {} : {
-      keptCount: applied.keptCount,
-      keptTokens: tokensOf(applied.keptChars),
-      droppedTokens: tokensOf(applied.droppedChars),
-      skillKept: applied.skillKept,
-      skillSuperseded: applied.skillSuperseded,
-      paired: applied.paired,
-    }),
-  };
-}
-
-// The rerun watch list's $.store key, one per session, since the window
-// counts this session's own calls.
-function compactionRerunKey(): string {
-  return `compactionRerun:${sess.mySessionId}`;
-}
-
-// The watch list, read from $.store at the first call that needs it and
-// held in memory after. A read that fails or holds nothing well formed
-// watches nothing. Two callers racing the first read keep whichever list
-// landed first, so neither replaces changes the other made since.
-async function compactionRerunList(dp: any): Promise<RerunEntry[]> {
-  if (compactionPass.rerun !== null) return compactionPass.rerun;
-  let held: unknown;
-  try {
-    held = await dp.store.get(compactionRerunKey());
-  } catch {
-    held = undefined;
-  }
-  if (compactionPass.rerun === null) compactionPass.rerun = rerunListOf(held);
-  return compactionPass.rerun;
-}
-
-// Writes the watch list through to $.store as memory holds it when the write
-// runs, deleting the key where nothing is watched. Writes run one after
-// another, so the last to run carries the newest list. Never awaited and
-// never thrown: a refused write costs only the outcomes a reload would lose.
-let compactionRerunWrites: Promise<void> = Promise.resolve();
-function saveCompactionRerun(dp: any): void {
-  compactionRerunWrites = compactionRerunWrites
-    .then(async () => {
-      const list = compactionPass.rerun ?? [];
-      if (list.length === 0) await dp.store.delete(compactionRerunKey());
-      else await dp.store.set(compactionRerunKey(), list);
-    })
-    .catch(() => { /* the store refused; the list in memory still serves this session */ });
-}
-
-// A compaction of the main conversation that ran ends every open window:
-// each entry still watched writes rerun_within false. Then a live pass that
-// handed up its own list starts a window for each result it dropped or cut
-// whose verdict carries a stamp.
-async function compactionRerunAtCompaction(dp: any, applied: ApplyResult | null): Promise<void> {
-  const open = await compactionRerunList(dp);
-  const host = hostOf(dp);
-  for (const entry of open) shadowOutcome(host, entry.stampId, "rerun_within", "false");
-  compactionPass.rerun = applied === null ? [] : rerunEntriesOf(applied.changed, compactionPass.cache ?? {});
-  if (open.length > 0 || compactionPass.rerun.length > 0) saveCompactionRerun(dp);
-}
-
-// One main-loop tool call counted against the watch list, on the tool.call
-// after side: a call of a watched tool and input writes rerun_within true,
-// an entry past its window writes false, and the rest count down. The list
-// is read and replaced in one synchronous step after the load, so calls
-// running side by side each count once.
-async function compactionRerunAtCall(dp: any, tool: string, input: unknown): Promise<void> {
-  await compactionRerunList(dp);
-  const entries = compactionPass.rerun ?? [];
-  if (entries.length === 0) return;
-  const settled = settleRerunCall(entries, tool, toolInputHash(input));
-  compactionPass.rerun = settled.open;
-  const host = hostOf(dp);
-  for (const outcome of settled.outcomes) shadowOutcome(host, outcome.stampId, "rerun_within", outcome.value);
-  saveCompactionRerun(dp);
-}
-
-// The worker's ASK: marker, a line reading `ASK: <question>? Recommend:
-// <choice>` anywhere in an answer, in any case. turn.complete opens an ask
-// record from it, and the step watch notes the first step whose answer
-// carries one, so the two read one rule. No `g` flag, so neither `match` nor
-// `test` keeps state between calls.
-const ASK_MARKER_LINE = /^ASK:\s*(.+?\?\s*Recommend:\s*.+)$/im;
-
-// The line breaks a closing text is cut at before each line is matched
-// against ASK_MARKER_LINE: the four terminators its `m` flag reads as line
-// ends, so a line read here is a line the marker's own anchors would see. A
-// VT, FF or NEL inside a line stays inside its question, which the prompts
-// that carry a question quote as a continuation line.
-const ASK_MARKER_LINE_BREAK = /\r\n|[\n\r\u2028\u2029]/u;
-
-// The most asks one turn opens, its ask_open calls and its closing text's
-// ASK: lines together. Lines past it are refused under one ask_cap_refused
-// decision naming their count, and a call past it under its own.
-const ASK_TURN_MAX = 4;
-
-// The text after "Recommend:" in a matched ASK: line, trimmed: the choice the
-// work proceeds on while the question stands.
-function askRecommendOf(question: string): string {
-  const at = /\?\s*Recommend:\s*/i.exec(question);
-  return at ? question.slice(at.index + at[0].length).trim() : "";
-}
-
-// A fresh id for an entry on `nodeId`, in the form the ledger stores,
-// ask-<nodeId>-<ms>. Several lines parsed in one turn share a millisecond,
-// so the ms part steps up until no entry on the ledger holds the id.
-function newAskId(state: AgentState, nodeId: string, now: number): string {
-  let ms = now;
-  while (state.asks.some((entry) => entry.id === `ask-${nodeId}-${ms}`)) ms += 1;
-  return `ask-${nodeId}-${ms}`;
-}
-
-// The open entry of `opener` on `nodeId`, where one stands.
-function openAskBy(state: AgentState, opener: AskOpener, nodeId: string): AskEntry | undefined {
-  return openAskEntries(state).find((entry) => entry.opener === opener && entry.nodeId === nodeId);
-}
-
-// Whether an open blocking entry of `opener` stands on `nodeId`. Each
-// controller opener asks once per node: a second streak or cap on the same
-// node while its own question still holds the work adds nothing the operator
-// does not have. An own entry whose hold was lifted does not stand: the
-// opener withdraws it and opens a fresh one, through withdrawLiftedAskBy.
-function ownAskStands(state: AgentState, opener: AskOpener, nodeId: string): boolean {
-  const own = openAskBy(state, opener, nodeId);
-  return own !== undefined && own.blocking;
-}
-
-// Withdraws the open entry of `opener` on `nodeId` whose hold was lifted, so
-// the opener can open a fresh blocking one in its place: the condition it
-// asked about holds again, and the lifted entry no longer stops the work.
-// The entry closes as withdrawn by ask_close, since the Approach's close
-// routes name no controller route, with a note naming its successor, and its
-// commons record takes withdrawn where it is still open. The successor's id
-// is the one newAskId gives at `now`, which is the id openLedgerAsk computes
-// for the open that follows at the same `now`, because a close frees no id.
-// The close runs before that open, so the open cap never counts the
-// predecessor against its successor. Nothing happens where no lifted own
-// entry stands.
-async function withdrawLiftedAskBy(dp: any, state: AgentState, persona: string, opener: AskOpener, nodeId: string, now: number): Promise<void> {
-  const own = openAskBy(state, opener, nodeId);
-  if (own === undefined || own.blocking) return;
-  const successorId = newAskId(state, nodeId, now);
-  const store = commonsStoreOf(dp);
-  const askRecord = await readAskRecord(store, persona, own.id);
-  if (askRecord && askRecord.status === "open") {
-    askRecord.status = "withdrawn";
-    await store.set(askKey(persona, own.id), askRecord);
-  }
-  closeAsk(state, own.id, "withdrawn", "ask_close", `replaced by ${successorId}`, now);
-}
-
-// Opens one ledger entry on `nodeId` and, where the open was accepted, its
-// commons record in the same step. Returns the entry, or the refusal with
-// nothing written: the caller logs a "cap" refusal as ask_cap_refused. A
-// record write that throws undoes the open whole before the throw goes on,
-// since an entry with no record would hold the work on a question no reader
-// session can see or answer.
-async function openLedgerAsk(
-  dp: any,
-  state: AgentState,
-  persona: string,
-  ownerSessionId: string,
-  nodeId: string,
-  question: string,
-  recommend: string,
-  opener: AskOpener,
-  blocking: boolean,
-  now: number,
-): Promise<AskEntry | AskOpenRefusal> {
-  const node = state.goals.find((g) => g.id === nodeId);
-  const id = newAskId(state, nodeId, now);
-  const result = openAsk(state, {
-    id,
-    nodeId,
-    planPath: node?.planPath ?? null,
-    entryTitle: node?.title ?? "",
-    question,
-    recommend,
-    opener,
-    blocking,
-  }, now);
-  if (typeof result === "string") return result;
-  try {
-    await writeAskRecord(commonsStoreOf(dp), persona, id, nodeId, question, ownerSessionId);
-  } catch (err) {
-    state.asks = state.asks.filter((entry) => entry !== result);
-    throw err;
-  }
-  return result;
-}
-
-// --- Section 4 (goal-every-turn): opening a turn record at the prompt ---
-
-// The most characters of the arriving message the turn-open question's state
-// carries. The record's own text is cut far shorter than this, by
-// clampTurnRecordText, so the two bounds are not the same number.
-const TURN_OPEN_MESSAGE_MAX = 1200;
-
-// The turn-open question's state, as the one text the seam's `ask` entry point
-// takes. Its three fields are labelled inside that text rather than sent as a
-// structured state, because `ask` types its state a string while the request
-// path beneath it takes either; widening that entry point is a change to
-// hooks/decision-seam.ts, which this section does not touch. A labeller reads
-// the same three field names off the journal's state column either way.
-//
-// Every value goes through kaizenLine, this file's own guard for text reaching
-// a composed channel: it folds the line terminators and runs bracketSafeText,
-// whose own comment gives the reason, that the text cannot forge a label. That
-// is not cosmetic here. A message carrying its own line break and the text
-// "open_record:" would otherwise write a second field into a state the plugin
-// is supposed to be the only author of.
-function turnOpenStateText(activeGoal: string, openRecord: string, message: string): string {
-  return `active_goal: ${kaizenLine(activeGoal)}\n` +
-    `open_record: ${kaizenLine(openRecord)}\n` +
-    `message: ${kaizenLine(message)}`;
-}
-
-// One line naming what a message asks for, for the record a live `new-goal`
-// verdict opens. Null on every failure, which is a call that threw or that the
-// wait rule gave up on, a result carrying no text, and a text that is empty
-// once folded and trimmed; the
-// caller's fallback is the message excerpt. The line is not cut here: the
-// record field's own clamp is what bounds it, so the prompt's "under 80
-// characters" is a request to Haiku rather than the guard.
-//
-// The call is billed to the `reason` bucket, beside the controller's own reason
-// call whose shape this one clones: a one-line Haiku completion over text the
-// plugin composed. Every completion site in this file bumps a bucket next to
-// itself and the cost summary sums exactly those buckets, so a site with none
-// would drop one Haiku call per external message out of the spend line the
-// operator reads. The per-hour call window is not bumped: that cap bounds the
-// controller's own tick, which is the only thing that can back itself off.
-// The bump comes before the call, so a call the engine cut at its own timeout,
-// or one that failed, is billed as the call it was.
-//
-// The completion bounds itself with its request's own `timeoutMs`, which the
-// hook's dispatch budget does not run through, so holdFor starts no timer for
-// it and only records a cut at that timeout.
-async function wordNewRecordText(dp: any, message: string, budget: HookBudget): Promise<string | null> {
-  const prompt =
-    `A message has just arrived for an autonomous agent. In one line of under 80 characters, ` +
-    `plain text with no Markdown, name what the message asks for. Answer with that line alone.\n` +
-    message;
-  sess.state.monitor.cost.reason.count += 1;
-  sess.state.monitor.cost.reason.estTokens += estimateTokens(prompt.length, 40);
-  try {
-    // The one caller is the prompt.submit step, so the hold is that event's.
-    const raw = answeredOrThrow(await holdFor(holdHostOf(dp, budget), "prompt.submit", "model", dp.model.complete({
+    session: sess,
+    host: hostOf(dp),
+    store: commonsStoreOf(dp),
+    holdHost: (budget: HookBudget) => holdHostOf(dp, budget),
+    completeRecordWording: (prompt: string) => dp.model.complete({
       model: "haiku",
-      prompt,
+      prompt: scrubText(prompt).text,
       maxTokens: 40,
       timeoutMs: COMPLETE_TIMEOUT_MS,
-    }), { ownTimeoutMs: COMPLETE_TIMEOUT_MS }));
-    const text = completionText(raw);
-    if (text === null) {
-      noteCompletionShape("turn-record-wording", raw);
-      return null;
-    }
-    const line = kaizenLine(text).trim();
-    return line.length > 0 ? line : null;
-  } catch {
-    // A failed wording call costs the excerpt rather than the record.
-    return null;
-  }
-}
-
-/**
- * Hold a genuine external message as a turn record, before the model reads it.
- * Called from the real prompt.submit hook, which fires for exactly the messages
- * that arrive as a turn of their own: the operator's, a peer session's, which
- * the harness delivers through this same hook, and the harness's own. The
- * plugin's own submits bypass it, so a coordinator persona's message, which
- * reaches the model through the inbox drain's submit, opens no record here. The caller runs this on the owner session of an
- * owner-armed session alone, so a reader-armed session and a session that does
- * not hold the claim open nothing.
- *
- * The fixed rules run first and each decides without Jev. A priming or
- * supervisor-ask turn is refused by the caller, because the text it carries is
- * the plugin's own and a record of it would hold the supervisor's words as the
- * persona's own intention. A turn that answered an open ask opens one record
- * attached to the entry the ask named, supersedes whatever was open, and asks
- * nothing: the handler above has already closed that ask, so what the message
- * is about is settled without a classifier.
- *
- * What the rules leave goes to the turn-open question, through liveAsk, the one
- * wrapper whose answer a branch may read. Live, `new-goal` supersedes the open
- * record and opens one worded by Haiku, `step` opens one attached to the active
- * entry, and `continuation` keeps the open record for the turn about to open.
- * Not live, or on a failed live call, the fallback is continue-or-attach-or-bare-
- * record: an open record carries over until it expires, a message arriving on
- * an active entry attaches to it, and anything else opens a bare record holding
- * the message's own opening. No route opens a goal, which is the plan's ruling.
- *
- * The store write is the one failure this step catches, and the handler's job
- * is to deliver the message: a write that fails leaves the record in memory and
- * the turn goes on. The step is not wrapped beyond that, so what keeps the rest
- * of it off the prompt's path is that each await here answers with a value
- * rather than throwing. The wording call catches its own failure and returns
- * null, and liveAsk catches a host that broke the seam's never-rejects
- * contract. A record opened for a prompt a hook beneath then drops stays open
- * and is what the next message continues, which is the carry-over the plan asks
- * for rather than a leak.
- */
-async function holdMessageAsRecord(
-  dp: any,
-  message: string,
-  answeredAskNodeId: string | null,
-  jevMode: string,
-  jevLive: readonly string[],
-  budget: HookBudget,
-): Promise<void> {
-  const now = Date.now();
-  // The reap runs before the open record is read, so what this step reads as
-  // open is a record the timeout has already judged. Reading first instead
-  // loses the arriving message outright: the step would carry over a record
-  // already past its timeout, and the persist at the end of this same step
-  // would then expire it, leaving the message with no record at all.
-  reapTurnRecords(sess.state, now);
-  // The same two-part reading the [GOAL TREE] block takes: activeGoalId names
-  // the entry, and its status is what says the persona is working on it.
-  const activeNode = sess.state.activeGoalId
-    ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-    : undefined;
-  const activeEntry = activeNode && activeNode.status === "active" ? activeNode : null;
-  const excerpt = message.slice(0, TURN_OPEN_MESSAGE_MAX);
-
-  // One decision per act, each naming the record it acted on. Where the detail
-  // carries the record's text it goes through kaizenLine first, as every
-  // decision detail built from text the plugin did not write does.
-  const logRecord = (action: string, detail: string): void => {
-    sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action, detail });
-  };
-  // Section 5 (goal-every-turn): what the turn-open question said this message
-  // was, which is the next_prompt_kind outcome every turn-disposition call
-  // still pending on a record is waiting for. It carries a live verdict's own
-  // option id where one was read, and the token `fallback` where none was:
-  // the question not live, not asked, or failed. The arm the fallback then
-  // runs is a function of the record's own status, so writing the arm would
-  // restate the verdict the outcome exists to score. The shadow verdict for a
-  // fallback call sits on the journal's answer line for that call, joined by
-  // the stamp id, which is where a labelling pass reads it. Null until an act
-  // runs.
-  let promptKind: string | null = null;
-  // Closes the open record as the act that replaced it. The record layer holds
-  // at most one open record, so every route that opens one runs this first. The
-  // record is passed in rather than read here, because a caller that awaited
-  // anything reads the open record again first: another invocation of this hook,
-  // for a message that arrived while this one was in a call, can have opened one
-  // since.
-  const supersede = (record: TurnRecord | null): void => {
-    if (record === null) return;
-    record.status = "superseded";
-    record.closedAt = now;
-    logRecord("turn_record_superseded", `record ${record.id} superseded by a new message`);
-  };
-  const openNew = (text: string, goalId: string | null, stampId: string | null): void => {
-    const record: TurnRecord = {
-      id: newTurnRecordId(now),
-      text: clampTurnRecordText(text),
-      openedAt: now,
-      status: "open",
-    };
-    if (goalId !== null) record.goalId = goalId;
-    if (stampId !== null) record.pendingStamps = [{ stampId, turns: 0 }];
-    sess.state.turnRecords.push(record);
-    logRecord(
-      goalId === null ? "turn_record_opened" : "turn_record_attached",
-      `record ${record.id}${goalId === null ? "" : ` on ${goalId}`}: ${kaizenLine(record.text)}`,
-    );
-  };
-  // Keeps the open record for the turn about to open. Its text stands, because
-  // a continuation adds to the same request rather than replacing it, and the
-  // turn id is stamped by turn.start, the first point at which one exists. The
-  // continuing call's stamp joins the pending list rather than replacing what is
-  // there: the call that opened the record owes an outcome of its own, and each
-  // pending entry counts the turns from where it joined.
-  const continueOpen = (record: TurnRecord, stampId: string | null): void => {
-    if (stampId !== null) {
-      const pending = record.pendingStamps ?? [];
-      pending.push({ stampId, turns: 0 });
-      record.pendingStamps = pending;
-    }
-    logRecord("turn_record_continued", `record ${record.id} continued: ${kaizenLine(record.text)}`);
-  };
-
-  if (answeredAskNodeId !== null) {
-    // An asked entry the tree no longer holds leaves the record bare rather
-    // than pointing its goalId at an id nothing resolves.
-    const asked = sess.state.goals.find((g) => g.id === answeredAskNodeId);
-    supersede(openTurnRecord(sess.state));
-    openNew(excerpt, asked === undefined ? null : asked.id, null);
-    // This route asks the question of no one, so no verdict steered it.
-    promptKind = "fallback";
-  } else {
-    const openAtEntry = openTurnRecord(sess.state);
-    // The stamp id rides a holder filled by onStamp, because onStamp is called
-    // on the not-live path too, whose null return carries no id. Null where no
-    // journal line was written at all.
-    const call: { stampId: string | null } = { stampId: null };
-    const live = await liveAsk(
-      hostOf(dp),
-      "prompt.submit",
-      budget,
-      // One hook site asks this question, so the journal site is its own id.
-      TURN_OPEN,
-      TURN_OPEN,
-      TURN_OPEN_OPTIONS,
-      turnOpenStateText(activeEntry === null ? "" : activeEntry.objective, openAtEntry === null ? "" : openAtEntry.text, excerpt),
-      jevMode,
-      jevLive,
-      (stampId) => { call.stampId = stampId; },
-    );
-    // The open record is read again here, after the call: at most one record is
-    // open at a time, and a message that arrived while this one was in the call
-    // runs this same step, so the record read before it may already be closed
-    // and a record it opened is the one this act has to answer to.
-    const open = openTurnRecord(sess.state);
-    // A failed live call reads as the not-live path does: no verdict.
-    const verdict = live !== null && "answer" in live ? live.answer.choice : null;
-    // The outcome is the verdict itself, whichever arm below it lands in: a
-    // live `step` with nothing active or a live `continuation` with nothing
-    // open runs a fallback arm and still reads as the verdict Jev gave.
-    promptKind = verdict ?? "fallback";
-    if (verdict === "new-goal") {
-      const worded = await wordNewRecordText(dp, excerpt, budget);
-      // Read again for the same reason, the wording call being a second await.
-      supersede(openTurnRecord(sess.state));
-      openNew(worded ?? excerpt, null, call.stampId);
-    } else if (verdict === "step" && activeEntry !== null) {
-      supersede(open);
-      openNew(excerpt, activeEntry.id, call.stampId);
-    } else if (open !== null) {
-      // The fallback's first arm, and where a live `continuation` verdict
-      // lands. A `step` verdict with nothing active and a `continuation`
-      // verdict with nothing open take the fallback too, which is what the
-      // plan means by treating the latter as the fallback: neither names a
-      // record the plugin could act on.
-      continueOpen(open, call.stampId);
-    } else if (activeEntry !== null) {
-      openNew(excerpt, activeEntry.id, call.stampId);
-    } else {
-      openNew(excerpt, null, call.stampId);
-    }
-  }
-
-  // Section 5 (goal-every-turn): the next_prompt_kind outcome, written once
-  // against every turn-disposition stamp still pending on a record that has
-  // not expired, whatever the record's status. A record delivered at its turn
-  // end holds its stamps until this message arrives, since the verdict this
-  // message took is exactly what that outcome measures. The reap at the top of
-  // this step has already expired a stale record, so an expired one is skipped
-  // here and settled as `none` at the persona's next own turn end instead,
-  // which is the writer for that arm. It runs after the acts above, so a
-  // record they superseded is read in its closed state, and before the
-  // persist, so the cleared list is what the store write carries.
-  if (promptKind !== null) {
-    for (const record of sess.state.turnRecords) {
-      if (record.status === "expired") continue;
-      writeNextPromptKind(dp, record, promptKind);
-    }
-  }
-
-  // Attempted rather than depended on, as the turn-id stamp above this in the
-  // same handler is: a throw here would leave the prompt undelivered over
-  // bookkeeping, and the first write that is not refused carries the record.
-  try { await persist(dp); } catch { /* the record stands in memory until a write lands */ }
-}
-
-// --- Section 5 (goal-every-turn): closing a turn record at the turn's end ---
-
-// The most characters of the turn's opening text and of its closing text the
-// turn-disposition question's state carries. Both bounds are the state's own,
-// so the two texts are cut here rather than by the callers that hold them.
-const TURN_DISPOSITION_ASKED_MAX = 1200;
-const TURN_DISPOSITION_MESSAGE_MAX = 3000;
-
-// The turn_tool_activity field: the seven yes-or-no flags, the work-tool count
-// and the ring, on one line in a fixed labelled shape. A classifier reads it
-// and an offline labelling pass reads it back off the journal, so a stable
-// name=value form matters more than a compact one. The ring is the tool names
-// in call order, comma-joined.
-function turnToolActivityText(flags: TurnToolFlags, ring: readonly string[], workToolCount: number, replyCalled: boolean): string {
-  const yn = (held: boolean): string => (held ? "yes" : "no");
-  return `plan_read=${yn(flags.planRead)} plan_edited=${yn(flags.planEdited)} commit=${yn(flags.committed)} push=${yn(flags.pushed)} ` +
-    `agent_dispatched=${yn(flags.agentDispatched)} goal_done=${yn(flags.goalDoneCalled)} reply=${yn(replyCalled)} ` +
-    `work_tools=${workToolCount} tools=${ring.join(",")}`;
-}
-
-// The turn's tool activity as the turn-score state reads it: the seven flags
-// under the names turnToolActivityText gives them, and a copy of the ring, so
-// a call landing after this read cannot change what the scorer is handed.
-function turnScoreToolsOf(flags: TurnToolFlags, ring: readonly string[], replyCalled: boolean): TurnScoreTools {
-  return {
-    flags: {
-      plan_read: flags.planRead, plan_edited: flags.planEdited, commit: flags.committed, push: flags.pushed,
-      agent_dispatched: flags.agentDispatched, goal_done: flags.goalDoneCalled, reply: replyCalled,
-    },
-    calls: [...ring],
+    }),
+    completionText,
+    noteCompletionShape,
+    liveAsk,
+    shadowOutcome,
+    persist: () => persist(dp),
+    persistOrRollBack: (rollBack: () => void) => persistOrRollBack(dp, rollBack),
+    activate: (nextId: string | null, reason: string) => activate(dp, nextId, reason),
+    dropDecision,
+    countResetSinceNudgeOpened: () => countResetSinceNudgeOpened,
+    setCountResetSinceNudgeOpened: (value: boolean) => { countResetSinceNudgeOpened = value; },
+    cwd: () => dp.session.cwd(),
   };
 }
+function holdMessageAsRecord(dp: any, ...args: AfterDeps<typeof holdMessageAsRecordFromModule>) { return holdMessageAsRecordFromModule(recordsDepsOf(dp), ...args); }
+function settleExpiredDispositionStamps(dp: any): void { settleExpiredDispositionStampsFromModule(recordsDepsOf(dp)); }
+function closeTurnRecordAtTurnEnd(dp: any, ...args: AfterDeps<typeof closeTurnRecordAtTurnEndFromModule>) { return closeTurnRecordAtTurnEndFromModule(recordsDepsOf(dp), ...args); }
+function promoteOpenRecord(...args: AfterDeps<typeof promoteOpenRecordFromModule>) { return promoteOpenRecordFromModule({ session: sess, dropDecision }, ...args); }
+function addGoalEntry(dp: any, ...args: AfterDeps<typeof addGoalEntryFromModule>) { return addGoalEntryFromModule(recordsDepsOf(dp), ...args); }
+function promotePlanTouchingRecord(dp: any, ...args: AfterDeps<typeof promotePlanTouchingRecordFromModule>) { return promotePlanTouchingRecordFromModule(recordsDepsOf(dp), ...args); }
 
-// The turn-disposition question's state, as the one text the seam's `ask`
-// entry point takes, on the shape turnOpenStateText gives the turn-open
-// question and for the reason its comment states: `ask` types its state a
-// string, and every value goes through kaizenLine so a text carrying its own
-// line break and a label cannot write a fifth field into a state the plugin is
-// the only author of. The closing text is the model's own, and the opening
-// text is an external message, so both are exactly the texts that guard is
-// for. The two cuts are applied before the guard, which changes no length.
-function turnDispositionStateText(activeGoal: string, asked: string, finalMessage: string, activity: string): string {
-  return `active_goal: ${kaizenLine(activeGoal)}\n` +
-    `this_turn_was_asked: ${kaizenLine(asked.slice(0, TURN_DISPOSITION_ASKED_MAX))}\n` +
-    `agent_final_message: ${kaizenLine(finalMessage.slice(0, TURN_DISPOSITION_MESSAGE_MAX))}\n` +
-    `turn_tool_activity: ${kaizenLine(activity)}`;
-}
+// --- Section 5 (goal-every-turn): the live-agent read a turn record's close consults; the close is in hooks/records.ts ---
 
 // Whether a failed $.agent.list() read has been logged this session. The read
 // runs at every own turn end and on every eligible idle tick, so a host
@@ -2227,9 +1201,6 @@ async function liveTopLevelAgentRunning(dp: any): Promise<boolean> {
   });
 }
 
-// How often a standing agent hold writes its idle_hold_agent_held line.
-const AGENT_HOLD_REPORT_MS = 60 * 60_000;
-
 // The controller's idle branch's hold on a running agent, or null where none
 // stands. `entryId` is the active entry the hold began on, and a held tick on
 // another entry begins a fresh hold. `since` is the clock of the first held
@@ -2247,736 +1218,6 @@ let agentHold: { entryId: string; since: number; beginLogged: boolean; hourLogge
 const clearAgentHold = (): void => {
   agentHold = null;
 };
-
-// Joins one next_prompt_kind value onto every turn-disposition call still
-// pending on a record, and drops the list as the lines are written, which is
-// what holds one call to one outcome line. A record with no pending stamp is a
-// record no call is waiting on, which is every record under the kill switch.
-function writeNextPromptKind(dp: any, record: TurnRecord, value: string): void {
-  const stamps = record.dispositionStamps;
-  if (stamps === undefined || stamps.length === 0) return;
-  for (const stampId of stamps) shadowOutcome(hostOf(dp), stampId, "next_prompt_kind", value);
-  delete record.dispositionStamps;
-}
-
-// The `none` arm of next_prompt_kind: a record that expired before the next
-// external message arrived. It runs here, at the persona's own turn end,
-// rather than inside reapTurnRecords, because the reap lives in the store
-// module and has no host to write a journal line with. That placement also
-// covers a record the reap expired at a load or at a store write elsewhere,
-// since the expired record is still in the array to be read here.
-function settleExpiredDispositionStamps(dp: any): void {
-  for (const record of sess.state.turnRecords) {
-    if (record.status === "expired") writeNextPromptKind(dp, record, "none");
-  }
-}
-
-/**
- * Decide at the persona's own turn end whether the open record was delivered,
- * and close it when it was. Called from turn.complete under the true-boundary
- * guard: the completing id is the one turn.start carried, no subagent id is on
- * the completion, no turn is open once this completion's own entry is gone,
- * this session holds the persona, and the turn was not skipped. A record is
- * never deleted here; it changes status and gains closedAt, and the cap is
- * the reap's alone.
- *
- * The fixed rules run first, in the plan's order, and each decides without
- * Jev, logging one turn_record_in_flight decision naming itself. A closing
- * text opening with a BLOCKED: or WAITING: lead, an ask open at the turn's
- * end, and a background agent the main loop started and still running each
- * leave the record open and in flight. The agent list is read through the
- * caller's thunk only once the first two rules have declined, since those
- * two are synchronous facts already in hand and the list is a host call
- * with a suspension of its own. What they leave goes to the
- * turn-disposition question through liveAsk over the four-field state, whose
- * active_goal is the objective of the entry that was active at the turn's
- * start, the entry the turn served, read by the caller from the same
- * turn-start leaf the scorer above it judges. The entry active at the turn's
- * end is often a different one: the scorer that ran above this can have
- * blocked or completed the served entry and activated the next, and the
- * closing text and tool activity beside the field describe the served one,
- * so the served one is what the question is asked about. Live,
- * the record is delivered when the answer's probability for `delivered` is at
- * least TURN_DELIVERED_THRESHOLD, the equal case included, else it stays open.
- * Not live, or on a failed live call, the fallback is not delivered, which keeps the
- * record open and costs nothing on a record, since a record is never nudged.
- *
- * The stamp of every call this asks is parked on the record before the await,
- * on the disposition list rather than the turn-open one, so the next
- * message's verdict can answer it. After the await, two facts are read again
- * before anything is written. The turn-start count is compared with the one
- * the caller read at its delete, which is the same reading the compaction
- * boundary takes of the same fact: a newer turn started while this
- * completion awaited means it no longer owns the turn, and a completion that
- * does not own the turn writes nothing. And the open record is read again,
- * since a store write in between can have expired it. Nothing here throws
- * to the caller: liveAsk catches a host that broke the seam's never-rejects
- * contract, and every other line is a read or a write of state already in
- * memory.
- */
-async function closeTurnRecordAtTurnEnd(
-  dp: any,
-  activeGoal: string,
-  closingText: string,
-  askedText: string,
-  activityText: string,
-  endedOnLead: boolean,
-  readLiveAgent: () => Promise<boolean>,
-  newerTurnStarted: () => boolean,
-  jevMode: string,
-  jevLive: readonly string[],
-  budget: HookBudget,
-): Promise<void> {
-  const open = openTurnRecord(sess.state);
-  if (open === null) return;
-  const inFlight = (rule: string): void => {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "turn_record_in_flight",
-      detail: `record ${open.id} left open: ${rule}`,
-    });
-  };
-  // A blocking ask is read ahead of the lead: a BLOCKED: lead with an ASK:
-  // line under it is in flight on that question, which the decision names.
-  const blockingAsks = openBlockingAsks(sess.state);
-  if (blockingAsks.length > 0) {
-    inFlight(`a blocking ask is open (${blockingAsks.map((entry) => entry.id).join(", ")})`);
-    return;
-  }
-  if (endedOnLead) {
-    inFlight("the closing text opens with a BLOCKED: or WAITING: lead");
-    return;
-  }
-  if (await readLiveAgent()) {
-    inFlight("a background agent the main loop started is still running");
-    return;
-  }
-  const live = await liveAsk(
-    hostOf(dp),
-    "turn.complete",
-    budget,
-    // One hook site asks this question, so the journal site is its own id.
-    TURN_DISPOSITION,
-    TURN_DISPOSITION,
-    TURN_DISPOSITION_OPTIONS,
-    turnDispositionStateText(activeGoal, askedText, closingText, activityText),
-    jevMode,
-    jevLive,
-    (stampId) => {
-      if (stampId === null) return;
-      const stamps = open.dispositionStamps ?? [];
-      stamps.push(stampId);
-      open.dispositionStamps = stamps;
-    },
-  );
-  // A completion that no longer owns the turn writes nothing, on the boundary
-  // step's own reading of the turn-start count it captured at the delete.
-  if (newerTurnStarted()) return;
-  // A failed live call reads as the not-live path does: not delivered.
-  if (live === null || !("answer" in live)) return;
-  const delivered = live.answer.probabilities["delivered"];
-  if (typeof delivered !== "number" || delivered < TURN_DELIVERED_THRESHOLD) return;
-  const current = openTurnRecord(sess.state);
-  if (current === null || current.id !== open.id) return;
-  current.status = "delivered";
-  current.closedAt = Date.now();
-  sess.state.decisions.push({
-    timestamp: Date.now(),
-    loop: "monitor",
-    action: "turn_record_delivered",
-    detail: `record ${current.id} delivered at p ${delivered}`,
-  });
-}
-
-// Section 6 (goal-every-turn): marks one turn record promoted with the id of the
-// goal node or the task it became, and returns the undo of that mark, or null
-// where there is no record to mark. Route two's three handlers and route one all
-// promote through this one function, so the fields a promotion writes are one
-// rule: the closed status, the id on whichever field names its kind, the plan
-// path where the add carried one, and the clock the promotion happened at. A
-// promoted record is no longer open, so it drops out of the close's view and out
-// of the status line's, which is what keeps a record from dangling beside the
-// entry it became.
-//
-// The record is the caller's reading rather than this function's, because a
-// caller that awaited anything between resolving the record and marking it has
-// to mark the record it resolved: the one a message that arrived in that window
-// opened asked for nothing, and marking it would leave the record the entry was
-// made from superseded with its plan path and never promoted.
-//
-// The plan path is written because the entry the record became is found by path
-// at the next boundary, and the record is the only place a path-keyed reader can
-// see that route two's own add already covered the document. An add naming no
-// path leaves whatever the record carried.
-//
-// The undo is returned rather than applied by the caller's own hand because a
-// caller that can roll its add back has to put every field of the record back
-// as it was, including the ones it never wrote, and a caller that cannot roll
-// back simply drops the undo.
-function promoteTurnRecord(
-  record: TurnRecord | null,
-  id: string,
-  field: "goalId" | "taskId",
-  now: number,
-  planPath: string | undefined,
-): (() => void) | null {
-  if (record === null) return null;
-  const before = {
-    status: record.status, goalId: record.goalId, taskId: record.taskId,
-    planPath: record.planPath, closedAt: record.closedAt,
-  };
-  record.status = "promoted";
-  record[field] = id;
-  if (planPath !== undefined) record.planPath = planPath;
-  record.closedAt = now;
-  const decision: AgentState["decisions"][number] = {
-    timestamp: now,
-    loop: "monitor",
-    action: "turn_record_promoted",
-    detail: `record ${record.id} promoted to ${field === "goalId" ? "entry" : "task"} ${id}`,
-  };
-  sess.state.decisions.push(decision);
-  return () => {
-    record.status = before.status;
-    if (before.goalId === undefined) delete record.goalId; else record.goalId = before.goalId;
-    if (before.taskId === undefined) delete record.taskId; else record.taskId = before.taskId;
-    if (before.planPath === undefined) delete record.planPath; else record.planPath = before.planPath;
-    if (before.closedAt === undefined) delete record.closedAt; else record.closedAt = before.closedAt;
-    dropDecision(decision);
-  };
-}
-
-// The same mark on whichever record is open now, for the three route-two handlers
-// that read the record and mark it with nothing awaited in between.
-function promoteOpenRecord(id: string, field: "goalId" | "taskId", now: number): (() => void) | null {
-  return promoteTurnRecord(openTurnRecord(sess.state), id, field, now, undefined);
-}
-
-// Section 6 (goal-every-turn): what an add of a goal entry does once its
-// arguments are settled, and the one path that does it. The goal_add handler
-// calls this with the arguments the model gave, and route one of the promotion
-// routes calls it at a turn's end with the arguments it read off the record, so
-// the paused-awaiting-yes shape, the [PROPOSAL] and [STARTED] records and the
-// rollback are the autonomy dial's own on both routes rather than a second copy
-// of them. `unprompted` and `awaitingYes` are the caller's readings, since only
-// a tool call can read a turn's origin: route one is the plugin's own act and is
-// unprompted whatever turn it lands in.
-//
-// What it does not do is build the caller's message. The deny text of a refusal
-// is returned, so the tool can pass it to the model and the boundary can log it,
-// and the entry is returned, so the tool can name what is active now.
-type GoalEntryAdd =
-  | { ok: true; node: GoalNode }
-  | { ok: false; deny: string };
-
-async function addGoalEntry(
-  dp: any,
-  a: {
-    kind: "plan" | "task";
-    title: string;
-    objective: string;
-    parentId: string;
-    root: GoalNode;
-    maxRounds: number;
-    planPath: string | undefined;
-    unprompted: boolean;
-    awaitingYes: boolean;
-    dropTaskId: string | undefined;
-    coordinatorPersona: string;
-    architectPersona: string;
-  },
-): Promise<GoalEntryAdd> {
-  const { kind, parentId, root, planPath, unprompted, awaitingYes, coordinatorPersona, architectPersona } = a;
-  // The record this add is made for, read here rather than at the mark below,
-  // because the reach check is an await and a message arriving inside it opens a
-  // record of its own and supersedes this one. The mark belongs on the record the
-  // add answered, whatever is open by the time it runs.
-  const recordAtEntry = openTurnRecord(sess.state);
-  // A plan the gate admitted outside the operator's and the coordinator
-  // persona's turns was admitted by the autonomy level, and one record
-  // tells the coordinator persona about it: a [PROPOSAL] at plan-and-ask,
-  // where the entry waits paused for the operator's yes, and a [STARTED]
-  // at plan-and-start. The road to the coordinator persona is checked
-  // here, with the other refusals. The record goes out only after the
-  // entry is saved, so the coordinator's inbox never names an entry the
-  // store does not hold, and a record that then cannot be written takes
-  // the add back out of the tree and the store.
-  if (unprompted) {
-    let noRoad: string | null = null;
-    try {
-      if (sess.persona === "default") {
-        noRoad = "the session is on the default persona, which has no road to a coordinator persona";
-      } else if (!await mayReachPersona(commonsStoreOf(dp), coordinatorPersona, sess.mySessionId, coordinatorPersona, architectPersona, sess.staleAfterMs)) {
-        noRoad = `the reach rule refuses this session's write to '${coordinatorPersona}'`;
-      }
-    } catch (err) {
-      noRoad = `the reach check for '${coordinatorPersona}' failed: ${err instanceof Error ? err.message : String(err)}`;
-    }
-    if (noRoad !== null) {
-      return { ok: false, deny: unpromptedPlanRefusedText(noRoad) };
-    }
-  }
-
-  const now = Date.now();
-  const newNode: GoalNode = {
-    id: `${kind}-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    parentId,
-    kind,
-    title: a.title.slice(0, 80),
-    objective: a.objective.slice(0, 500),
-    status: awaitingYes ? "paused" : "pending",
-    ...(awaitingYes ? { blockedReason: AWAITING_YES_REASON, awaitingYes: true } : {}),
-    source: "worker",
-    planningRounds: 0,
-    consecutiveBlockedPlannings: 0,
-    consecutivePlanningFailures: 0,
-    planningRound: 0,
-    maxRounds: a.maxRounds,
-    completedRounds: 0,
-    scores: [],
-    notes: [],
-    createdAt: now,
-    updatedAt: now,
-    ...(planPath ? { planPath } : {}),
-  };
-  // What this add changes, so an unprompted add whose save yields or
-  // whose record cannot be written can take it back: the root's fields
-  // where the add reopened it, the active slot before any activation,
-  // the task route three drops, the open record it promotes, and the
-  // decision lines the add pushed.
-  const priorActiveGoalId = sess.state.activeGoalId;
-  let reopenedRoot: { status: GoalNode["status"]; blockedReason: string | undefined; updatedAt: number } | null = null;
-  const addDecisions: AgentState["decisions"] = [];
-  let nudgeBefore: { answers: number; capRefusedFor: string | null; resetSinceOpened: boolean; lastNudgeAt: number } | null = null;
-  // A node added directly under a finished root reopens the root, so the
-  // tree never holds live work under a root that reads finished. A node
-  // added under a plan leaves the root as it was, since a finished plan
-  // keeps its child out of reach and a reopened root over it would read
-  // live with nothing to activate. It runs after every refusal above, so a
-  // refused add reopens nothing, and it touches no other node: finished
-  // children stay finished.
-  if (parentId === root.id && (root.status === "complete" || root.status === "abandoned")) {
-    const priorStatus = root.status;
-    reopenedRoot = { status: root.status, blockedReason: root.blockedReason, updatedAt: root.updatedAt };
-    root.status = "pending";
-    root.blockedReason = undefined;
-    root.updatedAt = now;
-    const reopenDecision: AgentState["decisions"][number] = {
-      timestamp: now,
-      loop: "goal",
-      action: "root_reopened",
-      detail: `${root.id} reopened from ${priorStatus} to pending for a new ${kind}`,
-    };
-    sess.state.decisions.push(reopenDecision);
-    addDecisions.push(reopenDecision);
-  }
-  sess.state.goals.push(newNode);
-
-  const addDecision: AgentState["decisions"][number] = {
-    timestamp: now,
-    loop: "goal",
-    action: "add",
-    detail: `${newNode.id} (${kind}) under ${parentId}: "${a.title.slice(0, 50)}"`,
-  };
-  sess.state.decisions.push(addDecision);
-  addDecisions.push(addDecision);
-
-  // R4: adding a task under the active plan demotes the plan to pending
-  // and activates the new task.
-  if (kind === "task") {
-    const parent = sess.state.goals.find((g) => g.id === parentId)!;
-    if (parent.status === "active") {
-      parent.status = "pending";
-      parent.updatedAt = now;
-      newNode.status = "active";
-      sess.state.activeGoalId = newNode.id;
-      activate(dp, newNode.id, `${parent.id} demoted to pending; ${newNode.id} activated`);
-    }
-  }
-
-  // Section 10: if the tree still has no active leaf, activate the node
-  // just created rather than deferring to the next tick, mirroring the
-  // task branch above (set status and activeGoalId directly, then call
-  // activate() to log the decision and reset the nudge budget). Without
-  // this, the node stays pending for the rest of this turn, so a
-  // same-turn goal_done has nothing of this node's to close.
-  //
-  // isActivationEligible carries activateNext's own ancestor rule, so a
-  // node added under an abandoned or blocked parent is refused here the
-  // same way activateNext's DFS would refuse it - this branch never
-  // activates into a closed subtree.
-  //
-  // The hold check beside it is one thing: an open blocking ask on the
-  // ledger is the operator's own open question the work is stopped on,
-  // whatever opened it, and the controller keeps no other hold. A paused
-  // node, dropped by an operator pause or left over from a plan switch, is
-  // not a hold and must not disable this branch for the rest of the session.
-  if (
-    !sess.state.goals.some((g) => g.status === "active") &&
-    openBlockingAsks(sess.state).length === 0 &&
-    isActivationEligible(sess.state, newNode)
-  ) {
-    newNode.status = "active";
-    newNode.updatedAt = now;
-    sess.state.activeGoalId = newNode.id;
-    nudgeBefore = { answers: sess.nudgedAnswersWithoutStatus, capRefusedFor: sess.nudgeCapRefusedFor, resetSinceOpened: countResetSinceNudgeOpened, lastNudgeAt: sess.lastNudgeAt };
-    activate(dp, newNode.id, `${newNode.id} added with no active leaf`);
-    // activate() pushes its one decision line last.
-    addDecisions.push(sess.state.decisions[sess.state.decisions.length - 1]);
-  }
-
-  // Route three's reap: the task this entry was made from leaves the list as
-  // the entry replaces it, in this add's own write rather than in a second
-  // one, so a save that does not land leaves both the task and the tree as
-  // they were. The prior array is kept whole for the rollback, the way
-  // task_clear keeps it, since a task put back by hand would lose its place
-  // in the list.
-  const tasksBefore = sess.state.tasks;
-  const droppedTask = a.dropTaskId === undefined
-    ? undefined
-    : sess.state.tasks.find((t) => t.id === a.dropTaskId);
-  if (droppedTask !== undefined) sess.state.tasks = sess.state.tasks.filter((t) => t !== droppedTask);
-
-  // Route two of the promotion routes, and the mark route one takes as well:
-  // where the turn holding this add held an open turn record, that record is
-  // the intention the message arrived with and this entry is what the
-  // intention became. Any open record counted, bare or attached, since a record
-  // attached to the active entry is still the message this add answered. The
-  // record is the one read above, before the reach check, and the plan path this
-  // add named goes onto it, so the next boundary's path-keyed reading of the tree
-  // and of the record agree about which document is already covered. The mark
-  // rides this add's own write and the rollback takes it back, so no record reads
-  // promoted against an entry the store does not hold.
-  const undoPromotion = promoteTurnRecord(recordAtEntry, newNode.id, "goalId", now, planPath);
-
-  // Takes this add back out of memory: the node, the root's reopening,
-  // the activation with the session-local nudge fields activate() reset,
-  // the dropped task, the promoted record, and the decision lines. The
-  // active slot goes back only where it names this entry.
-  const rollBackAdd = (): void => {
-    const at = sess.state.goals.indexOf(newNode);
-    if (at !== -1) sess.state.goals.splice(at, 1);
-    if (reopenedRoot !== null) {
-      root.status = reopenedRoot.status;
-      root.blockedReason = reopenedRoot.blockedReason;
-      root.updatedAt = reopenedRoot.updatedAt;
-    }
-    if (sess.state.activeGoalId === newNode.id) sess.state.activeGoalId = priorActiveGoalId;
-    if (nudgeBefore !== null) {
-      sess.nudgedAnswersWithoutStatus = nudgeBefore.answers;
-      sess.nudgeCapRefusedFor = nudgeBefore.capRefusedFor;
-      countResetSinceNudgeOpened = nudgeBefore.resetSinceOpened;
-      sess.lastNudgeAt = nudgeBefore.lastNudgeAt;
-    }
-    if (droppedTask !== undefined) sess.state.tasks = tasksBefore;
-    if (undoPromotion !== null) undoPromotion();
-    for (const d of addDecisions) dropDecision(d);
-  };
-
-  const writeOk = unprompted ? await persistOrRollBack(dp, rollBackAdd) : await persist(dp);
-  if (writeOk && unprompted) {
-    const recordText = unpromptedPlanRecordText(awaitingYes, sess.persona, newNode.id, newNode.title, planPath);
-    let sent: { id: string; writer: string; seq: number };
-    try {
-      sent = await sendPluginRecord(commonsStoreOf(dp), coordinatorPersona, sess.mySessionId, recordText);
-    } catch (err) {
-      const cause = `the write to '${coordinatorPersona}' failed: ${err instanceof Error ? err.message : String(err)}`;
-      rollBackAdd();
-      let undone = false;
-      try { undone = await persist(dp); } catch { /* read below as not undone */ }
-      if (!undone) return { ok: false, deny: unpromptedPlanNotUndoneText(cause, newNode.id) };
-      return { ok: false, deny: unpromptedPlanRefusedText(cause) };
-    }
-    sess.state.decisions.push({
-      timestamp: now,
-      loop: "goal",
-      action: awaitingYes ? "plan_awaiting_yes" : "plan_started_unprompted",
-      detail: `${newNode.id}: record ${sent.id} to '${coordinatorPersona}'`,
-    });
-    // The record is ledgered so a quiet tick can send it again where the
-    // coordinator persona's inbox skips it; see the plan record settle step.
-    sess.state.monitor.planRecords.push({ nodeId: newNode.id, awaitingYes, text: recordText, writer: sent.writer, seq: sent.seq, resends: 0 });
-    // The entry and the record have both landed, so only this line and the
-    // ledger entry are lost on a failed save.
-    try { await persist(dp); } catch { /* the add's success stands */ }
-  }
-  if (!writeOk) {
-    return { ok: false, deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-  }
-  return { ok: true, node: newNode };
-}
-
-// The last line route one logged, which is what its two no-entry lines are held
-// to one of per reading by. It carries the record it was logged for, so a new
-// record's first reading is logged whatever the record before it read.
-let lastPlanRouteLine: { recordId: string; action: string; detail: string } | null = null;
-
-/**
- * Route one of the promotion routes: a turn record whose own turn wrote a plan
- * document becomes a plan entry in the goal tree, through the autonomy dial.
- * Called from turn.complete under the same true-boundary guard as the record
- * close, and ahead of it, because the close can set the open record `delivered`
- * on a live verdict and a plan-touching record is promoted rather than
- * delivered.
- *
- * Only a bare record takes this route. A record carrying a goalId is already a
- * step of an entry the tree holds, so there is nothing to promote it into, and
- * the architect persona the settings name never takes it at all: that seat
- * authors plan documents for other workers by charter, so every one of its turns
- * would otherwise queue an entry for somebody else's plan. An unset architect
- * seat, which is what the plugin holds where the setting is absent, blank,
- * "default" or the coordinator's own name, excludes nobody.
- *
- * The path is the first of this turn's own plan edits this match accepts, and
- * otherwise the path the record already carries, which is what makes a refused
- * promotion retry at the next boundary. An edit is read through
- * PLAN_PATH_PATTERN after the working directory's prefix comes off, so a plan
- * document in another checkout, in a subdirectory, or under a working directory
- * the host will not name yields no path and the record keeps whatever it had:
- * the entry's planPath is joined back onto this working directory by every later
- * reader, so a path that is not this directory's names a file none of them will
- * find.
- *
- * A path the record carried is re-tested against that same pattern before
- * anything is built on it, which the store's own comment puts at the reader:
- * goal_add enforces the shape on what it writes, and a hand-edited or
- * foreign-written store is the second producer no validation saw. A path that
- * fails that re-test is dropped from the record rather than written back,
- * because nothing between two boundaries can change the shape of a string: the
- * next boundary would re-test the same value, fail it again and log the same
- * line, for as long as the record stayed open.
- *
- * Then the autonomy dial decides, and two readings stop before it. A tree the
- * operator has not opened takes no entry, since only the operator opens one, and
- * a path a plan entry of the tree already carries takes no second entry, since
- * the tree would otherwise gain one entry per turn that touched the document.
- * That second reading is the tree's and not the record log's, because the tree is
- * where the entry lives: a record promoted through route two carries the path
- * only because the promotion copies it, a paused entry outlives the twenty closed
- * records the log keeps, and either way the log can stop naming a document the
- * tree still holds an entry for. An entry of any status counts, a finished one
- * included, since a second entry for a document the tree has already worked is
- * the same flood by another route. Both readings leave the record open with its
- * planPath and log one turn_record_plan_noted naming which of them held. At
- * `propose` the same line is logged and nothing else happens, which is the
- * level's own rule: the standing block already tells a persona how to propose,
- * and an entry here would propose the plan to the steward on the author's
- * behalf. At `plan-and-ask` and `plan-and-start` the entry is added through
- * addGoalEntry, so the paused-awaiting-yes shape and the [PROPOSAL] or [STARTED]
- * record are the dial's own, and the record is marked promoted by that same path.
- * A refused add logs one turn_record_promotion_refused naming the cause and
- * leaves the record open with its planPath, so the next boundary tries again.
- *
- * Either line is logged only where its own text moved for that record since the
- * last boundary, which is what holds the log to one line per reading rather than
- * one per turn end: this runs at every own-turn end while the record stays open,
- * and under the shipped fallback an open record continues across messages until
- * the timeout reaps it. The text carries the record, the rule and the path, so a
- * path this turn moved and a rule that now refuses for another reason are both
- * logged, and only an unchanged reading is silent. The comparison is one reading
- * held in this module, so a relaunched session logs its record's current reading
- * once more.
- *
- * The record's own text is the entry's title. It arrives cut to the record
- * field's bound and with its brackets already neutralized, by the one clamp
- * every producer of that field and the load call, so no guard is repeated here.
- *
- * Nothing here throws to the caller: the working-directory read is caught, and
- * addGoalEntry answers a refusal rather than raising it.
- */
-async function promotePlanTouchingRecord(
-  dp: any,
-  editedPaths: readonly string[],
-  coordinatorPersona: string,
-  architectPersona: string,
-  newerTurnStarted: () => boolean,
-): Promise<void> {
-  const open = openTurnRecord(sess.state);
-  if (open === null || open.goalId !== undefined) return;
-  if (architectPersona !== "" && sess.persona === architectPersona) return;
-
-  // The working directory is read only where this turn edited something that
-  // named a plan document, so a turn that touched none costs no host call on
-  // the turn-end path. A read that fails or answers no directory leaves every
-  // edit unresolved, which reads the same way as an edit outside this
-  // directory: no path, and the record keeps what it had. The turn's edits are
-  // read in call order and the first this match accepts is the path, so a turn
-  // that touched another checkout's spec before its own document is promoted on
-  // its own document.
-  let edited: string | null = null;
-  if (editedPaths.length > 0) {
-    let cwd: string | null = null;
-    try {
-      const answered = await dp.session.cwd();
-      if (typeof answered === "string" && answered.length > 0) cwd = answered;
-    } catch { /* read as unresolvable edits below */ }
-    if (cwd !== null) {
-      for (const candidate of editedPaths) {
-        edited = planPathUnderCwd(candidate, cwd);
-        if (edited !== null) break;
-      }
-    }
-  }
-  // After the one await above, two facts are read again before anything is
-  // written, the way the record close beside this reads them. A newer turn
-  // started during the read means this completion no longer owns the turn, and
-  // a completion that does not own the turn writes nothing. And the open record
-  // is read again, since a store write in between can have expired it.
-  if (newerTurnStarted()) return;
-  const record = openTurnRecord(sess.state);
-  if (record === null || record.id !== open.id) return;
-
-  // One line per reading rather than one per boundary: a line whose action,
-  // record and text are the ones last logged from here says nothing new, and
-  // this runs at every own-turn end the record stays open for. The reading is
-  // compared before the 300-character cut, so two causes that part company past
-  // that cut are still two readings.
-  const logOnce = (action: string, detail: string): void => {
-    if (lastPlanRouteLine !== null && lastPlanRouteLine.recordId === record.id
-      && lastPlanRouteLine.action === action && lastPlanRouteLine.detail === detail) return;
-    lastPlanRouteLine = { recordId: record.id, action, detail };
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action,
-      detail: detail.slice(0, 300),
-    });
-  };
-  const noted = (rule: string): void => {
-    logOnce("turn_record_plan_noted", `record ${record.id} holds ${record.planPath}, no entry added: ${rule}`);
-  };
-  const refused = (cause: string): void => {
-    logOnce("turn_record_promotion_refused", `record ${record.id} keeps ${record.planPath} for the next boundary: ${cause}`);
-  };
-
-  const path = edited ?? record.planPath;
-  if (path === undefined) return;
-  if (!PLAN_PATH_PATTERN.test(path)) {
-    // The shape of a stored string cannot change between boundaries, so the path
-    // is dropped rather than written back: keeping it would buy a re-test and a
-    // line at every later boundary and no promotion ever.
-    delete record.planPath;
-    logOnce(
-      "turn_record_promotion_refused",
-      `record ${record.id} drops the plan path ${path}: it fails the shape the store's own pattern names`,
-    );
-    return;
-  }
-  record.planPath = path;
-
-  const root = sess.state.goals.find((g) => g.parentId === null);
-  if (root === undefined) {
-    noted("no goal tree exists, and only the operator opens one");
-    return;
-  }
-  if (sess.state.goals.some((g) => g.kind === "plan" && g.planPath === path)) {
-    noted("the tree already holds a plan entry for that plan document");
-    return;
-  }
-  const autonomy = sess.state.autonomy;
-  if (autonomy === "propose") {
-    noted("the autonomy level is propose, which proposes through the standing block rather than the tree");
-    return;
-  }
-
-  const added = await addGoalEntry(dp, {
-    kind: "plan",
-    title: record.text,
-    objective: `Work the plan document ${path} to completion; its own sections say what done looks like.`,
-    parentId: root.id,
-    root,
-    // The round budget goal_add gives an add that names none.
-    maxRounds: 10,
-    planPath: path,
-    // The plugin's own act, so it announces itself to the coordinator persona
-    // at either level, as an add the dial admitted outside the operator's turn
-    // does.
-    unprompted: true,
-    awaitingYes: autonomy === "plan-and-ask",
-    dropTaskId: undefined,
-    coordinatorPersona,
-    architectPersona,
-  });
-  if (!added.ok) refused(added.deny);
-}
-
-// The persona an agentic_say or agentic_inbox call addresses: the `persona`
-// argument when given, else the session's own persona. A given name passes
-// personaNameProblem, the one rule for a name that reaches a store key.
-function targetPersonaOf(arg: unknown, own: string): { persona: string } | { deny: string } {
-  if (arg === undefined || arg === null) return { persona: own };
-  const problem = personaNameProblem(arg);
-  if (problem) return { deny: `'persona' ${problem}${typeof arg === "string" ? ` (got '${arg.trim()}')` : ""}.` };
-  return { persona: (arg as string).trim() };
-}
-
-// One turn this plugin's own $.prompt.submit has queued and that has not
-// opened yet; the list and its match rules are described at register()'s
-// `expectedTurns`. An entry carries two match keys. `text` is the string
-// handed to the submit. `settledText` is the text the resolved submit
-// reports, which is the text as the hook chain beneath this plugin left it
-// (another plugin's prompt.submit hook may rewrite it, and the engine caps
-// it whole), and the text the turn then opens with. Both are kept because
-// the contract does not order the submit promise settling against
-// turn.start: a turn that opens before the submit's continuation has run
-// matches on `text` where nothing rewrote the text, and one that opens
-// after matches on `settledText` either way. A
-// UserPromptSubmit settings hook cannot rewrite the text, since its output
-// carries no text field, and a prompt it suppresses leaves no turn that
-// matches either key. A turn that opens with a rewritten or capped text
-// before the submit's continuation has stored the settled text matches
-// neither key either. Such a delivery's turn reads unaccounted, and its
-// entry then leaves the list at the withheld branch once its record is
-// swept or resolved.
-//
-// A delivery entry also carries what the effort gate reads for its turn,
-// fixed when the entry is built: `ground`, the value deliveryGroundIn gave
-// the record, and `seatLead`, whether the record's own text opens with
-// [FINDING] or [PROPOSAL]. `answersAsk` is set on the one delivery the
-// ask-answer path queues, the record that answers an open ask, and is
-// absent on every other, so the turn-score call's next_trigger outcome can
-// tell an answered ask from any other delivered record.
-//
-// A proposal entry is the idle proposal's [PROPOSE] turn. It is a plugin
-// turn in every other respect, and its own kind is what lets the agentic_say
-// handler ledger the proposal the persona sends inside it.
-//
-// A memoryCheck entry is the [MEMORY CHECK] turn a goal's close queues. It
-// carries the closed goal's id and the ids of every goal the close completed
-// with it, so the turn's answer is read against the records shown under those
-// goals and no other.
-type ExpectedTurn = { text: string; settledText?: string } & ({ kind: "delivery"; recordId: string; ground: string; seatLead: boolean; answersAsk?: true } | { kind: "nudge" } | { kind: "plugin" } | { kind: "proposal" } | { kind: "memoryCheck"; goalId: string; goalIds: string[] });
-
-// Whether a turn's opening text is the text an entry was submitted with, on
-// either of the entry's two keys. An empty turn text (a continuation) and an
-// empty key match nothing, since an empty string is inside every text.
-//
-// Two rules. Equality is the first, and the one the origin readings the
-// prompt.submit hook keeps take alone, since the engine never frames an
-// external prompt. Framed containment is the second, for the expected-turn
-// list only: from Claude Code 2.1.280 the engine opens a plugin-submitted
-// turn with the submitted text inside its own frame ("The <plugin> plugin
-// sent a message:", a line break, the text, a blank line, then a sentence
-// saying how the prompt reached the model), so the turn's text holds the
-// key as whole lines rather than equalling it. The key is matched between
-// line breaks, so a key that is a prefix of another entry's key, or a word
-// that happens to appear in the frame's own sentence, matches nothing.
-// findExpectedTurn prefers an exact match over the list before any framed
-// one, so a foreign turn that quotes a queued entry's text whole takes it
-// only where no entry equals the turn's text.
-function turnTextEquals(turnText: string, entry: { text: string; settledText?: string }): boolean {
-  if (turnText === "") return false;
-  return turnText === entry.text || (entry.settledText !== undefined && entry.settledText !== "" && turnText === entry.settledText);
-}
-function turnTextFrames(turnText: string, entry: { text: string; settledText?: string }): boolean {
-  if (turnText === "") return false;
-  const keys = entry.settledText !== undefined ? [entry.text, entry.settledText] : [entry.text];
-  return keys.some((key) => key !== "" && turnText.includes(`\n${key}\n`));
-}
-function findExpectedTurn(list: ExpectedTurn[], turnText: string): ExpectedTurn | undefined {
-  return list.find((entry) => turnTextEquals(turnText, entry)) ?? list.find((entry) => turnTextFrames(turnText, entry));
-}
 
 // How long an idle persona holding a long-term goal waits between two
 // [PROPOSE] turns, counted from monitor.proposal.askedAt.
@@ -3044,160 +1285,6 @@ function opensWithSeatLead(text: string): boolean {
 // the SDK host, which is how the supervisor's launch prompt arrives.
 const OPERATOR_ORIGIN_KINDS: ReadonlySet<string> = new Set(["composer", "bridge", "channel", "sdk"]);
 
-// Who sent a relayed channel message, as the broker writes it on the
-// envelope the harness wraps the message in:
-//   <channel source="..." chat_id="..." author="..." sender_class="...">
-// with the text on the lines below and </channel> closing it. A class of
-// exactly "operator", and an envelope with no class, is the operator's, so a
-// broker that writes no class keeps every channel turn's standing. Every other
-// class value, "participant" included, is a person in the thread with no
-// authority, so a value the plugin does not know fails toward none. The author
-// is the sender's name, or empty where the envelope names none.
-export type ChannelSender = { senderClass: "operator" | "participant"; author: string };
-const OPERATOR_SENDER: ChannelSender = { senderClass: "operator", author: "" };
-// The most characters of an author a goal root's askedBy stores, the width
-// bin/restart-recap.mjs gives an author on a digest line (RECAP_AUTHOR_CHARS).
-export const ASKED_BY_MAX_CHARS = 64;
-
-// The five XML entities this reader decodes in an attribute value, in one
-// pass so a decoded "&" never starts a second decode.
-const ENVELOPE_ENTITIES: Readonly<Record<string, string>> = { quot: '"', amp: "&", lt: "<", gt: ">", apos: "'" };
-function decodeEnvelopeAttribute(value: string): string {
-  return value.replace(/&(quot|amp|lt|gt|apos);/g, (_, name: string) => ENVELOPE_ENTITIES[name]);
-}
-
-// The attributes of the channel envelope's opening tag as name and value
-// pairs in the order the tag gives them, or null where the text does not open
-// with a whole one. Only a tag at the very start of the text is read: a
-// <channel sequence anywhere later is the message's own content, which the
-// sender wrote. The tag is read as a run of name="value" pairs up to its
-// closing '>', so a '>' inside a quoted value does not end it. The tag is
-// whole only where that '>' ends its line, followed by a line break or the
-// end of the text, since the envelope puts the message on the lines below:
-// anything else after it on the tag's line is text that broke the tag, such
-// as an author value holding an unescaped '">'. The whole tag sits on one
-// line: a line break inside an attribute value, between two pairs, or before
-// the closing '>' breaks it. A name given twice appears twice.
-function channelEnvelopeAttributes(text: string): Array<[string, string]> | null {
-  const open = "<channel";
-  if (!text.startsWith(open)) return null;
-  const pair = /[ \t]+([A-Za-z_][\w.:-]*)="([^"\r\n]*)"/y;
-  const attributes: Array<[string, string]> = [];
-  let at = open.length;
-  for (;;) {
-    pair.lastIndex = at;
-    const m = pair.exec(text);
-    if (!m) break;
-    attributes.push([m[1], decodeEnvelopeAttribute(m[2])]);
-    at = pair.lastIndex;
-  }
-  return /^[ \t]*>(?:\r?\n|$)/.test(text.slice(at)) ? attributes : null;
-}
-
-// The sender a channel prompt's envelope names. A text that does not open
-// with <channel reads as the operator's with no author. A text that opens
-// with <channel reads as a participant with no author where its tag does not
-// parse whole, or where the tag names sender_class more than once: either
-// shape can come from author text the envelope did not escape, so neither may
-// decide the class. A whole tag with no sender_class, or with one whose value
-// is exactly "operator", reads as the operator; one with any other value reads
-// as a participant. The author is the first author attribute's value, or
-// empty where the tag names none.
-export function channelSenderOf(text: string): ChannelSender {
-  if (!text.startsWith("<channel")) return OPERATOR_SENDER;
-  const attributes = channelEnvelopeAttributes(text);
-  const classes = attributes === null ? [] : attributes.filter(([name]) => name === "sender_class");
-  if (attributes === null || classes.length > 1) return { senderClass: "participant", author: "" };
-  return {
-    senderClass: classes.length === 0 || classes[0][1] === "operator" ? "operator" : "participant",
-    author: attributes.find(([name]) => name === "author")?.[1] ?? "",
-  };
-}
-
-// The one refusal the four acts that start a new effort give outside a turn
-// the operator or the coordinator persona started.
-const EFFORT_REFUSED_TEXT =
-  "Refused: a new effort starts only in a turn the operator or the coordinator persona started, and this turn is neither. " +
-  "An act the operator or the coordinator persona directed is retried in a turn one of them opens, not proposed. " +
-  "Send any other idea to the coordinator persona with agentic_say, opening the text with [PROPOSAL].";
-
-// The one refusal goal_autonomy gives outside a turn the operator started.
-// A coordinator delivery is refused too, so a level in the store is always
-// one the operator set.
-const AUTONOMY_REFUSED_TEXT =
-  "Refused: the autonomy level is the operator's to set, in a turn the operator starts on this persona's own thread, " +
-  "and this turn is not one. Ask the operator to set it there.";
-
-// The one refusal goal_resume gives on an entry awaiting the operator's yes,
-// or a node under one, outside a turn the operator or the coordinator
-// persona started.
-const AWAITING_YES_RESUME_REFUSED_TEXT =
-  "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator or the coordinator persona started may resume it. " +
-  "It stays as it is until that word reaches you.";
-
-// The refusal goal_add gives a plan the autonomy level admitted when the
-// record telling the coordinator persona about it cannot be written. `cause`
-// names which of the three roads failed.
-function unpromptedPlanRefusedText(cause: string): string {
-  return `Refused: the plan was not added, because the record telling the coordinator persona about it could not be written: ${cause}. ` +
-    "Nothing was added to the goal tree.";
-}
-
-// The refusal goal_add gives when the record could not be written after the
-// entry was saved and the save that takes the entry back out did not land
-// either, so the store may still hold the entry.
-function unpromptedPlanNotUndoneText(cause: string, nodeId: string): string {
-  return `Refused: the record telling the coordinator persona about the plan could not be written: ${cause}. ` +
-    `Taking the entry back out was not saved, so entry ${nodeId} may remain in the store.`;
-}
-
-// The one refusal goal_edit drop gives on an entry awaiting the operator's
-// yes outside a turn the operator or the coordinator persona started.
-const AWAITING_YES_DROP_REFUSED_TEXT =
-  "Refused: this entry waits for the operator's word, and only a turn the operator or the coordinator persona started may drop it. " +
-  "It stays paused until that word reaches you.";
-
-// The one refusal goal_edit drop gives on a plan's open closing leaf.
-const CLOSING_LEAF_DROP_REFUSED_TEXT =
-  "Refused: this entry closes itself once its plan's document reads Complete. " +
-  "Dropping it would leave the plan with no entry the controller can reach. " +
-  "To give up the plan, drop the plan entry itself.";
-
-// The one refusal goal_done by name gives on an entry awaiting the operator's
-// yes, or on a node under one, outside a turn the operator or the coordinator
-// persona started.
-const AWAITING_YES_DONE_REFUSED_TEXT =
-  "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator or the coordinator persona started may complete it. " +
-  "It stays as it is until that word reaches you.";
-
-// The record goal_add sends the coordinator persona for a plan the autonomy
-// level admitted outside the operator's and the coordinator persona's turns:
-// a [PROPOSAL] at plan-and-ask, whose entry waits for the operator's yes, and
-// a [STARTED] at plan-and-start. The plan document clause is left out where
-// the add carried no planPath.
-function unpromptedPlanRecordText(awaitingYes: boolean, persona: string, nodeId: string, title: string, planPath: string | undefined): string {
-  const doc = planPath ? `, plan document ${planPath}` : "";
-  return awaitingYes
-    ? `[PROPOSAL] ${persona} queued plan entry ${nodeId} "${title}"${doc}. It waits paused for the operator's yes. ` +
-      `On a yes, tell ${persona} to goal_resume ${nodeId}; on a no, tell it to goal_edit drop ${nodeId} with the reason.`
-    : `[STARTED] ${persona} queued plan entry ${nodeId} "${title}"${doc} to start on its own, under the plan-and-start autonomy level.`;
-}
-
-// The acts turnMayStartEffort decides. goal_add_plan is the one the
-// autonomy level reaches.
-type EffortAct = "goal_create" | "goal_add_plan" | "goal_longterm" | "goal_done_root" | "goal_resume_awaiting";
-
-// The longest a task's text is kept at store time. task_add cuts here the
-// same way goal_add cuts an objective to 500: at write, with .slice, not by
-// refusing a long call.
-export const TASK_TEXT_MAX_CHARS = 200;
-
-// The longest a task's id, or the active goal's id, is rendered at. Both
-// are plugin-minted rather than free persona text, but the render-time
-// guard treats them the same as task text: a length cap it applies to
-// itself rather than trusting the mint site.
-export const TASK_ID_MAX_CHARS = 64;
-
 // The [TASK LIST] block: the active goal's task_add/task_done/task_clear
 // scratch pad, injected in prompt.submit right after [GOAL TREE] whenever
 // the active goal is not a plan-holder and holds at least one task. Pure:
@@ -3249,15 +1336,6 @@ export function taskListBlock(tasks: TaskItem[], goalId: string): string | null 
   );
 }
 
-type SubmitOutcome = { ok: true } | { ok: false; how: "failed" | "dropped"; reason: string };
-
-// Removes one entry from the expected-turn list by identity, never by
-// position; an entry already gone is left alone.
-function removeExpectedTurn(expectedTurns: ExpectedTurn[], entry: ExpectedTurn): void {
-  const i = expectedTurns.indexOf(entry);
-  if (i >= 0) expectedTurns.splice(i, 1);
-}
-
 // Submits the [KAIZEN] thread message, one plugin turn carrying each line
 // kaizenLine made, for what has no coordinator persona to reach: the
 // self-review's unroutable findings, the idle proposal's unroutable resend,
@@ -3299,266 +1377,32 @@ async function submitExpectedTurn(dp: any, expectedTurns: ExpectedTurn[], entry:
   return { ok: true };
 }
 
-/**
- * D5: the open blocking asks during a held tick.
- * Returns "waiting" while every open blocking entry is inside its wait
- * (persist and return), "expired" where at least one entry's wait elapsed
- * this tick (its hold lifts, the entry stays open, no status moves and
- * nothing is activated; persist, return), and "none" where no open blocking
- * entry stands (the caller proceeds normally). A non-blocking entry is read
- * by none of this: it is never re-raised and never times out.
- */
-async function tickOpenAsk(
-  dp: any,
-  state: AgentState,
-  persona: string,
-  cfg: Record<string, unknown>,
-  contextId: string | null,
-  // register()'s list of queued plugin turns, so the re-raise below can be
-  // queued as a plugin-opened turn for the stamp guard at turn.start.
-  expectedTurns: ExpectedTurn[],
-): Promise<"waiting" | "expired" | "none"> {
-  const blocking = openBlockingAsks(state);
-  if (blocking.length === 0) return "none";
-  const store = commonsStoreOf(dp);
-
-  const now = Date.now();
-  const lastAskWaiting = state.decisions.findLast((d) => d.action === "ask_waiting");
-  if (!lastAskWaiting || now - lastAskWaiting.timestamp >= 60_000) {
-    state.decisions.push({
-      timestamp: now,
-      loop: "monitor",
-      action: "ask_waiting",
-      detail: `${contextId ? contextId + ": " : ""}ask ${blocking.map((entry) => entry.id).join(", ")} still open`,
-    });
-  }
-
-  // D5b (bullet 3): a quiet channel means the operator may never see the
-  // ask_waiting log line. Past a bounded window, re-raise each question into
-  // the thread once (a real turn, not a log line) rather than sit silent. One
-  // turn carries every entry due this tick, each stamped on the ledger and,
-  // where its record is in the store, on the record too.
-  const reraiseMs = typeof cfg.askReraiseWindowMs === "number" ? (cfg.askReraiseWindowMs as number) : 15 * 60_000;
-  const due = reraiseMs > 0 ? blocking.filter((entry) => entry.reraisedAt === null && now - entry.openedAt >= reraiseMs) : [];
-  if (due.length > 0) {
-    for (const entry of due) {
-      entry.reraisedAt = now;
-      const askRecord = await readAskRecord(store, persona, entry.id);
-      if (askRecord) {
-        askRecord.reraisedAt = now;
-        await store.set(askKey(persona, entry.id), askRecord);
-      }
-      state.decisions.push({
-        timestamp: now,
-        loop: "monitor",
-        action: "ask_reraised",
-        detail: `${contextId ? contextId + ": " : ""}ask ${entry.id} re-raised after ${Math.round((now - entry.openedAt) / 1000)}s: ${entry.question.slice(0, 100)}`,
-      });
-    }
-    // A refused re-raise is non-fatal: the decision log still shows the
-    // re-raise, and its entry has left the list.
-    // The questions are store data, so every one of their lines is quoted,
-    // the first included. The label line is the plugin's own and the only
-    // unquoted one, which is the shape quoteContinuationLines documents for
-    // its own first line. The label leads the turn because the Goal gives a
-    // prompt's head to its label, and "below" is true of the questions
-    // because they start on the next line rather than sharing this one.
-    const dueQuestions = due.map((entry) => entry.question).join("\n");
-    const reraiseText =
-      quoteContinuationLines(`[STILL WAITING] Send the question below to the operator again through the reply tool, since it is still unanswered.\n${dueQuestions}`);
-    const reraiseEntry: ExpectedTurn = { kind: "plugin", text: reraiseText };
-    expectedTurns.push(reraiseEntry);
-    await submitExpectedTurn(dp, expectedTurns, reraiseEntry);
-  }
-
-  // Round 34: an absent option must still resolve to a real wait, not to 0 -
-  // whether the engine fills plugin.json's userConfig default into `cfg` is
-  // not established anywhere in this repo, so the code fallback carries its
-  // own default (60 minutes, larger than the 15-minute re-raise window),
-  // matching how line 123's askReraiseWindowMs fallback is written in code.
-  // A wait of 0 is no timeout.
-  const waitMs = typeof cfg.askOperatorWaitMs === "number" ? (cfg.askOperatorWaitMs as number) : 3_600_000;
-  let lifted = false;
-  if (waitMs > 0) {
-    for (const entry of blocking) {
-      const elapsed = now - entry.openedAt;
-      if (elapsed < waitMs) continue;
-      // The timeout lifts the hold and nothing else: the entry stays open on
-      // the ledger and in the commons, since the question is still the
-      // operator's to answer, and the work proceeds on its recommendation.
-      // The asked entry keeps its status and no other entry is activated, so
-      // the controller's nudges resume on the entry that asked. The decision
-      // carries the id as a field, which is how the next nudge on the entry
-      // finds the question it names as timed out, and lastAskClosedAt takes
-      // this clock so the re-ask guard reads the lift as it reads a close.
-      state.decisions.push({
-        timestamp: now,
-        loop: "monitor",
-        action: "ask_timeout",
-        detail: `${contextId ? contextId + ": " : ""}ask ${entry.id} timed out after ${Math.round(elapsed / 1000)}s, work proceeds on its recommendation`,
-        askId: entry.id,
-      });
-      liftAsk(state, entry.id);
-      const askedNode = state.goals.find((n) => n.id === entry.nodeId);
-      if (askedNode) {
-        askedNode.lastAskQuestion = entry.question;
-        askedNode.lastAskClosedAt = now;
-      }
-      lifted = true;
-    }
-  }
-  if (lifted) {
-    await persist(dp);
-    return "expired";
-  }
-  await persist(dp);
-  return "waiting";
+// The held tick's [STILL WAITING] turn, which tickOpenAsk in
+// hooks/ask-layer.ts submits through its deps: one plugin turn carrying
+// every question due a re-raise this tick, entered in the expected-turn
+// list first. It stays in this file, whose source
+// test-personas/injection-ledger.mjs sizes its frame from.
+// A refused re-raise is non-fatal: the decision log still shows the
+// re-raise, and its entry has left the list.
+// The questions are store data, so every one of their lines is quoted,
+// the first included. The label line is the plugin's own and the only
+// unquoted one, which is the shape quoteContinuationLines documents for
+// its own first line. The label leads the turn because the Goal gives a
+// prompt's head to its label, and "below" is true of the questions
+// because they start on the next line rather than sharing this one.
+async function submitStillWaitingReraise(dp: any, expectedTurns: ExpectedTurn[], due: readonly AskEntry[]): Promise<void> {
+  const dueQuestions = due.map((entry) => entry.question).join("\n");
+  const reraiseText =
+    quoteContinuationLines(`[STILL WAITING] Send the question below to the operator again through the reply tool, since it is still unanswered.\n${dueQuestions}`);
+  const reraiseEntry: ExpectedTurn = { kind: "plugin", text: reraiseText };
+  expectedTurns.push(reraiseEntry);
+  await submitExpectedTurn(dp, expectedTurns, reraiseEntry);
 }
 
-/**
- * D5b: an open ask never silences the worker, part 2. A worker can state
- * the identical ASK: question again right after the
- * operator (or a thread reply) just closed it, which reads as the worker
- * ignoring the answer. Suppress a re-open of the exact same question on the
- * exact same node within the suppress window; the caller falls through to a
- * nudge instead so the plan keeps moving rather than pausing on a loop.
- */
-function shouldSuppressReask(
-  node: GoalNode | undefined,
-  question: string,
-  now: number,
-  suppressMs: number,
-): boolean {
-  if (!node || !node.lastAskQuestion || node.lastAskClosedAt === undefined) return false;
-  return node.lastAskQuestion === question && now - node.lastAskClosedAt < suppressMs;
-}
-
-// Why openWorkerAsk refused an ask: "placeholder" for a question still
-// carrying an angle-bracket template placeholder, "reask" for the question
-// this node closed within the suppress window, "already-open" for a question
-// open on the node now, "turn-cap" past ASK_TURN_MAX opens this turn, and
-// openLedgerAsk's own refusals, "cap" among them for the open cap.
-type WorkerAskRefusal = "placeholder" | "reask" | "already-open" | "turn-cap" | AskOpenRefusal;
-
-// Opens one worker ask on `nodeId`, the one path both of the worker's routes
-// take: an ASK: line in its closing text, which turn.complete reads, and the
-// ask_open tool. `question` is the stored question, recommendation joined,
-// and `recommend` the choice alone. Both are folded to one line at
-// ASK_MARKER_LINE_BREAK, which a line already is, so a tool's text reaches
-// the ledger, the [GOAL TREE] block and the card in the shape a line's does.
-// `placeholderScope` is the text the placeholder refusal reads: the whole
-// line for a line, and the question alone for the tool, whose recommendation
-// may carry angle brackets of its own, such as a generic type. `turn` holds
-// the count of this turn's opens that the per-turn cap reads: the session's
-// own count for the tool, and for the line route the count turn.complete
-// took before its first await, so a turn.start landing mid-handler cannot
-// reset the completing turn's count.
-// The guards run in this order: the placeholder refusal, the re-ask
-// suppression, the same-question-open refusal, the per-turn cap, and the
-// open cap inside openLedgerAsk. The first three log their decision here.
-// The two caps log nothing, since the line route folds a turn's cap
-// refusals into one ask_cap_refused and the tool logs its own. Every guard
-// and the entry's push into the ledger run before the first await, and the
-// turn's count is reserved there too and released on a refusal or a throw,
-// so parallel calls in one assistant message each see the opens before them
-// and cannot together pass a cap or open one question twice. An accepted
-// open logs ask_opened naming the route where it is the tool, and toasts
-// the question. A refusal writes no entry and no commons record.
-async function openWorkerAsk(
-  dp: any,
-  route: "line" | "tool",
-  turn: { asksOpenedThisTurn: number },
-  nodeId: string,
-  question: string,
-  placeholderScope: string,
-  recommend: string,
-  blocking: boolean,
-  suppressMs: number,
-): Promise<AskEntry | WorkerAskRefusal> {
-  const storedQuestion = question.split(ASK_MARKER_LINE_BREAK).join(" ");
-  const storedRecommend = recommend.split(ASK_MARKER_LINE_BREAK).join(" ");
-  // A worker that copies a template without filling it in is not stating a
-  // fork.
-  if (/<[^<>]+>/.test(placeholderScope)) {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "ask_marker_placeholder_refused",
-      detail: `worker's ${route === "line" ? "ASK line" : "ask_open question"} still carries a template placeholder, refused: ${storedQuestion.slice(0, 100)}`,
-    });
-    return "placeholder";
-  }
-  const askedNode = sess.state.goals.find((node) => node.id === nodeId);
-  if (shouldSuppressReask(askedNode, storedQuestion, Date.now(), suppressMs)) {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "ask_reask_suppressed",
-      detail: `${nodeId}: suppressed identical question closed ${Math.round((Date.now() - (askedNode?.lastAskClosedAt || Date.now())) / 1000)}s ago: ${storedQuestion.slice(0, 80)}`,
-    });
-    return "reask";
-  }
-  // A question already open on this node, from an earlier turn or earlier
-  // in this one by either route, is not opened again: the operator holds it
-  // once, and a restatement adds nothing to the ledger.
-  if (openAskEntries(sess.state).some((entry) => entry.nodeId === nodeId && entry.question === storedQuestion)) {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "ask_reask_suppressed",
-      detail: `${nodeId}: the same question is already open: ${storedQuestion.slice(0, 80)}`,
-    });
-    return "already-open";
-  }
-  if (turn.asksOpenedThisTurn >= ASK_TURN_MAX) return "turn-cap";
-  turn.asksOpenedThisTurn += 1;
-  let opened: AskEntry | AskOpenRefusal;
-  try {
-    opened = await openLedgerAsk(dp, sess.state, sess.persona, sess.mySessionId, nodeId, storedQuestion, storedRecommend, "worker", blocking, Date.now());
-  } catch (err) {
-    turn.asksOpenedThisTurn -= 1;
-    throw err;
-  }
-  // The id is fresh and a worker's question carries "Recommend:", so it is
-  // never the seed question, and the open cap is the one refusal it meets.
-  if (typeof opened === "string") {
-    turn.asksOpenedThisTurn -= 1;
-    return opened;
-  }
-  sess.state.decisions.push({
-    timestamp: Date.now(),
-    loop: "monitor",
-    action: "ask_opened",
-    detail: `${nodeId}: worker-stated fork${route === "tool" ? " by ask_open" : ""}${blocking ? " (blocking)" : ""}: ${storedQuestion.slice(0, 100)} (ask ${opened.id})`,
-  });
-  try { dp.ui.toast(`Agentic: ${storedQuestion.slice(0, 100)}`); } catch { /* non-fatal */ }
-  // A blocking entry is itself the hold on the idle branch, so the entry
-  // keeps its status and carries no reason; the ask record carries the
-  // question.
-  return opened;
-}
-
-/**
- * The questions of the open asks on `node` whose hold timed out and that no
- * nudge on the entry has named since, joined one per line, or null where
- * there is none. An entry's timeout is the ask_timeout decision carrying its
- * id as askId, which tickOpenAsk logs as it clears the entry's blocking; a
- * nudge_sent decision on the entry after that clock means a nudge already
- * named it. The decision ring is capped, so a timeout pushed past
- * DECISIONS_MAX entries before the next nudge is not named, which costs one
- * sentence and nothing else.
- */
-function unnamedExpiredAskQuestion(state: AgentState, node: GoalNode): string | null {
-  const unnamed: string[] = [];
-  for (const entry of openAskEntries(state)) {
-    if (entry.nodeId !== node.id || entry.blocking) continue;
-    const timeout = state.decisions.find((d) => d.action === "ask_timeout" && d.askId === entry.id);
-    if (!timeout) continue;
-    const named = state.decisions.some((d) => d.action === "nudge_sent" && d.timestamp > timeout.timestamp && d.detail.startsWith(`${node.id}: `));
-    if (!named) unnamed.push(entry.question);
-  }
-  return unnamed.length > 0 ? unnamed.join("\n") : null;
-}
+// The held tick's open blocking asks and a worker's ask open, in
+// hooks/ask-layer.ts, over askLayerDepsOf's deps.
+function tickOpenAsk(dp: any, ...args: AfterDeps<typeof tickOpenAskFromModule>) { return tickOpenAskFromModule(askLayerDepsOf(dp), ...args); }
+function openWorkerAsk(dp: any, ...args: AfterDeps<typeof openWorkerAskFromModule>) { return openWorkerAskFromModule(askLayerDepsOf(dp), ...args); }
 
 // Section 3 (boundary-compaction): the plan document a nudge or the
 // [GOAL TREE] block names, from the active entry's plan holder
@@ -3578,352 +1422,7 @@ function planDocumentLine(state: AgentState, entry: GoalNode): string {
   return `Plan document: ${holder.planPath}, Section ${(holder.chapterCount ?? 0) + 1}.\n`;
 }
 
-/**
- * Item 2 backstop (Round 28): whether a tool call counts as "did real
- * work" for the turn.complete backstop, which logs an `untracked_work`
- * decision for a turn that did work with no open root. Built-in file/shell
- * tools that change state; any MCP tool that is neither this plugin's own
- * (which would have opened a goal itself, making the backstop moot) nor the
- * channel's reply tool (a priming turn's only call, which must never look
- * like task work - a channel-attached passive child's acknowledgment turn
- * would otherwise log untracked work, which the supervisor reads on a clean
- * exit as a reason to relaunch). Read-only tools (Read, Grep, Glob, ...) do
- * not count: looking at something is not doing the thing the operator
- * asked for.
- */
-function isWorkTool(toolName: string): boolean {
-  if (["Write", "Edit", "Bash", "NotebookEdit"].includes(toolName)) return true;
-  if (!toolName.startsWith("mcp__")) return false;
-  if (toolName.startsWith("mcp__personas__")) return false;
-  if (toolName.includes("__reply") || toolName.endsWith("_reply")) return false;
-  return true;
-}
-
-/**
- * Whether a tool call is work for the nudge count's reset: isWorkTool's set,
- * plus an agent dispatch. A dispatched agent works on the worker's behalf, so
- * a turn that dispatched one is a working turn for the count alone; the
- * untracked-work backstop and the lead clear keep reading isWorkTool.
- */
-function isNudgeCountWork(toolName: string): boolean {
-  return isWorkTool(toolName) || toolName === "Agent";
-}
-
-// The step watch's reading of one turn, opened at its turn.start under its
-// id. `steps` counts the main loop's responses and `toolUses` the tool calls
-// they made, both read into the turn end's readings decision.
-//
-// `effortReading` is the latest step-effort call the watch fired, held until
-// the next step writes its outcome: its stamp id, the index of the step its
-// answer is for, whether the call has settled and the choice Jev answered,
-// null while it is pending or where it failed; null before the turn's first
-// reading and between an outcome and the next reading. `effort` counts the
-// turn's step-effort readings for the turn end's decision: the calls fired,
-// the calls settled, the settled choices by option id, the readings still
-// unsettled when the step they were for fired, and the effort rewrites
-// applied to a step, by level, and refused for an effort the event's shape
-// does not take. Only a live reading rewrites a step, so under shadow the
-// three rewrite counts stay zero.
-type StepWatch = {
-  turnId: string | null;
-  steps: number;
-  toolUses: number;
-  effortReading: { stampId: string; forIndex: number; settled: boolean; choice: string | null } | null;
-  effort: {
-    readings: number;
-    settled: number;
-    choices: Record<string, number>;
-    late: number;
-    lowered: number;
-    raised: number;
-    unrewritable: number;
-  };
-};
-
-function stepWatchOf(turnId: string | null): StepWatch {
-  return {
-    turnId, steps: 0, toolUses: 0,
-    effortReading: null,
-    effort: { readings: 0, settled: 0, choices: {}, late: 0, lowered: 0, raised: 0, unrewritable: 0 },
-  };
-}
-
-// A step-effort call's next_step_tools value, read off the step after it: the
-// names of the tools that step called, in call order and joined with commas,
-// or `answer` where it called none, whatever its text. The turn end writes
-// `none` itself for a call no step came after.
-function nextStepToolsValue(toolUses: readonly { name: string }[]): string {
-  return toolUses.length > 0 ? toolUses.map((use) => String(use.name)).join(",") : "answer";
-}
-
-// The step event a settled live step-effort choice sends down, counting the
-// rewrite it applies into `counts`. `low` sends the request at low effort.
-// `high` sends it at high where the step came at low or medium, and leaves a
-// step already at high or above as it came, so a `high` never lowers the
-// step's effort. `keep`, and any other choice, sends the
-// step as it came. A step whose effort is absent or a number takes no named
-// level, so a `low` or `high` choice leaves it as it came and counts it
-// unrewritable. A step already at the level the choice names counts nothing.
-function stepEffortRewrite<E extends { effort?: unknown }>(
-  e: E,
-  choice: string,
-  counts: { lowered: number; raised: number; unrewritable: number },
-): E {
-  if (choice !== "low" && choice !== "high") return e;
-  if (typeof e.effort !== "string") {
-    counts.unrewritable += 1;
-    return e;
-  }
-  if (choice === "low") {
-    if (e.effort === "low") return e;
-    counts.lowered += 1;
-    return { ...e, effort: "low" };
-  }
-  if (e.effort !== "low" && e.effort !== "medium") return e;
-  counts.raised += 1;
-  return { ...e, effort: "high" };
-}
-
-const sess: {
-  persona: string;
-  mySessionId: string;
-  myEpoch: number;
-  isOwner: boolean;
-  state: AgentState;
-  storePath: string;
-  yieldLogPath: string;
-  lastNudgeAt: number;
-  // Nudged turns in a row that closed with no status line and did no work,
-  // one count per session. turn.complete moves it; reaching
-  // MAX_CONSECUTIVE_NUDGES opens the nudge cap's ask.
-  nudgedAnswersWithoutStatus: number;
-  // The entry the nudge cap's refused ask was logged for, null where none
-  // is. While it names the entry and the count stays at the cap, the cap
-  // logs nothing more on later ticks. Cleared wherever the count resets.
-  nudgeCapRefusedFor: string | null;
-  options: { healthTimeoutMs?: number; gitProbeMs?: number; healthCommand?: string[] };
-  controllerTickCount: number; // D4: in-session tick counter for backoff and cost_summary
-  staleAfterMs: number; // F9a: single-source the staleness threshold
-  turnStartedAt: number | null; // plan item 8.3: this session's clock at turn.start, null between turns
-  workdir: string; // the directory this session runs in, "" until session.start reads it
-  cacheWarmUntil: number | null; // the clock's warm-until instant, which the beat publishes
-  // The controller tick's fleet watcher's last reading, for the coordinator
-  // persona alone: one entry per persona a reading of this session's has
-  // named, plus the three the watcher keeps about the roster file and the tick
-  // itself. A key stays for the life of the session once it is in, so a roster
-  // that stops naming a persona leaves that persona's entry standing with the
-  // class it was last read in, and the name coming back is compared against
-  // that class rather than read as new.
-  // It sits here, in the session's own memory, and is written to no file. The
-  // persisted state is a file inside a persona's own working directory, which
-  // a roster can give to more than one persona, and every field of a memo
-  // that silences a key is a value the watcher itself produces, so a stored
-  // reading is a value the watched party can write to decide what is said
-  // about it. A reading held here is one this session composed.
-  fleetHealth: Record<string, FleetHealthMemo> | undefined;
-  // Whether this session has made a clean roster reading yet. On the reading
-  // that sets it, every persona is remembered and only the personas outside
-  // the healthy class are reported, a whole healthy fleet being no news and a
-  // persona that crashed while the steward was down being the case the watcher
-  // exists for. Past it, a name the reading lacks is a persona the roster has
-  // gained and is reported against FLEET_UNSEEN rather than against health it
-  // was never observed to have.
-  // It advances only on a tick whose roster read cleanly, and it advances with
-  // the reading itself: a tick that could not read the roster names no
-  // persona, so counting it as the first reading would report a whole healthy
-  // fleet as new on the first tick that could read one.
-  fleetFirstReadingDone: boolean;
-  // The stamp id of this session's latest shadow call on the controller
-  // decision, held in two halves so the two outcome joiners clear
-  // independently. The turn scorer reads and clears the first, the worker's
-  // own ASK marker reads and clears the second, so each writes one outcome per
-  // controller call and a second scored turn or a second marker writes none.
-  // Null where no controller call is held: before the first tick of the
-  // session, after a joiner has taken its half, and on every tick of a session
-  // running with the seam's kill switch off, which mints no id at all.
-  // Session memory rather than persisted state: a stamp id names a call this
-  // process made, and a restart's first tick mints a new one.
-  jevScoreOutcomeStampId: string | null;
-  jevAskMarkerOutcomeStampId: string | null;
-  // The stamp id of the controller call whose nudge was last submitted,
-  // held until the turn that nudge opened ends and writes the call's acted
-  // outcome, or a later nudge replaces it. Null where no nudge is out.
-  // Session memory, as the two halves above are.
-  jevActedStampId: string | null;
-  // The stamp id of the turn-score call of the turn scored last, held until
-  // the next turn.start writes what opened that turn as the call's
-  // next_trigger outcome. Null where none is held. Session memory, as above.
-  jevNextTriggerStampId: string | null;
-  // The step watch's reading of the open turn, replaced at every turn.start.
-  stepWatch: StepWatch;
-  // The index of the open turn's first step whose answer carried an ASK:
-  // marker line, null where no step's has. Reset at every turn.start. A
-  // reading only: the ask record still opens from turn.complete's own match.
-  askSeenAtStep: number | null;
-  // The asks the open turn's ask_open calls opened. turn.complete takes it
-  // before its first await as the count the closing text's ASK: lines add
-  // to, so ASK_TURN_MAX caps both routes together. Reset at every
-  // turn.start.
-  asksOpenedThisTurn: number;
-  // The plan health request's memory, per plan entry: `closingTexts` is the
-  // entry's last few closing texts, oldest first, which the next request's
-  // state carries. Session memory rather than persisted state: a restart or
-  // the entry completing drops the record.
-  jevPlanHealth: Map<string, { closingTexts: string[] }>;
-  // The stamp id of the latest plan health call, awaiting the next turn's
-  // origin for its next_speaker outcome. Null where none is held.
-  jevNextSpeakerStampId: string | null;
-  // The worker's most recent answer, raw, and the entry the turn that gave
-  // it started on, which the controller's state carries as its Last answer
-  // line where that entry is the tick's own node. Moved only by the persona's
-  // own turn end with an answer to judge: a subagent's completion carries the
-  // subagent's report, which is not the worker's answer, and an aborted or
-  // answerless completion leaves the previous answer as the most recent. The
-  // entry is the key because the answer belongs to the work it closed: after
-  // goal_done, a switch, a resume or a completion moves the active entry,
-  // the next tick's node is another entry and its state reads none rather
-  // than pairing that entry's objective with the old entry's closing answer.
-  // Null where none is held, before the first such turn end in this process.
-  // Session memory rather than persisted state: a restart's first tick reads
-  // none, since the answer that ended a turn under another process is not
-  // what this one saw.
-  lastAnswer: { goalId: string | null; text: string } | null;
-  // Why this session's persona state is not loaded, or null once it is. It
-  // starts as the start-up cause, because a session whose session.start
-  // never finished holds the built-in default state below and nothing else.
-  // session.start's store read sets the store cause where the file would not
-  // read and clears it where the read parsed, and agentic_identity clears it
-  // on a store that parsed as an object. While it stands, the six goal tools
-  // answer with it in place of an empty tree or a refusal naming a live
-  // holder, neither of which is true of a session that never loaded. Every
-  // other tool answers on its own terms: persist reads the store before it
-  // writes and gives the persona up to whatever session the stored entry
-  // names, so a stored tree is not a session's to destroy by writing over it.
-  stateNotLoaded: string | null;
-  // The one `untracked_work` decision this session keeps in the log: the
-  // timestamp of the line it last pushed, and how many turns that line
-  // counts. Both are unset until the turn.complete backstop first fires in
-  // this session, so a new session pushes its own line and leaves any line
-  // an earlier session wrote where it is. Session memory rather than
-  // persisted state, for that reason.
-  untrackedWorkAt: number | null;
-  untrackedWorkCount: number;
-  // The heartbeatPath option: the absolute path of the workdir sidecar the
-  // supervisor that launched this session reads, or "" where no such option
-  // was set. heartbeatPathOf reads it.
-  heartbeatPath: string;
-  // The time before which kitMemq's read path spawns nothing, set
-  // MEMQ_STAND_DOWN_MS, one minute, ahead by a read that ran past its bound
-  // or that memq answered with its store-unavailable line, and 0 until one
-  // does.
-  // Session memory rather than persisted state: a restart probes the host
-  // afresh.
-  memqStandDownUntil: number;
-  // The UTC day, as YYYY-MM-DD, on which kitMemq last logged a
-  // memq_spawn_failed decision for each cause, "" until it has. Session
-  // memory, so a restart logs its first failure of the day again.
-  memqFailedDay: { start: string; timeout: string; unavailable: string };
-  // The UTC day, as YYYY-MM-DD, on which the meter last logged a
-  // meter_write_failed decision for each cause, "" until it has: `write` for
-  // a spool line or beat file that could not be written, `drain` for a drain
-  // that ran and did not exit 0. Session memory, as memqFailedDay is.
-  meterFailedDay: { write: string; drain: string };
-  // When this session last started the spool drain. 0 until it has, except
-  // that session.start sets it to its own time, so the first drain runs ten
-  // minutes in.
-  meterDrainAt: number;
-  // Whether a beat write this session started has not settled yet. Read and
-  // written by hooks/beat.ts's stamp, which drops a beat while one is pending.
-  meterBeatInFlight: boolean;
-  // The id of the persona's own last turn this session metered, "" until one.
-  meterLastTurnId: string;
-  // The launch directory kitMemq runs memq from: the first non-empty
-  // directory a session.start captured, "" until one has. A later
-  // session.start leaves it, because its cwd is wherever the session stands
-  // then. This field is the module's copy. A reload of the plugin's code
-  // starts a fresh module with it empty, so session.start also writes it to
-  // $.state, which the host keeps across that reload, and a later start
-  // copies it back from there.
-  memqLaunchDir: string;
-  // How many records the distiller and memory_add wrote to the kit's memory
-  // store in this session, each a memq put that exited 0. The one-time
-  // migration's writes are not counted. It counts this module's session
-  // across persona switches, never reset by a later session.start, and a
-  // reload of the plugin's code rebuilds it at 0. Read by the tick summary's
-  // Memory: line.
-  memqWrittenThisSession: number;
-  // The recall chain's window between two typed prompts. `recallPromptSeq`
-  // counts the typed prompts this session ran the chain for, so a chain
-  // still collecting when the next prompt arrives registers nothing.
-  // `recallPending` holds the last prompt's candidates, each with the stamp
-  // id of its memory-recall call line, until the next prompt writes their
-  // recall_acted outcomes, or null where no prompt's chain has registered
-  // since. The two sets hold the record names the session's own tool calls
-  // fetched through `memq get` without `--no-stamp`, and the names the
-  // goal-close check stamped applied through `memq touch --applied`, since
-  // the last prompt. `recallTouches` holds the touches the session's own
-  // tool calls ran through `memq touch --applied` since the last prompt,
-  // each with the tier it stamps, since a stamp counts only for a candidate
-  // shown from that tier. Session memory, as memqFailedDay is: a reload of
-  // the plugin's code between two prompts leaves the earlier prompt's
-  // candidates without an outcome.
-  recallPromptSeq: number;
-  recallPending: { seq: number; candidates: Array<{ name: string; tier: RecallTier | null; typeName: string | null; stampId: string }> } | null;
-  recallGetNames: Set<string>;
-  recallAppliedNames: Set<string>;
-  recallTouches: Array<{ name: string } & MemqTouchTier>;
-  // The prompt whose recall chain is still collecting, or null: one chain
-  // runs per session at a time, and a prompt arriving under another's chain
-  // journals a skip naming it.
-  recallChainBusy: { seq: number } | null;
-  // The records the memory block has shown this session, each as its
-  // lowercased name, since memq compares record names without case on
-  // Windows. A name enters when the chain renders it, before the prompt's
-  // submit resolves, so a record on a submit the engine then refused still
-  // counts as shown. A record here is still asked and still gets its
-  // outcome, and is never rendered again in the session. Emptied at
-  // session.start and nowhere else.
-  recallShownNames: Set<string>;
-  // The recognition ask's index and its source. `index` is the snapshot's
-  // `cmd:` triggers in the hook's tiers, empty until a load built one. `stamp`
-  // is the size and mtime of the snapshot it was built from, null where the
-  // last load built nothing, so the next one reads the file again. `checkedAt`
-  // is when the last load started, which a tool call reads to start the next
-  // at most once a minute. `scope` is the kit's answer about which tiers this
-  // session reads, null until a scope run answers. `scopeRunAt` is when the
-  // last scope run started, null before the first, which session.start's
-  // load and prompt.submit's retry read to start the next no sooner than
-  // RECOGNITION_SCOPE_RETRY_MS after a run that did not answer. `loading` is
-  // the load in flight, or null. `nudge` is the memory-recognition nudge's
-  // index of every trigger kind and anchor, built from the same read of the
-  // snapshot and emptied with `index`. Session memory, as memqFailedDay is.
-  recognition: { index: RecognitionIndex; nudge: NudgeRecord[]; stamp: string | null; checkedAt: number; scope: RecognitionScope | null; scopeRunAt: number | null; loading: Promise<void> | null };
-  // The records a memory-recognition call asked about, each as its tier and
-  // its lowercased name, with the stamp id of its call line and how many of
-  // the session's tool calls are left before its nudge_acted outcome is
-  // written false. Session memory, as recallPending is.
-  recognitionPending: Array<{ tier: RecognitionTier; name: string; stampId: string; left: number }>;
-  // The records memory-recognition has been asked about this session, each
-  // under recognitionKeyOf's tier and name, so a record is asked once a
-  // session however many calls match it. Session memory, as recallPending is.
-  recognitionAsked: Set<string>;
-  // The memory-recognition asks still out, each under the same key as the
-  // record it asks about, set as the ask starts and deleted as it settles. A
-  // call matching a record already asked awaits the record's entry here, so
-  // it claims no pointer ahead of an answer another call is still holding on.
-  recognitionAsking: Map<string, Promise<void>>;
-  // The records memory-recognition answered skip, under the same key: each
-  // has its `cmd:` pointer withheld from the nudge at every tool-call
-  // boundary for the rest of the session, since its record is asked once a
-  // session and a later match has no answer of its own. Session memory, as
-  // recognitionAsked is: both live as long as sess does.
-  recognitionSkipped: Set<string>;
-  // The pointers the recognition gate has withheld this session, each under
-  // the nudgeDedupKey its pointer would have been claimed under, so a
-  // withheld pointer writes its event line once, as a pointer given is
-  // claimed once. Session memory, as recognitionSkipped is.
-  recognitionWithheld: Set<string>;
-} = {
+const sess: SessionState = {
   persona: "default",
   mySessionId: "pending",
   myEpoch: 0,
@@ -3977,86 +1476,18 @@ const sess: {
   recognitionAsking: new Map(),
   recognitionSkipped: new Set(),
   recognitionWithheld: new Set(),
+  lastPlanRouteLine: null,
+  memoryFork: FORK_IDLE,
+  askBriefFork: FORK_IDLE,
+  pairFork: FORK_IDLE,
+  pairDraftOwed: null,
+  pairDrafts: null,
 };
-
-// The store cause sess.stateNotLoaded takes where session.start's store read
-// fails, and the one-sentence answer the goal tools build from whichever
-// cause stands.
-const STATE_NOT_LOADED_STORE_CAUSE = "the store file could not be read, so this session came up on an empty default state";
-function stateNotLoadedText(cause: string): string {
-  return `This session never loaded its persona's state: ${cause}. The stored goal tree is not shown and was not changed.`;
-}
-
-// The persona store's text parsed and shape-checked, for the reads that load a
-// persona's state from it: session.start's and agentic_identity's two. A parse
-// that returns is not a store that read. JSON.parse("null") returns null, and
-// an array, a number and a string all parse as cleanly, but none of them holds
-// a persona entry to load or an object a claim can be written into: a lookup
-// on null throws a TypeError, and a claim written into an array serializes
-// back as the array with the entry dropped. So anything but an object throws
-// here, the same refusal as a file that would not parse at all.
-function parsePersonaStore(text: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(text);
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`the file parsed as ${parsed === null ? "null" : Array.isArray(parsed) ? "an array" : typeof parsed} rather than as an object of persona entries`);
-  }
-  return parsed as Record<string, unknown>;
-}
 
 // The turn state and workdir every commons-entry write carries, so the entry
 // tracks the turn the way the heartbeat file's own stamp does.
 const commonsMeta = () => ({ turnStartedAt: sess.turnStartedAt, workdir: sess.workdir });
 
-// The three files a supervised session keeps beside its working directory, and
-// the resolver that anchors them to the directory the session was launched in
-// rather than to wherever the working directory has since moved.
-//
-// bin/supervise.sh resolves these files once, against the absolute WORKDIR it
-// was launched with, and never resolves them again: the persona store is
-// handed to bin/supervise-poll.mjs, whose readStoreFacts harvests
-// shutdown_requested, park_requested and restart_requested out of it, and the
-// heartbeat sidecar is what its pre-launch gate reads to tell whether the
-// persona is held. A session that resolved the bare names against a working
-// directory a tool call had moved would write them where nothing reads them.
-//
-// The sidecar is the record of who holds a persona. It is not the supervisor's
-// liveness signal: every persona launched in one directory rewrites it whole,
-// so one session's entry can read stale while it stamps on time. A supervised
-// child also stamps a heartbeat file only it writes, named by the
-// supervisorHeartbeatPath option, and that file is what the supervisor's
-// liveness verdict in bin/supervise-liveness.mjs reads.
-//
-// The store is the reason these files move together rather than the heartbeat
-// alone. Anchoring the heartbeat by itself would leave a displaced session
-// holding its persona while its shutdown request, its restart request and its
-// goal completion were written somewhere the supervisor never reads.
-//
-// A supervised child is also handed the sidecar's absolute path as the
-// heartbeatPath option, from the same launcher that reads it, so the writer and
-// the reader hold one path whatever the session's working directory. Where that
-// option is set, heartbeatPathOf returns it; every heartbeat read and write in
-// this module goes through heartbeatPathOf.
-//
-// sess.workdir is captured at session.start from the launch cwd, before any
-// tool call can move it. For a supervisor-launched child that is the same
-// directory the supervisor holds, because supervise.sh:119 cds to the absolute
-// WORKDIR it resolved at :107 before launching. For a session started by hand
-// it is whatever cwd that launcher had, which anchoring still improves on. The
-// bare names are the fallback for the one case that leaves sess.workdir empty,
-// a session.start whose cwd could not be read at all.
-//
-// The join is unconditional "/", as rosterRunDir's own join in hooks/fleet.ts is: Windows
-// resolves a forward slash, and every path this can see is either a Windows
-// path or a POSIX one.
-const HEARTBEAT_FILENAME = ".agentic-heartbeat.json";
-const PERSONA_STORE_FILENAME = ".agentic-personas.json";
-const YIELD_LOG_FILENAME = ".agentic-yields.log";
-// goal_create appends each tree it replaces here, one JSON line per tree,
-// beside the store, and the fold appends each node a completed plan sheds, one
-// JSON line per node (foldSettledPlans). It is a recovery copy opened by hand.
-// The plugin reads it back only for the fold's own lines, so a fold that runs
-// again writes no node twice.
-const GOAL_HISTORY_FILENAME = ".agentic-goal-history.jsonl";
 const workdirPathOf = (filename: string): string => {
   const root = sess.workdir;
   if (!root) return filename;
@@ -4066,7 +1497,8 @@ const heartbeatPathOf = (): string => sess.heartbeatPath !== "" ? sess.heartbeat
 // Reentrancy flag for the git probe (E4).
 let gitProbeInFlight = false;
 
-// Reentrancy flag for the fleet block of the controller tick. $.clock.every
+// Reentrancy flag for the fleet block of the controller tick, idleTick in
+// hooks/controller-tick.ts. $.clock.every
 // takes a callback it does not await, so a tick whose reads outlast
 // controllerTickMs does not hold the next tick off. The fleet block awaits the
 // commons read, each roster persona's keeper state, a persist and a submit
@@ -4116,141 +1548,11 @@ let nudgeCountWorkThisTurn = 0;
 // completed it.
 let goalDoneClosedThisTurn = new Map<string, number>();
 
-// Section 5 (goal-every-turn): the turn's own tool activity, which the
-// turn-disposition question's state carries as turn_tool_activity. The flags,
-// the ring and the work-tool count are reset at turn.start and written by
-// tool.call for the main loop's calls alone, on the ground the nudge count
-// takes: a subagent dispatched in an earlier turn can still be running, and
-// its calls say nothing about what the persona's own turn did. The reset
-// itself carries no agent-id guard and rests on turn.start firing for the
-// persona's own turns only, which is what the engine's turn events describe
-// and what no test here pins; a reset is idempotent, so a guard on it would
-// be a mechanism no reading needs. Each flag is a text read of the call's own
-// arguments and never a run: a commit or a push is a Bash command whose
-// subcommand is `commit` or `push`, with any option run between `git` and
-// the subcommand allowed, and a plan document is a name directly under
-// docs/plans/ that the store's own PLAN_PATH_PATTERN accepts. The ring holds
-// the last TURN_TOOL_RING_MAX tool names in call order. The work-tool count
-// is kept here rather than read from toolCallsThisTurn above, which counts
-// every loop's work calls for the untracked-work backstop and the lead
-// clear, so the four-field state has one subject across all eight readings.
-const TURN_TOOL_RING_MAX = 8;
-type TurnToolFlags = {
-  planRead: boolean;
-  planEdited: boolean;
-  committed: boolean;
-  pushed: boolean;
-  agentDispatched: boolean;
-  goalDoneCalled: boolean;
-};
-function freshTurnToolFlags(): TurnToolFlags {
-  return { planRead: false, planEdited: false, committed: false, pushed: false, agentDispatched: false, goalDoneCalled: false };
-}
 let turnToolFlags: TurnToolFlags = freshTurnToolFlags();
 let turnToolRing: string[] = [];
 let turnWorkToolCalls = 0;
 
-// Section 6 (goal-every-turn): the plan documents this turn wrote or edited, as
-// the model wrote them, in call order. It sits beside the flags above rather
-// than inside them because route one of the promotion routes needs the path
-// itself and a boolean cannot carry one: the record it promotes stores that
-// path, and the entry it adds is judged against the document the path names.
-// Reset and written where the flags are, so it is the same turn's reading.
-//
-// The turn's edits are kept rather than one value, because the one route one
-// wants is the first that its own match accepts and this path cannot run that
-// match: the working directory the match needs is a host call, and the
-// per-tool-call path makes none. A turn whose first plan edit is another
-// checkout's spec and whose second is this directory's own would otherwise
-// promote nothing. Route one takes the first of these it accepts, so a turn that
-// writes its own plan document and then touches a second one (an archive move,
-// another worker's spec) is still promoted on the first.
-//
-// The list is bounded the way the ring above is bounded, and the bound drops the
-// latest edits rather than the earliest, since the earliest that matches is the
-// one route one wants.
-// It is exported so the leg that drives a turn past the bound counts to the
-// bound the code holds rather than to a literal of its own.
-export const TURN_PLAN_EDITS_MAX = 8;
 let turnPlanEditedPaths: string[] = [];
-
-// Whether a tool argument names a plan document: a file directly under a
-// docs/plans/ directory, at any depth and with either separator, whose
-// docs/plans/ suffix is a name PLAN_PATH_PATTERN accepts once the separators
-// read as forward slashes. The path is read as the model wrote it, absolute
-// or relative, since this flag is a reading of what the turn touched rather
-// than the promotion route's own match, which is section 6's and resolves
-// the path against the working directory first.
-function namesPlanDocument(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  const suffix = /(^|[\\/])(docs[\\/]plans[\\/][^\\/]+)$/.exec(value);
-  return suffix !== null && PLAN_PATH_PATTERN.test(suffix[2].replace(/\\/g, "/"));
-}
-
-// Section 6 (goal-every-turn): the project-relative plan path a tool argument
-// names under `cwd`, or null where it names none. This is route one's own
-// match, stricter than namesPlanDocument above in the one way that matters:
-// the document has to be this working directory's, since the path becomes a
-// plan entry's planPath and every later reader joins that value back onto the
-// working directory to read the file.
-//
-// Both sides are read as text and nothing is resolved against the filesystem,
-// which the plugin loader offers no path API for. Separators are folded to "/"
-// on both sides, since this host's own paths carry "\" and the store's pattern
-// admits neither separator inside a name. A path already relative is relative
-// to cwd by definition and is tested as it stands, past any leading
-// current-directory segment. An absolute one keeps only what follows the
-// directory's own prefix, the trailing-separator-plus-"/" rule the plan reader's
-// join uses, so the strip and that join are inverses.
-//
-// PLAN_PATH_PATTERN on the remainder is what makes the strip safe, and it is
-// the only guard here: it is anchored at both ends and admits no separator and
-// no "." segment inside the name, so every path that escapes the directory
-// fails it rather than being admitted. "D:/root/../other/docs/plans/a.md"
-// leaves "../other/docs/plans/a.md", "D:/root/x/../docs/plans/a.md" leaves
-// "x/../docs/plans/a.md", and a path under another checkout keeps its whole
-// absolute self; none of the three matches.
-//
-// The whole prefix comparison folds case where both sides are drive-rooted,
-// because a Windows path names one file whichever case any of its segments
-// carries and the model writes the directory either way. Where the path starts
-// with "/" the comparison stays case-sensitive, since on a case-sensitive host
-// "/home/Root" and "/home/root" are two directories. The remainder is sliced
-// out of the path as the model wrote it and still read by PLAN_PATH_PATTERN
-// case-sensitively, so the fold reaches the directory's own prefix and never
-// admits "DOCS/PLANS/a.md" as the name of a plan document.
-//
-// It is exported for the unit pins over these shapes: the function is two
-// strings in and one out, and the hook path that feeds it is pinned by legs of
-// its own.
-export function planPathUnderCwd(filePath: string, cwd: string): string | null {
-  const slashed = filePath.replace(/\\/g, "/");
-  const root = cwd.replace(/\\/g, "/").replace(/\/+$/, "") + "/";
-  const rooted = /^([A-Za-z]:|\/)/.test(slashed);
-  let candidate: string;
-  if (!rooted) {
-    // A relative path the model wrote as "./docs/plans/x.md", or with this host's
-    // separators as ".\docs\plans\x.md", names the file the bare form names, so
-    // the leading current-directory segments come off before the pattern reads
-    // it. Only "./" comes off: a "../" segment leaves this directory, and the
-    // pattern below refuses what is left of it as it refuses every other escape.
-    candidate = slashed.replace(/^(?:\.\/)+/, "");
-  } else if (slashed.startsWith(root)) {
-    candidate = slashed.slice(root.length);
-  } else if (driveRooted(slashed) && driveRooted(root)
-    && slashed.toLowerCase().startsWith(root.toLowerCase())) {
-    candidate = slashed.slice(root.length);
-  } else {
-    return null;
-  }
-  return PLAN_PATH_PATTERN.test(candidate) ? candidate : null;
-}
-
-// Whether a path leads with a drive letter, which is what makes its comparison
-// above a case-folding one. A path leading with "/" does not.
-function driveRooted(path: string): boolean {
-  return /^[A-Za-z]:/.test(path);
-}
 
 // A git subcommand read off a Bash command: the word `git`, then any run of
 // options, each with at most one argument of its own, then the subcommand.
@@ -4352,165 +1654,6 @@ async function runHealth(dp: any, forNodeId: string | null): Promise<void> {
   }
 }
 
-// The kit plugin's key in the engine's installed_plugins.json, and how long
-// its boundary command may run before $.process.run kills it and rejects.
-const KIT_PLUGIN_KEY = "grimoire@applefeld";
-const KIT_BOUNDARY_TIMEOUT_MS = 15_000;
-
-// Where the kit plugin is installed: <home>/.claude/plugins/installed_plugins.json
-// holds { plugins: { "grimoire@applefeld": [{ installPath, lastUpdated }, ...] } },
-// and the record with the greatest lastUpdated is the build in use. The file is
-// the engine's, so every shape miss (no home, no file, a read that fails, text
-// that is not JSON, no plugins object, no key, a value that is not an array, an
-// empty array, no record with a string installPath and a readable
-// lastUpdated) returns a reason rather than throwing.
-async function kitInstallPathOf(dp: any): Promise<{ installPath: string } | { skip: string }> {
-  let home: unknown;
-  try {
-    home = await hostOf(dp).getHome();
-  } catch {
-    home = undefined;
-  }
-  if (typeof home !== "string" || home.trim().length === 0) return { skip: "no home directory" };
-  const file = `${home.trim().replace(/[/\\]+$/, "")}/.claude/plugins/installed_plugins.json`;
-  let text: unknown;
-  try {
-    if (!(await dp.fs.exists(file))) return { skip: "installed_plugins.json is absent" };
-    text = await dp.fs.read(file);
-  } catch (err) {
-    return { skip: `installed_plugins.json could not be read: ${String(err).slice(0, 150)}` };
-  }
-  if (typeof text !== "string") return { skip: "installed_plugins.json is not text" };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripBom(text));
-  } catch {
-    return { skip: "installed_plugins.json is not JSON" };
-  }
-  const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-  const plugins = isObject(parsed) ? parsed.plugins : undefined;
-  if (!isObject(plugins)) return { skip: "installed_plugins.json has no plugins object" };
-  if (!Object.hasOwn(plugins, KIT_PLUGIN_KEY)) return { skip: `installed_plugins.json has no ${KIT_PLUGIN_KEY} key` };
-  const records = plugins[KIT_PLUGIN_KEY];
-  if (!Array.isArray(records)) return { skip: `${KIT_PLUGIN_KEY} is not an array` };
-  if (records.length === 0) return { skip: `${KIT_PLUGIN_KEY} has no install record` };
-  // A record without a string installPath or a readable lastUpdated is passed
-  // over, so a stale or partial entry beside a good one still leaves the good
-  // one to run; the run is skipped only when no record qualifies.
-  let best: { installPath: string; at: number } | null = null;
-  for (const record of records) {
-    if (!isObject(record) || typeof record.installPath !== "string" || record.installPath.trim().length === 0) continue;
-    const at = typeof record.lastUpdated === "string" ? Date.parse(record.lastUpdated) : NaN;
-    if (Number.isNaN(at)) continue;
-    if (best === null || at > best.at) best = { installPath: record.installPath.trim(), at };
-  }
-  if (best === null) return { skip: `no ${KIT_PLUGIN_KEY} record has an installPath and a readable lastUpdated` };
-  return { installPath: best.installPath };
-}
-
-// Runs the kit's checkpoint command with its boundary verb for this session,
-// which records the compaction marker the kit's own gate honors. The marker is
-// keyed by session id under ~/.kit, so the child takes the session id in its
-// environment and is handed no working directory. It still inherits the
-// session's directory, where the kit may create its gitignored .kit/ scratch
-// directory. Best-effort: every outcome is one
-// decision and nothing throws. The decision carries the exit code and the
-// first line the child wrote to stderr, because the command exits zero on a
-// marker it could not position and says so only there. turnKind is what
-// opened the turn that owed the bank, for the record only.
-async function bankCompactionBoundary(dp: any, turnKind: string): Promise<void> {
-  const sessionId = sess.mySessionId;
-  if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId === "pending") {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "compaction_boundary_skipped",
-      detail: `no session id; turn ${turnKind}`,
-    });
-    return;
-  }
-  const located = await kitInstallPathOf(dp);
-  if ("skip" in located) {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "compaction_boundary_skipped",
-      detail: `${located.skip}; turn ${turnKind}`,
-    });
-    return;
-  }
-  const script = `${located.installPath.replace(/[/\\]+$/, "")}/hooks/kit-compact-checkpoint.js`;
-  try {
-    const res = await runChild(dp, ["node", script, "boundary"], {
-      env: { CLAUDE_CODE_SESSION_ID: sessionId },
-      timeoutMs: KIT_BOUNDARY_TIMEOUT_MS,
-    });
-    const exitCode = res && typeof res.exitCode === "number" ? res.exitCode : null;
-    const stderr = res && typeof res.stderr === "string" ? res.stderr : "";
-    const firstStderr = (stderr.split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim().slice(0, 150);
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: exitCode === 0 ? "compaction_boundary_banked" : "compaction_boundary_failed",
-      detail: `exit ${exitCode === null ? "unknown" : exitCode}; stderr: ${firstStderr || "none"}; turn ${turnKind}; ${script.slice(0, 150)}`,
-    });
-  } catch (err) {
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "monitor",
-      action: "compaction_boundary_failed",
-      detail: `run failed: ${String(err).slice(0, 150)}; turn ${turnKind}; ${script.slice(0, 150)}`,
-    });
-  }
-}
-
-// How long a read that ran past its bound, or that memq answered with one of
-// its store-unavailable lines, keeps later reads from spawning memq. Every
-// read in the window would otherwise pay its bound, or memq's own seconds of
-// failed probing, against a store host that is down.
-const MEMQ_STAND_DOWN_MS = 60_000;
-
-// How far short of its bound a rejection may land and still read as a
-// timeout. A host timer can fire a little early against Date.now(), and a
-// command that cannot start fails within milliseconds, far below any bound.
-const MEMQ_TIMEOUT_SLACK_MS = 100;
-
-// The openings of the stderr lines memq recall-candidates prints, with
-// nothing on stdout, when the store could not be read, each written by
-// memq.js's reportHostUnread. A host that did not answer prints sqlcmd's own
-// detail from memory-database.js's runBatch (`sqlcmd exited ...` or `could
-// not run sqlcmd ...`) on the read that found it down, and hostDownDetail's
-// `the memory database did not answer within the last ...` on a read inside
-// memq's down-marker window; reportHostUnread's own `... did not answer this
-// read` stands in for an empty detail. standDownText prints `no memory
-// database is configured on this machine` and, with exit 0,
-// redirectedRootText's sentence for a store root that is not the machine's
-// own. kitMemq reads any of them as the
-// `unavailable` cause on a read, whatever the exit code. A refusal, a spent
-// budget, a cancelled call, a schema mismatch or an embedding server that
-// did not answer is not a host to wait for, so none of those arms it.
-// Exported so the suite pins each opening against the emitting source.
-export const MEMQ_UNAVAILABLE_LINES: readonly string[] = Object.freeze([
-  "memq: sqlcmd exited ",
-  "memq: could not run sqlcmd",
-  "memq: the memory database did not answer",
-  "memq: no memory database is configured on this machine",
-  "memq: this process is pointed at a store root",
-]);
-
-export type KitMemqResult = { exitCode: number | null; stdout: string; stderr: string };
-
-// Whether `cause` has not yet failed today, by the UTC day the latch holds
-// for it, which moves to today. A failure logged behind it earns one
-// decision per cause per UTC day. The latches are session memory, so a
-// restart logs its first failure of the day again.
-function firstFailureToday<K extends string>(latch: Record<K, string>, cause: K): boolean {
-  const day = new Date(Date.now()).toISOString().slice(0, 10);
-  if (latch[cause] === day) return false;
-  latch[cause] = day;
-  return true;
-}
-
 // The temp root the git pins' hooks path sits under, read from $.env on a
 // spawn and kept for the session once a read has answered, or null before
 // that. The suffix is drawn once per module load, so every git this session
@@ -4589,160 +1732,34 @@ async function executableOf(dp: any, name: string): Promise<string | null> {
   return found;
 }
 
-// Runs node for this session with the arguments `argvOf` builds from the
-// located kit install's root, in the launch directory kitMemq runs memq from,
-// `node` resolved to an absolute path by executableOf first, so it never
-// resolves from the launch directory, with the session id in the child's
-// environment over the host's, so KIT_MEMORY_ROOT, KIT_MEMORY_ROOT_ALLOW_DATA
-// and KIT_MEMORY_PROJECT reach the child unchanged. Resolves the child's
-// result, a non-zero exit included, or the cause it did not run to an exit,
-// kitMemq's two: `timeout` for a run that rejected once `timeoutMs`, less
-// MEMQ_TIMEOUT_SLACK_MS, had passed since the spawn, and `start` for every
-// other rejection and for no session id, no launch directory, no located kit
-// install or no `node` on PATH, which spawn nothing. Logs nothing and throws
-// nothing; the caller decides what a failure costs.
-async function kitNodeRun(
-  dp: any,
-  argvOf: (kitRoot: string) => string[],
-  timeoutMs: number,
-): Promise<{ ran: KitMemqResult } | { cause: "start" | "timeout"; reason: string }> {
-  const sessionId = sess.mySessionId;
-  if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId === "pending") return { cause: "start", reason: "no session id" };
-  if (sess.memqLaunchDir.length === 0) return { cause: "start", reason: "no launch directory" };
-  const located = await kitInstallPathOf(dp);
-  if ("skip" in located) return { cause: "start", reason: located.skip };
-  const args = argvOf(located.installPath.replace(/[/\\]+$/, ""));
-  const node = await executableOf(dp, "node");
-  if (node === null) return { cause: "start", reason: "node is on no absolute PATH entry" };
-  const startedAt = Date.now();
-  let res: any;
-  try {
-    res = await runChild(dp, [node, ...args], {
-      cwd: sess.memqLaunchDir,
-      env: { CLAUDE_CODE_SESSION_ID: sessionId },
-      timeoutMs,
-    });
-  } catch (err) {
-    const reason = (String(err).split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim();
-    return { cause: Date.now() - startedAt >= timeoutMs - MEMQ_TIMEOUT_SLACK_MS ? "timeout" : "start", reason };
-  }
+// The kit boundary's deps over `$`, built at each call as stretchDepsOf is:
+// the spawn adapter and the bare-name resolver above, the home, the two file
+// reads and the clock, which hooks/memq-boundary.ts reads in place of `$`.
+function kitBoundaryDepsOf(dp: any): KitBoundaryDeps {
   return {
-    ran: {
-      exitCode: res && typeof res.exitCode === "number" ? res.exitCode : null,
-      stdout: res && typeof res.stdout === "string" ? res.stdout : "",
-      stderr: res && typeof res.stderr === "string" ? res.stderr : "",
-    },
+    run: (argv: readonly string[], init: ProcessRunInit) => runChild(dp, argv, init),
+    executable: (name: string) => executableOf(dp, name),
+    home: () => hostOf(dp).getHome(),
+    exists: (path: string) => dp.fs.exists(path),
+    read: (path: string) => dp.fs.read(path),
+    now: () => Date.now(),
   };
 }
 
-// Runs the kit's memq command with `argv` for this session, as
-// node <installPath>/scripts/memq.js ...argv, through kitNodeRun, in the
-// launch directory the first session.start captured rather than wherever
-// $.session.cwd() stands now, so memq resolves the launch directory's store
-// even after a bare cd in
-// a tool call and a plugin reload after it, a reload of the plugin's code
-// included, since session.start keeps that directory in $.state as well as
-// in sess. Where $.state could not be read, a reload of the code captures
-// the session's cwd at that start instead. The child takes the session id in
-// its environment. Resolves the child's result, a non-zero exit included, for
-// the caller to read, or null where the command did not run to an exit.
-// Nothing throws.
-//
-// A null has one of two causes. `timeout` is a run that rejected once
-// `timeoutMs`, less MEMQ_TIMEOUT_SLACK_MS, had passed since the spawn, since
-// $.process.run's contract gives no cause for a rejection, so a start that
-// itself takes that long also reads as a timeout. `start` is every other
-// rejection, and also no session id, no launch directory, no located kit
-// install or no `node` on PATH, which spawn nothing. `onNotRun`, where given,
-// receives either cause and its reason as the null resolves, whatever the
-// decision latch does. A third cause, `unavailable`, is a read that
-// ran to an exit with an empty stdout and a stderr line opening one of
-// MEMQ_UNAVAILABLE_LINES, memq's lines for a store it could not read; that
-// result still resolves for the caller, who reads its exit code. Each cause
-// logs one memq_spawn_failed decision per UTC day, carrying the first line of
-// the reason, memq's own line for `unavailable`. The verb decides read or
-// write, so no caller can mislabel one: a `recall-candidates` call is a read,
-// the one the prompt waits on for its memory block, and a read that times
-// out or is unavailable stands later reads down for MEMQ_STAND_DOWN_MS, a
-// read inside that window resolving null with no spawn and no decision. No
-// other stderr line arms it, since an empty answer is normal. Every other
-// verb is treated as a write, which neither honours nor arms the stand-down,
-// because a write skipped is a fact lost and a write costs the prompt
-// nothing. The recall chain's body fetch, `get`,
-// takes a third treatment, `fetch`: it honours an armed stand-down, so a
-// store the prompt's own read found down costs the fetch no spawn, and it
-// never arms one, since a fetch that fails costs one record its body and the
-// chain renders that record as unfetched rather than withholding the block.
-// A fetch inside the window resolves null, which the chain renders the same
-// way. A fetch that fails earns no memq_spawn_failed decision and spends no
-// latch either: the once-a-day latch stays the prompt's read's.
-export async function kitMemq(
+// The kit boundary in hooks/memq-boundary.ts, each over the deps above and
+// this session. The suite reads MEMQ_UNAVAILABLE_LINES and kitMemq off this
+// module.
+export { MEMQ_UNAVAILABLE_LINES };
+function kitInstallPathOf(dp: any) { return boundaryKitInstallPathOf(kitBoundaryDepsOf(dp)); }
+function bankCompactionBoundary(dp: any, turnKind: string) { return boundaryBankCompactionBoundary(kitBoundaryDepsOf(dp), sess, turnKind); }
+function kitNodeRun(dp: any, argvOf: (kitRoot: string) => string[], timeoutMs: number) { return boundaryKitNodeRun(kitBoundaryDepsOf(dp), sess, argvOf, timeoutMs); }
+export function kitMemq(
   dp: any,
   argv: string[],
-  { timeoutMs, onNotRun }: { timeoutMs: number; onNotRun?: (cause: "start" | "timeout", reason: string) => void },
+  opts: KitMemqOptions,
 ): Promise<KitMemqResult | null> {
-  const verb = typeof argv[0] === "string" ? argv[0] : "none";
-  const purpose: "read" | "fetch" | "write" = verb === "recall-candidates" ? "read"
-    : verb === "get" ? "fetch" : "write";
-  if (purpose !== "write" && sess.memqStandDownUntil > Date.now()) return null;
-  const failed = (cause: "start" | "timeout" | "unavailable", reason: string): null => {
-    if (purpose === "fetch") return null;
-    if (firstFailureToday(sess.memqFailedDay, cause)) {
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "memory",
-        action: "memq_spawn_failed",
-        detail: `cause ${cause}; ${reason.slice(0, 150)}; verb ${verb}`,
-      });
-    }
-    if (cause !== "start" && purpose === "read") sess.memqStandDownUntil = Date.now() + MEMQ_STAND_DOWN_MS;
-    return null;
-  };
-  const run = await kitNodeRun(dp, (kitRoot) => [`${kitRoot}/scripts/memq.js`, ...argv], timeoutMs);
-  if ("cause" in run) {
-    onNotRun?.(run.cause, run.reason);
-    return failed(run.cause, run.reason);
-  }
-  const result = run.ran;
-  if (purpose === "read" && result.stdout === "") {
-    const unavailable = result.stderr.split(LINE_TERMINATOR).find((line: string) => MEMQ_UNAVAILABLE_LINES.some((opening) => line.startsWith(opening)));
-    if (unavailable !== undefined) failed("unavailable", unavailable.trim());
-  }
-  return result;
+  return boundaryKitMemq(kitBoundaryDepsOf(dp), sess, argv, opts);
 }
-
-// How long one memq put may run. A put takes the tier's lock, and a write
-// costs the prompt nothing, so its bound is never shorter than a read's.
-const MEMQ_WRITE_TIMEOUT_MS = 5_000;
-
-// How long the per-prompt recall chain may run, from its memq
-// recall-candidates spawn through its asks and body fetches. The prompt
-// waits on it, and past it the prompt goes with no memory block.
-const MEMQ_READ_TIMEOUT_MS = 5_000;
-
-// --- The meter: one spool file per turn line, one beat file per session ---
-//
-// turn.complete creates a spool file of its own under <home>/.claude/kit-meter/
-// holding the turn's one line. The session's beat file there is rewritten by
-// hooks/beat.ts's stampBeat on every heartbeat tick, turn.start and
-// turn.complete, from the one instant the other liveness files take. The
-// heartbeat timer starts `memq meter-drain`, which carries the spool to the
-// memory database, at most once every METER_DRAIN_EVERY_MS and never
-// awaited, so no hook and no tick waits on the host. Every meter write is
-// bounded at METER_WRITE_TIMEOUT_MS. Nothing here fails a turn or a tick:
-// every failure is one meter_write_failed decision per cause per UTC day,
-// firstFailureToday's latch, and a drain that could not start is kitMemq's
-// memq_spawn_failed.
-const METER_DRAIN_EVERY_MS = 10 * 60_000;
-// How long one drain may run before $.process.run kills it. A killed drain
-// leaves every file it had not deleted, and the next drain sends them again.
-const METER_DRAIN_TIMEOUT_MS = 120_000;
-// How long one meter write may run before it counts as failed. The bound is
-// a $.clock.sleep, and a clock wait spends the calling hook's own 10,000 ms
-// budget while it runs, as no other $ call does, so meterWrite aborts it the
-// moment the write settles. turn.complete's two meter writes run together,
-// so the meter costs that hook at most this bound once.
-const METER_WRITE_TIMEOUT_MS = 2_000;
 
 // A new spool file for one turn line, named for the turn's UTC day, the
 // session, the time and a per-process count, so each write creates its own
@@ -4765,6 +1782,27 @@ function meterFailed(cause: "write" | "drain", reason: string): void {
     detail: `cause ${cause}; ${reason}`.slice(0, 200),
   });
 }
+
+// --- The meter: one spool file per turn line, one beat file per session ---
+//
+// turn.complete creates a spool file of its own under <home>/.claude/kit-meter/
+// holding the turn's one line. The session's beat file there is rewritten by
+// hooks/beat.ts's stampBeat on every heartbeat tick, turn.start and
+// turn.complete, from the one instant the other liveness files take. The
+// heartbeat timer starts `memq meter-drain`, which carries the spool to the
+// memory database, at most once every METER_DRAIN_EVERY_MS and never
+// awaited, so no hook and no tick waits on the host. Every meter write is
+// bounded at METER_WRITE_TIMEOUT_MS. Nothing here fails a turn or a tick:
+// every failure is one meter_write_failed decision per cause per UTC day,
+// firstFailureToday's latch, and a drain that could not start is kitMemq's
+// memq_spawn_failed.
+
+// How long one meter write may run before it counts as failed. The bound is
+// a $.clock.sleep, and a clock wait spends the calling hook's own 10,000 ms
+// budget while it runs, as no other $ call does, so meterWrite aborts it the
+// moment the write settles. turn.complete's two meter writes run together,
+// so the meter costs that hook at most this bound once.
+const METER_WRITE_TIMEOUT_MS = 2_000;
 
 // What meterWrite rejects with where its bound won.
 class MeterWriteTimedOut extends Error {}
@@ -4878,1180 +1916,90 @@ function meterDrainStep(dp: any, now: number): void {
   startMeterDrain(dp);
 }
 
-// The most code points of a prompt the read passes memq as its situation.
-const MEMQ_SITUATION_MAX = 500;
-
-// The most characters of a prompt the memory questions' states carry as its
-// head: the memory-kind state's cut of the prompt and the memory-recall
-// state's promptHead, one bound shared.
-const PROMPT_HEAD_MAX = 300;
-
-// The most candidates the recall chain asks about for one prompt, which is
-// also the most records its memq recall-candidates read asks for, as memq's
-// own limit flag takes it.
-const RECALL_ASK_MAX = 10;
-const MEMQ_RECALL_LIMIT = String(RECALL_ASK_MAX);
-
-// The first max code points of text, read without copying the rest, so a
-// surrogate pair is never split and a very long prompt costs max steps.
-function firstCodePoints(text: string, max: number): string {
-  let out = "";
-  let n = 0;
-  for (const ch of text) {
-    if (n === max) break;
-    out += ch;
-    n += 1;
-  }
-  return out;
-}
-
-// The memory kind a record is written under: fact, preference or lesson as
-// given, and fact for anything else.
-function memqKindOf(kind: unknown): "fact" | "preference" | "lesson" {
-  return kind === "preference" || kind === "lesson" ? kind : "fact";
-}
-
-// What one memq put came to. `written` is exit 0. `duplicate` is exit 1 with
-// memq's refusal of a name the store already holds, which is the dedupe: the
-// same text always derives the same name. Its `retired` is true where that
-// refusal says the store holds the name retired under archive/. `failed` is
-// anything else, with the first non-empty stderr line as its reason, and
-// `ran` false where memq never ran to an exit.
-type MemoryWriteOutcome =
-  | { outcome: "written"; name: string }
-  | { outcome: "duplicate"; name: string; retired: boolean }
-  | { outcome: "failed"; name: string; reason: string; ran: boolean };
-
-// The characters memq takes in a record name, a tag and an author, and the
-// longest tag it takes.
-const MEMQ_NAME_CHARSET = /^[A-Za-z0-9_.-]+$/;
-const MEMQ_TAG_CAP = 40;
-
-// The id a persona carries in the kit's memory store, in its record names,
-// its persona-<id> tag and its persona-<id> author. It is the name itself
-// where the name holds only memq's name charset and persona-<name> fits the
-// tag cap. Otherwise it is the name with every other character removed, cut
-// so that persona-<id> still fits, then a dash and the base-36 fnv1a hash of
-// the full name, so two names that differ only in removed characters keep
-// apart. Two names that differ only in letter case are not kept apart: memq
-// compares record names without case on Windows, so the second one's write
-// is refused as a duplicate. Reading and stamping a persona's records go by
-// the same id.
-export function personaStoreId(persona: string): string {
-  const prefix = "persona-";
-  if (MEMQ_NAME_CHARSET.test(persona) && prefix.length + persona.length <= MEMQ_TAG_CAP) return persona;
-  const hash = fnv1aHash(persona).toString(36);
-  const kept = persona.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, MEMQ_TAG_CAP - prefix.length - 1 - hash.length);
-  return `${kept}-${hash}`;
-}
-
-// Writes `text` as one record in the kit's memory store through memq put,
-// tagged with its source, its kind and this persona's store id, with the
-// author persona-<id>, since memq's author grammar is the record-name charset
-// and refuses a colon. The name is the kind, the persona's store id and the
-// base-36 fnv1a hash of the text lowercased and trimmed, the persona in it
-// because memq refuses a name its project tier already holds whatever the
-// tags, so two personas in one launch directory writing the same text write
-// two records.
-// The description is the text's first line with each control character a
-// space, since memq refuses one there, then each double quote a single quote
-// and each backslash a slash, since memq has no quoted form for a
-// description holding a single quote beside either, cut to 120 code points
-// so a surrogate pair is never split. It is passed behind one leading space,
-// which memq trims. The body is one provenance line naming the persona, the
-// source, this session and the UTC date of `createdAt`, a blank line, then
-// the text. So neither opens with `--`, which memq reads as an option
-// whatever the text. Logs nothing itself: kitMemq logs a spawn that failed,
-// and each caller logs the outcome its own way.
-// `writerTag`, where set, is one more tag naming which writer drafted the
-// text, the fork or the Haiku fallback; it changes nothing else about the
-// record, so the same text from either writer derives one name.
-async function writeMemoryRecord(
-  dp: any,
-  text: string,
-  { kind, source, createdAt, writerTag }: { kind: unknown; source: "distilled" | "worker" | "user"; createdAt: number; writerTag?: string },
-): Promise<MemoryWriteOutcome> {
-  const heldKind = memqKindOf(kind);
-  const storeId = personaStoreId(sess.persona);
-  const name = `${heldKind}-${storeId}-${fnv1aHash(text.toLowerCase().trim()).toString(36)}`;
-  const firstLine = text.split(LINE_TERMINATOR)[0]
-    .replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g, " ")
-    .replace(/"/g, "'")
-    .replace(/\\/g, "/");
-  const description = " " + Array.from(firstLine).slice(0, 120).join("");
-  const date = new Date(Number.isFinite(createdAt) ? createdAt : Date.now()).toISOString().slice(0, 10);
-  const body = `Written by persona ${sess.persona} from source ${source} in session ${sess.mySessionId} on ${date}.\n\n${text}`;
-  const res = await kitMemq(dp, [
-    "put", name, description,
-    "--body", body,
-    "--tag", source,
-    "--tag", heldKind,
-    "--tag", "persona-" + storeId,
-    ...(writerTag !== undefined ? ["--tag", writerTag] : []),
-    "--author", "persona-" + storeId,
-  ], { timeoutMs: MEMQ_WRITE_TIMEOUT_MS });
-  if (res === null) return { outcome: "failed", name, reason: "memq did not run to an exit", ran: false };
-  if (res.exitCode === 0) return { outcome: "written", name };
-  const lines = res.stderr.split(LINE_TERMINATOR);
-  const refusal = res.exitCode === 1 ? lines.find((line: string) => line.startsWith(`memq: '${name}' already exists`)) : undefined;
-  if (refusal !== undefined) {
-    return { outcome: "duplicate", name, retired: refusal.includes("retired under archive/") };
-  }
-  const reasonLine = (lines.find((line: string) => line.trim() !== "") ?? "").trim().slice(0, 150);
-  return { outcome: "failed", name, reason: reasonLine || `memq exited ${res.exitCode === null ? "unknown" : res.exitCode}`, ran: true };
-}
-
-// Logs what the distiller's or memory_add's write came to, and counts a
-// written record for the tick summary: remember names the record and the
-// text's opening, memory_duplicate names the record the store already held,
-// and memory_write_failed names the reason. A failed fact is dropped rather
-// than queued, since the next turn distills again.
-function noteMemoryWrite(written: MemoryWriteOutcome, text: string): void {
-  if (written.outcome === "written") sess.memqWrittenThisSession += 1;
-  sess.state.decisions.push({
-    timestamp: Date.now(),
-    loop: "memory",
-    action: written.outcome === "written" ? "remember" : written.outcome === "duplicate" ? "memory_duplicate" : "memory_write_failed",
-    detail: written.outcome === "failed" ? `${written.name}: ${bracketSafeText(written.reason)}` :`${written.name}: ${text.slice(0, 80)}`,
-  });
-}
-
-// One memory_owed_dropped decision for an owed item the queue or the drain let
-// go, naming the item's turn and why.
-function noteMemoryOwedDropped(item: MemoryOwed, reason: string): void {
-  sess.state.decisions.push({
-    timestamp: Date.now(),
-    loop: "memory",
-    action: "memory_owed_dropped",
-    detail: `turn ${item.turnId}: ${reason}`,
-  });
-}
-
-// Whether a memory drain is running now. Controller ticks can overlap, and a
-// second drain beside a fork still unresolved would take the next item and
-// fork again before the first came back; a tick that finds one running
-// drains nothing and does not wait, unlike the inbox drain, since the owed
-// item is durable and the next tick takes it.
-let memoryDrainInFlight = false;
-
-// The controller tick's memory drain: writes the record for the oldest owed
-// item, one per tick, for the owner alone (the tick's owner check runs
-// first). The item leaves the queue, and the store, before any model call is
-// awaited, so a crash or an overlapping tick never writes it twice. An item
-// older than MEMORY_OWED_LIFE_MS is dropped under memory_owed_dropped and the
-// next live one is taken on the same tick. Where the cache clock reads warm
-// the writer is a fork of the session's own transcript, served from the main
-// thread's prompt cache, and lastForkAt is stamped only where the fork
-// answered, since a nothing-to-fork or api-error result reached no cache. The
-// clock alone picks the writer; the item's age plays no part. Where the clock
-// reads cold, the fork does not answer, or its text is not the one JSON
-// object the reader takes, the Haiku completion over the item's two heads
-// runs as the distiller always has, awaited whole: a timer has no hook
-// budget and the call bounds itself. One memory_fork_fallback decision names
-// why the fork fell through, and a fork is never called twice for one item.
-// Every fork result carrying a `usage` object adds its counts to the ledger
-// and pushes one memory_fork decision naming the three, answered or not, a
-// missing count reading zero; a result carrying none, as nothing-to-fork
-// does, made no request and adds and decides nothing. A fork's record whose
-// `existing` names a record the prompt-time read showed this session, under
-// any goal, is a memory_duplicate and writes nothing; a name off that list is
-// ignored. Wherever the reply parsed, a duplicate and a null record included,
-// its follow-ups, cut by memoryWriterFollowUps, join the session's follow-up
-// queue under source turn-end and the item's turn id, read and written once
-// just before the last persist and behind a catch of its own, as
-// followUpsAtTurnEnd does; the fallback adds none. Never throws: a failed
-// drain ends with the item gone and the tick goes on.
-async function drainMemoryOwed(dp: any): Promise<void> {
-  if (memoryDrainInFlight || sess.state.memoryOwed.length === 0) return;
-  memoryDrainInFlight = true;
-  try {
-    const now = Date.now();
-    const { item, dropped } = takeMemoryOwed(sess.state.memoryOwed, now);
-    for (const old of dropped) noteMemoryOwedDropped(old, `older than ${MEMORY_OWED_LIFE_MS / 60_000} minutes at the drain`);
-    // The removal reaches the store before the model is asked, and the
-    // decisions below ride the write at the end; a refused write leaves both
-    // in memory for the next write that is not refused. A write that gives
-    // the persona up puts the item back at the queue's head first, so the
-    // store the yield leaves still owes it to the next owner, and the drain
-    // ends there: a session that is no longer the owner forks and writes
-    // nothing.
-    let kept = true;
-    try {
-      kept = await persist(dp, () => { if (item !== null) sess.state.memoryOwed.unshift(item); });
-    } catch { /* the store refused; the removal stands in memory */ }
-    if (!kept || item === null) return;
-    let reply: MemoryWriterReply | null = null;
-    let fallback: string | null = null;
-    if (cacheReading(now, cacheClock, false).warm) {
-      // The turn head, or the prompt head where the item holds none, is
-      // folded to one line with its brackets turned, as every other message the plugin composes in
-      // its own voice is, so the head cannot close the plugin's line or open
-      // a bracketed label of its own. The fallback's prompt below carries the
-      // raw head: its request is the distiller's own, unchanged.
-      // The fork's instant is the one before the request leaves, since that
-      // is when the cache was read; the stamp below takes it where the fork
-      // answered.
-      const forkAt = Date.now();
-      const forked = await dp.model.fork({ prompt: memoryWriterPrompt({ ...item, turnHead: bracketSafeText(oneLine(memoryTurnHead(item))) }) });
-      const rawUsage = forked !== null && typeof forked === "object" ? (forked as { usage?: unknown }).usage : undefined;
-      // A result with no usage object made no request, as nothing-to-fork
-      // does, so there is nothing to sum or to decide on.
-      if (rawUsage !== null && typeof rawUsage === "object") {
-        const usage = forkUsageOf(rawUsage);
-        sess.state.monitor.cost.forkUsage = addForkUsage(sess.state.monitor.cost.forkUsage, usage);
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "memory",
-          action: "memory_fork",
-          detail: `turn ${item.turnId}: inputTokens ${usage.inputTokens}, outputTokens ${usage.outputTokens}, cacheReadInputTokens ${usage.cacheReadInputTokens}`,
-        });
-      }
-      if (forked !== null && typeof forked === "object" && (forked as { isAnswered?: unknown }).isAnswered === true) {
-        cacheClock.lastForkAt = forkAt;
-        const text = (forked as { text?: unknown }).text;
-        reply = parseMemoryWriterReply(typeof text === "string" ? text : "", item.kind);
-        if (reply === null) fallback = "unparsed";
-      } else {
-        // The result's own reason word, one of nothing-to-fork, api-error,
-        // empty-reply and aborted; a result carrying none reads as a reply
-        // with no text.
-        const reason = forked !== null && typeof forked === "object" ? (forked as { reason?: unknown }).reason : undefined;
-        fallback = typeof reason === "string" ? bracketSafeText(oneLine(reason)).slice(0, 40) : "empty-reply";
-      }
-    } else {
-      fallback = "cold";
-    }
-    if (fallback !== null) {
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "memory",
-        action: "memory_fork_fallback",
-        detail: `${fallback}, turn ${item.turnId}`,
-      });
-      const rawDistilled = await dp.model.complete({
-        model: "haiku",
-        prompt: memoryFallbackPrompt(item.promptHead, item.answerHead),
-        maxTokens: 50,
-        timeoutMs: COMPLETE_TIMEOUT_MS,
-      });
-      // A result with no text distills nothing, as an empty reply does,
-      // after one line naming the shape the engine handed back.
-      const distilledText = completionText(rawDistilled);
-      if (distilledText === null) noteCompletionShape("memory-distill", rawDistilled);
-      const distilled = (distilledText ?? "").trim();
-      // The owner reading is taken again at the write: the model call above
-      // is a wait across which another session can take the persona.
-      if (distilled.length > 0 && distilled.toUpperCase() !== "NONE" && sess.isOwner) {
-        const written = await writeMemoryRecord(dp, distilled, { kind: item.kind, source: "distilled", createdAt: Date.now(), writerTag: WRITER_TAG_HAIKU });
-        noteMemoryWrite(written, distilled);
-      }
-    } else if (reply !== null) {
-      const shown = reply.existing !== null ? sess.state.shownMemories.find((m) => m.name === reply.existing) : undefined;
-      if (shown !== undefined) {
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "memory",
-          action: "memory_duplicate",
-          detail: `${bracketSafeText(oneLine(shown.name))}: the fork named it as already holding the fact`,
-        });
-      } else if (reply.record !== null && sess.isOwner) {
-        const written = await writeMemoryRecord(dp, reply.record.text, { kind: reply.record.kind, source: "distilled", createdAt: Date.now(), writerTag: WRITER_TAG_FORK });
-        noteMemoryWrite(written, reply.record.text);
-      }
-    }
-    // A throw in the follow-ups costs them alone, never the persist below.
-    try {
-      const followUps = reply === null ? [] : memoryWriterFollowUps(reply.followups).map((f) => ({ source: TURN_END_SOURCE, ...f }));
-      if (followUps.length > 0 && meterSessionKnown(sess.mySessionId)) {
-        const store = commonsStoreOf(dp);
-        const queue = await readFollowUps(store, sess.mySessionId);
-        if (queue !== null) await writeFollowUps(store, sess.mySessionId, enqueueFollowUps(queue, followUps, Date.now(), item.turnId, pushFollowUpDecision));
-      }
-    } catch { /* the follow-ups are lost; the record and the decisions above still persist */ }
-    try { await persist(dp); } catch { /* the store refused; the lines above wait for one that parses */ }
-  } catch {
-    // The drain failed; the item is gone and the tick goes on.
-  } finally {
-    memoryDrainInFlight = false;
-  }
-}
-
-// The pairs the running turn's own `memq decay-scan` listed, owed to the
-// drain below, and the [PAIR DRAFTS] block the drain holds for that turn's
-// next main-loop tool result. Both live in memory alone, never in
-// sess.state: a draft is one turn's hygiene step's and is worthless after it,
-// so a reload or a restart loses nothing worth keeping. The owed item names
-// the turn its scan ran in, so the drain forks only while that turn is open,
-// and turn.complete drops both for the turn that ends.
-let pairDraftOwed: { turnId: string; pairs: ScanPair[]; notDrafted: number; at: number } | null = null;
-let pairDrafts: { turnId: string; block: string } | null = null;
-
-// Whether a pair drain is running now. The owe in tool.call starts the drain
-// and the heartbeat fires every 30 seconds, while the drain can run longer
-// than that, so neither starts a second drain while one runs: the item is
-// taken before the first await, and a second scan owed meanwhile waits for
-// the next tick after the drain ends rather than forking beside the first.
-let pairDraftsInFlight = false;
-
-// One pair_drafts_dropped decision for an owed item or a held block the
-// session let go: replaced by a later scan in the same turn, or dropped with
-// the turn that ends, since a draft on a later turn restates bodies that may
-// have changed.
-function notePairDraftsDropped(turnId: string, reason: string): void {
-  sess.state.decisions.push({
-    timestamp: Date.now(),
-    loop: "memory",
-    action: "pair_drafts_dropped",
-    detail: `turn ${turnId}: ${reason}`,
-  });
-}
-
-// The pair drain, started by the owe in tool.call and by the heartbeat tick
-// for an item the owe left owed: takes the owed item before any await, and
-// where the cache clock's stamps read warm fetches each pair's two record
-// bodies through memq get --no-stamp under the pair's tier flag, one read at
-// a time, then asks one fork of the session's own transcript for a
-// disposition per pair and holds the block the reply renders to for the
-// turn's next main-loop tool result. The clock is read from its stamps, as
-// the memory drain reads it, rather than from the open turn: a plugin
-// reloaded mid-turn holds no stamp, and a fork over a cold cache pays the
-// whole transcript, which is the cost the draft exists to avoid. A read that
-// did not run or exited non-zero leaves that body null, which the prompt
-// shows as (not read), and never ends the drain. Every fork result carrying
-// a `usage` object adds its counts to the ledger and pushes one
-// pair_drafts_fork decision naming the pair count and the three, as the
-// memory drain does; an answered fork stamps the clock. A cold reading, a
-// fork that did not answer or a reply that is not the one object the reader
-// takes logs one pair_drafts_fallback decision with its reason and holds
-// nothing, and the session judges the pairs by hand as it does today: no
-// second fork and no Haiku completion ever runs for one scan. The turn can
-// end while the reads or the fork run, when turn.complete finds nothing to
-// drop, so the drain checks the turn itself: after the reads it forks nothing
-// for a closed turn, and after the fork it holds nothing for one, each under
-// a pair_drafts_dropped reading turn ended; the fork's cost is ledgered
-// either way, since it was paid. A later scan in the same turn owed while
-// the fork ran supersedes this result, which is dropped as replaced by a
-// later scan, as is a block still held for the turn when a newer one lands.
-// The decisions ride one persist at the end, and a refused persist leaves
-// them in memory for the next write that is not refused. Never throws: a
-// drain that throws ends with the item gone and one pair_drafts_fallback
-// reading drain-failed, and the tick goes on.
-async function drainPairDraftOwed(dp: any, turnOpen: (turnId: string) => boolean): Promise<void> {
-  if (pairDraftsInFlight || pairDraftOwed === null) return;
-  pairDraftsInFlight = true;
-  const owed = pairDraftOwed;
-  pairDraftOwed = null;
-  try {
-    // A closure, so the check reads the variable a later scan may have set
-    // across the awaits below rather than the null assigned above.
-    const replaced = (): boolean => pairDraftOwed !== null && pairDraftOwed.turnId === owed.turnId;
-    let fallback: string | null = null;
-    let block: string | null = null;
-    if (cacheReading(Date.now(), cacheClock, false).warm) {
-      const read = async (name: string, p: ScanPair): Promise<string | null> =>
-        fetchedRecordOf(await kitMemq(dp, ["get", name, "--no-stamp", ...pairTierFlag(p)], { timeoutMs: MEMQ_READ_TIMEOUT_MS }))?.body ?? null;
-      const withBodies: Array<ScanPair & { bodyA: string | null; bodyB: string | null }> = [];
-      for (const p of owed.pairs) withBodies.push({ ...p, bodyA: await read(p.a, p), bodyB: await read(p.b, p) });
-      if (!turnOpen(owed.turnId)) {
-        notePairDraftsDropped(owed.turnId, "turn ended");
-      } else if (replaced()) {
-        notePairDraftsDropped(owed.turnId, "replaced by a later scan");
-      } else {
-        const forkAt = Date.now();
-        const forked = await dp.model.fork({ prompt: pairDrafterPrompt(withBodies) });
-        const rawUsage = forked !== null && typeof forked === "object" ? (forked as { usage?: unknown }).usage : undefined;
-        if (rawUsage !== null && typeof rawUsage === "object") {
-          const usage = forkUsageOf(rawUsage);
-          sess.state.monitor.cost.forkUsage = addForkUsage(sess.state.monitor.cost.forkUsage, usage);
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "memory",
-            action: "pair_drafts_fork",
-            detail: `turn ${owed.turnId}: pairs ${owed.pairs.length}, inputTokens ${usage.inputTokens}, outputTokens ${usage.outputTokens}, cacheReadInputTokens ${usage.cacheReadInputTokens}`,
-          });
-        }
-        const answered = forked !== null && typeof forked === "object" && (forked as { isAnswered?: unknown }).isAnswered === true;
-        if (answered) cacheClock.lastForkAt = forkAt;
-        if (!turnOpen(owed.turnId)) {
-          notePairDraftsDropped(owed.turnId, "turn ended");
-        } else if (replaced()) {
-          notePairDraftsDropped(owed.turnId, "replaced by a later scan");
-        } else if (answered) {
-          const text = (forked as { text?: unknown }).text;
-          const drafts = parsePairDrafterReply(typeof text === "string" ? text : "", owed.pairs);
-          if (drafts === null) fallback = "unparsed";
-          else block = pairDraftsBlock(drafts, owed.pairs, owed.notDrafted);
-        } else {
-          const reason = forked !== null && typeof forked === "object" ? (forked as { reason?: unknown }).reason : undefined;
-          fallback = typeof reason === "string" ? bracketSafeText(oneLine(reason)).slice(0, 40) : "empty-reply";
-        }
-      }
-    } else {
-      fallback = "cold";
-    }
-    if (fallback !== null) {
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "memory",
-        action: "pair_drafts_fallback",
-        detail: `${fallback}, turn ${owed.turnId}`,
-      });
-    } else if (block !== null) {
-      if (pairDrafts !== null && pairDrafts.turnId === owed.turnId) notePairDraftsDropped(owed.turnId, "replaced by a later scan");
-      pairDrafts = { turnId: owed.turnId, block };
-    }
-    try { await persist(dp); } catch { /* the store refused; the lines above wait for one that parses */ }
-  } catch {
-    // The drain threw: the item is gone, one fallback names the failure, and
-    // the tick goes on.
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "memory",
-      action: "pair_drafts_fallback",
-      detail: `drain-failed, turn ${owed.turnId}`,
-    });
-    try { await persist(dp); } catch { /* the store refused; the line above waits for one that parses */ }
-  } finally {
-    pairDraftsInFlight = false;
-  }
-}
-
-// Moves the distillates a persona's JSON still holds into the kit's memory
-// store, once, wherever this session becomes the persona's owner: the
-// session.start claim, agentic_identity and the heartbeat tick's reader
-// promotion. Every entry whose source is worker,
-// distilled or user is written in order through writeMemoryRecord under its
-// own source, and leaves the JSON on a write or on the store already holding
-// its name. Any other outcome leaves it for the next start. A write that
-// memq never ran to an exit ends the pass and counts the rest as left, so a
-// host that is down costs the start one bound rather than one per entry.
-// Self-review lessons stay. One memory_migrated decision names the counts
-// wherever there was a candidate, and the state is saved where any entry
-// left the JSON.
-// --- The recall chain: the candidates, the asks, the rendering and the outcome ---
-//
-// At a typed prompt the chain reads usp_Recall's candidates through memq
-// recall-candidates, asks memory-recall of each, live, renders the records
-// Jev said show into the prompt's memory block and the journal's rendering
-// line, and at the session's next typed prompt writes each candidate's
-// recall_acted outcome. The context builder awaits the chain for its memory
-// block, and the whole chain, read, asks and body fetches, runs inside
-// MEMQ_READ_TIMEOUT_MS from its spawn: past it the prompt carries no memory
-// block. No list reaches the prompt unjudged.
-
-// The two bounds of what a prompt shows: a body at most this long shows
-// whole and a longer one shows as a pointer line, and at most this many
-// records show per prompt. Both are the plan's, held here and nowhere else.
-const RECALL_BODY_MAX = 6_000;
-const RECALL_SHOW_MAX = 3;
-
-// The least `show` probability a candidate's answer carries to be rendered.
-// Jev's choice is the option with the greater probability, so one half is
-// the choice's own boundary, read from the probability so a tie renders.
-const RECALL_SHOW_THRESHOLD = 0.5;
-
-// The most characters of a candidate's body the memory-recall state carries,
-// the catalog's body head, which is also the head usp_Recall returns. A body
-// no longer than this is whole in the head, so the rendering takes it from
-// there and fetches nothing.
-const RECALL_BODY_HEAD_MAX = 600;
-
-// The least of the window a body fetch is started with. Under it the fetch
-// would read as a timeout before memq could answer, so the record renders as
-// unfetched instead and no memq is spawned.
-const RECALL_FETCH_FLOOR_MS = MEMQ_TIMEOUT_SLACK_MS;
-
-// The provenance a shared tier's record carries on its head line, in the
-// words memq's own fence over such a body uses (memq.js typeClause and
-// operatorClause), so a record another project or another person's session
-// wrote is told from the project's own wherever it reaches a prompt. The
-// project tier is the session's own and carries none, as memq prints it raw.
-const RECALL_TYPE_TIER_CLAUSE = "the shared tier every project of this type reads and writes";
-const RECALL_OPERATOR_TIER_CLAUSE = "the operator tier, the store-wide tier every project on this machine reads and writes";
-
-// The tier a procedure row was read from, memory-database.js recallRow's
-// `tier`.
-type RecallTier = "project" | "type" | "operator";
-
-// One candidate of a prompt's recall chain: its name, the tier its row was
-// read from and the type that tier names, the fields the state carries, the
-// body whole where it was fetched and null where it was not, and the body's
-// length where known.
-type RecallCandidate = {
-  name: string;
-  tier: RecallTier | null;
-  typeName: string | null;
-  description: string;
-  tags: string[];
-  bodyHead: string;
-  body: string | null;
-  bodyLength: number | null;
-};
-
-// What the chain hands the context builder: the memory block's text under
-// its opening line, and the names it shows, in rendered order.
-type RecallInjection = { rendering: string; names: readonly string[] };
-
-// The rows memq recall-candidates printed, in the procedure's fused order, or
-// the class of reason none were read: `did-not-run` for a read that did not
-// run to an exit, which a stand-down also answers, `exit-<code>` for a
-// non-zero exit, and `unparsed` for a stdout that is not a JSON array. Each
-// row is read for the fields the state and the rendering take, in the
-// client's own shape (memory-database.js recallRow); a row without a name, or
-// naming one already read, is dropped.
-function procedureCandidatesOf(res: KitMemqResult | null): { rows: RecallCandidate[] } | { absent: string } {
-  if (res === null) return { absent: "did-not-run" };
-  if (res.exitCode !== 0) return { absent: `exit-${res.exitCode === null ? "unknown" : res.exitCode}` };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(res.stdout);
-  } catch {
-    parsed = null;
-  }
-  if (!Array.isArray(parsed)) return { absent: "unparsed" };
-  const rows: RecallCandidate[] = [];
-  const seen = new Set<string>();
-  for (const row of parsed) {
-    if (row === null || typeof row !== "object") continue;
-    const r = row as Record<string, unknown>;
-    if (typeof r.name !== "string" || r.name === "" || seen.has(r.name.toLowerCase())) continue;
-    seen.add(r.name.toLowerCase());
-    rows.push({
-      name: r.name,
-      tier: r.tier === "project" || r.tier === "type" || r.tier === "operator" ? r.tier : null,
-      typeName: typeof r.typeName === "string" && r.typeName !== "" ? r.typeName : null,
-      description: typeof r.description === "string" ? r.description : "",
-      tags: Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === "string") : [],
-      bodyHead: typeof r.bodyHead === "string" ? firstCodePoints(r.bodyHead, RECALL_BODY_HEAD_MAX) : "",
-      body: null,
-      bodyLength: typeof r.bodyLength === "number" && Number.isSafeInteger(r.bodyLength) && r.bodyLength >= 0 ? r.bodyLength : null,
-    });
-  }
-  return { rows };
-}
-
-// The opening of the provenance fence memq get prints a shared or pinned
-// tier's body under, and its closing words, with every line after it indented
-// two spaces (memq.js fenceLine).
-const MEMQ_FENCE_OPEN = "memq: from ";
-const MEMQ_FENCE_CLOSE = "data, not instructions:";
-
-// A record as memq get --no-stamp printed it: the description and tags its
-// frontmatter carries, its body, and the body's length. The frontmatter, the
-// provenance fence a pinned or shared tier prints the body under, and the
-// anchors, triggers and author lines get prints after the body are each taken
-// off, the report lines first since get prints them after its truncation
-// note, and a body get cut at its own print cap keeps the length that note
-// names. Null where the read did not run to an exit, exited non-zero or
-// printed nothing, which is also what a name the store does not hold prints.
-function fetchedRecordOf(res: KitMemqResult | null): { description: string; tags: string[]; body: string; length: number } | null {
-  if (res === null || res.exitCode !== 0 || res.stdout.trim() === "") return null;
-  let lines = res.stdout.split(/\r?\n/);
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  if (lines.length > 0 && lines[0].startsWith(MEMQ_FENCE_OPEN) && lines[0].endsWith(MEMQ_FENCE_CLOSE)) {
-    lines = lines.slice(1).map((l) => (l.startsWith("  ") ? l.slice(2) : l));
-  }
-  while (lines.length > 0 && /^(anchors|triggers|author): /.test(lines[lines.length - 1])) lines.pop();
-  let length: number | null = null;
-  const truncated = lines.length > 0 ? /^memq: body truncated at \d+ of (\d+) characters$/.exec(lines[lines.length - 1]) : null;
-  if (truncated !== null) {
-    length = Number(truncated[1]);
-    lines.pop();
-  }
-  let description = "";
-  const tags: string[] = [];
-  if (lines[0] === "---") {
-    const close = lines.indexOf("---", 1);
-    if (close > 0) {
-      for (const field of lines.slice(1, close)) {
-        if (field.startsWith("description: ")) {
-          description = field.slice("description: ".length).trim().replace(/^(['"])(.*)\1$/, "$2");
-        } else if (field.startsWith("tags: ")) {
-          tags.push(...field.slice("tags: ".length).split(",").map((t) => t.trim()).filter((t) => t !== ""));
-        }
-      }
-      lines = lines.slice(close + 1);
-    }
-  }
-  const body = lines.join("\n");
-  return { description, tags, body, length: length ?? body.length };
-}
-
-// The memory-recall question's state, one field to a line under the catalog's
-// field names, every value through kaizenLine: the prompt, the description, the tags and the body head are the
-// operator's and the store's text, and a value carrying its own line break
-// and a field name would otherwise write a field of its own. Every candidate
-// is the procedure's, so the source field reads `procedure` on each.
-function memoryRecallStateText(promptHead: string, c: RecallCandidate): string {
-  return `${MEMORY_RECALL_STATE_PROMPT}: ${kaizenLine(promptHead)}\n` +
-    `${MEMORY_RECALL_STATE_RECORD}: ${kaizenLine(c.name)}\n` +
-    `${MEMORY_RECALL_STATE_DESCRIPTION}: ${kaizenLine(c.description)}\n` +
-    `${MEMORY_RECALL_STATE_TAGS}: ${kaizenLine(c.tags.join(", "))}\n` +
-    `${MEMORY_RECALL_STATE_BODY}: ${kaizenLine(c.bodyHead)}\n` +
-    `${MEMORY_RECALL_STATE_SOURCE}: procedure`;
-}
-
-// One shown record's rendering: its name and description on one line, with
-// the tier's provenance clause in parentheses for a type- or operator-tier
-// record, then the body whole where it is at most RECALL_BODY_MAX
-// characters, the pointer line where its known length is longer, or, where a
-// body inside the bound could not be fetched, a line saying so. `whole` is
-// true on the first shape alone. Every store text goes through
-// bracketSafeText, the hostile-text clamp every injected line takes, so the
-// rendering is the bytes the prompt carries.
-function recallRecordText(c: RecallCandidate, body: string | null, length: number | null): { text: string; whole: boolean } {
-  const provenance = c.tier === "type" ? ` (from ${c.typeName === null ? "the type tier" : `type '${c.typeName}'`}, ${RECALL_TYPE_TIER_CLAUSE})`
-    : c.tier === "operator" ? ` (from ${RECALL_OPERATOR_TIER_CLAUSE})`
-    : "";
-  const head = bracketSafeText(`${c.name}: ${c.description}${provenance}`);
-  if (body !== null && body.length <= RECALL_BODY_MAX) return { text: `${head}\n${bracketSafeText(body)}`, whole: true };
-  if (length !== null && length > RECALL_BODY_MAX) return { text: `${head}\nrecord is ${length} characters; read it with memq get ${bracketSafeText(c.name)}`, whole: false };
-  return { text: `${head}\nrecord could not be fetched; read it with memq get ${bracketSafeText(c.name)}`, whole: false };
-}
-
-// The recall chain for one typed prompt, the context builder's memory
-// source. It resolves to the memory block's rendering and the names it
-// shows, or to null where the prompt gets no memory block, and it writes one
-// rendering line either way, a skip naming why where it is null. `seq` is
-// the prompt's number in this session, and `budget` the prompt hook's own.
-//
-// Nothing is injected without Jev's word. `mode` off, which shadowAsk sends
-// nothing under, spawns nothing and journals a `stand-down` skip. Inside a
-// read stand-down window, which a read arms for the prompts after its own, the
-// chain spawns nothing and journals `stand-down` too. One
-// chain runs per session at a time: a prompt arriving while its
-// predecessor's chain is still collecting journals `chain-busy` naming that
-// prompt, and a chain whose next prompt arrived while its one collecting
-// spawn ran journals `overtaken` naming that prompt and asks nothing, since
-// no outcome could ever settle its rows.
-//
-// The chain makes one spawn to collect the candidates, memq recall-candidates
-// over the situation with no tag, so the pool is the project's rows with the
-// type and operator tiers, in the procedure's fused order and at most
-// RECALL_ASK_MAX in all. Each candidate is then asked once through liveAsk,
-// with memory-recall named live at this one site, and the asks fire together.
-// The candidates are registered for their outcome as soon as the rows are
-// known, ahead of the asks settling, so a next prompt inside the Jev bound
-// still finds them; a candidate the session has shown before is asked and
-// registered like any other. Where no ask came back answered, Jev did not
-// answer this prompt, and the chain journals `stand-down` and injects
-// nothing. The rendering takes, in candidate order, the first RECALL_SHOW_MAX
-// candidates whose answer carries a `show` probability of at least
-// RECALL_SHOW_THRESHOLD and whose name sess.recallShownNames does not hold.
-// A body no longer than RECALL_BODY_HEAD_MAX is whole in the row's head and
-// renders from it; one longer than RECALL_BODY_MAX shows as its pointer
-// whatever the body says; the rest are fetched together through memq get
-// --no-stamp, each under what is left of the window, and none is started
-// with under RECALL_FETCH_FLOOR_MS left. Every fetch carries --no-stamp, so
-// none writes a pointer outcome, and none can count as the session opening
-// the record. The names rendered join sess.recallShownNames, so the session
-// never sees one twice.
-//
-// The whole chain runs inside MEMQ_READ_TIMEOUT_MS from the spawn. The asks
-// see the window's remainder as their budget, raised by HOLD_HEADROOM_MS so
-// holdFor's headroom leaves them the remainder itself, and the hook's own
-// remaining budget binds them as it binds every hold; a hook with no share
-// left before the asks journals `budget` without asking. A chain past the
-// window at any of its gates journals a `budget` skip and injects nothing,
-// and so does a collecting spawn that failed with under MEMQ_TIMEOUT_SLACK_MS
-// of the window left, which is its timeout read either side of the bound.
-// Every rendering write rides a detached chain, so the prompt is not held
-// for it; the one decision a failed write earns is noteJournalWrite's.
-async function recallInjection(dp: any, promptText: string, mode: string, seq: number, budget: HookBudget): Promise<RecallInjection | null> {
-  const host = hostOf(dp);
-  const persona = sess.persona;
-  const session = sess.mySessionId;
-  const promptHead = firstCodePoints(promptText, PROMPT_HEAD_MAX);
-  const skip = (reason: string, skippedFor: number | null): null => {
-    void writeRendering(host, {
-      persona, session, promptSeq: seq, promptHead, procedure: null, procedureAbsent: null, namedFailed: null, shown: [], calls: {}, rendering: "",
-      skipped: reason, skippedFor,
-    })
-      .then((write) => noteJournalWrite(write, MEMORY_RECALL))
-      .catch(() => { /* the journal never rejects; a host that broke that loses one line */ });
-    return null;
+// The owed-work drains in hooks/drains.ts: the memory, ask brief and pair
+// drains with the memory record write, and the supervisor mailbox pass
+// further down. Each wrapper calls its body there over deps built at the
+// call, with `sess` itself as the session, so a body reads each field, the
+// three fork watches and the two pair-draft fields among them, at the moment
+// it reads it. The transcript
+// fork and the memory fallback's completion stay in this file as closures,
+// since test-personas/redactor-module-test.mjs reads every model call here
+// for its scrubText. So do the [ASK BRIEF] and [SUPERVISOR] submits, since
+// test-personas/injection-ledger.mjs sizes their frames and counts the
+// submitExpectedTurn call sites from this file's source.
+function drainsDepsOf(dp: any): DrainsDeps {
+  return {
+    session: sess,
+    host: hostOf(dp),
+    store: commonsStoreOf(dp),
+    cacheClock,
+    persist: (rollBackOnYield?: () => void) => persist(dp, rollBackOnYield),
+    kitMemq: (argv: string[], opts: KitMemqOptions) => kitMemq(dp, argv, opts),
+    fork: (prompt: string) => dp.model.fork({ prompt: scrubText(prompt).text }),
+    completeMemoryFallback: (prompt: string) => dp.model.complete({
+      model: "haiku",
+      prompt: scrubText(prompt).text,
+      maxTokens: 50,
+      timeoutMs: COMPLETE_TIMEOUT_MS,
+    }),
+    completionText,
+    noteCompletionShape,
+    pushFollowUpDecision,
+    callTool: (call: { tool: string; message: string }) => dp.tool.call(call),
+    submitAskBriefReprompt: (expectedTurns: ExpectedTurn[], brief: string) => submitAskBriefReprompt(dp, expectedTurns, brief),
+    appendLines: (path: string, lines: string[]) => appendLines(dp, path, lines),
+    submitSupervisorShutdown: (expectedTurns: ExpectedTurn[], rec: { id: string; text: string }) => submitSupervisorShutdown(dp, expectedTurns, rec),
   };
-  if (mode !== "shadow" || sess.memqStandDownUntil > Date.now()) return skip("stand-down", null);
-  if (sess.recallChainBusy !== null) return skip("chain-busy", sess.recallChainBusy.seq);
-  sess.recallChainBusy = { seq };
-  try {
-    const deadline = Date.now() + MEMQ_READ_TIMEOUT_MS;
-    const leftMs = (): number => deadline - Date.now();
-    // The hook's own figure, where its `next` carries one; a reader that
-    // throws or answers no number leaves the window's own bound.
-    const hookLeftMs = (): number => {
-      try {
-        const ms = budget.remainingMs();
-        return typeof ms === "number" && Number.isFinite(ms) ? ms : Infinity;
-      } catch {
-        return Infinity;
-      }
-    };
-    const chainBudget: HookBudget = { get live() { return budget.live; }, remainingMs: () => Math.min(hookLeftMs(), leftMs() + HOLD_HEADROOM_MS) };
-    const recall = await kitMemq(dp, [
-      "recall-candidates",
-      "--situation", firstCodePoints(promptText, MEMQ_SITUATION_MAX),
-      "--limit", MEMQ_RECALL_LIMIT,
-    ], { timeoutMs: MEMQ_READ_TIMEOUT_MS });
-    if (seq !== sess.recallPromptSeq) return skip("overtaken", sess.recallPromptSeq);
-    if (leftMs() <= 0 || (recall === null && leftMs() < MEMQ_TIMEOUT_SLACK_MS)) return skip("budget", null);
-    const procedure = procedureCandidatesOf(recall);
-    const asked = "rows" in procedure ? procedure.rows.slice(0, RECALL_ASK_MAX) : [];
-    if (asked.length > 0 && chainBudget.remainingMs() - HOLD_HEADROOM_MS <= 0) return skip("budget", null);
-    // liveAsk hands the stamp id over before its first await, so every ask
-    // has fired and every stamp is held before the registration below, ahead
-    // of any answer.
-    const asks = asked.map((c) => {
-      const held: { stampId: string | null } = { stampId: null };
-      const done = liveAsk(host, "prompt.submit", chainBudget, MEMORY_RECALL, MEMORY_RECALL, MEMORY_RECALL_OPTIONS, memoryRecallStateText(promptHead, c), mode, [MEMORY_RECALL], (id) => { held.stampId = id; });
-      return { c, stampId: held.stampId, done };
-    });
-    const registered = asks.filter((a): a is { c: RecallCandidate; stampId: string; done: Promise<LiveAskResult | null> } => a.stampId !== null);
-    sess.recallPending = { seq, candidates: registered.map((a) => ({ name: a.c.name, tier: a.c.tier, typeName: a.c.typeName, stampId: a.stampId })) };
-    const results = await Promise.all(asks.map((a) => a.done));
-    if (leftMs() <= 0) return skip("budget", null);
-    if (asked.length > 0 && results.every((r) => r === null || !("answer" in r))) return skip("stand-down", null);
-    const picked: RecallCandidate[] = [];
-    for (let i = 0; i < asked.length && picked.length < RECALL_SHOW_MAX; i += 1) {
-      const result = results[i];
-      if (result === null || !("answer" in result)) continue;
-      const show = result.answer.probabilities.show;
-      if (!(typeof show === "number" && show >= RECALL_SHOW_THRESHOLD)) continue;
-      if (sess.recallShownNames.has(asked[i].name.toLowerCase())) continue;
-      picked.push(asked[i]);
-    }
-    // A name off memq's record-name charset, or opening with a dash memq
-    // would read as a flag, is not fetched and renders as unfetched.
-    const fetchable = (c: RecallCandidate): boolean => MEMQ_NAME_CHARSET.test(c.name) && !c.name.startsWith("-");
-    const fetchBoundMs = leftMs();
-    const shown = await Promise.all(picked.map(async (c): Promise<{ c: RecallCandidate; body: string | null; length: number | null }> => {
-      if (c.bodyLength !== null && c.bodyLength <= RECALL_BODY_HEAD_MAX) return { c, body: c.bodyHead, length: c.bodyLength };
-      if (c.bodyLength !== null && c.bodyLength > RECALL_BODY_MAX) return { c, body: null, length: c.bodyLength };
-      if (fetchBoundMs < RECALL_FETCH_FLOOR_MS || !fetchable(c)) return { c, body: null, length: c.bodyLength };
-      const fetched = fetchedRecordOf(await kitMemq(dp, ["get", c.name, "--no-stamp"], { timeoutMs: fetchBoundMs }));
-      return fetched === null ? { c, body: null, length: c.bodyLength } : { c, body: fetched.body, length: fetched.length };
-    }));
-    if (leftMs() <= 0) return skip("budget", null);
-    const rendered = shown.map((s) => ({ name: s.c.name, ...recallRecordText(s.c, s.body, s.length) }));
-    const rendering = rendered.map((r) => r.text).join("\n\n");
-    const calls: Record<string, string> = Object.create(null);
-    for (const a of registered) calls[a.c.name] = a.stampId;
-    for (const r of rendered) sess.recallShownNames.add(r.name.toLowerCase());
-    // The rendering line rides a detached chain, as the asks' lines do, so the
-    // prompt is not held for it.
-    void writeRendering(host, {
-      persona,
-      session,
-      promptSeq: seq,
-      promptHead,
-      procedure: "rows" in procedure ? procedure.rows.map((r) => r.name) : null,
-      procedureAbsent: "absent" in procedure ? procedure.absent : null,
-      namedFailed: null,
-      shown: rendered.map((r) => ({ name: r.name, characters: r.text.length, whole: r.whole })),
-      calls,
-      rendering,
-      skipped: null,
-      skippedFor: null,
-    })
-      .then((write) => noteJournalWrite(write, MEMORY_RECALL))
-      .catch(() => { /* the journal never rejects; a host that broke that loses one line */ });
-    return rendered.length === 0 ? null : { rendering, names: rendered.map((r) => r.name) };
-  } finally {
-    if (sess.recallChainBusy !== null && sess.recallChainBusy.seq === seq) sess.recallChainBusy = null;
-  }
 }
 
-// Writes the last prompt's candidates their recall_acted outcome and opens
-// the next prompt's window: true where the session's own tool calls since
-// that prompt fetched the record through memq get without --no-stamp or
-// stamped it through memq touch --applied in the tier it was shown from, or
-// the goal-close check stamped it applied, false otherwise. Names are matched
-// without regard to case, as the goal-close check matches them, since memq
-// compares record names without case on Windows. A touch after this prompt
-// is in the next window and counts for the next prompt's candidates alone,
-// as a get is. Nothing here is awaited: each outcome rides shadowOutcome's
-// detached chain.
-function settleRecallOutcomes(dp: any): void {
-  const pending = sess.recallPending;
-  const fetched = sess.recallGetNames;
-  const applied = sess.recallAppliedNames;
-  const touches = sess.recallTouches;
-  sess.recallPending = null;
-  sess.recallGetNames = new Set();
-  sess.recallAppliedNames = new Set();
-  sess.recallTouches = [];
-  sess.recallPromptSeq += 1;
-  if (pending === null) return;
-  for (const c of pending.candidates) {
-    const name = c.name.toLowerCase();
-    const acted = fetched.has(name) || applied.has(name) || touches.some((t) => touchStampsCandidate(t, c));
-    shadowOutcome(hostOf(dp), c.stampId, "recall_acted", acted ? "true" : "false");
-  }
+// The [ASK BRIEF] re-prompt drainAskBriefOwed in hooks/drains.ts submits
+// through its deps where the reply tool threw: one plugin turn carrying the
+// brief, entered in the expected-turn list first. The brief's lines are
+// store-sourced text under a plugin label, so every one after the label is
+// quoted, as the re-raise quotes its questions.
+async function submitAskBriefReprompt(dp: any, expectedTurns: ExpectedTurn[], brief: string): Promise<SubmitOutcome> {
+  const askBriefText = quoteContinuationLines(`[ASK BRIEF] Send the decision brief below to the operator through the reply tool now, each line without its leading "> " and otherwise unchanged:\n${brief}`);
+  const askBriefEntry: ExpectedTurn = { kind: "plugin", text: askBriefText };
+  expectedTurns.push(askBriefEntry);
+  return await submitExpectedTurn(dp, expectedTurns, askBriefEntry);
 }
 
-// Whether one touch the session ran stamps a candidate: the names match
-// without case, and the touch's tier is the tier the candidate was shown
-// from. A touch with no tier flag stamps the project tier, --operator the
-// operator tier and --type the type tier, where --type=<type> must name the
-// candidate's type, without case, for a row that carried one; bare --type
-// stamps the project's declared type, which the module does not know, so it
-// matches any type-tier candidate. A candidate whose row named no known tier
-// has none to be shown from, so no touch is shown to land there and none
-// counts for it; a get of it still does. A touch memq refuses stamps nothing.
-function touchStampsCandidate(t: { name: string } & MemqTouchTier, c: { name: string; tier: RecallTier | null; typeName: string | null }): boolean {
-  if (t.tier === "refused" || t.name.toLowerCase() !== c.name.toLowerCase()) return false;
-  if (c.tier === null) return false;
-  if (t.tier !== c.tier) return false;
-  return t.tier !== "type" || t.namedType === null || c.typeName === null || t.namedType.toLowerCase() === c.typeName.toLowerCase();
-}
+function writeMemoryRecord(dp: any, ...args: AfterDeps<typeof writeMemoryRecordFromModule>) { return writeMemoryRecordFromModule(drainsDepsOf(dp), ...args); }
+function noteMemoryWrite(...args: AfterDeps<typeof noteMemoryWriteFromModule>): void { noteMemoryWriteFromModule({ session: sess }, ...args); }
+function noteMemoryOwedDropped(...args: AfterDeps<typeof noteMemoryOwedDroppedFromModule>): void { noteMemoryOwedDroppedFromModule({ session: sess }, ...args); }
+function drainMemoryOwed(dp: any, ...args: AfterDeps<typeof drainMemoryOwedFromModule>) { return drainMemoryOwedFromModule(drainsDepsOf(dp), ...args); }
+function drainAskBriefOwed(dp: any, ...args: AfterDeps<typeof drainAskBriefOwedFromModule>) { return drainAskBriefOwedFromModule(drainsDepsOf(dp), ...args); }
+function notePairDraftsDropped(...args: AfterDeps<typeof notePairDraftsDroppedFromModule>): void { notePairDraftsDroppedFromModule({ session: sess }, ...args); }
+function drainPairDraftOwed(dp: any, ...args: AfterDeps<typeof drainPairDraftOwedFromModule>) { return drainPairDraftOwedFromModule(drainsDepsOf(dp), ...args); }
 
-// The record names a shell command fetches through `memq get` without
-// `--no-stamp`: the name of each get memqVerbArgsOf finds, only where
-// `--no-stamp` is not among the words read, so the module's own fetches could
-// never match even if they reached a tool call, and a get memq refuses names
-// nothing. Exported for the test suite.
-export function recallGetNamesOf(command: string): string[] {
-  return memqGetsOf(command).filter((g) => g.tier !== "refused").map((g) => g.name);
-}
-
-// Which tier a `memq get` reads, from its flags as memq's get verb reads
-// them: `--operator` the operator tier; bare `--type` the declared type's
-// tier and `--type=<type>` the type named; no tier flag the nearest tier
-// holding the name, project, then type, then operator; and a get memq refuses
-// reads nothing.
-type MemqGetTier = { tier: "nearest" | "operator" | "refused" } | { tier: "type"; namedType: string | null };
-
-// Which tier a `memq touch` stamps, from its flags as memq's touch verb reads
-// them: `--operator` the operator tier; bare `--type` the declared type's
-// tier and `--type=<type>` the type named; no tier flag the project tier;
-// and a touch memq refuses stamps nothing.
-type MemqTouchTier = { tier: "project" | "operator" | "refused" } | { tier: "type"; namedType: string | null };
-
-// The fetches recallGetNamesOf reads, each with the tier it reads. A get
-// carrying `--no-stamp` anywhere among its words is not a fetch.
-function memqGetsOf(command: string): Array<{ name: string } & MemqGetTier> {
-  const out: Array<{ name: string } & MemqGetTier> = [];
-  for (const rest of memqVerbArgsOf(command, "get")) {
-    if (rest.includes("--no-stamp")) continue;
-    const read = memqNameAndTierOf(rest, []);
-    if (read === null) continue;
-    out.push(read.tier === "unflagged" ? { name: read.name, tier: "nearest" } : read);
-  }
-  return out;
-}
-
-// The stamps a shell command writes through `memq touch --applied`, each
-// with the tier it stamps. A touch without `--applied` is one memq refuses
-// (memq.js cmdTouch, "touch needs --applied"), so it is in the refused class
-// with the forms memqNameAndTierOf refuses.
-function memqTouchesOf(command: string): Array<{ name: string } & MemqTouchTier> {
-  const out: Array<{ name: string } & MemqTouchTier> = [];
-  for (const rest of memqVerbArgsOf(command, "touch")) {
-    const read = memqNameAndTierOf(rest, ["--applied"]);
-    if (read === null) continue;
-    out.push(!rest.includes("--applied") || read.tier === "refused" ? { name: read.name, tier: "refused" }
-      : read.tier === "unflagged" ? { name: read.name, tier: "project" }
-      : read);
-  }
-  return out;
-}
-
-// The argument words of each `memq <verb>` a shell command runs. The command
-// is cut into segments at the shell operators `;`, `&`, `|` and a line break
-// outside single or double quotes, and a segment runs the verb only where its
-// own command is memq, memq.js or node running a memq.js, followed by the
-// verb's word. A `memq <verb>` inside a quoted string, an echo or a grep
-// pattern is text, not a run.
-function memqVerbArgsOf(command: string, verb: string): string[][] {
-  const segments: string[] = [];
-  let current = "";
-  let quote: string | null = null;
-  for (const ch of command) {
-    if (quote !== null) {
-      current += ch;
-      if (ch === quote) quote = null;
-    } else if (ch === "'" || ch === '"') {
-      quote = ch;
-      current += ch;
-    } else if (ch === ";" || ch === "&" || ch === "|" || ch === "\n" || ch === "\r") {
-      segments.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  segments.push(current);
-  const out: string[][] = [];
-  for (const segment of segments) {
-    const words = segment.trim().split(/\s+/).filter((w) => w !== "");
-    const isMemq = (w: string) => w === "memq" || /(^|[\\/])memq\.js$/.test(w);
-    let at = -1;
-    if (words.length > 0 && isMemq(words[0])) at = 1;
-    else if (words.length > 1 && words[0] === "node" && isMemq(words[1])) at = 2;
-    if (at < 0 || words[at] !== verb) continue;
-    out.push(words.slice(at + 1));
-  }
-  return out;
-}
-
-// The record name and tier flags among one get's or touch's argument words,
-// read as memq's get and touch verbs read them: the name is the first bare
-// word, with its quotes removed, and null where there is none; `--operator`
-// names the operator tier; bare `--type` the declared type's tier and
-// `--type=<type>` the type named; neither flag is `unflagged`, for the verb
-// to read as its own default; and the verb refuses, for both tier flags,
-// `--type` given twice, an option outside `known` and the tier flags, or a
-// second bare word after the name. A redirection such as `2>/dev/null` is the
-// shell's and never a bare word.
-type MemqNameAndTier =
-  | { name: string; tier: "unflagged" }
-  | { name: string; tier: "operator" }
-  | { name: string; tier: "refused" }
-  | { name: string; tier: "type"; namedType: string | null };
-function memqNameAndTierOf(rest: string[], known: ReadonlyArray<string>): MemqNameAndTier | null {
-  const bare = rest.filter((w) => !w.startsWith("-") && !/^\d*[<>]/.test(w));
-  const name = bare[0];
-  if (name === undefined) return null;
-  const types = rest.filter((w) => w === "--type" || w.startsWith("--type="));
-  const operator = rest.includes("--operator");
-  const unknown = rest.some((w) => w.startsWith("--") && w !== "--operator" && w !== "--type" && !w.startsWith("--type=") && !known.includes(w));
-  const tier = unknown || bare.length > 1 || types.length > 1 || (types.length === 1 && operator) ? { tier: "refused" as const }
-    : operator ? { tier: "operator" as const }
-    : types.length === 1 ? { tier: "type" as const, namedType: types[0] === "--type" ? null : types[0].slice("--type=".length) }
-    : { tier: "unflagged" as const };
-  return { name: name.replace(/^["']|["']$/g, ""), ...tier };
-}
-
-// --- The memory-recognition question: the index, the match, the gate and the outcome ---
-//
-// At session.start the module reads the memory snapshot's index.json and
-// builds the index of `cmd:` triggers hooks/recognition.ts describes, in the
-// tiers the memory-recognition nudge reads for the launch directory. After each
-// main-loop Bash or PowerShell call has run, its command is matched against
-// that index inside the hook's own time, memory-recognition is asked live
-// once a session of each record it matched, and within the session's next
-// three tool calls a memq get of the record in its tier writes nudge_acted
-// true, the third writing false otherwise. The question's state carries the matched trigger
-// and the record, and nothing of the command. The tool call awaits the asks,
-// each under its hold, before its nudge is claimed, and awaits as well an
-// ask another call still holds on a record this call matched. An answer
-// whose `skip` probability is at least RECOGNITION_SKIP_THRESHOLD withholds
-// that record's `cmd:` pointer at every tool-call boundary for the rest of
-// the session, its pointers under other trigger kinds and anchors kept; any
-// other ending, a `nudge` answer, a hold that ran out, a failed call or no
-// ask at all, leaves the nudge as it would be with no gate. The answer reaches
-// nothing else: not the tool's result, a branch or a decision action. The
-// nudge itself, read from the same snapshot, is the memory-recognition nudge
-// section's below.
-
-// The `skip` probability at or above which a record's tool-call pointer is
-// withheld.
-const RECOGNITION_SKIP_THRESHOLD = 0.5;
-
-// Where the snapshot sits under the home, memory-database.js's
-// snapshotIndexPath.
-const RECOGNITION_SNAPSHOT_FILE = ".claude/memory-snapshot/index.json";
-
-// How often a tool call may start a check of the snapshot's size and mtime.
-const RECOGNITION_CHECK_EVERY_MS = 60_000;
-
-// The largest snapshot read, the engine's own $.fs.read ceiling, so a larger
-// file is passed over on its stat rather than on a rejected read.
-const RECOGNITION_READ_MAX = 4 * 1024 * 1024;
-
-// The memory-recognition question's state, one field to a line under the
-// catalog's field names, every value through kaizenLine for
-// memoryRecallStateText's reason: the matched trigger, the record's name, and
-// its description cut at PROMPT_HEAD_MAX, the head the recall state's prompt
-// takes. The catalog has no field for the command, and none is written.
-function memoryRecognitionStateText(m: RecognitionMatch): string {
-  return `${MEMORY_RECOGNITION_STATE_TRIGGER}: ${kaizenLine(m.trigger)}\n` +
-    `${MEMORY_RECOGNITION_STATE_RECORD}: ${kaizenLine(m.name)}\n` +
-    `${MEMORY_RECOGNITION_STATE_DESCRIPTION}: ${kaizenLine(firstCodePoints(m.description, PROMPT_HEAD_MAX))}`;
-}
-
-// The index's scope, from one run of RECOGNITION_SCOPE_SCRIPT in the launch
-// directory through kitNodeRun, so the kit's own resolvers answer under the
-// environment every memq spawn of this session inherits. A run that did not
-// start, ran past its bound, exited other than 0 or printed other than the
-// script's one object did not answer, and gives null.
-async function recognitionScopeRead(dp: any): Promise<RecognitionScope | null> {
-  const run = await kitNodeRun(dp, (kitRoot) => [
-    "-e", RECOGNITION_SCOPE_SCRIPT, `${kitRoot}/scripts/memq.js`, `${kitRoot}/scripts/memory-database.js`,
-  ], MEMQ_READ_TIMEOUT_MS);
-  if ("cause" in run || run.ran.exitCode !== 0) return null;
-  return recognitionScopeOf(run.ran.stdout);
-}
-
-// One check of the snapshot. Where `mayRunScope` is set and the session holds
-// no scope, the scope program runs first, before the snapshot is looked at,
-// so the session holds a scope whatever state the snapshot is in. Then a
-// size and mtime equal to the index's stamp leave the
-// index as it is, and otherwise the file is read and both indexes, the
-// ask's and the nudge's, rebuilt from that one read. session.start's load
-// and prompt.submit's retry set `mayRunScope`: a check a tool call starts
-// reads the scope the session holds and never spawns the scope program,
-// since the only child a call spawns is a formatter or a stamp. A scope that
-// answered is kept for the session, one that does not serve included. A run
-// that did not answer leaves the scope unread, and the next run starts no
-// sooner than RECOGNITION_SCOPE_RETRY_MS after it started, so a failing host
-// sees at most one run per back-off. A snapshot that is absent, not a file,
-// past RECOGNITION_READ_MAX, unreadable or of another version, an unread
-// scope, and a scope that does not serve, each leave an empty index and no
-// stamp, silently, so the next check stats the file again. Never rejects.
-async function recognitionLoad(dp: any, mayRunScope: boolean): Promise<void> {
-  const r = sess.recognition;
-  r.checkedAt = Date.now();
-  const clear = (): void => {
-    r.index = [];
-    r.nudge = [];
-    r.stamp = null;
+// The recall chain and the memory-recognition question in hooks/recall.ts.
+// Each wrapper calls its body there over deps built at the call, with `sess`
+// itself as the session, so a body reads each field at the moment it reads
+// it. The snapshot check in flight is sess.recognition.loading, which
+// recognitionLoadSettled below reads.
+function recallDepsOf(dp: any): RecallDeps {
+  return {
+    session: sess,
+    host: hostOf(dp),
+    kitMemq: (argv: string[], opts: KitMemqOptions) => kitMemq(dp, argv, opts),
+    kitNodeRun: (argvOf: (kitRoot: string) => string[], timeoutMs: number) => kitNodeRun(dp, argvOf, timeoutMs),
+    statFile: (path: string) => dp.fs.stat(path),
+    liveAsk,
+    shadowOutcome,
+    noteJournalWrite,
   };
-  try {
-    if (mayRunScope) await recognitionScopeEnsured(dp);
-    const home: unknown = await hostOf(dp).getHome();
-    if (typeof home !== "string" || home.trim().length === 0) return clear();
-    const file = `${home.trim().replace(/[/\\]+$/, "")}/${RECOGNITION_SNAPSHOT_FILE}`;
-    const stat = await dp.fs.stat(file);
-    if (stat === null || typeof stat !== "object" || stat.kind !== "file") return clear();
-    const size = Number(stat.size);
-    const mtimeMs = Number(stat.mtimeMs);
-    const stamp = `${size}:${Math.round(mtimeMs)}`;
-    if (stamp === r.stamp) return;
-    if (!Number.isFinite(size) || size > RECOGNITION_READ_MAX) return clear();
-    const scope = r.scope;
-    if (scope === null || !scope.serves) return clear();
-    const text = String(await dp.fs.read(file));
-    const index = recognitionIndexOf(text, scope);
-    const nudge = nudgeIndexOf(text, scope);
-    if (index === null || nudge === null) return clear();
-    r.index = index;
-    r.nudge = nudge;
-    r.stamp = stamp;
-  } catch {
-    clear();
-  }
 }
-
-// Starts a check of the snapshot unless one is in flight, awaited by nothing
-// where it starts. `mayRunScope` is session.start's and prompt.submit's
-// alone, recognitionLoad's reason.
-function startRecognitionLoad(dp: any, mayRunScope: boolean): void {
-  const r = sess.recognition;
-  if (r.loading !== null) return;
-  r.loading = recognitionLoad(dp, mayRunScope).finally(() => { r.loading = null; });
-}
-
-// prompt.submit's recovery from a scope run that did not answer: where the
-// session holds no scope and RECOGNITION_SCOPE_RETRY_MS has passed since the
-// last scope run started, a check that may run the scope program starts,
-// awaited by nothing here. A prompt is not a tool call, so no call spawns
-// the scope program, and a failing host sees at most one run per back-off.
-function recognitionScopeRetry(dp: any): void {
-  const r = sess.recognition;
-  if (r.scope !== null) return;
-  if (r.scopeRunAt !== null && Date.now() - r.scopeRunAt < RECOGNITION_SCOPE_RETRY_MS) return;
-  startRecognitionLoad(dp, true);
-}
+function recallInjection(dp: any, ...args: AfterDeps<typeof recallInjectionFromModule>) { return recallInjectionFromModule(recallDepsOf(dp), ...args); }
+function settleRecallOutcomes(dp: any, ...args: AfterDeps<typeof settleRecallOutcomesFromModule>): void { settleRecallOutcomesFromModule(recallDepsOf(dp), ...args); }
+function startRecognitionLoad(dp: any, ...args: AfterDeps<typeof startRecognitionLoadFromModule>): void { startRecognitionLoadFromModule(recallDepsOf(dp), ...args); }
+function recognitionScopeRetry(dp: any, ...args: AfterDeps<typeof recognitionScopeRetryFromModule>): void { recognitionScopeRetryFromModule(recallDepsOf(dp), ...args); }
+function recognitionAsk(dp: any, ...args: AfterDeps<typeof recognitionAskFromModule>) { return recognitionAskFromModule(recallDepsOf(dp), ...args); }
+function settleRecognitionOutcomes(dp: any, ...args: AfterDeps<typeof settleRecognitionOutcomesFromModule>): void { settleRecognitionOutcomesFromModule(recallDepsOf(dp), ...args); }
 
 // The check in flight, or a settled promise where none is. Exported for the
 // test suite, which waits on it rather than on a clock.
 export function recognitionLoadSettled(): Promise<void> {
   return sess.recognition.loading ?? Promise.resolve();
-}
-
-// The after side of one main-loop tool call: where a minute has passed since
-// the last check, a new one starts; then the command is matched against the
-// index as it stands, and memory-recognition is asked live, through liveAsk
-// with the question named live at this one site, of each matched record not
-// yet asked about this session. The asks fire together, and each opens its
-// record's nudge_acted window as it fires, whatever it then answers. A
-// matched record already asked whose ask another call still holds in
-// sess.recognitionAsking is awaited too. Settles once every one of those
-// has: a record answered skip at or above RECOGNITION_SKIP_THRESHOLD joins
-// sess.recognitionSkipped, and a record answered otherwise, or whose ask ran
-// out its hold or failed, joins nothing. `mode` off checks nothing, asks
-// nothing and writes nothing, liveAsk's rule.
-async function recognitionAsk(dp: any, tool: unknown, command: unknown, mode: string, budget: HookBudget): Promise<void> {
-  if (mode !== "shadow") return;
-  if (Date.now() - sess.recognition.checkedAt >= RECOGNITION_CHECK_EVERY_MS) startRecognitionLoad(dp, false);
-  const matched = recognitionMatches(sess.recognition.index, tool, command);
-  // Read before this call's own asks start, so it waits on other calls' asks
-  // alone.
-  const waits = new Set<Promise<void>>();
-  for (const m of matched) {
-    const key = recognitionKeyOf(m);
-    const asking = sess.recognitionAsked.has(key) ? sess.recognitionAsking.get(key) : undefined;
-    if (asking !== undefined) waits.add(asking);
-  }
-  const matches = matched.filter((m) => !sess.recognitionAsked.has(recognitionKeyOf(m)));
-  if (matches.length === 0 && waits.size === 0) return;
-  const host = hostOf(dp);
-  // liveAsk hands the stamp id over before its first await, so each record is
-  // marked asked, and its window opened, before any answer comes back. The
-  // record's sess.recognitionAsking entry is set in the same synchronous
-  // stretch, and settles once its answer has been read, never rejecting.
-  const asks = matches.map((m) => {
-    const key = recognitionKeyOf(m);
-    const ask = liveAsk(host, "tool.call", budget, MEMORY_RECOGNITION, MEMORY_RECOGNITION, MEMORY_RECOGNITION_OPTIONS, memoryRecognitionStateText(m), mode, [MEMORY_RECOGNITION], (stampId) => {
-      if (stampId === null) return;
-      sess.recognitionAsked.add(key);
-      sess.recognitionPending.push({ tier: m.tier, name: m.name.toLowerCase(), stampId, left: RECOGNITION_ACT_WINDOW });
-    }).then((result) => {
-      if (result === null || !("answer" in result)) return;
-      const skip = result.answer.probabilities.skip;
-      if (typeof skip === "number" && skip >= RECOGNITION_SKIP_THRESHOLD) sess.recognitionSkipped.add(key);
-    });
-    const settled = ask.then(() => undefined, () => undefined);
-    sess.recognitionAsking.set(key, settled);
-    void settled.then(() => {
-      if (sess.recognitionAsking.get(key) === settled) sess.recognitionAsking.delete(key);
-    });
-    return ask;
-  });
-  await Promise.allSettled([...asks, ...waits]);
-}
-
-// The tier one `memq get` reads, for the record of that lowercased name, or
-// null where it reads none the session knows of. A flag names its tier, and
-// `--type=<type>` the type tier only where it names the declared type, the
-// one the index reads. A bare get reads the nearest tier holding the name,
-// read here from the tiers the session's index and its open windows hold it
-// in. memq's own walk reads a journal key and a pending memory before the
-// project tier, and a nearer record carrying no `cmd:` trigger is not in the
-// index, so a get any of those answers is credited to the nearest tier the
-// index holds the name in.
-function recognitionTierOfGet(g: { name: string } & MemqGetTier): RecognitionTier | null {
-  if (g.tier === "refused") return null;
-  if (g.tier === "operator") return "operator";
-  if (g.tier === "type") return g.namedType === null || g.namedType === sess.recognition.scope?.projectType ? "type" : null;
-  const name = g.name.toLowerCase();
-  const holding = new Set<RecognitionTier>([
-    ...sess.recognition.index.filter((r) => r.name.toLowerCase() === name).map((r) => r.tier),
-    ...sess.recognitionPending.filter((p) => p.name === name).map((p) => p.tier),
-  ]);
-  return (["project", "type", "operator"] as const).find((t) => holding.has(t)) ?? null;
-}
-
-// One main-loop tool call counted against every open nudge_acted window:
-// a record the call's command fetches through memq get without --no-stamp,
-// in the tier that get reads, writes true, and a window this call closes
-// without one writes false. Names match without case, as the recall outcome
-// matches them.
-function settleRecognitionOutcomes(dp: any, fetches: ReadonlyArray<{ name: string } & MemqGetTier>): void {
-  if (sess.recognitionPending.length === 0) return;
-  const credited = new Set<string>();
-  for (const g of fetches) {
-    const tier = recognitionTierOfGet(g);
-    if (tier !== null) credited.add(recognitionKeyOf({ tier, name: g.name.toLowerCase() }));
-  }
-  const open: Array<{ tier: RecognitionTier; name: string; stampId: string; left: number }> = [];
-  for (const p of sess.recognitionPending) {
-    if (credited.has(recognitionKeyOf(p))) shadowOutcome(hostOf(dp), p.stampId, "nudge_acted", "true");
-    else if (p.left <= 1) shadowOutcome(hostOf(dp), p.stampId, "nudge_acted", "false");
-    else open.push({ ...p, left: p.left - 1 });
-  }
-  sess.recognitionPending = open;
 }
 
 // --- The memory-recognition nudge ---
@@ -6062,7 +2010,8 @@ function settleRecognitionOutcomes(dp: any, fetches: ReadonlyArray<{ name: strin
 // prompt carries; and at a subagent's start, appended to its prompt. It runs
 // in every arming tier whatever Jev's mode, and stands down where
 // KIT_EXTERNAL_ENGINE is "1", as every kit nudge does under an external
-// engine. Its index is the one recognitionLoad builds, checked again where a
+// engine. Its index is the one recognitionLoad in hooks/recall.ts builds,
+// checked again where a
 // minute has passed since the last check. Its dedup marker is the session's
 // $.state value recognitionNudgeMarker, and each record it points at writes
 // one recognition_nudge event line. Every failure points at nothing. At a
@@ -6090,18 +2039,6 @@ async function nudgeEngineExternal(dp: any): Promise<boolean> {
   }
 }
 
-// The scope the session holds, or one run of the scope program where it
-// holds none and the last run started at least RECOGNITION_SCOPE_RETRY_MS
-// ago, or null.
-async function recognitionScopeEnsured(dp: any): Promise<RecognitionScope | null> {
-  const r = sess.recognition;
-  if (r.scope !== null) return r.scope;
-  if (r.scopeRunAt !== null && Date.now() - r.scopeRunAt < RECOGNITION_SCOPE_RETRY_MS) return null;
-  r.scopeRunAt = Date.now();
-  r.scope = await recognitionScopeRead(dp);
-  return r.scope;
-}
-
 // Settles the indexes: a check that runs no scope program starts where a
 // minute has passed since the last one, and the check in flight, if any,
 // session.start's included, is awaited.
@@ -6119,11 +2056,6 @@ async function nudgeMarkerRead(dp: any): Promise<NudgeMarker | null> {
     return null;
   }
 }
-
-// One boundary's matched hits, read against the marker as it stands, with
-// what claiming them reads. Null where the nudge stands down or nothing
-// matched. Writes nothing.
-type NudgePrepared = { boundary: NudgeBoundary; subjects: NudgeSubjects; hits: NudgeHit[]; scope: RecognitionScope };
 
 async function nudgePrepare(dp: any, payload: NudgePayload, boundary: NudgeBoundary): Promise<NudgePrepared | null> {
   if (await nudgeEngineExternal(dp)) return null;
@@ -6166,14 +2098,6 @@ function nudgeCommit(dp: any, prepared: NudgePrepared): Promise<string | null> {
     }
     return bracketSafeText(nudgeText(claim.claimed, prepared.boundary, nudgeElisionsOf(prepared.scope)));
   });
-}
-
-// One tool call and its result as the nudge's readers take them: the tool,
-// its arguments, its result where core gave one and its text otherwise, and
-// its error flag.
-function nudgeToolPayload(e: GuardCall, r: GuardResult): NudgePayload {
-  const { tool, tool_use_id: _callId, agentId: _agentId, ...input } = e;
-  return { tool_name: tool, tool_input: input, tool_response: r.result !== undefined ? r.result : r.text, is_error: r.isError === true };
 }
 
 // A tool-call boundary's prepared hits less those the recognition gate
@@ -6253,17 +2177,46 @@ async function spawnNudge(dp: any, e: AgentSpawnInput): Promise<string | null> {
 
 // The agent.spawn hook's work, in every arming tier: the subagent starts
 // with its pointer text appended to its prompt after a blank line, or with
-// its prompt as it came where it earns none or the match fails.
-async function spawnWithNudge(dp: any, e: AgentSpawnInput, next: Next<"agent.spawn">): Promise<AgentSpawnResult | { deny: string }> {
+// its prompt as it came where it earns none or the match fails. A started
+// subagent is recorded by spawnStarted.
+async function spawnWithNudge(dp: any, e: AgentSpawnInput, next: Next<"agent.spawn">, spawnTypes: SpawnTypes): Promise<AgentSpawnResult | { deny: string }> {
   let text: string | null = null;
   try {
     text = await spawnNudge(dp, e);
   } catch {
     text = null;
   }
-  return next(text === null ? e : { ...e, prompt: e.prompt + "\n\n" + text });
+  const down = text === null ? e : { ...e, prompt: e.prompt + "\n\n" + text };
+  if (!redactorOn) return spawnStarted(dp, e.subagentType, await next(down), spawnTypes);
+  // The redactor's scrub; a scan that throws starts no subagent.
+  let scrubbed: AgentSpawnInput;
+  try { scrubbed = scrubSpawn(down, next.budget.remainingMs); } catch { return SPAWN_WITHHELD; }
+  return spawnStarted(dp, e.subagentType, await next(scrubbed), spawnTypes);
 }
 
+// A spawn's result, answered as it came: where next started a subagent, its
+// id maps to `subagentType` in the register call's map and one debug-log
+// line names both. A deny or a withheld spawn started none and records nothing.
+function spawnStarted(dp: any, subagentType: string, result: AgentSpawnResult | { deny: string }, spawnTypes: SpawnTypes): AgentSpawnResult | { deny: string } {
+  const agentId = recordSpawnType(spawnTypes, result, subagentType);
+  if (agentId !== null) {
+    try { dp.ui.log(spawnLogLine(subagentType, agentId), { to: "debug" }); } catch { /* non-fatal */ }
+  }
+  return result;
+}
+
+// Moves the distillates a persona's JSON still holds into the kit's memory
+// store, once, wherever this session becomes the persona's owner: the
+// session.start claim, agentic_identity and the heartbeat tick's reader
+// promotion. Every entry whose source is worker,
+// distilled or user is written in order through writeMemoryRecord under its
+// own source, and leaves the JSON on a write or on the store already holding
+// its name. Any other outcome leaves it for the next start. A write that
+// memq never ran to an exit ends the pass and counts the rest as left, so a
+// host that is down costs the start one bound rather than one per entry.
+// Self-review lessons stay. One memory_migrated decision names the counts
+// wherever there was a candidate, and the state is saved where any entry
+// left the JSON.
 async function migrateLegacyMemories(dp: any): Promise<void> {
   const candidates = sess.state.memory.filter((m) => m.source === "worker" || m.source === "distilled" || m.source === "user");
   if (candidates.length === 0) return;
@@ -6297,30 +2250,6 @@ async function migrateLegacyMemories(dp: any): Promise<void> {
 // keeps now that distillates live in the kit's memory store.
 function selfReviewLessonCount(): number {
   return sess.state.memory.filter((m) => m.source === "self-review").length;
-}
-
-// How long bin/restart-recap.mjs may run before $.process.run kills it and
-// rejects. The prompt.submit hook has ten seconds in all, and the script reads
-// bounded tails of at most two transcripts, so five seconds is its ceiling.
-const RECAP_TIMEOUT_MS = 5_000;
-// The automatic recap's gate. The previous session's last record must be at
-// most RECAP_RECENT_MS old, and either the store holds an active goal or the
-// operator last wrote at most RECAP_OPERATOR_MS ago. A launch after a parked
-// night, or after a stretch with no goal and no operator, carries no block.
-const RECAP_RECENT_MS = 24 * 60 * 60_000;
-const RECAP_OPERATOR_MS = 6 * 60 * 60_000;
-
-// A header time as epoch milliseconds, or null where it is absent or does not
-// parse, which fails whichever window reads it.
-function recapTimeOf(value: unknown): number | null {
-  if (typeof value !== "string") return null;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
-}
-
-// An age in whole hours, for a decision line.
-function recapAgeText(ms: number | null, now: number): string {
-  return ms === null ? "unknown" : `${Math.round((now - ms) / 3_600_000)} hours ago`;
 }
 
 // The [RESTART RECAP] block for this session's priming turn, or null. Runs
@@ -6406,27 +2335,6 @@ async function restartRecapBlock(dp: any): Promise<string | null> {
   return recapFrame + "\n" + digest;
 }
 
-// Item 5 (Bounded store): the one append-only rollover log every capped
-// store writes to when something falls off its window - the commons
-// store's closed inbox/reply records (enforceChannelWindow and
-// sweepExpiredRecords) and the persona file's own decision log and memory
-// cap (persist(), below). Same one-JSON-object-per-line rule as the yield
-// log. The engine offers no append, so an append reads the file whole and
-// writes it back whole, and the engine refuses a read or a write over
-// 4,194,304 bytes: the typings state the read bound, and the write bound is
-// the refusal `$.fs.write` returns. So the log is a series of segments,
-// `.agentic-channel.0001.jsonl` and up: an append lands in the
-// highest-numbered one until that file plus the batch would pass
-// CHANNEL_SEGMENT_MAX_BYTES, and then opens the next number. The bound sits
-// far under the engine's cap because each append rewrites its whole segment.
-// A work directory can hold a `.agentic-channel.jsonl` from before the
-// segments; its name carries no number, so the pattern never selects it and
-// nothing writes it again.
-const CHANNEL_SEGMENT_PREFIX = ".agentic-channel.";
-const CHANNEL_SEGMENT_SUFFIX = ".jsonl";
-const CHANNEL_SEGMENT_PATTERN = /^\.agentic-channel\.(\d{4,})\.jsonl$/;
-const CHANNEL_SEGMENT_MAX_BYTES = 1_048_576;
-const channelSegmentPath = (n: number): string => `${CHANNEL_SEGMENT_PREFIX}${String(n).padStart(4, "0")}${CHANNEL_SEGMENT_SUFFIX}`;
 // The line session.compact puts ahead of the kept launch instructions in the
 // message it adds after a compaction's summary. It is a named literal of its
 // own so the injection ledger can size it.
@@ -6644,170 +2552,19 @@ const liveCommonsHolderOf = async (dp: any, staleAfterMs: number): Promise<strin
   }
 };
 
-// --- The supervisor mailbox ---
-//
-// bin/supervise.sh names one mailbox per run directory, <rundir>/mailbox.jsonl,
-// and the ack file beside it, <rundir>/mailbox.ack.jsonl, and hands the first
-// to this plugin as the supervisorMailbox option. The supervisor is the
-// mailbox's only writer and this plugin the ack file's. Each mailbox line is
-// one JSON object { id, kind, at, text } with kind probe or shutdown.
-
-// The ack file beside a mailbox: mailbox.jsonl reads mailbox.ack.jsonl.
-function supervisorAckPathOf(mailboxPath: string): string {
-  return `${mailboxPath.replace(/\.jsonl$/, "")}.ack.jsonl`;
+// The supervisor mailbox pass, drainSupervisorMailbox in hooks/drains.ts,
+// over drainsDepsOf's deps, and the [SUPERVISOR] turn it submits through
+// them for the shutdown record a pass delivers: one plugin turn opening
+// [SUPERVISOR id=<id>] followed by the record's text, entered in the
+// expected-turn list first. The pass writes the record's delivered line
+// before it calls this.
+async function submitSupervisorShutdown(dp: any, expectedTurns: ExpectedTurn[], rec: { id: string; text: string }): Promise<SubmitOutcome> {
+  const shutdownText = `[SUPERVISOR id=${rec.id}] ${quoteContinuationLines(rec.text)}`;
+  const shutdownEntry: ExpectedTurn = { kind: "plugin", text: shutdownText };
+  expectedTurns.push(shutdownEntry);
+  return await submitExpectedTurn(dp, expectedTurns, shutdownEntry);
 }
-
-type SupervisorMailboxRecord = { id: string; kind: "probe" | "shutdown"; at: number; text: string };
-
-// One mailbox line read as a record, or the reason it is not one. The id and
-// the text are held to the rule the inbox drain holds a record to
-// (deliveryRecordProblem), since the id is spliced into the [SUPERVISOR id=]
-// label and the text is submitted as a turn.
-function parseSupervisorMailboxLine(line: string): SupervisorMailboxRecord | { problem: string } {
-  let parsed: unknown;
-  try { parsed = JSON.parse(line); } catch { return { problem: "is not JSON" }; }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { problem: "is not a JSON object" };
-  const o = parsed as Record<string, unknown>;
-  for (const field of ["id", "kind", "at", "text"]) {
-    if (!(field in o)) return { problem: `lacks the ${field} field` };
-  }
-  if (o.kind !== "probe" && o.kind !== "shutdown") return { problem: `has kind ${JSON.stringify(o.kind).slice(0, 40)}, outside probe and shutdown` };
-  if (typeof o.at !== "number" || !Number.isFinite(o.at)) return { problem: "has an at that is not a number" };
-  const recordProblem = deliveryRecordProblem({ id: o.id, text: o.text });
-  if (recordProblem !== null) return { problem: recordProblem };
-  return { id: o.id as string, kind: o.kind, at: o.at, text: o.text as string };
-}
-
-// One controller tick's pass over the mailbox. A line whose id is already in
-// the ack file is passed over, so no record is acted on twice. A probe gets an
-// ack line and spends no turn, during a long turn as between turns. The first
-// shutdown gets a delivered line, and then one turn opening
-// [SUPERVISOR id=<id>] followed by the record's text, submitted through the
-// expected-turn path; the pass ends there, so one tick delivers at most one
-// shutdown. A shutdown read while a turn is open, by `turnOpen` at the
-// moment the line is reached, is passed over with the line neither
-// acknowledged nor delivered, and the pass goes on to the probes after it: a
-// turn submitted into an open turn is queued rather than answered, so the
-// record stays in the mailbox for the first idle tick's pass, and no state
-// is kept between the two. The ack line is
-// written before the submit, and a pass that cannot read or write the ack
-// file acts on nothing, so a record can never be delivered without the line
-// that keeps it from being delivered again; a submit that opens no turn adds
-// a failed line beside it. A line that is not a record is never acknowledged,
-// and is logged once per session under the key `skipped` holds. A missing,
-// empty or unreadable mailbox is a pass that does nothing. Nothing here
-// throws. Top level because it takes `dp`.
-async function drainSupervisorMailbox(
-  dp: any,
-  mailboxPath: string,
-  expectedTurns: ExpectedTurn[],
-  skipped: Set<string>,
-  turnOpen: () => boolean,
-): Promise<{ delivered: boolean; logged: boolean }> {
-  const outcome = { delivered: false, logged: false };
-  let mailboxText: string;
-  let ackText = "";
-  const ackPath = supervisorAckPathOf(mailboxPath);
-  try {
-    if (!(await dp.fs.exists(mailboxPath))) return outcome;
-    mailboxText = String(await dp.fs.read(mailboxPath));
-    // An empty mailbox is the healthy steady state, and needs no ack read.
-    if (mailboxText.trim() === "") return outcome;
-    if (await dp.fs.exists(ackPath)) ackText = String(await dp.fs.read(ackPath));
-  } catch {
-    return outcome;
-  }
-  const handled = new Set<string>();
-  for (const ackLine of ackText.split("\n")) {
-    if (ackLine.trim() === "") continue;
-    try {
-      const a: unknown = JSON.parse(ackLine);
-      if (a !== null && typeof a === "object" && typeof (a as { id?: unknown }).id === "string") handled.add((a as { id: string }).id);
-    } catch { /* a line this plugin did not write whole acknowledges nothing */ }
-  }
-  // New ack lines are appended through appendLines, the one JSONL append rule
-  // the plugin's logs share, which reads the file again immediately before its
-  // write, so a line already in the file is kept however stale this pass's
-  // own reading is. $.fs has no append of its own, so the write is still the
-  // whole file.
-  const newAcks: string[] = [];
-  const writeAcks = async (): Promise<boolean> => {
-    if (newAcks.length === 0) return true;
-    try {
-      await appendLines(dp, ackPath, newAcks.splice(0));
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  // The supervisor appends each record whole with its newline, so a mailbox
-  // that does not end in one has its last line still being written. That line
-  // is left for the next pass, which reads it whole, rather than read here as
-  // a malformed record.
-  const lines = mailboxText.split("\n");
-  if (!mailboxText.endsWith("\n")) lines.pop();
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line.trim() === "") continue;
-    const rec = parseSupervisorMailboxLine(line);
-    if ("problem" in rec) {
-      const key = `${index}:${line}`;
-      if (!skipped.has(key)) {
-        skipped.add(key);
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "monitor",
-          action: "supervisor_mailbox_line_skipped",
-          detail: `mailbox line ${index + 1} ${rec.problem}; skipped and not acknowledged`.slice(0, 200),
-        });
-        outcome.logged = true;
-      }
-      continue;
-    }
-    if (handled.has(rec.id)) continue;
-    handled.add(rec.id);
-    if (rec.kind === "probe") {
-      newAcks.push(JSON.stringify({ id: rec.id, at: Date.now(), action: "ack" }));
-      continue;
-    }
-    // A shutdown with a turn open is left for the next idle pass, neither
-    // acknowledged nor delivered; the probes around it, before and after,
-    // are acknowledged all the same.
-    if (turnOpen()) continue;
-    newAcks.push(JSON.stringify({ id: rec.id, at: Date.now(), action: "delivered" }));
-    if (!(await writeAcks())) return outcome;
-    const shutdownText = `[SUPERVISOR id=${rec.id}] ${quoteContinuationLines(rec.text)}`;
-    const shutdownEntry: ExpectedTurn = { kind: "plugin", text: shutdownText };
-    expectedTurns.push(shutdownEntry);
-    const shutdownOutcome = await submitExpectedTurn(dp, expectedTurns, shutdownEntry);
-    // A submit that opened no turn keeps its delivered line, which is what
-    // keeps the record from being submitted again, and gains a failed line
-    // beside it, so the ack file does not claim a delivery that never reached
-    // the session. The supervisor's probe reading counts only ack lines.
-    if (!shutdownOutcome.ok) {
-      newAcks.push(JSON.stringify({ id: rec.id, at: Date.now(), action: "failed", reason: `${shutdownOutcome.how}: ${shutdownOutcome.reason}`.slice(0, 200) }));
-      await writeAcks();
-    }
-    sess.state.decisions.push(shutdownOutcome.ok
-      ? {
-        timestamp: Date.now(),
-        loop: "monitor",
-        action: "supervisor_shutdown_delivered",
-        detail: `mailbox record ${rec.id} submitted as [SUPERVISOR id=${rec.id}]`,
-      }
-      : {
-        timestamp: Date.now(),
-        loop: "monitor",
-        action: "supervisor_shutdown_failed",
-        detail: `mailbox record ${rec.id} submit ${shutdownOutcome.how}; left delivered: ${shutdownOutcome.reason}`.slice(0, 200),
-      });
-    outcome.delivered = true;
-    outcome.logged = true;
-    return outcome;
-  }
-  await writeAcks();
-  return outcome;
-}
+function drainSupervisorMailbox(dp: any, ...args: AfterDeps<typeof drainSupervisorMailboxFromModule>) { return drainSupervisorMailboxFromModule(drainsDepsOf(dp), ...args); }
 
 // The text of the [RECONCILE] turn. The pass runs on this prompt and at no
 // other time, which is what this text states. What the pass does is the
@@ -7199,75 +2956,8 @@ const closeAsksOnCompletedNodes = async (dp: any, nodeIds: readonly string[], cl
   }
 };
 
-// The entry an answered ask named, at the ask's close. An ask leaves its
-// entry active, so the close moves no status, demotes no other entry and
-// points activeGoalId nowhere: the open blocking ask was the hold, and its
-// close or lift ends it. What it does clear is a blockedReason left on an active
-// entry, which only a store written by a controller that paused on an ask
-// carries, since an active entry has no reason to be blocked. A paused
-// entry keeps its reason, which the operator or a plan switch wrote and
-// goal_resume reads back.
-const reactivateAskedEntry = (askedNode: GoalNode): void => {
-  if (askedNode.status === "active" && askedNode.blockedReason !== undefined) {
-    askedNode.blockedReason = undefined;
-    askedNode.updatedAt = Date.now();
-  }
-};
-
-// completeLeaf's walk marks a plan parent blocked with the reason "Child task
-// blocked" while a child is blocked, and leaves that status and reason in
-// place when goal_done later completes the blocked child by name. A parent
-// left blocked is never descended into by activateNext's DFS, so its pending
-// children are stranded. This walks up from the completed entry through each
-// non-root ancestor carrying that reason. A complete ancestor has the stale
-// reason cleared, whether the walk completed it in this call or earlier, and
-// the walk goes on above it. A blocked ancestor with no child still blocked returns to pending.
-// A blocked ancestor with a child still blocked stays blocked and ends the
-// walk, as does any other state. Each ancestor changed gets one decision.
-// The walk is bounded by the node count, as isActivationEligible's is.
-const clearChildBlockedAncestors = (completedId: string): void => {
-  const goals = sess.state.goals;
-  let current = goals.find((g) => g.id === completedId);
-  let steps = goals.length;
-  while (current && current.parentId) {
-    if (steps-- <= 0) return;
-    const parent = goals.find((g) => g.id === current!.parentId);
-    if (!parent || parent.parentId === null || parent.blockedReason !== "Child task blocked") return;
-    const cause = `goal_done's completion of ${completedId} cleared "Child task blocked"`;
-    if (parent.status === "complete") {
-      parent.blockedReason = undefined;
-      parent.updatedAt = Date.now();
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "goal",
-        action: "reason_cleared",
-        detail: `${parent.id}: ${cause}`,
-      });
-    } else if (parent.status === "blocked" && !goals.some((g) => g.parentId === parent.id && g.status === "blocked")) {
-      parent.status = "pending";
-      parent.blockedReason = undefined;
-      parent.updatedAt = Date.now();
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "goal",
-        action: "unblocked",
-        detail: `${parent.id}: returned to pending, ${cause}`,
-      });
-    } else {
-      return;
-    }
-    current = parent;
-  }
-};
-
-// Section 2 (plan-health-from-the-record): a plan entry is an entry that has
-// a plan by resolvePlanPath's ancestor rule, whatever its kind, so a task a
-// worker adds under its plan node is one too. A plan entry is judged from its
-// plan document rather than from a count of turns: its completedRounds is
-// never incremented, the round-budget block never applies to it, and its
-// maxRounds is neither read nor changed.
-const isPlanEntry = (state: AgentState, g: GoalNode): boolean =>
-  resolvePlanPath(state, g) !== undefined;
+// The goal_done walk in hooks/records.ts, over the session alone.
+function clearChildBlockedAncestors(...args: AfterDeps<typeof clearChildBlockedAncestorsFromModule>): void { clearChildBlockedAncestorsFromModule({ session: sess }, ...args); }
 
 // Section 3 (plan-health-from-the-record): the worker's own lead. A plan
 // entry's closing text opens with the literal `BLOCKED:` when the worker
@@ -7279,80 +2969,6 @@ const isPlanEntry = (state: AgentState, g: GoalNode): boolean =>
 // a `WORKING:` first line among them. The line is read at turn
 // end, below the ASK: marker parse; the hold is holdOf's read in the
 // controller tick.
-
-// The bound on a lead's reason, which is text from the worker's own closing
-// line written into the store.
-const LEAD_REASON_MAX = 300;
-
-// The status line a closing text states, read from its first non-blank line:
-// one of the literal uppercase markers `WORKING:`, `WAITING:` or `BLOCKED:`
-// at the start of that line, with the rest of the line as the reason.
-// `Working:`, `BLOCKED x`, the marker on a later line and the word inside a
-// sentence all read as no status line. Never throws: a text that is not a
-// string reads as none. The nudge asks for this line, the nudge count reads
-// its presence on a nudged turn, and a `BLOCKED:` or `WAITING:` line on any
-// entry is the worker's lead.
-function readStatusLine(text: unknown): { state: "working" | "blocked" | "waiting"; reason: string } | null {
-  if (typeof text !== "string") return null;
-  const found = text.split(/\r?\n/).find((line) => line.trim() !== "");
-  if (found === undefined) return null;
-  // One stray carriage return left by a \r\r\n ending is not reason text.
-  const firstLine = found.endsWith("\r") ? found.slice(0, -1) : found;
-  const m = /^(WORKING|BLOCKED|WAITING):(.*)$/.exec(firstLine);
-  if (!m) return null;
-  const state = m[1] === "WORKING" ? "working" : m[1] === "BLOCKED" ? "blocked" : "waiting";
-  return { state, reason: m[2].trim().slice(0, LEAD_REASON_MAX) };
-}
-
-// The round text the controller's idle summary and its skip-hash subset
-// carry for an entry. A task entry reads its budget; a plan entry has none.
-const roundSummaryText = (state: AgentState, g: GoalNode): string =>
-  isPlanEntry(state, g) ? "plan entry, no round budget" : `round ${g.completedRounds}/${g.maxRounds}`;
-
-/**
- * The registration-time jevLive read's own filter, pulled out of register()
- * so a test can drive it directly and see both halves of what it decides:
- * which ids liveAsk may act on, and which the manifest value carried but
- * this dropped. The manifest declares jevLive as a comma-separated string,
- * so a string `raw` is split on commas and a member left blank by a stray
- * comma is skipped. An array is read member by member. Trims each member
- * the way the settings file's own shell producer trims JEV_LIVE, and drops a
- * member that is not a string or is not one of PROMOTABLE_SET_IDS, rather
- * than reaching a branch that would otherwise treat an unpromoted question
- * as safe to act on live. A missing `raw`, or one that is neither a string
- * nor an array, reads as no members, never a thrown error.
- *
- * Exported so the test suite can call it directly; register() still holds
- * the one call this filter feeds, so nothing about the registration read
- * changes. The default an absent value takes is JEV_LIVE_DEFAULT, applied at
- * that read rather than here.
- */
-export function filterJevLive(raw: unknown): { kept: readonly string[]; dropped: readonly string[] } {
-  const kept: string[] = [];
-  const dropped: string[] = [];
-  const members: unknown[] = typeof raw === "string"
-    ? raw.split(",").filter((part) => part.trim() !== "")
-    : Array.isArray(raw) ? raw : [];
-  for (const entry of members) {
-    if (typeof entry !== "string") {
-      dropped.push(String(entry));
-      continue;
-    }
-    const trimmed = entry.trim();
-    if (PROMOTABLE_SET_IDS.includes(trimmed)) {
-      kept.push(trimmed);
-    } else {
-      dropped.push(trimmed);
-    }
-  }
-  return { kept, dropped };
-}
-
-// The live list a configuration carrying no jevLive value reads: the four
-// promotable questions that act on Jev's answer by default. A configured
-// value, the empty string included, replaces it whole, so a roster can still
-// name fewer live questions or none.
-export const JEV_LIVE_DEFAULT = [CONTROLLER_DECISION, TURN_SCORE, MEMORY_KIND, TURN_DISPOSITION].join(",");
 
 // The names shown under any of `goalIds`, each once, in the list's order.
 function shownNamesUnder(goalIds: string[]): string[] {
@@ -7391,11 +3007,6 @@ async function readPlanDocument(dp: any, planPath: string): Promise<{ reading: P
   const planDir = await resolvePlanDir(planFs, liveDir, planPath);
   return { reading: await readPlanRecord(planFs, planDir, planPath), liveDir, planDir };
 }
-
-// How long the git read under a plan document's directory may run before
-// $.process.run kills it and rejects. git status on one checkout answers well
-// inside this, and the bound keeps a hung git from holding the turn end.
-const PLAN_CHECKOUT_TIMEOUT_MS = 5_000;
 
 // The checkout holding a plan document, read by `git status --porcelain=v1 -b`
 // with `dir` as its working directory: whether the branch line names an
@@ -7442,14 +3053,6 @@ async function readPlanCheckout(dp: any, dir: string): Promise<{ upstream: boole
     ahead,
     dirty: lines.length - 1,
   };
-}
-
-// The objective a plan's closing leaf carries, exactly, with the plan's own
-// planPath. The walk up adds one such leaf under a plan it holds open, so the
-// plan keeps an entry the controller can activate and nudge on, and this text
-// alone tells the leaf apart from any other child.
-function closingLeafObjective(planPath: string): string {
-  return `Set ${planPath} Status to Complete`;
 }
 
 // The open closing leaf under `plan`, or undefined where it has none: a child
@@ -7499,20 +3102,6 @@ function addClosingLeaf(plan: GoalNode, status: string): GoalNode {
     detail: `${leaf.id} (task) under ${plan.id}: "${leaf.title.slice(0, 50)}"`,
   });
   return leaf;
-}
-
-// A plan document's Status value as the walk up and goal_done quote it: one
-// line, its brackets neutralized, cut to 80 characters, since the value is
-// text a repository supplies and reaches the model.
-function planStatusText(status: string): string {
-  return bracketSafeText(oneLine(status)).slice(0, 80);
-}
-
-// The finish-the-document sentence goal_done's answer carries for a plan held
-// open, both where the walk up holds it and where goal_done refuses the plan's
-// closing leaf.
-function planLeftOpenText(plan: GoalNode, status: string): string {
-  return ` ${plan.id} "${plan.title}" stays open: its plan document reads Status: ${status}, and it completes once the document reads Complete.`;
 }
 
 // Completes goal `id` through completeLeaf and returns `id` followed by every
@@ -7670,8 +3259,10 @@ async function answerMemoryCheck(dp: any, goalId: string, goalIds: string[], ans
     const res = await kitMemq(dp, ["touch", name, "--applied"], { timeoutMs: MEMQ_WRITE_TIMEOUT_MS });
     if (res !== null && res.exitCode === 0) {
       // The stamp is the recall chain's other outcome input: a candidate
-      // stamped applied before the next prompt reads as acted on.
+      // stamped applied before the next prompt reads as acted on, and the
+      // stretch fork's applied verdict on it spends no second touch.
       sess.recallAppliedNames.add(name.toLowerCase());
+      markStretchApplied(sess.state.stretchShown, name);
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "memory",
@@ -7949,7 +3540,7 @@ export const register: Register = async (on, options) => {
   const openTurns = new Map<string, number>();
   const turnIsOpen = () => openTurns.size > 0;
   // The inbox drain, which the session.start hook defines beside the
-  // controller tick and publishes here so the turn.complete handler can call
+  // controller tick and publishes here so the turn.complete body in hooks/turn-complete.ts can call
   // it. It is defined there because it uses that hook's `$`, and the loader
   // refuses a function taking `$` that is declared anywhere but the top level
   // of the file. Null on a reader session and until session.start has run.
@@ -8124,15 +3715,18 @@ export const register: Register = async (on, options) => {
   // like the Reviewer's: only agentic_identity/agentic_say/agentic_inbox and
   // fleet_status register, with no goal-tree tool, no controller tick, and no claim on
   // any owner-only claim site. "off" is a plain chat session: it registers
-  // the guards and after hooks and no tool, timer or claim. Its session.start
-  // hook logs the tier, reads the session id and the working directory,
-  // starts the recognition index load and returns; session.compact's veto
-  // decides an automatic compaction in every session the module loads in;
-  // turn.start in this tier stamps the moment the veto's declared-marker rule
-  // reads and nothing else; tool.call runs the guard and after-hook region
-  // around next(e) alone; prompt.submit attaches the memory-recognition block
-  // alone; and agent.spawn appends a starting subagent's pointer as in every
-  // tier. register() itself returns right after those six are installed.
+  // the guards, the after hooks and the compaction pass, and no tool or
+  // claim. Its session.start hook logs the tier, reads the session id and
+  // the working directory, starts the recognition index load and starts one
+  // timer, the compaction pass's step; session.compact's veto decides an
+  // automatic compaction in every session the module loads in, and its pass
+  // cuts or hands up as in an armed session; turn.start in this tier stamps
+  // the moment the veto's declared-marker rule reads and opens the turn the
+  // pass's idle test reads, and turn.complete closes it; tool.call runs the
+  // guard and after-hook region around next(e) and the pass's rerun watch;
+  // prompt.submit attaches the memory-recognition block alone; and
+  // agent.spawn appends a starting subagent's pointer as in every tier.
+  // classic.PostModelSwitch and turn.step are not registered in this tier.
   // The option reads between here and that hook run for every tier; they
   // touch only the module's own state. An absent or unrecognized value reads
   // as "off"; an unrecognized one is remembered so the log line can name it.
@@ -8180,7 +3774,7 @@ export const register: Register = async (on, options) => {
   // arguments with no shell. A value that is absent or not a string reads as
   // empty, which runs nothing: that the engine fills the manifest's default
   // into this object is not established, as the comment at tickOpenAsk's
-  // askOperatorWaitMs read records.
+  // askOperatorWaitMs read in hooks/ask-layer.ts records.
   const healthCommand = typeof cfg.healthCommand === "string" ? cfg.healthCommand.trim().split(/\s+/).filter((t) => t) : [];
   sess.options = { healthTimeoutMs, gitProbeMs, healthCommand };
 
@@ -8218,7 +3812,8 @@ export const register: Register = async (on, options) => {
   // session that read the store at start, and true for one that came up owner
   // without being able to write into a store it could not read: the claim is
   // in the heartbeat sidecar and in commons, and the store alone does not
-  // carry it. The heartbeat tick below reads it, because a store that names
+  // carry it. The heartbeat tick, heartbeatTick in hooks/controller-tick.ts,
+  // reads it, because a store that names
   // another session is that unread store's own previous holder there rather
   // than a successor, and yielding to it hands the persona to a name that
   // predates this session with nothing left to promote it back.
@@ -8273,10 +3868,19 @@ export const register: Register = async (on, options) => {
   // configuration carries no value, a fallback that sits in code for
   // jevMode's reason. Under shadow a guard's deny is journaled and the call
   // runs; under live it is returned; under off no guard runs. Any other value
-  // reads as off, and session.start logs the refused value once.
+  // reads as live, and session.start logs the refused value once.
   const guardsRead = guardsOptionOf(cfg.guards);
   const guardsOption: GuardsOption = guardsRead.option;
   let guardsInvalid: string | null = guardsRead.invalid;
+
+  // The started subagents' types by id, for the guards' context: one map per
+  // register call, never module state, so two registrations share none.
+  const spawnTypes = newSpawnTypes();
+
+  // The redactor's switch: on unless the setting reads false. The egress
+  // scrubs in redactor.ts read their own copy.
+  redactorOn = cfg.redactor !== false && cfg.redactor !== "false";
+  setRedactorOn(redactorOn);
 
   // jevLive names, by question-set id, which of PROMOTABLE_SET_IDS's
   // questions may read Jev's live answer through liveAsk instead of always
@@ -8301,9 +3905,25 @@ export const register: Register = async (on, options) => {
 
   // --- session.start: register tools, claim or join the persona ---
   // The one session.start registration in this file. An "off" session logs
-  // its tier, reads what its veto and after hooks key on and starts the
-  // recognition index load; every other tier runs the body.
+  // its tier, reads what its veto and after hooks key on, starts the
+  // recognition index load and starts the compaction pass's timer; every
+  // other tier runs the body.
   on("session.start", async ($, e, next) => {
+    // The redactor's vault seed, in every tier: the reads are here and the
+    // parsing is redactor.ts's. A failed home read reads no home file, a file's
+    // text is undefined where it is missing or not read and null where its read
+    // failed, and any other throw seeds nothing more; the start runs on.
+    if (redactorOn) {
+      try {
+        const env = await Promise.allSettled([$.env.get("TYPESAFE_API_KEY"), $.env.get("ANTHROPIC_API_KEY"), $.env.get("GH_TOKEN"), $.env.get("GITHUB_TOKEN"), $.env.get("DEEPGRAM_API_KEY")]);
+        const home = await (async () => hostOf($).getHome())().catch(() => undefined);
+        const read = async (f: SeedFile) => (f.skip || !(await $.fs.exists(f.path)) ? undefined : String(await $.fs.read(f.path)));
+        const files = await Promise.all(seedFiles(home, cfg.credentialFiles).map(async (f) => ({ ...f, text: await read(f).catch(() => null) })));
+        for (const line of seedVault(env, files)) $.ui.log(line);
+      } catch {
+        try { $.ui.log("redactor: the session-start seed failed"); } catch { /* non-fatal */ }
+      }
+    }
     if (arming === "off") {
       const suffix = armingUnrecognized ? `; unrecognized value '${armingUnrecognized}'` : "";
       $.ui.log(`Agentic: arming off, no persona tools or claims in this session${suffix}`);
@@ -8312,7 +3932,7 @@ export const register: Register = async (on, options) => {
       // role-boundary marker is named for the session, and the consent
       // marker sits under the working directory's scratch directory. Both
       // are read here, into the module's own state, and nothing else of the
-      // armed start runs.
+      // armed start runs but the compaction pass's timer below.
       try {
         sess.mySessionId = String(await $.session.id());
       } catch {
@@ -8334,6 +3954,14 @@ export const register: Register = async (on, options) => {
       // nothing.
       if (sess.memqLaunchDir === "" && sess.workdir !== "") sess.memqLaunchDir = sess.workdir;
       startRecognitionLoad($, true);
+      // The compaction pass's timer, the one timer this tier starts: its
+      // body is the armed heartbeat's pass step alone, so it stamps no file,
+      // refreshes no claim, drains no meter and writes no persona store. Its
+      // journal lines name the default persona, as the veto's do.
+      $.clock.every(heartbeatMs, async () => {
+        const at = Date.now();
+        try { await compactionPassStep(compactionPassDepsOf($), compactionPassOption, jevMode, turnIsOpen, at); } catch { /* the step counts its own failures */ }
+      });
       return next(e);
     }
     // session.start fires again on a reload of the plugin's code, which
@@ -8567,6 +4195,7 @@ export const register: Register = async (on, options) => {
         "File only a decision that is the operator's to make: a fork the plan does not settle and that is not yours to settle. " +
         "The ask rises from the entry this turn started on. " +
         "One turn opens at most 4 asks, and at most 16 stand open at once. A question still carrying an angle-bracket placeholder, a question already open on the entry, or one closed on the entry recently is refused. " +
+        "A decision brief for the operator is drafted from the transcript after the turn ends and posted to the thread, so write the question and the recommendation and keep your reasoning in the turn. " +
         "The result is JSON: the new ask's id, whether it blocks, and the ids of every ask still open. Close it with ask_close by that id. Owner only.",
       inputSchema: {
         type: "object",
@@ -9247,6 +4876,7 @@ export const register: Register = async (on, options) => {
       });
       jevLiveDropped = [];
     }
+    sess.state.decisions.push(...await skillPickStart(docsCheckFsOf($), jevMode, $.plugin.root, () => kitInstallPathOf($)));
 
     // The memory gate's floor was read at registration, above the state this
     // decision needs, so a clamp is logged here for the reason and on the
@@ -9281,7 +4911,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "monitor",
         action: "setting_clamped",
-        detail: `guards ${bracketSafeText(oneLine(guardsInvalid)).slice(0, 50)} is not off, shadow or live; using off`,
+        detail: `guards ${bracketSafeText(oneLine(guardsInvalid)).slice(0, 50)} is not off, shadow or live; using live`,
       });
       guardsInvalid = null;
     }
@@ -9379,18 +5009,23 @@ export const register: Register = async (on, options) => {
       // recommendation after its Recommend:, and one whose
       // record is not open closes as expired. That record may still exist,
       // answered, resumed or expired while the owner was down, so the ask it
-      // stood for is settled and the ledger closes its entry to match.
+      // stood for is settled and the ledger closes its entry to match. A refused
+      // save restores the entries and drops the decisions; the question is folded.
       try {
         const reconcileAt = Date.now();
         const ledgerStatusOf = (askId: string) => sess.state.asks.find((entry) => entry.id === askId)?.status ?? null;
+        const pushed: AgentState["decisions"][number][] = [];
         const reconciled = await reconcileOpenAsks(commonsStoreOf($), sess.persona, ledgerStatusOf);
+        const restore = askEntriesRestorer(sess.state.asks.filter((entry) => entry.status === "open" && entry.question === ASK_SEED_QUESTION));
         for (const askId of reconciled.expired) {
-          sess.state.decisions.push({
+          const decision: AgentState["decisions"][number] = {
             timestamp: reconcileAt,
             loop: "monitor",
             action: "ask_expired",
             detail: `${sess.persona}: ${askId} (owner restart)`,
-          });
+          };
+          sess.state.decisions.push(decision);
+          pushed.push(decision);
         }
         let changed = reconciled.expired.length > 0;
         for (const entry of sess.state.asks) {
@@ -9398,8 +5033,9 @@ export const register: Register = async (on, options) => {
           const record = reconciled.open.find((rec) => rec.id === entry.id);
           if (record) {
             if (typeof record.question === "string") {
-              entry.question = record.question;
-              entry.recommend = askRecommendOf(record.question);
+              const question = record.question.split(ASK_MARKER_LINE_BREAK).join(" ");
+              entry.question = question;
+              entry.recommend = askRecommendOf(question);
               changed = true;
             }
           } else {
@@ -9408,7 +5044,7 @@ export const register: Register = async (on, options) => {
           }
         }
         if (changed) {
-          await persist($);
+          await persist($, () => { restore(); for (const d of pushed) dropDecision(d); });
         }
       } catch { /* non-fatal */ }
     }
@@ -9417,301 +5053,322 @@ export const register: Register = async (on, options) => {
 
     // Note: $ is available in the timer callback scope (session.start hook).
 
-    // --- Heartbeat: refresh the sidecar every heartbeatMs ---
-    // Only the owner stamps its own heartbeat. A passive reader must NOT
-    // overwrite the holder's heartbeat, or it will (a) mask the real holder's
-    // staleness and (b) make its own promotion check compare the holder id to
-    // itself and never fire.
-    $.clock.every(heartbeatMs, async () => {
-        // One instant for this tick: every liveness file the tick writes, and
-        // the claim refresh beside them, carry it, so a reader comparing two
-        // of the files never finds them a tick apart.
-        const at = Date.now();
-        // The child's own heartbeat file, stamped first and whether or not
-        // this session still owns the persona: a child that yielded is still
-        // the child its supervisor launched and is watching, and nothing the
-        // tick does after this, a store read that hangs among them, can delay
-        // the file the supervisor reads for liveness. It carries the tick's
-        // instant, and the beat below is handed no supervisor path, so the
-        // file is written once per tick.
-        if (supervisorHeartbeatPath !== "") {
-          try { await stampSupervisorFile(beatHostOf($), sess, at, supervisorHeartbeatPath); } catch { /* heartbeat file write failed; non-fatal */ }
-        }
-        // The meter's drain, for every session, started before the ownership
-        // checks below can return from the tick and never awaited, so a host
-        // that stalls never delays this session's yield.
-        try { meterDrainStep($, at); } catch { /* the meter never fails a tick */ }
-        // The compaction pass's step, for every armed session, owner or
-        // reader: this timer is the one registered before the reader gate
-        // the controller tick sits behind. It awaits engine reads alone and
-        // fires its Jev asks without awaiting them, so it holds the stamps
-        // below for the engine's own answer time and never for the vendor.
-        try { await compactionPassStep($, compactionPassOption, jevMode, turnIsOpen, at); } catch { /* the step counts its own failures */ }
-        // The cache clock's tick, owner or reader: the beat below publishes
-        // the warm-until instant, and a turn from warm to cold pushes one
-        // cache_cold decision per idle stretch. A throw costs the reading only.
-        try {
-          const tick = cacheTick(at, cacheClock, cacheWatch, turnIsOpen());
-          sess.cacheWarmUntil = tick.warmUntil;
-          if (tick.coldDetail !== null) sess.state.decisions.push({ timestamp: at, loop: "monitor", action: "cache_cold", detail: tick.coldDetail });
-        } catch { /* the beat still stamps */ }
-        // The heartbeat tick verifies ownership BEFORE stamping.
-        // If the store's (sessionId, epoch) no longer matches this session,
-        // another session has claimed the persona and this one must yield
-        // here, not on its next guarded write. Without this check a demoted
-        // owner keeps stamping its own id over the new owner's heartbeat,
-        // and the sidecar ends up naming a session the store does not.
-        if (sess.isOwner) {
-          let onDisk: { activeSessionId: string; epoch: number } | null = null;
-          try {
-            if (await $.fs.exists(sess.storePath)) {
-              const store = JSON.parse(await $.fs.read(sess.storePath)) as Record<string, unknown>;
-              const existing = store[sess.persona] as AgentState | undefined;
-              if (existing) onDisk = existing;
-            }
-          } catch { /* store read failed */ }
-
-          if (onDisk && shouldYield(onDisk, sess.mySessionId, sess.myEpoch)) {
-            // A session that came up on a store it could not read holds the
-            // persona by its heartbeat and its commons claim, and by nothing
-            // in the store. The name the store carries at the first read that
-            // parses is then the one it held before this session started
-            // rather than a successor's, and yielding to it hands the persona
-            // to a session that is very likely gone. What it costs is the
-            // whole watcher: this session's own sidecar stamp names the
-            // holder for the promotion check below, which reads that holder
-            // as itself and so never promotes again for the life of the
-            // process, and the controller tick returns at its owner check
-            // from here on, so no [FLEET] and no [RECONCILE] prompt is ever
-            // submitted and the start-up refusal above reaches nobody. So a
-            // session that has its persona's state to publish takes the claim
-            // here instead, at the first read that parses, with commons
-            // deciding whether a live session got there first.
-            // A session that never loaded its state does not publish here.
-            // What writeClaimDirect below writes is the whole of sess.state,
-            // so a session still carrying the built-in default would put an
-            // empty tree into the store it has just managed to read. Where the
-            // state never loaded the branch is skipped, claimTaken stays false,
-            // and the yield below hands the persona to the name the store
-            // carries: giving it up costs this session's watcher, where
-            // publishing costs the persona's stored tree. Such a session can
-            // still take the claim the ordinary way, through a persist that
-            // finds no entry for its persona and writes its own, which is the
-            // self-heal and destroys nothing, so what this branch guards is the
-            // store that does hold a tree. A session that recovered through
-            // agentic_identity has the real state and its field cleared, so it
-            // publishes here. With the field cleared this way the branch is
-            // reached only when a foreign entry lands in the store after
-            // agentic_identity's own claim write, since that write puts this
-            // session's name in the store and the next tick reads it as its own.
-            let claimTaken = false;
-            if (claimUnpublished && sess.stateNotLoaded === null) {
-              try {
-                const claims = await readAllClaims(commonsStoreOf($), staleAfterMs);
-                const winner = commonsWinner(claims, `persona:${sess.persona}`);
-                if (winner === null || winner === sess.mySessionId) {
-                  recordPreviousSession(sess.state, onDisk.activeSessionId, sess.mySessionId);
-                  sess.state.activeSessionId = sess.mySessionId;
-                  // Above the epoch the store carries, so that the guarded
-                  // write this session makes next reads its own claim rather
-                  // than yielding to the epoch it just wrote past.
-                  sess.state.epoch = Math.max(sess.state.epoch, onDisk.epoch) + 1;
-                  sess.myEpoch = sess.state.epoch;
-                  await writeClaimDirect($);
-                  claimUnpublished = false;
-                  claimTaken = true;
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "monitor",
-                    action: "persona_claim_published",
-                    detail: `Wrote this session's claim on '${sess.persona}' into a store that would not read when it started (prev ${onDisk.activeSessionId}, epoch ${sess.state.epoch})`,
-                  });
-                }
-              } catch { /* commons or the store refused; the yield below stands */ }
-            }
-            if (!claimTaken) await yieldNow($, onDisk);
-            // No claim refresh here: a yielded session is a reader to the
-            // beat below, which then leaves the sidecar alone, and a
-            // published claim has just written the sidecar through
-            // writeClaimDirect.
-          } else {
-            // The store read and carries this session's own claim, so there
-            // is nothing left waiting to be published into it and a later
-            // name in it is a successor's rather than a predecessor's.
-            if (onDisk !== null) claimUnpublished = false;
-            // Commons: refresh the persona claim's lastSeen at the tick's
-            // instant, the one the beat below stamps, so the claim and the
-            // entry's stamp never disagree.
-            try {
-              const resource = `persona:${sess.persona}`;
-              await claimResource(commonsStoreOf($), resource, sess.mySessionId, at, commonsMeta());
-            } catch { /* non-fatal */ }
-          }
-        }
-
-        // BE3: non-owner heartbeat tick refreshes the reader claim (idempotent).
-        // Without this, the reader claim goes stale at 90s and agentic_inbox
-        // denies the reader. At the tick's instant, as the owner's refresh is.
-        if (!sess.isOwner) {
-          try {
-            await claimReaderRole(commonsStoreOf($), sess.persona, sess.mySessionId, at, commonsMeta());
-          } catch { /* non-fatal */ }
-        }
-
-        // The beat: the sidecar, the commons entry and the meter beat from
-        // the tick's one instant, the supervisor's file having taken it at
-        // the top. It runs after the ownership check so a demoted owner
-        // stamps nothing over its successor's sidecar entry, and so a meter
-        // spool that stalls, which holds the stamp for the meter's bound at
-        // most and only once, never delays this session's yield. Nothing in
-        // it throws into the tick, and a file that cannot be written costs
-        // that file alone.
-        await stampBeat(beatHostOf($), sess, at, { sidecarPath: heartbeatPathOf(), supervisorPath: "" });
-
-        // Passive reader: promote if the sidecar holder is stale and not self.
-        // With the shouldYield check above, the sidecar is only ever
-        // written by the store's current owner, so a stale sidecar means no
-        // live owner, no store-owner comparison needed. A reader-tier
-        // session never promotes: it stays a reader even when the holder
-        // it reads goes stale.
-        // A session whose state never loaded stays a reader too. Taking the
-        // persona here loads the stored state and raises the epoch, and the
-        // field is cleared only by session.start, where its own store read
-        // parsed, and by agentic_identity, so what it would make is
-        // an owner every write of which is refused, holding the persona away
-        // from a session that could keep it. The same condition guards the
-        // claim publish above, so the tick's two persona-taking branches read
-        // alike, and a healthy session promotes in this one's place.
-        if (!sess.isOwner && arming !== "reader" && sess.stateNotLoaded === null) {
-          let holderHb: HeartbeatEntry | null = null;
-          let sidecarRead = false;
-          try {
-            if (await $.fs.exists(heartbeatPathOf())) {
-              const hb = JSON.parse(await $.fs.read(heartbeatPathOf())) as Record<string, HeartbeatEntry>;
-              holderHb = hb[sess.persona] ?? null;
-            }
-            sidecarRead = true;
-          } catch { /* heartbeat read failed */ }
-
-          const now = Date.now();
-          // An absent entry is promotable as a stale one is: a session that
-          // joined as a reader on a live commons claim with no sidecar entry
-          // behind it would otherwise stay a reader forever. The commons check
-          // below still guards the promotion, so it waits until that claim
-          // goes stale. A sidecar that could not be read promotes nothing.
-          const holderIsStale = sidecarRead && (holderHb === null || (now - holderHb.lastSeen) > staleAfterMs);
-          const holderIsSelf = holderHb?.sessionId === sess.mySessionId;
-          if (holderIsStale && !holderIsSelf) {
-            // BE1: check commons before promoting. If a live claim exists
-            // on the persona from anyone, stay reader and do not bump epoch.
-            try {
-              const claims = await readAllClaims(commonsStoreOf($), staleAfterMs);
-              const personaResource = `persona:${sess.persona}`;
-              const commonsWinner = claims.find(
-                (c) => c.resource === personaResource && c.holder !== sess.mySessionId
-              );
-              if (commonsWinner) {
-                const alreadyLogged = sess.state.decisions.some(
-                  (d) => d.action === "promotion_deferred_commons" && d.detail?.includes(commonsWinner.holder)
-                );
-                if (!alreadyLogged) {
-                  sess.state.decisions.push({
-                    timestamp: now,
-                    loop: "monitor",
-                    action: "promotion_deferred_commons",
-                    detail: `Deferring promotion: live commons claim by ${commonsWinner.holder}`,
-                  });
-                  // Persist the decision to disk (reader path, so persist() won't work).
-                  // Merge into an existing slot only: read it, push the decision
-                  // onto it, write back. Where the store holds no slot for the
-                  // persona, nothing is written. A slot built here from this
-                  // reader's own state would name the reader as the holder, and
-                  // a live owner whose own slot is missing would read it at its
-                  // next persist and yield to a session that owns nothing.
-                  try {
-                    const store: Record<string, unknown> = await $.fs.exists(sess.storePath)
-                      ? (JSON.parse(await $.fs.read(sess.storePath)) as Record<string, unknown>)
-                      : {};
-                    const existing = store[sess.persona] as AgentState | undefined;
-                    if (existing) {
-                      const existingDecisions = existing.decisions ?? [];
-                      existingDecisions.push({
-                        timestamp: now,
-                        loop: "monitor",
-                        action: "promotion_deferred_commons",
-                        detail: `Deferring promotion: live commons claim by ${commonsWinner.holder}`,
-                      });
-                      existing.decisions = existingDecisions;
-                      existing.updatedAt = now;
-                      store[sess.persona] = existing;
-                      await $.fs.write(sess.storePath, JSON.stringify(store, null, 2));
-                    }
-                  } catch { /* non-fatal */ }
-                }
-                return;
-              }
-            } catch {
-              // The commons check failed. A stale sidecar entry proceeds with
-              // a local-only promotion, as it always has. An absent entry does
-              // not: that reader joined on a live commons claim, so the commons
-              // read is the only evidence the holder has gone, and without it
-              // nothing is promoted.
-              if (holderHb === null) return;
-            }
-            const store: Record<string, unknown> = await $.fs.exists(sess.storePath)
-              ? (JSON.parse(await $.fs.read(sess.storePath)) as Record<string, unknown>)
-              : {};
-            const existing = store[sess.persona] as AgentState | undefined;
-            if (existing) {
-              sess.state = parseState(JSON.stringify(existing));
-              sess.state.persona = sess.persona;
-            } else {
-              sess.state = createDefaultState(sess.persona, sess.mySessionId);
-            }
-            // The count this session held before it yielded counted answers
-            // on a tree it no longer holds, so it does not carry into this one.
-            // The heartbeat runs with a turn open, so a nudged turn begun
-            // before the yield is not added to this tree's count either.
-            sess.nudgedAnswersWithoutStatus = 0;
-            sess.nudgeCapRefusedFor = null;
-            countResetSinceNudgeOpened = true;
-            // The store's holder, not the sidecar's, as at the session.start claim.
-            recordPreviousSession(sess.state, sess.state.activeSessionId, sess.mySessionId);
-            sess.state.activeSessionId = sess.mySessionId;
-            sess.state.epoch += 1;
-            sess.myEpoch = sess.state.epoch;
-            sess.isOwner = true;
-            sess.state.decisions.push({
-              timestamp: now,
-              loop: "monitor",
-              action: "reader_promoted",
-              detail: holderHb === null
-                ? `Promoted from reader to owner (no sidecar entry, no live commons claim)`
-                : `Promoted from reader to owner (prev ${holderHb.sessionId ?? "unknown"}, stale after ${now - holderHb.lastSeen}ms)`,
-            });
-            // AD1: Write the stale-takeover claim directly to the store so that
-            // the subsequent persist() call finds the new holder, not the dead one.
-            await writeClaimDirect($);
-            $.ui.log(`Agentic: promoted to owner of '${sess.persona}' (previous holder stale)`);
-            // The promoted owner moves the distillates this persona's JSON
-            // still holds, as the start's claim does.
-            try {
-              await migrateLegacyMemories($);
-            } catch { /* non-fatal */ }
-          }
-        }
-
-        // The pair drain's catch, for the owner alone, where the turn its
-        // scan ran in is still open: the owe in tool.call starts the drain,
-        // and an item owed while a drain was already running is still owed
-        // here. Started and not awaited, as the compaction pass's asks are,
-        // so a fork that takes a minute never holds the next tick's stamps;
-        // the in-flight flag keeps this tick from draining beside a running
-        // drain. The drain never throws.
-        if (sess.isOwner && pairDraftOwed !== null && !pairDraftsInFlight && openTurns.has(pairDraftOwed.turnId)) void drainPairDraftOwed($, (turnId) => openTurns.has(turnId));
+    // --- The controller tick's context: hooks/controller-tick.ts holds the bodies ---
+    // Built once here, after every state declaration above that the
+    // bodies read and before either timer registers, so no tick can read
+    // a field the context does not yet hold. The engine's verbs and the
+    // helpers that take $ cross as closures over this handler's $; the
+    // session and the register-scope constants cross as the references
+    // they are; each let the bodies share with the other handlers crosses
+    // as a getter, and a setter where a body writes it, so the body reads
+    // it at the moment it did here. The statements kept inside the
+    // closures below are the ones a test reads out of this file's source:
+    // the prompt submits and the delivery frames
+    // test-personas/injection-ledger.mjs sizes, the fleet notes it reads,
+    // the model calls whose scrub test-personas/redactor-module-test.mjs
+    // pins, and the completeRoot call lines
+    // test-personas/supervisor-natural-exit-test.sh reads.
+    const tickContextOf = (): TickContext => ({
+      log: (line) => $.ui.log(line),
+      toast: (text) => $.ui.toast(text),
+      status: (text) => $.ui.status(text),
+      fsExists: (path) => $.fs.exists(path),
+      fsRead: (path) => $.fs.read(path),
+      fsWrite: (path, text) => $.fs.write(path, text),
+      completeSelfReview: (prompt) => $.model.complete({ model: "haiku", prompt: scrubText(prompt).text, maxTokens: 80 }),
+      completePlanner: (planPrompt) => $.model.complete({
+        model: "haiku",
+        prompt: scrubText(planPrompt).text,
+        maxTokens: 1500,
+      }),
+      classifyController: (summary, labels) => $.model.classify(
+        scrubText(summary).text,
+        labels,
+        { model: "haiku" }
+      ),
+      completePlanSwitch: (switchPrompt) => $.model.complete({
+        model: "haiku",
+        prompt: scrubText(switchPrompt).text,
+        maxTokens: 50,
+        timeoutMs: COMPLETE_TIMEOUT_MS,
+      }),
+      completeReason: (finalDecision, summary) => $.model.complete({
+        model: "haiku",
+        prompt: scrubText(
+          `You are the controller of an agentic plugin. The decision was "${finalDecision}". ` +
+          `Give a one-line plain-text reason (under 20 words). Do not use Markdown formatting.\n` + summary).text,
+        maxTokens: 30,
+        timeoutMs: COMPLETE_TIMEOUT_MS,
+      }),
+      commonsStore: () => commonsStoreOf($),
+      host: () => hostOf($),
+      beatHost: () => beatHostOf($),
+      compactionPassDeps: () => compactionPassDepsOf($),
+      persist: () => persist($),
+      persistOrRollBack: (rollBack) => persistOrRollBack($, rollBack),
+      activate: (nextId, reason) => activate($, nextId, reason),
+      runChild: (argv) => runChild($, argv),
+      runHealth: (forNodeId) => runHealth($, forNodeId),
+      tickOpenAsk: (state, persona, askCfg, contextId, turns) => tickOpenAsk($, state, persona, askCfg, contextId, turns),
+      openLedgerAsk: (state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now) => openLedgerAsk($, state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now),
+      withdrawLiftedAskBy: (state, persona, opener, nodeId, now) => withdrawLiftedAskBy($, state, persona, opener, nodeId, now),
+      submitKaizen: (expectedTurns, announced) => submitKaizen($, expectedTurns, announced),
+      queueMemoryCheck: (expectedTurns, goalId, title, goalIds) => queueMemoryCheck($, expectedTurns, goalId, title, goalIds),
+      writeClaimDirect: () => writeClaimDirect($),
+      yieldNow: (onDisk) => yieldNow($, onDisk),
+      liveTopLevelAgentRunning: () => liveTopLevelAgentRunning($),
+      meterDrainStep: (now) => meterDrainStep($, now),
+      appendToChannelLog: (lines) => appendToChannelLog($, lines),
+      drainSupervisorMailbox: (mailboxPath, turns, skipped, turnOpen) => drainSupervisorMailbox($, mailboxPath, turns, skipped, turnOpen),
+      drainMemoryOwed: () => drainMemoryOwed($),
+      drainAskBriefOwed: (cfg, expectedTurns) => drainAskBriefOwed($, cfg, expectedTurns),
+      drainPairDraftOwed: (turnOpen) => drainPairDraftOwed($, turnOpen),
+      completeLeafReturningClosed: (id, note) => completeLeafReturningClosed($, id, note),
+      migrateLegacyMemories: () => migrateLegacyMemories($),
+      completeRootUnplanned: async (rootId) => {
+        await completeRoot($, rootId, "every descendant complete or abandoned, no planner call");
+      },
+      completeRootZeroPlans: async (rootId) => {
+        await completeRoot($, rootId, `Root ${rootId} marked complete`);
+      },
+      answerBlocksOf: async (answer, answerFollowUps) => {
+        const answerBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => !turnIsOpen() }, answer.text, contextSourcesOf($, undefined, answerFollowUps));
+        return answerBlocks;
+      },
+      submitAnswerDelivery: async (answer, askEntry, answerLabel, answerBlocks) => {
+        const answerText = deliveryText(answerLabel, answer.id, answer.text, { answerTo: askEntry.question });
+        const framedAnswerText = deliveryWithContext(answerBlocks, answerText);
+        const expectedAnswerTurn = expectTurn({ kind: "delivery", recordId: answer.id, ground: answerLabel, seatLead: opensWithSeatLead(answer.text), answersAsk: true, text: framedAnswerText });
+        const answerOutcome = await submitExpectedTurn($, expectedTurns, expectedAnswerTurn);
+        return answerOutcome;
+      },
+      deliveryBlocksOf: async (oldest, deliveryFollowUps) => {
+        const deliveryBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => !turnIsOpen() }, oldest.text, contextSourcesOf($, undefined, deliveryFollowUps));
+        return deliveryBlocks;
+      },
+      submitDelivery: async (oldest, ground, deliveryBlocks) => {
+        const submittedText = deliveryText(ground, oldest.id, oldest.text);
+        const framedSubmittedText = deliveryWithContext(deliveryBlocks, submittedText);
+        const expectedDeliveryTurn = expectTurn({ kind: "delivery", recordId: oldest.id, ground, seatLead: opensWithSeatLead(oldest.text), text: framedSubmittedText });
+        const deliveryOutcome = await submitExpectedTurn($, expectedTurns, expectedDeliveryTurn);
+        return deliveryOutcome;
+      },
+      fleetStoreRefusedNote: (err) => ({
+        composed: `the steward's own state store '${sess.storePath}' refused the write that carries this report's audit line, so the report below went out and that line waits for a store that parses again.`,
+        carried: boundedText(safeErrorText(err)),
+      }),
+      submitFleet: async (changed, notes, movedKeys, fleetNow) => {
+        const fleetOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: fleetPromptText(changed, notes, movedKeys, fleetNow) }));
+        return fleetOutcome;
+      },
+      noteReconcileStoreRefused: (err) => {
+        reconcileStoreProblem = {
+          composed: `the steward's own state store '${sess.storePath}' refused the write that carries the reconciliation cadence stamp, so the pass was asked for and the stamp stands in this session's memory alone.`,
+          carried: boundedText(safeErrorText(err)),
+        };
+      },
+      submitReconcile: async () => {
+        const reconcileOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: RECONCILE_TEXT }));
+        return reconcileOutcome;
+      },
+      expectProposalTurn: () => {
+        const expectedProposalTurn = expectTurn({ kind: "proposal", text: proposeFrame(sess.state.longTermGoals, coordinatorPersona, sess.state.autonomy) });
+        return expectedProposalTurn;
+      },
+      submitProposal: async (expectedProposalTurn) => {
+        const proposalOutcome = await submitExpectedTurn($, expectedTurns, expectedProposalTurn);
+        return proposalOutcome;
+      },
+      submitNudge: async (g, idleGapConverted, idleDisplay, controllerStampId) => {
+        // The hold sentence rides on every nudge, since every entry's
+        // leads hold the idle branch.
+        const leadHoldLine = " " + NUDGE_LEAD_HOLD_TEXT;
+        // Section 3 (boundary-compaction): the active entry's plan
+        // document and section, spliced into both arms right after
+        // the [GOAL] line so a nudged worker knows which document to
+        // re-read. Declared here, above architectLine, so it sits
+        // outside extractNudgeFrames' fixed-order match on the
+        // architectLine/expiredAskLine declarations directly above
+        // nudgeText.
+        const planLine = planDocumentLine(sess.state, g);
+        // R8: nudge text appends goal_done instruction, and both arms
+        // close with NUDGE_STATUS_LINE_TEXT, the status line the
+        // nudge count reads at the nudged turn's end, followed by
+        // leadHoldLine. Item 8.2
+        // (Round 36): the idle-gap nudge has its own text - re-read
+        // the plan and the discussion file, and only state a fork as
+        // a literal marker line if one truly exists, since the
+        // decider itself never carries a concrete blocking question,
+        // only an idle reading. Only that marker, read on
+        // turn.complete, opens an ask record, with the worker's own
+        // line as the stored question. Where the plugin holds an
+        // architect name and this session owns a named persona, the
+        // fork line also names the architect, which the worker leg of
+        // the reach rule lets such a session reach; a default-persona
+        // session has no such leg, so the line is withheld from it.
+        // The architect and the coordinator take no such line either,
+        // matching the seats the supervisor's steer text withholds the
+        // worker's architect sentences from.
+        const architectLine = architectPersona !== "" && sess.persona !== "default" && sess.persona !== architectPersona && sess.persona !== coordinatorPersona
+          ? `A design question the plan doesn't cover (a spec gap, an approach fork, a plan review or a consult) can go to the architect instead: send it with agentic_say, persona set to ${architectPersona}.\n`
+          : "";
+        // An ask on this entry whose hold timed out with no nudge
+        // since is named once, in one sentence, so the worker knows
+        // its question went unanswered rather than reading the silence
+        // as an answer, and that the work goes on under the
+        // recommendation the ask stated. The question is store data on
+        // a line-structured prompt, so its continuation lines are
+        // quoted the way the re-raise quotes them; the sentence's own
+        // first line stays the plugin's.
+        const expiredAskQuestion = unnamedExpiredAskQuestion(sess.state, g);
+        const expiredAskLine = expiredAskQuestion !== null
+          ? `An ask on this entry, "${quoteContinuationLines(expiredAskQuestion)}", timed out unanswered after its wait; it stays open, and the work proceeds on its recommendation.\n`
+          : "";
+        const nudgeText = idleGapConverted
+          ? `[GOAL] The active goal is: ${g.objective}\n` +
+            planLine +
+            expiredAskLine +
+            `The controller read this as an idle gap, not a real fork: no concrete blocking question. ` +
+            `Re-read the plan doc and DISCUSSION.md before continuing - the next concrete step should already be there.\n` +
+            `If you genuinely hold a fork the plan doesn't resolve, file it in this turn with ask_open, naming the choice you proceed on as its recommend.\n` +
+            `An ask does not stop the work: proceed on your recommendation while it stands. Set blocking to true and open the closing text with BLOCKED: only where the next step is irreversible without the answer, or where another plan waits on it.\n` +
+            architectLine +
+            `Otherwise take the next concrete step and mark it finished with goal_done.\n` +
+            NUDGE_STATUS_LINE_TEXT +
+            leadHoldLine
+          : `[GOAL] The active goal is: ${g.objective}\n` +
+            planLine +
+            expiredAskLine +
+            `The Controller detected ${idleDisplay} of idle time. ` +
+            `Re-read the objective and take the next concrete step toward it, then report that step done with goal_done.\n` +
+            NUDGE_STATUS_LINE_TEXT +
+            leadHoldLine;
+        // The floor is spent here, before the submit, so that the open-turn
+        // test in hooks/controller-tick.ts's idleTick, which calls this closure,
+        // and this write are one synchronous step. $.prompt.submit
+        // does not resolve until the session is next idle, so during a
+        // long turn it parks; writing the floor after it would leave
+        // every tick reading the same stale stamp, passing the floor,
+        // and queueing another identical copy of this prompt. The cost
+        // of spending it first is that a submit that throws has still
+        // consumed the floor and the next nudge waits it out, which the
+        // nudge_failed record idleTick writes is there to make visible.
+        //
+        // The stamp is the clock now rather than the tick's own `now`,
+        // which was taken before the classify call: classify latency
+        // would otherwise come out of the floor and shorten it.
+        sess.lastNudgeAt = Date.now();
+        // The rest of this nudge's own bookkeeping is spent here for the
+        // same reason as the floor. The region from the open-turn check in
+        // idleTick to this point is synchronous, so both writes are made
+        // for a nudge that is going out between turns; on the far side of
+        // the submit a whole worker turn may have run and been scored, and
+        // each of the two then lands too late for the turn it is about.
+        //
+        // The nudge's expected-turn entry would be queued after its own
+        // turn.start had looked for it, so that turn would open
+        // unaccounted: it would be scored without the nudge-aware label
+        // set, and its answer would move the nudge count neither way.
+        // The prompt text would land after the scorer had already judged
+        // the answer against the previous turn's prompt.
+        currentPrompt = nudgeText;
+        const expectedNudgeTurn = expectTurn({ kind: "nudge", text: nudgeText });
+        // The count as this nudge goes out, read here rather than after
+        // the submit, so the record names the count the nudge was sent
+        // at rather than whatever its own turn's end left behind. The
+        // count itself moves at a nudged turn's end, never here.
+        const unlinedAnswers = sess.nudgedAnswersWithoutStatus;
+        // The nudged turn's end writes the controller call's acted
+        // outcome against this stamp, and that turn may run and end
+        // before the submit below resolves, so the stamp is held here
+        // with the expected-turn entry. A later nudge replaces it, as
+        // the score joiner's is replaced.
+        sess.jevActedStampId = controllerStampId;
+        // Only the submit's own outcome is read here, so a throw from the
+        // ledger writes idleTick makes after this returns is not recorded as
+        // a submit failure.
+        const nudgeOutcome = await submitExpectedTurn($, expectedTurns, expectedNudgeTurn);
+        return { nudgeOutcome, unlinedAnswers };
+      },
+      liveAsk,
+      shadowAsk,
+      shadowOutcome,
+      selfReviewLessonCount,
+      withdrawFollowUpsOffered,
+      nudgeCapAskText,
+      completionText,
+      completionShape,
+      noteCompletionShape,
+      dropDecision,
+      clearAgentHold,
+      commonsMeta,
+      heartbeatPathOf,
+      recordFailedDelivery,
+      cacheClock,
+      cacheWatch,
+      PROPOSAL_EVERY_MS,
+      PLAN_RECORD_MAX_RESENDS,
+      sess,
+      cfg,
+      expectedTurns,
+      openTurns,
+      turnIsOpen,
+      MAX_CONSECUTIVE_NUDGES,
+      staleAfterMs,
+      controllerTickMs,
+      coordinatorPersona,
+      architectPersona,
+      architectLegRefusal,
+      fleetRoster,
+      supervisorMailbox,
+      supervisorHeartbeatPath,
+      supervisorMailboxSkipped,
+      reconcileEveryMs,
+      nudgeFloorMs,
+      nudgeIdleMs,
+      gitProbeMs,
+      selfReviewStreak,
+      selfReviewDebounceTurns,
+      selfReviewMaxPerHour,
+      costEnabled,
+      costMaxNudgesPerHour,
+      costMaxPluginCallsPerHour,
+      costBackoffAfterTicks,
+      costBackoffMaxMs,
+      jevMode,
+      compactionPassOption,
+      jevLive,
+      planningInFlight: () => planningInFlight,
+      setPlanningInFlight: (value) => { planningInFlight = value; },
+      arming: () => arming,
+      startStoreProblem: () => startStoreProblem,
+      setStartStoreProblem: (value) => { startStoreProblem = value; },
+      reconcileStoreProblem: () => reconcileStoreProblem,
+      setReconcileStoreProblem: (value) => { reconcileStoreProblem = value; },
+      claimUnpublished: () => claimUnpublished,
+      setClaimUnpublished: (value) => { claimUnpublished = value; },
+      tickFailure: () => tickFailure,
+      selfReviewEveryTurns: () => selfReviewEveryTurns,
+      setSelfReviewEveryTurns: (value) => { selfReviewEveryTurns = value; },
+      agentHold: () => agentHold,
+      setAgentHold: (value) => { agentHold = value; },
+      gitProbeInFlight: () => gitProbeInFlight,
+      setGitProbeInFlight: (value) => { gitProbeInFlight = value; },
+      fleetBlockInFlight: () => fleetBlockInFlight,
+      setFleetBlockInFlight: (value) => { fleetBlockInFlight = value; },
+      drainInFlight: () => drainInFlight,
+      setDrainInFlight: (value) => { drainInFlight = value; },
+      gitUnavailable: () => gitUnavailable,
+      setGitUnavailable: (value) => { gitUnavailable = value; },
+      setCountResetSinceNudgeOpened: (value) => { countResetSinceNudgeOpened = value; },
     });
+    const tick = tickContextOf();
 
-    // --- PIANO CONTROLLER TICK (v3, goal-tree) ---
+    // --- Heartbeat: refresh the sidecar every heartbeatMs ---
+    // The body is heartbeatTick in hooks/controller-tick.ts.
+    $.clock.every(heartbeatMs, () => heartbeatTick(tick));
+
+    // --- PIANO CONTROLLER TICK (v3, goal-tree): the bodies are in hooks/controller-tick.ts ---
     // R1 order: owner check → in-flight check → planning gate →
     //   "no active leaf, return" → idle gate → classify.
     // Eligibility in code. The model decides WHAT, never WHETHER.
@@ -9721,2810 +5378,50 @@ export const register: Register = async (on, options) => {
     // goal tree to classify or actuate against, and the tick's own owner
     // check would return immediately anyway, so the timer itself is skipped.
     if (arming !== "reader") {
-    // The inbox drain, the controller tick's D3 block held in a name so a
-    // turn's completion can run it too: the turn.complete handler calls it
-    // through drainInboxNow once a turn this session saw start has closed and
-    // no other is open, so a burst of records drains at turn pace rather than
-    // one per tick. It returns true where it submitted a record, or where a
-    // drain already running when it was called submitted one. A running
-    // drain holds its place until its submit settles, which the harness
-    // states is when the submitted turn starts or is queued, never when it
-    // ends. So the hold keeps a second drain from submitting beside a prompt
-    // not yet entered, and is gone before the delivered turn can complete.
-    const drainInbox = async (): Promise<boolean> => {
-      while (drainInFlight !== null) {
-        // A running drain that throws is reported by its own caller, so a
-        // waiter reads the throw as nothing delivered and drains itself.
-        try { if (await drainInFlight) return true; } catch { /* reported by the drain's own caller */ }
-      }
-      drainInFlight = drainInboxOnce().finally(() => { drainInFlight = null; });
-      return drainInFlight;
-    };
-    const drainInboxOnce = async (): Promise<boolean> => {
-      // D3: drain operator inbox (one record per call, owner only).
-      // List pending inbox records whose writer may reach this persona
-      // (deliveryGroundIn over one claims read: a reader claim on it, the
-      // coordinator persona owned, a named persona owned when this persona
-      // is the coordinator or the architect, or the architect persona owned
-      // by the writer of an answer agentic_say admitted on the answer leg
-      // and stamped), take the lowest at, mark delivered, submit as a prompt
-      // opening with the provenance label that same read produced.
-      // D5: if a pending record answers the open ask, close the ask first
-      // (ask_answered path) before the general drain.
-      // The open-turn reading is taken here rather than trusted from the
-      // caller. The tick's blocks before this call submit, and a submit
-      // resolves once its turn has started or been queued rather than when
-      // that turn ends, so a turn can have opened underneath them by the time
-      // this line runs. This drain marks
-      // a record delivered and then submits it, and a submit into an open turn
-      // is queued rather than answered, so the record would carry a delivered
-      // stamp with no turn that ever read it. Skipping leaves it pending and
-      // the next quiet tick takes it, which costs one tick and loses nothing.
-      if (sess.isOwner && !turnIsOpen()) {
-        const persona = sess.persona;
-        const store = commonsStoreOf($);
-        const allRecords = await listInboxRecords(store, persona);
-        const pending = allRecords.filter((rec) => rec.status === "pending");
+      // The inbox drain, the controller tick's D3 block, is drainInbox in
+      // hooks/controller-tick.ts; it is published here so the turn.complete
+      // handler can run it once a turn this session saw start has closed.
+      drainInboxNow = () => drainInbox(tick);
 
-        // D5: an answering record closes the open ledger entry it names,
-        // whichever open entry that is, before the general drain. A record
-        // naming a closed or unknown id is no answer here and is left to the
-        // drain below, as any other record is.
-        if (pending.length > 0) {
-          const openEntries = openAskEntries(sess.state);
-          const answer = pending.find((rec) => typeof rec.answers === "string" && openEntries.some((entry) => entry.id === rec.answers));
-          if (answer) {
-            const askId = answer.answers as string;
-            const askEntry = openEntries.find((entry) => entry.id === askId) as AskEntry;
-            const askRecord = await readAskRecord(store, persona, askId);
-            // One claims read gates the answer and labels it. A dead
-            // writer's answer is logged here and skipped by the general
-            // drain below; an answer whose writer persona cannot sit
-            // inside the bracket, or whose id or text fails the record
-            // rule, is marked skipped here, once, so the drain never
-            // lists it.
-            const answerGround = deliveryGroundIn(await readAllClaims(store, sess.staleAfterMs), persona, answer.from, coordinatorPersona, deliveryArchitectLine(architectPersona, answer));
-            const answerProblem = deliveryRecordProblem(answer);
-            if ("refused" in answerGround && answerGround.refused === "no_claim") {
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "operator_skipped_no_claim",
-                detail: `answer ${answer.id} from ${answer.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own${architectLegRefusal})`,
-              });
-            } else if ("refused" in answerGround || answerProblem !== null) {
-              answer.status = "skipped";
-              await store.set(answer.key, { ...answer });
-              sess.state.decisions.push("refused" in answerGround && answerGround.refused === "bad_name"
-                ? {
-                  timestamp: Date.now(),
-                  loop: "monitor",
-                  action: "operator_skipped_bad_name",
-                  detail: `answer at ${answer.key} would be labelled with persona ${JSON.stringify(answerGround.persona)}, which ${answerGround.problem}; marked skipped`,
-                }
-                : {
-                  timestamp: Date.now(),
-                  loop: "monitor",
-                  action: "operator_skipped_bad_record",
-                  detail: `answer at ${answer.key}: ${answerProblem}; marked skipped`,
-                });
-            } else {
-              const answerLabel = answerGround.ground;
-              // The goal block, the task list, the standing text and any
-              // follow-up block ride ahead of the answer; a delivery carries
-              // no memory block, contextSourcesOf says why. They are built
-              // before anything below is written, since the sources read
-              // the store and a turn can open meanwhile. Null means one
-              // did: the ask stays open and the answer pending, nothing is
-              // written, and the next quiet tick delivers it with the
-              // blocks as they stand then.
-              const answerFollowUps: string[] = [];
-              const answerBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => !turnIsOpen() }, answer.text, contextSourcesOf($, undefined, answerFollowUps));
-              if (answerBlocks === null) return false;
-              // Close the ask on the ledger and, where its record is still
-              // open, on the record in the same step. The ledger is the
-              // owner's truth, so a record that is missing or already
-              // closed does not keep the entry open.
-              if (askRecord && askRecord.status === "open") {
-                askRecord.status = "answered";
-                await store.set(askKey(persona, askId), askRecord);
-              }
-              closeAsk(sess.state, askId, "answered", `record ${answer.id}`, answer.text, Date.now());
-              // D5b: remember the closed question so the classifier does
-              // not reopen it on this node right away (bullet 2).
-              const askedNodeInbox = sess.state.goals.find((n) => n.id === askEntry.nodeId);
-              if (askedNodeInbox) {
-                askedNodeInbox.lastAskQuestion = askEntry.question;
-                askedNodeInbox.lastAskClosedAt = Date.now();
-              }
-              // Mark the answer as delivered
-              answer.status = "delivered";
-              answer.deliveredAt = Date.now();
-              const existing = await store.get(answer.key);
-              if (existing) {
-                const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
-                parsed.status = "delivered";
-                parsed.deliveredAt = answer.deliveredAt;
-                await store.set(answer.key, parsed);
-              }
-              // Deliver the answer as a labelled prompt.
-              // The entry is the one the ledger entry names, or the active
-              // entry where it is gone from the tree. The close moves no
-              // status; see reactivateAskedEntry.
-              const targetNode = sess.state.goals.find((g) => g.id === askEntry.nodeId) ?? null;
-              const activeNode = targetNode || (sess.state.activeGoalId
-                ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-                : null);
-              if (activeNode) reactivateAskedEntry(activeNode);
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "ask_answered",
-                detail: `ask ${askId} closed by record ${answer.id}`,
-              });
-              const answerText = deliveryText(answerLabel, answer.id, answer.text, { answerTo: askEntry.question });
-              const framedAnswerText = deliveryWithContext(answerBlocks, answerText);
-              const expectedAnswerTurn = expectTurn({ kind: "delivery", recordId: answer.id, ground: answerLabel, seatLead: opensWithSeatLead(answer.text), answersAsk: true, text: framedAnswerText });
-              const answerOutcome = await submitExpectedTurn($, expectedTurns, expectedAnswerTurn);
-              if (!answerOutcome.ok) {
-                // A refused submit opens no turn, so the follow-up entries
-                // its blocks listed list again on the next prompt.
-                withdrawFollowUpsOffered(answerFollowUps);
-                recordFailedDelivery(answer, answerOutcome);
-              }
-              await persist($);
-              return true;
-            }
-          }
-        }
-
-        // General drain (D3)
-        // Filter to writers whose live claims reach this persona, over one
-        // claims read for the whole pending list; the same read yields the
-        // label each deliverable record carries. A record whose writer's
-        // persona cannot sit inside the label's bracket, or whose id or
-        // text fails the record rule, is skipped like a dead writer's,
-        // under its own decision. An answer the ask step above already
-        // marked skipped is not listed again.
-        const withClaim: { rec: InboxRecord; ground: string }[] = [];
-        const withoutClaim: typeof pending = [];
-        const badName: { rec: InboxRecord; persona: string; problem: string }[] = [];
-        const badRecord: { rec: InboxRecord; problem: string }[] = [];
-        const claims = pending.length > 0 ? await readAllClaims(store, sess.staleAfterMs) : [];
-        for (const rec of pending) {
-          if (rec.status !== "pending") continue;
-          const ground = deliveryGroundIn(claims, persona, rec.from, coordinatorPersona, deliveryArchitectLine(architectPersona, rec));
-          const recordProblem = deliveryRecordProblem(rec);
-          if ("refused" in ground) {
-            if (ground.refused === "no_claim") withoutClaim.push(rec);
-            else badName.push({ rec, persona: ground.persona, problem: ground.problem });
-          } else if (recordProblem !== null) badRecord.push({ rec, problem: recordProblem });
-          else withClaim.push({ rec, ground: ground.ground });
-        }
-        // Round 32/36: mark a dead writer's record skipped once, on its own
-        // key, rather than re-logging the same decision every tick forever -
-        // once `status` is "skipped" it drops out of `pending` above on the
-        // next `listInboxRecords` read, so the record costs one line total.
-        for (const rec of withoutClaim) {
-          await store.set(rec.key, { ...rec, status: "skipped" });
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "operator_skipped_no_claim",
-            detail: `record ${rec.id} writer ${rec.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own${architectLegRefusal}; marked skipped)`,
-          });
-        }
-        for (const { rec, persona: writerPersona, problem } of badName) {
-          await store.set(rec.key, { ...rec, status: "skipped" });
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "operator_skipped_bad_name",
-            detail: `record at ${rec.key} would be labelled with persona ${JSON.stringify(writerPersona)}, which ${problem}; marked skipped`,
-          });
-        }
-        for (const { rec, problem } of badRecord) {
-          await store.set(rec.key, { ...rec, status: "skipped" });
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "operator_skipped_bad_record",
-            detail: `record at ${rec.key}: ${problem}; marked skipped`,
-          });
-        }
-        // Take the oldest record with a live claim
-        if (withClaim.length > 0) {
-          withClaim.sort((a, b) => a.rec.at - b.rec.at);
-          const { rec: oldest, ground } = withClaim[0];
-          // The goal block, the task list, the standing text and any
-          // follow-up block ride ahead of the record; a delivery carries no
-          // memory block, contextSourcesOf says why. They are built before
-          // the delivered stamp, as at the answer above: null means a turn
-          // opened while the sources read, so the record stays pending with
-          // nothing written and the next quiet tick delivers it.
-          const deliveryFollowUps: string[] = [];
-          const deliveryBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => !turnIsOpen() }, oldest.text, contextSourcesOf($, undefined, deliveryFollowUps));
-          if (deliveryBlocks === null) return false;
-          oldest.status = "delivered";
-          oldest.deliveredAt = Date.now();
-          const existing = await store.get(oldest.key);
-          if (existing) {
-            const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
-            parsed.status = "delivered";
-            parsed.deliveredAt = oldest.deliveredAt;
-            await store.set(oldest.key, parsed);
-          }
-          const submittedText = deliveryText(ground, oldest.id, oldest.text);
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "operator_delivered",
-            detail: `record ${oldest.id} submitted as ${deliveryPrefix(ground, oldest.id, "plain")}`,
-          });
-          const framedSubmittedText = deliveryWithContext(deliveryBlocks, submittedText);
-          const expectedDeliveryTurn = expectTurn({ kind: "delivery", recordId: oldest.id, ground, seatLead: opensWithSeatLead(oldest.text), text: framedSubmittedText });
-          const deliveryOutcome = await submitExpectedTurn($, expectedTurns, expectedDeliveryTurn);
-          if (!deliveryOutcome.ok) {
-            // A refused submit opens no turn, so the follow-up entries its
-            // blocks listed list again on the next prompt.
-            withdrawFollowUpsOffered(deliveryFollowUps);
-            recordFailedDelivery(oldest, deliveryOutcome);
-          }
-          await persist($);
-          return true; // One record per call
-        }
-      }
-      return false;
-    };
-    drainInboxNow = drainInbox;
-
-    // The tick's body, held in a name so that the registration below can run
-    // it inside a catch. Every write this body makes reads the persona store
-    // first, the store is a file inside a persona's own working directory,
-    // and a roster can give one directory to more than one persona: a
-    // watched persona that leaves the file unparseable makes some write of
-    // every tick throw, and which write it is depends on where the tick got
-    // to. The fleet and reconciliation blocks answer that store failure
-    // themselves, each submitting its prompt and carrying its own line, so
-    // what is left for the catch is the tick ending where it stood rather
-    // than ending in a rejection nobody receives: $.clock.every takes a
-    // callback it does not await, so an exception out of this body reaches no
-    // caller and becomes an unhandled rejection whose consequence is the host
-    // process's own to decide. The actuator at the foot of the body already
-    // runs inside a catch of exactly this shape.
-    // The always part of the tick: what runs on every tick an owner takes,
-    // turn open or not. The supervisor's mailbox, where the launcher set one:
-    // a probe is acknowledged with no turn spent, during a long turn as
-    // between turns, so a supervisor probing a session inside a long turn
-    // reads it alive; a shutdown is delivered once as a labelled turn where
-    // no turn is open, after which the tick ends as the inbox drain's does,
-    // so nothing else queues behind a session that has been asked to leave;
-    // a shutdown read while a turn is open stays in the mailbox for the first
-    // idle tick's pass. The cost bookkeeping stays in the idle part, below
-    // the fleet block: its persist is the bare store write whose throw the
-    // fleet's tick-failure reading reports, and its sweep collects stale
-    // commons entries the fleet block must read first. Resolves false where
-    // nothing more runs this tick.
-    const alwaysTick = async (): Promise<boolean> => {
-      // 1. Owner check.
-      if (!sess.isOwner) return false;
-      if (supervisorMailbox !== "") {
-        const mailbox = await drainSupervisorMailbox($, supervisorMailbox, expectedTurns, supervisorMailboxSkipped, turnIsOpen);
-        if (mailbox.logged) {
-          try { await persist($); } catch { /* the store refused; the lines above wait in memory */ }
-        }
-        if (mailbox.delivered) return false;
-      }
-
-      return true;
-    };
-
-    // The idle part of the tick: everything that needs no turn open, run
-    // after the always part where this session owns the persona and no turn
-    // is open.
-    const idleTick = async () => {
-      // Section 6: the fleet wake. The steward is woken by this block rather
-      // than by a cadence written into its own standing instruction. A duty
-      // written "on each tick" states a trigger the runtime does not have:
-      // everything else in this tick submits nothing at all on a persona
-      // holding no active goal leaf and an empty inbox, which is exactly the
-      // quiet fleet on which a crashed persona most needs reporting. It runs
-      // for the coordinator persona only, that being the seat whose standing
-      // instruction carries the fleet duty, and only with a roster
-      // configured, there being no fleet to read without one.
-      // It runs ahead of the inbox drain below, which delivers one record and
-      // returns for the rest of the tick. Behind that return, a coordinator
-      // with a backlog in its inbox would read no fleet and advance no
-      // reconciliation stamp for as many ticks as the backlog is long, which
-      // is a fleet going unwatched for exactly as long as the operator is
-      // busy. A fleet change is rare and cannot wait; a queued record is
-      // durable and is delivered a tick later at worst.
-      if (sess.persona === coordinatorPersona && fleetRoster !== "" && !fleetBlockInFlight) {
-        fleetBlockInFlight = true;
+      // The tick's body, controllerTick in hooks/controller-tick.ts, runs
+      // inside a catch here. Every write this body makes reads the persona store
+      // first, the store is a file inside a persona's own working directory,
+      // and a roster can give one directory to more than one persona: a
+      // watched persona that leaves the file unparseable makes some write of
+      // every tick throw, and which write it is depends on where the tick got
+      // to. The fleet and reconciliation blocks answer that store failure
+      // themselves, each submitting its prompt and carrying its own line, so
+      // what is left for the catch is the tick ending where it stood rather
+      // than ending in a rejection nobody receives: $.clock.every takes a
+      // callback it does not await, so an exception out of this body reaches no
+      // caller and becomes an unhandled rejection whose consequence is the host
+      // process's own to decide. The actuator at the foot of the body already
+      // runs inside a catch of exactly this shape.
+      $.clock.every(controllerTickMs, async () => {
         try {
-          const fleetNow = Date.now();
-          const fleetEntries = await readAllEntries(commonsStoreOf($));
-          const report = await readFleetRows(hostOf($), fleetRoster, fleetEntries, sess.staleAfterMs, fleetNow);
-          // The reading this one is compared against, which this session made on
-          // an earlier tick. It is held in session memory and read back from no
-          // file, so nothing a persona can write decides what is said about it.
-          const previousMap = sess.fleetHealth;
-          // Whether a clean roster reading has been made, as it stood before
-          // this tick. It rolls back with the reading below, so the two advance
-          // and retreat together: a flag that advanced while the reading went
-          // back would compare the next tick's personas against FLEET_UNSEEN
-          // with no memo to hold, which reports every one of them as new.
-          const previousFirstReadingDone = sess.fleetFirstReadingDone;
-          const { current, changed, notes, movedKeys } = fleetReadingOf(report, previousMap, previousFirstReadingDone, fleetNow, { tickFailure, startStoreProblem, reconcileStoreProblem });
-          // The reading is advanced here, before the submit below, and not when
-          // the model reports. What the order guards is the window between a
-          // submit and the turn it opens: $.prompt.submit does not resolve until
-          // the session is next idle, and until that turn opens the tick sees no
-          // open turn and runs in full. A tick landing in that window reads the
-          // same fleet, and against a reading still holding the previous one it
-          // queues a second copy of this prompt. Submitted prompts accumulate
-          // rather than replacing one another, so that is a pile of identical
-          // prompts at the next idle moment.
-          // The first-reading flag advances with it, on a tick whose roster read
-          // cleanly and on no other, and every rollback below puts the two back
-          // together. A flag advancing over a reading that rolled back would
-          // leave the next tick comparing personas it holds no memo for against
-          // FLEET_UNSEEN, which reports a whole fleet as new.
-          sess.fleetHealth = current;
-          if (report.problem === undefined) sess.fleetFirstReadingDone = true;
-          if (changed.length === 0 && notes.length === 0) {
-            // Nothing to say, and nothing to write either: the reading is this
-            // session's own memory and the line above has already advanced it.
-          } else if (turnIsOpen()) {
-            // The open-turn reading is taken again here rather than trusted from
-            // the top of the tick. Several awaits stand between the two, the
-            // roster and every keeper state file among them, and a delivered
-            // record or the operator's own message can open a turn across any of
-            // them. A prompt submitted into an open turn wakes nothing: it is
-            // queued and arrives as part of the next turn's prompt, behind
-            // whatever opened the turn it was queued against.
-            // The reading goes back to the one it replaced, so the next quiet
-            // tick composes these same lines again rather than waiting for every
-            // one of those keys to move a second time. The first-reading flag
-            // goes back with it: the two are one reading.
-            sess.fleetHealth = previousMap;
-            sess.fleetFirstReadingDone = previousFirstReadingDone;
-            sess.state.decisions.push({
-              timestamp: fleetNow,
-              loop: "monitor",
-              action: "fleet_skipped_turn_in_flight",
-              detail: `a turn opened while the fleet was being read, so the reading is back at the one before it and the next quiet tick reports it: ${[...changed.map(({ row, from, to }) => `${row.name}: ${from} -> ${to}`), ...notes.map((note) => note.composed)].join("; ")}`.slice(0, 400),
-            });
-            // Attempted rather than depended on, as at the submit below. The
-            // store is a file a watched persona can leave unparseable, and a
-            // throw from here ends the tick where it stands: the reconciliation
-            // block, the inbox drain and the actuator would all be skipped for
-            // as long as that persona chooses to hold the store. The reading is
-            // session memory and stands whatever the file does, so what a
-            // refused write costs is the audit line alone.
-            try { await persist($); } catch { /* the store refused; the line above waits for one that parses */ }
-          } else {
-            // The line saying the change was reported, pushed before the write
-            // that carries it and taken back out with the reading wherever the
-            // prompt does not go out. The store is this session's own record,
-            // and the yield path below writes it as it hands the persona over,
-            // so a line left standing there says the operator was told something
-            // no prompt ever carried.
-            const changeDecision = {
-              timestamp: fleetNow,
-              loop: "monitor" as const,
-              action: "fleet_health_changed",
-              detail: [...changed.map(({ row, from, to }) => `${row.name}: ${from} -> ${to}`), ...notes.map((note) => note.composed)].join("; ").slice(0, 400),
-            };
-            sess.state.decisions.push(changeDecision);
-            // The submit runs on a persist that landed, and a persist that did
-            // not land fails in two ways this branch reads apart.
-            // A false return is the seat. This session has just given the
-            // persona up, on a raised epoch or a lost commons claim, and
-            // submitting then would put a fleet reading in front of a session
-            // that no longer holds the seat, the reading it was composed
-            // against being nowhere. The rollback goes with the call rather
-            // than after it, because the lost-claim path writes the state as it
-            // gives the persona up and the owner check refuses every write
-            // after that, so a rollback assigned below the call would rest in
-            // memory while the advanced value rested on disk.
-            // A throw is the store. It is a file inside a persona's own working
-            // directory, and the live roster gives one directory to more than
-            // one persona, so a watched persona that leaves it unparseable
-            // makes every persist of every tick throw. A report gated on that
-            // write is a report held back about every persona of the fleet for
-            // as long as one persona chooses to hold it, which is the silence
-            // this whole block exists to refuse. The reading itself needs no
-            // file, being this session's own memory, so what the throw costs is
-            // the audit line and nothing else: the report goes out carrying a
-            // line that names the refusal, the reading stays advanced so the
-            // next tick does not compose these same lines again, and the
-            // decision line waits in memory for a store that parses.
-            // Submitting there does not race the seat. A parse that refuses
-            // fires before persist's own yield check, and the same parse
-            // refuses any successor's claim write, so no other session took the
-            // seat through a store that does not parse; a write that fails
-            // comes after a yield check that passed.
-            // The line naming the refused write, held here because its own text
-            // says the report went out. Where the submit below then fails, that
-            // sentence is untrue and the line goes back out of the store beside
-            // the one saying the change was reported, rather than standing there
-            // asserting a submission this tick did not make.
-            let storeRefusedDecision: AgentState["decisions"][number] | null = null;
-            try {
-              if (!await persistOrRollBack($, () => {
-                sess.fleetHealth = previousMap;
-                sess.fleetFirstReadingDone = previousFirstReadingDone;
-                dropDecision(changeDecision);
-              })) return;
-            } catch (err) {
-              // persistOrRollBack ran the rollback on its way out, which is
-              // what a caller that does not submit needs. This branch does
-              // submit, so the reading goes forward again and the line saying
-              // the change was reported goes back with it, to be written by the
-              // first persist that finds a store it can parse.
-              sess.fleetHealth = current;
-              if (report.problem === undefined) sess.fleetFirstReadingDone = true;
-              if (!sess.state.decisions.includes(changeDecision)) sess.state.decisions.push(changeDecision);
-              // What the line waits on, said without promising it lands. The
-              // repair is a store that parses again, and it is the only thing
-              // named here: a session carrying the built-in default rather
-              // than the persona's own state comes to hold that state only
-              // through a worker calling agentic_identity, which no background
-              // path does, so naming it beside the repair would name a wait
-              // that may never end. What the line does after the repair depends
-              // on what the file then says, and no sentence here tells an
-              // operator it will arrive.
-              storeRefusedDecision = {
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "fleet_store_write_failed",
-                detail: `the store refused the write that carries this tick's fleet line, so the report went out and both lines wait for a store that parses: ${safeErrorText(err)}`.slice(0, 400),
-              };
-              sess.state.decisions.push(storeRefusedDecision);
-              // The line the prompt carries, composed the way the roster read's
-              // own failure is. A failed write's message is built out of the
-              // store path and, for a parse, out of the bytes the parser
-              // stopped on, so it carries store text whoever wrote the store:
-              // it rides a carried line of its own, and the composed line above
-              // it holds the plugin's own sentence alone.
-              notes.push({
-                composed: `the steward's own state store '${sess.storePath}' refused the write that carries this report's audit line, so the report below went out and that line waits for a store that parses again.`,
-                carried: boundedText(safeErrorText(err)),
-              });
-              // Swallowed rather than rethrown. $.clock.every takes a callback
-              // it does not await, so an exception out of this tick reaches no
-              // caller at all and becomes an unhandled rejection whose
-              // consequence is the host process's to decide. The store read in
-              // the heartbeat tick swallows this same failure for the same
-              // reason. The tick carries on from here and the next one runs.
-              try { $.ui.log(`Agentic: the persona store refused a write during the fleet read; the [FLEET] report goes out and its decision line waits for a store that parses`); } catch { /* non-fatal */ }
-            }
-            const fleetOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: fleetPromptText(changed, notes, movedKeys, fleetNow) }));
-            if (!fleetOutcome.ok) {
-              // No turn is coming, so nothing in that prompt was reported. The
-              // reading goes back to the one it replaced, which is what makes
-              // the next tick report the same lines again instead of waiting for
-              // every one of those keys to move a second time. The line saying
-              // the change was reported goes with it, the decision below being
-              // what this tick actually did. The first-reading flag goes back
-              // with it, the two being one reading.
-              sess.fleetHealth = previousMap;
-              sess.fleetFirstReadingDone = previousFirstReadingDone;
-              dropDecision(changeDecision);
-              // And the line naming the refused write, whose own text says the
-              // report went out. Left standing it would put "the report went
-              // out" and "the prompt failed" in one store.
-              if (storeRefusedDecision !== null) dropDecision(storeRefusedDecision);
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "fleet_prompt_failed",
-                detail: `the [FLEET] prompt was ${fleetOutcome.how}, so the reading is back at the one before it: ${fleetOutcome.reason}`.slice(0, 200),
-              });
-              // Attempted rather than depended on: a store that refuses the
-              // write is one of the things this tick reaches this line for, and
-              // the rolled-back reading is session memory and stands whatever
-              // the file does. The line waits in memory for a store that parses.
-              try { await persist($); } catch { /* the store refused; the line above waits for one that parses */ }
-            } else {
-              // A prompt carrying the start-up store line went out, so the line
-              // is done. It is cleared here rather than where it was composed
-              // into the notes, because every path that does not submit leaves
-              // it for the next tick to carry. The reconciliation block's line
-              // rides the same prompt and is done on the same terms.
-              startStoreProblem = null;
-              reconcileStoreProblem = null;
-            }
-          }
-        } finally {
-          // Released here rather than at the foot of the block, so a throw
-          // out of any of the reads above leaves the flag clear and the next
-          // tick reads the fleet. Wedged shut, it would stop the fleet being
-          // watched for the life of the session behind a process the keeper
-          // reads as healthy, which is the silence this block exists to refuse.
-          fleetBlockInFlight = false;
-        }
-      }
-
-      // Section 6: the kit Coordinator seat's reconciliation pass, on that
-      // seat's own four-hour cadence and never more often. The first tick of
-      // the first session starts the cadence rather than firing it, because
-      // the seat is taken and its board read at priming; the prompt is for the
-      // pass that follows. The stamp is persisted at that first tick, so a
-      // steward relaunched more often than the cadence still reconciles rather
-      // than restarting the wait every launch. It is written before the submit,
-      // for the reason the reading above is.
-      if (sess.persona === coordinatorPersona) {
-        const reconcileNow = Date.now();
-        const lastReconcileAt = sess.state.lastReconcileAt;
-        if (lastReconcileAt === undefined) {
-          sess.state.lastReconcileAt = reconcileNow;
-          // Attempted rather than depended on, as at the submit below. A
-          // throw from here ends the tick where it stands, so the inbox drain
-          // and the actuator would be skipped for as long as a watched
-          // persona chooses to hold the store unparseable. The stamp stands in
-          // memory and holds the cadence for as long as this session runs,
-          // which is what a refused write costs: one extra pass after a
-          // relaunch inside the cadence.
-          try { await persist($); } catch { /* the store refused; the stamp stands in memory */ }
-        } else if (reconcileNow - lastReconcileAt >= reconcileEveryMs) {
-          // The open-turn reading is taken again here rather than trusted from
-          // the top of the tick. The fleet block above submits, and a submit
-          // does not resolve until the session is next idle, so a turn can
-          // have opened underneath it by the time this line runs. A prompt
-          // submitted into that turn wakes nothing: it is queued and arrives
-          // as part of the next turn's prompt, beside the [FLEET] line that
-          // opened the turn it was queued behind. The stamp is left where it
-          // is, so the next tick with no turn open asks again.
-          if (turnIsOpen()) {
-            // The stamp is not written, so this costs the pass nothing: the
-            // next tick with no turn open finds the cadence still satisfied
-            // and asks then. The tick carries on from here rather than
-            // returning, because everything below this block is a worker's own
-            // bookkeeping and has nothing to do with the seat.
-            sess.state.decisions.push({
-              timestamp: reconcileNow,
-              loop: "monitor",
-              action: "reconcile_skipped_turn_in_flight",
-              detail: "the reconciliation pass is due and a turn is in flight, so the cadence stamp stands and the next quiet tick asks for it",
-            });
-            // Attempted rather than depended on, for the reason the write
-            // above is: the tick has the inbox drain and the actuator still
-            // to run, and the stamp this branch leaves alone is unaffected by
-            // what the file does.
-            try { await persist($); } catch { /* the store refused; the line above waits for one that parses */ }
-          } else {
-            sess.state.lastReconcileAt = reconcileNow;
-            // The line naming the submission, taken back out with the stamp
-            // wherever the prompt does not go out, as at the fleet submit
-            // above. A stamp back at its previous value beside a decision
-            // saying the pass was asked for is a store that contradicts
-            // itself about the one thing this branch does.
-            const reconcileDecision = {
-              timestamp: reconcileNow,
-              loop: "monitor" as const,
-              action: "reconcile_due",
-              detail: `submitted the [RECONCILE] prompt on the ${reconcileEveryMs}ms cadence`,
-            };
-            sess.state.decisions.push(reconcileDecision);
-            // As at the fleet submit above, and read apart the same way.
-            // A persist that returned false is a session that has just given
-            // the persona up, and the seat is no longer this session's to
-            // reconcile. The stamp rolls back with the call for the reason
-            // the reading above does: the lost-claim path writes this state,
-            // so a stamp left advanced would rest on disk with no [RECONCILE]
-            // submitted, and the successor would find the cadence freshly
-            // satisfied and skip the pass for a whole four hours behind a
-            // decision line saying it was asked for.
-            // A persist that threw is the store, which a watched persona can
-            // hold unparseable for as long as it likes. An unreconciled seat
-            // for that whole time is the worse of the two outcomes, so the
-            // pass is asked for and the stamp stays advanced in memory. What
-            // that costs is one extra pass after a relaunch inside the
-            // cadence, the stamp being off disk, against a prompt pile this
-            // session cannot make: the in-memory stamp holds the cadence for
-            // as long as the session runs.
-            // Held for the reason the fleet block's own is: its text says the
-            // pass was asked for, so it goes back out of the store wherever
-            // the submit below does not make that true.
-            let reconcileStoreRefusedDecision: AgentState["decisions"][number] | null = null;
-            try {
-              if (!await persistOrRollBack($, () => {
-                sess.state.lastReconcileAt = lastReconcileAt;
-                dropDecision(reconcileDecision);
-              })) return;
-            } catch (err) {
-              // The rollback ran on the way out, and this branch submits, so
-              // the stamp goes forward again and the line naming the
-              // submission goes back with it for the first persist that finds
-              // a store it can parse.
-              sess.state.lastReconcileAt = reconcileNow;
-              if (!sess.state.decisions.includes(reconcileDecision)) sess.state.decisions.push(reconcileDecision);
-              reconcileStoreRefusedDecision = {
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "reconcile_store_write_failed",
-                detail: `the store refused the write that carries the cadence stamp, so the pass was asked for and the stamp stands in memory alone: ${safeErrorText(err)}`.slice(0, 400),
-              };
-              sess.state.decisions.push(reconcileStoreRefusedDecision);
-              // The line the operator reads, composed the way the fleet
-              // block's own refused write is and carried on the next [FLEET]
-              // prompt. Without it this failure reaches them nowhere: the
-              // [RECONCILE] text is fixed and says nothing about the store,
-              // and the decision line above is held by the file that refused
-              // it. A failed write's message is built out of the store path
-              // and, for a parse, out of the bytes the parser stopped on, so
-              // it carries store text whoever wrote the store and rides a
-              // carried line of its own.
-              // It is composed only where a roster is configured, which is the
-              // one condition the fleet block takes past this block's own. The
-              // [FLEET] prompt is the only thing that carries this line, and
-              // that prompt is composed nowhere without a roster, so a line
-              // composed here on a rosterless steward would stand uncarried
-              // and uncleared for the life of the session and reach the
-              // operator at no point. Where there is no roster the log line
-              // below is the whole of what this failure leaves.
-              if (fleetRoster !== "") {
-                reconcileStoreProblem = {
-                  composed: `the steward's own state store '${sess.storePath}' refused the write that carries the reconciliation cadence stamp, so the pass was asked for and the stamp stands in this session's memory alone.`,
-                  carried: boundedText(safeErrorText(err)),
-                };
-              }
-              // Swallowed for the reason the fleet submit above swallows: the
-              // timer does not await this callback, so an exception reaches no
-              // caller and the tick would end in an unhandled rejection.
-              try { $.ui.log(`Agentic: the persona store refused the write carrying the reconciliation cadence stamp; the [RECONCILE] prompt goes out and the stamp stands in memory`); } catch { /* non-fatal */ }
-            }
-            const reconcileOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: RECONCILE_TEXT }));
-            if (!reconcileOutcome.ok) {
-              // No turn is coming, so the pass was never asked for. The stamp
-              // goes back, and the next tick asks again rather than leaving
-              // the seat unreconciled for a whole further cadence. The line
-              // naming the submission goes with it.
-              sess.state.lastReconcileAt = lastReconcileAt;
-              dropDecision(reconcileDecision);
-              // And the line naming the refused write, whose own text says the
-              // pass was asked for. The operator's copy of it goes with the
-              // decision line, for the same reason: it would otherwise reach
-              // the next prompt saying a pass was asked for that this tick
-              // never asked for.
-              // Both go back on one condition, which is that this tick is the
-              // tick that composed them. The operator's copy waits for the
-              // next [FLEET] rather than for a store that parses, so a copy
-              // standing here can be one an earlier tick composed and no
-              // prompt has carried yet. Cleared unconditionally, that one is a
-              // refused write this tick had nothing to do with, thrown away
-              // where the decision line naming it is held by the store that
-              // refused it and the [RECONCILE] text says nothing about a
-              // store: it would reach the operator at no point at all.
-              if (reconcileStoreRefusedDecision !== null) {
-                dropDecision(reconcileStoreRefusedDecision);
-                reconcileStoreProblem = null;
-              }
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "reconcile_prompt_failed",
-                detail: `the [RECONCILE] prompt was ${reconcileOutcome.how}, so the cadence stamp is back at its previous value: ${reconcileOutcome.reason}`.slice(0, 200),
-              });
-              // Attempted rather than depended on, as at the fleet submit
-              // above: the store may be the thing that failed, and the
-              // rolled-back stamp stands in memory whatever the file does.
-              try { await persist($); } catch { /* the store refused; the line above waits for one that parses */ }
-            }
-          }
-        }
-      }
-
-      // D3: drain operator inbox, one record per call; drainInbox above
-      // owns the block, and a turn's completion calls it too.
-      if (await drainInbox()) return;
-
-      // D4: increment tick index for backoff and cost_summary cadence.
-      sess.controllerTickCount = (sess.controllerTickCount ?? 0) + 1;
-      const tickIndex = sess.controllerTickCount;
-
-      // D1: emit cost_summary on cadence (AJ2: at top of tick, independent of idle gate).
-      const costSummaryEveryNTicks = typeof cfg.costSummaryEveryNTicks === "number" ? (cfg.costSummaryEveryNTicks as number) : 20;
-      if (tickIndex % costSummaryEveryNTicks === 0) {
-        const cost = sess.state.monitor.cost;
-        const totalEstTokens = cost.classify.estTokens + cost.reason.estTokens + cost.selfReview.estTokens + cost.planner.estTokens;
-        const totalCalls = cost.classify.count + cost.reason.count + cost.selfReview.count + cost.planner.count + cost.nudge.count;
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "monitor",
-          action: "cost_summary",
-          detail: `classify:${cost.classify.count} reason:${cost.reason.count} selfReview:${cost.selfReview.count} planner:${cost.planner.count} nudge:${cost.nudge.count} estTokens:${totalEstTokens} totalCalls:${totalCalls}`,
-        });
-        await persist($);
-
-        // AT5: Sweep expired operator records on the summary cadence (owner only).
-        // The sweep appends each inbox and reply record to the channel log
-        // before deleting it and throws on a refused append with every record
-        // still in the store, so a refusal reads as its own decision rather
-        // than as a quiet count of zero, the same split the window roll below
-        // makes.
-        if (sess.isOwner) {
-          const ttlMs = typeof cfg.operatorRecordTtlMs === "number" ? (cfg.operatorRecordTtlMs as number) : 86400000;
-          try {
-            const swept = await sweepExpiredRecords(
-              commonsStoreOf($),
-              sess.persona,
-              async (lines) => { await appendToChannelLog($, lines); },
-              ttlMs,
-            );
-            if (swept > 0) {
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "worker",
-                action: "sweep_expired_records",
-                detail: `swept ${swept} expired operator records (persona: ${sess.persona})`,
-              });
-            }
-          } catch (err) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "worker",
-              action: "sweep_expired_records_failed",
-              detail: err instanceof SweepDeleteError
-                ? `sweep partly applied, every record logged, ${err.removed} of ${err.total} removed (persona: ${sess.persona}): ${err.message}`
-                : `sweep refused, records left in store (persona: ${sess.persona}): ${err instanceof Error ? err.message : String(err)}`,
-            });
-          }
-
-          // Item 5 (Bounded store): the shared store keeps only a short
-          // window of recent inbox/reply records - overflow rolls to the
-          // append-only channel log instead of staying in the one JSON
-          // file forever. Open asks are untouched (a different function,
-          // a different lifecycle).
-          const channelWindowSize = typeof cfg.channelRecordWindow === "number" ? (cfg.channelRecordWindow as number) : 50;
-          // Round 50 point 3: enforceChannelWindow now throws instead of
-          // swallowing a failed append, so "nothing to roll" (0, no error)
-          // and "a roll was refused" (thrown, records still in the store)
-          // read as two different decisions - the next gate can tell them
-          // apart instead of seeing the store quietly stop shrinking.
-          try {
-            let rolledTo = "";
-            const rolled = await enforceChannelWindow(
-              commonsStoreOf($),
-              sess.persona,
-              channelWindowSize,
-              async (lines) => { rolledTo = await appendToChannelLog($, lines); },
-            );
-            if (rolled > 0) {
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "worker",
-                action: "channel_window_rolled",
-                detail: `rolled ${rolled} closed inbox/reply records to ${rolledTo} (persona: ${sess.persona})`,
-              });
-            }
-          } catch (err) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "worker",
-              action: "channel_window_roll_failed",
-              detail: `roll refused, records left in store (persona: ${sess.persona}): ${err instanceof Error ? err.message : String(err)}`,
-            });
-          }
-        }
-      }
-      // 2a. C3: error streak branch (before the idle gate; H1: move out of the classify path).
-      // F6: with an active node, route through the ask-operator path (paused, not blocked).
-      // Re-fire rule: only when a new error occurred after handledAt.
-      const envErrors = sess.state.monitor.env.errors;
-      if (envErrors.consecutiveErrorTurns >= 3 && (!envErrors.handledAt || (envErrors.lastErrorAt && envErrors.lastErrorAt > envErrors.handledAt))) {
-        const streakTs = Date.now();
-        const streakHead = `Error streak ${envErrors.consecutiveErrorTurns} turns`;
-        envErrors.handledAt = streakTs;
-        // Look up the active node; with none to pause, there is nothing for
-        // an ask to resume, so the streak is logged and nothing more. With no
-        // ask open, step 4 below still activates pending work on this tick.
-        const activeForStreak = sess.state.goals.find((n) => n.status === "active");
-        if (!activeForStreak) {
-          sess.state.decisions.push({
-            timestamp: streakTs,
-            loop: "monitor",
-            action: "error_streak",
-            detail: `no-active-node: ${streakHead}; no leaf to pause, no ask opened`,
-          });
-          sess.state.updatedAt = streakTs;
-          await persist($);
-        } else if (ownAskStands(sess.state, "error-streak", activeForStreak.id)) {
-          // The streak's own question still holds this leaf, so the
-          // operator already has it. A second one would add nothing, and
-          // pausing the leaf with no ask of its own would leave nothing to
-          // resume it, so the streak is logged and the leaf keeps running.
-          const openStreakAsk = openAskBy(sess.state, "error-streak", activeForStreak.id);
-          sess.state.decisions.push({
-            timestamp: streakTs,
-            loop: "monitor",
-            action: "error_streak",
-            detail: `${activeForStreak.id}: ${streakHead}; ask ${openStreakAsk?.id} already open, no second ask`,
-          });
-          sess.state.updatedAt = streakTs;
-          await persist($);
-        } else {
-          const nodeId = activeForStreak.id;
-          const streakReason = `${streakHead}; escalating`;
-          sess.state.decisions.push({
-            timestamp: streakTs,
-            loop: "monitor",
-            action: "error_streak",
-            detail: `${nodeId}: ${streakReason}`,
-          });
-          // D5: open the blocking entry and its ask record. A streak ask of
-          // this leaf whose hold was lifted is withdrawn first, so the fresh
-          // one replaces it rather than standing beside it.
-          await withdrawLiftedAskBy($, sess.state, sess.persona, "error-streak", nodeId, streakTs);
-          const opened = await openLedgerAsk($, sess.state, sess.persona, sess.mySessionId, nodeId, streakReason, "", "error-streak", true, streakTs);
-          if (typeof opened === "string") {
-            sess.state.decisions.push({
-              timestamp: streakTs,
-              loop: "monitor",
-              action: "ask_cap_refused",
-              detail: `${nodeId}: error-streak ask refused: ${opened === "cap" ? `the open cap of ${ASKS_OPEN_MAX}` : opened}`,
-            });
-          } else {
-            sess.state.decisions.push({
-              timestamp: streakTs,
-              loop: "monitor",
-              action: "ask_opened",
-              detail: `${nodeId}: error-streak: ${streakReason} (ask ${opened.id})`,
-            });
-            try { $.ui.toast(`Agentic: ${streakReason}`); } catch { /* non-fatal */ }
-          }
-          // The open ask is the hold: the leaf stays active with no reason
-          // written on it, and the idle branch reads the ask through holdOf.
-          sess.state.updatedAt = streakTs;
-          await persist($);
-        }
-      }
-
-      // 2a2. Self-review (S9: single execution site in the tick handler).
-      // The open-turn reading is taken again here rather than trusted from the
-      // top of the tick. The blocks above await store reads and submits, so a
-      // turn can have opened underneath them by the time this line runs, and
-      // an agentic_say in that turn writes to the coordinator persona's inbox
-      // under this session's id. sendPluginRecord and the agentic_say handler
-      // each read the highest sequence and then write under the same writer
-      // id, so the two could take one sequence number and one would overwrite
-      // the other's record. Skipping leaves the settle step, the routing and
-      // the review to the next quiet tick, which costs one tick and loses
-      // nothing.
-      if (sess.state.monitor.selfReview && !turnIsOpen()) {
-        const sr = sess.state.monitor.selfReview;
-        const now = Date.now();
-
-        // Lines for the [KAIZEN] thread message, which carries only the
-        // findings that have no coordinator persona to reach. Each line is
-        // made safe by kaizenLine. No line names a node id.
-        const announced: string[] = [];
-        const announce = (line: string, signal: string): void => {
-          announced.push(kaizenLine(`${line} (${signal})`));
-        };
-        // A finding's text below its [FINDING] line, for an announcement made
-        // from a ledger entry.
-        const findingBody = (text: string): string => text.split(LINE_TERMINATOR).slice(1).join(" ") || text;
-
-        // Sends one finding to the coordinator persona as a [FINDING] record
-        // and enters it in the ledger, or, given `resend`, sends that entry's
-        // text again and replaces its writer and seq while keeping its sentAt.
-        // A session on the default persona, a write the reach rule refuses,
-        // and a store that throws have no road: the finding is logged as
-        // finding_unroutable, announced on this persona's own thread, and
-        // entered as delivered with an empty writer and a seq of 0, so it is
-        // never read back or retried and still starts the cool-off. A resend
-        // takes the open-turn reading once more right before its write, as
-        // the proposal resend does, and a turn open by then leaves the entry
-        // untouched for the next quiet tick. Returns the record id, or null
-        // on the unroutable path and on a resend left for a later tick.
-        const sendFinding = async (signal: string, text: string, announceLine: string, resend?: SentFinding): Promise<string | null> => {
-          let problem: string;
-          try {
-            if (sess.persona === "default") {
-              problem = "the session is on the default persona, which has no road to a coordinator persona";
-            } else if (!await mayReachPersona(commonsStoreOf($), coordinatorPersona, sess.mySessionId, coordinatorPersona, architectPersona, sess.staleAfterMs)) {
-              problem = `the reach rule refuses this session's write to '${coordinatorPersona}'`;
-            } else {
-              // A turn can have opened under the settle step's record read and
-              // the reach check, and an agentic_say in it takes the highest
-              // sequence under this session's id exactly as the write below does.
-              if (resend && turnIsOpen()) return null;
-              const sent = await sendPluginRecord(commonsStoreOf($), coordinatorPersona, sess.mySessionId, text);
-              if (resend) {
-                resend.writer = sent.writer;
-                resend.seq = sent.seq;
-              } else {
-                sr.sent.push({ signal, text, sentAt: now, writer: sent.writer, seq: sent.seq, delivered: false });
-              }
-              sess.state.decisions.push({
-                timestamp: now,
-                loop: "monitor",
-                action: "finding_sent",
-                detail: `${signal}: record ${sent.id} to '${coordinatorPersona}'${resend ? " (sent again, the earlier record was skipped)" : ""}`,
-              });
-              return sent.id;
-            }
-          } catch (err) {
-            problem = `the write to '${coordinatorPersona}' failed: ${err instanceof Error ? err.message : String(err)}`;
-          }
-          if (resend) {
-            resend.writer = "";
-            resend.seq = 0;
-            resend.delivered = true;
-          } else {
-            sr.sent.push({ signal, text, sentAt: now, writer: "", seq: 0, delivered: true });
-          }
-          sess.state.decisions.push({
-            timestamp: now,
-            loop: "monitor",
-            action: "finding_unroutable",
-            detail: `${signal}: ${problem}; announced on this persona's own thread`,
-          });
-          announce(announceLine, signal);
-          return null;
-        };
-
-        // The settle step, on every tick that reaches this block and not only
-        // on one where a review is due: a persona with little to do takes few
-        // turns, and a lost record would otherwise go unnoticed for days. Each
-        // entry not yet delivered is read back. A record that reads delivered,
-        // answered or resolved settles the entry, and so does an absent one,
-        // since a pending record is never swept and an absent record has
-        // therefore already left pending. A record that was skipped and then
-        // swept before this tick also reads absent and is not sent again,
-        // which the plan accepts: it needs the finder down for longer than the
-        // record survives. A skipped record is sent again. A
-        // record still pending FINDING_UNROUTABLE_AFTER_MS after the send has
-        // no coordinator persona to take it: the finding is announced here and
-        // the record is left in the store.
-        const ledgerBefore = JSON.stringify(sr.sent);
-        for (const entry of sr.sent) {
-          if (entry.delivered) continue;
-          const rec = await readInboxRecord(commonsStoreOf($), coordinatorPersona, entry.writer, entry.seq);
-          if (rec === null || rec.status === "delivered" || rec.status === "answered" || rec.status === "resolved") {
-            entry.delivered = true;
-          } else if (rec.status === "skipped") {
-            await sendFinding(entry.signal, entry.text, findingBody(entry.text), entry);
-          } else if (now - entry.sentAt >= FINDING_UNROUTABLE_AFTER_MS) {
-            entry.delivered = true;
-            sess.state.decisions.push({
-              timestamp: now,
-              loop: "monitor",
-              action: "finding_unroutable",
-              detail: `${entry.signal}: record ${rec.id} to '${coordinatorPersona}' still pending after ${Math.round(FINDING_UNROUTABLE_AFTER_MS / 3_600_000)}h; announced on this persona's own thread, record left in the store`,
-            });
-            announce(findingBody(entry.text), entry.signal);
-          }
-        }
-        // A delivered entry past the cool-off is dropped to keep the list
-        // short, except where it is its signal's latest: the review counts only
-        // the events after a signal's latest sentAt, so that entry is kept.
-        // The list holds at most one such entry per signal, plus the entries
-        // still inside the cool-off. Two entries with one sentAt are ordered
-        // by their place in the list, the later one counting as later.
-        sr.sent = sr.sent.filter((e, i) => !(e.delivered && now - e.sentAt > FINDING_COOLOFF_MS
-          && sr.sent.some((later, j) => later.signal === e.signal
-            && (later.sentAt > e.sentAt || (later.sentAt === e.sentAt && j > i)))));
-
-        // A goal node an earlier self-review wrote, still open, is sent as a
-        // finding and abandoned, so the signal is in the ledger before the
-        // review below reads it and the node never holds the active slot.
-        let routedAny = false;
-        for (const node of sess.state.goals) {
-          if (typeof node.kaizenSignal !== "string") continue;
-          if (node.status !== "pending" && node.status !== "active" && node.status !== "paused" && node.status !== "blocked") continue;
-          const signal = node.kaizenSignal;
-          const wasActive = node.status === "active" || sess.state.activeGoalId === node.id;
-          // The node is closed before the send is awaited, so a tick that
-          // overlaps this one finds it abandoned and does not route it again.
-          node.status = "abandoned";
-          node.updatedAt = now;
-          if (sess.state.activeGoalId === node.id) sess.state.activeGoalId = null;
-          const recordId = await sendFinding(signal, `[FINDING] ${sess.persona} ${signal}\n${node.objective}`, node.objective);
-          node.notes = [...(node.notes ?? []), recordId !== null
-            ? `Sent to the '${coordinatorPersona}' persona as finding record ${recordId}.`
-            : "The finding was announced on this persona's own thread."];
-          sess.state.decisions.push({
-            timestamp: now,
-            loop: "goal",
-            action: "kaizen_node_routed",
-            detail: `${node.id} -> ${recordId ?? "announced on this persona's own thread"}`,
-          });
-          if (wasActive) {
-            const nextId = activateNext(sess.state);
-            activate($, nextId, `${node.id} routed as a finding`);
-          }
-          routedAny = true;
-        }
-        if (routedAny || JSON.stringify(sr.sent) !== ledgerBefore) {
-          sess.state.updatedAt = now;
-          await persist($);
-        }
-
-        // S10: reset the hourly cap when the window has expired.
-        if (sr.windowStart > 0 && now - sr.windowStart >= 3600000) {
-          sr.count = 0;
-          sr.windowStart = now;
-        }
-
-        const srOpts = { selfReviewStreak, selfReviewEveryTurns, selfReviewDebounceTurns, selfReviewMaxPerHour };
-        // Reactive check (error streak trigger).
-        const reactive = shouldSelfReview(
-          { monitor: sess.state.monitor, decisions: sess.state.decisions, memory: sess.state.memory, goals: sess.state.goals, activeGoalId: sess.state.activeGoalId },
-          srOpts, now, "reactive",
-        );
-        // Periodic check (pendingPeriodic or turnsSince >= everyTurns).
-        const periodic = shouldSelfReview(
-          { monitor: sess.state.monitor, decisions: sess.state.decisions, memory: sess.state.memory, goals: sess.state.goals, activeGoalId: sess.state.activeGoalId },
-          srOpts, now, "periodic",
-        );
-
-        if (reactive.eligible || periodic.eligible) {
-          const trigger = reactive.eligible ? reactive.reason : periodic.reason;
-          // Stamp the attempt before the first await. $.clock.every does not
-          // await the tick, so a tick that overlaps a slow review must read it
-          // as spent, and a review that throws is spent exactly as one that
-          // succeeds: the debounce and the hourly cap bound both.
-          const owedPeriodic = sr.pendingPeriodic;
-          sr.count += 1;
-          if (sr.windowStart === 0) sr.windowStart = now;
-          sr.lastAt = now;
-          sr.turnsSince = 0;
-          sr.pendingPeriodic = false;
-          try {
-            // Plan item 8.4: before asking the model for a lesson, read the
-            // worker's own record mechanically. A repeated weakness becomes a
-            // finding sent to the coordinator persona, and where the loop can
-            // answer it by changing its own configuration, that change is
-            // applied here as well. When a finding is made the review is spent
-            // on it and no model lesson is written: a finding about the
-            // worker's own record is exactly the class item 8.2 keeps out of
-            // memory. A finding writes no goal node and leaves activeGoalId
-            // alone.
-            const inboxForReview = sess.isOwner ? await listInboxRecords(commonsStoreOf($), sess.persona) : [];
-            const findings = reviewOwnRecord(
-              { decisions: sess.state.decisions, memory: sess.state.memory, inbox: inboxForReview, sent: sr.sent.map((e) => ({ signal: e.signal, sentAt: e.sentAt })) },
-              { selfReviewEveryTurns, selfReviewDebounceTurns, now },
-            );
-            for (const f of findings) {
-              if (f.configFix) {
-                selfReviewEveryTurns = f.configFix.to;
-                sess.state.decisions.push({
-                  timestamp: now,
-                  loop: "monitor",
-                  action: "kaizen_config_adjusted",
-                  detail: `${f.signal} x${f.count}: ${f.configFix.knob} ${f.configFix.from} -> ${f.configFix.to}`,
-                });
-              }
-              const text = `[FINDING] ${sess.persona} ${f.signal} x${f.count}\n${f.configFix ? f.rationale : f.objective}`;
-              await sendFinding(f.signal, text, f.rationale);
-            }
-            if (findings.length > 0) {
-              sess.state.decisions.push({
-                timestamp: now,
-                loop: "monitor",
-                action: "self-review",
-                detail: `${trigger}: own record -> ${findings.length} finding(s), no lesson`,
-              });
-              sess.state.updatedAt = now;
-              await persist($);
-            }
-            if (findings.length === 0) {
-              const input = buildSelfReviewInput(
-                { monitor: sess.state.monitor, decisions: sess.state.decisions, memory: sess.state.memory, goals: sess.state.goals, activeGoalId: sess.state.activeGoalId },
-                now,
-              );
-              const raw = await $.model.complete({ model: "haiku", prompt: input.prompt, maxTokens: 80 });
-              // D1: increment self-review ledger
-              sess.state.monitor.cost.selfReview.count += 1;
-              sess.state.monitor.cost.selfReview.estTokens += estimateTokens(input.prompt.length, 80);
-              const lessonText = completionText(raw);
-              if (lessonText === null) {
-                // The result carried no text: the catch below writes the
-                // site's own error decision naming the shape, and no lesson
-                // is written. The attempt is already stamped, so the debounce
-                // bounds the retry as it does for any other throw here.
-                throw new Error(`review returned no text ${completionShape(raw)}`);
-              }
-              const lesson = lessonText.trim();
-              if (lesson.length > 0 && lesson.toUpperCase() !== "NONE") {
-                // Item 8.2: a memory entry comes from a proof passing or an
-                // operator correction, never from the classifier scoring its
-                // own confusion. Refuse the latter before the dedupe check.
-                if (isSelfScoringLesson(lesson)) {
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "memory",
-                    action: "memory_lesson_refused",
-                    detail: `self-scoring lesson refused: ${lesson.slice(0, 80)}`,
-                  });
-                } else if (!dedupeSelfReview(sess.state.memory, lesson)) {
-                  const entryId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                  sess.state.memory.push({
-                    id: entryId,
-                    kind: "lesson",
-                    text: lesson,
-                    confidence: 0.5,
-                    source: "self-review",
-                    createdAt: Date.now(),
-                    lastAccessed: Date.now(),
-                    accessCount: 0,
-                    pinned: false,
-                    provenance: {
-                      decisionTimestamps: input.decisionTimestamps,
-                      windowRange: input.decisionTimestamps.length > 0
-                        ? [input.decisionTimestamps[0], input.decisionTimestamps[input.decisionTimestamps.length - 1]]
-                        : undefined,
-                      streak: input.streak,
-                      trigger: trigger,
-                    },
-                  });
-                  // Evict old self-review lessons (S8: keep max 5, never touch pinned).
-                  evictSelfReview(sess.state.memory, 5);
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "monitor",
-                    action: "self-review",
-                    detail: `${trigger}: ${lesson.slice(0, 80)}`,
-                  });
-                } else {
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "monitor",
-                    action: "self-review",
-                    detail: `${trigger}: dupe, skipped`,
-                  });
-                }
-              } else {
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "monitor",
-                  action: "self-review",
-                  detail: `${trigger}: NONE`,
-                });
-              }
-            }
-          } catch (err) {
-            // Self-review failed; non-fatal. The attempt is already stamped, so
-            // the debounce and the hourly cap bound the retry. The decision
-            // names the error on one line, so the next failure says what threw.
-            let message = "";
-            try {
-              message = safeErrorText(err);
-            } catch {
-              // A thrown value whose conversion itself throws.
-            }
-            if (message === "" && err instanceof Error) {
-              try {
-                message = bracketSafeText(String(err.name));
-              } catch {
-                // An Error whose name itself throws.
-              }
-            }
-            const foldedMessage = message.split(LINE_TERMINATOR).join(" ").slice(0, 200) || "unprintable error";
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "self-review",
-              detail: `${trigger}: error: ${foldedMessage}`,
-            });
-            // A failed attempt did not serve the goal_done review it was owed,
-            // so that request stays set and is retried once the debounce
-            // admits it. A failed reactive-only review sets nothing.
-            if (owedPeriodic) sr.pendingPeriodic = true;
-          }
-          sess.state.updatedAt = now;
-          await persist($);
-        }
-
-        if (announced.length > 0) await submitKaizen($, expectedTurns, announced);
-      }
-
-      // 2b. Git probe (E4, C6): time-based cadence, fire-and-forget.
-      if (!gitProbeInFlight && !gitUnavailable) {
-        const env = sess.state.monitor.env;
-        const now = Date.now();
-        const gitProbeMs = sess.options.gitProbeMs ?? 120000;
-        if (env.git === null || now - env.git.sampledAt >= gitProbeMs) {
-          gitProbeInFlight = true;
-          runChild($, ["git", "status", "--porcelain=v1", "-b"])
-            .then((res) => {
-              if (res.exitCode === 0) {
-                const lines = (res.stdout || "").split("\n").filter((l) => l.trim());
-                const branchLine = lines.find((l) => l.startsWith("## "));
-                const branch = branchLine ? branchLine.slice(3).split(" ")[0] : "unknown";
-                const dirty = lines.filter((l) => !l.startsWith("## ") && l.trim()).length;
-                let ahead = 0;
-                let behind = 0;
-                // Parse ahead/behind from the branch line if present.
-                if (branchLine) {
-                  const aheadMatch = branchLine.match(/ahead (\d+)/);
-                  const behindMatch = branchLine.match(/behind (\d+)/);
-                  if (aheadMatch) ahead = parseInt(aheadMatch[1], 10);
-                  if (behindMatch) behind = parseInt(behindMatch[1], 10);
-                }
-                return runChild($, ["git", "log", "-1", "--format=%ct"]).then((logRes) => {
-                  const lastCommitAt = logRes.exitCode === 0 ? parseInt((logRes.stdout || "0").trim(), 10) * 1000 : 0;
-                  const newGit: EnvGit = { branch, dirty, ahead, behind, lastCommitAt, sampledAt: Date.now() };
-                  const prevGit = env.git;
-                  if (prevGit === null || prevGit.dirty !== dirty || prevGit.branch !== branch) {
-                    const detail = prevGit === null
-                      ? `env_git first sample dirty=${dirty} branch ${branch}`
-                      : `env_git dirty=${dirty} (was ${prevGit.dirty}) branch ${branch}`;
-                    sess.state.decisions.push({
-                      timestamp: Date.now(),
-                      loop: "monitor",
-                      action: "env_git",
-                      detail,
-                    });
-                  }
-                  sess.state.monitor.env.git = newGit;
-                });
-              } else if (res.exitCode === 128) {
-                // F7: non-git cwd confirmed; stop probing for the session.
-                if (!gitUnavailable) {
-                  gitUnavailable = true;
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "monitor",
-                    action: "env_git_null",
-                    detail: `env_git_null exit 128`,
-                  });
-                }
-              } else {
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "monitor",
-                  action: "env_git_error",
-                  detail: `env_git_error exit ${res.exitCode}`,
-                });
-              }
-            })
-            .catch(() => { /* non-fatal */ })
-            .finally(() => { gitProbeInFlight = false; });
-        }
-      }
-
-      // 2c. The plan record settle step, for the [PROPOSAL] and [STARTED]
-      // records goal_add sent. It sits ahead of every step that can end the
-      // tick on the tree, so it runs on each quiet owner tick whether or not an
-      // entry is active: a [STARTED] plan is usually the active entry, and the
-      // idle proposal's settle step in 4a never runs while one is. The
-      // coordinator persona and the default persona are skipped, as 4a skips
-      // them. The open-turn reading is taken again here, since the awaits
-      // above leave room for a turn to open, and an agentic_say in it and a
-      // resend below each take the highest inbox sequence under this
-      // session's id.
-      //
-      // An entry whose goal entry no longer needs it leaves the ledger unread:
-      // a [PROPOSAL] once its node is gone or no longer carries awaitingYes,
-      // and a [STARTED] once its node is gone, complete or abandoned. Any
-      // other entry's record is read back. One that reads delivered, answered,
-      // resolved or absent settles the entry, which leaves the ledger. One
-      // that reads skipped is sent again with the same text under this
-      // session, taking the new writer and seq and counting one more resend.
-      // One that reads skipped after PLAN_RECORD_MAX_RESENDS resends, and a
-      // resend the reach rule refuses, have no road: the entry leaves the
-      // ledger, plan_record_unroutable is logged, and the record's text is
-      // announced on this persona's own thread through the [KAIZEN] frame. A
-      // resend whose reach check or store write throws leaves the entry for
-      // the next quiet tick. A turn open by the time a resend would write
-      // stops the step: what it settled so far is still saved and announced,
-      // and the tick then ends, as step 4a ends on a turn it finds open.
-      if (sess.persona !== coordinatorPersona && sess.persona !== "default"
-        && sess.state.monitor.planRecords.length > 0 && !turnIsOpen()) {
-        const ledger = sess.state.monitor.planRecords;
-        const planRecordNow = Date.now();
-        const unroutableLines: string[] = [];
-        let planRecordsChanged = false;
-        let turnOpenedUnderStep = false;
-        const settle = (entry: SentPlanRecord): void => {
-          const at = ledger.indexOf(entry);
-          if (at !== -1) ledger.splice(at, 1);
-          planRecordsChanged = true;
-        };
-        // Settles an entry that has no road left, logs why, and queues its
-        // text for the [KAIZEN] announcement.
-        const settleUnroutable = (entry: SentPlanRecord, recordId: string, why: string): void => {
-          settle(entry);
-          unroutableLines.push(kaizenLine(entry.text));
-          sess.state.decisions.push({
-            timestamp: planRecordNow,
-            loop: "monitor",
-            action: "plan_record_unroutable",
-            detail: `${entry.nodeId}: record ${recordId} to '${coordinatorPersona}' ${why}; announced on this persona's own thread`,
-          });
-        };
-        for (const entry of [...ledger]) {
-          const node = sess.state.goals.find((g) => g.id === entry.nodeId);
-          const needed = !!node && (entry.awaitingYes
-            ? node.awaitingYes === true
-            : node.status !== "complete" && node.status !== "abandoned");
-          if (!needed) {
-            settle(entry);
-            continue;
-          }
-          const rec = await readInboxRecord(commonsStoreOf($), coordinatorPersona, entry.writer, entry.seq);
-          if (rec === null || rec.status === "delivered" || rec.status === "answered" || rec.status === "resolved") {
-            settle(entry);
-            continue;
-          }
-          if (rec.status !== "skipped") continue;
-          if (entry.resends >= PLAN_RECORD_MAX_RESENDS) {
-            settleUnroutable(entry, rec.id, `was skipped after ${entry.resends} resends and is not sent again`);
-            continue;
-          }
-          try {
-            if (!await mayReachPersona(commonsStoreOf($), coordinatorPersona, sess.mySessionId, coordinatorPersona, architectPersona, sess.staleAfterMs)) {
-              settleUnroutable(entry, rec.id, `was skipped and is not sent again: the reach rule refuses this session's write to '${coordinatorPersona}'`);
-              continue;
-            }
-            // Taken once more, since a turn can have opened under the record
-            // read and the reach check.
-            if (turnIsOpen()) {
-              turnOpenedUnderStep = true;
-              break;
-            }
-            const again = await sendPluginRecord(commonsStoreOf($), coordinatorPersona, sess.mySessionId, entry.text);
-            entry.writer = again.writer;
-            entry.seq = again.seq;
-            entry.resends += 1;
-            planRecordsChanged = true;
-            sess.state.decisions.push({
-              timestamp: planRecordNow,
-              loop: "monitor",
-              action: "plan_record_resent",
-              detail: `${entry.nodeId}: record ${again.id} to '${coordinatorPersona}' (sent again, the earlier record ${rec.id} was skipped)`,
-            });
-          } catch (err) {
-            planRecordsChanged = true;
-            sess.state.decisions.push({
-              timestamp: planRecordNow,
-              loop: "monitor",
-              action: "plan_record_resend_failed",
-              detail: `${entry.nodeId}: record ${rec.id} to '${coordinatorPersona}' was skipped and not sent again: ${safeErrorText(err)}`.slice(0, 200),
-            });
-          }
-        }
-        // The ledger is written before the announcement is submitted, since
-        // the submit does not resolve until the session is next idle. A save
-        // that throws still lets the announcement go out, and the settled
-        // ledger waits in memory for the next save.
-        if (planRecordsChanged) {
-          try { await persist($); } catch { /* the store refused; the ledger above waits in memory */ }
-        }
-        if (unroutableLines.length > 0) await submitKaizen($, expectedTurns, unroutableLines);
-        if (turnOpenedUnderStep) return;
-      }
-
-      // Get the active node.
-      const activeNode = sess.state.activeGoalId
-        ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-        : null;
-      const root = sess.state.goals.find((g) => g.parentId === null);
-
-      // 3a. A finished root completes with no planner call: every descendant
-      // is complete or abandoned, at least one is complete, and the planner
-      // has never broken the root down (isRootFinished). isPlanningDue reads
-      // false for such a root, so this is read first and consumes the tick.
-      // It waits while a planner call is in flight: a tree edited into the
-      // finished shape during that call takes the call's own outcome, and a
-      // root completed under it would receive the call's plans.
-      if (isRootFinished(sess.state) && !planningInFlight) {
-        await completeRoot($, root!.id, "every descendant complete or abandoned, no planner call");
-        await persist($);
-        return;
-      }
-
-      // 3. Planning gate (R1, R5): planning runs here, NOT in a tool handler.
-      // Due when root exists, not complete/abandoned, no
-      // pending/active/paused descendants, and the root is not finished.
-      // M8: reentrancy guard: a planner call slower than one tick must not fire twice.
-      if (isPlanningDue(sess.state) && !planningInFlight) {
-        planningInFlight = true;
-        // M13: a failing planner is capped. Each call, shape or parse failure,
-        // and any throw inside the gate, increments the root counter and
-        // persists; at 3 the root is blocked so the planner is not retried
-        // every tick. A successful planning round (created or complete) resets
-        // it. Declared above the gate's try so its catch can reach it: a
-        // register the catch could not call was how a throw after the model
-        // call looped one Haiku call per tick without ever counting.
-        // planningSettled is set once this attempt has counted, one way or
-        // the other: a failure registered, a round created or completed, or
-        // a reply discarded. The gate's catch registers a throw only where it
-        // is still false, so a persist that throws after the count neither
-        // counts the attempt twice nor turns a created round into a failure.
-        let planningSettled = false;
-        const registerPlanningFailure = async (rootId: string, detail: string): Promise<void> => {
-          planningSettled = true;
-          const rootNow = sess.state.goals.find((g) => g.id === rootId);
-          if (rootNow) {
-            rootNow.consecutivePlanningFailures = (rootNow.consecutivePlanningFailures || 0) + 1;
-          }
-          const failCount = rootNow?.consecutivePlanningFailures || 0;
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "planning_failed",
-            detail,
-          });
-          if (rootNow && failCount >= 3 && rootNow.status !== "blocked") {
-            rootNow.status = "blocked";
-            rootNow.blockedReason = `Planner failing: ${detail}`;
-            rootNow.updatedAt = Date.now();
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "block",
-              detail: `Root ${rootNow.id}: Planner failing after ${failCount} consecutive failures`,
-            });
-            try { $.ui.toast(`Agentic: root blocked: planner failing`); } catch { /* non-fatal */ }
-            try { $.ui.status(""); } catch { /* non-fatal */ }
-          }
-          await persist($);
-        };
-        try {
-          const planTs = Date.now();
-          sess.state.decisions.push({
-            timestamp: planTs,
-            loop: "goal",
-            action: "planning_fired",
-            detail: `Root ${root!.id} has no pending/active/paused descendants; planning`,
-          });
-
-          // H5 / M15: cap check BEFORE the model call.
-          // The blocked-planning streak is evaluated over the PREVIOUS planning
-          // round's plans only (planningRound === planningRounds - 1), never
-          // over every node the root has ever produced. A completed plan from an
-          // earlier round therefore cannot mask two consecutive all-blocked
-          // rounds, and a stale blocked node cannot mask a fresh round.
-          const prevBlocked = previousRoundBlocked(root!, sess.state.goals);
-          if (prevBlocked) {
-            root!.consecutiveBlockedPlannings = (root!.consecutiveBlockedPlannings || 0) + 1;
-          } else {
-            root!.consecutiveBlockedPlannings = 0;
-          }
-          const capReason = planningCapReached(root!, root!.consecutiveBlockedPlannings);
-          if (capReason) {
-            root!.status = "blocked";
-            root!.blockedReason = capReason;
-            root!.updatedAt = Date.now();
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "block",
-              detail: `Root ${root!.id}: ${capReason}`,
-            });
-            try { $.ui.toast(`Agentic: root blocked: planning cap reached`); } catch { /* non-fatal */ }
-            try { $.ui.status(""); } catch { /* non-fatal */ }
-            await persist($);
-            return;
-          }
-
-          // R2: re-read the roadmap file at every planning event.
-          let roadmapText = "";
-          const rp = root!.roadmapPath;
-          if (rp) {
-            try {
-              if (await $.fs.exists(rp)) {
-                roadmapText = await $.fs.read(rp);
-              }
-            } catch { /* roadmap unreadable; planner gets empty text */ }
-          }
-
-          // Planning call: Haiku complete, JSON array of plans.
-          // H3-part2: carry history and a cap in the prompt.
-          const completedPlans = sess.state.goals.filter((g) => g.parentId === root!.id && g.status === "complete");
-          const blockedPlans = sess.state.goals.filter((g) => g.parentId === root!.id && g.status === "blocked");
-          const abandonedPlans = sess.state.goals.filter((g) => g.parentId === root!.id && g.status === "abandoned");
-          const historyLines: string[] = [];
-          for (const cp of completedPlans) {
-            const lastNote = cp.notes.length > 0 ? cp.notes[cp.notes.length - 1] : "no note";
-            historyLines.push(`Completed: ${cp.title}: ${lastNote}`);
-          }
-          for (const bp of blockedPlans) {
-            historyLines.push(`Blocked: ${bp.title}: ${bp.blockedReason || "unknown"}`);
-          }
-          for (const ap of abandonedPlans) {
-            historyLines.push(`Abandoned: ${ap.title}`);
-          }
-          const historyBlock = historyLines.length > 0 ? `\n${historyLines.join("\n")}\n\n` : "";
-          const planPrompt =
-            `You are the planner for an agentic plugin. ` +
-            `The operator's objective is: "${root!.objective}".\n\n` +
-            (roadmapText
-              ? `Roadmap file content:\n${roadmapText}\n\n`
-              : "") +
-            historyBlock +
-            `Create a plan of 0 to 7 steps to accomplish the objective.\n` +
-            (roadmapText
-              ? `When a roadmap is provided, produce exactly one plan per numbered roadmap item.\n`
-              : "") +
-            `Return a JSON array. Each element: {"title": string, "objective": string, "maxRounds": number (5-20)}.\n` +
-            `Return [] (empty array) if the objective and roadmap are fully met by the completed items.\n` +
-            `Never repeat a completed item. A blocked item may be retried at most once with a different approach.\n` +
-            `Return a JSON array only: no prose, no markdown fences.`;
-
-          // H4 / M14: planner fault injection via a single cwd-relative file
-          // flag, beside the store path (which also resolves cwd-relative).
-          // A file named .agentic-planner-fault makes the planner return "not
-          // json" so parsing fails. The test runs with cwd = harness root, the
-          // same cwd the store resolves against, so the flag belongs there.
-          let fault = false;
-          try { if (await $.fs.exists(".agentic-planner-fault")) { fault = true; } } catch { /* non-fatal */ }
-
-          // H4: AGENTIC_PLANNER_FAULT file flag replaces the raw response with "not json".
-          let rawResult: unknown;
-          try {
-            rawResult = await $.model.complete({
-              model: "haiku",
-              prompt: planPrompt,
-              maxTokens: 1500,
-            });
-            // D1: increment planner ledger
-            sess.state.monitor.cost.planner.count += 1;
-            sess.state.monitor.cost.planner.estTokens += estimateTokens(planPrompt.length, 1500);
-          } catch (e) {
-            await registerPlanningFailure(root!.id, `Planner call failed: ${String(e).slice(0, 150)}`);
-            return;
-          }
-          // The root may have closed while the call was out: goal_done on the
-          // root, in an operator turn, completes exactly the tree the planner
-          // is due for. A round for a root no longer open is dropped whole,
-          // so no plan node lands under a complete root.
-          const rootAfterCall = sess.state.goals.find((g) => g.id === root!.id);
-          if (!rootAfterCall || rootAfterCall.status === "complete" || rootAfterCall.status === "abandoned") {
-            planningSettled = true;
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "planning_discarded",
-              detail: `Root ${root!.id} is ${rootAfterCall ? rootAfterCall.status : "gone"} since the planner call went out; its reply is dropped`,
-            });
-            await persist($);
-            return;
-          }
-          // The result is read through the one reader before any parse. A
-          // result with no text is a failure the counter sees, named by its
-          // shape, so an engine that changes the result's shape again blocks
-          // the root after three ticks rather than looping on every one.
-          const rawText = completionText(rawResult);
-          if (rawText === null) {
-            await registerPlanningFailure(root!.id, `Planner returned no text ${completionShape(rawResult)}`);
-            return;
-          }
-          let raw: string = rawText;
-          if (fault) {
-            raw = "not json";
-          }
-
-          // H4: parsed flag set only when JSON.parse returns an array.
-          let plans: Array<{ title: string; objective: string }> = [];
-          let parsedOk = false;
-          try {
-            const trimmed = raw.trim().replace(/^```(?:json)?\n?/m, "").replace(/\n?```$/m, "").trim();
-            const parsed = JSON.parse(trimmed);
-            if (Array.isArray(parsed)) {
-              plans = parsed
-                .filter((p) => p && typeof p.title === "string" && typeof p.objective === "string")
-                .slice(0, 7);
-              parsedOk = true;
-            }
-          } catch { /* parse failed */ }
-
-          if (!parsedOk) {
-            // H4: parse failure is not "objective met".
-            await registerPlanningFailure(root!.id, `Planner parse failure: ${raw.slice(0, 100)}`);
-            return;
-          }
-
-          if (plans.length === 0) {
-            // Objective met or nothing to plan: complete the root.
-            const rootNow = sess.state.goals.find((g) => g.id === root!.id);
-            // M13: a successful planning round clears the failure streak.
-            if (rootNow) rootNow.consecutivePlanningFailures = 0;
-            planningSettled = true;
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "planning_complete",
-              detail: `Planner returned 0 plans`,
-            });
-            await completeRoot($, root!.id, `Root ${root!.id} marked complete`);
-          } else {
-            // Create plan nodes under the root.
-            // L9: per-plan maxRounds from the planner, defaulting to root.maxRounds.
-            // H3-part2: increment planningRounds on the root.
-            for (const p of plans) {
-              const perPlanMaxRounds = typeof (p as any).maxRounds === "number"
-                ? Math.min(Math.max((p as any).maxRounds, 5), 20)
-                : (root!.maxRounds > 0 ? root!.maxRounds : 10);
-              const node: GoalNode = {
-                id: `plan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-                parentId: root!.id,
-                kind: "plan",
-                title: p.title.slice(0, 80),
-                objective: p.objective.slice(0, 500),
-                status: "pending",
-                source: "controller",
-                maxRounds: perPlanMaxRounds,
-                completedRounds: 0,
-                scores: [],
-                notes: [],
-                planningRounds: 0,
-                consecutiveBlockedPlannings: 0,
-                consecutivePlanningFailures: 0,
-                planningRound: root!.planningRounds || 0, // M15: which round created this plan
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-              };
-              sess.state.goals.push(node);
-            }
-            // H3-part2: count this planning round on the root.
-            root!.planningRounds = (root!.planningRounds || 0) + 1;
-            // M13: a successful planning round clears the failure streak.
-            root!.consecutivePlanningFailures = 0;
-            planningSettled = true;
-
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "planning_created",
-              detail: `${plans.length} plans under root ${root!.id}: ${plans.map((p) => p.title.slice(0, 30)).join("; ")}`,
-            });
-
-            // BM2: Check planner variance (flag, not trim)
-            if (roadmapText) {
-              // Count numbered items in the roadmap
-              const numberedItems = roadmapText.match(/^\d+\./gm) || [];
-              const roadmapCount = numberedItems.length;
-              if (plans.length !== roadmapCount) {
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "goal",
-                  action: "planner_variance",
-                  detail: `planner ${plans.length}, roadmap ${roadmapCount}`,
-                });
-              }
-            }
-
-            // Activate the first plan.
-            const firstPlan = sess.state.goals.find((g) => g.parentId === root!.id && g.status === "pending");
-            if (firstPlan) {
-              firstPlan.status = "active";
-              firstPlan.updatedAt = Date.now();
-              sess.state.activeGoalId = firstPlan.id;
-              activate($, firstPlan.id, `Plan ${firstPlan.id} "${firstPlan.title}" activated`);
-            }
-          }
-
-          await persist($);
+          await controllerTick(tick);
+          // The tick reached the end of its body, so the reading the fleet
+          // block compares says so and a tick that was failing reports that it
+          // recovered. It is cleared here rather than at the top of the body,
+          // where the block that reports it would never see a failure at all.
+          tickFailure = null;
         } catch (err) {
-          // A throw anywhere in the gate before the attempt has counted is a
-          // planning failure the counter sees, so three block the root. No
-          // second wrap: a register whose own persist throws has nothing left
-          // to write, and the throw reaches the tick's own catch as any other
-          // does. A throw after the count (a persist failing) is not counted
-          // again.
-          if (!planningSettled) {
-            await registerPlanningFailure(root!.id, `Planner threw: ${safeErrorText(err)}`);
-          }
-        } finally {
-          planningInFlight = false;
-        }
-        return; // Planning gate consumed this tick.
-      }
-
-      // 4. No active leaf: activate pending work if any exists (H1), else return.
-      if (!activeNode || activeNode.status !== "active") {
-        const askResult = await tickOpenAsk($, sess.state, sess.persona, cfg, null, expectedTurns);
-        if (askResult !== "none") return;
-        const nextId = activateNext(sess.state);
-        if (nextId) {
-          activate($, nextId, "no active leaf, pending work found");
-          await persist($);
-          return;
-        }
-
-        // 4a. The idle proposal. A persona that holds a long-term goal and
-        // has nothing the controller will start is asked, at most once per
-        // PROPOSAL_EVERY_MS, for the single next piece of work toward one of
-        // its goals, which it sends to the coordinator persona as a
-        // [PROPOSAL] record and does not start. The coordinator persona is
-        // never asked, since a session cannot message the persona it owns. A
-        // session on the default persona is never asked either: it has no
-        // road to a coordinator persona, and it is refused here as the
-        // finding path refuses it, so it is not asked every day for a message
-        // it cannot send. A reader session never reaches this line: the
-        // tick's owner check returns first.
-        if (sess.persona === coordinatorPersona || sess.persona === "default") return;
-        // The open-turn reading is taken again here rather than trusted from
-        // the top of the tick, as the self-review block does before its settle
-        // step. The awaits above leave room for a turn to open, and an
-        // agentic_say in it and a resend below each read the highest sequence
-        // and then write under this session's id, so the two could take one
-        // sequence number. The settle and the ask wait for the next quiet tick.
-        if (turnIsOpen()) return;
-        const proposal = sess.state.monitor.proposal;
-        const proposalNow = Date.now();
-        let proposalChanged = false;
-
-        // The settle step for the proposal the persona sent, on every tick
-        // that reaches this line and ahead of the interval check. It reads the
-        // record back as the findings ledger's settle step does, without the
-        // 24-hour rule: a record that reads delivered, answered, resolved or
-        // absent settles the entry, and one that reads skipped is sent again
-        // with the same text under this session, taking the new writer and
-        // seq. A resend the reach rule refuses has no road, so the entry is
-        // settled once in the finding's unroutable form, an empty writer and
-        // a seq of 0, proposal_unroutable is logged, and the proposal is
-        // announced on this persona's own thread through the [KAIZEN] frame,
-        // as an unroutable finding is. A resend whose reach check or store
-        // write throws leaves the entry as it was, and the next tick that
-        // reaches this line tries again.
-        const sentProposal = proposal.sent;
-        let unroutableLine: string | null = null;
-        if (sentProposal && !sentProposal.delivered) {
-          const rec = await readInboxRecord(commonsStoreOf($), coordinatorPersona, sentProposal.writer, sentProposal.seq);
-          if (rec === null || rec.status === "delivered" || rec.status === "answered" || rec.status === "resolved") {
-            sentProposal.delivered = true;
-            proposalChanged = true;
-          } else if (rec.status === "skipped") {
-            proposalChanged = true;
-            try {
-              if (!await mayReachPersona(commonsStoreOf($), coordinatorPersona, sess.mySessionId, coordinatorPersona, architectPersona, sess.staleAfterMs)) {
-                sentProposal.writer = "";
-                sentProposal.seq = 0;
-                sentProposal.delivered = true;
-                unroutableLine = kaizenLine(sentProposal.text);
-                sess.state.decisions.push({
-                  timestamp: proposalNow,
-                  loop: "monitor",
-                  action: "proposal_unroutable",
-                  detail: `record ${rec.id} to '${coordinatorPersona}' was skipped and is not sent again: the reach rule refuses this session's write to '${coordinatorPersona}'; announced on this persona's own thread`,
-                });
-              } else {
-                // The open-turn reading is taken once more, since a turn can
-                // have opened under the record read and the reach check. A
-                // turn that opens after this line and writes before the resend
-                // does is the race docs/backlog.md files under two writers
-                // taking one inbox sequence number.
-                if (turnIsOpen()) return;
-                const again = await sendPluginRecord(commonsStoreOf($), coordinatorPersona, sess.mySessionId, sentProposal.text);
-                sentProposal.writer = again.writer;
-                sentProposal.seq = again.seq;
-                sess.state.decisions.push({
-                  timestamp: proposalNow,
-                  loop: "monitor",
-                  action: "proposal_sent",
-                  detail: `record ${again.id} to '${coordinatorPersona}' (sent again, the earlier record was skipped)`,
-                });
-              }
-            } catch (err) {
-              // A thrown reach check or store write: the entry is left as it
-              // was, so the next tick that reaches this line reads the skipped
-              // record and tries again.
-              sess.state.decisions.push({
-                timestamp: proposalNow,
-                loop: "monitor",
-                action: "proposal_resend_failed",
-                detail: `record ${rec.id} to '${coordinatorPersona}' was skipped and not sent again: ${safeErrorText(err)}`.slice(0, 200),
-              });
-            }
-          }
-        }
-        // The settled entry is written before the announcement is submitted,
-        // since the submit does not resolve until the session is next idle.
-        if (unroutableLine !== null) {
-          sess.state.updatedAt = Date.now();
-          await persist($);
-          await submitKaizen($, expectedTurns, [unroutableLine]);
-        }
-
-        // The ask. askedAt is stamped before the submit, for the reason the
-        // nudge floor is spent first: $.prompt.submit does not resolve until
-        // the session is next idle, so a stamp written after it would leave
-        // every tick in between passing the interval and queueing another
-        // copy. A submit that fails has still spent the interval, which the
-        // proposal_failed record makes visible. The stamp is persisted before
-        // the submit as well, so a relaunch while the submit waits does not
-        // ask again. The open-turn reading is taken again here rather than
-        // trusted from the top of the tick, since a turn can have opened
-        // under the awaits above.
-        if (sess.state.longTermGoals.length > 0 && !hasStartableWork(sess.state) && !turnIsOpen()
-          && proposalNow - proposal.askedAt >= PROPOSAL_EVERY_MS) {
-          proposal.askedAt = Date.now();
-          const unsettled = proposal.sent;
-          if (unsettled && !unsettled.delivered) {
-            sess.state.decisions.push({
-              timestamp: proposal.askedAt,
-              loop: "monitor",
-              action: "proposal_dropped",
-              detail: `the proposal at writer ${unsettled.writer} seq ${unsettled.seq} to '${coordinatorPersona}' never read delivered and is cleared by the next ask`,
-            });
-          }
-          proposal.sent = null;
-          const expectedProposalTurn = expectTurn({ kind: "proposal", text: proposeFrame(sess.state.longTermGoals, coordinatorPersona, sess.state.autonomy) });
-          sess.state.updatedAt = proposal.askedAt;
-          await persist($);
-          const proposalOutcome = await submitExpectedTurn($, expectedTurns, expectedProposalTurn);
-          sess.state.decisions.push(proposalOutcome.ok
-            ? {
-              timestamp: proposalNow,
-              loop: "monitor",
-              action: "proposal_asked",
-              detail: `proposal turn submitted over ${sess.state.longTermGoals.length} long-term goal(s)`,
-            }
-            : {
-              timestamp: proposalNow,
-              loop: "monitor",
-              action: "proposal_failed",
-              detail: `submit ${proposalOutcome.how}, interval already spent: ${proposalOutcome.reason}`.slice(0, 200),
-            });
-          proposalChanged = true;
-        }
-        if (proposalChanged) {
-          sess.state.updatedAt = Date.now();
-          await persist($);
-        }
-        return;
-      }
-      const g = activeNode;
-
-      // 5. Idle gate.
-      const now = Date.now();
-      const idleMs = sess.state.monitor.lastTurnComplete
-        ? now - sess.state.monitor.lastTurnComplete
-        : now - sess.state.monitor.sessionStart;
-      const eligible = idleMs >= nudgeIdleMs;
-      if (!eligible) {
-        clearAgentHold();
-        return;
-      }
-
-      // A blocked lead on the active entry whose ask closed after the lead
-      // was set, answered by the operator or the coordinator or expired, is
-      // cleared before the hold is read: the ask settled what the block
-      // waited on, so an answered ask on a BLOCKED: worker lifts the hold.
-      if (g.lead && g.lead.state === "blocked"
-        && typeof g.lastAskClosedAt === "number" && g.lastAskClosedAt > g.lead.at) {
-        g.lead = null;
-        g.updatedAt = now;
-        sess.state.decisions.push({
-          timestamp: now,
-          loop: "goal",
-          action: "lead_cleared",
-          detail: `${g.id}: blocked lead cleared by an ask closed after it was set`,
-        });
-        if (!(await persist($))) return;
-      }
-
-      // The hold: one read of holdOf decides whether this branch nudges. An
-      // open blocking ask, a blocked lead or a waiting lead inside its window
-      // holds the whole branch, no classifier call and no nudge, and nothing
-      // is logged per held tick. An ask hold still runs tickOpenAsk, which
-      // records ask_waiting once a minute, re-raises each question once, and
-      // lifts an entry's hold at its timeout. Both read the same ledger
-      // predicate, so "none" here is a tick on which the hold lifted between
-      // the two reads, and the hold is read again since a lead can still
-      // hold once the ask is gone.
-      let hold = holdOf(sess.state, now);
-      if (hold === "ask") {
-        const askResult = await tickOpenAsk($, sess.state, sess.persona, cfg, g.id, expectedTurns);
-        if (askResult !== "none") {
-          clearAgentHold();
-          return;
-        }
-        hold = holdOf(sess.state, now);
-      }
-      if (hold !== null) {
-        clearAgentHold();
-        return;
-      }
-
-      // The agent hold: any running agent with no parentId on $.agent.list(),
-      // whether the worker or a plugin started it, holds the branch as a
-      // waiting lead does, on any entry, for as long as the agent runs: no
-      // classifier call, no nudge, no completion, nothing spent. It has no
-      // time bound, since a nudge into a turn awaiting its own agent is the
-      // fault this hold exists to prevent. It is read after holdOf so the host
-      // call is made only on a tick that would otherwise go on to nudge. The
-      // hold is keyed to the active entry it began on, and its clock is the
-      // first held tick's, set before any write. One idle_hold_agent line is
-      // logged as it begins, and one idle_hold_agent_held line carrying its
-      // age in whole minutes on the first tick at or past each further hour,
-      // a tick that crosses several hours writing one line for the latest.
-      // Each line's mark is set before its write so an overlapping tick
-      // writes nothing, and a write that fails or yields takes back the line
-      // and its mark, never the clock, so a later tick retries it. A list
-      // that cannot be read is no agent, and the branch goes on as
-      // liveTopLevelAgentRunning states.
-      if (await liveTopLevelAgentRunning($)) {
-        if (agentHold === null || agentHold.entryId !== g.id) {
-          agentHold = { entryId: g.id, since: now, beginLogged: false, hourLogged: 0 };
-        }
-        const held = agentHold;
-        if (!held.beginLogged) {
-          held.beginLogged = true;
-          const begun: AgentState["decisions"][number] = {
-            timestamp: now,
-            loop: "goal",
-            action: "idle_hold_agent",
-            detail: `${g.id}: a running background agent holds the idle branch until it ends`,
+          // Logged and carried. The store is the failure this catch exists for
+          // and a decision line about it would need that same store to be
+          // written, so the log does not depend on what failed; but a log line
+          // reaches a persona's own stdout and nobody else, and a tick that
+          // fails at every tick leaves the fleet unwatched behind a process the
+          // keeper reads as healthy. The line rides the next [FLEET] prompt,
+          // composed as the start-up store refusal is: the plugin's own
+          // sentence on the composed half and the error's own text, neutralized
+          // and bounded, on the carried half. The next tick runs.
+          tickFailure = {
+            composed: "the controller tick ended before the end of its body, so what runs after the point it stopped at did not run on that tick.",
+            carried: boundedText(safeErrorText(err)),
           };
-          sess.state.decisions.push(begun);
-          await persistOrRollBack($, () => {
-            dropDecision(begun);
-            held.beginLogged = false;
-          });
-          return;
-        }
-        const hour = Math.floor((now - held.since) / AGENT_HOLD_REPORT_MS);
-        if (hour >= 1 && hour > held.hourLogged) {
-          const previousHour = held.hourLogged;
-          held.hourLogged = hour;
-          const ageMinutes = Math.floor((now - held.since) / 60_000);
-          const report: AgentState["decisions"][number] = {
-            timestamp: now,
-            loop: "goal",
-            action: "idle_hold_agent_held",
-            detail: `${g.id}: the agent hold has stood ${ageMinutes} minutes with an agent still running`,
-          };
-          sess.state.decisions.push(report);
-          await persistOrRollBack($, () => {
-            dropDecision(report);
-            if (held.hourLogged === hour) held.hourLogged = previousHour;
-          });
-        }
-        return;
-      }
-      clearAgentHold();
-
-      // L6: print seconds below one minute, minutes otherwise
-      const idleDisplay = idleMs < 60_000 ? `${Math.floor(idleMs / 1000)}s` : `${Math.floor(idleMs / 60_000)}min`;
-      const last5 = g.scores.slice(-5).map((s) => s.result).join(", ") || "none";
-      const onGoalCount = g.scores.filter((s) => s.result === "on-goal").length;
-
-      // R6: switch is offered on a task entry alone, and only when at least
-      // one pending plan exists, since the idle controller never moves a plan
-      // entry off the active slot. The state names each pending plan by id
-      // and title on its own line.
-      const pendingPlans = sess.state.goals.filter((x) => x.kind === "plan" && x.status === "pending");
-      const planEntry = isPlanEntry(sess.state, g);
-      const hasSwitch = pendingPlans.length > 0 && !planEntry;
-
-      // C7: Environment line only when env.git or env.health is non-null.
-      const env = sess.state.monitor.env;
-      let envText: string | null = null;
-      if (env.git !== null || env.health !== null) {
-        const parts: string[] = [];
-        if (env.git !== null) {
-          parts.push(`git: ${env.git.branch} dirty ${env.git.dirty} ahead ${env.git.ahead} behind ${env.git.behind}`);
-        }
-        if (env.health !== null) {
-          parts.push(`health: exit ${env.health.exitCode} for ${env.health.forNodeId || "no-node"}`);
-        }
-        envText = parts.join(", ");
-      }
-      const envLine = envText === null ? "" : `Environment: ${envText}\n`;
-
-      // The ids in force this tick: complete on a task entry alone, since a
-      // plan entry's done is read from its plan document, and switch on a task
-      // entry alone where a pending plan exists.
-      const classifyLabels: readonly string[] = controllerLabelsOf(!planEntry, hasSwitch);
-
-      // The controller's state's inputs, read here in the synchronous region
-      // so they are this tick's readings: the facts, the last answer where
-      // it was given on this node and none otherwise, and the pending plans.
-      // The state itself is built below, once the question is resolved, since
-      // its option list carries the resolved descriptions.
-      const lastAnswer = sess.lastAnswer !== null && sess.lastAnswer.goalId === g.id ? sess.lastAnswer.text : null;
-      const facts: ControllerStateFact[] = [
-        ["Objective", g.objective],
-        ["Node", `${g.id} (${g.kind}), status ${g.status}, ${roundSummaryText(sess.state, g)}`],
-        ["Last 5 scores", last5],
-        ["On-goal count", `${onGoalCount} of ${g.scores.length}`],
-        ["Idle time", idleDisplay],
-        ["Nudged answers with no status line", String(sess.nudgedAnswersWithoutStatus)],
-        ["Decisions tail", sess.state.decisions.slice(-5).map((d) => `${d.loop}:${d.action}`).join(", ")],
-        ["Memory", `${selfReviewLessonCount()} self-review lessons, ${sess.memqWrittenThisSession} written this session`],
-      ];
-      {
-        const sr = sess.state.memory.filter((m) => m.source === "self-review" && m.kind === "lesson");
-        if (sr.length > 0) {
-          const newest = sr.sort((a, b) => b.createdAt - a.createdAt)[0];
-          facts.push(["LESSON", newest.text.slice(0, 120)]);
-        }
-      }
-      if (envText !== null) facts.push(["Environment", envText]);
-      const statePendingPlans = pendingPlans.map((p) => ({ id: p.id, title: p.title }));
-
-      // Fire-and-forget: the timer callback is sync, so we schedule async work.
-      Promise.resolve().then(async () => {
-        try {
-          // Cap check before spending a classify call. A cap whose ask was
-          // refused on an earlier tick, with the count still at the cap, the
-          // refusal logged for this entry and the open cap still full, logs
-          // nothing more and sends no nudge. Once an entry closes and the
-          // ledger has room, the cap tries its ask again.
-          if (sess.nudgedAnswersWithoutStatus >= MAX_CONSECUTIVE_NUDGES) {
-            if (sess.nudgeCapRefusedFor === g.id && openAskEntries(sess.state).length >= ASKS_OPEN_MAX) return;
-            const capTs = Date.now();
-            const capReason = `${sess.nudgedAnswersWithoutStatus} nudged answers carried no status line`;
-            // A retry after a refusal is the same cap episode, which has
-            // already logged its cap and toasted.
-            if (sess.nudgeCapRefusedFor !== g.id) {
-              sess.state.decisions.push({
-                timestamp: capTs,
-                loop: "monitor",
-                action: "nudge_cap_reached",
-                detail: `${g.id}: ${capReason}`,
-              });
-              try { $.ui.toast(`Agentic: ${capReason}`); } catch { /* non-fatal */ }
-            }
-            // The cap holds by opening an ask, the same way the cost cap
-            // below does: the entry stays active with no reason written on
-            // it, holdOf reads the open ask as the hold, and the ask's
-            // close, by an answer or by expiry, is the lift. The ask's
-            // question is nudgeCapAskText, which names the persona and the
-            // entry for the operator. The count is reset as the ask opens,
-            // which serves as the reset at the ask's close: the count rises
-            // only at a nudged turn's end, and while the ask is open holdOf
-            // holds every nudge, so no nudge is sent in between. Nor is a
-            // nudged turn under way as the ask opens: this branch runs only
-            // with no turn open, and the count moves only at the completion
-            // of a turn whose start recorded a nudged id. So the close finds
-            // the count at zero. A count left at the cap would reopen the ask
-            // on the tick after the close in place of the nudge the lift
-            // promises. The floor is left alone, since the last nudge's
-            // spacing still applies.
-            //
-            // The record is written as the entry opens, and the count is
-            // reset only once the write returns: a write that throws undoes
-            // the open and leaves the count at the cap, so the cap fires
-            // again on a later tick. The cap asks once per entry: while its
-            // own question still holds this entry the idle branch returns on
-            // that hold above and never reaches this check, so the cap opens
-            // no second one. An own question whose hold was lifted is
-            // withdrawn and a fresh one opened in its place. A
-            // refused open leaves the count at the cap: no question of the
-            // cap's own stands, so a reset would send the next tick's nudge
-            // as if the cap had asked. The refusal is latched on the entry
-            // instead, so the next ticks neither nudge nor log it again.
-            let capAskStands = ownAskStands(sess.state, "nudge-cap", g.id);
-            if (!capAskStands) {
-              const askQuestion = nudgeCapAskText(sess.persona, g.title, sess.nudgedAnswersWithoutStatus);
-              await withdrawLiftedAskBy($, sess.state, sess.persona, "nudge-cap", g.id, capTs);
-              const opened = await openLedgerAsk($, sess.state, sess.persona, sess.mySessionId, g.id, askQuestion, "", "nudge-cap", true, capTs);
-              if (typeof opened === "string") {
-                sess.nudgeCapRefusedFor = g.id;
-                sess.state.decisions.push({
-                  timestamp: capTs,
-                  loop: "monitor",
-                  action: "ask_cap_refused",
-                  detail: `${g.id}: nudge-cap ask refused: ${opened === "cap" ? `the open cap of ${ASKS_OPEN_MAX}` : opened}`,
-                });
-              } else {
-                capAskStands = true;
-                sess.state.decisions.push({
-                  timestamp: capTs,
-                  loop: "monitor",
-                  action: "ask_opened",
-                  detail: `${g.id}: nudge-cap: ${capReason} (ask ${opened.id})`,
-                });
-              }
-            }
-            if (capAskStands) {
-              sess.nudgedAnswersWithoutStatus = 0;
-              sess.nudgeCapRefusedFor = null;
-            }
-            sess.state.updatedAt = capTs;
-            await persist($);
-            return;
-          }
-
-          const tickTs = Date.now();
-
-          // D3: Call cap check. If the call window is latched, skip classify.
-          // AK2: emit cost_cap_reached once per window (latched by capNoticeWindowStart).
-          if (costEnabled && costMaxPluginCallsPerHour > 0) {
-            const callWin = sess.state.monitor.cost.callWindow;
-            const callWinCount = effectiveWindowCount(callWin, now);
-            if (callWinCount >= costMaxPluginCallsPerHour) {
-              if (sess.state.monitor.cost.capNoticeWindowStart !== callWin.start) {
-                sess.state.decisions.push({
-                  timestamp: tickTs,
-                  loop: "monitor",
-                  action: "cost_cap_reached",
-                  detail: `${g.id}: call cap reached (${callWinCount}/${costMaxPluginCallsPerHour} per hour), skipping classify`,
-                });
-                sess.state.monitor.cost.capNoticeWindowStart = callWin.start;
-              }
-              sess.state.updatedAt = tickTs;
-              await persist($);
-              return;
-            }
-          }
-
-          // AH5: Nudge cap check before classify. If the nudge cap is latched, skip classify entirely.
-          // AK2: emit cost_cap_reached once per window (latched by capNoticeWindowStart).
-          // The cost-cap ask opens once per nudge window, under the same
-          // latch as the notice: the entry stays active with no reason
-          // written on it and the open ask is the hold. Once that ask
-          // closes inside the window the refusal alone holds, no nudge and
-          // no second ask, and a new window that reaches the cap latches
-          // afresh and opens one again. The cap asks once per entry: while
-          // its own question still holds this entry it opens no second, and
-          // an own question whose hold was lifted is withdrawn and replaced.
-          const nudgeCapped = costEnabled && costMaxNudgesPerHour > 0 &&
-            effectiveWindowCount(sess.state.monitor.cost.nudgeWindow, now) >= costMaxNudgesPerHour;
-          if (nudgeCapped) {
-            if (sess.state.monitor.cost.capNoticeWindowStart !== sess.state.monitor.cost.nudgeWindow.start) {
-              sess.state.decisions.push({
-                timestamp: tickTs,
-                loop: "monitor",
-                action: "cost_cap_reached",
-                detail: `${g.id}: nudge cap reached (${effectiveWindowCount(sess.state.monitor.cost.nudgeWindow, now)}/${costMaxNudgesPerHour} per hour), refusing nudge`,
-              });
-              sess.state.monitor.cost.capNoticeWindowStart = sess.state.monitor.cost.nudgeWindow.start;
-              if (!ownAskStands(sess.state, "cost-cap", g.id)) {
-                const capReason = `cost-cap: nudge budget spent (${effectiveWindowCount(sess.state.monitor.cost.nudgeWindow, now)}/${costMaxNudgesPerHour} per hour)`;
-                await withdrawLiftedAskBy($, sess.state, sess.persona, "cost-cap", g.id, tickTs);
-                const opened = await openLedgerAsk($, sess.state, sess.persona, sess.mySessionId, g.id, capReason, "", "cost-cap", true, tickTs);
-                if (typeof opened === "string") {
-                  sess.state.decisions.push({
-                    timestamp: tickTs,
-                    loop: "monitor",
-                    action: "ask_cap_refused",
-                    detail: `${g.id}: cost-cap ask refused: ${opened === "cap" ? `the open cap of ${ASKS_OPEN_MAX}` : opened}`,
-                  });
-                } else {
-                  sess.state.decisions.push({
-                    timestamp: tickTs,
-                    loop: "monitor",
-                    action: "ask_opened",
-                    detail: `${g.id}: ${capReason} (ask ${opened.id})`,
-                  });
-                  try { $.ui.toast(`Agentic: ${capReason}`); } catch { /* non-fatal */ }
-                }
-              }
-            }
-            sess.state.updatedAt = tickTs;
-            await persist($);
-            return;
-          }
-
-          // D4: Backoff gate. After K consecutive skipped ticks, run classify less often.
-          if (costEnabled) {
-            const consecutiveSkips = sess.state.monitor.cost.consecutiveSkips;
-            if (!shouldRunClassify(tickIndex, consecutiveSkips, costBackoffAfterTicks, costBackoffMaxMs, controllerTickMs)) {
-              // Skip classify and nudge; carry forward the previous decision.
-              const factor = backoffFactor(consecutiveSkips, costBackoffAfterTicks, costBackoffMaxMs, controllerTickMs);
-              sess.state.decisions.push({
-                timestamp: tickTs,
-                loop: "monitor",
-                action: "controller_tick",
-                detail: `${g.id}: backed off (factor ${factor}, tick ${tickIndex})`,
-              });
-              sess.state.updatedAt = tickTs;
-              await persist($);
-              return;
-            }
-          }
-
-          // D2: Idle tick skip. Hash the stable subset of the summary.
-          // Skip classify+reason only when the hash is unchanged AND the nudge is not due.
-          if (costEnabled) {
-            // Build the stable subset string (exclude idle time, nudge count,
-            // decisions tail). The last answer is in it: a tick whose only
-            // change is a new answer on this node is a new situation to
-            // classify, not a repeat of the last one.
-            const stableSubset =
-              `Objective: ${g.objective}\n` +
-              `Node: ${g.id} (${g.kind}), status ${g.status}, ${roundSummaryText(sess.state, g)}\n` +
-              `Last 5 scores: ${last5}\n` +
-              `On-goal count: ${onGoalCount} of ${g.scores.length}\n` +
-              `Memory: ${selfReviewLessonCount()} self-review lessons, ${sess.memqWrittenThisSession} written this session\n` +
-              (() => {
-                const sr = sess.state.memory.filter((m) => m.source === "self-review" && m.kind === "lesson");
-                if (sr.length === 0) return "";
-                const newest = sr.sort((a, b) => b.createdAt - a.createdAt)[0];
-                return `LESSON: ${newest.text.slice(0, 120)}\n`;
-              })() +
-              envLine +
-              `Last answer: ${controllerLastAnswerText(lastAnswer)}\n`;
-            const currentHash = fnv1aHash(stableSubset);
-            const prevHash = sess.state.monitor.cost.lastSummaryHash;
-            const nudgeDue = idleMs >= nudgeIdleMs && (now - sess.lastNudgeAt >= nudgeFloorMs);
-            if (currentHash === prevHash && !nudgeDue) {
-              // Skip classify and reason; carry forward the previous decision.
-              sess.state.monitor.cost.consecutiveSkips += 1;
-              sess.state.decisions.push({
-                timestamp: tickTs,
-                loop: "monitor",
-                action: "controller_tick",
-                detail: `${g.id}: unchanged, skipped`,
-              });
-              sess.state.updatedAt = tickTs;
-              await persist($);
-              return;
-            }
-            // Hash changed or nudge due: reset skip counter, update hash, run classify.
-            sess.state.monitor.cost.consecutiveSkips = 0;
-            sess.state.monitor.cost.lastSummaryHash = currentHash;
-          }
-
-          // The controller's state, one text for Haiku and for the shadow
-          // call. The catalog builds it, so .kit/jev-gold/replay.mjs builds
-          // the same state from a sampled record. Its option list is the
-          // labels in force, so the text names switch only where it is
-          // offered, each with the description of the question as resolved
-          // now, an admitted override's or the shipped entry's; the same
-          // resolution is handed to the shadow call, so Haiku's text and
-          // Jev's criteria carry one wording.
-          const controllerHost = hostOf($);
-          const controllerQuestion = await resolverOf(controllerHost)(CONTROLLER_DECISION);
-          const summary = controllerStateText(
-            facts,
-            lastAnswer,
-            statePendingPlans,
-            classifyLabels,
-            controllerQuestion.primitive === "choice" ? controllerQuestion.options : {},
-          );
-          // Where the controller question is named live, Jev is asked live
-          // over the same label array and state as Haiku, and the two calls
-          // are started together and awaited together, so the tick waits only
-          // for whatever Jev takes beyond Haiku, bounded at the wait rule's
-          // Jev figure for controller.tick. That row is the timer's own: no
-          // hook meters this call, so the budget it holds under reads
-          // unmetered and is not live, and a shadow fired from it keeps the
-          // flat shadow bound. Haiku's classify is timer-side and off the
-          // chain, so it is not held. Everywhere else this is null and the
-          // step is Haiku, then Jev in shadow with Haiku's value. The branch
-          // is tested here rather than left to liveAsk, whose not-live path
-          // would journal a shadow call carrying no Haiku value. On the
-          // not-live path a classify that throws reaches the tick's catch as
-          // it always has. On the live path Haiku's classify is settled
-          // rather than awaited bare, since liveAsk never rejects and Jev's
-          // answer decides the tick: a Haiku throw beside an answered call
-          // acts on Jev's label and logs controller_haiku_failed, and one
-          // beside a failed call is rethrown, so the catch is that tick's one
-          // record.
-          const controllerBudget: HookBudget = { live: false, remainingMs: () => Infinity };
-          const liveControllerCall = jevMode === "shadow" && jevLive.includes(CONTROLLER_DECISION)
-            ? liveAsk(controllerHost, "controller.tick", controllerBudget, "controller", CONTROLLER_DECISION, classifyLabels, summary, jevMode, jevLive)
-            : null;
-          const haikuControllerCall = $.model.classify(
-            summary,
-            classifyLabels,
-            { model: "haiku" }
-          );
-          let liveController: LiveAskResult | null = null;
-          let decision: Awaited<typeof haikuControllerCall> | null;
-          if (liveControllerCall === null) {
-            decision = await haikuControllerCall;
-          } else {
-            const [live, haiku] = await Promise.all([
-              liveControllerCall,
-              haikuControllerCall.then(
-                (value) => ({ ok: true as const, value }),
-                (err: unknown) => ({ ok: false as const, err }),
-              ),
-            ]);
-            liveController = live;
-            if (haiku.ok) {
-              decision = haiku.value;
-            } else if (live === null || "reason" in live) {
-              throw haiku.err;
-            } else {
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "controller_haiku_failed",
-                detail: `${g.id}: stamp ${live.stampId}, ${safeErrorText(haiku.err).slice(0, 150)}`,
-              });
-              decision = null;
-            }
-          }
-          // D1: increment classify ledger
-          sess.state.monitor.cost.classify.count += 1;
-          sess.state.monitor.cost.classify.estTokens += estimateTokens(summary.length, 30);
-          // D3: update call window (count the classify call)
-          sess.state.monitor.cost.callWindow = bumpWindow(sess.state.monitor.cost.callWindow, Date.now());
-          // Haiku's value, the one an agreement figure is read against: the
-          // tick acts on each answer as given, with no rewrite between them.
-          const haikuDecision = typeof decision === "string" ? decision : null;
-          // The answer the tick acts on, and the stamp id of the controller
-          // call the three joiners cite: the next score, the worker's ASK
-          // marker and the nudged turn's acted outcome. The stamp is held
-          // whatever it is: a null clears the previous tick's call, which is
-          // what leaves each joiner citing the latest one.
-          let chosen: string | null;
-          let controllerStampId: string | null;
-          if (liveController === null) {
-            // The decision seam, in shadow. Jev is asked the same question
-            // over the same option ids Haiku was just offered, and its answer
-            // is journaled beside Haiku's. It sits after the ledger rather
-            // than inside it because the ledger counts the Haiku call and
-            // does not count this one.
-            controllerStampId = shadowAsk(
-              controllerHost,
-              "controller",
-              CONTROLLER_DECISION,
-              classifyLabels,
-              summary,
-              jevMode,
-              haikuDecision,
-              async () => controllerQuestion,
-            );
-            chosen = haikuDecision;
-          } else if ("reason" in liveController) {
-            // Haiku's label is the tick's, with no shadow call beside it. A
-            // seam reason has its own call line naming it, written by
-            // liveAsk, and Haiku's label is joined to it. A `rejected` call
-            // has none, since liveAsk's catch returns before any line is
-            // written, so this decision is its only record, no outcome is
-            // written against a call line that does not exist, and the
-            // joiners cite no call either.
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "controller_fallback",
-              detail: `${g.id}: reason ${liveController.reason}, stamp ${liveController.stampId}, split ${splitOf(liveController.stampId)}`,
-            });
-            if (liveController.reason !== "rejected" && haikuDecision !== null) {
-              shadowOutcome(controllerHost, liveController.stampId, "haiku_decision", haikuDecision);
-            }
-            controllerStampId = liveController.reason === "rejected" ? null : liveController.stampId;
-            chosen = haikuDecision;
-          } else {
-            // Jev's choice is the tick's decision, and Haiku's label is joined
-            // to the live call, so the journal holds both answers for one
-            // input as a shadow answer line does.
-            if (haikuDecision !== null) {
-              shadowOutcome(controllerHost, liveController.stampId, "haiku_decision", haikuDecision);
-            }
-            controllerStampId = liveController.stampId;
-            chosen = liveController.answer.choice;
-          }
-          sess.jevScoreOutcomeStampId = controllerStampId;
-          sess.jevAskMarkerOutcomeStampId = controllerStampId;
-          // A verdict outside the labels offered is read as nudge, as a null
-          // one is: the decider was handed a closed set, so any other string
-          // is no decision, and leaving the tick without an actuator on it
-          // would let the worker sit idle for the tick. Each answer in the
-          // set acts as given: idle-gap-nudge sends the idle-gap text,
-          // complete, offered on a task entry alone, completes the entry, and
-          // switch takes the pending plan.
-          let finalDecision: string = typeof chosen === "string" && classifyLabels.includes(chosen) ? chosen : "nudge";
-
-          // A turn can open under the classify call above, and a worker inside
-          // an open turn is not idle. A complete or a switch that finds one
-          // open changes nothing and says so, as the nudge arm does. The
-          // reading is taken again at each await that precedes a change: the
-          // plan pick and the reason call before it, and the health run
-          // before the complete arm's activation. The one await left
-          // unfenced is the plan-document read inside
-          // completeLeafReturningClosed, ahead of the completion itself.
-          const skipForOpenTurn = (what = "not acted on"): boolean => {
-            if (!turnIsOpen()) return false;
-            sess.state.decisions.push({
-              timestamp: tickTs,
-              loop: "monitor",
-              action: "controller_skipped_turn_in_flight",
-              detail: `${g.id}: ${finalDecision} ${what}, turn in flight`,
-            });
-            return true;
-          };
-          // R6: switch, second Haiku call to pick a plan id.
-          if (finalDecision === "switch" && pendingPlans.length > 0 && skipForOpenTurn()) {
-            finalDecision = "skipped";
-          } else if (finalDecision === "switch" && pendingPlans.length > 0) {
-            const switchPrompt =
-              `Choose which plan to switch to. Plans:\n` +
-              pendingPlans.map((p) => `- ${p.id}: ${p.title}`).join("\n") +
-              `\nReturn the plan id only.`;
-            let switchRaw: unknown;
-            let pickFailed = false;
-            try {
-              switchRaw = await $.model.complete({
-                model: "haiku",
-                prompt: switchPrompt,
-                maxTokens: 50,
-                timeoutMs: COMPLETE_TIMEOUT_MS,
-              });
-            } catch {
-              // The plan-pick failed: the tick falls through to the plain
-              // nudge, so no arm is left holding a decision it cannot act on.
-              pickFailed = true;
-              finalDecision = "nudge";
-            }
-            if (!pickFailed) {
-              // A result with no text reads as an empty reply, which matches
-              // no plan id and logs switch_failed below, after one line
-              // naming the shape the engine handed back.
-              const switchText = completionText(switchRaw);
-              if (switchText === null) noteCompletionShape("plan-switch", switchRaw);
-              const switchId = (switchText ?? "").trim().split(/\s/)[0];
-              const target = pendingPlans.find((p) => p.id === switchId);
-              // The decision seam, in shadow. This one site answers in free
-              // text rather than from a label array, so the options in force
-              // are the pending plan ids the prompt listed plus the catalog's
-              // own "no_match", and Haiku's value is its reply where that is
-              // exactly one of those ids and "no_match" where it is not.
-              shadowAsk(
-                hostOf($),
-                "plan-switch",
-                PLAN_SWITCH,
-                [...pendingPlans.map((p) => p.id), PLAN_SWITCH_NO_MATCH],
-                switchPrompt,
-                jevMode,
-                target ? switchId : PLAN_SWITCH_NO_MATCH,
-              );
-              if (target && skipForOpenTurn()) {
-                finalDecision = "skipped";
-              } else if (target) {
-                // Demote current active to paused (M10: write blockedReason).
-                g.status = "paused";
-                g.blockedReason = "Switched to another plan";
-                g.updatedAt = Date.now();
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "goal",
-                  action: "switch_from",
-                  detail: `${g.id} demoted to paused (switch)`,
-                });
-                // Activate target.
-                target.status = "active";
-                target.updatedAt = Date.now();
-                sess.state.activeGoalId = target.id;
-                sess.nudgedAnswersWithoutStatus = 0;
-                sess.nudgeCapRefusedFor = null;
-                sess.lastNudgeAt = 0;
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "goal",
-                  action: "switch_to",
-                  detail: `${target.id} "${target.title}" activated (switch)`,
-                });
-                // The decision stays switch, which is what the tick's record
-                // names. No nudge goes out on this tick: the nudge arm reads
-                // the entry the tick started on, now paused. The floor is
-                // zero, so the next idle tick nudges the new plan.
-              } else {
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "goal",
-                  action: "switch_failed",
-                  detail: `No pending plan matched id "${switchId}"`,
-                });
-                finalDecision = "nudge";
-              }
-            }
-          }
-
-          // Get a reason with a second complete call (for non-nudge decisions).
-          // Item 3: an ask record must carry the worker's FULL question, so the
-          // model's reason is kept whole (fullReason) for that purpose. The
-          // 100-char slice (finalReason) exists only to keep the decision-log
-          // detail line terse; it must never be the text a reader sees as "the
-          // question asked" - that was the earlier defect (a reader seeing a
-          // fragment cut off mid-word).
-          let finalReason = "";
-          let fullReason = "";
-          // Only a complete carries a reason: both nudges say why in their own
-          // text, and a switch is explained by the plan it takes up, so a
-          // reason call would spend a completion on each.
-          if (finalDecision === "complete" && skipForOpenTurn()) {
-            finalDecision = "skipped";
-          }
-          if (finalDecision === "complete") {
-            try {
-              const reason = await $.model.complete({
-                model: "haiku",
-                prompt:
-                  `You are the controller of an agentic plugin. The decision was "${finalDecision}". ` +
-                  `Give a one-line plain-text reason (under 20 words). Do not use Markdown formatting.\n` + summary,
-                maxTokens: 30,
-                timeoutMs: COMPLETE_TIMEOUT_MS,
-              });
-              // D1: increment reason ledger
-              sess.state.monitor.cost.reason.count += 1;
-              sess.state.monitor.cost.reason.estTokens += estimateTokens(summary.length, 30);
-              // D3: update call window (count the reason call)
-              sess.state.monitor.cost.callWindow = bumpWindow(sess.state.monitor.cost.callWindow, Date.now());
-              // A result with no text leaves the reason empty, and the tick's
-              // decision reads "no reason" as it does when the call throws,
-              // after one line naming the shape the engine handed back.
-              const reasonText = completionText(reason);
-              if (reasonText === null) noteCompletionShape("controller-reason", reason);
-              fullReason = (reasonText ?? "").trim().replace(/\*{1,2}/g, "");
-              finalReason = fullReason.slice(0, 100);
-            } catch { /* reason call failed; non-fatal */ }
-          }
-
-          sess.state.decisions.push({
-            timestamp: tickTs,
-            loop: "monitor",
-            action: "controller_tick",
-            detail: `${g.id}: ${finalDecision}: ${finalReason || "no reason"} (idle ${idleDisplay})`,
-          });
-
-          // Actuate (controller only: actuators 2 to 4 of the four in the file
-          // header, since context injection, the first, is always on). Whether
-          // this is the idle-gap nudge, which carries its own text below. The
-          // identifier is the anchor test-personas/injection-ledger.mjs's
-          // extractNudgeFrames reads the two nudge frames by.
-          const idleGapConverted = finalDecision === "idle-gap-nudge";
-          if ((finalDecision === "nudge" || idleGapConverted) && g.status === "active") {
-            // A nudge wakes an idle worker, and a worker inside an open turn is
-            // not idle, so no nudge is sent while a turn is open. The tick's
-            // in-flight check passes synchronously while the classify call that
-            // follows is async, so a turn can open underneath a tick already on
-            // its way to this line. That is why the open-turn reading is taken
-            // again here rather than trusted from the top of the tick. A
-            // submission made here would not reach the running turn at all. It
-            // is queued and runs once the session is idle, so it arrives as
-            // part of the next turn's prompt, one identical copy per tick,
-            // rather than waking anything.
-            if (turnIsOpen()) {
-              sess.state.decisions.push({
-                timestamp: tickTs,
-                loop: "monitor",
-                action: "nudge_skipped_turn_in_flight",
-                detail: `${g.id}: idle ${idleDisplay}, turn in flight`,
-              });
-            } else if (now - sess.lastNudgeAt >= nudgeFloorMs) {
-              // Nudge floor.
-              // AK2: Guard only (silent). The nudge-cap check before classify already handles the cap.
-              // If we reached here, the cap was not latched at the pre-classify check.
-              if (nudgeCapped) {
-                return;
-              }
-              // The hold sentence rides on every nudge, since every entry's
-              // leads hold the idle branch.
-              const leadHoldLine = " " + NUDGE_LEAD_HOLD_TEXT;
-              // Section 3 (boundary-compaction): the active entry's plan
-              // document and section, spliced into both arms right after
-              // the [GOAL] line so a nudged worker knows which document to
-              // re-read. Declared here, above architectLine, so it sits
-              // outside extractNudgeFrames' fixed-order match on the
-              // architectLine/expiredAskLine declarations directly above
-              // nudgeText.
-              const planLine = planDocumentLine(sess.state, g);
-              // R8: nudge text appends goal_done instruction, and both arms
-              // close with NUDGE_STATUS_LINE_TEXT, the status line the
-              // nudge count reads at the nudged turn's end, followed by
-              // leadHoldLine. Item 8.2
-              // (Round 36): the idle-gap nudge has its own text - re-read
-              // the plan and the discussion file, and only state a fork as
-              // a literal marker line if one truly exists, since the
-              // decider itself never carries a concrete blocking question,
-              // only an idle reading. Only that marker, read on
-              // turn.complete, opens an ask record, with the worker's own
-              // line as the stored question. Where the plugin holds an
-              // architect name and this session owns a named persona, the
-              // fork line also names the architect, which the worker leg of
-              // the reach rule lets such a session reach; a default-persona
-              // session has no such leg, so the line is withheld from it.
-              // The architect and the coordinator take no such line either,
-              // matching the seats the supervisor's steer text withholds the
-              // worker's architect sentences from.
-              const architectLine = architectPersona !== "" && sess.persona !== "default" && sess.persona !== architectPersona && sess.persona !== coordinatorPersona
-                ? `A design question the plan doesn't cover (a spec gap, an approach fork, a plan review or a consult) can go to the architect instead: send it with agentic_say, persona set to ${architectPersona}.\n`
-                : "";
-              // An ask on this entry whose hold timed out with no nudge
-              // since is named once, in one sentence, so the worker knows
-              // its question went unanswered rather than reading the silence
-              // as an answer, and that the work goes on under the
-              // recommendation the ask stated. The question is store data on
-              // a line-structured prompt, so its continuation lines are
-              // quoted the way the re-raise quotes them; the sentence's own
-              // first line stays the plugin's.
-              const expiredAskQuestion = unnamedExpiredAskQuestion(sess.state, g);
-              const expiredAskLine = expiredAskQuestion !== null
-                ? `An ask on this entry, "${quoteContinuationLines(expiredAskQuestion)}", timed out unanswered after its wait; it stays open, and the work proceeds on its recommendation.\n`
-                : "";
-              const nudgeText = idleGapConverted
-                ? `[GOAL] The active goal is: ${g.objective}\n` +
-                  planLine +
-                  expiredAskLine +
-                  `The controller read this as an idle gap, not a real fork: no concrete blocking question. ` +
-                  `Re-read the plan doc and DISCUSSION.md before continuing - the next concrete step should already be there.\n` +
-                  `If you genuinely hold a fork the plan doesn't resolve, file it in this turn with ask_open, naming the choice you proceed on as its recommend.\n` +
-                  `An ask does not stop the work: proceed on your recommendation while it stands. Set blocking to true and open the closing text with BLOCKED: only where the next step is irreversible without the answer, or where another plan waits on it.\n` +
-                  architectLine +
-                  `Otherwise take the next concrete step and mark it finished with goal_done.\n` +
-                  NUDGE_STATUS_LINE_TEXT +
-                  leadHoldLine
-                : `[GOAL] The active goal is: ${g.objective}\n` +
-                  planLine +
-                  expiredAskLine +
-                  `The Controller detected ${idleDisplay} of idle time. ` +
-                  `Re-read the objective and take the next concrete step toward it, then report that step done with goal_done.\n` +
-                  NUDGE_STATUS_LINE_TEXT +
-                  leadHoldLine;
-              // The floor is spent here, before the submit, so that the test
-              // above and this write are one synchronous step. $.prompt.submit
-              // does not resolve until the session is next idle, so during a
-              // long turn it parks; writing the floor after it would leave
-              // every tick reading the same stale stamp, passing the floor,
-              // and queueing another identical copy of this prompt. The cost
-              // of spending it first is that a submit that throws has still
-              // consumed the floor and the next nudge waits it out, which the
-              // nudge_failed record below is there to make visible.
-              //
-              // The stamp is the clock now rather than the tick's own `now`,
-              // which was taken before the classify call: classify latency
-              // would otherwise come out of the floor and shorten it.
-              sess.lastNudgeAt = Date.now();
-              // The rest of this nudge's own bookkeeping is spent here for the
-              // same reason as the floor. The region from the open-turn check
-              // above to this point is synchronous, so both writes are made
-              // for a nudge that is going out between turns; on the far side of
-              // the submit a whole worker turn may have run and been scored, and
-              // each of the two then lands too late for the turn it is about.
-              //
-              // The nudge's expected-turn entry would be queued after its own
-              // turn.start had looked for it, so that turn would open
-              // unaccounted: it would be scored without the nudge-aware label
-              // set, and its answer would move the nudge count neither way.
-              // The prompt text would land after the scorer had already judged
-              // the answer against the previous turn's prompt.
-              currentPrompt = nudgeText;
-              const expectedNudgeTurn = expectTurn({ kind: "nudge", text: nudgeText });
-              // The count as this nudge goes out, read here rather than after
-              // the submit, so the record names the count the nudge was sent
-              // at rather than whatever its own turn's end left behind. The
-              // count itself moves at a nudged turn's end, never here.
-              const unlinedAnswers = sess.nudgedAnswersWithoutStatus;
-              // The nudged turn's end writes the controller call's acted
-              // outcome against this stamp, and that turn may run and end
-              // before the submit below resolves, so the stamp is held here
-              // with the expected-turn entry. A later nudge replaces it, as
-              // the score joiner's is replaced.
-              sess.jevActedStampId = controllerStampId;
-              // Only the submit's own outcome is read here, so a throw from
-              // the ledger writes below is not recorded as a submit failure.
-              const nudgeOutcome = await submitExpectedTurn($, expectedTurns, expectedNudgeTurn);
-              if (!nudgeOutcome.ok) {
-                // Non-fatal, as every actuator failure here is. It is recorded
-                // because the floor was already spent above, so a refused submit
-                // costs a whole nudge window and would otherwise leave nothing
-                // anywhere saying the worker went un-nudged. No nudged turn is
-                // coming, so its entry has left the list: left in, the tick's
-                // next delivery turn would open as the nudge and lose its stamp.
-                sess.state.decisions.push({
-                  timestamp: tickTs,
-                  loop: "monitor",
-                  action: "nudge_failed",
-                  detail: `${g.id}: submit ${nudgeOutcome.how}, floor already spent: ${nudgeOutcome.reason}`.slice(0, 200),
-                });
-                // No nudged turn is coming, so the controller call's acted
-                // outcome is none, written at once, and the stamp held above
-                // is released where it still names this call.
-                if (sess.jevActedStampId === controllerStampId) sess.jevActedStampId = null;
-                if (controllerStampId !== null) shadowOutcome(controllerHost, controllerStampId, "acted", "none");
-              }
-              if (nudgeOutcome.ok) {
-                // D1: increment nudge ledger (count only, no token estimate)
-                sess.state.monitor.cost.nudge.count += 1;
-                // D3: update nudge window
-                sess.state.monitor.cost.nudgeWindow = bumpWindow(sess.state.monitor.cost.nudgeWindow, now);
-                sess.state.decisions.push({
-                  timestamp: tickTs,
-                  loop: "monitor",
-                  action: "nudge_sent",
-                  detail: `${g.id}: idle ${idleDisplay}, nudged answers without a status line: ${unlinedAnswers}`,
-                });
-              }
-            } else {
-              // The decider said nudge and the floor held. This is the ordinary
-              // outcome for the second of two ticks alive at once, and it is
-              // recorded so that a quiet stretch reads as the floor doing its
-              // job rather than as the decider never having run.
-              sess.state.decisions.push({
-                timestamp: tickTs,
-                loop: "monitor",
-                action: "nudge_skipped_floor",
-                detail: `${g.id}: idle ${idleDisplay}, floor not elapsed`,
-              });
-            }
-          } else if (finalDecision === "complete" && g.status === "active" && skipForOpenTurn()) {
-            // Nothing is completed or activated under an open turn.
-          } else if (finalDecision === "complete" && g.status === "active") {
-            // R3: use completeLeaf + activateNext.
-            const completedId = g.id;
-            const closedIds = await completeLeafReturningClosed($, completedId, finalReason || "controller complete");
-            // E2: health run at completeLeaf site (controller complete).
-            await runHealth($, completedId);
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "completed_by_controller",
-              detail: `${completedId}: ${finalReason || "controller complete"}`,
-            });
-            queueMemoryCheck($, expectedTurns, completedId, g.title, closedIds);
-            // R3: activate next, unless a turn opened under the health run
-            // above. The entry stays complete, and the next idle tick, which
-            // finds no active entry, activates pending work.
-            if (!skipForOpenTurn("activation skipped")) {
-              const nextId = activateNext(sess.state, completedId);
-              activate($, nextId, `${completedId} complete`);
-            }
-            // L11: plan completion is a log line, not a speech.
-            try { $.ui.log(`Agentic: ${completedId} plan complete (controller)`); } catch { /* non-fatal */ }
-            try { $.ui.status(""); } catch { /* non-fatal */ }
-          }
-
-          // Visible status line while a goal is actively driving.
-          const currentActive = sess.state.activeGoalId
-            ? sess.state.goals.find((x) => x.id === sess.state.activeGoalId)
-            : null;
-          if (currentActive && currentActive.status === "active") {
-            // A plan entry has no round budget, so its status line carries
-            // no round text.
-            const roundText = isPlanEntry(sess.state, currentActive)
-              ? ""
-              : ` | round ${currentActive.completedRounds}/${currentActive.maxRounds}`;
-            try {
-              $.ui.status(`Goal: ${currentActive.title.slice(0, 50)} | ${currentActive.kind} | ${currentActive.id}${roundText}`);
-            } catch { /* non-fatal */ }
-          }
-
-          // Persist (owner only, guarded write).
-          sess.state.updatedAt = Date.now();
-          await persist($);
-        } catch {
-          // Controller tick failed; non-fatal.
+          try { $.ui.log(`Agentic: the controller tick ended early: ${safeErrorText(err)}`); } catch { /* non-fatal */ }
         }
       });
-    };
-
-    // The tick: the always part, then, where this session owns the persona
-    // and no turn is open, the idle part.
-    const controllerTick = async () => {
-      if (!(await alwaysTick())) return;
-      // 2. In-flight check: the idle part runs with no turn open.
-      if (turnIsOpen()) return;
-      // The memory drain runs ahead of the idle part, so a persona with no
-      // active goal leaf, or one held at the planning gate, still writes the
-      // record it owes: every early return inside idleTick sits behind this
-      // call. The always part's owner check has run, so the drain is the
-      // owner's alone. A turn can open while the drain awaits its model, so
-      // the open-turn check runs again before the idle part.
-      await drainMemoryOwed($);
-      if (turnIsOpen()) return;
-      await idleTick();
-    };
-    $.clock.every(controllerTickMs, async () => {
-      try {
-        await controllerTick();
-        // The tick reached the end of its body, so the reading the fleet
-        // block compares says so and a tick that was failing reports that it
-        // recovered. It is cleared here rather than at the top of the body,
-        // where the block that reports it would never see a failure at all.
-        tickFailure = null;
-      } catch (err) {
-        // Logged and carried. The store is the failure this catch exists for
-        // and a decision line about it would need that same store to be
-        // written, so the log does not depend on what failed; but a log line
-        // reaches a persona's own stdout and nobody else, and a tick that
-        // fails at every tick leaves the fleet unwatched behind a process the
-        // keeper reads as healthy. The line rides the next [FLEET] prompt,
-        // composed as the start-up store refusal is: the plugin's own
-        // sentence on the composed half and the error's own text, neutralized
-        // and bounded, on the carried half. The next tick runs.
-        tickFailure = {
-          composed: "the controller tick ended before the end of its body, so what runs after the point it stopped at did not run on that tick.",
-          carried: boundedText(safeErrorText(err)),
-        };
-        try { $.ui.log(`Agentic: the controller tick ended early: ${safeErrorText(err)}`); } catch { /* non-fatal */ }
-      }
-    });
     }
 
     // The distillates an earlier version kept in the persona's JSON move to
@@ -12581,20 +5478,21 @@ export const register: Register = async (on, options) => {
   // that runs disarms it. The owning session and a reader both decide and
   // both write the line, since the journal is per session.
   //
-  // The hook is registered ahead of the arming return below, so it runs in
-  // an "off" session too: the veto, its skip line, the valve, the illegible
-  // allow, the marker and consent reads with their consumption, and the
-  // journal line all need nothing an armed session builds, and a session
-  // with no veto compacts mid-work. What the off tier never has, the veto
-  // reads as absent there: the bank, which turn.complete sets, stays null.
-  // The moment rule holds there as it does armed, since the off tier's
-  // turn.start stamps lastTurnStartAt and nothing else, so a declared marker
-  // written before the latest turn start has lapsed. The boundary reminder is armed but
-  // never carried, since tool.call is not installed, so the engine's print
-  // of the skip line is the one text an off session receives. The shadow
-  // and live passes and the launch-instruction re-injection below run in an armed
-  // session only: the plan is the controller tick's and the kept text is
-  // prompt.submit's, and the off tier installs neither.
+  // The hook runs in an "off" session too: the veto, its skip line, the
+  // valve, the illegible allow, the marker and consent reads with their
+  // consumption, and the journal line all need nothing an armed session
+  // builds, and a session with no veto compacts mid-work. What the off tier
+  // never has, the veto reads as absent there: the bank, which the armed
+  // turn.complete sets, stays null. The moment rule holds there as it does
+  // armed, since the off tier's turn.start stamps lastTurnStartAt, so a
+  // declared marker written before the latest turn start has lapsed. The
+  // boundary reminder is armed but never carried, since tool.call's off
+  // branch carries no reminder, so the engine's print of the skip line is
+  // the one text an off session receives. The shadow and live passes below
+  // run in every tier, since the off tier starts the pass's timer that
+  // builds the plan. The launch-instruction re-injection runs in an armed
+  // session only: the kept text is prompt.submit's armed path's, which the
+  // off tier never runs.
   //
   // On the way down, a compaction of the main conversation, whatever its
   // trigger, tells the summarizer the names of the records shown under the
@@ -12727,12 +5625,16 @@ export const register: Register = async (on, options) => {
     // an allowed auto or precompute compaction of the main conversation, and
     // a marked one, which is the module's own manual compaction carrying
     // COMPACT_CUT_MARKER as its whole instructions, read the plan against
-    // the hook's messages. Where it applies, covering them under target with
-    // every kept call beside its result, the applied list is handed up and
-    // next is never called; kept messages carry their handles. Where it does
-    // not, an auto or precompute takes the engine's summary from next, and a
-    // marked one returns a skip naming why, so the engine never summarizes on
-    // the module's request. A marked compaction runs later than the tick that
+    // the hook's messages. At an auto or precompute the plan applies where it
+    // covers them with every kept call beside its result, whatever its kept
+    // estimate against the target, and the applied list goes down through
+    // next, so the engine's summary runs over the cut list; kept messages
+    // carry their handles, so the engine reads each as its own. Where it does
+    // not apply, next summarizes the untouched messages. A marked compaction
+    // never calls next: an applying plan, which there must also sit under
+    // target, is handed up as the hook's own result, and otherwise it returns
+    // a skip naming why, so the engine never summarizes on the module's
+    // request. A marked compaction runs later than the tick that
     // queued it, so it cuts only where the cache still reads expired, a turn
     // in between having re-warmed it, and where the plan as read now still
     // saves COMPACT_CUT_MIN_SAVED_TOKENS. Under shadow and off none of this
@@ -12741,12 +5643,11 @@ export const register: Register = async (on, options) => {
     // API form is read once first: a result whose user message carries a
     // block the rows do not, an image or a document, is kept, so that message
     // is untouched and stands as the engine has it. A read that fails refuses
-    // the hand-up, as api-unread, since the cut cannot know what it would
-    // lose.
+    // the cut, as api-unread, since the cut cannot know what it would lose.
     // The engine answers at most its newest 4096 messages, so a plan that
     // cuts or drops a result the API form lacks refuses too, as api-partial,
     // since that result's message was never checked for such a block.
-    const passLive = arming !== "off" && compactionPassOption === "live" && jevMode === "shadow";
+    const passLive = compactionPassOption === "live" && jevMode === "shadow";
     const marked = !subagent && e.trigger === "manual" && e.instructions === COMPACT_CUT_MARKER;
     let reading: CompactionPassReading | null = null;
     let protectedIds: string[] = [];
@@ -12772,7 +5673,7 @@ export const register: Register = async (on, options) => {
     }
     if (passLive && (gated || marked)) {
       try {
-        reading = compactionPassReading(e.messages, protectedIds);
+        reading = compactionPassReading(compactionPass, e.messages, protectedIds, { sizeChecks: !gated });
       } catch (err) {
         reading = null;
         sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action: "compaction_pass_failed", detail: boundedText(safeErrorText(err)) });
@@ -12791,11 +5692,14 @@ export const register: Register = async (on, options) => {
       else if (!cacheExpired(Date.now(), compactionPass.lastMainTurnEndedAt, false)) markedWhy = "cache-warm";
       else if (!cutWorthStarting(tokensOf(applies.droppedChars))) markedWhy = "under-minimum";
     }
-    const handUp = markedWhy === null ? applies : null;
+    // The marked compaction's hand-up, and the cut list an auto or precompute
+    // sends down to the summary.
+    const handUp = marked && markedWhy === null ? applies : null;
+    const cut = gated ? applies : null;
     if (passLive && marked && markedWhy !== null) {
       const why = markedWhy;
       try {
-        await compactionPassEvent($, {
+        await compactionPassEvent(compactionPassDepsOf($), {
           trigger: e.trigger,
           option: compactionPassOption,
           ...(reading === null ? { ...compactionPlanDetail(null) } : compactionReadingDetail(reading)),
@@ -12804,7 +5708,11 @@ export const register: Register = async (on, options) => {
           protected: protectedIds.length,
           marked: true,
           handedUp: false,
+          summarized: "none",
+          tokensBefore: null,
           tokensAfter: null,
+          summaryInputTokens: null,
+          summaryOutputTokens: null,
           messages: Array.isArray(e.messages) ? e.messages.length : 0,
         });
       } catch { /* the pass line is lost; the skip stands */ }
@@ -12818,10 +5726,18 @@ export const register: Register = async (on, options) => {
       const instructions = typeof e.instructions === "string" && e.instructions !== "" ? `${e.instructions} ${sentence}` : sentence;
       down = { ...e, instructions };
     }
+    // The stretch fork: an admitted auto or precompute, or a manual compaction
+    // that is not the marked cut, of the owner's main conversation.
+    if (!subagent && arming !== "off" && sess.isOwner && (gated || (e.trigger === "manual" && !marked))) {
+      const instructions = await stretchInstructions(stretchDepsOf($), e.trigger, e.messages, down.instructions);
+      if (instructions !== null) down = { ...down, instructions };
+    }
     // The applied list is the hook's own messages copied whole, blocks only
     // removed or a result's text replaced, so each keeps the engine's shape.
     type Compacted = Awaited<ReturnType<typeof next>>;
-    const result: Compacted = handUp !== null ? { messages: handUp.messages as unknown as NonNullable<Compacted["messages"]> } : await next(down);
+    const result: Compacted = handUp !== null
+      ? { messages: handUp.messages as unknown as NonNullable<Compacted["messages"]> }
+      : await next(cut !== null ? { ...down, messages: cut.messages as unknown as typeof e.messages } : down);
 
     // A compaction of the main conversation that ran, which is a result with
     // no skip and at least one message, ends the hold, since the context the
@@ -12846,48 +5762,58 @@ export const register: Register = async (on, options) => {
     // nothing. Under a seam mode that sends nothing no plan can exist, and
     // the timer's one disabled line is the whole record. Nothing here calls
     // Jev or a model. A failure in the branch is caught, since a throw from
-    // this hook fails the compaction. An off session holds no plan, since
-    // the tick that builds one is not installed, so it journals no pass line.
-    if (arming !== "off" && gated && ran && compactionPassOption === "shadow" && jevMode === "shadow") {
+    // this hook fails the compaction. An off session journals the same line,
+    // since its own timer builds the plan.
+    if (gated && ran && compactionPassOption === "shadow" && jevMode === "shadow") {
       try {
-        await compactionPassShadow($, e, result, compactionPassOption);
+        await compactionPassShadow(compactionPassDepsOf($), e, result, compactionPassOption);
       } catch { /* the pass line is lost; the compaction stands */ }
     }
     // The live line, on a live compaction that ran: the shadow line's fields
-    // beside whether the plan was handed up and whether the compaction was
-    // marked. A summary's tokensAfter is the engine's; a hand-up has none.
-    // Then the rerun windows: a compaction that ran, a precompute aside since
-    // it installs nothing, ends the open ones and starts one per result a
-    // hand-up dropped or cut. Each failure is caught, since a throw from this
-    // hook fails the compaction.
+    // beside whether the compaction was marked, whether the plan was handed
+    // up, and what the summary read: cut where the cut list went down to it,
+    // whole where it read the untouched messages, none where the marked
+    // hand-up answered. Where next answered, tokensBefore, tokensAfter and the
+    // summarizer's usage are the engine's as it reported them; a hand-up has
+    // none. Then the rerun windows: a compaction that ran, a precompute aside
+    // since it installs nothing, ends the open ones and starts one per result
+    // the cut list or the hand-up dropped or cut. Each failure is caught,
+    // since a throw from this hook fails the compaction.
     if (passLive && (gated || marked) && ran) {
       try {
-        await compactionPassEvent($, {
+        const engine = handUp === null;
+        await compactionPassEvent(compactionPassDepsOf($), {
           trigger: e.trigger,
           option: compactionPassOption,
           ...(reading === null ? { plan: "none", why: null, ...compactionPlanDetail(null) } : compactionReadingDetail(reading)),
           ...liveRefusal,
           protected: protectedIds.length,
           marked,
-          handedUp: handUp !== null,
-          tokensAfter: handUp === null && typeof result.tokensAfter === "number" ? result.tokensAfter : null,
+          handedUp: !engine,
+          summarized: !engine ? "none" : cut !== null ? "cut" : "whole",
+          tokensBefore: engine && typeof result.tokensBefore === "number" ? result.tokensBefore : null,
+          tokensAfter: engine && typeof result.tokensAfter === "number" ? result.tokensAfter : null,
+          ...compactionSummaryUsageDetail(engine ? result.usage : undefined),
           messages: reading === null ? (Array.isArray(e.messages) ? e.messages.length : 0) : reading.messages.length,
         });
       } catch { /* the pass line is lost; the compaction stands */ }
     }
     if (passLive && ran && e.trigger !== "precompute") {
       try {
-        await compactionRerunAtCompaction($, handUp);
+        await compactionRerunAtCompaction(compactionPassDepsOf($), handUp ?? cut);
       } catch { /* the windows stand as they were; the compaction stands */ }
     }
     // The plan was built over the transcript the compaction replaced, so it
     // goes with it: the next tick above the floor builds one over the new
     // rows, and the expired-cache reading holds no dead plan to read against.
-    if (ran && e.trigger !== "precompute") compactionPass.plan = null;
+    if (ran && e.trigger !== "precompute") {
+      compactionPass.plan = null;
+      endStretchAtCompaction(sess.state, handUp === null);
+    }
 
     if (subagent || result.skip !== undefined || !Array.isArray(result.messages) || result.messages.length === 0) return result;
-    // The kept launch instructions are prompt.submit's, which an off session
-    // never installs, so its compaction stands as it resolved and no $.state
+    // The kept launch instructions are kept by prompt.submit's armed path,
+    // which an off session never runs, so its compaction stands as it resolved and no $.state
     // read is made for it.
     if (arming === "off") return result;
     let kept: unknown;
@@ -12916,14 +5842,18 @@ export const register: Register = async (on, options) => {
 
   // --- turn.start: track turn ---
   on("turn.start", async ($, e, next) => {
-    // An off session stamps the moment and nothing else. The stamp is the
-    // input of the compaction veto's declared-marker rule, which lapses a
-    // declared boundary once a main-loop turn starts after it was written;
-    // the armed path below stamps it first with the same instant. No turn
-    // entry opens, no liveness file or store entry is written and no line is
-    // logged, since nothing in an off session reads them.
+    // An off session stamps the moment and opens the turn, with one instant
+    // for both. The stamp is the input of the compaction veto's
+    // declared-marker rule, which lapses a declared boundary once a main-loop
+    // turn starts after it was written; the armed path below stamps it first
+    // with the same instant. The open-turn entry is what the compaction
+    // pass's idle test reads, and turn.complete's off branch removes it. No
+    // liveness file or store entry is written and no line is logged, since
+    // nothing in an off session reads them.
     if (arming === "off") {
-      lastTurnStartAt = Date.now();
+      const at = Date.now();
+      lastTurnStartAt = at;
+      openTurns.set(e.turnId, at);
       return next(e);
     }
     // One instant for this start: the open-turn entry and every liveness file
@@ -13192,2468 +6122,114 @@ export const register: Register = async (on, options) => {
 
   // --- tool.call: serve tools, enforce constraints ---
   on("tool.call", async ($, e, next) => {
+    // The redactor's refusal first: a store surface carrying a raw secret
+    // ends the call before any guard or branch below reads it.
+    if (redactorOn) {
+      let refusal: string | null;
+      try { refusal = toolCallRefusal(e, next.budget?.remainingMs ?? Infinity); } catch { return withheldToolResult(); }
+      // A memq command's --body-file is read and scanned; a read that fails withholds.
+      if (refusal === null) {
+        try { refusal = await bodyFileRefusal(e, { read: (p) => $.fs.read(p) }, next.budget?.remainingMs ?? Infinity); } catch { return withheldToolResult(); }
+      }
+      if (refusal !== null) return { deny: refusal };
+    }
     // The budget this hook hands down to the calls it makes, live until
-    // the handler returns; hookBudgetOf says why the flag is cleared here.
+    // the handler returns; HookBudget in hooks/jev-live.ts says why the flag is cleared here.
     const hookBudget = hookBudgetOf(next);
-    try {
-      // An "off" session runs the guard and after-hook region around next(e)
-      // and nothing else: no call counting, no persona tool, no constraint.
-      if (arming === "off") {
-        const offGuarded = await guardedNext($, e, next, guardsOption);
-        return "early" in offGuarded ? offGuarded.early : offGuarded.r;
-      }
-      sess.state.monitor.totalToolCalls += 1;
-      if (isWorkTool(e.tool)) toolCallsThisTurn += 1;
-      // Whether this call comes from a loop other than the main one: e.agentId,
-      // the loop's id, is non-empty on a dispatched subagent's, a teammate's, a
-      // workflow agent's or an engine fork's calls and absent on the main
-      // loop's. The break-in check below reads it too.
-      const inSubagent = typeof e.agentId === "string" && e.agentId.length > 0;
-      // A subagent's own calls do not count as the main loop's work for the
-      // nudge count: an agent dispatched in an earlier turn can still be
-      // running, and its calls say nothing about whether the worker answered.
-      if (!inSubagent && isNudgeCountWork(e.tool)) nudgeCountWorkThisTurn += 1;
-      // Section 5 (goal-every-turn): the main loop's call joins the turn's tool
-      // activity, on the same ground the nudge count excludes a subagent's.
-      if (!inSubagent && typeof e.tool === "string") noteTurnToolCall(e.tool, e as { file_path?: unknown; path?: unknown; notebook_path?: unknown; command?: unknown });
-      // The recall chain's outcome input: a shell command of any loop that
-      // fetches a record through memq get without --no-stamp names it as acted
-      // on, a subagent's fetch being the session's own as much as the main
-      // loop's. Every name is kept, since the prompt's candidates are known
-      // only once its chain has collected them, and the outcome step reads the
-      // set against the candidates alone. A text read of the command and never
-      // a run, of a Bash or PowerShell call's command, the tool named in any
-      // case as the recognition match reads it, and read once for both outcomes.
-      // The recall outcome reads the names whatever tier each get reads, and
-      // skips a get memq refuses. A memq touch --applied in the same command
-      // is the outcome's other input, kept with the tier it stamps, since it
-      // counts only for a candidate shown from that tier; a touch memq refuses
-      // stamps nothing and is skipped the same way.
-      const shellCommand = shellCommandOf(e.tool, (e as { command?: unknown }).command);
-      const fetches = memqGetsOf(shellCommand);
-      for (const g of fetches) if (g.tier !== "refused") sess.recallGetNames.add(g.name.toLowerCase());
-      for (const t of memqTouchesOf(shellCommand)) if (t.tier !== "refused") sess.recallTouches.push(t);
-      // The recognition ask's outcome input: each main-loop call counts
-      // against the open nudge_acted windows, since a nudge reaches the main
-      // loop alone, the nudge standing down on a subagent's calls.
-      if (!inSubagent) settleRecognitionOutcomes($, fetches);
-      // Steer 68/69: the reply tool ran somewhere in this turn, so the
-      // channel-reply backstop at turn.complete has nothing to backfill.
-      if (typeof e.tool === "string" && (e.tool.includes("__reply") || e.tool.endsWith("_reply"))) {
-        replyCalledThisTurn = true;
-      }
-
-      // The compaction boundary the persona's last own turn owed, taken at the
-      // first main-loop tool call after it, before this call's tool is served
-      // or passed on, so the marker records a position before that tool's
-      // work. A sibling call from the same assistant message is not held back
-      // while the bank runs, so its work may land after the marker. By
-      // this point the turn's opening prompt line is on disk, which turn.start
-      // cannot guarantee. Only a call the model made takes it: next.origin
-      // names "engine" there. A call a plugin raised through $.tool.call
-      // reaches this hook too, this plugin's own reply backfill among them,
-      // which runs inside turn.complete, the one moment a marker is never
-      // honored. So a call whose origin names a plugin, or carries no origin,
-      // neither runs nor clears the owed bank, and neither does a subagent's
-      // call. The owed bank is cleared before the command runs, so it clears
-      // whatever the exit, and runs only while this session is still the
-      // owner, since ownership lost between the two events leaves nothing this
-      // session should bank. bankCompactionBoundary never throws, and its one
-      // decision is saved the way this handler's other bookkeeping lines are.
-      const modelMadeCall = next.origin?.plugin === "engine";
-      // Whether this call ran the boundary verb, so the hold reminder below
-      // does not tell the session to run what this call just ran.
-      let bankedOnThisCall = false;
-      if (modelMadeCall && !inSubagent && pendingCompactionBank !== null) {
-        const owedBank = pendingCompactionBank;
-        pendingCompactionBank = null;
-        if (sess.isOwner) {
-          bankedOnThisCall = true;
-          await bankCompactionBoundary($, owedBank.turnKind);
-          try { await persist($); } catch { /* persist could not read or write the store; the decision waits in memory */ }
-        }
-      }
-
-      // Serve agentic_identity (F9: single arbiter = commons; epoch is only the
-      // same-directory write fence). Claim in commons FIRST; if a live earlier
-      // holder exists, join as reader (no epoch bump, no ownership).
-      if (e.tool === "mcp__personas__agentic_identity") {
-        const name = String((e as any).persona || "default").trim() || "default";
-        // The shared name rule, before any claim or store write: a persona
-        // that fails it could be owned but never addressed, and its inbox
-        // listing would read another persona's keys.
-        const nameProblem = personaNameProblem(name);
-        if (nameProblem) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_identity: 'persona' ${nameProblem} (got '${name}').` };
-        }
-        // A store that is not an object of persona entries throws here, as a
-        // store that does not parse does, before the session takes the new
-        // name, resets its untracked-work line or releases its old claim. A
-        // refused switch leaves the session on the persona it held.
-        const store: Record<string, unknown> = await $.fs.exists(sess.storePath)
-          ? parsePersonaStore(await $.fs.read(sess.storePath))
-          : {};
-        const previousPersona = sess.persona;
-        sess.persona = name;
-        // The held untracked_work line lives in the previous persona's log, so
-        // a switch starts the new persona's line afresh rather than carrying
-        // the old count into it.
-        if (name !== previousPersona) {
-          sess.untrackedWorkAt = null;
-          sess.untrackedWorkCount = 0;
-        }
-        if (arming === "reader") {
-          // A reader session never claims persona:<name> here, never
-          // arbitrates for it, and never becomes its owner: it only ever
-          // joins as a reader. It keeps every reader:<target> claim it has
-          // made, because delivery grounds each pending record on a live
-          // reader:<target> claim at delivery time.
-          const existing = store[name] as AgentState | undefined;
-          // The store parsed as an object, so the state below is the persona's own.
-          sess.stateNotLoaded = null;
-          if (existing) {
-            sess.state = parseState(JSON.stringify(existing));
-            sess.state.persona = name;
-          } else {
-            sess.state = createDefaultState(name, sess.mySessionId);
-          }
-          sess.isOwner = false;
-          sess.myEpoch = existing?.epoch ?? 0;
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "passive_reader",
-            detail: `Joining '${sess.persona}' as reader (arming reader)`,
-          });
-          await claimReaderRole(commonsStoreOf($), sess.persona, sess.mySessionId, Date.now(), commonsMeta());
-          return {
-            result: `persona '${sess.persona}': joined as reader (arming reader). ${selfReviewLessonCount()} self-review lessons. ${previousSessionsText(sess.state)}`,
-          };
-        }
-        // Backlog fix (commons claim staleness): a commons session record shares
-        // one lastSeen across every claim it has ever made, so a persona claim
-        // left behind on switch reads as live for as long as this session keeps
-        // heartbeating under its NEW persona - blocking any other session from
-        // ever winning that old persona's arbitration. Release it here, the one
-        // place a session's persona actually changes.
-        if (previousPersona && previousPersona !== name) {
-          try {
-            await releaseResource(commonsStoreOf($), `persona:${previousPersona}`, sess.mySessionId, Date.now(), commonsMeta());
-          } catch { /* non-fatal: commons is a coordination layer */ }
-        }
-        const existing = store[name] as AgentState | undefined;
-        // The store parsed as an object, so the state below is the persona's
-        // own. This is how a session whose session.start did not finish
-        // recovers its state: the goal tools answer from it once this has run.
-        sess.stateNotLoaded = null;
-        if (existing) {
-          sess.state = parseState(JSON.stringify(existing));
-          sess.state.persona = name;
-        } else {
-          sess.state = createDefaultState(name, sess.mySessionId);
-        }
-        // The nudge count is the loaded persona's from here, so answers given
-        // under the previous persona neither carry into it nor are added by
-        // the answer closing this turn.
-        sess.nudgedAnswersWithoutStatus = 0;
-        sess.nudgeCapRefusedFor = null;
-        countResetSinceNudgeOpened = true;
-        // F9: commons is the single arbiter. Claim first, then check if a live
-        // earlier holder exists. Only the commons winner takes ownership.
-        const resource = `persona:${sess.persona}`;
-        let winnerId = sess.mySessionId; // default: we are the winner
-        let shouldYieldTo: string | null = null;
-        try {
-          await claimResource(commonsStoreOf($), resource, sess.mySessionId, Date.now(), commonsMeta());
-          const claims = await readAllClaims(commonsStoreOf($), sess.staleAfterMs);
-          const winner = commonsWinner(claims, resource);
-          if (winner && winner !== sess.mySessionId) {
-            shouldYieldTo = winner;
-          } else {
-            winnerId = winner ?? sess.mySessionId;
-          }
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "persona_claim_commons",
-            detail: `Claimed ${resource} in commons (session ${sess.mySessionId}, winner ${winnerId})`,
-          });
-        } catch { /* non-fatal: commons is a coordination layer, not a hard dependency */ }
-
-        if (shouldYieldTo) {
-          // F9: a live earlier holder exists. Join as reader, do NOT bump epoch,
-          // do NOT set isOwner, do NOT write the heartbeat.
-          sess.isOwner = false;
-          sess.myEpoch = existing?.epoch ?? 0;
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "passive_reader",
-            detail: `Joining '${sess.persona}' as reader (holder: ${shouldYieldTo}, commons arbitration)`,
-          });
-          try { $.ui.log(`Agentic: joined '${sess.persona}' as reader (held by ${shouldYieldTo})`); } catch { /* non-fatal */ }
-          // Round 32: the claimResource call above speculatively claimed
-          // `persona:<p>` before the winner was known. A reader join must not
-          // keep that claim - left in place, it reads as a live persona holder
-          // under this session's own heartbeat and blocks the next relaunch's
-          // pre-gate for the full stale-after window, exactly as the stale
-          // `persona:default` claim did. Release it before claiming the reader
-          // role, so the joiner ends with reader:<p> only.
-          try {
-            await releaseResource(commonsStoreOf($), resource, sess.mySessionId, Date.now(), commonsMeta());
-          } catch { /* non-fatal: commons is a coordination layer */ }
-          // D2: Claim the reader role
-          await claimReaderRole(commonsStoreOf($), sess.persona, sess.mySessionId, Date.now(), commonsMeta());
-          return {
-            result: `persona '${sess.persona}' is held by session ${shouldYieldTo}; joined as reader. ${selfReviewLessonCount()} self-review lessons. ${previousSessionsText(sess.state)}`,
-          };
-        }
-
-        // Commons winner: take ownership, bump epoch, write heartbeat.
-        recordPreviousSession(sess.state, sess.state.activeSessionId, sess.mySessionId);
-        sess.state.activeSessionId = sess.mySessionId;
-        sess.state.epoch += 1;
-        sess.myEpoch = sess.state.epoch;
-        sess.isOwner = true;
-        sess.state.monitor.sessionStart = Date.now();
-        sess.state.monitor.turnCount = 0;
-        sess.state.monitor.totalToolCalls = 0;
-        sess.state.monitor.errors = 0;
-        sess.state.monitor.lastTurnComplete = Date.now();
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "monitor",
-          action: "identity_set",
-          detail: `persona '${sess.persona}' (session ${sess.mySessionId}, epoch ${sess.myEpoch}, commons winner)`,
-        });
-        // Commons winner: one of the three claim sites that share writeClaimDirect
-        // (the other two are session.start and the heartbeat tick promotion).
-        // The claimant is the commons winner (activeSessionId = self), so the write
-        // must not go through persist's yield check.
-        await writeClaimDirect($);
-        // The new owner moves the distillates this persona's JSON still holds,
-        // as the start's claim does.
-        try {
-          await migrateLegacyMemories($);
-        } catch { /* non-fatal */ }
-        return {
-          result: `persona '${sess.persona}' active (epoch ${sess.myEpoch}, owner). ${selfReviewLessonCount()} self-review lessons. ${previousSessionsText(sess.state)}`,
-        };
-      }
-
-      // Serve goal_create (v3: creates the root node, NO planning in handler: R1).
-      if (e.tool === "mcp__personas__goal_create") {
-        // Before the owner check: a session that never loaded its state is not
-        // an owner either, and "held by a live session" would be untrue of it.
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        // A new tree is a new effort, so the turn-origin gate runs before any
-        // argument is read.
-        if (!turnMayStartEffort("goal_create")) {
-          toolErrorsThisTurn++;
-          return { deny: EFFORT_REFUSED_TEXT };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const objective = String((e as any).objective || "").trim();
-        if (!objective) {
-          toolErrorsThisTurn++;
-          return { deny: "goal_create requires a non-empty 'objective'." };
-        }
-        const maxRounds = Math.min(Math.max(parseInt(String((e as any).maxRounds || "10"), 10) || 10, 1), 50);
-        const roadmapPath = String((e as any).roadmapPath || "").trim() || undefined;
-        // Arguments can arrive stringified, as maxRounds above can, so the
-        // string "true" counts. Any other value leaves replace unset.
-        const rawReplace = (e as any).replace;
-        const replace = rawReplace === true || rawReplace === "true";
-
-        // An unfinished tree, one whose root is neither complete nor abandoned,
-        // is replaced only when the call says so. A finished tree needs no
-        // replace, so starting the next goal after one completes stays one call.
-        const oldRoot = sess.state.goals.find((g) => g.parentId === null);
-        const isOpen = (g: GoalNode) => g.status !== "complete" && g.status !== "abandoned";
-        if (oldRoot && isOpen(oldRoot) && !replace) {
-          const openCount = sess.state.goals.filter((g) => g.parentId !== null && isOpen(g)).length;
-          const openText = openCount === 0
-            ? `its root is ${oldRoot.status}`
-            : `${openCount === 1 ? "1 entry under its root is" : `${openCount} entries under its root are`} not complete or abandoned`;
-          toolErrorsThisTurn++;
-          return {
-            deny:
-              `The goal tree "${oldRoot.title}" is unfinished: ${openText}. ` +
-              `Pass replace: true to replace the tree, or use goal_add to extend it.`,
-          };
-        }
-
-        const now = Date.now();
-
-        // A tree holding any entry besides its root is copied to the history
-        // file before it is replaced. The copy comes first, so a replacement
-        // whose copy could not be written is refused and the tree stands.
-        if (sess.state.goals.some((g) => g.parentId !== null)) {
-          const line = JSON.stringify({ timestamp: now, persona: sess.persona, reason: "goal_create", goals: sess.state.goals });
-          try {
-            await appendLines($, workdirPathOf(GOAL_HISTORY_FILENAME), [line]);
-          } catch (err) {
-            toolErrorsThisTurn++;
-            return {
-              deny:
-                `The history copy in ${GOAL_HISTORY_FILENAME} could not be written, so the goal tree was not replaced: ` +
-                boundedText(safeErrorText(err)),
-            };
-          }
-        }
-
-        const rootId = `root-${now.toString(36)}`;
-        const root: GoalNode = {
-          id: rootId,
-          parentId: null,
-          kind: "root",
-          title: objective.slice(0, 80),
-          objective,
-          status: "pending",
-          source: "operator",
-          maxRounds, // L9: operator's value as the default for plans
-          completedRounds: 0,
-          scores: [],
-          notes: [],
-          roadmapPath,
-          planningRounds: 0,
-          consecutiveBlockedPlannings: 0,
-          consecutivePlanningFailures: 0,
-          planningRound: 0,
-          createdAt: now,
-          updatedAt: now,
-        };
-        // A root created on a channel turn records who asked, where the
-        // envelope named them, cut to ASKED_BY_MAX_CHARS.
-        if (currentTurnOriginKind === "channel" && currentTurnAuthor !== "") root.askedBy = currentTurnAuthor.slice(0, ASKED_BY_MAX_CHARS);
-
-        // Every open ask belongs to the tree being replaced, and an open
-        // blocking one would hold goal_add's activation on the new tree. Each
-        // closes as superseded on the ledger and, where its record is still
-        // open, on the record.
-        {
-          const store = commonsStoreOf($);
-          for (const entry of openAskEntries(sess.state)) {
-            const askRecord = await readAskRecord(store, sess.persona, entry.id);
-            if (askRecord && askRecord.status === "open") {
-              askRecord.status = "superseded";
-              await store.set(askKey(sess.persona, entry.id), askRecord);
-            }
-            closeAsk(sess.state, entry.id, "superseded", "goal_create", "tree replaced", now);
-            sess.state.decisions.push({
-              timestamp: now,
-              loop: "monitor",
-              action: "ask_answered",
-              detail: `ask ${entry.id} closed by goal_create (status: superseded)`,
-            });
-          }
-        }
-
-        // Replace any existing tree.
-        sess.state.goals = [root];
-        sess.state.activeGoalId = null;
-
-        sess.state.decisions.push({
-          timestamp: now,
-          loop: "goal",
-          action: "create",
-          detail: `Root ${rootId} "${objective.slice(0, 80)}" created (max ${maxRounds} rounds)`,
-        });
-        // Route two of the promotion routes: the message this turn is answering
-        // is what the operator turned into this tree, so its record is marked
-        // promoted with the root's id and rides the same write. The undo is
-        // dropped rather than kept, since this handler rolls nothing back on a
-        // refused write: the replaced tree stands in memory either way, and a
-        // record marked against the root it names is no worse off than the tree.
-        promoteOpenRecord(rootId, "goalId", now);
-        // H2b: a new goal inherits a clean nudge budget.
-        sess.nudgedAnswersWithoutStatus = 0;
-        sess.nudgeCapRefusedFor = null;
-        countResetSinceNudgeOpened = true;
-        sess.lastNudgeAt = 0;
-
-        const writeOk = await persist($);
-        if (writeOk) {
-          return {
-            result: `Root created; planning runs at the next controller tick.`,
-          };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve goal_add (R4: parent resolution).
-      if (e.tool === "mcp__personas__goal_add") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const givenTitle = String((e as any).title || "").trim();
-        const objective = String((e as any).objective || "").trim();
-        // Route three of the promotion routes: an add made from a task of the
-        // working list. The task's own text is the title where the call gives
-        // none, so turning a working item into a tree entry is one call rather
-        // than a copy, and the task leaves the list inside this add's own write.
-        // An id no task carries is refused before anything is read off it, the
-        // way an unknown parentId is. The lookup is over the whole list rather
-        // than under the active goal alone, since the entry this add builds is
-        // placed by parentId and need not sit under the goal the task did.
-        const rawTaskId = (e as any).taskId;
-        let sourceTask: TaskItem | undefined;
-        if (rawTaskId !== undefined && rawTaskId !== null) {
-          const taskId = String(rawTaskId).trim();
-          sourceTask = sess.state.tasks.find((t) => t.id === taskId);
-          if (sourceTask === undefined) {
-            toolErrorsThisTurn++;
-            return { deny: `taskId "${taskId.slice(0, TASK_ID_MAX_CHARS)}" not found in the task list.` };
-          }
-        }
-        const title = givenTitle || (sourceTask === undefined ? "" : sourceTask.text);
-        if (!title || !objective) {
-          toolErrorsThisTurn++;
-          return { deny: "goal_add requires non-empty 'title' and 'objective'." };
-        }
-        const kind = String((e as any).kind || "task").trim() === "plan" ? "plan" : "task";
-        // A plan is a new effort, so it passes the turn-origin gate once its
-        // kind is known and before anything is written. A task works inside
-        // what the persona already holds and is never gated. At plan-and-ask
-        // and plan-and-start the gate admits a plan in every turn, and a plan
-        // added outside the operator's and the coordinator persona's turns is
-        // reported to the coordinator persona below.
-        // The level is read once, so the gate and the entry's status below
-        // decide on the same value.
-        const autonomy = sess.state.autonomy;
-        if (kind === "plan" && !turnMayStartEffort("goal_add_plan", autonomy)) {
-          toolErrorsThisTurn++;
-          return { deny: EFFORT_REFUSED_TEXT };
-        }
-        const maxRounds = Math.min(Math.max(parseInt(String((e as any).maxRounds || "10"), 10) || 10, 1), 50);
-        const explicitParent = String((e as any).parentId || "").trim();
-
-        // Section 1 (plan-health-from-the-record): planPath is validated before
-        // anything is mutated, same as every other goal_add refusal below. The
-        // kind check comes first so a task carrying a syntactically valid path
-        // is refused for the kind reason, not the pattern reason - each rule
-        // owns exactly the cases it names, since a later reader (Section 2)
-        // joins this value onto the working directory and reads the file it
-        // names, and needs to know a task never held one. Both refusals state
-        // the required form, so the rule that fired is named by how the
-        // message opens rather than by which of them mentions the form.
-        //
-        // Absent means undefined or null, and nothing else. A present but
-        // empty or whitespace-only value is a caller that meant to pass a path
-        // and passed nothing, so on a task it is the kind refusal like any
-        // other value.
-        //
-        // A plan entry is one with a plan document, judged from that document
-        // rather than from a count of turns, so an add of kind "plan" must
-        // name one. An absent, empty or whitespace-only value names none and
-        // is refused by the no-path rule, whose message opens with the rule
-        // and closes with the required form; a value that names something is
-        // held to the pattern by the form rule. A plan entry has no round
-        // budget either, so maxRounds on kind "plan" is refused once the path
-        // is settled, and an add both rules would refuse reads the no-path
-        // refusal alone. Present for maxRounds means neither undefined nor
-        // null, as for planPath, so a string or a zero is refused too.
-        const rawPlanPath = (e as any).planPath;
-        let planPath: string | undefined;
-        if (rawPlanPath !== undefined && rawPlanPath !== null && kind !== "plan") {
-          toolErrorsThisTurn++;
-          return { deny: 'planPath is only allowed on kind "plan". ' + PLAN_PATH_REQUIRED_FORM };
-        }
-        if (kind === "plan") {
-          const trimmed = rawPlanPath === undefined || rawPlanPath === null ? "" : String(rawPlanPath).trim();
-          if (trimmed === "") {
-            toolErrorsThisTurn++;
-            return {
-              deny:
-                "A plan entry names its plan document, and an entry without one runs on a round budget, " +
-                "so goal_add of a plan requires planPath. " + PLAN_PATH_REQUIRED_FORM,
-            };
-          }
-          if (!PLAN_PATH_PATTERN.test(trimmed)) {
-            toolErrorsThisTurn++;
-            return { deny: PLAN_PATH_REQUIRED_FORM };
-          }
-          const rawMaxRounds = (e as any).maxRounds;
-          if (rawMaxRounds !== undefined && rawMaxRounds !== null) {
-            toolErrorsThisTurn++;
-            return {
-              deny:
-                "A plan entry has no round budget: it is judged from its plan document. " +
-                'maxRounds is for kind "task"; add this plan without it.',
-            };
-          }
-          planPath = trimmed;
-        }
-
-        const root = sess.state.goals.find((g) => g.parentId === null);
-        if (!root) {
-          toolErrorsThisTurn++;
-          return { deny: "No goal tree exists. Call goal_create first." };
-        }
-
-        // R4: parent resolution.
-        let parentId: string;
-        if (explicitParent) {
-          const parent = sess.state.goals.find((g) => g.id === explicitParent);
-          if (!parent) {
-            toolErrorsThisTurn++;
-            return { deny: `parentId "${explicitParent}" not found in goal tree.` };
-          }
-          if (kind === "plan" && parent.parentId !== null) {
-            toolErrorsThisTurn++;
-            return { deny: 'kind "plan" is only allowed under the root.' };
-          }
-          parentId = explicitParent;
-        } else if (kind === "plan") {
-          // Section 10 fix round: a plan always resolves to the root when no
-          // parentId is given, whatever is active. Without this, Section 10's
-          // own no-active-leaf branch below activates the first plan a worker
-          // adds in a turn, and a second plan add in the same turn - with no
-          // parentId, exactly what this tool's own description tells a worker
-          // to omit - would resolve under that now-active first plan and be
-          // denied ("plan" only allowed under the root), which never happened
-          // before this section since no plan stayed active mid-turn.
-          parentId = root.id;
-        } else {
-          const active = sess.state.activeGoalId
-            ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-            : null;
-          if (active) {
-            if (active.kind === "plan") {
-              parentId = active.id;
-            } else {
-              // Active task's parent.
-              parentId = active.parentId ?? root.id;
-            }
-          } else {
-            parentId = root.id;
-          }
-        }
-
-        // Validate kind under parent.
-        const parentNode = sess.state.goals.find((g) => g.id === parentId)!;
-        if (kind === "plan" && parentNode.parentId !== null) {
-          toolErrorsThisTurn++;
-          return { deny: 'kind "plan" is only allowed under the root.' };
-        }
-        // M6: deny goal_add whose resolved parent is a task (three levels max: root > plan > task).
-        if (parentNode.kind === "task") {
-          toolErrorsThisTurn++;
-          return { deny: "Cannot add a node under a task. The tree is root > plan > task; nothing deeper." };
-        }
-
-        // The add itself, the coordinator record it sends, the task it drops and
-        // the open turn record it promotes all run in addGoalEntry, which route
-        // one of the promotion routes calls too, so neither route holds a second
-        // copy of the dial's shape. What stays here is what only a tool call can
-        // read: whether this turn's origin makes the add unprompted, and the text
-        // the model is answered with.
-        const unprompted = kind === "plan" && !turnIsOperatorsOrCoordinators();
-        const awaitingYes = unprompted && autonomy === "plan-and-ask";
-        const added = await addGoalEntry($, {
-          kind,
-          title,
-          objective,
-          parentId,
-          root,
-          maxRounds,
-          planPath,
-          unprompted,
-          awaitingYes,
-          dropTaskId: sourceTask?.id,
-          coordinatorPersona,
-          architectPersona,
-        });
-        if (!added.ok) {
-          toolErrorsThisTurn++;
-          return { deny: added.deny };
-        }
-        const newNode = added.node;
-        {
-          const nextActive = sess.state.activeGoalId
-            ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-            : null;
-          const told = !unprompted ? ""
-            : awaitingYes ? ` It waits paused for the operator's yes, and a [PROPOSAL] record naming ${newNode.id} went to the coordinator persona.`
-            : ` A [STARTED] record naming ${newNode.id} went to the coordinator persona.`;
-          const fromTask = sourceTask === undefined ? "" : ` The task ${sourceTask.id} it was made from left the list.`;
-          return {
-            result: (nextActive
-              ? `Added ${kind} "${title.slice(0, 50)}". Now active: ${nextActive.id} "${nextActive.title}".`
-              : `Added ${kind} "${title.slice(0, 50)}". No active goal; planning or activation will occur at the next tick.`) + told + fromTask,
-          };
-        }
-      }
-
-      // Serve goal_edit (plan item 3: drop / pause / reprioritize a node in
-      // response to an operator steer). Each branch logs a decision naming the
-      // change, so the decision log plus the resulting tree diff is the proof
-      // the operator's request actually changed something.
-      if (e.tool === "mcp__personas__goal_edit") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const nodeId = String((e as any).nodeId || "").trim();
-        const action = String((e as any).action || "").trim();
-        const reason = String((e as any).reason || "").trim();
-        if (!nodeId || !["drop", "pause", "reprioritize"].includes(action)) {
-          toolErrorsThisTurn++;
-          return { deny: 'goal_edit requires a valid nodeId and action ("drop" | "pause" | "reprioritize").' };
-        }
-        const node = sess.state.goals.find((g) => g.id === nodeId);
-        if (!node) {
-          toolErrorsThisTurn++;
-          return { deny: `nodeId "${nodeId}" not found in goal tree.` };
-        }
-        if (node.parentId === null) {
-          toolErrorsThisTurn++;
-          return { deny: "Cannot edit the root; goal_create with replace: true replaces the whole tree instead." };
-        }
-        const now = Date.now();
-
-        if (action === "drop") {
-          // Item 8.1's own bullet in one line: a blocked node (e.g. a stale duplicate the planner
-          // left behind) could not be retired at all before this - drop refused it alongside every
-          // other status, and nothing else marks a blocked node done or dropped. Allowed here, same
-          // as pending/paused, with the reason always recorded (never optional for this status, so
-          // the tree can say why a blocked node was let go rather than just that it was).
-          //
-          // A plan's open closing leaf is the plan's one reachable entry while
-          // its document reads short of Complete, so it is never dropped on
-          // its own, whatever its status or whose turn this is; dropping the
-          // plan takes it. This refusal comes first, ahead of the status and
-          // awaiting-yes refusals, so the leaf's usual state, active, gets this
-          // answer rather than the generic one, and it names the plan to drop.
-          const dropParent = sess.state.goals.find((g) => g.id === node.parentId);
-          if (dropParent && dropParent.kind === "plan" && openClosingLeafOf(dropParent) === node) {
-            toolErrorsThisTurn++;
-            return { deny: `${CLOSING_LEAF_DROP_REFUSED_TEXT} Its id is ${dropParent.id}.` };
-          }
-          if (node.status !== "pending" && node.status !== "paused" && node.status !== "blocked") {
-            toolErrorsThisTurn++;
-            return { deny: `Cannot drop ${nodeId}: status is "${node.status}" (only pending, paused, or blocked nodes can be dropped).` };
-          }
-          if (node.awaitingYes && !turnIsOperatorsOrCoordinators()) {
-            toolErrorsThisTurn++;
-            return { deny: AWAITING_YES_DROP_REFUSED_TEXT };
-          }
-          // A dropped plan's open closing leaf is abandoned with it, and the
-          // active slot leaves it where it named it, so no open leaf stays
-          // under a dropped plan. No other child is touched.
-          const droppedLeaf = node.kind === "plan" ? openClosingLeafOf(node) : undefined;
-          node.status = "abandoned";
-          node.blockedReason = reason || "dropped by operator";
-          // A dropped entry no longer waits for the operator's yes.
-          node.awaitingYes = undefined;
-          node.updatedAt = now;
-          sess.state.decisions.push({
-            timestamp: now,
-            loop: "goal",
-            action: "drop",
-            detail: `${nodeId}: ${node.blockedReason}`,
-          });
-          if (droppedLeaf) {
-            droppedLeaf.status = "abandoned";
-            droppedLeaf.blockedReason = `dropped with ${nodeId}`;
-            droppedLeaf.updatedAt = now;
-            if (sess.state.activeGoalId === droppedLeaf.id) sess.state.activeGoalId = null;
-          }
-        } else if (action === "pause") {
-          if (node.status !== "active" && node.status !== "pending") {
-            toolErrorsThisTurn++;
-            return { deny: `Cannot pause ${nodeId}: status is "${node.status}" (only an active or pending node can be paused).` };
-          }
-          const wasActive = node.status === "active";
-          node.status = "paused";
-          node.blockedReason = reason || "paused by operator";
-          node.updatedAt = now;
-          if (wasActive && sess.state.activeGoalId === nodeId) {
-            sess.state.activeGoalId = null;
-          }
-          sess.state.decisions.push({
-            timestamp: now,
-            loop: "goal",
-            action: "paused_by_operator",
-            detail: `${nodeId}: ${node.blockedReason}`,
-          });
-        } else {
-          // reprioritize: move nodeId to activate before its pending siblings.
-          if (node.status !== "pending") {
-            toolErrorsThisTurn++;
-            return { deny: `Cannot reprioritize ${nodeId}: status is "${node.status}" (only a pending node can be reprioritized).` };
-          }
-          const siblings = sess.state.goals.filter((g) => g.parentId === node.parentId && g.id !== nodeId);
-          const earliestKey = siblings.length > 0
-            ? Math.min(...siblings.map((g) => g.sortKey ?? g.createdAt))
-            : node.sortKey ?? node.createdAt;
-          node.sortKey = earliestKey - 1;
-          node.updatedAt = now;
-          sess.state.decisions.push({
-            timestamp: now,
-            loop: "goal",
-            action: "reprioritized",
-            detail: `${nodeId}: moved to front of ${node.parentId ?? "root"}'s pending siblings${reason ? ` (${reason})` : ""}`,
-          });
-        }
-
-        const writeOk = await persist($);
-        if (writeOk) {
-          return { result: `${action} applied to ${nodeId}. Now: [${node.status}] "${node.title}".` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve goal_longterm: add or drop one entry of the long-term goal list.
-      // The list sits beside the tree, so nothing here reads or writes goals or
-      // activeGoalId. Each change logs a decision, and a drop's decision
-      // carries its reason.
-      if (e.tool === "mcp__personas__goal_longterm") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        // Both actions change what the persona works towards, so the
-        // turn-origin gate runs before any argument is read.
-        if (!turnMayStartEffort("goal_longterm")) {
-          toolErrorsThisTurn++;
-          return { deny: EFFORT_REFUSED_TEXT };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const action = String((e as any).action || "").trim();
-        if (action !== "add" && action !== "drop") {
-          toolErrorsThisTurn++;
-          return { deny: 'goal_longterm requires action "add" or "drop".' };
-        }
-        const list = sess.state.longTermGoals;
-        const now = Date.now();
-        let resultText: string;
-
-        if (action === "add") {
-          const title = String((e as any).title || "").trim();
-          const objective = String((e as any).objective || "").trim();
-          if (!title || !objective) {
-            toolErrorsThisTurn++;
-            return { deny: "goal_longterm add requires non-empty 'title' and 'objective'." };
-          }
-          if (list.length >= LONG_TERM_GOAL_CAP) {
-            toolErrorsThisTurn++;
-            return {
-              deny:
-                `goal_longterm add refused: ${list.length} long-term goals are held and the cap is ${LONG_TERM_GOAL_CAP}. ` +
-                `Drop one with goal_longterm drop first.`,
-            };
-          }
-          // The node id form with its own prefix, so a long-term id never reads
-          // as a root, plan or task id. The title and objective are cut to the
-          // lengths the planner cuts a plan's to, since the list is shown in a
-          // prompt as plans are.
-          const entry: LongTermGoal = {
-            id: `lt-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-            title: title.slice(0, 80),
-            objective: objective.slice(0, 500),
-            createdAt: now,
-          };
-          list.push(entry);
-          sess.state.decisions.push({
-            timestamp: now,
-            loop: "goal",
-            action: "longterm_added",
-            detail: `${entry.id} "${entry.title.slice(0, 50)}"`,
-          });
-          resultText = `Long-term goal added: ${entry.id} "${entry.title}".`;
-        } else {
-          const id = String((e as any).id || "").trim();
-          const reason = String((e as any).reason || "").trim();
-          const index = id ? list.findIndex((g) => g.id === id) : -1;
-          if (index === -1) {
-            toolErrorsThisTurn++;
-            const held = list.length > 0 ? list.map((g) => g.id).join(", ") : "none";
-            return {
-              deny:
-                `goal_longterm drop needs the id of a held long-term goal, and ` +
-                `${id ? `"${id.slice(0, 50)}" is not one` : "no id was given"}. Held: ${held}.`,
-            };
-          }
-          if (!reason) {
-            toolErrorsThisTurn++;
-            return { deny: "goal_longterm drop requires a non-empty 'reason', which is recorded." };
-          }
-          const [dropped] = list.splice(index, 1);
-          sess.state.decisions.push({
-            timestamp: now,
-            loop: "goal",
-            action: "longterm_dropped",
-            detail: `${dropped.id} "${String(dropped.title ?? "").slice(0, 50)}": ${reason.slice(0, 80)}`,
-          });
-          resultText = `Long-term goal dropped: ${dropped.id} "${String(dropped.title ?? "")}".`;
-        }
-
-        const writeOk = await persist($);
-        if (writeOk) {
-          return { result: resultText };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve goal_autonomy: set the persona's autonomy level. The level is the
-      // operator's alone, so the turn gate runs before the owner check and
-      // before the argument is read. A write that is not saved puts the old
-      // level and the decision log back, so what the session holds matches the
-      // store.
-      if (e.tool === "mcp__personas__goal_autonomy") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!turnIsOperators()) {
-          toolErrorsThisTurn++;
-          return { deny: AUTONOMY_REFUSED_TEXT };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const rawLevel = (e as any).level;
-        const level = typeof rawLevel === "string" ? rawLevel.trim() : "";
-        if (!isAutonomyLevel(level)) {
-          toolErrorsThisTurn++;
-          return { deny: `goal_autonomy requires level to be one of ${AUTONOMY_LEVELS.map((l) => `"${l}"`).join(", ")}.` };
-        }
-        const previous = sess.state.autonomy;
-        sess.state.autonomy = level;
-        const decision: AgentState["decisions"][number] = {
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "autonomy_set",
-          detail: `${previous} -> ${level}`,
-        };
-        sess.state.decisions.push(decision);
-        const writeOk = await persistOrRollBack($, () => {
-          sess.state.autonomy = previous;
-          dropDecision(decision);
-        });
-        if (writeOk) {
-          return { result: `Autonomy level set: ${level} (was ${previous}).` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve goal_done (R3: use completeLeaf + activateNext). With no nodeId it
-      // completes the active leaf. With a nodeId it completes that entry by
-      // name, where the entry is not the root, is not already complete or
-      // abandoned, and has no child still open. An entry that was not the
-      // active one when the call arrived earns no round or score credit and
-      // leaves any other active entry active.
-      if (e.tool === "mcp__personas__goal_done") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const note = String((e as any).note || "").trim();
-        const byNameId = String((e as any).nodeId || "").trim();
-        const active = sess.state.activeGoalId
-          ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-          : null;
-        // A plan's closing leaf completes with its plan once the document reads
-        // Complete. While the document reads a Status: value short of that,
-        // goal_done on the leaf completes nothing and answers with the same
-        // finish-the-document sentence the walk up gives, so the leaf stays
-        // the entry the controller nudges on. A document that does not read or
-        // has no Status: line holds nothing here, as it holds nothing in the
-        // walk up. Both branches below ask this before they change anything.
-        const closingLeafRefusal = async (node: GoalNode): Promise<string | null> => {
-          const plan = node.parentId ? sess.state.goals.find((g) => g.id === node.parentId) : undefined;
-          if (!plan || !plan.planPath || openClosingLeafOf(plan) !== node) return null;
-          const { reading } = await readPlanDocument($, plan.planPath);
-          if (reading.kind !== "read" || reading.status === null || reading.complete) return null;
-          return `Not complete: "${node.title}" closes itself once the plan document reads Complete.${planLeftOpenText(plan, planStatusText(reading.status))}`;
-        };
-        let target: GoalNode;
-        if (byNameId) {
-          const named = sess.state.goals.find((g) => g.id === byNameId);
-          if (!named) {
-            toolErrorsThisTurn++;
-            return { deny: `nodeId "${byNameId.slice(0, 50)}" not found in goal tree.` };
-          }
-          if (named.parentId === null) {
-            // The root completes by name on one admission: every descendant
-            // is complete or abandoned with at least one complete, in a turn
-            // the operator or the coordinator persona opened. That is the
-            // operator's word that a breakdown the planner made is done, which
-            // isRootFinished cannot read on its own (a planned root stays the
-            // planner's there). The tool's note is the root_complete detail,
-            // the same decision the controller's own completion writes, and
-            // none of the leaf follow-on below runs.
-            if (named.status === "complete" || named.status === "abandoned") {
-              toolErrorsThisTurn++;
-              return { deny: `Cannot complete ${byNameId}: status is already "${named.status}".` };
-            }
-            const descendants = sess.state.goals.filter((g) => g.parentId !== null);
-            const openDescendant = descendants.find((g) => g.status !== "complete" && g.status !== "abandoned");
-            if (openDescendant) {
-              toolErrorsThisTurn++;
-              return { deny: `Cannot complete ${byNameId}: it is the root, status "${named.status}", and its descendant ${openDescendant.id} is "${openDescendant.status}". The root completes by name only once every entry under it is complete or abandoned; complete or drop ${openDescendant.id} first.` };
-            }
-            if (!descendants.some((g) => g.status === "complete")) {
-              toolErrorsThisTurn++;
-              return { deny: `Cannot complete ${byNameId}: it is the root, status "${named.status}", and no entry under it is complete. A root with nothing done under it is not finished; drop it with goal_create replace: true or add the work.` };
-            }
-            if (!turnMayStartEffort("goal_done_root")) {
-              toolErrorsThisTurn++;
-              return { deny: `Cannot complete ${byNameId}: it is the root, and the root closes only on the operator's or the coordinator persona's word, in a turn one of them opened. Retry in such a turn; this turn was not one.` };
-            }
-            // A finished root is exactly the state the planner is due in, so a
-            // planner call the last tick started can still be out. The tick's
-            // own finished-root path refuses under an in-flight call for the
-            // same reason: a call that resolves after the root closed would add
-            // plan nodes under a complete root. The planner also re-reads the
-            // root after its call, so the two guards cover both orders.
-            if (planningInFlight) {
-              toolErrorsThisTurn++;
-              return { deny: `Cannot complete ${byNameId} right now: a planner call is in flight for it. Retry in a few seconds.` };
-            }
-            named.blockedReason = undefined;
-            named.lead = null;
-            await completeRoot($, named.id, note ? `Root ${named.id} marked complete by goal_done: ${note.slice(0, 200)}` : `Root ${named.id} marked complete by goal_done`);
-            const rootWriteOk = await persist($);
-            if (!rootWriteOk) {
-              toolErrorsThisTurn++;
-              return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-            }
-            return { result: `Complete: "${named.title}" (the root). Every entry under it was complete or abandoned; the goal tree is finished.` };
-          }
-          if (named.status === "complete" || named.status === "abandoned") {
-            toolErrorsThisTurn++;
-            return { deny: `Cannot complete ${byNameId}: status is already "${named.status}".` };
-          }
-          const openChild = sess.state.goals.find(
-            (g) => g.parentId === named.id && g.status !== "complete" && g.status !== "abandoned",
-          );
-          if (openChild) {
-            toolErrorsThisTurn++;
-            return { deny: `Cannot complete ${byNameId}: status is "${named.status}" and its child ${openChild.id} is "${openChild.status}". Complete or drop every child first.` };
-          }
-          // An entry awaiting the operator's yes, or a node under one, completes
-          // by name only in a turn the operator or the coordinator persona
-          // started, since completing it would settle the wait without that
-          // word.
-          const awaitingAbove = awaitingEntryAtOrAbove(sess.state, named);
-          if (awaitingAbove && !turnIsOperatorsOrCoordinators()) {
-            toolErrorsThisTurn++;
-            return { deny: AWAITING_YES_DONE_REFUSED_TEXT };
-          }
-          // An allowed completion under an entry awaiting the operator's yes is
-          // that word on the entry, as an allowed resume is: its flag goes, and
-          // its awaiting reason with it, and it stays paused. A named entry
-          // that is itself awaiting is settled by completeLeaf.
-          const namedRefusal = await closingLeafRefusal(named);
-          if (namedRefusal !== null) {
-            toolErrorsThisTurn++;
-            return { deny: namedRefusal };
-          }
-          if (awaitingAbove && awaitingAbove !== named) {
-            awaitingAbove.awaitingYes = undefined;
-            if (awaitingAbove.blockedReason === AWAITING_YES_REASON) awaitingAbove.blockedReason = undefined;
-            awaitingAbove.updatedAt = Date.now();
-          }
-          target = named;
-        } else {
-          if (!active || active.status !== "active") {
-            toolErrorsThisTurn++;
-            return { deny: "No active goal leaf to complete." };
-          }
-          const activeRefusal = await closingLeafRefusal(active);
-          if (activeRefusal !== null) {
-            toolErrorsThisTurn++;
-            return { deny: activeRefusal };
-          }
-          target = active;
-        }
-        // Which entries were active is read before anything changes, so the
-        // follow-on below keys on the tree as the call found it. The credit
-        // goes to the target only where activeGoalId names it and its status
-        // is active. Another entry is active where any node besides the target
-        // has status active, whatever activeGoalId names, the same test
-        // goal_add's no-active-leaf branch reads.
-        const wasActive = active != null && active.status === "active" && active.id === target.id;
-        const otherActive = sess.state.goals.find((g) => g.status === "active" && g.id !== target.id) ?? null;
-        const completedId = target.id;
-        const completedTitle = target.title;
-        const statusBefore = new Map(sess.state.goals.map((g) => [g.id, g.status]));
-        const leftOpen = new Map<string, { status: string; leaf: GoalNode }>();
-        const closedIds = await completeLeafReturningClosed($, completedId, note || "goal_done", leftOpen);
-        for (const id of closedIds) goalDoneClosedThisTurn.set(id, nudgeCountWorkThisTurn);
-        if (byNameId) {
-          target.blockedReason = undefined;
-          target.lead = null;
-        }
-        // E2: health run at completeLeaf site (goal_done).
-        await runHealth($, completedId);
-        if (wasActive) {
-          // M11: credit the round and score in goal_done, not turn.complete.
-          // The score is recorded for every entry; the round is spent on a task
-          // entry only, since a plan entry has no round budget.
-          active.scores.push({ round: active.scores.length + 1, result: "on-goal" });
-          if (!isPlanEntry(sess.state, active)) active.completedRounds += 1;
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "score",
-            detail: `${completedId} Round ${active.scores.length}: on-goal (goal_done)`,
-          });
-        }
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "done",
-          detail: `${completedId} "${completedTitle.slice(0, 50)}" marked complete${byNameId ? " by name" : ""}${note ? `: ${note.slice(0, 80)}` : ""}`,
-        });
-        queueMemoryCheck($, expectedTurns, completedId, completedTitle, closedIds);
-        // A completion by name can finish a blocked child, so the ancestors it
-        // freed from "Child task blocked" are logged after its done line and
-        // restored before any activation below, so activateNext reads them as
-        // pending. The call with no nodeId completes the active leaf, which
-        // is not a blocked child, and runs no such walk.
-        if (byNameId) {
-          clearChildBlockedAncestors(completedId);
-        }
-        // Every open ask on an entry this call completed closes as stood,
-        // blocking or not, whichever branch completed it. Those entries are
-        // the target and any plan completeLeaf's walk took to complete. An ask
-        // on any other entry stays open and keeps its hold.
-        {
-          const completedNow = sess.state.goals
-            .filter((g) => g.status === "complete" && statusBefore.get(g.id) !== "complete")
-            .map((g) => g.id);
-          await closeAsksOnCompletedNodes($, completedNow, "goal_done", Date.now());
-        }
-
-        // The completed entry was active: activate the next one, as the call
-        // with no nodeId always does. Another entry is active: it stays so.
-        // None is active: activate the next one unless an open blocking ask
-        // holds the tree, the one hold goal_add's no-active-leaf branch honors.
-        let nextId: string | null = null;
-        let heldBy = "";
-        if (wasActive) {
-          nextId = activateNext(sess.state, completedId);
-          activate($, nextId, `${completedId} done`);
-        } else if (!otherActive) {
-          if (openBlockingAsks(sess.state).length > 0) {
-            heldBy = "an operator ask is open";
-          } else {
-            nextId = activateNext(sess.state, completedId);
-            activate($, nextId, `${completedId} done by name`);
-          }
-        }
-        // activeGoalId never names the entry this call completed. Where it still
-        // does, it moves to the entry that is still active, or to null where
-        // none is, the same pointer a store load's invariant repair would set.
-        if (!wasActive && sess.state.activeGoalId === completedId) {
-          sess.state.activeGoalId = otherActive ? otherActive.id : null;
-        }
-
-        // S9: goal_done sets pendingPeriodic; the tick runs the review.
-        if (wasActive && sess.state.monitor.selfReview) {
-          sess.state.monitor.selfReview.pendingPeriodic = true;
-        }
-
-        const writeOk = await persist($);
-        if (writeOk) {
-          // F4: goal_done result names the health command, exit code, and first tail line.
-          const health = sess.state.monitor.env.health;
-          let healthText = "";
-          if (health) {
-            const firstLine = health.tail.split("\n")[0] || "no output";
-            healthText = ` Health: ${health.command.join(" ")} exit ${health.exitCode} (${firstLine}).`;
-          }
-          // A plan the walk up left open is named with the status its document
-          // read and the closing leaf added under it, in every result below,
-          // and the no-pending sentence gives way to it, since an open plan is
-          // pending work and holds the planner.
-          const leftOpenText = [...leftOpen].map(([planId, { status, leaf }]) => {
-            const plan = sess.state.goals.find((g) => g.id === planId);
-            const opened = plan ? planLeftOpenText(plan, status) : "";
-            return `${opened} Its closing entry ${leaf.id} "${leaf.title}" was added and is ${leaf.status}.`;
-          }).join("");
-          // R8: goal_done result names newly active leaf OR planning message.
-          // Where this call completed the plan holder the turn started on and
-          // the entry it activated sits under another plan holder, the result
-          // also tells the worker to end the turn here, so the compaction
-          // boundary the turn owes lands before the next plan's work. The
-          // boundary step reads only the turn-start holder, so a plan this call
-          // completed by name in a turn that started elsewhere gets no such
-          // sentence. A task under the same plan becoming active keeps the
-          // plain result.
-          if (nextId) {
-            const nextNode = sess.state.goals.find((g) => g.id === nextId)!;
-            const completedHolder = planHolderOf(sess.state, target);
-            const nextHolder = planHolderOf(sess.state, nextNode);
-            const turnStartLeaf = turnLeafId ? sess.state.goals.find((g) => g.id === turnLeafId) : undefined;
-            const turnStartHolder = turnStartLeaf ? planHolderOf(sess.state, turnStartLeaf) : undefined;
-            const handsOver = completedHolder !== undefined && closedIds.includes(completedHolder.id)
-              && turnStartHolder !== undefined && turnStartHolder.id === completedHolder.id
-              && nextHolder !== undefined && nextHolder.id !== completedHolder.id;
-            const handOverText = handsOver
-              ? ` A plan is finished and another is next: report and end this turn now, with no WAITING: or BLOCKED: line. The next turn starts ${nextId}.`
-              : "";
-            return {
-              result: `Complete: "${completedTitle}".${leftOpenText} Next active: ${nextId} "${nextNode.title}".${handOverText}${healthText}`,
-            };
-          }
-          if (otherActive && !wasActive) {
-            return { result: `Complete: "${completedTitle}".${leftOpenText} ${otherActive.id} "${otherActive.title}" is still active.${healthText}` };
-          }
-          if (heldBy) {
-            return { result: `Complete: "${completedTitle}".${leftOpenText} Nothing was activated: ${heldBy}.${healthText}` };
-          }
-          if (leftOpenText !== "") return { result: `Complete: "${completedTitle}".${leftOpenText}${healthText}` };
-          return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${healthText}` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve ask_open: the owner files one question to the operator through
-      // openWorkerAsk, the path a closing text's ASK: line takes, so the call
-      // meets the line's guards and shares its per-turn cap. The ask rises
-      // from the entry the turn started on, read as turn.complete reads it
-      // for a line. The stored question joins the recommendation as a line
-      // does, `<question> Recommend: <recommend>`, with a question mark
-      // closing the question where the worker wrote none, since
-      // askRecommendOf reads the recommendation from after "?" and
-      // "Recommend:". A refusal writes no entry and no commons record, logs
-      // the decision the line route logs for its guard, and names the guard.
-      // A subagent's call is refused, as turn.complete refuses a subagent's
-      // closing text, since only the main loop files an ask. A save that
-      // fails takes the entry back off the ledger before the yield's own
-      // write and marks its commons record withdrawn, so the deny saying the
-      // write was not saved is true.
-      if ((e as any).tool === "mcp__personas__ask_open") {
-        if (inSubagent) {
-          toolErrorsThisTurn++;
-          return { deny: `ask_open: refused, only the main loop files an ask; a subagent's call files nothing.` };
-        }
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const askQuestion = String((e as any).question || "").trim();
-        const askRecommend = String((e as any).recommend || "").trim();
-        if (askQuestion === "" || askRecommend === "") {
-          toolErrorsThisTurn++;
-          return { deny: `ask_open: question and recommend must both be given and non-empty.` };
-        }
-        const askBlocking = (e as any).blocking === true;
-        const nodeId = turnLeafId || sess.state.activeGoalId || "unknown";
-        const askReaskSuppressMs = typeof cfg.askReaskSuppressMs === "number" ? (cfg.askReaskSuppressMs as number) : 10 * 60_000;
-        const storedQuestion = `${askQuestion.endsWith("?") ? askQuestion : `${askQuestion}?`} Recommend: ${askRecommend}`;
-        const opened = await openWorkerAsk($, "tool", sess, nodeId, storedQuestion, askQuestion, askRecommend, askBlocking, askReaskSuppressMs);
-        if (typeof opened === "string") {
-          toolErrorsThisTurn++;
-          if (opened === "turn-cap" || opened === "cap") {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "ask_cap_refused",
-              detail: `${nodeId}: ask_open refused: past the ${opened === "turn-cap" ? `per-turn cap of ${ASK_TURN_MAX}` : `open cap of ${ASKS_OPEN_MAX}`}`,
-            });
-          }
-          const refusedBy: Record<WorkerAskRefusal, string> = {
-            "placeholder": "the question still carries an angle-bracket template placeholder; write the question itself",
-            "reask": `the same question closed on ${nodeId} recently; proceed on its answer`,
-            "already-open": `the same question is already open on ${nodeId}`,
-            "turn-cap": `this turn has already opened ${ASK_TURN_MAX} asks, the per-turn cap`,
-            "cap": `${ASKS_OPEN_MAX} asks already stand open, the open cap; close one with ask_close first`,
-            "duplicate": "an entry with this id already stands on the ledger",
-            "seed": "the question is the ledger's seed text",
-          };
-          return { deny: `ask_open: refused, ${refusedBy[opened]}.` };
-        }
-        const openWriteOk = await persist($, () => {
-          sess.state.asks = sess.state.asks.filter((a) => a !== opened);
-          sess.asksOpenedThisTurn -= 1;
-        });
-        if (!openWriteOk) {
-          toolErrorsThisTurn++;
-          try {
-            const store = commonsStoreOf($);
-            const askRecord = await readAskRecord(store, sess.persona, opened.id);
-            if (askRecord && askRecord.status === "open") {
-              askRecord.status = "withdrawn";
-              await store.set(askKey(sess.persona, opened.id), askRecord);
-            }
-          } catch { /* non-fatal: the owner start expires an open record no ledger entry names */ }
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        return { result: JSON.stringify({ id: opened.id, blocking: opened.blocking, open: openAskEntries(sess.state).map((a) => a.id) }, null, 2) };
-      }
-
-      // Serve ask_close: the owner closes one open ledger entry by id, with the
-      // outcome it names and the note as given, cut by closeAsk, and the
-      // entry's commons record takes the same status where it is still open,
-      // once the ledger is saved. Any open entry closes, whichever opener
-      // opened it. A refusal writes nothing to the ledger and no commons
-      // record. The record step is non-fatal: the ledger is the owner's
-      // truth, and the owner start's reconcile gives an open record a closed
-      // entry's status.
-      if ((e as any).tool === "mcp__personas__ask_close") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const askId = String((e as any).id || "").trim();
-        const outcome = String((e as any).outcome || "").trim();
-        if (outcome !== "answered" && outcome !== "stood" && outcome !== "withdrawn") {
-          toolErrorsThisTurn++;
-          return { deny: `ask_close: outcome must be "answered", "stood" or "withdrawn".` };
-        }
-        const entry = sess.state.asks.find((a) => a.id === askId);
-        if (!entry) {
-          toolErrorsThisTurn++;
-          return { deny: `ask_close: no ask on this persona's ledger has id "${askId.slice(0, 50)}".` };
-        }
-        if (entry.status !== "open") {
-          toolErrorsThisTurn++;
-          return { deny: `ask_close: ask ${entry.id} is not open; it closed as ${entry.status}.` };
-        }
-        const rawNote = (e as any).note;
-        const noteText = typeof rawNote === "string" && rawNote.trim() !== "" ? rawNote.trim() : null;
-        const closedAt = Date.now();
-        // The values the close overwrites are read first, so a refused save
-        // puts each one back.
-        const priorEntry = { status: entry.status, closedAt: entry.closedAt, closedBy: entry.closedBy, answer: entry.answer };
-        const askedNode = sess.state.goals.find((n) => n.id === entry.nodeId);
-        const priorNode = askedNode
-          ? { lastAskQuestion: askedNode.lastAskQuestion, lastAskClosedAt: askedNode.lastAskClosedAt, blockedReason: askedNode.blockedReason, updatedAt: askedNode.updatedAt }
-          : null;
-        closeAsk(sess.state, entry.id, outcome, "ask_close", noteText, closedAt);
-        // The closed question is remembered on its node, as the drain's close
-        // remembers it, so the re-ask guard does not reopen it right away, and
-        // the node is reactivated as the drain's and the reply's are.
-        if (askedNode) {
-          askedNode.lastAskQuestion = entry.question;
-          askedNode.lastAskClosedAt = closedAt;
-          reactivateAskedEntry(askedNode);
-        }
-        const closeDecision: AgentState["decisions"][number] = {
-          timestamp: closedAt,
-          loop: "monitor",
-          action: "ask_closed",
-          detail: `ask ${entry.id} closed by ask_close (outcome: ${outcome})`,
-        };
-        sess.state.decisions.push(closeDecision);
-        const closeWriteOk = await persistOrRollBack($, () => {
-          entry.status = priorEntry.status;
-          entry.closedAt = priorEntry.closedAt;
-          entry.closedBy = priorEntry.closedBy;
-          entry.answer = priorEntry.answer;
-          if (askedNode && priorNode) {
-            askedNode.lastAskQuestion = priorNode.lastAskQuestion;
-            askedNode.lastAskClosedAt = priorNode.lastAskClosedAt;
-            askedNode.blockedReason = priorNode.blockedReason;
-            askedNode.updatedAt = priorNode.updatedAt;
-          }
-          dropDecision(closeDecision);
-        });
-        if (!closeWriteOk) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        // The record follows the saved ledger, so a save that fails leaves
-        // both open and a reader can still answer the ask.
-        try {
-          const store = commonsStoreOf($);
-          const askRecord = await readAskRecord(store, sess.persona, entry.id);
-          if (askRecord && askRecord.status === "open") {
-            askRecord.status = outcome;
-            await store.set(askKey(sess.persona, entry.id), askRecord);
-          }
-        } catch { /* non-fatal: the owner start mirrors the closed entry onto the record */ }
-        return { result: JSON.stringify({ closed: entry.id, outcome, open: openAskEntries(sess.state).map((a) => a.id) }, null, 2) };
-      }
-
-      // Serve task_add, task_done and task_clear: the per-goal working list.
-      // The active goal is activeGoalId's node, read the same way goal_done
-      // reads it, and only where its own status is "active" - the same test
-      // the [GOAL TREE] injection uses to decide it has an active leaf at all.
-      // None of the three checks turnMayStartEffort: the list is the persona's
-      // own scratch pad on the goal it already holds, not a new effort.
-      if (e.tool === "mcp__personas__task_add") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const active = sess.state.activeGoalId
-          ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-          : null;
-        if (!active || active.status !== "active") {
-          toolErrorsThisTurn++;
-          return { deny: "task_add refused: no active goal to add a task under." };
-        }
-        // planHolderOf returns the active leaf itself, or its nearest ancestor,
-        // only when that node carries a planPath - so a defined result always
-        // means a plan tracks this goal already, whichever node holds it.
-        const holder = planHolderOf(sess.state, active);
-        if (holder) {
-          toolErrorsThisTurn++;
-          return {
-            deny:
-              `task_add refused: ${active.id} is tracked by the plan document ${holder.planPath}, whose own chapters ` +
-              `are already its task list. Track this work there instead of in a second list.`,
-          };
-        }
-        const existing = sess.state.tasks.filter((t) => t.goalId === active.id);
-        if (existing.length >= MAX_TASKS_PER_GOAL) {
-          toolErrorsThisTurn++;
-          return {
-            deny: `task_add refused: ${active.id} already holds ${existing.length} tasks, the cap (${MAX_TASKS_PER_GOAL}). Clear the list with task_clear first.`,
-          };
-        }
-        // Folded the same way kaizenLine folds stored text: a newline in the
-        // caller's text would otherwise ride into the store and, later, into
-        // the injected [TASK LIST] block as a line break that is not this
-        // task's own.
-        const rawText = String((e as any).text || "").split(LINE_TERMINATOR).join(" ").trim();
-        if (!rawText) {
-          toolErrorsThisTurn++;
-          return { deny: "task_add requires non-empty 'text'." };
-        }
-        const now = Date.now();
-        const task: TaskItem = {
-          id: newTaskId(now),
-          goalId: active.id,
-          text: rawText.slice(0, TASK_TEXT_MAX_CHARS),
-          done: false,
-          addedAt: now,
-        };
-        sess.state.tasks.push(task);
-        // Route two of the promotion routes: a turn holding an open record that
-        // is a step of this very entry marks that record promoted with the task's
-        // id, since the step the message asked for is now this working item. A
-        // bare record is left alone, and so is one attached to another entry:
-        // neither named the goal this task sits under, so neither is what the
-        // task was made from. The mark rides the add's own write and the rollback
-        // takes it back with the task.
-        const stepRecord = openTurnRecord(sess.state);
-        const undoPromotion = stepRecord !== null && stepRecord.goalId === active.id
-          ? promoteOpenRecord(task.id, "taskId", now)
-          : null;
-        const writeOk = await persistOrRollBack($, () => {
-          sess.state.tasks.pop();
-          if (undoPromotion !== null) undoPromotion();
-        });
-        if (writeOk) {
-          return { result: `Task added: ${task.id} "${task.text}" under ${active.id}.` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      if (e.tool === "mcp__personas__task_done") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const active = sess.state.activeGoalId
-          ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-          : null;
-        if (!active || active.status !== "active") {
-          toolErrorsThisTurn++;
-          return { deny: "task_done refused: no active goal to complete a task under." };
-        }
-        const id = String((e as any).id || "").trim();
-        const task = sess.state.tasks.find((t) => t.id === id && t.goalId === active.id);
-        if (!task) {
-          toolErrorsThisTurn++;
-          return {
-            deny: `task_done refused: "${id.slice(0, 50)}" is unknown under the active goal ${active.id}.`,
-          };
-        }
-        if (task.done) {
-          return { result: `Task already done: ${task.id} "${task.text}".` };
-        }
-        const priorDoneAt = task.doneAt;
-        const now = Date.now();
-        task.done = true;
-        task.doneAt = now;
-        const allDone = sess.state.tasks.filter((t) => t.goalId === active.id).every((t) => t.done);
-        const writeOk = await persistOrRollBack($, () => {
-          task.done = false;
-          if (priorDoneAt === undefined) delete task.doneAt;
-          else task.doneAt = priorDoneAt;
-        });
-        if (writeOk) {
-          return {
-            result: allDone
-              ? `Task done: ${task.id} "${task.text}". Every task under ${active.id} is done; consider goal_done.`
-              : `Task done: ${task.id} "${task.text}".`,
-          };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      if (e.tool === "mcp__personas__task_clear") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const active = sess.state.activeGoalId
-          ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
-          : null;
-        if (!active || active.status !== "active") {
-          toolErrorsThisTurn++;
-          return { deny: "task_clear refused: no active goal to clear tasks under." };
-        }
-        const priorTasks = sess.state.tasks;
-        sess.state.tasks = sess.state.tasks.filter((t) => t.goalId !== active.id);
-        const removed = priorTasks.length - sess.state.tasks.length;
-        const writeOk = await persistOrRollBack($, () => { sess.state.tasks = priorTasks; });
-        if (writeOk) {
-          return { result: `Cleared ${removed} task(s) from ${active.id}.` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve supervisor_shutdown (plan item 4: distinct from a finished goal,
-      // which the supervisor's poll does not act on; supervise.sh's decide unit exits
-      // the whole loop on this signal).
-      // park: true writes park_requested in place of shutdown_requested, so the
-      // supervisor exits on the park code and the keeper's next start launches
-      // the persona again rather than holding it for a hand release.
-      if (e.tool === "mcp__personas__supervisor_shutdown") {
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        // Arguments can arrive stringified, so the string "true" counts. Any
-        // other value is a stop.
-        const rawPark = (e as any).park;
-        const park = rawPark === true || rawPark === "true";
-        const reason = String((e as any).reason || "").trim() || (park ? "operator requested park" : "operator requested shutdown");
-        const now = Date.now();
-        sess.state.decisions.push({
-          timestamp: now,
-          loop: "monitor",
-          action: park ? "park_requested" : "shutdown_requested",
-          detail: reason,
-        });
-        const writeOk = await persist($);
-        if (writeOk) {
-          if (park) {
-            return { result: `Park requested: ${reason}. The supervisor will stop after this turn ends, and the keeper's next start launches this persona again.` };
-          }
-          return { result: `Shutdown requested: ${reason}. The supervisor will stop after this turn ends.` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve supervisor_restart (plan item 8.3: mirrors supervisor_shutdown;
-      // supervise.sh's decide unit maps this fact to restart_passive, so the
-      // child is relaunched with the goal tree kept rather than the run ending).
-      if (e.tool === "mcp__personas__supervisor_restart") {
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const reason = String((e as any).reason || "").trim() || "operator requested restart";
-        const now = Date.now();
-        sess.state.decisions.push({
-          timestamp: now,
-          loop: "monitor",
-          action: "restart_requested",
-          detail: reason,
-        });
-        const writeOk = await persist($);
-        if (writeOk) {
-          return { result: `Restart requested: ${reason}. The supervisor will relaunch the child after this turn ends; the goal tree is kept and the new child resumes the active plan.` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-      }
-
-      // Serve goal_status (read-only, passive-reader OK).
-      if (e.tool === "mcp__personas__goal_status") {
-        // A session that never loaded its state holds no tree to show, and
-        // "No goal tree exists." would read as a fact about the store.
-        if (sess.stateNotLoaded !== null) {
-          return { result: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        const root = sess.state.goals.find((g) => g.parentId === null);
-        // The long-term goals print one line each, so any line break a title or
-        // objective carries is joined into a space, through the shared fold every
-        // context block reads from the store module. Each field is read through
-        // String, so a malformed stored entry prints as blanks rather than
-        // throwing goal_status for the whole persona.
-        const longTerm = sess.state.longTermGoals;
-        const longTermLines = longTerm.length === 0
-          ? ["Long-term goals: (none)"]
-          : ["Long-term goals:", ...longTerm.map((g) =>
-            `  ${String(g?.id ?? "")} "${oneLine(String(g?.title ?? ""))}": ${oneLine(String(g?.objective ?? ""))}`)];
-        // The autonomy level, on its own line above the long-term goals, and
-        // ahead of the no-tree sentence where there is no tree.
-        const autonomyLine = `Autonomy: ${sess.state.autonomy}`;
-        // The open turn record, on one line above everything else, so the
-        // operator sees the intention the plugin is holding without reading the
-        // store. A record is not a goal entry, so it sits outside the tree. There
-        // is no line at all where no record is open, which is the usual case
-        // between turns. Both fields are strings by the time they reach here,
-        // fillTurnRecords having dropped any stored entry whose status or text is
-        // anything else, so the only shaping this line does is the one the
-        // long-term lines do: fold the text onto one line. The bracket guard the
-        // sibling lines apply here is applied to the field instead, by
-        // clampTurnRecordText, which every producer of the text and the load both
-        // call, so the text arrives bracket-safe.
-        const openRecord = openTurnRecord(sess.state);
-        const recordLines = openRecord === null
-          ? []
-          : [`Turn record: ${openRecord.status} ${oneLine(openRecord.text)}`];
-        if (!root) {
-          // With no tree, the list is shown only where it holds an entry.
-          return { result: [...recordLines, autonomyLine, "No goal tree exists.", ...(longTerm.length === 0 ? [] : longTermLines)].join("\n") };
-        }
-        const lines: string[] = [...recordLines];
-        // A folded plan's children left the tree for the history file, so its
-        // one line names how many.
-        const statusOf = (id: string) => {
-          const n = sess.state.goals.find((g) => g.id === id)!;
-          const folded = n.foldedChildren ?? 0;
-          const foldedText = folded > 0 ? ` (${folded} child${folded === 1 ? "" : "ren"} folded)` : "";
-          return `[${n.status}] ${n.id} (${n.kind}) "${n.title}"${foldedText}`;
-        };
-        lines.push(statusOf(root.id));
-        const children = (pid: string) =>
-          sess.state.goals.filter((g) => g.parentId === pid)
-            .sort((a, b) => (a.sortKey ?? a.createdAt) - (b.sortKey ?? b.createdAt));
-        const render = (pid: string, indent: string) => {
-          for (const c of children(pid)) {
-            lines.push(indent + statusOf(c.id));
-            render(c.id, indent + "  ");
-          }
-        };
-        render(root.id, "  ");
-        lines.push(autonomyLine, ...longTermLines);
-        return { result: lines.join("\n") };
-      }
-
-      // M5: Serve goal_resume (owner only: resumes paused leaf, resets nudge budget).
-      if (e.tool === "mcp__personas__goal_resume") {
-        if (sess.stateNotLoaded !== null) {
-          toolErrorsThisTurn++;
-          return { deny: stateNotLoadedText(sess.stateNotLoaded) };
-        }
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: "goal_resume requires ownership of this persona." };
-        }
-        const nodeId = String((e as any).nodeId || "").trim();
-        // An entry awaiting the operator's yes, or a node under one, is resumed
-        // only in a turn the operator or the coordinator persona started.
-        // Outside those turns a call naming one is refused, and a call naming
-        // none passes over them to the other paused entries.
-        const mayResumeAwaiting = turnMayStartEffort("goal_resume_awaiting");
-        // A call naming an entry the round budget blocked releases it: the
-        // literal "Max rounds reached" is the one blocked reason it lifts, and
-        // the entry's round count restarts below. Any other blocked entry, and
-        // every entry for the call naming none, stays out of reach.
-        let target: GoalNode | undefined;
-        if (nodeId) {
-          target = sess.state.goals.find((g) => g.id === nodeId
-            && (g.status === "paused" || (g.status === "blocked" && g.blockedReason === "Max rounds reached")));
-          if (target && awaitingEntryAtOrAbove(sess.state, target) && !mayResumeAwaiting) {
-            toolErrorsThisTurn++;
-            return { deny: AWAITING_YES_RESUME_REFUSED_TEXT };
-          }
-        } else {
-          target = sess.state.goals
-            .filter((g) => g.status === "paused" && (mayResumeAwaiting || awaitingEntryAtOrAbove(sess.state, g) === undefined))
-            .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-        }
-        if (!target) {
-          const passedOver = nodeId ? undefined : sess.state.goals
-            .filter((g) => g.status === "paused")
-            .map((g) => awaitingEntryAtOrAbove(sess.state, g))
-            .find((g) => g !== undefined);
-          if (passedOver) {
-            return { result: `No paused node to resume here: ${passedOver.id} "${passedOver.title}" waits for the operator's word, and so does anything under it.` };
-          }
-          return { result: "No paused nodes to resume." };
-        }
-        // M9: if a different node is active, pause it first (M10: write blockedReason).
-        if (sess.state.activeGoalId && sess.state.activeGoalId !== target.id) {
-          const activeNode = sess.state.goals.find((g) => g.id === sess.state.activeGoalId);
-          if (activeNode && activeNode.status === "active") {
-            activeNode.status = "paused";
-            activeNode.blockedReason = `Paused by goal_resume of ${target.id}`;
-            activeNode.updatedAt = Date.now();
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "paused_by_resume",
-              detail: `${activeNode.id} paused (goal_resume of ${target.id})`,
-            });
-          }
-        }
-        // M10: clear blockedReason on resume.
-        const pausedReason = target.blockedReason || "unknown";
-        const budgetRelease = target.status === "blocked";
-        // An allowed resume at or under an entry awaiting the operator's yes is
-        // that word on the entry, so the entry's flag goes, and its awaiting
-        // reason with it. An entry above the resumed node stays paused.
-        const awaitingAbove = awaitingEntryAtOrAbove(sess.state, target);
-        const admittedBy = !awaitingAbove ? ""
-          : currentTurnEntry !== null && currentTurnEntry.kind === "delivery" ? `; admitted by coordinator record ${currentTurnEntry.recordId}`
-          : `; admitted by origin ${currentTurnOriginKind}`;
-        if (awaitingAbove && awaitingAbove !== target) {
-          awaitingAbove.awaitingYes = undefined;
-          if (awaitingAbove.blockedReason === AWAITING_YES_REASON) awaitingAbove.blockedReason = undefined;
-          awaitingAbove.updatedAt = Date.now();
-        }
-        target.blockedReason = undefined;
-        target.awaitingYes = undefined;
-        target.status = "active";
-        // A released entry left at its maxRounds would re-block on its next
-        // scored round, so its count restarts. Its scores stay.
-        if (budgetRelease) target.completedRounds = 0;
-        // completeLeaf's walk blocked each plan above the released entry with
-        // "Child task blocked", and activateNext never descends into a blocked
-        // plan, so a release that left them would strand their pending work.
-        // blockedAncestorsToFree decides the chain as the load-time recovery
-        // does, and undefined is an ancestor in a state it cannot explain,
-        // which leaves every ancestor as it is and is named in the decision.
-        const releaseChain = budgetRelease ? blockedAncestorsToFree(sess.state, target) : [];
-        const chainNote = releaseChain === undefined ? "; ancestors left as they are, one above in a state the release does not free" : "";
-        // A resume lifts a blocked lead whatever paused the entry, since the
-        // lead would otherwise hold the idle branch until a working turn that
-        // may never come. A worker still blocked restates BLOCKED: at its next
-        // turn end and is held again. A waiting lead keeps its own hold window
-        // and stays.
-        const liftedLead = target.lead && target.lead.state === "blocked" ? target.lead : null;
-        if (liftedLead) target.lead = null;
-        target.updatedAt = Date.now();
-        sess.state.activeGoalId = target.id;
-        sess.nudgedAnswersWithoutStatus = 0;
-        sess.nudgeCapRefusedFor = null;
-        countResetSinceNudgeOpened = true;
-        sess.lastNudgeAt = 0;
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "resume",
-          detail: budgetRelease
-            ? `Node ${target.id} resumed (blocked: ${pausedReason}; round budget restarted${chainNote}${admittedBy})`
-            : `Node ${target.id} resumed (paused: ${pausedReason}${admittedBy})`,
-        });
-        // From the nearest ancestor up, one is freed only while its reason is
-        // exactly "Child task blocked" and no child of it is still blocked:
-        // the released entry is active and a lower ancestor freed here is
-        // pending. A pending or active ancestor is passed over, as the helper
-        // passes it. The first blocked ancestor that fails ends the walk,
-        // leaving it and everything above it as they are.
-        for (const ancestor of releaseChain ?? []) {
-          if (ancestor.blockedReason !== "Child task blocked"
-            || sess.state.goals.some((g) => g.parentId === ancestor.id && g.status === "blocked")) break;
-          ancestor.status = "pending";
-          ancestor.blockedReason = undefined;
-          ancestor.updatedAt = Date.now();
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "unblocked",
-            detail: `${ancestor.id}: returned to pending, goal_resume's release of ${target.id} cleared "Child task blocked"`,
-          });
-        }
-        if (liftedLead) {
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "lead_cleared",
-            detail: `${target.id}: blocked lead cleared by goal_resume`,
-          });
-        }
-        // goal_resume lifts the hold on the resumed node's asks and closes
-        // none: every open blocking entry on the node is lifted on the
-        // ledger alone, its record left open for a reader to answer. A
-        // blocking entry on another node keeps holding.
-        for (const entry of openBlockingAsks(sess.state)) {
-          if (entry.nodeId === target.id) liftAsk(sess.state, entry.id);
-        }
-        sess.state.updatedAt = Date.now();
-        await persist($);
-        return { result: `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.${budgetRelease ? " Round budget restarted." : ""}` };
-      }
-
-      // Serve memory_add.
-      if (e.tool === "mcp__personas__memory_add") {
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        const text = String((e as any).text || "").trim();
-        if (!text) {
-          toolErrorsThisTurn++;
-          return { deny: "memory_add requires a non-empty 'text'." };
-        }
-        // The seat is confirmed through a guarded write before the put, so an
-        // owner another session has displaced since its last write is refused
-        // as a non-owner is, and writes no record.
-        if (!(await persist($))) {
-          toolErrorsThisTurn++;
-          return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
-        }
-        // One record in the kit's memory store. A confidence argument is
-        // ignored, since the record carries none. The reply names the record,
-        // so the worker can touch or forget it with memq later. The decision is
-        // saved with the state, and the record stands in the store whatever
-        // that save returns.
-        const kind = String((e as any).kind ?? "").trim();
-        const written = await writeMemoryRecord($, text, { kind, source: "worker", createdAt: Date.now() });
-        noteMemoryWrite(written, text);
-        await persist($);
-        if (written.outcome === "written") {
-          return { result: `Wrote memory record ${written.name} to the shared memory store.` };
-        }
-        if (written.outcome === "duplicate" && written.retired) {
-          return { result: `The shared memory store holds this text as record ${written.name}, retired under archive/; nothing new was written.` };
-        }
-        if (written.outcome === "duplicate") {
-          return { result: `The shared memory store already holds this text as record ${written.name}; nothing new was written.` };
-        }
-        toolErrorsThisTurn++;
-        return { deny: `memory_add could not write record ${written.name}: ${bracketSafeText(written.reason)}` };
-      }
-
-      // The closing clause of agentic_say's and agentic_inbox's reach refusal,
-      // naming the legs that could have admitted the target. The architect
-      // persona is named only where the plugin holds one, and the answer leg
-      // only to the session that owns it.
-      const reachDenyTail = (persona: string, verb: "push" | "read"): string => {
-        if (persona === coordinatorPersona || (architectPersona !== "" && persona === architectPersona)) {
-          return `owns no named persona of its own to ${verb} from`;
-        }
-        if (architectPersona === "") return `'${persona}' is not the coordinator persona`;
-        const seats = `'${persona}' is neither the coordinator persona nor the '${architectPersona}' architect persona`;
-        return sess.isOwner && sess.persona === architectPersona
-          ? `${seats}, and no live owner of '${persona}' has a record to '${architectPersona}' that is delivered or answered`
-          : seats;
+    // Every answer below leaves through servedAnswer.
+    return servedAnswer($, e, next, await (async () => { try {
+      // The body in hooks/tool-call.ts, over a context built for this call.
+      const ctx: ToolCallContext = {
+        log: (line) => $.ui.log(line),
+        fsExists: (path) => $.fs.exists(path),
+        fsRead: (path) => $.fs.read(path),
+        fsWrite: (path, text) => $.fs.write(path, text),
+        commonsStore: () => commonsStoreOf($),
+        host: () => hostOf($),
+        compactionPassDeps: () => compactionPassDepsOf($),
+        persist: (rollBackOnYield) => persist($, rollBackOnYield),
+        persistOrRollBack: (rollBack) => persistOrRollBack($, rollBack),
+        activate: (nextId, reason) => activate($, nextId, reason),
+        runHealth: (forNodeId) => runHealth($, forNodeId),
+        queueMemoryCheck: (expectedTurns, goalId, title, goalIds) => queueMemoryCheck($, expectedTurns, goalId, title, goalIds),
+        writeClaimDirect: () => writeClaimDirect($),
+        migrateLegacyMemories: () => migrateLegacyMemories($),
+        completeLeafReturningClosed: (id, note, leftOpen) => completeLeafReturningClosed($, id, note, leftOpen),
+        drainPairDraftOwed: (turnOpen) => drainPairDraftOwed($, turnOpen),
+        guardedNext: (askRecognition) => guardedNext($, e, next, guardsOption, spawnTypes, askRecognition),
+        originIsEngine: () => next.origin?.plugin === "engine",
+        settleRecognitionOutcomes: (fetches) => settleRecognitionOutcomes($, fetches),
+        bankCompactionBoundary: (turnKind) => bankCompactionBoundary($, turnKind),
+        appendLines: (path, lines, known) => appendLines($, path, lines, known),
+        addGoalEntry: (entry) => addGoalEntry($, entry),
+        readPlanDocument: (planPath) => readPlanDocument($, planPath),
+        completeRootByGoalDone: async (named, note) => {
+          await completeRoot($, named.id, note ? `Root ${named.id} marked complete by goal_done: ${note.slice(0, 200)}` : `Root ${named.id} marked complete by goal_done`);
+        },
+        closeAsksOnCompletedNodes: (nodeIds, closedBy, now) => closeAsksOnCompletedNodes($, nodeIds, closedBy, now),
+        openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),
+        writeMemoryRecord: (text, meta) => writeMemoryRecord($, text, meta),
+        kitInstallPathOf: () => kitInstallPathOf($),
+        recognitionAsk: (tool, command, mode, budget) => recognitionAsk($, tool, command, mode, budget),
+        pushDeliveryLine: (lines, ground, rec, waited) => {
+          lines.push(deliveryText(ground, rec.id, rec.text, { mark: waited ? "waited" : "urgent" }));
+        },
+        promoteOpenRecord,
+        workdirPathOf,
+        notePairDraftsDropped,
+        noteMemoryWrite,
+        clearChildBlockedAncestors,
+        openClosingLeafOf,
+        noteTurnToolCall,
+        turnMayStartEffort,
+        turnIsOperatorsOrCoordinators,
+        turnIsOperators,
+        hookBudget,
+        COMPACT_HOLD_REMINDER_TEXT,
+        urgentCheckMinMs,
+        breakInAfterMs,
+        toolErrorsThisTurn: () => toolErrorsThisTurn,
+        setToolErrorsThisTurn: (value) => { toolErrorsThisTurn = value; },
+        toolCallsThisTurn: () => toolCallsThisTurn,
+        setToolCallsThisTurn: (value) => { toolCallsThisTurn = value; },
+        nudgeCountWorkThisTurn: () => nudgeCountWorkThisTurn,
+        setNudgeCountWorkThisTurn: (value) => { nudgeCountWorkThisTurn = value; },
+        goalDoneClosedThisTurn: () => goalDoneClosedThisTurn,
+        setReplyCalledThisTurn: (value) => { replyCalledThisTurn = value; },
+        pendingCompactionBank: () => pendingCompactionBank,
+        setPendingCompactionBank: (value) => { pendingCompactionBank = value; },
+        currentTurnOriginKind: () => currentTurnOriginKind,
+        currentTurnAuthor: () => currentTurnAuthor,
+        turnLeafId: () => turnLeafId,
+        currentTurnEntry: () => currentTurnEntry,
+        currentGateTurnId: () => currentGateTurnId,
+        compactionHeld: () => compactionHeld,
+        proposalLedgeredTurnId: () => proposalLedgeredTurnId,
+        setProposalLedgeredTurnId: (value) => { proposalLedgeredTurnId = value; },
+        compactionReminderAt: () => compactionReminderAt,
+        setCompactionReminderAt: (value) => { compactionReminderAt = value; },
+        lastBreakInCheckAt: () => lastBreakInCheckAt,
+        setLastBreakInCheckAt: (value) => { lastBreakInCheckAt = value; },
+        sess,
+        cfg,
+        expectedTurns,
+        openTurns,
+        coordinatorPersona,
+        architectPersona,
+        fleetRoster,
+        jevMode,
+        compactionPassOption,
+        selfReviewLessonCount,
+        dropDecision,
+        commonsMeta,
+        planningInFlight: () => planningInFlight,
+        arming: () => arming,
+        setCountResetSinceNudgeOpened: (value) => { countResetSinceNudgeOpened = value; },
       };
-
-      // D2: Serve agentic_say (a message to the owner of a persona)
-      // Plan D2: agentic_say(text, answers?, urgent?, persona?). The target is
-      // the persona argument when given, else sess.persona; sess.persona itself
-      // never changes here, and no claim is written.
-      if ((e as any).tool === "mcp__personas__agentic_say") {
-        const targetOrDeny = targetPersonaOf((e as any).persona, sess.persona);
-        if ("deny" in targetOrDeny) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_say: ${targetOrDeny.deny}` };
-        }
-        const persona = targetOrDeny.persona;
-        const text = String((e as any).text || "").trim();
-        const answers = (e as any).answers as string | undefined;
-        const urgent = (e as any).urgent === true;
-        if (!text) {
-          toolErrorsThisTurn++;
-          return { deny: "agentic_say requires a non-empty 'text'." };
-        }
-        // Self-message guard: an owner addressing the persona it owns is
-        // talking to itself. The guard keys on ownership rather than on the
-        // name alone, because a reader's sess.persona is the persona it reads.
-        if (sess.isOwner && persona === sess.persona) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_say cannot address '${persona}': this session owns that persona, and the owner does not need to send itself a message.` };
-        }
-        // The reach rule: a live reader claim on the target, the coordinator
-        // persona held by this session, the target being the coordinator or
-        // architect persona while this session owns a named persona of its
-        // own, or this session owning the architect persona while the target's
-        // owner has an open record to it.
-        // An answer admitted on the answer leg is stamped with the id of the
-        // record that opened it, and the delivery sites admit it on that stamp
-        // without reading the architect's inbox again.
-        const sendGround = await deliveryGroundAtSend(commonsStoreOf($), persona, sess.mySessionId, coordinatorPersona, architectPersona, sess.staleAfterMs);
-        if (!("ground" in sendGround)) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_say cannot reach '${persona}': this session holds no live reader claim on it and does not hold the '${coordinatorPersona}' persona, and ${reachDenyTail(persona, "push")}.` };
-        }
-        // BD3 part 2: when answers is set, verify it names a live open ask.
-        if (answers) {
-          const askRec = await readAskRecord(commonsStoreOf($), persona, answers);
-          if (!askRec || askRec.status !== "open") {
-            const allAsks = await listAskRecords(commonsStoreOf($), persona);
-            const openIds = allAsks.filter((a) => a.status === "open").map((a) => a.id);
-            toolErrorsThisTurn++;
-            return { deny: `no open ask '${answers}'; open asks: ${openIds.length ? openIds.join(", ") : "(none)"}` };
-          }
-        }
-        // Write the inbox record
-        const seq = await getHighestInboxSeq(commonsStoreOf($), persona, sess.mySessionId) + 1;
-        const id = await writeInboxRecord(commonsStoreOf($), persona, sess.mySessionId, seq, text, "say", answers, urgent, sendGround.answersRecord);
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "worker",
-          action: "say_sent",
-          detail: `${persona}: "${text.slice(0, 80)}" (id: ${id}${urgent ? ", urgent" : ""})`,
-        });
-        // Inside the idle proposal's own turn, the first message to the
-        // coordinator persona is the proposal. It is entered in
-        // monitor.proposal.sent, which the tick's idle-proposal step settles
-        // and sends again where the record reads skipped. A message in any
-        // other turn, [PROPOSAL] or not, is not entered.
-        if (currentTurnEntry?.kind === "proposal" && persona === coordinatorPersona && proposalLedgeredTurnId !== currentGateTurnId) {
-          proposalLedgeredTurnId = currentGateTurnId;
-          sess.state.monitor.proposal.sent = { text, writer: sess.mySessionId, seq, delivered: false };
-          // Attempted rather than depended on: the record is written above and
-          // the entry stands in memory, so the first write that is not refused
-          // carries it.
-          try { await persist($); } catch { /* persist could not read or write the store; the entry waits in memory */ }
-        }
-        return { result: `Message sent to owner of ${persona} (id: ${id}${urgent ? ", urgent: delivered inside the owner's running turn if one is in flight" : ", delivered on the owner's next quiet tick or as its running turn ends, each further waiting message following as the previous delivery turn ends, or, unless it is labelled COORDINATOR at delivery, into a turn already running once it has waited past the break-in bound; a delivery on the wait alone is not replied to, and the owner closes the record with agentic_resolve"})` };
-      }
-
-      // D2: Serve agentic_inbox (replies from the owner of a persona)
-      // Plan D2: agentic_inbox(persona?). The target is the persona argument
-      // when given, else sess.persona, under the same guard and reach rule as
-      // agentic_say; no identity switch, no claim written.
-      if ((e as any).tool === "mcp__personas__agentic_inbox") {
-        const targetOrDeny = targetPersonaOf((e as any).persona, sess.persona);
-        if ("deny" in targetOrDeny) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_inbox: ${targetOrDeny.deny}` };
-        }
-        const persona = targetOrDeny.persona;
-        if (sess.isOwner && persona === sess.persona) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_inbox cannot address '${persona}': this session owns that persona, and the owner reads its own replies directly.` };
-        }
-        const mayReach = await mayReachPersona(commonsStoreOf($), persona, sess.mySessionId, coordinatorPersona, architectPersona, sess.staleAfterMs);
-        if (!mayReach) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_inbox cannot reach '${persona}': this session holds no live reader claim on it and does not hold the '${coordinatorPersona}' persona, and ${reachDenyTail(persona, "read")}.` };
-        }
-        // D2: List inbox records for the target persona, filtered to the caller's messages
-        const allRecords = await listInboxRecords(commonsStoreOf($), persona);
-        const myRecords = allRecords.filter((rec) => rec.from === sess.mySessionId);
-        // D2: Append open asks for this persona
-        const allAsks = await listAskRecords(commonsStoreOf($), persona);
-        const openAsks = allAsks.filter((ask) => ask.status === "open");
-        // Plan item 8.3: the owner's commons entry carries turnStartedAt while
-        // a turn runs. A record still pending behind that turn is reported as
-        // deferred, with how long the turn has run, so the sender knows the
-        // message is held rather than lost. The stamp alone is not enough: an
-        // owner killed mid-turn never clears it, so the report also requires
-        // the entry's lastSeen within staleAfterMs of now, since a stale owner
-        // is dead rather than busy. The commons store is machine-global, so a
-        // reader in another working directory sees the same entry. The heartbeat
-        // file cannot give it that: it sits in one session's own launch directory.
-        let ownerTurnStartedAt: number | null = null;
-        // The owner's working directory rides on the result too, so a
-        // coordinator in another repository knows where the worker's own
-        // store file sits without asking for it in a record.
-        let ownerWorkdir: string | null = null;
-        try {
-          const holder = await readHolderMeta(commonsStoreOf($), `persona:${persona}`, sess.staleAfterMs);
-          if (holder) { ownerTurnStartedAt = holder.turnStartedAt; ownerWorkdir = holder.workdir; }
-        } catch { /* commons read failed; report records without the deferred view */ }
-        // Attach replies to records, and the deferred view to pending ones.
-        const withReplies = await Promise.all(myRecords.map(async (rec) => {
-          const reply = await readReplyRecord(commonsStoreOf($), persona, rec.id);
-          const base = reply ? { ...rec, reply: reply.text } : rec;
-          if (rec.status === "pending" && ownerTurnStartedAt !== null) {
-            return { ...base, deferred: true, turnRunningMs: Math.max(0, Date.now() - ownerTurnStartedAt) };
-          }
-          return base;
-        }));
-        return { result: JSON.stringify({ inbox: withReplies, asks: openAsks, ...(ownerWorkdir !== null ? { workdir: ownerWorkdir } : {}) }, null, 2) };
-      }
-
-      // Section 3: serve fleet_status (one row per roster persona: what the
-      // process keeper last decided for it and what its commons entry says).
-      // Read-only: the roster, each persona's keeper state and the commons
-      // entries are read, and nothing is written, created or deleted. The
-      // commons entries are read once, before the reach check, and serve both:
-      // the claims readAllClaims would return are derived from them, which
-      // keeps the read-only promise, since readAllClaims collects stale entries
-      // on its own read and those entries are what a stopped persona's
-      // heartbeat age is read from.
-      if ((e as any).tool === "mcp__personas__fleet_status") {
-        const now = Date.now();
-        // Every commons entry on the machine, read without readAllClaims'
-        // staleness filter and without the garbage collection it performs on its
-        // own read: the fleet report writes and deletes nothing, and a persona
-        // whose heartbeat has stopped is exactly what it exists to show.
-        const entries = await readAllEntries(commonsStoreOf($));
-        // The reach rule with the coordinator persona as the target, narrowed
-        // to the two standings that read fleet state: holding that persona, or
-        // holding a live reader claim on it. deliveryGroundIn decides its legs
-        // here; the worker leg, a session owning a named persona of its own,
-        // reaches the coordinator persona to send it a record and is not a
-        // standing to read the fleet from, so its WORKER ground is refused. The
-        // answer leg reads no records here, since no ground it alone admits is
-        // one this check accepts.
-        const ground = deliveryGroundIn(liveClaimsOf(entries, sess.staleAfterMs, now), coordinatorPersona, sess.mySessionId, coordinatorPersona, { persona: architectPersona, records: [] });
-        const mayRead = "ground" in ground && (ground.ground === "COORDINATOR" || ground.ground === `READER:${coordinatorPersona}`);
-        if (!mayRead) {
-          toolErrorsThisTurn++;
-          const standing = "ground" in ground ? `the ground '${ground.ground}'` : "no ground on that persona at all";
-          return { deny: `fleet_status cannot read the fleet: the plugin's reach rule admits two standings to fleet state, holding the '${coordinatorPersona}' persona and holding a live reader claim on it, and this session holds ${standing}. A WORKER ground, which a session owning a named persona of its own holds, is refused here: it reaches '${coordinatorPersona}' to send it a record, and a record is a write to one inbox where fleet state is every persona's health.` };
-        }
-        // The reading itself is readFleetRows, shared with the controller
-        // tick's fleet watcher, so the tool and the watcher cannot drift on
-        // what a row says. This handler adds the staleness bound the ages in
-        // it were read against.
-        const report = await readFleetRows(hostOf($), fleetRoster, entries, sess.staleAfterMs, now);
-        return { result: JSON.stringify({
-          roster: report.roster,
-          staleAfterMs: sess.staleAfterMs,
-          rows: report.rows,
-          ...(report.problem !== undefined ? { problem: fleetLineText(report.problem) } : {}),
-          ...(report.problems !== undefined ? { problems: report.problems.map(fleetLineText) } : {}),
-        }, null, 2) };
-      }
-
-      // Serve fleet_restart (the coordinator restarts another persona's child).
-      // The request is a file in the target's run directory, which that
-      // persona's supervisor reads as the same fact as its store's
-      // restart_requested (bin/supervise-restart-request.mjs), so no session
-      // writes into a store another session owns. The refusals are a closed set,
-      // checked in this order, and each one writes nothing. The ground is the
-      // one the reach rule computes for fleet_status, narrowed to COORDINATOR
-      // alone, since a reader claim reads the fleet without steering it. That
-      // ground fences this tool and not the file: every persona runs as the
-      // operator's own account, so any local process can write restart.request
-      // directly, the same boundary the persona store already sits inside.
-      if ((e as any).tool === "mcp__personas__fleet_restart") {
-        const now = Date.now();
-        const target = String((e as any).persona || "").trim();
-        const reason = String((e as any).reason || "").trim().slice(0, FLEET_RESTART_REASON_MAX);
-        // The caller's own argument, as every refusal and the result echo it.
-        const shown = boundedText(bracketSafeText(target));
-        const refuse = (why: string) => {
-          toolErrorsThisTurn++;
-          return { deny: `fleet_restart refused: ${why}` };
-        };
-        const entries = await readAllEntries(commonsStoreOf($));
-        const ground = deliveryGroundIn(liveClaimsOf(entries, sess.staleAfterMs, now), coordinatorPersona, sess.mySessionId, coordinatorPersona, { persona: architectPersona, records: [] });
-        if (!("ground" in ground) || ground.ground !== COORDINATOR_GROUND) {
-          const standing = "ground" in ground ? `the ground '${ground.ground}'` : "no ground on that persona at all";
-          return refuse(`only the session holding the '${coordinatorPersona}' persona may restart another persona's child, and this session holds ${standing}.`);
-        }
-        if (fleetRoster === "") {
-          return refuse("the plugin's fleetRoster setting names no roster file, so there is no persona to restart.");
-        }
-        let roster: unknown;
-        try {
-          roster = await readRosterFile(hostOf($), fleetRoster);
-        } catch (err) {
-          return refuse(`the roster '${fleetRoster}' could not be read or parsed: ${boundedText(safeErrorText(err))}`);
-        }
-        if (!Array.isArray(roster)) {
-          return refuse(`the roster '${fleetRoster}' does not hold a JSON array of persona entries.`);
-        }
-        // The first entry under the name, as the fleet reading gives the first
-        // one a row and reports a repeat as a problem.
-        const entry = (roster as unknown[]).find((candidate) => {
-          const name = ((candidate ?? {}) as RosterEntry).name;
-          return typeof name === "string" && name.trim() === target;
-        }) as RosterEntry | undefined;
-        if (entry === undefined) {
-          return refuse(`the roster '${fleetRoster}' carries no entry named '${shown}'.`);
-        }
-        if (entry.enabled !== true) {
-          return refuse(`the roster entry for '${shown}' is not enabled, and only a persona the roster enables is restarted.`);
-        }
-        if (target === sess.persona) {
-          return refuse(`'${shown}' is this session's own persona, whose restart lever is supervisor_restart.`);
-        }
-        const runDir = rosterRunDir(entry);
-        const runDirExists = runDir !== null && await $.fs.exists(runDir).catch(() => false);
-        if (runDir === null || !runDirExists) {
-          return refuse(runDir === null
-            ? `the roster entry for '${shown}' names neither a run directory nor a working directory, so there is nowhere to write the request.`
-            : `the run directory '${runDir}' for '${shown}' does not exist.`);
-        }
-        // A request the supervisor would read as no request is no request here
-        // either: one that does not parse, carries no numeric at, or is dated
-        // ahead of this clock is overwritten rather than holding the lever off.
-        const requestPath = `${runDir}/restart.request`;
-        let standingAt: number | null = null;
-        try {
-          if (await $.fs.exists(requestPath)) {
-            const parsed = JSON.parse(stripBom(String(await $.fs.read(requestPath))));
-            const at = parsed !== null && typeof parsed === "object" ? (parsed as { at?: unknown }).at : undefined;
-            if (typeof at === "number" && Number.isFinite(at) && at <= now) standingAt = at;
-          }
-        } catch { /* an unreadable request is treated as absent and overwritten */ }
-        if (standingAt !== null && now - standingAt < FLEET_RESTART_MIN_INTERVAL_MS) {
-          return refuse(`a restart.request for '${shown}' was written ${Math.floor((now - standingAt) / 1000)} seconds ago, and a second request inside fifteen minutes of the first is refused.`);
-        }
-        // One write rather than a temporary file renamed over the target, since
-        // the host's filesystem has no rename. A supervisor that reads the file
-        // mid-write parses a truncated object as no request and reads the whole
-        // file at its next poll.
-        try {
-          await $.fs.write(requestPath, JSON.stringify({ at: now, by: sess.persona, reason }));
-        } catch (err) {
-          return refuse(`the request file '${requestPath}' could not be written: ${boundedText(safeErrorText(err))}`);
-        }
-        return { result: `Restart requested for '${shown}': where its supervisor is running, it restarts the child at its next poll and lets a running turn end first. Where none is running, the next child launched for that persona starts after the request and reads it as served.` };
-      }
-
-      // Serve fleet_interrupt (the coordinator ends another persona's running
-      // turn in place, keeping its conversation). Clones fleet_restart's gates
-      // above in the same order, minus the fifteen-minute interval refusal:
-      // interrupt.request carries no lever a second write could jam, since the
-      // supervisor's own served-time record is what makes one request send one
-      // interrupt, not this tool. The ground, the roster read and the run
-      // directory check are the same rule for the same reason fleet_restart's
-      // comment gives: every persona runs as the operator's own account, so
-      // this tool's ground fences the tool, not the file.
-      if ((e as any).tool === "mcp__personas__fleet_interrupt") {
-        const now = Date.now();
-        const target = String((e as any).persona || "").trim();
-        const reason = String((e as any).reason || "").trim().slice(0, FLEET_RESTART_REASON_MAX);
-        const shown = boundedText(bracketSafeText(target));
-        const refuse = (why: string) => {
-          toolErrorsThisTurn++;
-          return { deny: `fleet_interrupt refused: ${why}` };
-        };
-        const entries = await readAllEntries(commonsStoreOf($));
-        const ground = deliveryGroundIn(liveClaimsOf(entries, sess.staleAfterMs, now), coordinatorPersona, sess.mySessionId, coordinatorPersona, { persona: architectPersona, records: [] });
-        if (!("ground" in ground) || ground.ground !== COORDINATOR_GROUND) {
-          const standing = "ground" in ground ? `the ground '${ground.ground}'` : "no ground on that persona at all";
-          return refuse(`only the session holding the '${coordinatorPersona}' persona may interrupt another persona's child, and this session holds ${standing}.`);
-        }
-        if (fleetRoster === "") {
-          return refuse("the plugin's fleetRoster setting names no roster file, so there is no persona to interrupt.");
-        }
-        let roster: unknown;
-        try {
-          roster = await readRosterFile(hostOf($), fleetRoster);
-        } catch (err) {
-          return refuse(`the roster '${fleetRoster}' could not be read or parsed: ${boundedText(safeErrorText(err))}`);
-        }
-        if (!Array.isArray(roster)) {
-          return refuse(`the roster '${fleetRoster}' does not hold a JSON array of persona entries.`);
-        }
-        const entry = (roster as unknown[]).find((candidate) => {
-          const name = ((candidate ?? {}) as RosterEntry).name;
-          return typeof name === "string" && name.trim() === target;
-        }) as RosterEntry | undefined;
-        if (entry === undefined) {
-          return refuse(`the roster '${fleetRoster}' carries no entry named '${shown}'.`);
-        }
-        if (entry.enabled !== true) {
-          return refuse(`the roster entry for '${shown}' is not enabled, and only a persona the roster enables is interrupted.`);
-        }
-        if (target === sess.persona) {
-          return refuse(`'${shown}' is this session's own persona.`);
-        }
-        const runDir = rosterRunDir(entry);
-        const runDirExists = runDir !== null && await $.fs.exists(runDir).catch(() => false);
-        if (runDir === null || !runDirExists) {
-          return refuse(runDir === null
-            ? `the roster entry for '${shown}' names neither a run directory nor a working directory, so there is nowhere to write the request.`
-            : `the run directory '${runDir}' for '${shown}' does not exist.`);
-        }
-        const requestPath = `${runDir}/interrupt.request`;
-        try {
-          await $.fs.write(requestPath, JSON.stringify({ at: now, by: sess.persona, reason }));
-        } catch (err) {
-          return refuse(`the request file '${requestPath}' could not be written: ${boundedText(safeErrorText(err))}`);
-        }
-        return { result: `Interrupt requested for '${shown}': where its supervisor is running, it relays the request to the child's holder at its next poll, and the holder relays the interrupt to the child at its own next poll, up to about 12 seconds after this call at the plugin's default poll intervals. The turn ends keeping the conversation. Where no turn begun at or before this call is running, the supervisor records the request served without relaying it instead. A message sent with agentic_say afterwards arrives as that persona's next prompt.` };
-      }
-
-      // Section 12: serve agentic_resolve (the owner marks a record's work
-      // finished or declined). Owner only, and only for a record listed under
-      // the session's own persona, so a reader holding the persona cannot
-      // resolve, and a record keyed to another persona does not resolve here.
-      // A pending record has not been read, and a skipped record's writer is
-      // gone, so neither has anything to resolve.
-      if ((e as any).tool === "mcp__personas__agentic_resolve") {
-        const persona = sess.persona;
-        const id = String((e as any).id || "").trim();
-        const outcome = (e as any).outcome as string | undefined;
-        const note = typeof (e as any).note === "string" ? (e as any).note : "";
-        if (!sess.isOwner) {
-          toolErrorsThisTurn++;
-          return { deny: "agentic_resolve is for the owner session only; a reader does not resolve the owner's records." };
-        }
-        // The note goes whole into the machine-global store, which every live
-        // session rewrites and polls, so it is bounded here at the handler.
-        if (note.length > FREE_TEXT_MAX) {
-          toolErrorsThisTurn++;
-          return { deny: `agentic_resolve note is ${note.length} characters; the bound is ${FREE_TEXT_MAX}. Shorten it.` };
-        }
-        if (!id) {
-          toolErrorsThisTurn++;
-          return { deny: "agentic_resolve requires a non-empty 'id'." };
-        }
-        if (outcome !== "done" && outcome !== "declined") {
-          toolErrorsThisTurn++;
-          return { deny: "agentic_resolve requires 'outcome' of done or declined." };
-        }
-        const store = commonsStoreOf($);
-        const target = (await listInboxRecords(store, persona)).find((rec) => rec.id === id);
-        if (!target) {
-          toolErrorsThisTurn++;
-          return { deny: `no record '${id}' addressed to persona ${persona}.` };
-        }
-        if (target.status === "pending") {
-          toolErrorsThisTurn++;
-          return { deny: `record '${id}' is still pending (not delivered yet); nothing to resolve.` };
-        }
-        if (target.status === "skipped") {
-          toolErrorsThisTurn++;
-          return { deny: `record '${id}' was skipped at delivery (the decision log names why); nothing to resolve.` };
-        }
-        if (target.status !== "delivered" && target.status !== "answered") {
-          toolErrorsThisTurn++;
-          return { deny: `record '${id}' is already ${target.status} (${target.outcome ?? "no outcome"}).` };
-        }
-        const existing = await store.get(target.key);
-        if (!existing) {
-          toolErrorsThisTurn++;
-          return { deny: `record '${id}' left the store before it could be resolved.` };
-        }
-        const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
-        parsed.status = "resolved";
-        parsed.resolvedAt = Date.now();
-        parsed.outcome = outcome;
-        parsed.note = note;
-        await store.set(target.key, parsed);
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "worker",
-          action: "operator_resolved",
-          detail: `record ${id} resolved ${outcome}${note ? `: "${note.slice(0, 80)}"` : ""}`,
-        });
-        // Attempted rather than depended on. The resolve itself is the commons
-        // record written above, which stands whatever the persona store does, so
-        // a throw here would tell the caller the resolve failed after it landed
-        // and invite a second call on a record that is already resolved. The
-        // decision line stands in memory and the first write that is not refused
-        // carries it.
-        try { await persist($); } catch { /* persist could not read or write the store; the line above waits in memory */ }
-        return { result: `Record ${id} resolved (${outcome}).` };
-      }
-
-      // Goal constraint: deny Bash if the ROOT objective says so (R10).
-      const rootForConstraint = sess.state.goals.find((g) => g.parentId === null);
-      if (rootForConstraint &&
-          e.tool === "Bash" && rootForConstraint.objective.toLowerCase().includes("no bash")) {
-        toolErrorsThisTurn++;
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "deny",
-          detail: `${rootForConstraint.id}: Bash denied by root constraint`,
-        });
-        await persist($);
-        return { deny: "Bash is not allowed by the current goal" };
-      }
-
-      // The recognition ask of a main-loop call, started once whichever site
-      // reaches it first: the nudge's after hook awaits it before it claims,
-      // so the answer gates this call's pointers, and the lines below start
-      // it unawaited where no nudge ran, as on a call a plugin raised, since
-      // no pointer of this call waits on it. A failed ask settles as no
-      // answer, so it never silences a pointer. It reads the call and never
-      // the result.
-      let recognitionAsked: Promise<void> | null = null;
-      const askRecognition = inSubagent ? undefined : (): Promise<void> => {
-        recognitionAsked ??= recognitionAsk($, e.tool, (e as { command?: unknown }).command, jevMode, hookBudget).catch(() => undefined);
-        return recognitionAsked;
-      };
-
-      // The guard and after-hook region around next(e), guardedNext's.
-      const guarded = await guardedNext($, e, next, guardsOption, askRecognition);
-      if ("early" in guarded) return guarded.early;
-      let r = guarded.r;
-      if ((r as { isError?: boolean }).isError === true) toolErrorsThisTurn++;
-
-      // The recognition ask on the after side of a main-loop call that ran:
-      // awaited where the nudge's after hook started it, by then settled,
-      // and started and left to settle on its own where no nudge ran. That
-      // start holds on an unmetered budget rather than this hook's, which
-      // ends before the ask can answer.
-      if (askRecognition !== undefined) {
-        if (recognitionAsked !== null) await recognitionAsked;
-        else void recognitionAsk($, e.tool, (e as { command?: unknown }).command, jevMode, { live: false, remainingMs: () => Infinity }).catch(() => undefined);
-      }
-
-      // The rerun window a live pass opened: a main-loop call the model made
-      // and the engine ran counts once against the watch list, and one of a
-      // watched tool and input writes rerun_within true. A subagent's call and
-      // a plugin-raised one count nothing. Under shadow and off nothing is
-      // watched and nothing is read. A failure costs the outcome and never
-      // the call's result.
-      if (modelMadeCall && !inSubagent && typeof (r as { deny?: unknown }).deny !== "string" && compactionPassOption === "live" && jevMode === "shadow") {
-        try {
-          await compactionRerunAtCall($, e.tool, toolCallInputOf(e));
-        } catch { /* the window stands as it was; the result stands */ }
-      }
-
-      // The boundary reminder a held compaction armed, on the next tool
-      // result the model reads: a main-loop call the model made, at most
-      // once in COMPACT_REMINDER_INTERVAL_MS, since a vetoed offer recurs
-      // every turn and the session needs telling once rather than at every
-      // call. A subagent's result and a plugin-raised call's carry none and
-      // spend nothing: the engine drops a plugin call's context, and the
-      // reminder is for the main loop whose context is held. The call that
-      // ran the boundary verb above carries none and spends nothing either,
-      // since the reminder would ask for what it just did. A deny from beneath
-      // carries none and spends nothing, since the engine's deny arm takes no
-      // context and skips a result of any other shape. The command names
-      // the kit's install path where installed_plugins.json resolves one,
-      // with the home directory spelled $HOME, and the bare verb where it
-      // does not; compaction.ts composes the clause under its own grammar,
-      // and it is folded to one bracket-safe line here as every other context
-      // line this module writes is. The fills are function replacements, so
-      // no dollar sequence in a value is read as a replacement pattern.
-      if (modelMadeCall && !inSubagent && !bankedOnThisCall && typeof r.deny !== "string" && compactionHeld !== null && Date.now() - compactionReminderAt >= COMPACT_REMINDER_INTERVAL_MS) {
-        compactionReminderAt = Date.now();
-        const located = await kitInstallPathOf($);
-        let home: unknown;
-        try {
-          home = await hostOf($).getHome();
-        } catch {
-          home = undefined;
-        }
-        const command = checkpointCommandClause("installPath" in located ? located.installPath : null, home).clause;
-        const held = compactionHeld.percent;
-        const line = COMPACT_HOLD_REMINDER_TEXT
-          .replace("{percent}", () => String(held))
-          .replace("{valve}", () => String(COMPACT_VALVE_PERCENT))
-          .replace("{command}", () => bracketSafeText(oneLine(command)));
-        const prior = Array.isArray(r.context) ? r.context : [];
-        r = { ...r, context: [...prior, line] } as typeof r;
-      }
-
-      // The close-out pair drafts, on a main-loop call the model made that a
-      // hook beneath did not deny: a subagent's result and a plugin-raised
-      // call's carry none and owe nothing, since the hygiene step is the main
-      // loop's own, and a deny takes no context. First the delivery: the
-      // block the drain holds for the running turn rides this result's
-      // context, once, and is cleared here, so the call after it carries
-      // none. Then the owe: a shell command running memq decay-scan without
-      // --pairs all, in either spelling memq takes and with or without one
-      // pair of quotes around the word, whose result text lists a pair, owes
-      // the listed pairs to the drain under the running turn's id and starts
-      // the drain where none is running. The start is not awaited, so this
-      // result goes back at once and the block rides a later call; an item
-      // owed while a drain runs waits for the heartbeat tick to drain it.
-      // A --pairs all backlog drain is one the session redirects to a file
-      // and judges by hand, so nothing is drafted for it. The text is the
-      // result as the model reads it, stderr included, where memq prints the
-      // pair block. A later scan in the same turn replaces an item still owed,
-      // under one decision. A reader session owes nothing, as it drains
-      // nothing. The owed item and the block live in memory beside
-      // drainPairDraftOwed, never in the state.
-      if (modelMadeCall && !inSubagent && typeof r.deny !== "string") {
-        if (pairDrafts !== null && currentGateTurnId !== null && pairDrafts.turnId === currentGateTurnId) {
-          const prior = Array.isArray(r.context) ? r.context : [];
-          r = { ...r, context: [...prior, pairDrafts.block] } as typeof r;
-          pairDrafts = null;
-        }
-        if (sess.isOwner && currentGateTurnId !== null && typeof r.text === "string") {
-          const scans = memqVerbArgsOf(shellCommand, "decay-scan");
-          const unquoted = (a: string): string => a.replace(/^(["'])(.*)\1$/, "$2").replace(/^(--pairs=)(["'])(.*)\2$/, "$1$3");
-          const backlog = (args: string[]) => args.some((a, i) => unquoted(a) === "--pairs=all" || (unquoted(a) === "--pairs" && i + 1 < args.length && unquoted(args[i + 1]) === "all"));
-          if (scans.length > 0 && !scans.some(backlog)) {
-            const listed = parseScanPairs(r.text);
-            if (listed.pairs.length > 0) {
-              if (pairDraftOwed !== null && pairDraftOwed.turnId === currentGateTurnId) notePairDraftsDropped(currentGateTurnId, "replaced by a later scan");
-              pairDraftOwed = { turnId: currentGateTurnId, pairs: listed.pairs, notDrafted: listed.notDrafted, at: Date.now() };
-              if (!pairDraftsInFlight && openTurns.has(currentGateTurnId)) void drainPairDraftOwed($, (turnId) => openTurns.has(turnId));
-            }
-          }
-        }
-      }
-
-      // Plan item 8.3: a record from a writer that may reach this persona
-      // (deliveryGroundIn over one claims read, the tick's own rule) reaches
-      // the owner inside the running turn, either because the sender flagged
-      // it urgent or because it has waited breakInAfterMs without being
-      // delivered, a leg no coordinator-ground record takes. The age leg is
-      // what a long turn needs: a turn that runs for
-      // hours holds every record sent during it, and no sender can be asked to
-      // predict that, so waiting past the bound is itself the qualification.
-      // The controller tick cannot deliver while a turn is in flight, so the
-      // record rides here instead: marked delivered, its text appended as
-      // context on this tool's result, which the model reads after the result
-      // itself. The two legs differ in what they claim about the turn. A
-      // flagged record is stamped with it, and turn.complete files that turn's
-      // answer as the record's reply, which is what flagging asked for. An aged
-      // record is not stamped: the turn opened for something else and its answer
-      // is not a reply to the message, so the sender's feedback path is the
-      // owner's own agentic_resolve call. One scan carries at most one aged
-      // record, the oldest deliverable one, matching the tick drain's own rule
-      // that one record rides each pass, so a backlog
-      // built up over a quiet stretch drains one record per scan rather than
-      // emptying into a single tool result. Flagged records are unrestricted.
-      // A record that answers an open ask is left to the tick, which owns the
-      // ask lifecycle.
-      // Only the main loop's own tool calls carry a break-in: this hook also
-      // runs for every other loop's tool calls (a dispatched subagent, the
-      // case that matters, and also a teammate, a workflow's agents and the
-      // engine's own forks), and e.agentId, the loop's id, is non-empty on
-      // those and absent on the main loop. A steer delivered into a
-      // subagent's tool result reaches a loop that cannot verify it and never
-      // reaches the owner, so such a call neither reads nor advances the
-      // throttle, and the record stays pending for the tick or for the
-      // owner's own next call. inSubagent is read at the top of this handler.
-      if (!inSubagent && sess.isOwner && r.deny === undefined && Date.now() - lastBreakInCheckAt >= urgentCheckMinMs) {
-        // One clock reading for the whole scan, so every record in it is
-        // judged against the same instant.
-        const scanAt = Date.now();
-        lastBreakInCheckAt = scanAt;
-        try {
-          const store = commonsStoreOf($);
-          const persona = sess.persona;
-          const pending = (await listInboxRecords(store, persona))
-            .filter((rec) => rec.status === "pending" && !rec.answers);
-          const candidates = pending.filter((rec) => rec.urgent === true || scanAt - rec.at >= breakInAfterMs);
-          const lines: string[] = [];
-          const claims = candidates.length > 0 ? await readAllClaims(store, sess.staleAfterMs) : [];
-          // A record whose writer persona cannot sit inside the bracket, or
-          // whose id or text fails the record rule, is left pending here; the
-          // tick's drain marks it skipped. The ground a record passes on is the
-          // label its text opens with, so it is kept here rather than recomputed
-          // at delivery, and no record is judged twice in one scan.
-          const grounds = new Map<InboxRecord, string>();
-          const groundFor = (rec: InboxRecord): string | null => {
-            const ground = deliveryGroundIn(claims, persona, rec.from, coordinatorPersona, deliveryArchitectLine(architectPersona, rec));
-            if ("refused" in ground || deliveryRecordProblem(rec) !== null) return null;
-            return ground.ground;
-          };
-          for (const rec of candidates) {
-            if (rec.urgent !== true) continue;
-            const ground = groundFor(rec);
-            if (ground !== null) grounds.set(rec, ground);
-          }
-          // The oldest deliverable record qualifying on its wait alone, and only
-          // that one; listInboxRecords returns its records oldest first. The
-          // deliverability check comes before the slot rather than after it,
-          // because the drain that would mark an undeliverable record skipped
-          // cannot run while the turn is in flight: a record picked on age alone
-          // and then refused would hold the scan's one aged slot for the whole
-          // turn and block every sender behind it. A record that is both flagged
-          // and aged rides the flagged leg, so it never consumes the slot.
-          //
-          // A coordinator-ground record is not eligible on its wait at all, and
-          // is passed over here without spending the slot. The worker's standing
-          // steer instruction names `[COORDINATOR id=<record id>, urgent]` as
-          // the one coordinator form carrying no delegated authority, and covers
-          // no other marker, so a coordinator bracket reading `, waited` is one
-          // a worker has no instruction for and would read as a steer to act on
-          // without an operator round trip. A coordinator record still breaks in
-          // on the sender's own urgent flag, and otherwise waits for the tick.
-          // Reader and worker brackets carry no delegated authority under that
-          // instruction whatever marker they arrive with.
-          for (const rec of candidates) {
-            if (rec.urgent === true) continue;
-            const ground = groundFor(rec);
-            // A coordinator-ground record never takes the wait leg. The worker
-            // steer instruction names only the flagged coordinator bracket as
-            // carrying no delegated authority, so a coordinator record reaches a
-            // tool result on the flagged leg alone. The ground it is compared
-            // against is the one deliveryGroundIn produces, read from the same
-            // constant, so producer and check cannot drift.
-            if (ground === null || ground === COORDINATOR_GROUND) continue;
-            grounds.set(rec, ground);
-            break;
-          }
-          for (const rec of candidates) {
-            const ground = grounds.get(rec);
-            if (ground === undefined) continue;
-            const existing = await store.get(rec.key);
-            if (!existing) continue;
-            const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
-            parsed.status = "delivered";
-            // The scan's own reading, the same instant the age test used, so the
-            // minutes the decision logs and the wait self-review measures as
-            // deliveredAt - at cannot disagree.
-            parsed.deliveredAt = scanAt;
-            // A record that is both flagged and aged reads as urgent: the
-            // sender's own flag is the stronger statement of why it is here.
-            const waited = rec.urgent !== true;
-            // Only a flagged record is stamped, so only a flagged record takes
-            // the turn's answer as its reply in turn.complete.
-            if (!waited) parsed.turnId = sess.state.monitor.lastTurnId;
-            await store.set(rec.key, parsed);
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: waited ? "operator_delivered_waited" : "operator_delivered_urgent",
-              detail: waited
-                ? `record ${rec.id} delivered inside the running turn as context on ${e.tool} after waiting ${Math.floor((scanAt - rec.at) / 60_000)} min`
-                : `record ${rec.id} delivered inside the running turn as context on ${e.tool}`,
-            });
-            lines.push(deliveryText(ground, rec.id, rec.text, { mark: waited ? "waited" : "urgent" }));
-          }
-          if (lines.length > 0) {
-            await persist($);
-            const prior = Array.isArray(r.context) ? r.context : [];
-            return { ...r, context: [...prior, ...lines] } as typeof r;
-          }
-        } catch { /* commons read failed; the tick delivers the record after the turn */ }
-      }
-      return r;
+      return await serveToolCall(ctx, e);
     } finally {
       hookBudget.live = false;
-    }
+    } })());
   }).catch(async ($, e, next) => {
     // The handler threw, misreturned, or spent its own time past its budget.
     // Only the handler's own time counts: the engine stops the clock while
@@ -15662,7 +6238,10 @@ export const register: Register = async (on, options) => {
     // own bound alone, as $.process.run is by its timeoutMs, and one with no
     // bound never reaches this handler. A failure while this call's before
     // guards were still running is a guard's, and under live it refuses the
-    // call naming the guards. Any other failure, or any mode but live,
+    // call naming the guards. Under live, a failure before the guard phase on
+    // a call that never reached next(e) refuses it where any before guard
+    // matches, since the replay would run the tool unjudged; a matcher that
+    // throws refuses it too, journaled under its guard's name. Any other failure, or any mode but live,
     // journals the failure and replays next(e). The replay is safe whenever
     // it falls: the engine's Caught contract makes this handler's next
     // replay-safe, so where the handler had called next(e), the replay
@@ -15673,10 +6252,33 @@ export const register: Register = async (on, options) => {
     const callId = typeof e.tool_use_id === "string" ? e.tool_use_id : null;
     const guardNames = callId !== null ? guardPhaseCalls.get(callId) : undefined;
     if (callId !== null) guardPhaseCalls.delete(callId);
-    const reason = `${failure.kind}${typeof failure.message === "string" ? `: ${failure.message}` : ""}`;
+    // The failure's message can quote the call's input or output, so it is
+    // scrubbed before the journal line and the deny carry it.
+    const reason = scrubText(`${failure.kind}${typeof failure.message === "string" ? `: ${failure.message}` : ""}`).text;
     if (guardNames !== undefined || guardsOption !== "off") await guardEvent($, "guard_error", { guard: guardNames ?? "", phase: "catch", failure: reason });
     if (guardNames !== undefined && guardsOption === "live") return { deny: `${guardNames} failed: ${reason}` };
-    return next(e);
+    if (guardsOption === "live" && !next.called) {
+      let matched: string;
+      try {
+        const call = e as unknown as GuardCall;
+        matched = [...matchingBeforeGuards(call), ...matchingBeforeGuards(call, moduleBeforeGuards($))].map((g) => g.name).join(", ");
+      } catch (err) {
+        matched = err instanceof GuardError ? err.guard : "a guard's matcher";
+        await guardEvent($, "guard_error", { guard: matched, phase: "catch", failure: scrubText(err instanceof GuardError ? err.reason : String(err)).text });
+      }
+      if (matched !== "") return { deny: `the tool.call hook failed with ${matched} matched and the tool not run: ${reason}` };
+    }
+    // Where the handler fell before it called next(e), the tool has not run
+    // and the redactor's refusal may not have either, so it runs here first.
+    if (redactorOn && !next.called) {
+      let refusal: string | null;
+      try { refusal = toolCallRefusal(e, next.budget.remainingMs); } catch { return withheldToolResult(); }
+      if (refusal === null) {
+        try { refusal = await bodyFileRefusal(e, { read: (p) => $.fs.read(p) }, next.budget.remainingMs); } catch { return withheldToolResult(); }
+      }
+      if (refusal !== null) return { deny: refusal };
+    }
+    return redactedToolNext($, e, next);
   });
 
   // --- prompt.submit: inject memory + active goal as hidden context ---
@@ -15684,8 +6286,10 @@ export const register: Register = async (on, options) => {
   // Both owner and passive reader can inject (read-only access to sess.state).
   on("prompt.submit", async ($, e, next) => {
     // The budget this hook hands down to the calls it makes, live until
-    // the handler returns; hookBudgetOf says why the flag is cleared here.
+    // the handler returns; HookBudget in hooks/jev-live.ts says why the flag is cleared here.
     const hookBudget = hookBudgetOf(next);
+    // Every path below hands the prompt down through the redactor's scrub.
+    const nextScrubbed = (down: PromptSubmitInput) => redactedSubmitNext($, down, next);
     try {
       // A prompt this plugin submitted itself passes through untouched: its
       // origin is the plugin kind under this plugin's own name, a stamp the
@@ -15700,7 +6304,7 @@ export const register: Register = async (on, options) => {
       // blocks. A delivery already carries its blocks in its own text.
       const ownOrigin = (e as { origin?: { kind?: string; name?: string } }).origin;
       if (ownOrigin?.kind === "plugin" && ownOrigin.name === $.plugin.name) {
-        return next(e);
+        return nextScrubbed(e);
       }
       // Every tier, "off" included, retries a scope run that did not answer,
       // so the nudge recovers without a tool call spawning anything; the
@@ -15710,13 +6314,19 @@ export const register: Register = async (on, options) => {
       // nothing else: no origin reading, no record, no other block.
       if (arming === "off") {
         const offRecognition = await promptNudgeBlock($, e.text, (e as { origin?: { kind?: string } }).origin?.kind);
-        return next(offRecognition === null ? e : {
+        return nextScrubbed(offRecognition === null ? e : {
           ...e,
           context: [...(e.context ?? []), offRecognition] as readonly string[],
         });
       }
-      // Capture the prompt text for the goal scorer.
-      currentPrompt = e.text;
+      // The prompt with its secrets hidden, which every copy this handler
+      // persists or sends to a model is made from: the goal scorer's
+      // currentPrompt, the kept launch text, the turn record and the context
+      // builder's situation. The raw text is still read where it stays in
+      // memory, by the origin reading and the recognition block's match, and
+      // goes down the chain through nextScrubbed.
+      const keptText = scrubText(e.text).text;
+      currentPrompt = keptText;
       // Item 2 backstop safety: mark whether this genuine external turn is
       // the supervisor's own synthetic priming message.
       // Steer 68/69: a real Discord message carries e.origin.kind === "channel".
@@ -15738,7 +6348,7 @@ export const register: Register = async (on, options) => {
       // holds its role as an owner does.
       if (fromSupervisor && e.text.startsWith("[SUPERVISOR-PRIMING]")) {
         try {
-          await $.state.set({ plugin: "personas", key: "launchInstructions" }, e.text);
+          await $.state.set({ plugin: "personas", key: "launchInstructions" }, keptText);
         } catch {
           // $.state unavailable; a compaction repeats nothing from this prompt
         }
@@ -15759,6 +6369,7 @@ export const register: Register = async (on, options) => {
       };
       originReadings.push(originReading);
       if (originReadings.length > ORIGIN_READINGS_CAP) originReadings.shift();
+      skillPickPrompt((...o) => shadowOutcome(hostOf($), ...o), originReading.kind, keptText, (wrap, ...a) => shadowAsk(hostOf($), ...a, jevMode, null, wrap(resolverOf(hostOf($))), undefined, hookBudget));
 
       // D5b (bullet 1): an open ask never silences the worker. The guard at
       // the top of this handler has already passed the plugin's own submits
@@ -15841,7 +6452,7 @@ export const register: Register = async (on, options) => {
         // [GOAL QUEUE], [NO GOAL], [ENV], [LESSON] or [MEMORY] block is appended.
         // The memory-recognition block alone rides down, as in every tier.
         const readerRecognition = await promptNudgeBlock($, e.text, originKind);
-        return settleSubmit(await next(readerRecognition === null ? e : {
+        return settleSubmit(await nextScrubbed(readerRecognition === null ? e : {
           ...e,
           context: [...(e.context ?? []), readerRecognition] as readonly string[],
         }));
@@ -15861,7 +6472,7 @@ export const register: Register = async (on, options) => {
       // must not say a record was opened on a turn that opened none.
       const recordOpened = sess.isOwner && !isPrimingTurn;
       if (recordOpened) {
-        await holdMessageAsRecord($, e.text, answeredAskNodeId, jevMode, jevLive, hookBudget);
+        await holdMessageAsRecord($, keptText, answeredAskNodeId, jevMode, jevLive, hookBudget);
       }
 
       // The recall chain. The last prompt's candidates get their recall_acted
@@ -15879,7 +6490,7 @@ export const register: Register = async (on, options) => {
           recordOpened,
           restartRecap: restartRecap === "auto" && sess.isOwner && e.text.startsWith("[SUPERVISOR-PRIMING]"),
         },
-        e.text,
+        keptText,
         contextSourcesOf(
           $,
           (situation) => recallInjection($, situation, jevMode, recallSeq, hookBudget).catch(() => null),
@@ -15891,26 +6502,173 @@ export const register: Register = async (on, options) => {
       // The blocks ride down with the prompt, after any context a hook above
       // attached. The result is core's, carrying the context that arrived, and
       // is returned as it came so nothing is put on it after the fact.
-      return settleSubmit(await next({
+      return settleSubmit(await nextScrubbed({
         ...e,
         context: [...(e.context ?? []), ...(contextBlocks ?? [])] as readonly string[],
       }));
     } finally {
       hookBudget.live = false;
     }
+  }).catch(async ($, e, next) => {
+    // The handler threw, misreturned or overran before the prompt went down.
+    // Skipped, the engine would run core on the prompt as it arrived, so the
+    // prompt goes down here through the redactor's scrub instead, its blocks
+    // and bookkeeping forgone. The replay is safe as tool.call's is: the
+    // engine's Caught contract makes this handler's next replay-safe, so
+    // where the handler had called next(e) the replay resolves to what that
+    // call settled to, and the prompt it carried went down scrubbed already,
+    // so it is replayed as it is rather than scrubbed again on a shrunken
+    // budget. With the redactor off the prompt goes down as it is.
+    if (!redactorOn || next.called) return next(e);
+    return redactedSubmitNext($, e, next);
   });
 
-  // --- agent.spawn: the memory-recognition pointer a starting subagent earns ---
-  on("agent.spawn", async ($, e, next) => spawnWithNudge($, e, next));
+  // --- agent.spawn: the memory-recognition pointer a starting subagent earns, and its type recorded ---
+  on("agent.spawn", async ($, e, next) => spawnWithNudge($, e, next, spawnTypes)).catch(async ($, e, next) => {
+    // The handler failed: the subagent starts on its task scrubbed, with no
+    // pointer, or not at all where the scrub throws. Off, the task goes
+    // down as it is, and so does one whose next had settled, since its task
+    // went down scrubbed then and a replay resolves to that result. The
+    // started subagent is recorded here too, so a failed nudge types it.
+    if (!redactorOn || next.called) return spawnStarted($, e.subagentType, await next(e), spawnTypes);
+    let scrubbed: AgentSpawnInput;
+    try { scrubbed = scrubSpawn(e, next.budget.remainingMs); } catch { return SPAWN_WITHHELD; }
+    return spawnStarted($, e.subagentType, await next(scrubbed), spawnTypes);
+  });
+
+  // --- prompt.context, prompt.attachment: redactor work alone, .catch fails closed ---
+  on("prompt.context", async ($, e, next) => {
+    const r = await next(e);
+    return redactorOn ? scrubContextBlocks(r, next.budget.remainingMs) : r;
+  }).catch(async ($, e, next) => {
+    const r = await next(e);
+    return redactorOn ? withheldContextBlocks(r) : r;
+  });
+  on("prompt.attachment", async ($, e, next) => {
+    const r = await next(e);
+    return redactorOn ? scrubAttachment(e, r, next.budget.remainingMs) : r;
+  }).catch(async ($, e, next) => (redactorOn ? ATTACHMENT_WITHHELD : next(e)));
 
   // --- tool.check: the memq grant, under the guards option in every tier ---
   on("tool.check", async ($, e, next) => memqGrantCheck($, e, next, guardsOption));
 
-  // An "off" session installs nothing past the hooks above: session.start,
-  // session.compact and turn.start, and the tool.call, prompt.submit,
-  // agent.spawn and tool.check hooks, whose off branches run the guards, the
-  // memq grant, the after hooks and the recognition block alone. No
-  // turn.step or turn.complete hook.
+  // --- turn.complete: goal scoring, memory curation, guarded save ---
+  // Modules write to sess.state. The Controller (clock.tick) reads sess.state and decides.
+  on("turn.complete", async ($, e, next) => {
+    // An off session closes the turn by its id and, where the completion is
+    // the main thread's, by the armed path's completesSubagentLoop test,
+    // starts the compaction pass's idle stretch from this end. A completion
+    // for a turn never seen removes nothing, and a subagent's completion,
+    // which can arrive inside an open main turn, stamps nothing.
+    if (arming === "off") {
+      openTurns.delete(e.turnId);
+      if (!(typeof e.agentId === "string" && e.agentId.length > 0)) {
+        compactionPass.lastMainTurnEndedAt = Date.now();
+        compactionPass.coldCacheJournaled = false;
+      }
+      return next(e);
+    }
+    // The budget this hook hands down to the calls it makes, live until
+    // the handler returns; HookBudget in hooks/jev-live.ts says why the flag is cleared here.
+    const hookBudget = hookBudgetOf(next);
+    try {
+      // The body in hooks/turn-complete.ts, over a context built for this
+      // completion. The two model calls, the reply backstop's two statements
+      // and every engine call stay here as closures.
+      const ctx: TurnCompleteContext = {
+        log: (line) => $.ui.log(line),
+        status: (text) => $.ui.status(text),
+        toast: (text) => $.ui.toast(text),
+        toolCall: (args) => $.tool.call(args as any),
+        classifyTurnScore: (state, labels) => holdFor(holdHostOf($, hookBudget), "turn.complete", "model", $.model.classify(scrubText(state).text, labels, { model: "haiku" })),
+        classifyMemoryKind: (state) => holdFor(holdHostOf($, hookBudget), "turn.complete", "model", $.model.classify(scrubText(state).text, MEMORY_KIND_LABELS, { model: "haiku" })),
+        host: () => hostOf($),
+        commonsStore: () => commonsStoreOf($),
+        stampTurnEndBeat: (at) => stampBeat(beatHostOf($), sess, at, beatFilesOf(supervisorHeartbeatPath)),
+        meterTurnComplete: (facts) => meterTurnComplete($, facts),
+        submitReplyBackstop: async () => {
+          const backstopText = `[REPLY BACKSTOP] Send this exact text to the operator through the reply tool now, unchanged:\n${e.answer}`;
+          const backstopOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: backstopText }));
+          return backstopOutcome;
+        },
+        openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),
+        persist: () => persist($),
+        activate: (nextId, reason) => activate($, nextId, reason),
+        runHealth: (forNodeId) => runHealth($, forNodeId),
+        completeLeafReturningClosed: (id, note) => completeLeafReturningClosed($, id, note),
+        queueMemoryCheck: (expectedTurns, goalId, title, goalIds) => queueMemoryCheck($, expectedTurns, goalId, title, goalIds),
+        readPlanDocument: (planPath) => readPlanDocument($, planPath),
+        readPlanCheckout: (dir) => readPlanCheckout($, dir),
+        closeAsksOnCompletedNodes: (nodeIds, closedBy, now) => closeAsksOnCompletedNodes($, nodeIds, closedBy, now),
+        foldSettledPlans: () => foldSettledPlans($),
+        liveTopLevelAgentRunning: () => liveTopLevelAgentRunning($),
+        settleExpiredDispositionStamps: () => settleExpiredDispositionStamps($),
+        promotePlanTouchingRecord: (editedPaths, coordinator, architect, newerTurnStarted) => promotePlanTouchingRecord($, editedPaths, coordinator, architect, newerTurnStarted),
+        closeTurnRecordAtTurnEnd: (activeGoal, closingText, askedText, activityText, endedOnLead, readLiveAgent, newerTurnStarted, mode, live, budget) => closeTurnRecordAtTurnEnd($, activeGoal, closingText, askedText, activityText, endedOnLead, readLiveAgent, newerTurnStarted, mode, live, budget),
+        answerMemoryCheck: (goalId, goalIds, answer) => answerMemoryCheck($, goalId, goalIds, answer),
+        followUpsAtTurnEnd: (turnId, reply, hitIds) => followUpsAtTurnEnd($, turnId, reply, hitIds),
+        liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt,
+        compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget,
+        jevTurnCalls: () => jevTurnCalls,
+        setJevTurnCalls: (value) => { jevTurnCalls = value; },
+        jevTurnLatencyMs: () => jevTurnLatencyMs,
+        setJevTurnLatencyMs: (value) => { jevTurnLatencyMs = value; },
+        toolErrorsThisTurn: () => toolErrorsThisTurn,
+        setToolErrorsThisTurn: (value) => { toolErrorsThisTurn = value; },
+        toolCallsThisTurn: () => toolCallsThisTurn,
+        nudgeCountWorkThisTurn: () => nudgeCountWorkThisTurn,
+        goalDoneClosedThisTurn: () => goalDoneClosedThisTurn,
+        turnToolFlags: () => turnToolFlags,
+        turnToolRing: () => turnToolRing,
+        turnWorkToolCalls: () => turnWorkToolCalls,
+        replyCalledThisTurn: () => replyCalledThisTurn,
+        turnPlanEditedPaths: () => turnPlanEditedPaths,
+        turnFollowUps: () => turnFollowUps,
+        countResetSinceNudgeOpened: () => countResetSinceNudgeOpened,
+        currentGateTurnId: () => currentGateTurnId,
+        setCurrentGateTurnId: (value) => { currentGateTurnId = value; },
+        currentTurnKind: () => currentTurnKind,
+        setCurrentTurnKind: (value) => { currentTurnKind = value; },
+        currentPrompt: () => currentPrompt,
+        currentTurnAskedText: () => currentTurnAskedText,
+        currentTurnNudged: () => currentTurnNudged,
+        setCurrentTurnNudged: (value) => { currentTurnNudged = value; },
+        currentTurnIsChannelOrigin: () => currentTurnIsChannelOrigin,
+        setCurrentTurnIsChannelOrigin: (value) => { currentTurnIsChannelOrigin = value; },
+        setCurrentTurnIsPriming: (value) => { currentTurnIsPriming = value; },
+        setCurrentTurnSenderClass: (value) => { currentTurnSenderClass = value; },
+        setCurrentTurnOriginKind: (value) => { currentTurnOriginKind = value; },
+        setCurrentTurnAuthor: (value) => { currentTurnAuthor = value; },
+        setCurrentTurnEntry: (value) => { currentTurnEntry = value; },
+        isPrimingTurn: () => isPrimingTurn,
+        nudgedTurnId: () => nudgedTurnId,
+        setNudgedTurnId: (value) => { nudgedTurnId = value; },
+        turnLeafId: () => turnLeafId,
+        setTurnLeafId: (value) => { turnLeafId = value; },
+        turnStartSeq: () => turnStartSeq,
+        setPendingCompactionBank: (value) => { pendingCompactionBank = value; },
+        memoryGateDiscardPercent: () => memoryGateDiscardPercent,
+        drainInboxNow: () => drainInboxNow,
+        sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta,
+        planningInFlight: () => planningInFlight,
+        arming: () => arming,
+        setCountResetSinceNudgeOpened: (value) => { countResetSinceNudgeOpened = value; },
+      };
+      await serveTurnComplete(ctx, e);
+      return await next(e);
+    } finally {
+      hookBudget.live = false;
+    }
+  });
+
+  // An "off" session installs nothing past this point: ten hooks and one
+  // timer. The hooks are the ten above, session.start, session.compact,
+  // turn.start, tool.call, prompt.submit, agent.spawn, prompt.context,
+  // prompt.attachment, tool.check and turn.complete, whose off branches run
+  // the guards, the memq grant, the after hooks, the recognition block, the
+  // redactor and the compaction pass; turn.complete's closes the turn the
+  // pass's idle test reads. The timer is the compaction pass's, started in
+  // session.start's off branch.
   if (arming === "off") return;
 
   // A full model switch forfeits the prompt cache (hooks/cache-clock.ts). The
@@ -15947,7 +6705,7 @@ export const register: Register = async (on, options) => {
   // Every reading sits inside a catch, so nothing here throws into the step.
   on("turn.step", async function* ($, e, next) {
     // The budget a shadow call fired here takes its share of, live until
-    // the handler returns; hookBudgetOf says why the flag is cleared here.
+    // the handler returns; HookBudget in hooks/jev-live.ts says why the flag is cleared here.
     const hookBudget = hookBudgetOf(next);
     try {
       // The event handed down: the event received, or, where a live reading
@@ -16070,1689 +6828,6 @@ export const register: Register = async (on, options) => {
         // A reading is lost, and the step goes on as it came.
       }
       return result;
-    } finally {
-      hookBudget.live = false;
-    }
-  });
-
-  // --- turn.complete: goal scoring, memory curation, guarded save ---
-  // Modules write to sess.state. The Controller (clock.tick) reads sess.state and decides.
-  on("turn.complete", async ($, e, next) => {
-    // The budget this hook hands down to the calls it makes, live until
-    // the handler returns; hookBudgetOf says why the flag is cleared here.
-    const hookBudget = hookBudgetOf(next);
-    try {
-      // Session-scoped and unconditional by design, whether or not this
-      // completion matches a turn this session saw start. The plan doc's
-      // Decisions entry on the idle anchor owns the reasoning.
-      sess.state.monitor.lastTurnComplete = Date.now();
-      // This turn's own entry, read before the delete below removes it.
-      const mapStartedAt = openTurns.get(e.turnId);
-      // Closing by id: a completion for a turn this session never saw start
-      // removes nothing, so it cannot clear a different turn that is still open.
-      // Whether it removed one is what lets the completion drain run below.
-      const removedOwnEntry = openTurns.delete(e.turnId);
-      // The compaction boundary step's facts, read together here at the delete
-      // and before any await, because the awaits below can let the next
-      // turn.start in and that start rewrites every one of them: whether this
-      // completion is the persona's own turn ending (by the id its turn.start
-      // carried), what opened that turn (for the step's decision), whether a
-      // turn is still open once this completion's own entry is gone, and how
-      // many turns have started so far. The step compares that last count with
-      // the live one: a newer turn started in between means this completion
-      // settled too late to owe a bank. The entry active now, as the turn left
-      // it, is read here too, for a turn that opened with none active.
-      // A completion naming a subagent loop (e.agentId set) is never the
-      // persona's own turn end, whatever turn id it carries. The scorer reads
-      // the same fact: a subagent's report is not the worker's answer.
-      const completesSubagentLoop = typeof e.agentId === "string" && e.agentId.length > 0;
-      const completesGateTurn = currentGateTurnId !== null && e.turnId === currentGateTurnId
-        && !completesSubagentLoop;
-      const turnKindAtStart: string = currentTurnKind;
-      // The step watch's reading of this turn, read here for the same reason,
-      // since the next turn.start replaces it, and spent here: the persona's
-      // own completion of the turn the watch opened under takes it, so a
-      // second completion carrying that id finds none, and a subagent's
-      // completion takes none.
-      const stepWatchAtDelete = !completesSubagentLoop && sess.stepWatch.turnId !== null && e.turnId === sess.stepWatch.turnId
-        ? sess.stepWatch
-        : null;
-      const askSeenAtStepAtDelete = sess.askSeenAtStep;
-      if (stepWatchAtDelete !== null) sess.stepWatch = stepWatchOf(null);
-      const turnOpenAfterDelete = turnIsOpen();
-      const turnStartSeqAtDelete = turnStartSeq;
-      const activeIdAtDelete = sess.state.activeGoalId;
-      // The entry this turn started on, read here for the same reason, since
-      // the next turn.start rewrites it: the last answer is keyed to it below.
-      const turnLeafIdAtDelete = turnLeafId;
-      // The asks this turn's ask_open calls opened, read here for the same
-      // reason, since the next turn.start resets the count: the closing
-      // text's ASK: lines count their opens from it against ASK_TURN_MAX.
-      const asksOpenedAtDelete = sess.asksOpenedThisTurn;
-      // The compaction boundary step's goal_done facts, read here for the same
-      // reason, since the next turn.start resets the record and the count: the
-      // turn-start entry's plan holder where it reads complete now and a
-      // goal_done call this turn completed it, and whether the main loop made a
-      // work call after that call. The status is the holder's as the turn left
-      // it, before this handler's own steps, so an abandoned holder and one no
-      // goal_done completed read as neither.
-      const turnStartLeafAtDelete = turnLeafIdAtDelete ? sess.state.goals.find((g) => g.id === turnLeafIdAtDelete) : undefined;
-      const turnStartHolderAtDelete = turnStartLeafAtDelete ? planHolderOf(sess.state, turnStartLeafAtDelete) : undefined;
-      const workAtHolderDone = turnStartHolderAtDelete !== undefined && turnStartHolderAtDelete.status === "complete"
-        ? goalDoneClosedThisTurn.get(turnStartHolderAtDelete.id)
-        : undefined;
-      const holderDoneByGoalDoneIdAtDelete = workAtHolderDone !== undefined ? turnStartHolderAtDelete!.id : null;
-      const workAfterHolderDoneAtDelete = workAtHolderDone !== undefined && nudgeCountWorkThisTurn > workAtHolderDone;
-      // Section 5 (goal-every-turn): the record close's own facts, read here for
-      // the same reason. The text this turn opened with, and the tool activity
-      // the turn's own calls wrote, are both rewritten by the next turn.start.
-      const askedTextAtDelete = currentTurnAskedText;
-      const turnNudgedAtDelete = currentTurnNudged;
-      // Cleared here, before the handler's first await, so a completion that
-      // lands during those awaits is not read as the nudged turn's.
-      if (completesGateTurn) currentTurnNudged = false;
-      const activityTextAtDelete = turnToolActivityText(turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn);
-      // The turn-score state's tool activity, read here for the same reason:
-      // the next turn.start rewrites it, and the scorer reads it after the
-      // awaits below. Its opening text is askedTextAtDelete above.
-      const scoreToolsAtDelete = turnScoreToolsOf(turnToolFlags, turnToolRing, replyCalledThisTurn);
-      // Section 6 (goal-every-turn): route one's own fact, read here for the same
-      // reason. The plan documents this turn edited are rewritten by the next
-      // turn.start too, and route one reads them after an await of its own. The
-      // list is copied rather than aliased: the reset at the next turn.start
-      // replaces the array, but a tool call landing before route one reads it
-      // pushes onto this one.
-      const planEditedPathsAtDelete = [...turnPlanEditedPaths];
-      // The follow-up outcome's fact, read here for the same reason: the
-      // entries this turn showed that a main-loop tool call's path argument
-      // named, where the running turn's reading is this turn's.
-      const followUpHitsAtDelete = turnFollowUps.turnId === e.turnId ? [...turnFollowUps.hits] : [];
-      // The metered row's facts, read here for the same reason: the next
-      // turn.start rewrites the turn's kind and its entry. The Jev tally is the
-      // persona's own turn's, read and reset by its own completion, so a
-      // subagent's row counts none. The turn's start is its end less the
-      // duration the engine measured, or the open-turn entry's time without one.
-      const meterEndedAt = Date.now();
-      const meterFacts: MeterTurnInput = {
-        sessionId: sess.mySessionId,
-        turnId: typeof e.turnId === "string" ? e.turnId : "",
-        agentId: completesSubagentLoop ? e.agentId : null,
-        persona: sess.persona,
-        goalId: turnLeafIdAtDelete,
-        planPath: turnStartHolderAtDelete?.planPath ?? null,
-        trigger: turnKindAtStart,
-        usage: e.usage,
-        jevCalls: completesSubagentLoop ? 0 : jevTurnCalls,
-        jevLatencyMs: completesSubagentLoop ? 0 : jevTurnLatencyMs,
-        startedAt: typeof e.durationMs === "number" ? meterEndedAt - e.durationMs : (mapStartedAt ?? null),
-        endedAt: meterEndedAt,
-      };
-      if (!completesSubagentLoop) {
-        jevTurnCalls = 0;
-        jevTurnLatencyMs = 0;
-        // The compaction pass's cache clock runs from this end, the last
-        // main-thread response, and a turn ending opens a new idle stretch
-        // for the cold_cache line.
-        compactionPass.lastMainTurnEndedAt = meterEndedAt;
-        compactionPass.coldCacheJournaled = false;
-      }
-      // A [MEMORY CHECK] turn names records shown under a closed goal and does
-      // no work, so it leaves the owed bank as it found it. That turn runs at
-      // the next idle after the close, ahead of the turn that starts the next
-      // entry, so clearing there would drop the bank the closing turn owed
-      // before that next turn's first tool call takes it. Read from the id
-      // its turn.start recorded, before the read below spends that id.
-      const completesMemoryCheckTurn = completesGateTurn && typeof e.turnId === "string" && memoryCheckTurns.has(e.turnId);
-      // Every other persona turn end clears any owed bank here, before any
-      // await, and the step below sets it again only where this turn ended
-      // durable. A throw on the way there leaves nothing owed: a missed bank
-      // costs one compaction point, while a bank an earlier turn owed and this
-      // mid-work turn failed to clear would license compaction mid-work.
-      if (completesGateTurn && !completesMemoryCheckTurn) pendingCompactionBank = null;
-      // The pair drafts owed or held for the ending turn go with it, before
-      // any await, since a draft delivered on a later turn would restate
-      // bodies that may have changed. A subagent's completion ends no turn
-      // of the main loop's and drops nothing.
-      if (!completesSubagentLoop) {
-        if (pairDraftOwed !== null && pairDraftOwed.turnId === e.turnId) {
-          notePairDraftsDropped(pairDraftOwed.turnId, "turn ended");
-          pairDraftOwed = null;
-        }
-        if (pairDrafts !== null && pairDrafts.turnId === e.turnId) {
-          notePairDraftsDropped(pairDrafts.turnId, "turn ended");
-          pairDrafts = null;
-        }
-      }
-      try { $.ui.log(`Agentic: turn complete ${kaizenLine(String(e.turnId ?? "none"))}`); } catch { /* non-fatal */ }
-      // Plan item 8.4: a turn that ran past an hour is one of the weaknesses
-      // the own-record pass counts, so record it as a decision here, the only
-      // point that knows both ends of the turn.
-      // The harness measures the turn itself and carries the figure whatever the
-      // turn's reason, so where it arrives the record needs no hook-side clock
-      // and no open-turn entry, and still counts a turn whose start this session
-      // never saw.
-      // The map entry is kept as a defensive fallback against a contract this
-      // plugin has never exercised: the field is declared required, and no other
-      // line here reads it, so an absent one would switch this record off with
-      // nothing saying so.
-      {
-        const turnMs = typeof e.durationMs === "number"
-          ? e.durationMs
-          : mapStartedAt === undefined ? null : Date.now() - mapStartedAt;
-        if (turnMs !== null && turnMs >= KAIZEN_LONG_TURN_MS) {
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "turn_over_hour",
-            detail: `Turn ${e.turnId || "unknown"} ran ${Math.round(turnMs / 1000)}s`,
-          });
-        }
-      }
-      // The deferred-status stamp is derived from what is still open rather than
-      // cleared, so it names the earliest turn still running, or null when none
-      // is. This value leaves the process: it is published to the heartbeat and
-      // read by another session to report how long a pending record has waited.
-      // A stamp cleared by whichever completion arrived first would tell that
-      // reader no turn is running while one still is, and a stamp left set by an
-      // unmatched completion would strand and report a turn that ended hours
-      // ago. Deriving it cannot strand the in-memory value, because an empty map
-      // yields null. The published file is a weaker claim: the sidecar stamp is
-      // a read-modify-write made from both turn handlers and from the heartbeat
-      // tick, so two in-flight calls can land out of build order and publish a
-      // non-null stamp just after the map emptied. The next tick repairs it, so
-      // that exposure is one heartbeat interval rather than unbounded. The
-      // commons entry carries the same exposure for the same reason, repaired by
-      // the owner's next tick claim write (a reader's tick passes no meta, so its
-      // copy holds until its next turn boundary).
-      sess.turnStartedAt = deriveTurnStartedAt();
-      // The persona's own last turn, which the beat file names; a subagent's
-      // completion names none.
-      if (!completesSubagentLoop && meterSessionKnown(sess.mySessionId)) sess.meterLastTurnId = meterFacts.turnId;
-      // Every liveness file from this end's one instant, the one the metered
-      // row ends at: the sidecar for the owner, the supervisor's file, the
-      // commons entry and the meter beat; and beside them the meter's spool
-      // file. The beat's write and the spool write are each bounded at
-      // METER_WRITE_TIMEOUT_MS and run together, so the meter holds this turn
-      // end for at most that bound once: the engine meters a pending $.clock
-      // wait whether or not anything awaits it, so two bounded writes in
-      // series would spend two. Neither can fail the turn: each failure is
-      // one decision per cause per UTC day, and this handler's result is
-      // next(e)'s whatever the meter did.
-      await Promise.all([
-        stampBeat(beatHostOf($), sess, meterEndedAt, beatFilesOf(supervisorHeartbeatPath)),
-        meterTurnComplete($, meterFacts).catch(() => { /* the meter never fails a turn */ }),
-      ]);
-
-      // Read what this turn opened as once, up front, and reset it so a stale
-      // reading never leaks into a later turn (a completion for a turn whose
-      // start this session never saw reads as unaccounted). The expected-turn
-      // list itself is not touched here: its entries leave it at turn.start,
-      // one per turn the plugin opened.
-      const wasNudged = currentTurnKind === "nudge";
-      // Section 4 (plan-health-from-the-record): captured before the resets
-      // below clear both facts, so the scorer can read what this turn opened
-      // as. A channel message or a delivered record carries no worker
-      // judgment to score.
-      const wasDelivery = currentTurnKind === "delivery";
-      // The idle proposal's turn asks for a proposal rather than work on a
-      // node, so it is scored against none and spends no round.
-      const wasProposal = currentTurnKind === "proposal";
-      // A closed goal's [MEMORY CHECK] turn asks about records shown under that
-      // goal, not about the entry active now, so it too is scored against none
-      // and spends no round.
-      const wasMemoryCheck = currentTurnKind === "memoryCheck";
-      // Whether this completion is the nudged turn's own, read by id rather
-      // than from currentTurnKind, which the first of the persona's own
-      // completions to arrive resets whatever turn it belongs to. The id is
-      // spent here, so the nudged turn is read once. A subagent's completion
-      // is never the nudged turn's own, whatever turn id it carries, and
-      // resets neither the id nor the kind, so the persona's own completion
-      // after it still reads what its turn opened as.
-      const completesNudgedTurn = !completesSubagentLoop && nudgedTurnId !== null && e.turnId === nudgedTurnId;
-      if (completesNudgedTurn) nudgedTurnId = null;
-      // The goals a [MEMORY CHECK] turn asked about, where this completion is
-      // that turn's own: read by the id its turn.start carried and spent here.
-      // A subagent's completion inside the turn is not the worker's answer,
-      // whatever id it carries.
-      const memoryCheck = typeof e.turnId === "string" && !(typeof e.agentId === "string" && e.agentId.length > 0)
-        ? memoryCheckTurns.get(e.turnId)
-        : undefined;
-      if (memoryCheck !== undefined) memoryCheckTurns.delete(e.turnId);
-      // A [MEMORY CHECK] turn's answer names records rather than work on the
-      // active entry, so the last-answer writer, plan health and memory
-      // curation below leave it unread.
-      const isMemoryCheckTurn = wasMemoryCheck || memoryCheck !== undefined;
-      if (!completesSubagentLoop) currentTurnKind = "unaccounted";
-      if (e.turnId === currentGateTurnId && !(typeof e.agentId === "string" && e.agentId.length > 0)) {
-        currentTurnOriginKind = "unclassified";
-        currentTurnIsPriming = false;
-        currentTurnSenderClass = "operator";
-        currentTurnAuthor = "";
-        currentTurnEntry = null;
-        currentGateTurnId = null;
-      }
-
-      // C3: error streak fold.
-      const toolErrors = toolErrorsThisTurn;
-      toolErrorsThisTurn = 0;
-      sess.state.monitor.env.errors = applyTurnToErrors(
-        sess.state.monitor.env.errors,
-        { reason: e.reason || "unknown", toolErrors },
-      );
-
-      // Skip scoring on aborted or errored turns (no answer to judge). The
-      // engine names the interruption flag `isAborted` from 2.1.280; earlier
-      // engines named it `aborted`, and the reason covers both.
-      const skipped = (e as { isAborted?: boolean; aborted?: boolean }).isAborted === true
-        || (e as { aborted?: boolean }).aborted === true
-        || e.reason === "aborted" || e.reason === "error" || e.reason === "refusal" || !e.answer;
-      // The worker's most recent answer, for the controller's state: the
-      // persona's own turn end with an answer to judge, keyed to the entry the
-      // turn started on. The reading is `skipped` above, an aborted, errored,
-      // refused or answerless completion, and nothing more: a turn a channel
-      // message or a delivered record opened, which the scorer leaves
-      // unscored, still ends on the worker's own answer and moves this.
-      // completesGateTurn excludes a subagent's completion, and a [MEMORY CHECK]
-      // turn's answer names records rather than work on the next goal.
-      if (completesGateTurn && !skipped && !isMemoryCheckTurn && typeof e.answer === "string") {
-        sess.lastAnswer = { goalId: turnLeafIdAtDelete, text: e.answer };
-      }
-
-      // The acted outcome of the controller call whose nudge opened this
-      // turn, written once against that call's stamp, which is then cleared:
-      // tools where the turn's main loop called a tool other than the reply
-      // tool, reply where it only answered, none where no answer arrived. The
-      // calls are read off the ring taken at the delete, before the awaits
-      // above could let the next turn.start reset it. A subagent's completion
-      // is never the nudged turn's own, by completesNudgedTurn.
-      if (completesNudgedTurn) {
-        const actedStampId = sess.jevActedStampId;
-        if (actedStampId !== null) {
-          sess.jevActedStampId = null;
-          const calledATool = scoreToolsAtDelete.calls.some((tool) => !(tool.includes("__reply") || tool.endsWith("_reply")));
-          shadowOutcome(hostOf($), actedStampId, "acted", skipped ? "none" : calledATool ? "tools" : "reply");
-        }
-      }
-
-      // Steer 68/69: a Discord message opened this turn and the turn ended
-      // with an answer but no reply-tool call - exactly the shape that left
-      // an operator's question answered in the transcript and invisible on
-      // the thread, twice, because the priming instruction alone did not
-      // reliably make the model call the reply tool. Gated off priming and
-      // nudged turns for the same reason the item 2 backstop above is: an
-      // internal turn was never a Discord message and must not be treated
-      // as one. Sends the model's own leftover text directly through the
-      // reply tool rather than trusting a second instruction to work where
-      // the first already didn't; falls back to one re-prompt, carrying the
-      // exact text, only if the direct call itself fails.
-      // Only the persona's own turn end is backfilled (completesGateTurn). A
-      // background subagent's completion arrives while the persona's channel
-      // turn is still open and carries the subagent's report as e.answer (the
-      // harness type: a subagent's answer is its own turn.complete, carrying
-      // its agentId), so backfilling it would post that report to the
-      // operator's thread. A nudged turn is excluded by its id as well as its
-      // kind: the kind is reset by every completion, a subagent's included,
-      // while the channel flag survives one, so a turn that is both a nudge and
-      // channel-origin would otherwise post the nudge's answer.
-      let submittedReplyBackstop = false;
-      if (!skipped && sess.isOwner && completesGateTurn && currentTurnIsChannelOrigin && !replyCalledThisTurn && !isPrimingTurn && !wasNudged && !completesNudgedTurn) {
-        try {
-          await $.tool.call({ tool: "mcp__plugin_relay_channel-relay__reply", message: e.answer } as any);
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "monitor",
-            action: "channel_reply_backfilled",
-            detail: `turn ${e.turnId} answered with no reply-tool call; sent through reply directly`,
-          });
-        } catch (directErr) {
-          const backstopText = `[REPLY BACKSTOP] Send this exact text to the operator through the reply tool now, unchanged:\n${e.answer}`;
-          // A refused re-prompt means both paths failed; nothing more to do
-          // without a live channel, and its entry has left the list. The
-          // completion drain is skipped on the attempt, whatever its outcome:
-          // a refused one costs the waiting record one tick, while a delivery
-          // queued beside an accepted one would pile into a prompt the turn
-          // matcher cannot read as a delivery.
-          submittedReplyBackstop = true;
-          const backstopOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: backstopText }));
-          if (backstopOutcome.ok) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "channel_reply_backfill_reprompted",
-              detail: `turn ${e.turnId} direct reply call failed (${(directErr as Error).message}); re-prompted instead`,
-            });
-          }
-        }
-      }
-      // Section 4 (plan-health-from-the-record): captured beside wasNudged,
-      // before this same reset clears it for the next turn.
-      const wasChannelOrigin = currentTurnIsChannelOrigin;
-      // The flag clears only on the persona's own turn end, so a subagent's
-      // completion inside the channel turn leaves it set and the persona's own
-      // completion afterwards is still backfilled.
-      if (completesGateTurn) currentTurnIsChannelOrigin = false;
-
-      // Item 2 sub-bullet (f016b69): a turn that did real work with no open
-      // root logs one `untracked_work` decision and leaves the goal tree
-      // alone. The tree changes only through a goal tool call that names the
-      // change, so this block builds no root, assigns nothing to goals and
-      // leaves activeGoalId as it is. A complete root can still hold a live
-      // plan that goal_add put under it, and that plan stays.
-      // The session keeps at most one such line. The first firing pushes it
-      // with count 1. Each later firing removes the one entry this session
-      // pushed, matched on action and on the held timestamp so a line an
-      // earlier session wrote stays, and pushes a fresh line at the tail with
-      // the new clock, the raised count and the new prompt excerpt. The log
-      // stays in time order, and the supervisor's clean-exit path reads the
-      // line's clock as newer than the child's start. Where the decision cap
-      // has already dropped the held line, the firing pushes and carries the
-      // count on. The match cannot be "the log's last entry", because turn
-      // starts, cost summaries and the like land between firings.
-      // The condition is "no open root", not "goals.length === 0": a request
-      // after a finished one arrives with that root still in state. Gated off
-      // real work only (isWorkTool, Round 28) and off priming/nudge turns
-      // (isPrimingTurn, wasNudged), since a channel-attached passive child's
-      // own acknowledgment turn is not task work. The turn's persist below
-      // carries the write.
-      const currentRoot = sess.state.goals.find((g) => g.parentId === null);
-      const noActiveRoot = !currentRoot || currentRoot.status === "complete" || currentRoot.status === "abandoned";
-      if (!skipped && sess.isOwner && !isPrimingTurn && !wasNudged && noActiveRoot && toolCallsThisTurn > 0) {
-        const untrackedNow = Date.now();
-        const excerpt = (currentPrompt || "Untitled request").slice(0, 80);
-        const heldAt = sess.untrackedWorkAt;
-        if (heldAt !== null) {
-          const decisions = sess.state.decisions;
-          for (let i = decisions.length - 1; i >= 0; i--) {
-            if (decisions[i].action === "untracked_work" && decisions[i].timestamp === heldAt) {
-              decisions.splice(i, 1);
-              break;
-            }
-          }
-        }
-        const count = sess.untrackedWorkCount + 1;
-        sess.state.decisions.push({
-          timestamp: untrackedNow,
-          loop: "goal",
-          action: "untracked_work",
-          detail: `x${count}: ${excerpt}`,
-        });
-        sess.untrackedWorkAt = untrackedNow;
-        sess.untrackedWorkCount = count;
-      }
-
-      // Item 8.2: an ask record opens only when the worker's own completed
-      // turn states a real fork as a literal marker line, never from the
-      // classifier's idle-gap reading, which the controller answers with the
-      // idle-gap nudge. The
-      // stored question is the worker's own line, not a reason the classifier
-      // produced. Two guards on the marker itself: refuse a match that still
-      // carries the literal template's angle-bracket placeholders (a worker
-      // that copies the nudge instruction verbatim without filling it in is
-      // not stating a fork), and suppress a re-open of the identical question
-      // this same node just closed (the D5b reask guard, driven through this
-      // path now that it is the only path that opens an ask from the idle
-      // tick's own read of the goal). A subagent's completion opens none: its
-      // answer is the subagent's report, not a line the worker wrote.
-      // The closing text's status line, read once here: the ask lines below,
-      // the lead, the WORKING: clear and the nudge count all take it from
-      // this one reading.
-      const statusLine = readStatusLine(e.answer);
-      // Whether the turn ended on a BLOCKED: or WAITING: lead, the reading the
-      // record close and the compaction boundary below both take: on a lead the
-      // open record is in flight and the turn end is not durable.
-      const endedOnLead = statusLine !== null && statusLine.state !== "working";
-      // Every ASK: line of the closing text opens its own ledger entry
-      // through openWorkerAsk, the path the ask_open tool takes too, so each
-      // line meets the same guards and counts from asksOpenedAtDelete, the
-      // opens of the turn's ask_open calls, against the same ASK_TURN_MAX.
-      // The entries block where the same
-      // text's first line reads BLOCKED:, and are open questions the work
-      // proceeds past under any other lead or none. A line past the turn cap,
-      // or one the ledger's open cap refuses, is counted into one
-      // ask_cap_refused decision for the turn.
-      if (!skipped && sess.isOwner && !completesSubagentLoop) {
-        const askMarkerMatches = e.answer.split(ASK_MARKER_LINE_BREAK).map((line) => line.match(ASK_MARKER_LINE)).filter((m) => m !== null);
-        if (askMarkerMatches.length > 0) {
-          // The outcome joiner for the ask marker. The first marker matched
-          // after a controller call writes one outcome against that call and
-          // clears this half of the hold, so a second marker writes none. The
-          // value is not the matched text and need not be: what matched is a
-          // line the worker wrote, and the journal writes a fixed token for
-          // this kind whatever the caller passes.
-          const askMarkerCallStampId = sess.jevAskMarkerOutcomeStampId;
-          if (askMarkerCallStampId !== null) {
-            sess.jevAskMarkerOutcomeStampId = null;
-            shadowOutcome(hostOf($), askMarkerCallStampId, "ask_marker", ASK_MARKER_VALUE);
-          }
-          const nodeId = turnLeafIdAtDelete || sess.state.activeGoalId || "unknown";
-          const askReaskSuppressMs = typeof cfg.askReaskSuppressMs === "number" ? (cfg.askReaskSuppressMs as number) : 10 * 60_000;
-          const askBlocking = statusLine !== null && statusLine.state === "blocked";
-          let refusedByTurnCap = 0;
-          let refusedByOpenCap = 0;
-          const lineTurn = { asksOpenedThisTurn: asksOpenedAtDelete };
-          for (const askMarkerMatch of askMarkerMatches) {
-            const question = askMarkerMatch[1].trim();
-            const opened = await openWorkerAsk($, "line", lineTurn, nodeId, question, question, askRecommendOf(question), askBlocking, askReaskSuppressMs);
-            if (opened === "turn-cap") refusedByTurnCap += 1;
-            else if (opened === "cap") refusedByOpenCap += 1;
-          }
-          if (refusedByTurnCap > 0 || refusedByOpenCap > 0) {
-            const reasons: string[] = [];
-            if (refusedByTurnCap > 0) reasons.push(`${refusedByTurnCap} past the per-turn cap of ${ASK_TURN_MAX}`);
-            if (refusedByOpenCap > 0) reasons.push(`${refusedByOpenCap} past the open cap of ${ASKS_OPEN_MAX}`);
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "ask_cap_refused",
-              detail: `${nodeId}: ${refusedByTurnCap + refusedByOpenCap} ASK line(s) refused: ${reasons.join("; ")}`,
-            });
-          }
-        }
-      }
-
-      // H2: Score against the leaf that was active at this turn's start, read
-      // from turnLeafIdAtDelete, the snapshot taken before this handler's
-      // first await. Neither the node active now, which goal_done or the
-      // scorer may have activated mid-turn, nor the live turnLeafId, which a
-      // turn starting during this handler's awaits rewrites to its own leaf.
-      const turnLeaf = turnLeafIdAtDelete
-        ? sess.state.goals.find((g) => g.id === turnLeafIdAtDelete)
-        : null;
-      // Spends the turn-start leaf once the scorer below is done with it. The
-      // scorer runs after this handler's awaits, and a turn that started
-      // during them wrote its own leaf at its start, which its own end
-      // scores, so the leaf is cleared only where no turn has started since.
-      const spendTurnLeaf = (): void => {
-        if (turnStartSeq === turnStartSeqAtDelete) turnLeafId = null;
-      };
-
-      // Section 3 (plan-health-from-the-record): the worker's lead, read from
-      // the first non-blank line of the closing text for the entry that was
-      // active at turn start, whatever its kind, at the end of every turn
-      // whatever opened it. A BLOCKED: or WAITING: line writes the lead
-      // fresh (state, reason, and the clock now, which is what the waiting
-      // hold measures from). A WORKING: line sets no lead and clears a waiting
-      // one. Any other first line clears a lead when the turn made at least one
-      // work tool call, the count isWorkTool keeps, so a reply to the operator
-      // clears nothing. lead_set and lead_cleared are logged once
-      // per change: a turn re-reading the same state and reason logs nothing.
-      // The entry's status, the nudge count and the active entry are not
-      // touched here. An entry
-      // already complete or abandoned at turn end (goal_done in the same turn)
-      // takes no lead, and a subagent's completion neither sets nor clears one,
-      // since its answer is the subagent's report. The ASK: marker above is
-      // handled as it is whether or not this line is present, and the status
-      // line is the one reading taken above the marker step.
-      if (!skipped && sess.isOwner && !completesSubagentLoop && turnLeaf) {
-        const leadLine = statusLine !== null && statusLine.state !== "working" ? { state: statusLine.state, reason: statusLine.reason } : null;
-        const workingLine = statusLine !== null && statusLine.state === "working";
-        const previous = turnLeaf.lead ?? null;
-        const entryOver = turnLeaf.status === "complete" || turnLeaf.status === "abandoned";
-        if (leadLine && !entryOver) {
-          const changed = !previous || previous.state !== leadLine.state || previous.reason !== leadLine.reason;
-          turnLeaf.lead = { state: leadLine.state, reason: leadLine.reason, at: Date.now() };
-          turnLeaf.updatedAt = Date.now();
-          if (changed) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "lead_set",
-              detail: `${turnLeaf.id}: ${leadLine.state}: ${leadLine.reason.slice(0, 150)}`,
-            });
-          }
-        } else if (workingLine && previous && previous.state === "waiting") {
-          turnLeaf.lead = null;
-          turnLeaf.updatedAt = Date.now();
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "lead_cleared",
-            detail: `${turnLeaf.id}: waiting lead cleared by a WORKING: line`,
-          });
-        } else if (!leadLine && previous && toolCallsThisTurn > 0) {
-          turnLeaf.lead = null;
-          turnLeaf.updatedAt = Date.now();
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "lead_cleared",
-            detail: `${turnLeaf.id}: ${previous.state} lead cleared by a turn that called a work tool`,
-          });
-        }
-      }
-
-      // The nudge count, one per session whatever entry the turn ran under. A
-      // turn that called a work tool or dispatched an agent, the calls
-      // isNudgeCountWork keeps, resets it, and so does a turn opened from a
-      // channel message, each whatever else the turn carried. Otherwise a
-      // nudged turn's own completion, the one carrying the id nudgedTurnId
-      // recorded at turn.start, resets it when its closing text opens with a
-      // status line and adds one when it opens with none. Every other
-      // completion moves nothing: an unaccounted turn, so a nudge whose turn
-      // cannot be placed never counts toward the cap; a subagent's completion,
-      // under whatever turn id it carries; and an aborted, errored or
-      // refused turn. A nudged completion with no answer
-      // opens with none of the three lines, so it adds one. Where an entry was
-      // activated, the tree replaced or the state loaded while the nudged turn
-      // was open, its answer resets the count rather than adding one, so the
-      // reset that act performs is
-      // not undone by the answer that follows it. Only the owner session keeps
-      // the count. The other resets are activation, which activate() and the
-      // switch and goal_resume sites perform, a new tree from goal_create, the
-      // root's completion, a persona's state loading at agentic_identity or at
-      // a reader's promotion, and the cap's own ask, which resets the count as
-      // it opens.
-      if (!sess.isOwner) {
-        // A reader session never nudges, so it keeps no count.
-      } else if (nudgeCountWorkThisTurn > 0 || wasChannelOrigin) {
-        sess.nudgedAnswersWithoutStatus = 0;
-        sess.nudgeCapRefusedFor = null;
-      } else if (completesNudgedTurn && !(e.isAborted === true || (e as { aborted?: boolean }).aborted === true || e.reason === "aborted" || e.reason === "error" || e.reason === "refusal")) {
-        if (statusLine !== null || countResetSinceNudgeOpened) {
-          sess.nudgedAnswersWithoutStatus = 0;
-          sess.nudgeCapRefusedFor = null;
-        } else {
-          sess.nudgedAnswersWithoutStatus += 1;
-        }
-      }
-
-      // A subagent's completion is not scored: its answer is the subagent's
-      // report rather than the worker's, so it makes no classify, no shadow call
-      // and no score, and leaves the turn-start leaf for the persona's own
-      // completion to score.
-      if (!skipped && turnLeaf && !completesSubagentLoop) {
-        if (turnLeaf.status === "complete") {
-          // M11: goal_done ran during this turn, the credit is already in the
-          // goal_done handler. Log score_skipped here.
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "score_skipped",
-            detail: `${turnLeaf.id} already complete (goal_done)`,
-          });
-          spendTurnLeaf();
-        } else if (turnLeaf.status === "active") {
-          const g = turnLeaf;
-          const planEntry = isPlanEntry(sess.state, g);
-          // Section 4 (plan-health-from-the-record): a channel-origin or
-          // delivered-record turn carries no worker judgment to score, for
-          // any entry, and a plan entry's own unaccounted turn is skipped
-          // too, since only a nudged turn is scored for one. wasNudged is
-          // checked first: a turn matched as a nudge is scored as a nudge
-          // whatever else it also carries, so the channel/delivery skip
-          // below reaches only a turn that was not a matched nudge.
-          const skippedForOrigin = !wasNudged && (wasChannelOrigin || wasDelivery || wasProposal || wasMemoryCheck);
-          if (skippedForOrigin) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "score_skipped",
-              detail: `${g.id}: turn opened from ${wasChannelOrigin ? "a channel message" : wasDelivery ? "a delivered record" : wasProposal ? "the idle proposal" : "a memory check"}`,
-            });
-            spendTurnLeaf();
-          } else if (planEntry && !wasNudged) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "score_skipped",
-              detail: `${g.id}: plan entry, turn not opened by a nudge`,
-            });
-            spendTurnLeaf();
-          } else {
-            // Still active at turn end: classify as before.
-            const labels = wasNudged
-              ? SCORER_LABELS_AFTER_NUDGE
-              : SCORER_LABELS;
-            try {
-              // Bound to a name so the same bytes reach Haiku and Jev, whether
-              // Jev is asked live or in shadow. The catalog builds it, so .kit/jev-gold/replay.mjs
-              // builds the same state from a sampled turn.
-              const scoreState = turnScoreStateText(askedTextAtDelete, e.answer, g.objective, scoreToolsAtDelete);
-              // Where turn-score is named live, Jev is asked live over the same
-              // label array and state as Haiku, and the two calls are started
-              // together and awaited together, so a live turn waits only for
-              // whatever Jev takes beyond Haiku, bounded at the wait rule's Jev
-              // budget for turn.complete. Haiku's classify holds at the rule's
-              // model budget, and a hold that gives up throws as a failed
-              // classify does, so it takes the same paths below.
-              // Everywhere else this is null and the step is Haiku, then Jev in
-              // shadow with Haiku's value. The branch is tested here rather than
-              // left to liveAsk, whose not-live path would journal a shadow call
-              // carrying no Haiku value. On the not-live path a classify that
-              // throws reaches the catch below as it always has. On the live
-              // path Haiku's classify is settled rather than awaited bare, since
-              // liveAsk never rejects and Jev's answer decides the turn: a Haiku
-              // throw beside an answered call scores Jev's label and logs
-              // turn_score_haiku_failed, and one beside a failed call is
-              // rethrown, so the catch's score_failed is that turn's one record.
-              const liveScoreCall = jevMode === "shadow" && jevLive.includes(TURN_SCORE)
-                ? liveAsk(hostOf($), "turn.complete", hookBudget, "turn-score", TURN_SCORE, labels, scoreState, jevMode, jevLive)
-                : null;
-              const haikuScoreCall = holdFor(holdHostOf($, hookBudget), "turn.complete", "model", $.model.classify(
-                scoreState,
-                labels,
-                { model: "haiku" }
-              )).then(answeredOrThrow);
-              let liveScore: LiveAskResult | null = null;
-              let result: Awaited<typeof haikuScoreCall> | null;
-              if (liveScoreCall === null) {
-                result = await haikuScoreCall;
-              } else {
-                const [live, haiku] = await Promise.all([
-                  liveScoreCall,
-                  haikuScoreCall.then(
-                    (value) => ({ ok: true as const, value }),
-                    (err: unknown) => ({ ok: false as const, err }),
-                  ),
-                ]);
-                liveScore = live;
-                if (haiku.ok) {
-                  result = haiku.value;
-                } else if (live === null || "reason" in live) {
-                  throw haiku.err;
-                } else {
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "goal",
-                    action: "turn_score_haiku_failed",
-                    detail: `${g.id}: stamp ${live.stampId}, ${safeErrorText(haiku.err).slice(0, 150)}`,
-                  });
-                  result = null;
-                }
-              }
-              let label: string;
-              // The stamp the turn-score call's journal lines carry, which its
-              // next_trigger outcome is written against: the shadow call's, or
-              // the live call's where liveAsk wrote a line for it.
-              let scoreStampId: string | null = null;
-              if (liveScore === null) {
-                // The decision seam, in shadow, over the same variant of the label
-                // array the caller offered Haiku.
-                scoreStampId = shadowAsk(
-                  hostOf($),
-                  "turn-score",
-                  TURN_SCORE,
-                  labels,
-                  scoreState,
-                  jevMode,
-                  typeof result === "string" ? result : null,
-                  undefined,
-                  undefined,
-                  hookBudget,
-                );
-                label = result ?? "unknown";
-              } else if ("reason" in liveScore) {
-                // Haiku's label is the turn's, with no shadow call beside it. A
-                // seam reason has its own call line naming it, written by
-                // liveAsk, and Haiku's label is joined to it. A `rejected` call
-                // has none, since liveAsk's catch returns before any line is
-                // written, so this decision is its only record and no outcome
-                // is written against a call line that does not exist.
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "goal",
-                  action: "turn_score_fallback",
-                  detail: `${g.id}: reason ${liveScore.reason}, stamp ${liveScore.stampId}, split ${splitOf(liveScore.stampId)}`,
-                });
-                if (liveScore.reason !== "rejected" && typeof result === "string") {
-                  shadowOutcome(hostOf($), liveScore.stampId, "haiku_score", result);
-                }
-                if (liveScore.reason !== "rejected") scoreStampId = liveScore.stampId;
-                label = result ?? "unknown";
-              } else {
-                // Jev's choice is the turn's label, and Haiku's label is joined
-                // to the live call, so the journal holds both answers for one
-                // input as a shadow answer line does.
-                if (typeof result === "string") {
-                  shadowOutcome(hostOf($), liveScore.stampId, "haiku_score", result);
-                }
-                label = liveScore.answer.choice;
-                scoreStampId = liveScore.stampId;
-              }
-              // Held for the next turn.start, which writes what opened that
-              // turn against this call. Where another turn was still open at
-              // this turn's delete, or a turn has started during this
-              // handler's awaits, the next turn to start is not this one's
-              // successor, so nothing is held and one measurement is lost
-              // rather than a wrong one written.
-              if (scoreStampId !== null && !turnOpenAfterDelete && turnStartSeq === turnStartSeqAtDelete) sess.jevNextTriggerStampId = scoreStampId;
-              // The outcome joiner for the next score. The first turn scored after a
-              // controller call writes one outcome against that call and clears this
-              // half of the hold, so a second scored turn writes none.
-              const scoreCallStampId = sess.jevScoreOutcomeStampId;
-              if (scoreCallStampId !== null) {
-                sess.jevScoreOutcomeStampId = null;
-                shadowOutcome(hostOf($), scoreCallStampId, "next_score", label);
-              }
-              g.scores.push({
-                round: g.scores.length + 1,
-                result: label,
-              });
-
-              // Only on-goal, drift, and complete burn rounds, and only on a
-              // task entry: a plan entry has no round budget, so no label
-              // spends one.
-              if (!planEntry && (label === "on-goal" || label === "drift" || label === "complete")) {
-                g.completedRounds += 1;
-              }
-
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "goal",
-                action: "score",
-                detail: `${g.id} Round ${g.scores.length}: ${label}`,
-              });
-
-              // No label moves the nudge count, which reads the closing
-              // text's status line and the turn's work instead. A plan
-              // entry's complete verdict at the scorer moves nothing.
-              if (label === "complete" && !planEntry) {
-                // R3: use completeLeaf + activateNext. Never for a plan
-                // entry: done is read from the plan document (Section 2),
-                // not from this classifier's label.
-                const completedId = g.id;
-                const closedIds = await completeLeafReturningClosed($, completedId, "scorer complete");
-                // E2: health run at completeLeaf site (scorer complete).
-                await runHealth($, completedId);
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "goal",
-                  action: "complete",
-                  detail: `${completedId}: Goal completed in ${g.completedRounds} rounds`,
-                });
-                queueMemoryCheck($, expectedTurns, completedId, g.title, closedIds);
-                const nextId = activateNext(sess.state, completedId);
-                activate($, nextId, `${completedId} complete`);
-                // L11: plan completion is a log line, not a speech.
-                try { $.ui.log(`Agentic: ${completedId} plan complete`); } catch { /* non-fatal */ }
-                try { $.ui.status(""); } catch { /* non-fatal */ }
-              } else if (!planEntry && g.completedRounds >= g.maxRounds) {
-                // R7: round budget → leaf blocked, toast once, then activateNext.
-                // Never for a plan entry, whose maxRounds is not read.
-                // blockedReason stays the literal the load-time recovery in
-                // agent-state.ts matches. The detail and the toast name the
-                // entry's kind, and an entry of kind "plan" here has no plan
-                // document, so they also name how a plan entry is added.
-                const kindNote = g.kind === "plan"
-                  ? "(kind plan with no plan document; a plan entry is added with planPath)"
-                  : "(kind task)";
-                g.status = "blocked";
-                g.blockedReason = "Max rounds reached";
-                g.updatedAt = Date.now();
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "goal",
-                  action: "block",
-                  detail: `${g.id}: Max rounds reached ${kindNote}`,
-                });
-                try { $.ui.toast(`Agentic: ${g.id} blocked: max rounds reached ${kindNote}`); } catch { /* non-fatal */ }
-                const nextId = activateNext(sess.state, g.id);
-                activate($, nextId, `${g.id} blocked`);
-                try { $.ui.status(""); } catch { /* non-fatal */ }
-              }
-              g.updatedAt = Date.now();
-            } catch (err) {
-              // The score joiner above sits after the awaited classify, so a
-              // classify that throws leaves the hold set and the next turn that
-              // does score writes its outcome against this controller call with
-              // an unscored turn in between. The journal defines next_score as
-              // the first turn scored after the call, which that row would still
-              // satisfy, and a load reading it as the very next turn's verdict
-              // would still be misled. Clearing here writes nothing and loses
-              // one measurement rather than recording a misleading one.
-              sess.jevScoreOutcomeStampId = null;
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "goal",
-                action: "score_failed",
-                detail: `${g.id}: ${String(err).slice(0, 150)}`,
-              });
-            }
-            spendTurnLeaf();
-          }
-        } else {
-          // H2: node is paused, blocked, or switched: skip scoring.
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "score_skipped",
-            detail: `${turnLeaf.id}: status ${turnLeaf.status} at turn end`,
-          });
-          spendTurnLeaf();
-        }
-      }
-
-      // The step watch's readings of this turn, as one decision wherever the
-      // turn's main loop made a step, aborted turns included: the steps, the
-      // tool calls they made and the first step whose answer carried an ASK:
-      // line. The turn id is event text, so it is folded to one line and made
-      // bracket-safe.
-      if (stepWatchAtDelete !== null && stepWatchAtDelete.steps > 0) {
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "step_readings",
-          detail: `turn ${kaizenLine(String(e.turnId))}: steps ${stepWatchAtDelete.steps}, tool uses ${stepWatchAtDelete.toolUses}, ask at step ${askSeenAtStepAtDelete ?? "none"}`,
-        });
-        // The step-effort readings of the same turn, as one decision beside
-        // it: the steps, the readings fired, the settled readings by choice,
-        // the readings that settled with no choice, the readings still
-        // unsettled now, the rewrites applied by level and refused, and the
-        // readings still unsettled when the step they were for fired. The
-        // turn's last reading had no step after it, so its next_step_tools
-        // outcome is none.
-        const effort = stepWatchAtDelete.effort;
-        const byChoice = STEP_EFFORT_OPTIONS.map((id) => `${id} ${effort.choices[id] ?? 0}`).join(", ");
-        const chosen = STEP_EFFORT_OPTIONS.reduce((sum, id) => sum + (effort.choices[id] ?? 0), 0);
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "step_effort_readings",
-          detail: `turn ${kaizenLine(String(e.turnId))}: steps ${stepWatchAtDelete.steps}, readings ${effort.readings} (${byChoice}, failed ${effort.settled - chosen}, pending ${effort.readings - effort.settled}), lowered ${effort.lowered}, raised ${effort.raised}, unrewritable ${effort.unrewritable}, late ${effort.late}`,
-        });
-        const lastReading = stepWatchAtDelete.effortReading;
-        if (lastReading !== null) {
-          stepWatchAtDelete.effortReading = null;
-          shadowOutcome(hostOf($), lastReading.stampId, "next_step_tools", "none");
-        }
-      }
-
-      // Section 2 (plan-health-from-the-record): done and progress from the
-      // plan document. For the entry that was active at turn start, when it is
-      // a plan entry, read the document its plan holder names. Complete
-      // (a header Status: Complete, or the document moved to an archive place)
-      // completes the holder with the same steps the scorer's complete label
-      // runs: completeLeaf, runHealth, a complete decision naming the document,
-      // activateNext, activate. That completion waits for the checkout holding
-      // the document: git status runs in planDir, and a branch with an
-      // upstream, no commit ahead and no other line lets it run. Any other
-      // answer leaves the entry active and logs one plan_complete_held
-      // decision per holder per checkout state. A git read that cannot be used
-      // completes as before and logs nothing. A Chapter count above the
-      // stored one stores the new count and logs plan_progress; an
-      // unchanged count logs nothing. A read document also sets the holder's
-      // sectionCount and nextSection, silently. An unreadable or archived
-      // document writes neither of those two. An unreadable document changes
-      // nothing and logs one plan_record_unreadable decision per holder per
-      // session.
-      // Only the owner reads: a reader's state is never saved, and completion
-      // would spawn a health run for nothing.
-      // The reader never throws on a document it cannot read; the try/catch
-      // here covers the completion steps, as the scorer's does.
-      // The document is read under the directory the session runs in now, from
-      // $.session.cwd(), because a persona works its plan in a linked worktree
-      // while sess.workdir stays the launch checkout, whose copy gains no
-      // Chapter and no Complete status until the plan's branch merges.
-      // sess.workdir remains the anchor the persona store and the workdir files
-      // resolve against, and no document is ever read under it. Where the call
-      // throws or answers with no directory, the reading is unreadable with the
-      // live directory named as unavailable, and it takes the same once-per-
-      // holder plan_record_unreadable log as a document the reader cannot read.
-      // A shell that moved into a subdirectory of its checkout leaves the live
-      // directory below the document, so resolvePlanDir walks up from it to the
-      // nearest directory holding the document at planPath or an archive place.
-      // The walk stops at the checkout's root, the first folder holding a .git
-      // entry, so it never reaches the launch checkout a worktree sits inside.
-      // A read under such an ancestor logs one plan_record_dir_resolved decision
-      // per holder naming both directories. Where the walk ends with no hit, the
-      // live directory is read and the reader names its own reason. A holder
-      // whose status is complete or abandoned when this block runs, a goal_done
-      // call during the turn among the ways, is still read, so its closing
-      // Chapter is counted, but it logs neither plan_record_dir_resolved nor
-      // plan_record_unreadable, and neither log is marked as written, so the
-      // once-per-holder budget is not spent on a closed holder.
-      const planHolder = turnLeaf ? planHolderOf(sess.state, turnLeaf) : undefined;
-      const planPath = planHolder?.planPath;
-      // Whether this turn's read found a Chapter above the stored count, or
-      // found the document Complete or archived and completed the holder. The
-      // compaction boundary step below reads a plan holder as mid-work unless
-      // one of the two is true; an unreadable document sets neither.
-      let planChapterAdvanced = false;
-      let planCompletedByDocument = false;
-      // Whether the checkout holding `holder`'s document, read in `planDir`,
-      // holds its completion: true where git answers a branch line with no
-      // upstream, a commit ahead, or any line after it. A held entry logs one
-      // plan_complete_held decision naming the holder, the document, the
-      // directory, the dirty count, the ahead count and whether an upstream is
-      // set, again only when that reason text changes. A read that cannot be
-      // used, or no planDir, holds nothing, so the completion runs as it does
-      // for a tree git cannot see. Not holding re-arms the log.
-      const heldByCheckout = async (holder: GoalNode, docPath: string, planDir: string | null): Promise<boolean> => {
-        const checkout = planDir === null ? null : await readPlanCheckout($, planDir);
-        if (planDir === null || checkout === null || (checkout.upstream && checkout.ahead === 0 && checkout.dirty === 0)) {
-          planCompleteHeldLogged.delete(holder.id);
-          return false;
-        }
-        const reason = `dirty ${checkout.dirty}, ahead ${checkout.ahead}, upstream ${checkout.upstream ? "set" : "none"}`;
-        if (planCompleteHeldLogged.get(holder.id) !== reason) {
-          planCompleteHeldLogged.set(holder.id, reason);
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "plan_complete_held",
-            detail: `${holder.id}: ${docPath.slice(0, 150)}: held until the checkout at ${planDir.slice(0, 200)} is clean and pushed: ${reason}`,
-          });
-        }
-        return true;
-      };
-      // Completes `holder` on a document reading Complete or archived.
-      // The document is the record for the holder's whole subtree, so its live
-      // descendants (pending, active or paused, a task the worker added under
-      // the plan node among them) are marked complete before the holder is,
-      // each with one note naming the document and one complete decision, the
-      // shape the scorer's complete branch writes for the one node it
-      // completes. A descendant already complete or abandoned is left as it
-      // is, nothing outside the holder's subtree is touched, and no walk goes
-      // upward past the holder. An open operator ask on an entry this close
-      // completed closes as goal_done closes one. The next entry is then
-      // activated only where no operator ask is still open, the hold
-      // goal_done's none-active branch honours, and with `onlyWhenIdle` only
-      // where no entry is active as well, since a plan read beside the turn's
-      // own holder can complete while another entry is being worked. Where
-      // activation is held, an activeGoalId naming an entry this close
-      // completed is cleared, so no pointer is left on a node the closing
-      // write can fold away.
-      const completeByDocument = async (holder: GoalNode, docPath: string, reading: Exclude<PlanRecordReading, { kind: "unreadable" }>, onlyWhenIdle: boolean): Promise<void> => {
-        const completedId = holder.id;
-        const cause = reading.kind === "archived"
-          ? `plan document ${docPath} is archived at ${reading.at}`
-          : `plan document ${docPath} reads Status: Complete`;
-        const subtree: string[] = [holder.id];
-        for (let i = 0; i < subtree.length; i++) {
-          for (const child of sess.state.goals) {
-            if (child.parentId === subtree[i] && !subtree.includes(child.id)) subtree.push(child.id);
-          }
-        }
-        // The goals this close completes, the holder and each live
-        // descendant, which its [MEMORY CHECK] asks about with any plan
-        // parent completeLeaf's walk up completes.
-        const closedHere: string[] = [holder.id];
-        for (const id of subtree.slice(1)) {
-          const descendant = sess.state.goals.find((g) => g.id === id);
-          if (!descendant) continue;
-          if (descendant.status !== "pending" && descendant.status !== "active" && descendant.status !== "paused") continue;
-          closedHere.push(descendant.id);
-          descendant.status = "complete";
-          descendant.lead = null;
-          descendant.notes.push(`completed with ${cause}`);
-          descendant.updatedAt = Date.now();
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "complete",
-            detail: `${descendant.id}: completed under ${completedId}, ${cause}`,
-          });
-        }
-        for (const id of await completeLeafReturningClosed($, completedId, "plan document complete")) {
-          if (!closedHere.includes(id)) closedHere.push(id);
-        }
-        // A holder blocked over a child ("Child task blocked") ends
-        // complete with no live reason and no lead left on it.
-        holder.blockedReason = undefined;
-        holder.lead = null;
-        await runHealth($, completedId);
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "complete",
-          detail: `${completedId}: ${cause}`,
-        });
-        queueMemoryCheck($, expectedTurns, completedId, holder.title, closedHere);
-        // Every open ask on an entry this completion closed stands as
-        // goal_done's do.
-        await closeAsksOnCompletedNodes($, closedHere, "goal_done (plan document)", Date.now());
-        if (openBlockingAsks(sess.state).length === 0 && (!onlyWhenIdle || !sess.state.goals.some((g) => g.status === "active"))) {
-          const nextId = activateNext(sess.state, completedId);
-          activate($, nextId, `${completedId} complete`);
-        } else if (sess.state.activeGoalId !== null && closedHere.includes(sess.state.activeGoalId)) {
-          sess.state.activeGoalId = null;
-        }
-        try { $.ui.log(`Agentic: ${completedId} plan complete (${cause})`); } catch { /* non-fatal */ }
-        try { $.ui.status(""); } catch { /* non-fatal */ }
-      };
-      if (sess.isOwner && planHolder && planPath) {
-        const holder = planHolder;
-        const holderClosed = holder.status === "complete" || holder.status === "abandoned";
-        try {
-          const { reading, liveDir, planDir } = await readPlanDocument($, planPath);
-          if (liveDir !== null && planDir !== null && planDir !== liveDir) {
-            if (!holderClosed && !planRecordDirResolvedLogged.has(holder.id)) {
-              planRecordDirResolvedLogged.add(holder.id);
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "goal",
-                action: "plan_record_dir_resolved",
-                detail: `${holder.id}: ${planPath.slice(0, 150)}: resolved to ${planDir.slice(0, 200)} for live directory ${liveDir.slice(0, 200)}`,
-              });
-            }
-          } else if (planDir !== null) {
-            planRecordDirResolvedLogged.delete(holder.id);
-          }
-          if (reading.kind === "unreadable") {
-            if (!holderClosed && !planRecordUnreadableLogged.has(holder.id)) {
-              planRecordUnreadableLogged.add(holder.id);
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "goal",
-                action: "plan_record_unreadable",
-                detail: `${holder.id}: ${planPath.slice(0, 150)}: ${reading.reason}${liveDir !== null ? `; live directory ${liveDir.slice(0, 200)}` : ""}`,
-              });
-            }
-          } else {
-            // A readable document re-arms the once-per-session log, so a
-            // document that becomes unreadable again later logs once more.
-            planRecordUnreadableLogged.delete(holder.id);
-            if (reading.kind === "read" && reading.chapters > (holder.chapterCount ?? 0)) {
-              const previous = holder.chapterCount ?? 0;
-              holder.chapterCount = reading.chapters;
-              holder.updatedAt = Date.now();
-              planChapterAdvanced = true;
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "goal",
-                action: "plan_progress",
-                detail: `${holder.id}: ${planPath} Chapters ${previous} -> ${reading.chapters}`,
-              });
-            }
-            // The section total and the latest Chapter's Next: line, for the
-            // board card that reads the store. Each is written only where it
-            // differs, a null line removes the field, and neither write touches
-            // updatedAt or logs a decision, since neither is progress.
-            if (reading.kind === "read") {
-              if (holder.sectionCount !== reading.sections) holder.sectionCount = reading.sections;
-              if (reading.next === null) {
-                if (holder.nextSection !== undefined) delete holder.nextSection;
-              } else if (holder.nextSection !== reading.next) {
-                holder.nextSection = reading.next;
-              }
-            }
-            const documentComplete = reading.kind === "archived" || reading.complete;
-            if (documentComplete && holder.status !== "complete" && holder.status !== "abandoned"
-              && !(await heldByCheckout(holder, planPath, planDir))) {
-              await completeByDocument(holder, planPath, reading, false);
-              planCompletedByDocument = true;
-            }
-          }
-        } catch (err) {
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "plan_record_failed",
-            detail: `${holder.id}: ${String(err).slice(0, 150)}`,
-          });
-        }
-      }
-
-      // The plan entries the walk up left open, read at every turn end on top
-      // of the turn's own holder, so a document that turns Complete in a later
-      // turn completes its plan whatever entry that turn started on. They are
-      // derived from the tree rather than recorded: a plan node with a
-      // planPath, not complete, abandoned or blocked, with at least one child
-      // and every child complete or abandoned save its open closing leaf, so a
-      // turn started on some other entry still completes it. A completion
-      // marks the closing leaf complete with the plan, as a live descendant of
-      // the holder, and the fold takes it at its next write. The turn's own
-      // holder was read above and is not read twice. A reading short of
-      // Complete, or unreadable, changes nothing and logs nothing, since such
-      // a plan is read at every turn end until it closes. A Complete reading
-      // waits for the checkout holding the document as the holder's does, with
-      // the same once-per-state plan_complete_held log. One read per such
-      // plan; the owner alone reads, as for the holder, and a subagent's
-      // completion, which is not the persona's own turn end, reads none.
-      if (sess.isOwner && !completesSubagentLoop) {
-        const leftOpen = sess.state.goals.filter((g) => {
-          if (g.kind !== "plan" || !g.planPath || g === planHolder) return false;
-          if (g.status === "complete" || g.status === "abandoned" || g.status === "blocked") return false;
-          const closingLeaf = openClosingLeafOf(g);
-          return sess.state.goals.some((c) => c.parentId === g.id)
-            && sess.state.goals.every((c) => c.parentId !== g.id || c === closingLeaf || c.status === "complete" || c.status === "abandoned");
-        });
-        for (const plan of leftOpen) {
-          try {
-            const { reading, planDir } = await readPlanDocument($, plan.planPath!);
-            if (reading.kind === "unreadable" || (reading.kind === "read" && !reading.complete)) continue;
-            if (plan.status === "complete" || plan.status === "abandoned") continue;
-            if (await heldByCheckout(plan, plan.planPath!, planDir)) continue;
-            await completeByDocument(plan, plan.planPath!, reading, true);
-          } catch (err) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "plan_record_failed",
-              detail: `${plan.id}: ${String(err).slice(0, 150)}`,
-            });
-          }
-        }
-      }
-
-      // The plan health request and its one outcome joiner. Everything here
-      // writes journal lines and session memory and nothing else: no branch
-      // above or below reads a value from it, and the one decision it can push
-      // is the journal's own write-failure line.
-      //
-      // The origin of this turn settles the next_speaker outcome of the
-      // previous plan health call, whatever entry that call was on. Every
-      // record held for an entry that has completed, been abandoned or left
-      // the tree is dropped, whichever entry this turn was on. Last, on a
-      // completed turn on a plan entry, block-owner is asked over this turn's
-      // closing text and the entry's last few.
-      if (jevMode === "shadow") {
-        const nextSpeakerStampId = sess.jevNextSpeakerStampId;
-        if (nextSpeakerStampId !== null) {
-          sess.jevNextSpeakerStampId = null;
-          shadowOutcome(hostOf($), nextSpeakerStampId, "next_speaker", wasChannelOrigin ? "channel" : wasDelivery ? "delivery" : "neither");
-        }
-        for (const heldId of [...sess.jevPlanHealth.keys()]) {
-          const heldEntry = sess.state.goals.find((g) => g.id === heldId);
-          if (!heldEntry || heldEntry.status === "complete" || heldEntry.status === "abandoned") sess.jevPlanHealth.delete(heldId);
-        }
-        if (turnLeaf && isPlanEntry(sess.state, turnLeaf)) {
-          const entryId = turnLeaf.id;
-          const entryOver = turnLeaf.status === "complete" || turnLeaf.status === "abandoned";
-          // A subagent's completion is its report, not the worker's closing
-          // text, so it asks nothing and enters no recent text.
-          if (!skipped && !isMemoryCheckTurn && !completesSubagentLoop && sess.isOwner && !entryOver) {
-            let record = sess.jevPlanHealth.get(entryId);
-            if (record === undefined) {
-              record = { closingTexts: [] };
-              sess.jevPlanHealth.set(entryId, record);
-            }
-            // The one cut of the closing text, which both the request's
-            // closingText and the recent list carry: the journal's state
-            // column is exempt from the field clamp, so what bounds a call
-            // line and the request body is this cut alone.
-            const closingText = e.answer.slice(0, PLAN_HEALTH_TEXT_MAX);
-            record.closingTexts.push(closingText);
-            while (record.closingTexts.length > PLAN_HEALTH_RECENT_MAX) record.closingTexts.shift();
-            const stampId = shadowAskPlanHealth(hostOf($), closingText, [...record.closingTexts], jevMode, hookBudget);
-            if (stampId !== null) sess.jevNextSpeakerStampId = stampId;
-          }
-        }
-      }
-
-      // Memory curation: distill, don't snapshot.
-      // Skip curation on nudged turns: the controller's own instruction
-      // is not a user preference and must not be distilled into a memory.
-      // The turn's start recorded whether a nudge opened it, so a subagent
-      // completing inside the turn does not make its end read as un-nudged.
-      // A [MEMORY CHECK] turn is skipped too: its prompt and answer are the
-      // plugin's question and a list of record names. A subagent's completion
-      // is skipped as well: its answer is the subagent's report, not an
-      // exchange with the operator, so it owes no record.
-      if (!skipped && !turnNudgedAtDelete && !isMemoryCheckTurn && !completesSubagentLoop) {
-        try {
-          if (askedTextAtDelete.trimStart().startsWith("<task-notification>")) {
-            // A turn opened by the harness's notification block for a finished
-            // background task or subagent makes no memory call at all: no seam
-            // call, no classify and no distill. What such an exchange holds is
-            // the persona's own report rather than anything the operator stated.
-            // A prompt carrying the block anywhere but its opening is an
-            // operator's message and is classified as any other. The test reads
-            // the text this turn opened with, recorded at turn.start, rather
-            // than currentPrompt, which only the prompt hook sets: a plugin
-            // turn or a continuation after a notification turn would otherwise
-            // read the notification and be skipped.
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "memory",
-              action: "memory_skipped_task_notification",
-              detail: "the turn opened with a task notification, so no memory call was made",
-            });
-          } else {
-            // The exchange, cut once: the kind state's last part.
-            const exchangeText = `User asked: ${currentPrompt.slice(0, PROMPT_HEAD_MAX)}\nWorker answered: ${e.answer.slice(0, 500)}`;
-            // Bound to a name so the same bytes reach Haiku and Jev, whether
-            // Jev is asked live ahead of Haiku or in shadow beside it.
-            const memoryKindState =
-              `What kind of memorable content is in this exchange? Answer with exactly one label.\n` +
-              `A description of what happened this turn is "discard".\n` +
-              `Only a fact or preference the user stated explicitly. An instruction to call a tool is discard.\n` +
-              exchangeText;
-            // The memory gate. Where memory-kind is named live, Jev is asked
-            // first and awaited, bounded at the wait rule's Jev budget for
-            // turn.complete. The classify below races the rule's model figure
-            // and the distill bounds itself with its own timeoutMs. A classify
-            // hold that gives up throws into the catch at the step's end as a
-            // failed call does. Everywhere else
-            // the gate is null and the step is Haiku, then Jev in shadow with
-            // Haiku's value. The branch is tested here rather than left to
-            // liveAsk, whose not-live path would journal a shadow call carrying
-            // no Haiku value.
-            const gate = jevMode === "shadow" && jevLive.includes(MEMORY_KIND)
-              ? await liveAsk(hostOf($), "turn.complete", hookBudget, "memory-kind", MEMORY_KIND, MEMORY_KIND_LABELS, memoryKindState, jevMode, jevLive)
-              : null;
-            // Whether a confident discard skips both Haiku calls, and the live
-            // stamp a call the gate passed joins Haiku's label to.
-            let gateSkips = false;
-            let passedStampId: string | null = null;
-            if (gate !== null) {
-              const split = splitOf(gate.stampId);
-              if ("reason" in gate) {
-                // Haiku runs as today with no shadow call beside it. A seam
-                // reason has its own call line naming it, written by liveAsk. A
-                // `rejected` call has none, since liveAsk's catch returns before
-                // any line is written, so this decision is its only record.
-                sess.state.decisions.push({
-                  timestamp: Date.now(),
-                  loop: "memory",
-                  action: "memory_gate_fallback",
-                  detail: `reason ${gate.reason}, stamp ${gate.stampId}, split ${split}`,
-                });
-              } else {
-                const discard = gate.answer.probabilities["discard"];
-                const p = typeof discard === "number" ? discard : null;
-                // A holdout stamp, one in five by a hash of its id, runs Haiku
-                // whatever Jev said, so the rate at which the gate would have
-                // skipped a memory Haiku kept stays readable from the journal.
-                if (split === "dev" && p !== null && Math.round(p * 100) >= memoryGateDiscardPercent) {
-                  gateSkips = true;
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "memory",
-                    action: "memory_gate_skipped",
-                    detail: `p ${p}, stamp ${gate.stampId}, split ${split}`,
-                  });
-                } else {
-                  passedStampId = gate.stampId;
-                  sess.state.decisions.push({
-                    timestamp: Date.now(),
-                    loop: "memory",
-                    action: "memory_gate_passed",
-                    detail: `${p === null ? "" : `p ${p}, `}stamp ${gate.stampId}, split ${split}, ${split === "holdout" ? "holdout" : "below-floor"}`,
-                  });
-                }
-              }
-            }
-            const kind = gateSkips ? null : answeredOrThrow(await holdFor(holdHostOf($, hookBudget), "turn.complete", "model", $.model.classify(
-              memoryKindState,
-              MEMORY_KIND_LABELS,
-              { model: "haiku" }
-            )));
-            if (gate === null) {
-              // The decision seam, in shadow.
-              shadowAsk(
-                hostOf($),
-                "memory-kind",
-                MEMORY_KIND,
-                MEMORY_KIND_LABELS,
-                memoryKindState,
-                jevMode,
-                typeof kind === "string" ? kind : null,
-                undefined,
-                undefined,
-                hookBudget,
-              );
-            } else if (passedStampId !== null && typeof kind === "string") {
-              // Haiku's label against the live call, so the journal holds both
-              // answers for one input as a shadow answer line does.
-              shadowOutcome(hostOf($), passedStampId, "haiku_kind", kind);
-            }
-            if (kind && kind !== "discard" && sess.isOwner) {
-              // The record is owed, not written here: the controller tick's
-              // drainMemoryOwed writes it, by a fork of the transcript while
-              // the prompt cache is warm and by the Haiku distill otherwise,
-              // so the handler makes no model call past the gate and a slow
-              // writer never holds the next turn. The item carries the bytes
-              // the gate saw, and the turn head names the turn to the fork by
-              // the text it opened with, a delivery's context block removed:
-              // currentPrompt, which the prompt head reads, is an earlier
-              // turn's on a delivery, proposal or continuation turn. Only the
-              // session that owns the persona writes
-              // its records, so a passive reader's gate result is dropped and
-              // its queue stays empty. A fifth item drops the oldest.
-              const dropped = pushMemoryOwed(sess.state.memoryOwed, {
-                turnId: typeof e.turnId === "string" ? e.turnId : "",
-                kind: memqKindOf(kind),
-                promptHead: currentPrompt.slice(0, PROMPT_HEAD_MAX),
-                answerHead: e.answer.slice(0, 500),
-                turnHead: deliveredRecordText(turnOpeningText(askedTextAtDelete)).trim().slice(0, PROMPT_HEAD_MAX),
-                at: Date.now(),
-              });
-              for (const old of dropped) noteMemoryOwedDropped(old, `the queue held ${MEMORY_OWED_MAX}, so the oldest item made way for the newest`);
-            }
-          }
-        } catch {
-          // Curation failed; non-fatal.
-        }
-      }
-
-      // S12: increment turnsSince for self-review debounce.
-      if (sess.state.monitor.selfReview) {
-        sess.state.monitor.selfReview.turnsSince += 1;
-      }
-
-      // D4: every record stamped with this turn gets the turn's answer as its
-      // reply and is marked answered. One break-in scan can stamp several
-      // flagged records with the running turn, so a turn can close over more
-      // than one; the model read all of them before it answered, so the one
-      // answer is the reply to each. A record may already be resolved: the owner
-      // does the work and calls agentic_resolve inside the stamped turn, so the
-      // reply is filed for a resolved record too and its resolution stays as it
-      // is. A record delivered on its wait alone is never stamped, so it never
-      // matches here. A subagent's completion files nothing, whatever turn id it
-      // carries: its answer is the subagent's report, not the reply.
-      if (sess.isOwner && !completesSubagentLoop) {
-        const persona = sess.persona;
-        const store = commonsStoreOf($);
-        const allRecords = await listInboxRecords(store, persona);
-        // An absent turn id matches nothing. A record delivered on its wait
-        // alone is delivered and unstamped by design, so an undefined id
-        // compared against an unstamped record would match every one of them
-        // at once and file this turn's answer as a reply to each.
-        const turnId = typeof e.turnId === "string" && e.turnId.length > 0 ? e.turnId : null;
-        const matching = turnId === null ? [] : allRecords.filter(
-          (rec) => (rec.status === "delivered" || rec.status === "resolved") && rec.turnId === turnId
-        );
-        const answering = Boolean(e.answer) && e.reason !== "aborted";
-        for (const record of matching) {
-          // One record whose stored value fails to read or parse must not cost
-          // the rest of them their replies, nor the persist below. The guard is
-          // the per-record body and nothing wider: the listInboxRecords read
-          // that feeds this loop sits outside it, and a failure there throws
-          // past the persist.
-          try {
-            if (answering) {
-              // AX4: write reply, mark answered
-              // The read and the parse, the only steps here that can throw, run
-              // before either write, so a stored value that cannot be read back
-              // leaves nothing written at all: no reply record on a record that
-              // never reaches answered, which is the state the failure decision
-              // below reports.
-              const existing = await store.get(record.key);
-              const parsed = existing
-                ? (typeof existing === "string" ? JSON.parse(existing) : existing)
-                : null;
-              // BE2: use writeReplyRecord so the value is an object, not a string
-              await writeReplyRecord(store, persona, record.id, e.answer);
-              if (parsed !== null) {
-                if (parsed.status === "delivered") parsed.status = "answered";
-                await store.set(record.key, parsed);
-              }
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "operator_answered",
-                detail: `record ${record.id} replied`,
-              });
-            } else {
-              // AX4: empty answer or aborted. The record keeps its status
-              // (delivered, or resolved with its resolution), its stamp and no
-              // reply until the TTL: a later turn is not the one the plugin
-              // opened for it, so none re-stamps it.
-              sess.state.decisions.push({
-                timestamp: Date.now(),
-                loop: "monitor",
-                action: "operator_turn_unanswered",
-                detail: `record ${record.id} turn ${e.turnId} ended with no answer (empty or aborted); left ${record.status}`,
-              });
-            }
-          } catch (err) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "operator_reply_failed",
-              detail: `record ${record.id} reply refused, left ${record.status}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
-            });
-          }
-        }
-      }
-
-      // Section 5 (goal-every-turn): the live-agent reading, shared by the
-      // record close just below and the compaction boundary further down, and
-      // taken at most once per completion, at the first of the two that
-      // consults it. The close consults it only once its lead rule and open-ask
-      // rule have both declined, and the boundary only where a turn end could
-      // be durable, so a completion neither needs it on never reads the list.
-      // A read that fails is no live agent, which liveTopLevelAgentRunning
-      // explains and logs once.
-      let liveAgentRead: Promise<boolean> | null = null;
-      const readLiveAgent = (): Promise<boolean> => {
-        if (liveAgentRead === null) liveAgentRead = liveTopLevelAgentRunning($);
-        return liveAgentRead;
-      };
-
-      // Section 6 (goal-every-turn): route one, promoting a plan-touching bare
-      // record into the goal tree, runs inside the record block below, above the
-      // close and under the same guard. The order is load-bearing: the close can
-      // set the open record `delivered` on a live verdict, and route one reads the
-      // open record, so a plan-touching bare record is promoted before the close
-      // judges it, or it reads `delivered` where the plan says `promoted`. It sits
-      // after the reap for the same reason the close does, so a record the timeout
-      // has already judged is never promoted, and it shares the close's own
-      // skipped-turn rule: a turn the operator aborted leaves the record as it
-      // was, and an entry queued off an aborted turn would announce itself to the
-      // coordinator persona all the same.
-
-      // Section 5 (goal-every-turn): the record close, at the persona's own turn
-      // end under the true-boundary guard, and the `none` arm of the
-      // next_prompt_kind outcome beside it. The reap runs first, so a record
-      // past its timeout is expired here as well as at the load and the store
-      // write, and the close then reads a record the timeout has already judged.
-      // The expiry writer runs on every own turn end whether or not the turn
-      // was skipped, since an expired record's stamps are bookkeeping the turn
-      // did not touch; the close itself runs only where the turn was not
-      // skipped, so a skipped turn leaves the record exactly as it was. Position
-      // is load-bearing on both sides: the ask step above is what opens a
-      // blocking ledger entry, which the close's open-ask rule reads, and the
-      // outcome loop below reads the status the close sets.
-      if (completesGateTurn && sess.isOwner) {
-        reapTurnRecords(sess.state, Date.now());
-        settleExpiredDispositionStamps($);
-        if (!turnOpenAfterDelete && !skipped) {
-          await promotePlanTouchingRecord(
-            $, planEditedPathsAtDelete, coordinatorPersona, architectPersona,
-            () => turnStartSeq !== turnStartSeqAtDelete,
-          );
-          await closeTurnRecordAtTurnEnd(
-            $, turnLeaf ? turnLeaf.objective : "", e.answer, askedTextAtDelete, activityTextAtDelete, endedOnLead,
-            readLiveAgent, () => turnStartSeq !== turnStartSeqAtDelete, jevMode, jevLive, hookBudget,
-          );
-        }
-      }
-
-      // Section 4 (goal-every-turn): the record_delivered_within outcome, which
-      // answers every turn-open call that opened or continued a record. Each such
-      // call is held on its record as a pending stamp and settles exactly once:
-      // true at the first of the persona's own completions that finds the record
-      // delivered, false at the third of them without one. The entry is dropped as
-      // its line is written, which is what holds one call to one outcome line.
-      //
-      // A record carried across several messages holds several pending stamps, one
-      // per call, and each counts its own turns from where it joined, so the call
-      // that opened the record settles earlier than the call that continued it.
-      //
-      // Only the persona's own turn end counts a turn, which completesGateTurn is
-      // the test for: a background subagent's completion arrives while the
-      // persona's turn is still open and carries the subagent's agentId, so it
-      // advances nothing here. A reader session counts nothing either, since the
-      // records are the holder's. A record with no pending stamp is a record no
-      // call is waiting on, which is every record under the kill switch, so the
-      // absence of a stamp is the mode gate and no mode is read here.
-      //
-      // Position is load-bearing: this reads `record.status` and must run after
-      // everything on this handler that can set it. The step that closes a record
-      // `delivered` belongs between the lead read above and the compaction
-      // boundary below, so this block sits at the far end of that window, right
-      // before the boundary. Anything inserted into the window therefore lands
-      // ahead of it. Put a status-setting step below this block instead and a
-      // record delivered on its own third turn has `false` written for that call:
-      // the outcome reads the status one step before it is set, which is exactly
-      // the boundary case the journal's labelling pass is for, and no assertion
-      // on a record delivered earlier than its third turn can see it.
-      if (completesGateTurn && sess.isOwner) {
-        for (const record of sess.state.turnRecords) {
-          const pending = record.pendingStamps;
-          if (pending === undefined || pending.length === 0) continue;
-          const delivered = record.status === "delivered";
-          const held: TurnRecordStamp[] = [];
-          for (const stamp of pending) {
-            if (delivered) {
-              shadowOutcome(hostOf($), stamp.stampId, "record_delivered_within", "true");
-              continue;
-            }
-            const turns = stamp.turns + 1;
-            if (turns >= RECORD_OUTCOME_TURNS) {
-              shadowOutcome(hostOf($), stamp.stampId, "record_delivered_within", "false");
-              continue;
-            }
-            held.push({ stampId: stamp.stampId, turns });
-          }
-          if (held.length === 0) delete record.pendingStamps;
-          else record.pendingStamps = held;
-        }
-      }
-
-      // The compaction boundary: every completion of the persona's own turn,
-      // the one carrying the id turn.start carried, recomputes the owed bank,
-      // save a [MEMORY CHECK] turn's, which leaves it as it found it.
-      // The owed bank was cleared at the delete, so here it is only set, where
-      // that turn stopped at a durable point, and the first main-loop tool call
-      // of a later turn runs the kit's boundary command, which records the
-      // marker the module's own session.compact handler honors. A turn that made no tool call
-      // therefore never carries a stale bank into a later turn that ended
-      // mid-work or on a lead, even where this handler throws before reaching
-      // this step. A background subagent's completion inside the open turn, or
-      // one for a turn this session never saw start, is not the persona's own
-      // and leaves the owed bank as it is. A turn still open after this
-      // completion's delete, a reader session and a skipped turn each owe none.
-      // A durable point is read from fixed signals: the closing text opens with
-      // no BLOCKED: or WAITING: line, whatever the entry's kind, and the entry
-      // active at turn start either has no plan holder (a task entry) or its
-      // holder's document gained a Chapter or completed the holder this turn,
-      // or a goal_done call this turn completed the holder, named on the holder
-      // itself or on any descendant whose completion closed it. goal_done is the worker's own
-      // statement that the entry is finished. That holder is read at the
-      // delete and must still read complete there, so a holder left with every
-      // child closed by a drop, and an abandoned holder, are not finished this
-      // way. A plan holder that did none of these is mid-section and owes
-      // nothing, since a marker there would license compaction mid-work.
-      // Where the entry the turn left active differs from the one active at
-      // turn start (goal_add activating a plan in a turn that opened with none,
-      // or goal_done moving on to a pending plan), that end entry is read too:
-      // a plan holder of its own, not complete or abandoned and not the
-      // turn-start holder, is mid-section, since no plan-record read ran for it
-      // this turn and a plan the turn only reached has banked no Chapter. The
-      // one exception is the turn between two plans: where goal_done completed
-      // the turn-start holder and the main loop made no isNudgeCountWork call
-      // after that goal_done, the plan it activated got no work in the turn,
-      // so it does not make the turn mid-section. goal_done's answer tells the
-      // worker to end the turn there. A channel reply and a record to another
-      // persona are not work calls, and one work call or agent dispatch after
-      // the goal_done keeps the end holder mid-section. An end entry under the
-      // turn-start holder changes nothing. The end entry is the one the turn
-      // itself left active, read at the delete, before this handler's own
-      // scorer or document-complete step activates the next entry. An entry
-      // this handler activates got no work in the turn, so the point between
-      // plans stays durable. A background agent the main loop started and
-      // still running, read from $.agent.list() through the shared thunk
-      // above, makes the turn not durable either: its work lands after this
-      // turn's end, so a marker here would license compaction while that work
-      // is in flight. The list is read here only where every other durable
-      // signal already holds, and the record close above will already have
-      // read it on a turn its agent rule reached, so the two consult one
-      // reading. A blocking ask open at the turn's end, read off the ledger
-      // after the marker step above that opens it, makes the turn not durable
-      // as a WAITING: lead does: the plan's Goal lists an open ask beside the
-      // lead and the live agent as what puts an open record in flight, and an
-      // outstanding blocking ask is the waiting state reached by an ASK: line
-      // under a BLOCKED: lead. A non-blocking ask is a question the work
-      // proceeds past, so it holds nothing here either. The open ask is a
-      // synchronous fact like the lead, so it gates the list read too. An
-      // open turn record with no lead, no open ask and no live agent is idle, and idle is
-      // durable, so a record alone never withholds the bank. It runs after the
-      // plan-record read, which settles the Chapter signal. Its boundary facts
-      // were read at the delete. Where a newer turn has started since, this
-      // completion settled too late: that turn's first tool call may have run
-      // already, so a bank set now could only land mid-turn, and nothing is set
-      // or logged. The count is compared after the read below, so a turn that
-      // starts during that read is seen. A [MEMORY CHECK] turn's end neither
-      // clears nor sets the owed bank, as at the delete above.
-      const askHolds = openBlockingAsks(sess.state).length > 0;
-      const liveAgent = completesGateTurn && !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !askHolds
-        ? await readLiveAgent()
-        : false;
-      if (completesGateTurn && !completesMemoryCheckTurn) {
-        if (turnStartSeq !== turnStartSeqAtDelete) {
-          pendingCompactionBank = null;
-        } else {
-          const endLeaf = activeIdAtDelete === null || activeIdAtDelete === turnLeaf?.id
-            ? undefined
-            : sess.state.goals.find((g) => g.id === activeIdAtDelete);
-          const endHolder = endLeaf ? planHolderOf(sess.state, endLeaf) : undefined;
-          const holderDoneByGoalDone = planHolder !== undefined && planHolder.id === holderDoneByGoalDoneIdAtDelete;
-          const endHolderOpen = endHolder !== undefined && endHolder !== planHolder
-            && endHolder.status !== "complete" && endHolder.status !== "abandoned"
-            && !(holderDoneByGoalDone && !workAfterHolderDoneAtDelete);
-          const midSection = (planHolder !== undefined && !planChapterAdvanced && !planCompletedByDocument && !holderDoneByGoalDone) || endHolderOpen;
-          const durable = !turnOpenAfterDelete && sess.isOwner && !skipped && !endedOnLead && !askHolds && !midSection && !liveAgent;
-          pendingCompactionBank = durable ? { turnKind: turnKindAtStart } : null;
-        }
-      }
-
-      // A [MEMORY CHECK] turn's answer stamps the records it names, before the
-      // save below carries the cleared list. An aborted, errored, refused or
-      // empty turn has no answer to read, which is not the same as NONE.
-      if (memoryCheck !== undefined) {
-        await answerMemoryCheck($, memoryCheck.goalId, memoryCheck.goalIds, skipped || typeof e.answer !== "string" ? null : e.answer);
-      }
-
-      // The follow-up queue, after every step above: the entries this turn
-      // showed take their outcome, and the documentation check enqueues what
-      // it finds in the working tree. The persona's own turn end alone, in a
-      // claimed or an unclaimed session, since a subagent's loop is not the
-      // turn a prompt opened. It sits before the save so its decisions ride
-      // that save, and nothing in it throws into this handler.
-      if (!completesSubagentLoop && typeof e.turnId === "string") {
-        await followUpsAtTurnEnd($, e.turnId, typeof e.answer === "string" ? e.answer : "", followUpHitsAtDelete);
-      }
-
-      // M7: single guarded-write path (shared helper).
-      // Attempted rather than depended on. A throw from here would skip the
-      // next(e) below and leave the turn hook chain unfinished for every hook
-      // behind this one, which is a cost out of all proportion to a save this
-      // handler has no caller to report. The state stands in memory and the
-      // first write that is not refused carries it.
-      // The main turn's closing write folds what this turn completed, where
-      // no other turn is open or has started since this one's delete; see
-      // foldSettledPlans for the two writes that fold.
-      try {
-        if (sess.isOwner && !completesSubagentLoop && !turnIsOpen() && turnStartSeq === turnStartSeqAtDelete) await foldSettledPlans($);
-        await persist($);
-      } catch { /* persist could not read or write the store; this turn's record waits in memory */ }
-
-      // The completion drain: a turn this session saw start has closed and no
-      // other is open, so the next waiting record is delivered now rather than
-      // at the next tick, and a burst drains one record per turn. It runs after
-      // this handler rather than inside it, so its store reads and its submit
-      // never hold the hook chain the engine awaits before the next turn
-      // starts. A refused submit is recorded inside the drain as at the tick. A
-      // throw out of it is caught here into one decision, and skips it wrote
-      // are saved, since no tick save follows this path.
-      const drain = drainInboxNow;
-      // A completion naming a subagent loop is never the persona's own turn
-      // end, whatever turn id it carries, as at completesGateTurn above.
-      const completesSubagent = typeof e.agentId === "string" && e.agentId.length > 0;
-      if (removedOwnEntry && !completesSubagent && sess.isOwner && !turnOpenAfterDelete && !submittedReplyBackstop && drain !== null) {
-        void Promise.resolve().then(async () => {
-          // The ring is read by identity as well as length, since a save
-          // that trims it swaps the array for a shorter one.
-          const ring = sess.state.decisions;
-          const logged = ring.length;
-          try {
-            if (!(await drain()) && (sess.state.decisions !== ring || sess.state.decisions.length !== logged)) await persist($);
-          } catch (err) {
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "monitor",
-              action: "operator_delivery_error",
-              detail: `the inbox drain at a turn's end stopped: ${safeErrorText(err)}`.slice(0, 200),
-            });
-            try { await persist($); } catch { /* the store refused; the line above waits in memory */ }
-          }
-        });
-      }
-
-      return await next(e);
     } finally {
       hookBudget.live = false;
     }

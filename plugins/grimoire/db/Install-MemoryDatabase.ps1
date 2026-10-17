@@ -197,7 +197,15 @@ $ErrorActionPreference = 'Stop'
 # every row stays. The client's PAIR_VERDICT_SCHEMA_VERSION reads this number
 # back through mem.usp_Health, and `memq decay-scan` reads no verdict from a
 # host below it.
-$script:SchemaVersion = 12
+#
+# Version 13 is where a search or nearest row carries the record's own machine
+# scope. mem.udf_VisibleRecords projects mem.Record's [Machine], and
+# mem.usp_Search and mem.usp_Nearest return it as the row's machine key beside
+# the sandbox key, which names the sandbox that published the row. A version 12
+# host takes it in place, changing no table and no parameter, so every row
+# stays. No client gates on this number: a hit from a host below it carries no
+# machine key and prints no machine label.
+$script:SchemaVersion = 13
 
 # The five logins the Security scripts create, each with the role it joins
 # and the sandbox it publishes for. The logins file carries these three

@@ -22,11 +22,15 @@
 // shape, and whether this host shape loads is settled only by a live launch.
 //
 // The API key is read here and reaches exactly one place: the request's
-// Authorization header. No part of its value is journaled, logged, put in a
-// result detail or written to a file. Two kinds of text are scrubbed of it
-// before they leave: every detail built from a message the host or the
-// resolver produced, and the state itself, which is scrubbed once before the
-// request body is built and rides the result from there. The state scrub is
+// Authorization header. Neither its value nor any run of at least
+// KEY_FRAGMENT_MIN_CHARS characters matching its start or its end is
+// journaled, logged, put in a result detail or written to a file. A shorter
+// run is left as ordinary text, and so is a run inside the key that neither
+// begins with its first KEY_FRAGMENT_MIN_CHARS characters nor ends with its
+// last. Two kinds of text are scrubbed of the key and those runs before they
+// leave: every detail built from a message the host or the resolver
+// produced, and the state itself, which is scrubbed once before the request
+// body is built and rides the result from there. The state scrub is
 // this module's principal guard, and it is here because a guard needing the
 // key cannot sit on a boundary that must not hold one.
 //
@@ -36,6 +40,7 @@
 // only the validated fields ride the result.
 
 import type { PluginHost } from "./host";
+import { scrubText } from "./redactor";
 
 // The live contract, endpoint included: https://docs.typesafe.ai/api.md
 export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -68,6 +73,17 @@ export const MODEL_MAX_CHARS = 64;
 // is still replaced wherever it occurs, which is the scrub working as intended
 // and not a case this constant guards.
 export const KEY_MIN_CHARS = 16;
+
+// The shortest run of the key the scrub below replaces, where it matches the
+// start or the end of the key. A text that happens to hold the first few
+// characters of the key, or its last few, is ordinary text, so a shorter match
+// would rewrite it rather than redact it. Eight is half the shortest key the
+// seam sends, which is KEY_MIN_CHARS above: a start or end run under it
+// carries less than half of any key. A start run and an end run of one key
+// left in the same state may together carry 14 of a 16-character key, and a
+// run inside the key, which no cut leaves, is not matched at all. This is the
+// knob: raise it and fewer ordinary runs are hit.
+export const KEY_FRAGMENT_MIN_CHARS = 8;
 
 // What the seam needs from the host: the key, the network and a timer.
 export type SeamHost = Pick<PluginHost, "getApiKey" | "fetch" | "sleep">;
@@ -334,13 +350,66 @@ function messageOf(err: unknown): string {
 // field, and the state itself. Both the key as read and its trimmed form are
 // removed, since the header carries the trimmed form and a host error may echo
 // the value as the environment holds it. The floor above is what makes this a redaction rather than a
-// rewrite: a degenerate key never reaches it.
+// rewrite: a degenerate key never reaches it. The redactor's scrub then hides
+// every other secret it knows or detects, so a prompt, a message, an answer or
+// a tool result carried in the state reaches the vendor and the journal as
+// placeholders; it never throws, and its switch off leaves the text as is.
+//
+// After the whole key, a run of the trimmed key's start or end is replaced
+// too: any run of at least KEY_FRAGMENT_MIN_CHARS that equals a proper prefix
+// of the trimmed key, the longest at each occurrence, and any run that equals a
+// proper suffix of it, wherever the run sits. A caller cuts a value to a head
+// or a tail and may append more text after it, so a cut leaves a prefix or a
+// suffix of the key anywhere in the state. A head cut or a tail cut leaves only
+// a run starting where the key starts, or ending where it ends, so no other
+// substring of the key is matched. Every occurrence of the key's first or last
+// KEY_FRAGMENT_MIN_CHARS is considered, including one inside a run already
+// found, and runs that overlap or touch merge into one [key]. The trimmed form
+// is the one compared, since both forms share its inner characters. The text is
+// held as segments joined by [key], so no scan reads the placeholder an earlier
+// pass inserted. No pattern is built from the key, and the cost is about the
+// text length times the key length, plus a sort of the runs found.
 function withoutKey(text: string, key: string): string {
-  let out = text;
+  let parts: string[] = [text];
   for (const form of new Set([key, key.trim()])) {
-    if (form.length > 0) out = out.split(form).join("[key]");
+    if (form.length > 0) parts = parts.flatMap((part) => part.split(form));
   }
-  return out;
+  const bare = key.trim();
+  if (bare.length > KEY_FRAGMENT_MIN_CHARS) {
+    const head = bare.slice(0, KEY_FRAGMENT_MIN_CHARS);
+    const tail = bare.slice(-KEY_FRAGMENT_MIN_CHARS);
+    parts = parts.flatMap((part) => {
+      const marks: [number, number][] = [];
+      for (let at = part.indexOf(head); at >= 0; at = part.indexOf(head, at + 1)) {
+        let n = KEY_FRAGMENT_MIN_CHARS;
+        while (at + n < part.length && n < bare.length - 1 && part[at + n] === bare[n]) n++;
+        marks.push([at, at + n]);
+      }
+      for (let at = part.indexOf(tail); at >= 0; at = part.indexOf(tail, at + 1)) {
+        const end = at + KEY_FRAGMENT_MIN_CHARS;
+        let n = KEY_FRAGMENT_MIN_CHARS;
+        while (end - n > 0 && n < bare.length - 1 && part[end - n - 1] === bare[bare.length - n - 1]) n++;
+        marks.push([end - n, end]);
+      }
+      marks.sort((a, b) => a[0] - b[0]);
+      const pieces: string[] = [];
+      let from = 0;
+      let runEnd = -1;
+      for (const [start, end] of marks) {
+        if (runEnd >= 0 && start <= runEnd) {
+          runEnd = Math.max(runEnd, end);
+        } else {
+          if (runEnd >= 0) from = runEnd;
+          pieces.push(part.slice(from, start));
+          runEnd = end;
+        }
+      }
+      pieces.push(part.slice(runEnd >= 0 ? runEnd : 0));
+      return pieces;
+    });
+  }
+  const out = parts.join("[key]");
+  return scrubText(out).text;
 }
 
 // The same scrub over a structured state, field by field: every text the

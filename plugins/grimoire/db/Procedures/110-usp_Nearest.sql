@@ -26,9 +26,14 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_Nearest
 		AUTHOR:		Scott Applefeld
 		DATE:		September 17th, 2026
-		VERSION:	v1.3
+		VERSION:	v1.4
 	*********************************************************************************************
-		NOTES:		v1.3 - 10/04/2026 - SCOTT APPLEFELD
+		NOTES:		v1.4 - 10/14/2026 - SCOTT APPLEFELD
+							Each row returns the record's own [Machine] as [machine], the machine
+							key an operator record is scoped to, beside the [sandbox] that
+							published it.
+
+					v1.3 - 10/04/2026 - SCOTT APPLEFELD
 							The call writes no log row and computes no digest of the
 							vector. It scans and returns, and the database keeps no
 							record of who asked for what.
@@ -55,7 +60,7 @@ BEGIN	-- PROCEDURE
 							model produced.
 
 							Returns one row, one column [Json], a JSON array of {recordId,
-							name, fileKey, tier, segment, sandbox, visibility, description,
+							name, fileKey, tier, segment, sandbox, machine, visibility, description,
 							distance, chunkIndex} ordered nearest first.
 	*********************************************************************************************
 	********************************************************************************************/
@@ -135,6 +140,7 @@ BEGIN	-- PROCEDURE
 					,[tier]			= V.[Tier]
 					,[segment]		= V.[Segment]
 					,[sandbox]		= COALESCE(SS.[Name], WS.[Name], PS.[Name])
+					,[machine]		= V.[Machine]
 					,[visibility]	= V.[Visibility]
 					,[description]	= V.[Description]
 					,[archived]		= V.[IsArchived]

@@ -5,9 +5,10 @@
 // session's own transcript while the prompt cache is warm and by the Haiku
 // completion over the item's two heads otherwise. This file holds the queue's
 // bounds and its two moves, the two prompts, the reader of the fork's reply,
-// the cut of its follow-ups and the fork ledger's sum. hooks/index.ts holds
-// the model calls, the memq put, the follow-up queue's read and write, the
-// decisions and the in-flight flag, and imports nothing but these.
+// the cut of its follow-ups and the fork ledger's sum. hooks/drains.ts holds
+// the drain, the memq put, the follow-up queue's read and write, the
+// decisions and the drain's fork watch, and hooks/index.ts the model calls,
+// as closures.
 
 import { MEMORY_KINDS, MEMORY_OWED_MAX, oneLine, type ForkUsage, type MemoryKind, type MemoryOwed } from "./agent-state";
 

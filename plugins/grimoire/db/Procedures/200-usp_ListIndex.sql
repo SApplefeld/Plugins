@@ -56,8 +56,7 @@ BEGIN	-- PROCEDURE
 							mem.RecordUsage, which every sandbox's stamps fold into: the last
 							read stamp, the last applied stamp, and the count of distinct days
 							it was stamped applied. The machine an operator record is scoped to is read from
-							mem.Record for each row the visible set chose, since the visible
-							set carries no machine.
+							mem.Record for each row the visible set chose, by record id.
 
 							Returns one row per record, each one column [Json] holding
 							{recordId, tier, projectKey, typeName, name, description, tags,

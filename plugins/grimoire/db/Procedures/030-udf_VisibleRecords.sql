@@ -16,9 +16,13 @@ RETURN
 		SCRIPT:		mem.udf_VisibleRecords
 		AUTHOR:		Scott Applefeld
 		DATE:		September 17th, 2026
-		VERSION:	v1.1
+		VERSION:	v1.2
 	*********************************************************************************************
-		NOTES:		v1.1 - 10/03/2026 - SCOTT APPLEFELD
+		NOTES:		v1.2 - 10/14/2026 - SCOTT APPLEFELD
+							The row carries the record's own [Machine], the machine key an
+							operator record is scoped to, beside the other projected fields.
+
+					v1.1 - 10/03/2026 - SCOTT APPLEFELD
 							Every undeleted row is served to every mapped sandbox, a private
 							row of another sandbox's older project store included, since a
 							project's records are the fleet's and not one machine's. A NULL
@@ -60,6 +64,7 @@ RETURN
 			,[Visibility]				= R.[Visibility]
 			,[LastPublishedBySandboxId]	= R.[LastPublishedBySandboxId]
 			,[WrittenBySandboxId]		= R.[WrittenBySandboxId]
+			,[Machine]					= R.[Machine]
 			,[CreatedDt]				= R.[CreatedDt]
 			,[UpdatedDt]				= R.[UpdatedDt]
 	FROM	mem.Record R

@@ -33,9 +33,14 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_Search
 		AUTHOR:		Scott Applefeld
 		DATE:		September 17th, 2026
-		VERSION:	v1.5
+		VERSION:	v1.6
 	*********************************************************************************************
-		NOTES:		v1.5 - 10/04/2026
+		NOTES:		v1.6 - 10/14/2026 - SCOTT APPLEFELD
+							Each row returns the record's own [Machine] as [machine], the machine
+							key an operator record is scoped to, beside the [sandbox] that
+							published it.
+
+					v1.5 - 10/04/2026
 							The applied-day count each candidate's boost multiplies is the
 							record's [AppliedDays] in mem.RecordUsage, the number of
 							distinct calendar dates it was marked applied on, and 0 for a
@@ -126,7 +131,7 @@ BEGIN	-- PROCEDURE
 
 							Returns one row, one column [Json], a JSON
 							array of {recordId, name, fileKey, tier, segment, sandbox,
-							visibility, description, archived, score, fusedScore,
+							machine, visibility, description, archived, score, fusedScore,
 							appliedBoost, descriptionRank, bodyRank, vectorLiveRank,
 							vectorArchivedRank, distance}, ranks NULL where a list did
 							not vote and distance NULL where neither vector list did.
@@ -177,6 +182,7 @@ BEGIN	-- PROCEDURE
 		,[StoreSandboxId]			INT				NULL
 		,[LastPublishedBySandboxId]	INT				NULL
 		,[WrittenBySandboxId]		INT				NULL
+		,[Machine]					NVARCHAR(100)	NULL
 		,[Name]						NVARCHAR(200)	NOT NULL
 		,[FileKey]					NVARCHAR(400)	NOT NULL
 		,[Description]				NVARCHAR(MAX)	NOT NULL
@@ -228,6 +234,7 @@ BEGIN	-- PROCEDURE
 			,[StoreSandboxId]
 			,[LastPublishedBySandboxId]
 			,[WrittenBySandboxId]
+			,[Machine]
 			,[Name]
 			,[FileKey]
 			,[Description]
@@ -241,6 +248,7 @@ BEGIN	-- PROCEDURE
 				,[StoreSandboxId]			= V.[StoreSandboxId]
 				,[LastPublishedBySandboxId]	= V.[LastPublishedBySandboxId]
 				,[WrittenBySandboxId]		= V.[WrittenBySandboxId]
+				,[Machine]					= V.[Machine]
 				,[Name]						= V.[Name]
 				,[FileKey]					= V.[FileKey]
 				,[Description]				= V.[Description]
@@ -460,6 +468,7 @@ BEGIN	-- PROCEDURE
 					,[tier]					= V.[Tier]
 					,[segment]				= V.[Segment]
 					,[sandbox]				= COALESCE(SS.[Name], WS.[Name], PS.[Name])
+					,[machine]				= V.[Machine]
 					,[visibility]			= V.[Visibility]
 					,[description]			= V.[Description]
 					,[archived]				= V.[IsArchived]

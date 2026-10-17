@@ -33,10 +33,11 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Review roster (lens tiers, `Audience:` pair, model), every dispatch's effort | `executing-work` (step 3's dispatch table, step 4) |
 | The review-round backstop: its bound, its ladder, the classes that never freeze | `executing-work` (step 4's backstop paragraph) |
 | Whether a fix delta owes its own review round | `executing-work` (step 4's fix-delta bar, and step 3 for the below-bar judgment) |
+| A later review round's `Fix delta:`, `Adjudicated findings:` and `Step back:` lines, and reading a repost, a class finding or an `APPROACH:` paragraph | `executing-work` (step 3's later-round rule, step 4) |
 | What a security Critical must cite from a `## Threat model`, and what citing buys | `executing-work` (step 4's advisory paragraph) |
 | A `## Threat model` section's four parts, and the security lens where none exists | `security-reviewer` |
 | A section's `Standing Brief Amendments` block | `executing-work` |
-| Which surfaces a subagent may write | `executing-work`, enforced by `hooks/docs-write-guard.js` |
+| Which surfaces a subagent may write | `executing-work`, enforced by `docs-write` |
 | Replacing a dispatched agent for a reason other than a stall | `executing-work` |
 | Awaiting a background dispatch: `WAITING:` turn end or synchronous call | `executing-work` (the dispatch row, step 1's wait-shape bullet) |
 | A quiet dispatched agent: probe, wedge hallmark, cadence, the wakes it is evaluated at, windows | `finishing-work` (the unavailability rule) |

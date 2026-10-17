@@ -1,7 +1,8 @@
 // follow-ups.ts: the follow-up queue, and the documentation check that is
-// one of its two sources. The other, source turn-end, is the follow-ups the
-// memory fork's reply lists, which the controller tick's memory drain in
-// hooks/index.ts enqueues under the owed turn's id.
+// one of its three sources. Source turn-end is the follow-ups the memory
+// fork's reply lists, which the controller tick's memory drain in
+// hooks/index.ts enqueues under the owed turn's id. Source distillation is
+// the stretch fork's, enqueued at a compaction (hooks/stretch-distillation.ts).
 //
 // The queue carries what the module observed at a turn's end into the next
 // prompt's context. It is one $.store value per session, under

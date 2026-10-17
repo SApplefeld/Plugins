@@ -92,7 +92,7 @@
       "type": "string",
       "default": "off",
       "title": "Arming tier",
-      "description": "off, reader or owner. off registers the guards and after hooks and no tool, timer or claim (a plain chat session). reader registers agentic_identity/agentic_say/agentic_inbox/fleet_status only, with no goal-tree tool and no ownership. owner is the full worker/coordinator shape. A supervisor launch always sets owner."
+      "description": "off, reader or owner. off registers the guards and after hooks and no tool or claim, and one timer, the compaction pass's (a plain chat session). reader registers agentic_identity/agentic_say/agentic_inbox/fleet_status only, with no goal-tree tool and no ownership. owner is the full worker/coordinator shape. A supervisor launch always sets owner."
     },
     "coordinatorPersona": {
       "type": "string",
@@ -128,13 +128,13 @@
       "type": "string",
       "default": "live",
       "title": "Compaction pass",
-      "description": "off, shadow or live, and live is the default. shadow has the module ask Jev on its heartbeat whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live plans the same way and then acts: at an automatic compaction or its precompute it hands up the plan's message list in place of the engine's summary where the plan covers the transcript and its kept estimate is at or under target, and otherwise takes the summary. At an expired cache it starts one marked compaction per idle stretch, only where the plan would drop at least 20,000 tokens, and that compaction cuts or skips and never summarizes. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off a pass that is not off asks nothing, writes one compaction_pass_disabled line per armed session, and writes no line at a compaction."
+      "description": "off, shadow or live, and live is the default. shadow has the module ask Jev on a timer, the heartbeat in an armed session and a timer of its own in an unarmed one, whether each old tool result is kept, cut or dropped, build a plan from those answers, and write to the decision journal what the plan would have kept at each automatic compaction and once per idle stretch past the cache life. It changes no message. live plans the same way and then acts: at an automatic compaction or its precompute it sends the plan's cut message list down to the engine's summary where the plan covers the transcript and keeps each call beside its result, and otherwise the summary runs over the whole transcript. At an expired cache it starts one marked compaction per idle stretch, only where the plan would drop at least 20,000 tokens, and that compaction cuts or skips and never summarizes. off asks nothing and writes nothing. Any other value is read as off, with one decision saying so. Under jevMode off a pass that is not off asks nothing, writes one compaction_pass_disabled line per session, armed or not, and writes no line at a compaction."
     },
     "guards": {
       "type": "string",
       "default": "live",
       "title": "Before-tool guards",
-      "description": "off, shadow or live, and live is the default. shadow has the module's tool.call hook run every registered before-tool guard on each call, write each verdict to the decision journal as a guard_verdict line beside the kit command hook's verdict for the same call as a guard_shadow line, and let the call run. live returns a guard's deny as the call's result and refuses a call whose guard failed, naming the guards the call matched. off runs no guard. The after-call hooks run whatever the value. Any other value is read as off, with one decision saying so."
+      "description": "off, shadow or live, and live is the default. shadow has the module's tool.call hook run every registered before-tool guard on each call, write each verdict to the decision journal as a guard_verdict line and a guard_shadow line, and let the call run. The guard_shadow line's command verdict reads deny only on a refusal phrase no command hook in the current kit writes. live returns a guard's deny as the call's result and refuses a call whose guard failed, naming the guards the call matched. off runs no guard. The after-call hooks run whatever the value. Any other value is read as live, so a misspelt value disarms nothing and keeps the memq grant answering, with one decision saying so."
     },
     "jevLive": {
       "type": "string",
@@ -171,6 +171,18 @@
       "default": "",
       "title": "Own heartbeat file path",
       "description": "The heartbeat file only this session writes, <rundir>/heartbeat.json, stamped with its session id, lastSeen and turnStartedAt on every heartbeat tick. It is the heartbeat the supervisor's liveness verdict reads. The supervisor writes this; left unset, no such file is written."
+    },
+    "redactor": {
+      "type": "boolean",
+      "default": true,
+      "title": "Transcript redactor",
+      "description": "Whether the redactor hides secrets from the transcript: a value a tool prints, a prompt carries, a context block holds or a subagent task quotes is swapped for a placeholder before the model reads it, the real value is restored only inside Bash, PowerShell, Write, Edit, MultiEdit and NotebookEdit, in a call that writes no store, and a store surface carrying a raw secret is refused. true by default. false passes every event through untouched."
+    },
+    "credentialFiles": {
+      "type": "string",
+      "default": "",
+      "title": "Credential files",
+      "description": "A comma-separated list of absolute paths whose secrets the redactor hides from session start. A file whose name ends in .env contributes the value of every line whose key is KEY, TOKEN, SECRET, PASSWORD, PASS or PWD, or ends in an underscore and one of them; any other file contributes its whole trimmed content. A missing or unreadable file contributes nothing and is logged once. Empty by default, which seeds nothing from this setting."
     }
   }
 }

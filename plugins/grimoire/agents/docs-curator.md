@@ -19,7 +19,7 @@ The spec/plan path in `docs/plans/`, and the project root. Read the spec, includ
 - Follow the prose-register skill for prose. You inherit no skills, so read the full skill from disk at the absolute path your dispatch supplies, plus any `references/` file it points at. If the path is missing or unreadable, say so in your output. Then write to the doctrine's register bullets where your context carries them, rather than guessing.
 - Update existing docs in place, never forking parallel copies. Preserve doc history sections where present.
 
-Your `docs/` writes pass `docs-write-guard`, which admits a main session and the agent type `docs-curator`, bare or as `grimoire:docs-curator`, and denies every other subagent. A dispatch under any other type writes its output under `.kit/` and returns the content for the orchestrator to land, the one exception to the docs-only constraint.
+Your `docs/` writes pass `docs-write`, which admits a main session and the agent type `docs-curator`, bare or as `grimoire:docs-curator`, and denies every other subagent. A dispatch under any other type writes its output under `.kit/` and returns the content for the orchestrator to land, the one exception to the docs-only constraint.
 
 ## Process
 

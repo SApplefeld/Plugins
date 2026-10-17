@@ -4141,6 +4141,16 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - reason: The seat's conduct lived in the persona plugin's launch literal alone, which no kit session running `/role Architect` could read, so the row names the skill that now owns it, beside the liaison row that names that seat's skill the same way. The label meanings and the launch facts stay the plugin's under the dispatch row above.
 - passage: | The Architect seat's conduct: a design ask, the plan written for a worker and never run, the clone, branch and report rules | `architect` |
 
+### E001
+- key: Name executing-work, steps 3 and 4, as the owner of a later review round's `Fix delta:`, `Adjudicated findings:` and `Step back:` lines and of reading a repost, a class finding or an `APPROACH:` paragraph.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:36
+- provenance: docs/plans/claude-kit_review-convergence_spec_v1.md section 1 2026-10-16, stage 1 of the review-verification program the operator approved that day.
+- verdict: keep
+- landed: 1c4a8198 section 1
+- reason: The three brief lines live in step 3's later-round rule and their readings in step 4, so a session placing a rule about re-review scope, reposts or the step-back reads the owner from this row rather than adding a second carrier beside the backstop row.
+- passage: | A later review round's `Fix delta:`, `Adjudicated findings:` and `Step back:` lines, and reading a repost, a class finding or an `APPROACH:` paragraph | `executing-work` (step 3's later-round rule, step 4) |
+
 ## plugins/grimoire/output-styles/kit.md
 
 This document is the kit's output style: it sets the register and shape of everything the session writes to Scott, its named reader. It owns the moments of addressing that reader (pitching explanation depth for a mixed expert-and-outsider audience who often reads on a phone after the fact), teaching while working, emitting the three formatted blocks (insight before and after significant work, decision when a call is made inside the session's remit, memory when the memory store changes by a deliberate act), and, through the pinned communication core it carries, the general communication rules. It is a style with `force-for-plugin: true` and `keep-coding-instructions: true` in its frontmatter, so it is in force for every turn of every session rather than invoked for a task: load class `session-start`.

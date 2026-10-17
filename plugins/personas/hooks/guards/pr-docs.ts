@@ -1,5 +1,5 @@
 // pr-docs.ts: the before-tool guard that holds a pull request until docs/ is
-// committed. It is the kit's pr-docs-guard.js ported whole.
+// committed.
 //
 // The documentation work (drift curation, plan archival, backlog prune, index
 // refresh) ships in the same pull request as the code, not as a follow-up, so

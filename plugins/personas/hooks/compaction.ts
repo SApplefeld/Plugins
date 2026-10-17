@@ -886,7 +886,9 @@ function skillNameOf(input: unknown): string {
 
 // --- The pass: the plan ---
 
-// The target a plan's kept estimate must sit at or under to apply: the
+// The target a plan's kept estimate must sit at or under to apply at the
+// marked compaction and in the shadow estimate, and which refuses nothing at
+// an automatic compaction: the
 // auto-compaction threshold's share where the usage breakdown gives one,
 // else the same share of the model's window, null where neither is read.
 export function targetTokensOf(usage: unknown): number | null {
@@ -972,23 +974,31 @@ export function buildPlan(
 
 // Why a plan does not apply to a message list, or null where it does: no
 // plan, keys that do not open the list, a kept estimate over the target or
-// no target to read it against, and an apply that would leave a kept tool
+// no target to read it against where the size checks run, and an apply that
+// would leave a kept tool
 // result not directly after the assistant message carrying its call, or a
 // kept call without its result.
 export type PlanRefusal = "no-plan" | "prefix" | "over-target" | "no-target" | "pairing";
 
+// `sizeChecks` false skips the two refusals that bound the cut list's size,
+// no-target and over-target, and keeps the other three. An automatic
+// compaction passes it, since the engine's summary runs over whatever the cut
+// leaves. The pairing check still runs where the plan has no target.
 export function planRefusal(
   plan: CompactionPlan | null,
   messages: readonly PassMessage[],
   applied: ApplyResult | null,
   covers: boolean = plan !== null && keysPrefix(plan.keys, messages),
+  { sizeChecks = true }: { sizeChecks?: boolean } = {},
 ): PlanRefusal | null {
   if (plan === null) return "no-plan";
   if (!covers) return "prefix";
-  if (plan.targetTokens === null) return "no-target";
+  const target = plan.targetTokens;
+  if (sizeChecks && target === null) return "no-target";
   if (applied !== null && !applied.paired) return "pairing";
+  if (!sizeChecks || target === null) return null;
   const keptTokens = applied === null ? plan.keptTokens : tokensOf(applied.keptChars);
-  if (keptTokens > plan.targetTokens) return "over-target";
+  if (keptTokens > target) return "over-target";
   return null;
 }
 
@@ -1007,7 +1017,7 @@ export function cacheExpired(nowMs: number, lastMainTurnEndedMs: number, turnOpe
 // expired cache: its estimated dropped tokens at least
 // COMPACT_CUT_MIN_SAVED_TOKENS, so a transcript already cut is not cut again
 // for little. A cut at an automatic compaction takes no minimum, since the
-// alternative there is the summary.
+// summary runs there either way and the cut only shrinks what it reads.
 export function cutWorthStarting(droppedTokens: number): boolean {
   return Number.isFinite(droppedTokens) && droppedTokens >= COMPACT_CUT_MIN_SAVED_TOKENS;
 }

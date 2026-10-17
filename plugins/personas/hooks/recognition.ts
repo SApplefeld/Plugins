@@ -1,7 +1,8 @@
 // The memory-recognition indexes the module matches in process, and the
 // recognition nudge built on them. Nothing here reads a file, spawns a
-// process or holds a `$`: hooks/index.ts reads the snapshot and runs
-// RECOGNITION_SCOPE_SCRIPT, and hands the text and the answer to the
+// process or holds a `$`: hooks/recall.ts reads the snapshot and runs
+// RECOGNITION_SCOPE_SCRIPT, through closures hooks/index.ts builds, and hands
+// the text and the answer to the
 // functions below.
 //
 // Two indexes come from one snapshot. The first holds every `cmd:` trigger the
@@ -312,7 +313,7 @@ export function recognitionKeyOf(record: { tier: RecognitionTier; name: string }
   return `${record.tier}\u0000${record.name}`;
 }
 
-// The program hooks/index.ts runs as `node -e` in the session's launch
+// The program hooks/recall.ts runs as `node -e` in the session's launch
 // directory, with the kit's memq.js and memory-database.js paths as its two
 // arguments, to learn the index's scope from the kit's own resolvers under the
 // environment the session's memq spawns inherit: storeRootServesDatabase, the

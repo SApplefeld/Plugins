@@ -123,11 +123,12 @@ export const BLOCK_OWNER_OPTIONS: readonly string[] = Object.freeze(["operator",
 export const PLAN_HEALTH_STATE_CLOSING = "closingText";
 export const PLAN_HEALTH_STATE_RECENT = "recentClosingTexts";
 
-// The plan switch is the one set whose options are not all the catalog own:
-// the rest are the pending plan ids the caller supplies per request. This is
-// the option that covers none of them, and the wiring in hooks/index.ts sends
-// it as an offered id and records it as Haiku value where no plan matched, so
-// the two files are pinned to one spelling rather than two literals.
+// The plan switch's options are not all the catalog's own, as the skill
+// pick's are not: the rest are the pending plan ids the caller supplies per
+// request. This is the option that covers none of them, and the wiring in
+// hooks/index.ts sends it as an offered id and records it as Haiku value
+// where no plan matched, so the two files are pinned to one spelling rather
+// than two literals.
 export const PLAN_SWITCH_NO_MATCH = "no_match";
 
 // --- The two turn record sets ---
@@ -214,6 +215,32 @@ export const MEMORY_RECOGNITION_STATE_DESCRIPTION = "description";
 export const STEP_EFFORT = "step-effort";
 export const STEP_EFFORT_OPTIONS: readonly string[] = Object.freeze(["low", "keep", "high"]);
 
+// --- The skill pick set ---
+//
+// Asked in shadow at every prompt of an armed persona session, over
+// skillPickStateText's state: which one of the installed skills should the
+// session invoke for this prompt, or none. No Haiku counterpart asks it and
+// nothing branches on its answer. Each call is measured against the skills
+// the session's main loop invoked in that turn, which hooks/index.ts writes
+// as its next_skill outcome at the turn's end. Its skill options arrive per
+// request, as the plan switch's pending plans do, and
+// skillPickResolverOf merges them into the shipped question.
+export const SKILL_PICK = "skill-pick";
+export const SKILL_PICK_NONE = "none";
+
+// The prompt's head in the state, in code points.
+export const SKILL_PICK_PROMPT_MAX = 1500;
+
+// The skill pick's state: the prompt's origin kind and the head of the prompt
+// itself. Each value goes through stateValue, since a value carrying its own
+// line break and a field name would otherwise write a field of its own, so
+// Jev reads the prompt trimmed, its whitespace runs collapsed and its square
+// brackets as parentheses, as the turn score reads its own. The prompt is cut
+// after that collapse, by code point so a surrogate pair is never split.
+export function skillPickStateText(originKind: string, prompt: string): string {
+  return `origin: ${stateValue(originKind)}\nprompt: ${Array.from(stateValue(prompt)).slice(0, SKILL_PICK_PROMPT_MAX).join("")}`;
+}
+
 // --- The compaction pass's set ---
 //
 // Asked on the module's timer, never inside a hook, of each tool result older
@@ -234,6 +261,7 @@ export const QUESTION_SET_IDS: readonly string[] = Object.freeze([
   MEMORY_RECALL, MEMORY_RECOGNITION,
   TOOL_RESULT_STALE,
   STEP_EFFORT,
+  SKILL_PICK,
 ]);
 
 // The sets a settings live list may name: a live answer is read into a
@@ -268,8 +296,8 @@ export const SHIPPED_VERSION = "v1";
 // A Choice takes up to 255 options (https://docs.typesafe.ai/primitives/choice.md).
 // The lower bound is this catalog's own judgment rather than the vendor's: a
 // question whose options are all the catalog's has no judgment in it with only
-// one. It therefore applies to the fixed sets and not to the plan
-// switch, whose other options arrive per request. See overrideProblem.
+// one. It therefore applies to the fixed sets and not to the plan switch or
+// the skill pick, whose other options arrive per request. See overrideProblem.
 export const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 255;
 
@@ -286,7 +314,8 @@ export const MAX_OPTIONS = 255;
 // on the same ground, and so is the compaction pass's set, whose verdict
 // the pass reads into an apply by option id. The plan switch is absent
 // because its option ids are the caller's pending plan ids rather than the
-// catalog's.
+// catalog's, and the skill pick is absent for the same reason: its option ids
+// are the installed skills the caller supplies per request.
 export const FIXED_OPTION_SETS: readonly string[] = Object.freeze([
   CONTROLLER_DECISION, TURN_SCORE, MEMORY_KIND, BLOCK_OWNER, TURN_OPEN, TURN_DISPOSITION,
   MEMORY_RECALL, MEMORY_RECOGNITION,
@@ -469,6 +498,20 @@ export const SHIPPED_QUESTIONS: Readonly<Record<string, ResolvedQuestion>> = {
       "low": "Less than usual: the next request is routine follow-through with its course already set, such as reading a file the step just located, running a command the step already planned, applying an edit already decided, or a status check on work already running. A step that read a result it still has to make sense of is still low only where what to do with it is plain.",
       "keep": "The usual effort: ordinary work with some judgment in it, such as reading search results to pick the next file, a small edit whose shape is mostly clear, a test run whose outcome decides the next move, or a step that shows too little to tell. A plain error with an obvious fix is still keep.",
       "high": "More than usual: the next request has to reason hard, such as diagnosing a failure or a test that went red for no plain reason, choosing between designs, planning a change across several files, reviewing work against a spec, or deciding what to do after a result that contradicts the plan. A step about to write the turn's final report on hard work is still high.",
+    },
+  },
+  [SKILL_PICK]: {
+    id: SKILL_PICK,
+    version: SHIPPED_VERSION,
+    overrideRefused: null,
+    primitive: "choice",
+    instructions: "Which one of the skills listed should the session invoke to work the prompt in the state, or none?",
+    // The only option this catalog owns. The rest are the installed skills the
+    // caller supplies at request time, which skillPickResolverOf merges in, so
+    // an override of this set is floored at one for the same reason as the plan
+    // switch's.
+    options: {
+      [SKILL_PICK_NONE]: "No skill fits: the prompt asks for no work, or is answered under the session's standing instructions alone.",
     },
   },
 };
@@ -862,10 +905,11 @@ function overrideProblem(parsed: unknown, shipped: ResolvedQuestion): string | n
   }
   const ids = Object.keys(parsed.options);
   // The floor is two for a set whose options are all this catalog's own. The
-  // plan switch's are not: its shipped map holds no_match alone and the rest
-  // are the pending plan ids the caller supplies per request. So a one-option
-  // override of that set is the shape mirroring its shipped default rather
-  // than a question with no judgment in it, and the floor there is one.
+  // plan switch's and the skill pick's are not: each shipped map holds one
+  // option, no_match or none, and the rest are the ids the caller supplies
+  // per request. So a one-option override of either set is the shape
+  // mirroring its shipped default rather than a question with no judgment in
+  // it, and the floor there is one.
   const floor = FIXED_OPTION_SETS.includes(shipped.id) ? MIN_OPTIONS : 1;
   if (ids.length < floor) return `the override has fewer than ${floor} option${floor === 1 ? "" : "s"}`;
   if (ids.length > MAX_OPTIONS) return `the override has more than ${MAX_OPTIONS} options`;
@@ -980,5 +1024,27 @@ export function resolverOf(host: CatalogHost): QuestionResolver {
       return { ...head, primitive: "score", levels: [...source.levels] };
     }
     return { ...head, primitive: "noul" };
+  };
+}
+
+// Wraps a resolver so the skill pick's question carries the installed skills
+// as options. The seam sends a criterion only for an option the resolved
+// question's map carries, so the skills ride the map for the one request. The
+// base resolves the shipped or overriding question first and runs its checks;
+// the merged map is its entries plus one per skill, prototype-free, and a
+// skill whose id the map already holds leaves that entry in place. Any other
+// question set id is the base's own, and a rejection from the base propagates.
+export function skillPickResolverOf(base: QuestionResolver, skills: readonly { id: string; description: string }[]): QuestionResolver {
+  return async (questionSetId: string): Promise<ResolvedQuestion> => {
+    if (questionSetId !== SKILL_PICK) return base(questionSetId);
+    const question = await base(SKILL_PICK);
+    // Narrows the type alone: the shipped question is a choice, and
+    // overrideProblem refuses an override naming another primitive.
+    if (question.primitive !== "choice") return question;
+    const options = optionsCopy(question.options);
+    for (const skill of skills) {
+      if (!Object.hasOwn(options, skill.id)) options[skill.id] = skill.description;
+    }
+    return { ...question, options };
   };
 }

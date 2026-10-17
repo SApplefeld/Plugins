@@ -1,8 +1,6 @@
 // readonly-agent.ts: the before-tool guard that keeps the state under review
-// out of a reviewer's reach. It is the kit's readonly-agent-guard.js ported
-// whole, the lexer, its depth bound and its explicit deny on unresolvable
-// text included, so a Bash or PowerShell call reads the same verdict here as
-// through the command hook.
+// out of a reviewer's reach. It reads a Bash or PowerShell call through a
+// lexer with a depth bound and an explicit deny on unresolvable text.
 //
 // The access model, by agent class (agent-class.ts):
 //   Strict (the read-only judgment seats): the repo tree is read-only. Git
@@ -43,13 +41,13 @@
 // with a word the shell may rewrite) denies. The per-function comments below
 // state each rule where it is applied.
 //
-// Nothing here reads `$` (runner.ts says why). The filesystem reads the hook
-// made synchronously (the .git walk, the cd target's directory test and the
+// Nothing here reads `$` (runner.ts says why). The filesystem reads
+// (the .git walk, the cd target's directory test and the
 // overwrite rule's existence test) are made through LexHost, which
 // hooks/index.ts builds over `$`, so the functions that reach them are async.
-// The path arithmetic the hook took from Node's `path` is the PathOps below,
-// Node's win32 and posix algorithms over strings, so a path resolves here as
-// it resolved in the hook on the same host.
+// The path arithmetic is the PathOps below, Node's win32 and posix
+// algorithms over strings, so a path resolves as Node's `path` would on the
+// same host.
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import { reviewAgentClass } from "./agent-class";

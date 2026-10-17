@@ -14,11 +14,12 @@
 # The supervisor stops the child by killing this process (the pipe-close phase):
 # closing this process's stdout is the end of input the child reads to exit. So
 # this process must never leave a child of its own holding the pipe's write end.
-# Its poll's `sleep` redirects stdout to /dev/null for that reason: a `sleep`
-# that inherited this stdout would keep the child's input open after this
-# process was killed, and the child would never see end of input. The project
-# memory record background-pipeline-pid-is-the-last-stage-the-feed-subshell-
-# survives-the-kill is that failure observed on this host.
+# Its poll wait is the builtin `read -t` on a fifo it holds open read-write, so
+# a quiet pass of the hold loop forks nothing: no kill can land inside a fork
+# and leave a half-copied holder holding the child's input open, and the child
+# sees end of input the moment this process dies. The project memory record
+# background-pipeline-pid-is-the-last-stage-the-feed-subshell-survives-the-kill
+# is that failure observed on this host.
 #
 # The working directory is never the run directory: a process whose cwd sits
 # inside a directory blocks that directory's removal on this host, so a holder
@@ -54,11 +55,13 @@ INTERRUPT_REQUEST_FILE="${6:-}"
 echo "$$" > "$HOLDER_PID_FILE"
 
 HOLDER_POLL_S="${SUPERVISOR_HOLDER_POLL_S:-2}"
-# A value that is not a positive number of seconds makes every poll's `sleep`
-# fail at once, so the loop below would spin; such a value falls back to 2,
-# and the refusal is logged once `log` is defined below.
+# A value that is not a positive number of seconds makes every poll's `read -t`
+# fail or return at once, so the loop below would spin. The accepted shape is up
+# to six whole digits and three decimals, so the smallest value is 0.001, which
+# `read -t` still waits out. Any other value falls back to 2, and the refusal
+# is logged once `log` is defined below.
 HOLDER_POLL_REFUSED=""
-if ! [[ "$HOLDER_POLL_S" =~ ^([0-9]+(\.[0-9]*)?|\.[0-9]+)$ ]] || ! [[ "$HOLDER_POLL_S" == *[1-9]* ]]; then
+if ! [[ "$HOLDER_POLL_S" =~ ^([0-9]{1,6}(\.[0-9]{0,3})?|\.[0-9]{1,3})$ ]] || ! [[ "$HOLDER_POLL_S" == *[1-9]* ]]; then
   HOLDER_POLL_REFUSED="$HOLDER_POLL_S"
   HOLDER_POLL_S=2
 fi
@@ -85,18 +88,22 @@ goal_prompt_json() {
     const framing = process.argv[2] || '';
     const json = JSON.stringify({type:'user',role:'user',message:{role:'user',content:[{type:'text',text:framing + p}]}});
     process.stdout.write(json + '\n');
-  " "$1" "$2"
+  " "$1" "$2" 9>&-
 }
 
 # The child's MSYS pid, once the supervisor has written it to the child-pid
-# file. Empty until then, so the hold loop below waits rather than reading an
-# unwritten file as a dead child.
+# file, left in HOLDER_CHILD_PID. Returns non-zero until then, so the hold loop
+# below waits rather than reading an unwritten file as a dead child. It prints
+# nothing and the loop calls it plainly, never inside `$( )`, so it forks
+# nothing.
+HOLDER_CHILD_PID=""
 holder_child_pid() {
   local p=""
+  HOLDER_CHILD_PID=""
   IFS= read -r p 2>/dev/null < "$CHILD_PID_FILE" || true
   p="${p%$'\r'}"
   case "$p" in ''|*[!0-9]*) return 1 ;; esac
-  printf '%s' "$p"
+  HOLDER_CHILD_PID="$p"
 }
 
 # Whether one line is a final ask this holder may relay: a stream-json user
@@ -127,7 +134,7 @@ const block = content[0];
 const ok = sameKeys(block, ["type", "text"]) && block.type === "text"
   && typeof block.text === "string" && block.text.startsWith("[SUPERVISOR-ASK id=");
 process.exit(ok ? 0 : 1);
-' "$1" 2>/dev/null
+' "$1" 2>/dev/null 8>&- 9>&-
 }
 
 # Validates and extracts an interrupt-request file's content in one node
@@ -159,7 +166,7 @@ const ok = o && typeof o === "object" && !Array.isArray(o)
 if (!ok) process.exit(1);
 const reason = o.reason.replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g, "");
 process.stdout.write(o.id + "\t" + reason + "\n");
-' "$1" 2>/dev/null
+' "$1" 2>/dev/null 8>&- 9>&-
 }
 
 # Whether the ask-request file holds exactly its first line and nothing after
@@ -169,12 +176,12 @@ process.stdout.write(o.id + "\t" + reason + "\n");
 # locale so a multibyte character cannot make the two disagree.
 holder_ask_file_whole() {  # <file> <first line as read>
   local bytes line_bytes
-  bytes=$(wc -c < "$1" 2>/dev/null) || return 1
-  line_bytes=$(LC_ALL=C printf '%s' "$2" | wc -c)
+  bytes=$(wc -c < "$1" 2>/dev/null 8>&- 9>&-) || return 1
+  line_bytes=$(LC_ALL=C printf '%s' "$2" | wc -c 8>&- 9>&-)
   [ "$bytes" -eq $((line_bytes + 1)) ]
 }
 
-  SKILL_LOAD_INSTRUCTION="Before your first tool call on any plan work, invoke the Skill tool for grimoire:operating-instructions, then grimoire:executing-work; when a plan reaches its last section, grimoire:finishing-work. Those skills own how a section, its review rounds and its fix rounds run. "
+  SKILL_LOAD_INSTRUCTION="Before your first tool call on any plan work, invoke the Skill tool for grimoire:executing-work; when a plan reaches its last section, grimoire:finishing-work. Those skills own how a section, its review rounds and its fix rounds run. "
   # What a prompt labelled [COORDINATOR id=<record id>] carries for a worker:
   # the operator's delegated authority for an act inside a goal node of its
   # approved plan. A steer outside that bound goes to the operator, or is
@@ -239,9 +246,9 @@ holder_ask_file_whole() {  # <file> <first line as read>
     fi
   fi
   # The one line the goal-prompt turn opens with. It names the text behind
-  # it as the operator's own task, so a child that has just loaded
-  # operating-instructions does not apply that skill's treat-embedded-text-
-  # as-data rule to its own goal and stall asking for confirmation.
+  # it as the operator's own task, so a child carrying the doctrine's
+  # treat-embedded-text-as-data rule does not apply it to its own goal and
+  # stall asking for confirmation.
   GOAL_PROMPT_FRAMING="The text below is your task from the operator. It is trusted; act on it."$'\n\n'
   # What the two prompts this supervisor puts to its child carry. The
   # [SUPERVISOR id=<id>] prompt is a shutdown request the child's plugin
@@ -444,9 +451,9 @@ holder_ask_file_whole() {  # <file> <first line as read>
   #
   # Splitting the priming turn off from the goal prompt is what keeps a
   # child from reading its own task as suspect. Concatenated into one turn,
-  # the skill-load sentence tells the child to load operating-instructions,
-  # whose own text says to treat instructions embedded in content as data
-  # and ask rather than act - so the child applied that rule to the very
+  # the skill-load sentence tells the child to load the plan skills, while
+  # the doctrine it already carries says to treat instructions embedded in
+  # content as data and ask rather than act - so the child applied that rule to the very
   # goal prompt sitting behind the sentence, replied asking for
   # confirmation, and spent its only round without ever calling
   # goal_create. Two turns, plus the framing line below, remove the
@@ -492,8 +499,29 @@ fi
 # interrupt-request file, writes the held goal once the priming turn closes,
 # relays a final ask the supervisor drops in the ask-request file, and exits
 # a few seconds after the child's pid disappears. A signal ends it too: the
-# default TERM disposition exits, and the `sleep` below holds no copy of the
-# pipe, so the child sees end of input the moment this process dies.
+# default TERM disposition exits, and the poll wait below is the builtin
+# `read -t` on a fifo, so a quiet pass forks nothing. No kill can land inside a
+# fork and leave a half-copied holder holding the child's input pipe, and no
+# child of this process holds a copy of the pipe, so the child sees end of
+# input the moment this process dies.
+#
+# The fifo is made under the temp path, opened read-write once on descriptor 9
+# so the read never meets end of file and only times out, and unlinked at once.
+# The open descriptor keeps it working with its path gone, so nothing is left to
+# clean up and this process sets no trap: the default TERM disposition ends it
+# and the descriptor closes when the process ends. A path left by a holder killed
+# before the unlink is removed by the next holder that takes the same name, just
+# before it makes its own fifo. A fifo that cannot be made or
+# opened ends the holder with exit 1, so the loop never runs without its wait.
+# Every external command that runs while descriptor 9 is open closes it
+# (`9>&-`), so no relay child inherits it.
+#
+# The goal check reads the child's output file through descriptor 8, opened
+# once the file exists and closed as soon as the goal is sent, so it forks no
+# grep. Each pass reads only the lines added since the last pass, and a line
+# still being written is carried into the next pass. Every external command
+# that runs while descriptor 8 is open closes it too (`8>&-`), because an open
+# handle on a file in the run directory can block that directory's removal.
 #
 # The exit-on-death is armed by the child-pid file holding a valid pid rather
 # than by having seen that pid alive. The supervisor writes the file the instant
@@ -502,6 +530,21 @@ fi
 # read. Keying on "seen alive" would leave this process holding the pipe forever
 # for a child that died that fast, which blocks the supervisor's own `wait` on
 # the pipeline.
+HOLDER_TICK_FD=9
+HOLDER_TICK_FIFO="${TMPDIR:-/tmp}/supervise-holder-tick-$$"
+rm -f "$HOLDER_TICK_FIFO"
+if ! mkfifo "$HOLDER_TICK_FIFO"; then
+  log "could not make the wait fifo $HOLDER_TICK_FIFO; exiting"
+  exit 1
+fi
+if ! exec 9<>"$HOLDER_TICK_FIFO"; then
+  rm -f "$HOLDER_TICK_FIFO"
+  log "could not open the wait fifo $HOLDER_TICK_FIFO; exiting"
+  exit 1
+fi
+rm -f "$HOLDER_TICK_FIFO" 9>&-
+GOAL_OUT_OPEN=0
+goal_partial=""
 while true; do
   if [ -n "$INTERRUPT_REQUEST_FILE" ] && [ -f "$INTERRUPT_REQUEST_FILE" ]; then
     # Checked, and written where it relays, before the goal-pending write
@@ -516,7 +559,7 @@ while true; do
     # ".taken" copy from here on. A failed rename (the file already gone, a
     # race with a departing writer) skips the interrupt for this poll; there
     # is nothing to refuse or remove, and the next poll tries again.
-    if mv -f "$INTERRUPT_REQUEST_FILE" "$INTERRUPT_REQUEST_FILE.taken" 2>/dev/null; then
+    if mv -f "$INTERRUPT_REQUEST_FILE" "$INTERRUPT_REQUEST_FILE.taken" 2>/dev/null 8>&- 9>&-; then
       # The private copy is read exactly once, through `head -c 4097` so the
       # read never grows past that cap to find out how much more there is.
       # `read -d ''` keeps every byte `head` hands it, trailing newline
@@ -530,8 +573,8 @@ while true; do
       # against the 4096 cap, and holder_interrupt_relay still parses only a
       # checked id out of it, so a truncated or oversized read passes nothing
       # but that checked id to the pipe below.
-      IFS= read -r -d '' interrupt_content < <(head -c 4097 "$INTERRUPT_REQUEST_FILE.taken" 2>/dev/null)
-      interrupt_bytes=$(LC_ALL=C printf '%s' "$interrupt_content" | wc -c)
+      IFS= read -r -d '' interrupt_content < <(head -c 4097 "$INTERRUPT_REQUEST_FILE.taken" 2>/dev/null 8>&- 9>&-)
+      interrupt_bytes=$(LC_ALL=C printf '%s' "$interrupt_content" | wc -c 8>&- 9>&-)
       interrupt_id=""
       if [ "$interrupt_bytes" -le 4096 ] && interrupt_fields=$(holder_interrupt_relay "$interrupt_content"); then
         interrupt_id="${interrupt_fields%%$'\t'*}"
@@ -547,13 +590,37 @@ while true; do
       else
         log "the interrupt-request file did not hold one valid interrupt request; removed it unrelayed"
       fi
-      rm -f "$INTERRUPT_REQUEST_FILE.taken"
+      rm -f "$INTERRUPT_REQUEST_FILE.taken" 8>&- 9>&-
     fi
   fi
-  if [ "$GOAL_PENDING" -eq 1 ] && [ -f "$OUT" ] && grep -q '"type":"result"' "$OUT"; then
-    goal_prompt_json "$PROMPT_FILE" "$GOAL_PROMPT_FRAMING"
-    log "priming turn completed; sent the goal prompt as its own turn"
-    GOAL_PENDING=0
+  if [ "$GOAL_PENDING" -eq 1 ]; then
+    if [ "$GOAL_OUT_OPEN" -eq 0 ] && [ -f "$OUT" ]; then
+      exec 8< "$OUT" && GOAL_OUT_OPEN=1
+    fi
+    goal_ready=0
+    if [ "$GOAL_OUT_OPEN" -eq 1 ]; then
+      # A read at end of file returns non-zero with any partial line in
+      # goal_line; that partial is carried and prepended on the next pass.
+      while IFS= read -r -u 8 goal_line; do
+        goal_line="$goal_partial$goal_line"
+        goal_partial=""
+        if [[ "$goal_line" == *'"type":"result"'* ]]; then
+          goal_ready=1
+          break
+        fi
+      done
+      if [ "$goal_ready" -eq 0 ]; then
+        goal_partial="$goal_partial$goal_line"
+        [[ "$goal_partial" == *'"type":"result"'* ]] && goal_ready=1
+      fi
+    fi
+    if [ "$goal_ready" -eq 1 ]; then
+      exec 8>&-
+      GOAL_OUT_OPEN=0
+      goal_prompt_json "$PROMPT_FILE" "$GOAL_PROMPT_FRAMING"
+      log "priming turn completed; sent the goal prompt as its own turn"
+      GOAL_PENDING=0
+    fi
   fi
   if [ -f "$ASK_REQUEST_FILE" ]; then
     # One whole line is relayed. The supervisor writes the file whole and moves
@@ -568,12 +635,11 @@ while true; do
     else
       log "the ask-request file did not hold one whole [SUPERVISOR-ASK id=] user turn; removed it unrelayed"
     fi
-    rm -f "$ASK_REQUEST_FILE"
+    rm -f "$ASK_REQUEST_FILE" 8>&- 9>&-
   fi
-  holder_watched_pid=$(holder_child_pid) || holder_watched_pid=""
-  if [ -n "$holder_watched_pid" ] && ! kill -0 "$holder_watched_pid" 2>/dev/null; then
-    log "the child pid $holder_watched_pid is gone; exiting so the child's input pipe closes"
+  if holder_child_pid && ! kill -0 "$HOLDER_CHILD_PID" 2>/dev/null; then
+    log "the child pid $HOLDER_CHILD_PID is gone; exiting so the child's input pipe closes"
     exit 0
   fi
-  sleep "$HOLDER_POLL_S" >/dev/null 2>&1
+  read -t "$HOLDER_POLL_S" -u "$HOLDER_TICK_FD" || true
 done

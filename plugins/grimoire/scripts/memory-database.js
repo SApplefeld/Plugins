@@ -1805,6 +1805,11 @@ function queryRows(run) {
 // return, each held to the type it is read as, with a similarity in the place
 // each procedure states its ranking in.
 //
+// Two of those fields name a machine and they are different facts: sandbox is
+// the sandbox that published the row, and machine is the record's own machine
+// scope. A host below schema version 13 returns no machine key, which reads as
+// the empty string.
+//
 // ONE QUANTITY CARRIES THE SIMILARITY ON BOTH PATHS, AND IT IS THE DISTANCE.
 // Both procedures return the cosine distance of the record's best chunk, and one
 // minus it is a similarity on the scale of the host's embedding model. A floor
@@ -1860,6 +1865,7 @@ function queryHit(row, procedure) {
         tier: row.tier,
         segment: typeof row.segment === 'string' ? row.segment : '',
         sandbox: typeof row.sandbox === 'string' ? row.sandbox : '',
+        machine: typeof row.machine === 'string' ? row.machine : '',
         visibility: typeof row.visibility === 'string' ? row.visibility : '',
         description: typeof row.description === 'string' ? row.description : '',
         archived: row.archived === true || row.archived === 1,

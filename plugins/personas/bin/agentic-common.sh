@@ -1386,7 +1386,7 @@ const listed = (id) => Object.prototype.hasOwnProperty.call(plugins, id) && Arra
 # file, one that cannot be read or parsed, or one with no plugins object
 # returns 1 with the reason on the line, the side on which nothing is
 # copied. The readings mirror the module's own read of this file for the
-# kit's install path (hooks/index.ts, kitInstallPathOf).
+# kit's install path (hooks/memq-boundary.ts, boundaryKitInstallPathOf).
 installed_id_cutover_done() {
   local file="$HOME/.claude/plugins/installed_plugins.json" file_w line
   file_w=$(cygpath -m "$file" 2>/dev/null || echo "$file")

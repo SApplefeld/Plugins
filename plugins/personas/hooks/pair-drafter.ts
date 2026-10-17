@@ -1,14 +1,14 @@
 // pair-drafter.ts: the pure parts of the close-out pair drafter. The memory
 // hygiene step's `memq decay-scan` lists pairs of records that read as one
-// fact; the tool.call handler in hooks/index.ts owes the pairs it lists and
+// fact; serveToolCall in hooks/tool-call.ts owes the pairs it lists and
 // starts the drain, with the heartbeat tick as the catch; the drain reads
 // each pair's two bodies and asks a fork of the session's own transcript to
 // draft a disposition for each, and the turn's first main-loop tool result
 // after the fork returns carries the drafts as a [PAIR DRAFTS] block. This file
 // holds the bounds, the scan reader, the fork's prompt, the reader of its
-// reply, the command each draft carries and the block. hooks/index.ts holds
-// the owe, the drain, the reads, the fork call, the decisions and the
-// delivery, and imports nothing but these.
+// reply, the command each draft carries and the block. hooks/drains.ts holds
+// the drain, the reads and the decisions, and hooks/index.ts the owe, the
+// fork call, as a closure, and the delivery.
 
 import { bracketSafeText, LINE_TERMINATOR, oneLine } from "./agent-state";
 

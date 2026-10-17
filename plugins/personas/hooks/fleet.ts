@@ -879,7 +879,7 @@ type FleetReading = { current: Record<string, FleetHealthMemo>; changed: FleetCh
 // The wake's comparison: one fleet report against the reading an earlier
 // tick left, producing the new reading and the lines to report. It reads
 // nothing but its arguments and writes nothing outside the reading it
-// returns. The controller tick in hooks/index.ts calls it between reading
+// returns. idleTick in hooks/controller-tick.ts calls it between reading
 // the report and advancing sess.fleetHealth, and keeps the store writes, the
 // submit and every rollback.
 export function fleetReadingOf(
