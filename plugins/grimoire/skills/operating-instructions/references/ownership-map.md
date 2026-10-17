@@ -13,6 +13,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Designing a non-trivial change: scope check, questions, spec | `brainstorming` |
 | A plan's `## Intent` record, and a ruling after the spec ships | `brainstorming` (step 9, and its freeze paragraph for a later ruling) |
 | A section's model tier, and the tier bands | `brainstorming` |
+| A section's `Verify:` line, its acceptance commands' write-time trunk run and its pre-review run | `brainstorming` (Spec Format, steps 9 and 10), `executing-work` (step 2, the `Gate:` line) |
 | The scout sweep deriving a section's files in scope | `brainstorming` |
 | Reading a spec against its Goal before approval, the `[unrefusable-frame]` question included | `brainstorming` (step 10, plan review) |
 | A hard-to-reverse architecture fork | `design-council` |

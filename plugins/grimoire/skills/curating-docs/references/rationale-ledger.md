@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's rulebook for keeping a project's `docs/` folder a curated library rather than an attic of finished plans. It owns four moments: archiving a plan that has reached Complete or abandoned (the close path), registering and cross-referencing a newly written plan (the create path), pruning and age-checking `docs/backlog.md`, and retrofitting an existing `docs/` tree into the three-zone taxonomy. It also owns the frozen v1 plan-doc header contract, stating the exact line shapes and value rules an external parser reads, and the placement rules for the `## Intent`, `## Assumptions` and `## Dispatch Authorization` headings. Its load class is `named-trigger`: its own description says to use it during finishing-work when a plan reaches Complete, when a new plan is written that should be indexed, or when someone asks to tidy, retrofit, or reorganize a project's `docs/` folder.
 
-Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition).
+Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 and F002 added under the plan's letter F for the catalog seed and the `Verify:` line's contract standing.
 
 ### C001
 - key: Treat a plan as finished only once it is archived, the backlog is pruned, related plans link each other, and the index matches reality.
@@ -60,7 +60,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan: the backlog grew without bound because items were struck through in place.
 - verdict: keep
 - reason: The owner's row; the doctrine states the principle and names this skill as owner. session-start.js reports the backlog's counts but prunes nothing.
-- passage: | `docs/backlog.md` | The living handoff doc for cross-effort next-steps, active items only | Pruned-live: completed items move to a dated snapshot |
+- passage: | `docs/backlog.md` | The handoff doc for cross-effort next-steps, active items only | Pruned-live: completed items move to a dated snapshot |
 
 ### C006
 - key: Do not zone or move `docs/coordinator-board.md` during a curating pass; it belongs to the coordinator seat.
@@ -113,7 +113,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: b49a47b 2026-06-19 (the docs-lifecycle plan's "git mv, history preserved"), reworded by aeffbb2 2026-08-09.
 - verdict: keep
 - reason: The owner's mechanic with its non-git fallback; finishing-work and the templates skeleton restate the `git mv` only. A kaizen note of 2026-09-04 records a project whose archive is nested (`docs/archive/plans/`), which the flat path here does not describe; that is a gap for the rewrite plan to weigh, not a reason to drop the step.
-- passage: 2. Move the file with `git mv docs/plans/<file> docs/archive/<file>` in a git repo, or a plain move otherwise. The Chapters travel untouched.
+- passage: Move the file with `git mv docs/plans/<file> docs/archive/<file>`, or a plain move outside git. The Chapters travel untouched.
 
 ### C011
 - key: Re-run `git add` on the moved file whenever it carries unstaged edits, so the finalized content is what commits.
@@ -122,7 +122,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: aeffbb2 2026-08-09, a close-out that finalized the doc, moved it, and committed the pre-finalization bytes because `git mv` stages index content.
 - verdict: keep
 - reason: The class recurred after the sentence shipped (operator memory git-mv-stages-the-index-content-not-your-edits, applied x6) and no hook catches it, so the rule and its one-line why stay at the point of action; the why is what keeps the re-add from reading as superstition beside a `git mv` that appears staged.
-- passage: Then `git add` the moved file again whenever it carries unstaged edits. `git mv` stages the index content, not the worktree content, so a doc finalized and then moved commits pre-finalization unless re-added.
+- passage: Then `git add` the moved file again if it carries unstaged edits. `git mv` stages the index content, not the worktree, so those edits miss the commit unless re-added.
 
 ### C012
 - key: Read the `RM` pair against the file in `git status --short` as the sign that the moved file still needs re-adding.
@@ -131,7 +131,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: aeffbb2 2026-08-09, same incident as C011.
 - verdict: keep
 - reason: C011's condition is observable only through this tell, so the rule cannot be obeyed without it. The operator memory names a second tell after the commit (a 100% rename similarity in `git show --name-only` on a file you edited) the rewrite plan may add.
-- passage: The `RM` pair against the file in `git status --short` is the tell.
+- passage: An `RM` pair in `git status --short` is the tell.
 
 ### C013
 - key: Repoint the moved plan's relative links by grepping it for `../archive/` and fixing every hit.
@@ -143,7 +143,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - reason: The grep, the fix target (`<file>` once archived) and the timing are the rule and stay; the closing "not an edge case" clause argues for the step's existence, which this entry now does. Lands at line 31, the step now ending "Grep the moved file for `../archive/` and fix every hit."
 - proposed: Keep the grep, the fix target and the timing; drop the not-an-edge-case clause.
 - baseline-test: yes
-- passage: 3. Repoint the plan's own relative links, before or right after the move. An archived sibling reached as `../archive/<file>` from `plans/` is `<file>` once the plan is itself in `archive/`. Grep the moved file for `../archive/` and fix every hit.
+- passage: Repoint the plan's own relative links, before or right after the move. A sibling linked as `../archive/<file>` becomes `<file>` once the plan is itself in `archive/`. Grep the moved file for `../archive/` and fix every hit.
 
 ### C014
 - key: Ensure a plan and any plan it built on or superseded link each other via a `## Related` section, and mark a superseded plan in its header.
@@ -175,7 +175,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - landed: 368ae03 section 33
 - reason: The carve-out is the later and more specific rule, consistent with the archive's immutability, and it is the side that wins the create-path contention (C023) and brainstorming's both-directions wording. It is a rule-plus-exception beside C014, not a contradiction. Flipped from keep at section 33's close, a respell forced by C014: C014's drop of the restated archive rationale "`docs/archive/` is append-only, so" from inside this sentence left the carve-out to follow the colon directly; the rule is word for word. Landed as the proposal below.
 - proposed: The pointers run one way when the other plan is already archived: the moving plan gets the `## Related` section and the archived one is left alone.
-- passage: The pointers run one way when the other plan is already archived: the moving plan gets the `## Related` section and the archived one is left alone.
+- passage: If the other plan is already archived, only the moving plan gets the `## Related` section.
 
 ### C017
 - key: Prune the backlog as part of the close path.
@@ -290,7 +290,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - reason: The check and its three outcomes with their mechanics all stay; the paragraph is split one sentence per rule and loses only its summary sentence. The tunable-knob sentence stays because the doctrine's craft rule asks for the knob to be named. session-start.js reports the oldest parked date but adjudicates nothing. Lands at line 50 split one sentence per rule and outcome: "Promote it: spec it now. Retire it: move to the snapshot with the reason. Keep it: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays, so it ages from the adjudication." Every mechanic and the knob sentence stay; "An item never sits silently past the threshold;" is gone. C028, C062 and C063 are recorded as flips forced by this entry.
 - proposed: Split the paragraph into one sentence per rule and outcome, keeping every mechanic and the knob, and drop the summary sentence.
 - baseline-test: yes
-- passage: The prune pass is also the aging check. Name every active item parked more than 90 days ago, with its date, for a promote, retire or keep call.
+- passage: The prune pass is also the aging check. Name every active item parked over 90 days, with its date, for a promote, retire or keep call.
 - passage: 90 days is the tunable knob, aligned with the quarterly snapshot cadence.
 
 ### C028
@@ -302,7 +302,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - landed: 368ae03 section 33
 - reason: The surfacing layer ages an item from the first date on its line (templates.md:85), so the order of the two dates is load-bearing and the form must be stated where the keep call is made. Flipped from keep at section 33's close, a respell forced by C027: C027's split made the keep outcome its own sentence with a capital and a period; the date form and its order are untouched. Landed as the proposal below.
 - proposed: Keep it: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays, so it ages from the adjudication.
-- passage: Keep it: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays.
+- passage: Keep: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays.
 
 ### C029
 - key: Treat an undated active item as past the threshold: give it a parked date from git history or today's marked `backfilled`, and adjudicate it in the same pass.
@@ -311,7 +311,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: fa5df56 2026-08-09, the backlog-visibility plan (undated backfill).
 - verdict: keep
 - reason: The rule stands because the templates skeleton states the same duty, sharing the operative phrase and the closing act: both surfaces read "past the threshold by definition" and both end in backfilling the date and adjudicating the item in the same pass. That is one duty stated once and echoed, not two readings to reconcile.
-- passage: An undated active item is past the threshold: give it its parked date from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
+- passage: An undated item is past the threshold: date it from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
 
 ### C030
 - key: Offer the prune pass in one line when the session-start block reports an oldest item past the threshold and no close-out is near.
@@ -320,7 +320,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: fa5df56 2026-08-09, the backlog-visibility plan ("a standalone trigger").
 - verdict: keep
 - reason: The session-start block (session-start.js) raises the signal and this sentence is what turns it into an offer; without it the block is a number nobody acts on outside a close-out.
-- passage: The check also runs without a close-out. When the session-start block reports an oldest item past the threshold and no close-out is near, offer the prune pass in one line.
+- passage: When no close-out is near and the session-start block reports an oldest item past the threshold, offer the prune pass in one line.
 
 ### C031
 - key: Start a retrofit with a read-only audit: list every doc, read each plan's `Status` header, and classify each as active plan, completed or abandoned plan, about-the-solution doc, or stray.
@@ -344,7 +344,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - reason: The gate is a blast-radius stop over a library-wide batch of moves and it stays, because which plans leave the live library is the operator's call over the library's own shape; the stop is stated twice and collapses to one sentence that carries its reason. The gate is the material-decision member of executing-work's closed blocker set rather than the doctrine's stop-for-a-yes rule, whose two-part test a move inside the working tree meets on neither part, so a plan run reaching this stop has a member to declare it under. No standing grant covers a retrofit, so this is not a loop-maintenance gate. Landed at `368ae03` as the step ending "Move nothing until it is confirmed; this is a destructive-enough batch to earn the confirmation."; "Present it and stop." is gone.
 - proposed: State the proposal contents and one stop sentence that names the batch as destructive enough to earn the confirmation.
 - baseline-test: yes
-- passage: 2. **Propose the migration.** Name the plans that move to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed.
+- passage: **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed.
 - flag: stale
 
 ### C033
@@ -363,7 +363,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan.
 - verdict: keep
 - reason: Governs a retrofit pass over a whole tree, where the archive README's "nothing is deleted here" governs one folder; neither contains the other.
-- passage: Never delete a file. Relocate it instead.
+- passage: Relocate a file, never delete it.
 
 ### C035
 - key: Reproduce plan-doc header lines in their exact case and line-start position rather than rewording them, since a reworded line parses as absent.
@@ -584,7 +584,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 2 ("templates are referenced, not inlined into every caller").
 - verdict: keep
 - reason: No finding; the pointer at the skeleton source.
-- passage: Seed the README, index, and backlog skeletons from `references/templates.md` rather than inventing a new shape per project.
+- passage: Seed the README, index, and backlog skeletons from `references/templates.md`, never inventing a new shape per project.
 
 ### C057
 - key: Do not close a plan in place by flipping status to Complete and never moving the file.
@@ -647,7 +647,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - landed: 368ae03 section 33
 - reason: No finding of its own; the promote outcome's mechanic, kept whole by the C027 rewrite. Flipped from keep at section 33's close, a respell forced by C027: C027's split made the parenthetical "promote it (spec it now)" its own sentence with a capital and a period; the words are unchanged. Landed as the proposal below.
 - proposed: Promote it: spec it now.
-- passage: Promote it: spec it now.
+- passage: Promote: spec it now.
 
 ### C063
 - key: When the aging-check call on an item is retire, move it to the backlog snapshot along with the reason for retiring it.
@@ -658,7 +658,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - landed: 368ae03 section 33
 - reason: No finding of its own; the retire outcome's mechanic, kept whole by the C027 rewrite. Flipped from keep at section 33's close, a respell forced by C027: C027's split made the parenthetical "retire it (move to the snapshot with the reason)" its own sentence with a capital and a period; the words are unchanged. Landed as the proposal below.
 - proposed: Retire it: move to the snapshot with the reason.
-- passage: Retire it: move to the snapshot with the reason.
+- passage: Retire: move it to the snapshot with the reason.
 
 ### C064
 - key: When a worker runs under the external engine, do not touch the plan's Status header at all; setting it to In Progress at start is executing-work's own instruction, not this contract's guarantee.
@@ -722,7 +722,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - verdict: keep
 - landed: 1aa3fff5 section 4
 - reason: Plans in this repository carry the section, so its fields need one owner, and this skill already owns the plan document's format and the section's placement (C043). The meaning is the one the section had before the move, which the plan's Approach keeps: an approval of the run, never an instruction to start it.
-- passage: A `## Dispatch Authorization` section records a plan run's approval: who approved the run, when, and which sessions the grant covers, by default "any session holding this plan". It is an approval, never an instruction to start the run.
+- passage: A `## Dispatch Authorization` section records a plan run's approval: who approved it, when, and which sessions the grant covers, by default "any session holding this plan". It never instructs a run to start.
 
 ### J002
 - key: Run a plan that arrives by peer message under its `## Dispatch Authorization` section only once the grant stands as the peer-sessions skill states, by a trace to the operator or a chain handoff.
@@ -732,7 +732,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - verdict: keep
 - landed: 1aa3fff5 section 4
 - reason: Any peer can commit such a section and no tool performs the trace, so a receiver that runs a plan on the section's presence alone lets whoever wrote the plan hand it work. The peer-sessions skill owns the trace and the chain handoff, and this sentence points there (J003).
-- passage: A plan arriving by peer message runs under it once the grant stands as the peer-sessions skill states, by a trace to the operator or a chain handoff.
+- passage: A plan arriving by peer message runs under it once the grant stands, by a trace to the operator or a chain handoff.
 
 ### J003
 - key: Read the peer-sessions skill for the trace, the chain handoff, the message's standing and the reply states.
@@ -742,7 +742,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - verdict: keep
 - landed: 1aa3fff5 section 4
 - reason: No finding. The pointer the ownership map requires: its Dispatch Authorization row names peer-sessions for the trace and curating-docs for the format.
-- passage: The peer-sessions skill owns the trace, the chain handoff, the message's standing and the reply states.
+- passage: The peer-sessions skill owns the trace and the handoff, with the message's standing and the reply states.
 
 ### J004
 - key: Take anything the plan does not cover to the operator, since a `## Dispatch Authorization` section supplies no live steering.
@@ -752,13 +752,31 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - verdict: keep
 - landed: 1aa3fff5 section 4
 - reason: The section is committed before the run starts, so it answers only what the plan already states. A question it does not cover is the material decision executing-work's closed blocker set reserves to the operator, and the grant is never read as licence to decide it.
-- passage: The section supplies no live steering, so anything the plan does not cover goes to the operator.
+- passage: The section supplies no live steering, so whatever the plan does not cover goes to the operator.
+
+### F001
+- key: At the create path, seed a missing `docs/verification.md` from the templates with a row per instrument the spec's `Verify:` lines name.
+- class: rule
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:38
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: Brainstorming's self-review checks every `Verify:` line against the catalog (F004 under the brainstorming SKILL.md heading), so a repository without one gets it at the step that already runs when a spec is written. Seeding the rows the spec names keeps the catalog to instruments a plan uses.
+- passage: Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks.
+
+### F002
+- key: Treat a section's `Verify:` line as no contract change, since no row names it.
+- class: rule
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:82
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: No consumer parses the line, as none parses `Tests:` or `References:`, so the contract stays at v1. The sentence says so where the contract is stated, because a line added to the spec template reads as a contract change to a reader who never opens the rows (C066).
+- passage: No row names a section's `Verify:` line either.
 
 ## plugins/grimoire/skills/curating-docs/references/templates.md
 
 This document is a set of copy-ready skeletons for a project's `docs/` library: the index README, the active-plans README, the archive README, the living backlog, and the dated quarterly backlog snapshot. It owns the moment when a session seeds a new `docs/` library or retrofits an existing one, deciding what files exist, what headings and placeholder text each carries, where a plan or a backlog item lives at each point in its life, and how each is named. It also fixes the naming shapes (`<project>_<content-type>_v<n>.md`, `backlog-YYYY-QN.md`), the dated backlog item form, and the archive-on-close rule that the skeletons state to their own readers. A session loads it as a `plan-run` reference: it carries no frontmatter and no statement of when it loads, but its content is only usable at the specific act of creating or reorganizing the docs tree, which sits inside a plan run, so it is read immediately before that act rather than at session start.
 
-Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templates.md`). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `2bef94c9` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`.
+Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templates.md`). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `2bef94c9` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 to F003 added under the plan's letter F for the catalog's index line and skeleton.
 
 ### C001
 - key: Build a new or retrofitted `docs/` library from the skeletons in this document.
@@ -1229,3 +1247,30 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templat
 - reason: row 657 (Stable-doc and plan purpose prose), dropped under the mechanism cut.
 - passage: The archive is the project's memory.
 - ruled: cut 2026-09-30
+
+### F001
+- key: List `verification.md` among the index template's living documents.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/references/templates.md:19
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: The catalog is a living root document that plans read rather than finish, so the index names it beside the backlog.
+- passage: - **`verification.md`** is the instrument catalog.
+
+### F002
+- key: Seed `docs/verification.md` with a title and one sentence saying each row is an instrument a section's `Verify:` line names.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/references/templates.md:80
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: The sentence tells a reader of the seeded file what a row is for, which the table alone does not say.
+- passage: Each row is an instrument a section's `Verify:` line names.
+
+### F003
+- key: Give the catalog table the columns Instrument, Command or observation, Pass reads as, Failure here looks like, and Cost and lane.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/references/templates.md:80
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: Each column is a question a reader asks of an instrument: its name, what to run or look at, what a pass shows, what a failure in this area looks like, and what it costs and where it runs. A row may name an observation as well as a command, so a browser walk at a viewport has a home beside the tests.
+- passage: | Instrument | Command or observation | Pass reads as | Failure here looks like | Cost and lane |

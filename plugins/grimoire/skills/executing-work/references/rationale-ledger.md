@@ -6147,7 +6147,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 0, 1 and 2 of the section loop and the rules for delegating to subagents. It owns closing the previous boundary, confirming a section's approach, the Dispatch Brief template and tier routing, the capacity reading, the implementer status and escalation ladder, awaiting a dispatched agent and stopping one before replacing it, the evidence check of step 2 and its promises check, and the orchestrator's delegation rules, the disjoint-files rule and scout banding among them. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 0 to 2 tell a session to read it before a section opens and before any implementer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: c3.C001 and c3.C002 rewritten to their passages as they now read, and F001 to F005 added under the plan's letter F for the inline start-of-work statement, the brief's `Verify:` field and step 2's instrument run.
 
 ### I019
 - key: Title the reference file carrying steps 0, 1 and 2 of the section loop and the rules for delegating to subagents `Implementing a Section`.
@@ -6179,7 +6179,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: The rule stands verbatim; only the fictional-spec reason sentence beside it leaves the paragraph (A003). Keep the trigger (a mechanism the spec assumed without reading the code) and the lightweight bound, since c2.C100's "do not pre-read" is the other side of one semantics and reads wrong without them.
 - proposed: Delete the fictional-spec sentence and leave every other sentence of the paragraph as written.
 - baseline-test: yes
-- passage: Where the spec assumed a section's mechanism without reading the code, first read the files it touches and confirm the approach holds, in a lightweight read, never a fan-out.
+- passage: Where the spec assumed a section's mechanism without reading the code, confirm the approach holds in a lightweight read of the files it touches, never a fan-out.
 
 ### c2.C002
 - key: Read any file you open only to locate one mechanism under the doctrine's rule for hunting in a large file.
@@ -6206,7 +6206,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 830ff28 2026-06-17, the session-mined completion contract.
 - verdict: keep
 - reason: The bound that separates the confirm read from a scout sweep and from pre-reading for the implementer; it is what keeps c2.C001 and c2.C100 one semantics.
-- passage: Where the spec assumed a section's mechanism without reading the code, first read the files it touches and confirm the approach holds, in a lightweight read, never a fan-out.
+- passage: Where the spec assumed a section's mechanism without reading the code, confirm the approach holds in a lightweight read of the files it touches, never a fan-out.
 
 ### c2.C007
 - key: Where the real code shape differs materially from the spec, adjust the approach and note the difference in the Chapter.
@@ -6233,7 +6233,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 9865f6d 2026-08-01, after a session read the injected no-unrequested-dispatch line as a bar and built an entire plan run inline; the pointer sits at the point of action by design.
 - verdict: keep
 - reason: The routing sentence at the moment the inline-versus-dispatch call is made; c2.C015 is its stated override, not a conflict (A014).
-- passage: Then implement per the section's model tier: a section carrying a `Model:` tier goes to that tier's implementer.
+- passage: Then implement per the tier: a section carrying a `Model:` tier goes to that tier's implementer.
 
 ### c2.C010
 - key: Dispatch anyway because the doctrine's standing dispatch request covers it, including where a session-prompt line makes dispatch conditional on the operator asking.
@@ -6242,7 +6242,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 9865f6d 2026-08-01 and 0c0eaed 2026-08-01, the harness-line incident and its reframing from override to satisfied condition.
 - verdict: keep
 - reason: A reader holding the injected line reads the tier instruction as blocked, so the rule is not executable without this clause; no hook forces dispatch (A017).
-- passage: The doctrine's standing dispatch request covers this, even where a session-prompt line makes dispatch conditional on my request.
+- passage: The doctrine's standing dispatch request covers this, even under a session-prompt line conditioning dispatch on my request.
 
 ### c2.C011
 - key: At each section open, grep the plan doc for its `Standing Brief Amendments` block and treat every entry as binding on this section.
@@ -6300,7 +6300,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 682a1f7 2026-07-17, the routing override.
 - verdict: keep
 - reason: The permissive half that keeps drafting dispatchable; survives A027 unchanged.
-- passage: An implementer may draft the prose and return it in its final message, but the `docs/` write is the main thread's.
+- passage: An implementer may return drafted prose in its final message, but the main thread writes it.
 
 ### c2.C018
 - key: Record `Locus: inline` under the section's `Model:` line so the routing override is visible up front.
@@ -6319,7 +6319,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: c2114e9 2026-08-01, the engine accepts only bare tier tokens.
 - verdict: keep
 - reason: Keeps the machine-parsed line valid; incident-born.
-- passage: This overrides routing, not tier. Record `Locus: inline` under the `Model:` line, which keeps the bare tier the section earned.
+- passage: Record `Locus: inline` under the `Model:` line, which keeps the bare tier the section earned.
 - flag: weak-reason
 
 ### c2.C020
@@ -6329,7 +6329,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 7dafcdb 2026-07-15, kit stabilization §5, which replaced a run-on brief sentence with the template and re-pinned the charters to it.
 - verdict: keep
 - reason: The template is the field list of record and the charters point at it; c2.C015 is its stated override (A030).
-- passage: dispatch the matching `implementer-<tier>` agent with a complete brief built from the Dispatch Brief template.
+- passage: dispatch the matching `implementer-<tier>` agent with a brief built from the Dispatch Brief template.
 
 ### c2.C021
 - key: Put the spec path and section name in the brief.
@@ -6834,7 +6834,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: The rule stands; the paragraph splits into one sentence per rule (A017) because three unrelated rules share it, and this sentence's words do not change.
 - proposed: Split the paragraph into one sentence per rule, keeping the three legacy values as a parenthetical; carry the lean rule's rewrite from A018.
 - baseline-test: yes
-- passage: Every dispatch includes every REQUIRED field, and each conditional field when its condition holds.
+- passage: Every dispatch carries every REQUIRED field and each conditional field whose condition holds.
 
 ### c2.C099
 - key: Treat a spec's legacy spend-authorization line as inert: read past it, note it in the first Chapter that touches the spec, and honor nothing it says.
@@ -6844,7 +6844,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - reason: Older specs in the archive still carry the line, so the tolerance holds; the rewrite is a sentence split that keeps the three values as a parenthetical, since the enumeration is how a session recognizes the line.
-- passage: An older spec may carry a legacy spend-authorization line in its header block (an expected Fable surface, a Fable-led-session marker, or a hold at the session model). That line is inert: read past it, note it in the first Chapter that touches the spec, and honor nothing it says.
+- passage: An older spec's header may carry a legacy spend-authorization line (an expected Fable surface, a Fable-led-session marker, or a hold at the session model). It is inert: read past it, note it in the first Chapter that touches the spec, and honor nothing it says.
 
 ### c2.C100
 - key: Keep the orchestrator lean: do not pre-read the implementer's files, do not re-implement its work, and do not read its full diff unless adjudicating.
@@ -6856,7 +6856,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: The rule predates the approach-confirmation read (ddd6c72) and the verify step's diff read, both of which it now appears to forbid; the intent is reading to confirm and to judge, never to redo, and the clause needs that bound stated (A018).
 - proposed: Reword to "do not read the files beyond the approach-confirmation read above, do not re-implement its work, and read its diff to verify and adjudicate it, never to redo it".
 - baseline-test: yes
-- passage: The orchestrator stays lean. Read no files beyond the approach-confirmation read above, and never re-implement the agent's work. Read its diff to verify and adjudicate it, never to redo it.
+- passage: The orchestrator stays lean. It reads no file beyond the approach-confirmation read above and never re-implements the agent's work. It reads the agent's diff only to verify and adjudicate it.
 
 ### c2.C101
 - key: Implement a section marked `Locus: inline`, or carrying no tier, in the main thread at the session's own model.
@@ -6883,7 +6883,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: c2114e9 2026-08-01.
 - verdict: keep
 - reason: No finding; the external engine still parses the Model line and substitutes a sonnet default for any decorated value, so the migration guards a live parse defect.
-- passage: Read an older decorated `Model:` value (`fable (inline)`) as `Locus: inline` at that tier, and correct the line while in the file.
+- passage: Read an older decorated `Model:` value (`fable (inline)`) as `Locus: inline` at that tier, correcting the line while in the file.
 - flag: weak-reason
 
 ### c2.C105
@@ -7000,7 +7000,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 61b9f52 2026-08-19, the boundary-cadence plan stated the route once at step 4 and installed this pointer at step 1.
 - verdict: keep
 - reason: Already the pointer its installer wrote, plus the bound that any status can carry a surface, which the route does not enumerate.
-- passage: **A surface outside the section's Files in scope is never a bare observation.** Any report can name one, whatever its status, and it takes step 4's out-of-scope route.
+- passage: **A surface outside the section's Files in scope is never a bare observation.** One named in a report of any status takes step 4's out-of-scope route.
 
 ### c2.C139
 - key: Let subagents neither commit nor stage; implementers leave their work as unstaged edits.
@@ -7009,7 +7009,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 19a570c 2026-07-12, the concurrency safeguards, after files outside the expected work were committed.
 - verdict: keep
 - reason: The owning statement of the controller's side; line 462's restatement and the charter's line are that model's reconciliation and the agent's half of a pinned pair.
-- passage: **Subagents neither commit nor stage.** Implementers leave unstaged edits under every commit model.
+- passage: **Subagents neither commit nor stage, under any commit model.** You stage what you accept, and that explicit `git add <paths>` after review is the scope check.
 
 ### c2.C141
 - key: Stage what you accept with an explicit `git add <paths>` after review; that add is the scope check.
@@ -7039,7 +7039,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 83b81ac 2026-08-19, the first-green commit, whose review found it contradicting commits-only-after-review and shipped this division.
 - verdict: keep
 - reason: Names who commits and points at step 7 for which model permits the early moment; line 462 defines that moment for one model.
-- passage: Commits happen only in the main session, after review or at a first-green commit, and step 7 says which commit models allow the second.
+- passage: Only the main session commits, after review or at a first-green commit, and step 7 says which commit models allow the second.
 
 ### c2.C144
 - key: Treat a quiet agent as a working agent and wait for the completion notification.
@@ -7101,22 +7101,24 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: A versioned cache path under a marketplace install is correct when resolved this session.
 
 ### c3.C001
-- key: Run the build yourself and require it to pass, even when an implementer reported DONE.
+- key: Before step 3, run each instrument the section's `Verify:` line names, even when an implementer reported DONE, and read its verdict from its own exit code.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:158
-- provenance: 9e124f7 2026-06-11, the subagent-direction commit that installed the run-it-yourself clause, and 830ff28 2026-06-17, which added the trust-but-verify framing from the session-mined completion contract.
-- verdict: keep
-- reason: The doctrine states the principle and the pre-send question; this is the act at the verify step, which executing-work owns. No hook reads a DONE report, so the rule is the only check.
-- passage: Run the build yourself and require it to pass, even when an implementer reported DONE.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:153
+- provenance: 9e124f7 2026-06-11, the subagent-direction commit that installed the run-it-yourself clause, and 830ff28 2026-06-17, which added the trust-but-verify framing from the session-mined completion contract; docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17 made the run the section's named instruments.
+- verdict: rewrite
+- reason: The doctrine states the principle and the pre-send question; this is the act at the verify step, which executing-work owns. No hook reads a DONE report, so the rule is the only check. Running the instruments the spec named verifies the section against the acceptance it was written to, and the exit code is the verdict under the doctrine's verdict rule, never a grep narrowed to the expected lines.
+- proposed: Before step 3, run the build and targeted tests and require them to pass, and run each instrument the section's `Verify:` line names, even when an implementer reported DONE, reading each verdict from its own exit code.
+- passage: Before step 3, run the build and targeted tests and require them to pass, and run each instrument the section's `Verify:` line names, even when an implementer reported DONE, reading each verdict from its own exit code.
 
 ### c3.C002
-- key: Run targeted tests, and attach the command output that proves any claim of "done" or "passing".
+- key: Attach the output that proves any claim of "done" or "passing", read against the start-of-work statement.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:158
-- provenance: 830ff28 2026-06-17, the session-mined completion contract.
-- verdict: keep
-- reason: The implementer charter's copy is the agent's, since agents load no skills; this copy binds the orchestrator's own verify step.
-- passage: Run targeted tests, and a claim of "done" or "passing" carries the command output that proves it.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:153
+- provenance: 830ff28 2026-06-17, the session-mined completion contract; docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17 measured the claim against the start-of-work statement.
+- verdict: rewrite
+- reason: The implementer charter's copy is the agent's, since agents load no skills; this copy binds the orchestrator's own verify step. The statement made at the section's start is the measure, so the claim is read against what was promised rather than against what was built (F003).
+- proposed: A claim of "done" or "passing" carries the output that proves it against the start-of-work statement.
+- passage: A claim of "done" or "passing" carries the output that proves it against the start-of-work statement.
 
 ### c3.C003
 - key: Report every gate number together with the tree state it was measured on, such as a clean worktree at a sha or a checkout with N foreign dirty files.
@@ -7220,7 +7222,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 03a0500 2026-07-24, the serialize-probes commit, which named the worktree as the alternative.
 - verdict: keep
 - reason: no finding.
-- passage: When the state under test is already committed, run the probe in a separate worktree, which needs no exclusivity.
+- passage: When the state under test is already committed, run it in a separate worktree, which needs no exclusivity.
 - flag: weak-reason
 
 ### c4.C072
@@ -7233,7 +7235,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: Executing-work owns the three retention grounds (doctrine and brainstorming point here); the opening token-economics sentence is the reason the rule was installed and moves to this ledger: main-context tokens are re-billed every turn while a subagent's churn is paid once and only its report returns.
 - proposed: Drop the "Tokens absorbed into the main context are re-billed" sentence to the ledger; keep the orchestrator-stays-the-designer sentence and the three-ground retention rule with its glosses.
 - baseline-test: yes
-- passage: Keep a task in the main session only when it is design-entangled, tiny, or session-state-dependent: its shape still being discovered in contact with the code, a prompt that would cost more than the work, or an in-flight debugging chain.
+- passage: Keep a task in the main session only when it is design-entangled, tiny, or session-state-dependent: its shape still emerging from the code, a prompt that would cost more than the work, or an in-flight debugging chain.
 
 ### c4.C073
 - key: Keep the orchestrator as the designer: it writes dispatch prompts, judges findings, reads implementer diffs, and writes Chapters.
@@ -7291,7 +7293,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 830ff28 2026-06-17, delegation economics.
 - verdict: keep
 - reason: Cited only by the paragraph-wide compress group, whose ruling keeps this rule as one sentence.
-- passage: **Hand bulky inputs over as files,** not pasted inline:
+- passage: **Hand bulky inputs over as files:**
 
 ### c4.C079
 - key: Capture a diff with `git diff > .kit/scratch/<name>.diff`, never under `docs/`, and keep the project's `.gitignore` covering `.kit/`.
@@ -7324,7 +7326,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 2b7b2d9 2026-06-20, subagents were filling the tree with report files.
 - verdict: keep
 - reason: The inline return is the default that fixed the incident; c4.C084's file destination covers the case this rule excludes (the summary-plus-file pattern) and retires separately.
-- passage: **A subagent's report comes back in its final message, not as a committed file.** Have each return its report inline,
+- passage: **A subagent's report comes back in its final message, not as a committed file.**
 
 ### c4.C082
 - key: Distill the durable outcome of a subagent's report into the Chapter.
@@ -7333,7 +7335,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 2b7b2d9 2026-06-20.
 - verdict: keep
 - reason: Cited only by the paragraph-wide compress group, whose ruling keeps this rule as one sentence.
-- passage: and distill the durable outcome into the Chapter.
+- passage: Distill its durable outcome into the Chapter.
 
 ### c4.C083
 - key: For a large review, return the verdict, the Critical/Major/Minor counts and the top finding inline, and write the full findings to a file read only when adjudicating.
@@ -7342,7 +7344,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 2b7b2d9 2026-06-20.
 - verdict: keep
 - reason: No finding.
-- passage: A large review may return the verdict, the Critical/Major/Minor counts and the top finding inline, with the full findings in a `.kit/` file the orchestrator reads only when adjudicating.
+- passage: A large review may return the verdict, the Critical/Major/Minor counts and the top finding inline, with the full findings in a `.kit/` file read only when adjudicating.
 - flag: weak-reason
 
 ### c4.C085
@@ -7382,7 +7384,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: The rule stays; the reason moves here: starting sections together and marching them through review rounds together is the one arrangement that yields no Chapter, no commit and every compaction offer deferred while the worktree holds the finished work's only copy. Landed with the bold lead kept and the proposal's first sentence as 'Advance them offset, one being briefed, one implementing, one in review.'
 - proposed: "Stagger concurrent sections so they advance offset, one being briefed, one implementing, one in review. Run steps 4 through 8 for a section the moment a round's step 4 ends with nothing blocking its close (a fixes-then-re-review cycle clearing at its final round's adjudication), never batched with siblings. A step 8 close reached while siblings are in flight appends an interim board entry beside its Chapter, carrying the closure-drought rule's content list."
 - baseline-test: yes
-- passage: **Stagger concurrent sections; lockstep is the anti-pattern.** Advance them offset: one being briefed, one implementing, one in review.
+- passage: **Stagger concurrent sections.** Advance them offset: one being briefed, one implementing, one in review.
 
 ### c4.C089
 - key: Run steps 4 through 8 for a section the moment its round's step 4 ends with nothing blocking its close, never batched with siblings.
@@ -7414,7 +7416,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: The guard (`hooks/docs-write-guard.js`) enforces the denial, not the briefing rule, so the rule stays; the cost clause ("the round is spent discovering the denial") is the reason and moves here.
 - proposed: Keep the headline, the inert-write bound, the three routing options and the step 1 pointer; drop "and the round is spent discovering the denial" to the ledger.
 - baseline-test: yes
-- passage: Where a PreToolUse guard keys on agent type, widening the agent's file scope in the brief is inert: the write is blocked whatever the brief says.
+- passage: Where a PreToolUse guard keys on agent type, widening the agent's file scope in the brief leaves the write blocked.
 
 ### c4.C092
 - key: Route around a mechanical guard at dispatch time: send an agent type the guard admits, keep the guarded write in the main thread, or have the agent return the text in its report for the main thread to place.
@@ -7423,7 +7425,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 51ffe14 2026-08-03.
 - verdict: keep
 - reason: The general rule whose standing instance is step 1's docs routing; both link to each other and neither is a copy.
-- passage: Route around the guard at dispatch time. Send an agent type the guard admits, keep the guarded write in the main thread, or have the agent return the text in its report for the main thread to place.
+- passage: Route around it at dispatch time: send an agent type the guard admits, keep the guarded write in the main thread, or have the agent return the text for the main thread to place.
 
 ### c4.C093
 - key: Treat a brief's read-only instruction as a request rather than a control when the agent type is not on the guard's roster.
@@ -7518,7 +7520,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - reason: Survives the compress unchanged; "so the report lands lean by construction" is its reason and moves here.
-- passage: Every scout prompt states its return contract.
+- passage: **Band the scout by question shape, and state its return contract.**
 
 ### c4.C102
 - key: Have each scout lead come back as a file:line reference with a one-sentence fact and why the site matters, never pasted file contents, with bulky evidence in the gitignored `.kit/` scratch path read on demand.
@@ -7527,7 +7529,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 56e785c 2026-07-03.
 - verdict: keep
 - reason: No finding of its own; it is the contract c4.C101 requires and stays whole.
-- passage: Each lead comes back as a file:line reference with a one-sentence fact and why the site matters, never pasted file contents, and bulky evidence goes to the gitignored `.kit/` scratch path, read on demand.
+- passage: Each lead comes back as a file:line reference with a one-sentence fact and why the site matters, never pasted file contents, and bulky evidence goes to the `.kit/` scratch path, read on demand.
 
 ### c4.C103
 - key: Keep implementation single-agent-per-worktree where it touches shared state.
@@ -7850,6 +7852,51 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: **Then run the promises check before step 3:** `node <plugin-root>/scripts/kit-jev-check.js promises .kit/scratch/<plan-slug>/promises-section-<n>.json <the section's changed source files> --record .kit/scratch/<plan-slug>/promises-section-<n>.record.json`.
 - passage: Re-read each promise over 0.6 against the code, then fix it or record one `Decisions / Surprises:` line. After a fix, re-run once without `--record`.
 - passage: Step 3 dispatches whatever the reading, and no reading enters a review brief. A `not checked` or `not configured` line is recorded as printed and never retried into a pass.
+
+### F001
+- key: On an inline section, write the brief's start-of-work statement beside the add-decision line at the section open.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:7
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: An inline section has no brief, so without this sentence the statement reaches dispatched sections alone. The operator's frame puts it at the start of the work for every section (the spec's Intent, its second ruling).
+- passage: An inline section's open also writes the brief's start-of-work statement beside that line.
+
+### F002
+- key: Put the section's `Verify:` line verbatim in the brief, with each row it names quoted with its command and pass shape.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:21
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: A subagent cannot be assumed to open the catalog, so the brief carries the rows it is to run. The field rides the rich-references bullet, which already carries what the acceptance leans on.
+- passage: Verify: the section's Verify: line verbatim, each row it names quoted with its command and pass shape.
+
+### F003
+- key: Have the implementer open its report with how the finished work will be shown complete, read from the Goal, the Intent and the section, and close it with that instrument's result.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:21
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: The operator framed the line as coaching at the start of the work: read the Goal, the Intent and the objective, state how the work will be shown complete, and measure against that when done (the spec's Intent, its second ruling). Opening the report with the statement fixes the measure before the work can bend it, and closing with the result is the measurement.
+- passage: Open your report with the start-of-work statement, how the finished work will be shown complete, read from the Goal, the Intent and the section, a test or a screenshot among the forms, and close with its result
+
+### F004
+- key: Record an observation row's reading in place of an exit code.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:153
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: A row may name an observation, such as a browser walk at a viewport or a call against a deployed slot, which prints no exit code. Its reading in words is the evidence, and the Chapter's `Gate:` token takes it (F001 under the closing.md heading).
+- passage: An observation row's reading is recorded instead.
+
+### F005
+- key: Fix a failing instrument before step 3 opens.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:153
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: A reviewer dispatched over a failing instrument spends its round on what the instrument already reported, so the fix comes first, as for any failing gate.
+- passage: A failing instrument is fixed before step 3.
 
 ## plugins/grimoire/skills/executing-work/references/review.md
 
@@ -10696,7 +10743,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 5 to 8 of the section loop and the Chapter format. It owns closing a section: the plan doc update, the applied-stamp adjudication and the Chapter, the commit model's application, the compaction boundary declaration, the compaction deferral in a session no `/goal` or `/loop` drives, the interim boundary a closure drought earns, and the Chapter template and its machine contract. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 5 to 8 tell a session to read it at a section's close and at an interim boundary.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c4.C054 deleted with its passage, and c4.C051, c4.C052, c4.C055, c4.C058, c4.C061, c4.C064, c4.C067, S136 and S137 rewritten to their passages as they now read. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the deferral paragraph's first two sentences and its native-trigger sentence, step 8's Review-Only sentence, and its sentence on how long a declaration holds). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 4 on 2026-10-06, which removed the pre-push whole gate: c4.C035, S097, S101 and S113 rewritten to their passages as they now read, and c4.C045, c4.C136, S098, S099, S102 and S103 retired to S097. Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 on 2026-10-06: S115 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c4.C051, c4.C058, c4.C059, c4.C061, J001 and J004 rewritten to their passages as they now read, and J002 retired to J001. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: c4.C108 and S107 rewritten to their passages as they now read and c4.C014 retired. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: E009 added under the plan's letter E for the `reposted <n>` part.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c4.C054 deleted with its passage, and c4.C051, c4.C052, c4.C055, c4.C058, c4.C061, c4.C064, c4.C067, S136 and S137 rewritten to their passages as they now read. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the deferral paragraph's first two sentences and its native-trigger sentence, step 8's Review-Only sentence, and its sentence on how long a declaration holds). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 4 on 2026-10-06, which removed the pre-push whole gate: c4.C035, S097, S101 and S113 rewritten to their passages as they now read, and c4.C045, c4.C136, S098, S099, S102 and S103 retired to S097. Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 on 2026-10-06: S115 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c4.C051, c4.C058, c4.C059, c4.C061, J001 and J004 rewritten to their passages as they now read, and J002 retired to J001. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: c4.C108 and S107 rewritten to their passages as they now read and c4.C014 retired. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: E009 added under the plan's letter E for the `reposted <n>` part. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 added under the plan's letter F for the `verify:` token.
 
 ### I025
 - key: Title the reference file carrying steps 5 to 8 of the section loop, the interim boundary and the Chapter format `Closing a Section`.
@@ -10804,7 +10851,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - reason: The two-surface rule survives compressed; the reason, that finishing-work names review downgrades on both surfaces and the close-out is the one the operator reads when they did not follow the run, moves here (A008).
-- passage: Name any section state whose only reader was its writer in the close-out status as well as the Chapter.
+- passage: Name any section state whose only reader was its writer in the Chapter and the close-out status.
 
 ### c4.C010
 - key: Name the re-opened document on this section's `Files in scope:` line.
@@ -10919,7 +10966,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 04002f6 2026-08-25, the memory-read-side plan's Section 9.
 - verdict: keep
 - reason: The step states the routing at acting time and the template states the field's form; finishing-work's copy reports on the close-out, a different surface, because its sweep runs after the final Chapter closed (A031, A032, A033).
-- passage: Take an owed walk before writing the Chapter, and name on `Stamps:` its window, why it was owed and what it found.
+- passage: a window that owed a hand walk says so, why, and what the walk found
 
 ### c4.C023
 - key: Run the stamp adjudication at every section boundary rather than waiting for the close-out.
@@ -11023,7 +11070,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - reason: The mechanic stays; its why moves here: every branch commit is a durable recovery point for a crash-interrupted run, and the merge stays gated by review, the finishing pass, and the PR (A048, A052, A053).
-- passage: The verified state commits at first green, the first-green commit: once it passes step 2 and before the step 3 round goes out, with review fixes following as further commits, and step 1's staging discipline holds at every one of them.
+- passage: The verified state commits at first green, once it passes step 2 and before the step 3 round goes out. Review fixes follow as further commits, and step 1's staging discipline holds at each, the first-green commit included.
 
 ### c4.C033
 - key: Have the controller stage exactly the section's files, and keep implementers from committing or staging.
@@ -11035,7 +11082,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: Step 1's staging bullet owns the discipline; this site keeps only the bound that it holds whichever moment the commit lands at, as a pointer, which closes the composition defect the sentence was installed for (A054, A055, A056).
 - proposed: (via A054) Replace "The staging discipline is unchanged, whichever moment the commit lands at: the controller stages exactly the section's files, and implementers still neither commit nor stage" with "Step 1's staging discipline holds whichever moment the commit lands at".
 - baseline-test: yes
-- passage: The verified state commits at first green, the first-green commit: once it passes step 2 and before the step 3 round goes out, with review fixes following as further commits, and step 1's staging discipline holds at every one of them.
+- passage: The verified state commits at first green, once it passes step 2 and before the step 3 round goes out. Review fixes follow as further commits, and step 1's staging discipline holds at each, the first-green commit included.
 
 ### c4.C034
 - key: Do not open the pull request here; it happens in finishing-work.
@@ -11198,7 +11245,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: 1aa3fff5 section 4
 - landed: fa23bc4a section 2
 - reason: The trigger and its more-reliable ranking stay as rules; their reasons move to this ledger under c4.C060.
-- passage: The other trigger, and the more reliable, is the persona module's boundary reminder arriving on a tool result, which says the module is holding this session's automatic compaction.
+- passage: The other trigger, and the more reliable, is the persona module's boundary reminder on a tool result, which says the module is holding this session's compaction.
 
 ### c4.C062
 - key: At either trigger, append an interim board entry to the plan doc below `## Chapters`.
@@ -11415,7 +11462,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 830ff28 2026-06-17 installed the worktree-branch case; the lanes clause came with 3380bf2 2026-08-31; line touched by 55c5abc 2026-09-09.
 - verdict: keep
 - reason: One handoff stated from each end; finishing-work performs the merge this step defers.
-- passage: On a worktree branch that concurrency put you on, take Branch-and-PR's first-green commits and lanes, and leave the merge to main and the teardown to finishing-work.
+- passage: On a worktree branch concurrency put you on, take Branch-and-PR's first-green commits and lanes, and leave the merge to main and the teardown to finishing-work.
 
 ### S097
 - key: Push on the targeted lane step 4 ran, whose counts are already on the `Gate:` line.
@@ -11666,7 +11713,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: 656310e 2026-06-10, the original Chapter-format paragraph; line touched by 55c5abc 2026-09-09.
 - verdict: keep
 - reason: Executing-work owns the Chapter and the doctrine's chapter-close bullet points here; R187's compress ruling on the paragraph is applied at S141 and S144 and its moved reasons stay recorded under R187.
-- passage: Chapters exist so that a compacted or fresh session can recover full working state from the plan doc alone. Write them for that reader.
+- passage: Write each Chapter so a compacted or fresh session can recover full working state from the plan doc alone.
 
 ### S136
 - key: Resolve `<plugin-root>` on the Delta line the same way the Dispatch Brief template's style-skill bullet does.
@@ -11740,7 +11787,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: e0ef09c 2026-09-06.
 - verdict: keep
 - reason: test/doctrine-parity.test.js:6257-6258 asserts executing-work names both prefixes, so the sentence is a pinned copy and a deletion reddens the suite; this departs from R187's move of the probe-prefix facts on that one sentence.
-- passage: The runner's summary line opens `probe-corpus:` and the report's warning lines `- WARNING:`, which is what lets both be quoted verbatim.
+- passage: The runner's summary line opens `probe-corpus:` and the report's warning lines `- WARNING:`, so both can be quoted verbatim.
 
 ### S145
 - key: Read the Delta reading's row list rather than only its totals.
@@ -11817,7 +11864,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 3, 2026-10-06. Amended by that plan's finishing pass, 2026-10-06: the plan's start replaces "whenever the base moves during the run", which named no read a session could take, and this sentence carries the pointer K003 carried, on the architect persona's consult ruling recorded under that plan's Intent.
 - verdict: keep
 - reason: A session told only to update from its base may reach for a rebase. Publishing it takes a force push, which rewrites the child's branch, and that branch may itself be another pull request's base, while a merge rewrites nothing already pushed. K002 carries the sentence stating that cost.
-- passage: A branch whose pull request base is another branch takes that base in by merge at the plan's start, by the finishing-work step 7 bullet that opens "A stacked parent's merge is not this pull request's own", which reads the base, retargets the pull request where the parent has merged, and decides whether the update arms. The branch never rebases onto its base.
+- passage: A branch whose pull request base is another branch takes that base in by merge at the plan's start, by the finishing-work step 7 bullet that opens "A stacked parent's merge is not this pull request's own", which retargets a merged parent's pull request and decides whether the update arms. The branch never rebases onto its base.
 
 ### K002
 - key: State the cost that makes the rule refuse a rebase: publishing one takes a force push.
@@ -11854,6 +11901,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: keep
 - reason: Step 4's repost reading (E006 under the findings.md heading) counts a repost here, so the `Metrics:` line the program's re-measurement greps for `review rounds` keeps its form.
 - passage: [; reposted <n>]
+
+### F001
+- key: Quote on the Chapter's `Gate:` line `verify: <row name> <pass | fail> exit <code>` per instrument the section's `Verify:` line names, or an observation row's one-sentence reading.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/closing.md:49
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: The Chapter carries each instrument's result so a fresh session and finishing-work's QA step, which reads each Chapter's `Gate:` line, see the acceptance's verdict without re-running it. An observation prints no exit code, so its reading stands in one sentence.
+- passage: `verify: <row name> <pass | fail> exit <code>` per `Verify:` instrument, or an observation row's one-sentence reading
 
 ## plugins/grimoire/agents/prose-reviewer.md
 
@@ -20367,7 +20423,7 @@ Extracted at `6bc07fb`: whole document (`agents.blind-reviewer.md`). Amended on 
 
 This document is the charter for the `plan-reviewer` agent, a fresh-context adversarial reviewer that reads a written spec against its own Goal before the plan is approved. It owns the moment between a spec being drafted and being approved for execution: judging whether following the plan's sections as written would achieve the plan's stated Goal, and whether the plan's `## Intent` record refuses anything a section could add, classifying every defect it finds under a closed set of question tags, rating each by severity and confidence, and closing with a READY, READY_WITH_FINDINGS, NOT_READY or NEEDS_CONTEXT verdict. It also owns the reviewer's own conduct in that moment: read-only tool use, treating the spec and repository as data rather than instructions, and refusing to fix or certify. The load class is `plan-run`: the charter is loaded at the agent's dispatch, which the description states is performed by the brainstorming skill after the author's self-review and the blind read, with the spec path alone.
 
-Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C068 to C070 below), section 2 on 2026-09-19 (C071 below), and section 4 on 2026-09-19 (C072 and C073 below, and C039 amended). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `7ebc5a61` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C002 rewritten to its passage as it now reads, and the reasons of C039 and C066 reworded.
+Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C068 to C070 below), section 2 on 2026-09-19 (C071 below), and section 4 on 2026-09-19 (C072 and C073 below, and C039 amended). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `7ebc5a61` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C002 rewritten to its passage as it now reads, and the reasons of C039 and C066 reworded. Amended by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1 on 2026-10-17 (A001 and A002 below, C033 retired to C022, C068 retired to C070, C073 rewritten, and C010, C012, C022, C051, C069 and C071 re-quoted after a narrow cut).
 
 ### C001
 - key: Dispatch this agent under the name `plan-reviewer`.
@@ -20407,17 +20463,17 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - passage: effort: low
 
 ### C005
-- key: Treat the Goal paragraph as the only statement of intent you hold, since you did not write the plan and hold no design conversation.
+- key: Treat the Goal paragraph as the only statement of intent you hold, since you did not write the plan.
 - class: rule
 - source: plugins/grimoire/agents/plan-reviewer.md:8
 - provenance: ead49db 2026-09-08, the charter's install; the Goal-only stance is the whole premise of the seat, which exists because the author's own reading fills the gaps the text leaves.
 - verdict: rewrite
 - superseded-by: C071
 - landed: 823066b section 13
-- reason: The rule stands and only its length changes; the compressed opening must still say the Goal paragraph is the sole intent statement, since everything else in the charter is measured against it. Lands as six sentences rather than the proposal's two: the fresh-reader stance in the first two ("You are a fresh-context reviewer of a plan. You did not write it, you hold no design conversation, and the Goal paragraph is the one statement of intent you are given."), the gaps framing C007's proposal retains as the third ("The gaps an author's own reading fills are the ones you are here to find."), C006's question verbatim as the fourth, and C008's two exclusions and its read-for-the-miss instruction as the fifth and sixth, in C008's landed shape; the author-story explanation C007 retires is gone.
+- reason: The rule stands and only its length changes; the compressed opening must still say the Goal paragraph is the sole intent statement, since everything else in the charter is measured against it. The no-design-conversation clause is cut, since the Inputs section's "nothing else describing the plan's intent" carries it. Lands as six sentences rather than the proposal's two: the fresh-reader stance in the first two ("You are a fresh-context reviewer of a plan. You did not write it, you hold no design conversation, and the Goal paragraph is the one statement of intent you are given."), the gaps framing C007's proposal retains as the third ("The gaps an author's own reading fills are the ones you are here to find."), C006's question verbatim as the fourth, and C008's two exclusions and its read-for-the-miss instruction as the fifth and sixth, in C008's landed shape; the author-story explanation C007 retires is gone.
 - proposed: Compress the opening to the proposed two sentences, but keep the fresh-reader stance in the first, since it is what tells the seat to read for gaps rather than for errors once C007's explanation is gone.
 - baseline-test: yes
-- passage: You are a fresh-context reviewer of a plan. You did not write it and hold no design conversation.
+- passage: You are a fresh-context reviewer of a plan. You did not write it.
 - flag: stale
 
 ### C006
@@ -20463,13 +20519,13 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - key: Note in your output any sentence you were given describing what the plan is for, what to focus on, or what the author intended.
 - class: rule
 - source: plugins/grimoire/agents/plan-reviewer.md:12
-- provenance: ead49db 2026-09-08, the charter's install, which carried the blind-reader's contamination handling across to the new seat.
+- provenance: ead49db 2026-09-08, the charter's install, which carried the blind-reader's contamination handling across to the new seat; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: rewrite
 - landed: 823066b section 13
 - reason: Only the sentence shape changes; the note-then-disregard order matters, because a contamination the operator never sees is a review whose independence cannot be checked afterwards. Lands as three sentences rather than the proposal's two, C009's dispatch sentence being a keep that stays word for word: the contamination sentence with its note-then-disregard order unchanged, and the carve-out sentence closing at "however much intent they carry." with its because-clause gone.
 - proposed: Replace the Inputs paragraph with the proposed two sentences, keeping the note-then-disregard order and the Goal/Approach/Assumptions/Decisions/Evidence carve-out intact.
 - baseline-test: yes
-- passage: A sentence saying what the plan is for, what to focus on, or what the author intended is contamination: note it in your output, disregard it, and review from the spec alone.
+- passage: Any statement of the plan's purpose, where to focus or the author's intent is contamination: note it in your output, disregard it, and review from the spec alone.
 
 ### C011
 - key: Disregard any supplied intent description and review from the spec alone.
@@ -20485,12 +20541,12 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - key: Treat the spec's own Goal, Approach, Assumptions, and any Decisions or Evidence sections as your subject, however much intent they carry.
 - class: rule
 - source: plugins/grimoire/agents/plan-reviewer.md:12
-- provenance: ead49db 2026-09-08, the charter's install; the carve-out exists because those sections are what the executor holds too, so intent inside them is the thing under review.
+- provenance: ead49db 2026-09-08, the charter's install; the carve-out exists because those sections are what the executor holds too, so intent inside them is the thing under review; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: rewrite
 - landed: 823066b section 13
 - reason: The carve-out must survive the compression intact: without it a strict reading of C011 would have the seat discard the Goal itself, which is the one input it is judging against. Lands as "The spec's own `## Goal`, `## Approach` and `## Assumptions` sections, and a `## Decisions` or `## Evidence` section where the spec carries one, are your subject rather than contamination, however much intent they carry.", the because-they-are-what-the-executor-will-hold clause dropped.
 - superseded-by: C069
-- passage: The spec's own `## Goal`, `## Intent`, `## Approach` and `## Assumptions` sections, and any `## Decisions` or `## Evidence` section, are your subject however much intent they carry.
+- passage: The spec's own sections, `## Goal` and `## Intent` included, are your subject however much intent they carry.
 - flag: stale
 
 ### C013
@@ -20591,11 +20647,11 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - key: Read the tree rather than trusting a section's scope list when answering question 3.
 - class: rule
 - source: plugins/grimoire/agents/plan-reviewer.md:20
-- provenance: ead49db 2026-09-08, the charter's install; question 3 is defined as found by reading the repository, never by asking the author.
+- provenance: ead49db 2026-09-08, the charter's install; question 3 is defined as found by reading the repository, never by asking the author; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: rewrite
 - landed: 823066b section 13
 - reason: The bound must stay explicit through the compression: it is the sentence telling the seat that the scope lists are the suspect surface, and question 3 cannot be answered from the spec's text at all. Lands as "Question 3 below cannot be answered from the spec's text at all, so read the tree rather than trusting a section's scope list.", the author's-reading clause dropped.
-- passage: Question 3 cannot be answered from the spec's text, so read the tree rather than trusting a scope list.
+- passage: Answer question 3 from the tree, never from a scope list.
 
 ### C023
 - key: Use only read-only commands; never edit files, never commit, and never run builds, the suite or the probe runner.
@@ -20705,9 +20761,9 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - class: rule
 - source: plugins/grimoire/agents/plan-reviewer.md:30
 - provenance: ead49db 2026-09-08, the charter's install; the seat's Bash, Grep and Glob grant exists for this.
-- verdict: rewrite
-- landed: 823066b section 13
-- reason: The instruction survives and the example goes; the never-by-asking half is what stops the seat treating the spec's own scope list as the answer to the question the tag asks. Lands as the proposal: question 3's Example sentence deleted, the `[falsified-surface]` definition and "Found by reading the repository, never by asking the author." word for word.
+- verdict: retire
+- superseded-by: C022
+- reason: A restatement: C022's sentence, "Answer question 3 from the tree, never from a scope list.", carries the read-the-repository instruction and the refusal to take the spec's scope list as the answer. The never-by-asking half meant that refusal, as the reason below records, and the seat holds no channel to the author besides. Before that: The instruction survives and the example goes; the never-by-asking half is what stops the seat treating the spec's own scope list as the answer to the question the tag asks. Lands as the proposal: question 3's Example sentence deleted, the `[falsified-surface]` definition and "Found by reading the repository, never by asking the author." word for word.
 - proposed: Keep the `[falsified-surface]` definition and the read-the-repository instruction; delete only the Example sentence.
 - baseline-test: yes
 - passage: Found by reading the repository, never by asking the author.
@@ -20880,12 +20936,12 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 ### C051
 - key: Set confidence by how sure you are the defect is real, and never downgrade a severity to hedge a low confidence.
 - class: rule
-- source: plugins/grimoire/agents/plan-reviewer.md:49
-- provenance: ead49db 2026-09-08, the charter's install; the same prohibition sits in the blind-reader and prose-reviewer charters, which add that the orchestrator weighs the pair.
+- source: plugins/grimoire/agents/plan-reviewer.md:52
+- provenance: ead49db 2026-09-08, the charter's install; the same prohibition sits in the blind-reader and prose-reviewer charters, which add that the orchestrator weighs the pair; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: rewrite
 - landed: 823066b section 13
 - reason: Survives with its independence bound; nothing mechanical checks a finding line's severity against its confidence, and a hedged severity is invisible to the author who reads only the band. Lands unchanged: "Confidence rates how sure you are the defect is real, independent of severity: never downgrade a severity to hedge a low confidence."
-- passage: Confidence rates how sure you are the defect is real, independent of severity. Never downgrade a severity to hedge a low confidence.
+- passage: Confidence rates how sure you are the defect is real. Never downgrade a severity to hedge it.
 
 ### C052
 - key: Close the report with exactly one verdict line.
@@ -21042,18 +21098,19 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - class: mechanic
 - source: plugins/grimoire/agents/plan-reviewer.md:3
 - provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19, on the operator's ruling of 2026-09-18 recorded in that plan's `## Intent` that the fresh judge holds the bigger-picture design and the why while staying blind to the decision-making; supersedes the "Goal and Decisions first" wording in C002.
-- verdict: keep
-- reason: The description names what the seat reads first, and `## Intent` is the section carrying the why that every spec now has. `## Decisions` stays admissible in the body, but only the parked specs carry it, so the dispatcher-facing line names the section every spec carries.
+- verdict: retire
+- superseded-by: C070
+- reason: A description summarizing the body's process, which writing-skills' Description Field (H001) keeps out of a description. C070's Reading Order step 1 carries the Goal-then-Intent order the operator's 2026-09-18 ruling set, and the description keeps the Goal. Before that: The description names what the seat reads first, and `## Intent` is the section carrying the why that every spec now has. `## Decisions` stays admissible in the body, but only the parked specs carry it, so the dispatcher-facing line names the section every spec carries.
 - passage: Reads the Goal and Intent first, then each section against them, then the repository where a claim depends on it
 
 ### C069
 - key: Treat the spec's own `## Intent` section as your subject rather than contamination, beside `## Goal`, `## Approach` and `## Assumptions`.
 - class: rule
 - source: plugins/grimoire/agents/plan-reviewer.md:12
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19; the carve-out itself is C012's.
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19; the carve-out itself is C012's; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: keep
-- reason: C012's carve-out has to reach the new section. It carries more intent than any other, so without naming it a strict reading of C011 would have the seat discard the one section written to be read against. `## Decisions` and `## Evidence` stay admissible where a spec carries them, in the sentence that follows.
-- passage: The spec's own `## Goal`, `## Intent`, `## Approach` and `## Assumptions` sections, and any `## Decisions` or `## Evidence` section, are your subject however much intent they carry.
+- reason: C012's carve-out has to reach the new section. It carries more intent than any other, so without naming it a strict reading of C011 would have the seat discard the one section written to be read against. `## Decisions` and `## Evidence` stay admissible where a spec carries them, as two of the spec's own sections, which the passage now covers as a class.
+- passage: The spec's own sections, `## Goal` and `## Intent` included, are your subject however much intent they carry.
 
 ### C070
 - key: Read the Goal first, then Intent, then Approach, then Decisions where the spec carries one, then Assumptions, until you can state in one sentence what must be true of the tree when the plan is done.
@@ -21068,10 +21125,10 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - key: Treat the Goal paragraph together with the `## Intent` record as the statement of intent you hold, and the Goal alone where the plan carries no record.
 - class: rule
 - source: plugins/grimoire/agents/plan-reviewer.md:8
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19; supersedes the Goal-only stance in C005, whose rewrite verdict quotes the sentence this replaces.
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19; supersedes the Goal-only stance in C005, whose rewrite verdict quotes the sentence this replaces; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: keep
 - reason: C005's stance was that the Goal is the sole intent statement, which was true while it was the only one a spec carried. The record now carries what the operator asked for and refused, so a seat told the Goal is the whole of it would read past the section most able to answer its own question. The no-record clause keeps the rule executable on the plans that predate the section, which is nearly all of them.
-- passage: The Goal paragraph together with the `## Intent` record is the statement of intent you are given, and the Goal alone where the plan has no record.
+- passage: Your statement of intent is the Goal with the `## Intent` record, or the Goal alone where the plan has none.
 
 ### C072
 - key: Tag `[unrefusable-frame]` an `## Intent` record whose not-done half refuses no mechanism a section could plausibly add, a record past its byte bound discounting a ruling appended after the spec shipped, or a spec carrying no record at all, naming the mechanism and the clause that failed to refuse it, or on the other two the byte count or the missing heading.
@@ -21085,11 +21142,32 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 ### C073
 - key: Rate an `[unrefusable-frame]` finding Major, since a section would ship something the record could not stop.
 - class: mechanic
-- source: plugins/grimoire/agents/plan-reviewer.md:42
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 4 2026-09-19.
-- verdict: keep
+- source: plugins/grimoire/agents/plan-reviewer.md:43
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 4 2026-09-19; rewritten by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1 on 2026-10-17, which folded A002 into the sentence.
+- verdict: rewrite
+- landed: 7753b1f8 section 1
 - reason: C041 keys severity to consequence, and C043 states the Major band over what a section would ship that the Goal did not ask for. This tag's consequence is one band down from Critical and reads nowhere in that band's own words, since the Goal can be achieved while the record stops nothing, so the composition is stated rather than left to the seat. It rides in the Major bullet rather than a fourth band, which would make the scale a tag lookup.
-- passage: An `[unrefusable-frame]` finding rates Major, since a section would ship something the record could not stop.
+- passage: An `[unrefusable-frame]` finding rates Major, since a section would ship something the record could not stop, and an `[undisplaced-text]` finding, since it would ship growth the operator asked to see argued.
+
+### A001
+- key: Tag `[undisplaced-text]` a section whose `Files in scope:` names the root `README.md`, a `plugins/**/README.md` or a file `plugins/grimoire/scripts/kit-size.js` counts toward `corpus-cap`, whose plan's Approach neither lists what the addition supersedes, contradicts or restates nor says the sweep found none.
+- class: rule
+- source: plugins/grimoire/agents/plan-reviewer.md:36
+- provenance: `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, 2026-10-17; its trigger reworded in that plan's finishing pass to name kit-size.js as the corpus membership source, and widened there to the two README sets on the architect's ruling of 2026-10-17.
+- verdict: keep
+- landed: 7753b1f8 section 1
+- reason: the operator's ruling of 2026-10-16, quoted under that plan's Intent: "before we're adding new language to the skills, the doctrine, or anything like that, we're checking to make sure that the existing content is compatible and potentially cut, trimmed, or adjusted for the new information we're putting in". The plan is where an addition is argued before it lands, so the reviewer is the seat that can see a missing sweep while the cut is still cheap. The tag keys on a corpus file in scope, since the corpus cap is the limit the operator asked to see argued, and on the root and `plugins/` READMEs, the one surface the Intent names outside the corpus. The set is closed so a plan, a probe scenario under `test/probes/` or the backlog never trips it. It also keys on the Approach saying either the list or that the sweep found none, since an honestly empty sweep is a result and not a finding.
+- passage: `[undisplaced-text]` A section whose `Files in scope:` names the root `README.md`, a `plugins/**/README.md` or a file `plugins/grimoire/scripts/kit-size.js` counts toward `corpus-cap`, whose plan's Approach neither lists what the addition supersedes, contradicts or restates nor says the sweep found none.
+
+### A002
+- key: Rate an `[undisplaced-text]` finding Major, since the section would ship growth the operator asked to see argued.
+- class: mechanic
+- source: plugins/grimoire/agents/plan-reviewer.md:43
+- provenance: `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, 2026-10-17.
+- verdict: keep
+- landed: 7753b1f8 section 1
+- reason: The Major band covers what a reviewer would send back, and a corpus addition with no sweep is what the operator's 2026-10-16 ruling sends back. It rides in C073's sentence, which states the other tag rated by composition, so the band keeps one sentence for both.
+- passage: an `[undisplaced-text]` finding, since it would ship growth the operator asked to see argued.
 
 ## plugins/grimoire/agents/implementer-fable.md
 

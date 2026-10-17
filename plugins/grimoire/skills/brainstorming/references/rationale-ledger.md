@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's brainstorming skill: it governs the collaborative design conversation that precedes any new feature, project, or non-trivial change, and it ends by producing a written spec in `docs/plans/` that the executing-work skill runs on. It owns these moments: the pre-design memory and backlog recall, the scope check that splits an oversized request into sub-project specs, the one-question-at-a-time design dialog, the offer of the design council at a hard fork, the contract-surface scout sweep that derives files in scope, the plan sketch, the spec write and its indexing, the spec self-review with its blind read and plan review, the choice of commit model, the per-section model tier and locus assignment, the `Tests:` and document-review lines, the Fable-usage rules, and the frozen spec format and header contract. A session loads it as a `named-trigger`: the frontmatter says to use it when the operator wants to think through a problem before building, or on any substantial new effort without an existing spec, with phrases like "let's think through", "help me design", or "spec this out".
 
-Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item.
+Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: C151 rewritten to its passage as it now reads, C152's key reworded, and F001 to F005 added under the plan's letter F for the `Verify:` line, the write-time run and the catalog check.
 
 ### C001
 - key: Explore the problem space in conversation with the operator, then capture the agreement as a spec for executing-work to run.
@@ -21,7 +21,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: f8c0649 2026-06-10, the kit's founding commit, which consolidated the operator's prior working-pattern artifacts and narrates no incident.
 - verdict: keep
 - reason: Brainstorming owns the design conversation and the spec it produces per the ownership map, and no hook makes a session hold the conversation before writing a spec.
-- passage: Explore the problem with me in conversation, then capture the agreement as a spec for the executing-work skill to run.
+- passage: Explore the problem with me in conversation, then capture the agreement as a spec for executing-work to run.
 
 ### C002
 - key: Never delegate the design conversation itself to a subagent.
@@ -68,7 +68,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: f270e9c 2026-07-31; reworded at fa5df56 2026-08-09 with the backlog-visibility plan.
 - verdict: keep
 - reason: The act that turns the digest into design input; nothing mechanical does it, and a design that ignores a recalled gotcha repeats it.
-- passage: Read it against the problem and pull what bears on it.
+- passage: Pull what bears on the problem.
 
 ### C007
 - key: Run the memory recall before the code reading.
@@ -108,7 +108,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: fa5df56 2026-08-09, the backlog-visibility plan.
 - verdict: keep
 - reason: The date is what the 90-day aging pass keys on, and surfacing the item is what lets the operator decide whether the parked answer is the design.
-- passage: Surface any item bearing on the problem, with its date,
+- passage: Surface any item bearing on it, with its date,
 
 ### C011
 - key: Surface bearing backlog items because the parked solution may already exist.
@@ -174,7 +174,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 830ff28 2026-06-18, the scope check ported from a sibling fork plus session mining.
 - verdict: keep
 - reason: Nothing mechanical sizes a request, and a spec that should have been three is caught only here.
-- passage: Before drilling into questions, split a request spanning independent subsystems, each with its own data and lifecycle and useful alone, into sub-project specs.
+- passage: Before questions, split a request spanning independent subsystems, each with its own data and lifecycle and useful alone, into sub-project specs.
 - flag: weak-reason
 
 ### C018
@@ -184,7 +184,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 830ff28 2026-06-18, the scope check.
 - verdict: keep
 - reason: The split's trigger and act; obeyable as written and enforced by no machinery.
-- passage: Before drilling into questions, split a request spanning independent subsystems, each with its own data and lifecycle and useful alone, into sub-project specs. Name how they relate and the build order,
+- passage: Before questions, split a request spanning independent subsystems, each with its own data and lifecycle and useful alone, into sub-project specs. Name how they relate and the build order.
 - flag: weak-reason
 
 ### C019
@@ -194,7 +194,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 830ff28 2026-06-18, the scope check.
 - verdict: keep
 - reason: The clause the readers' compressions dropped; it is what stops a split from producing one umbrella spec with sub-headings.
-- passage: then brainstorm the first through this process, and give each its own spec and its own execute and finish cycle.
+- passage: Brainstorm the first through this process, and give each its own spec and execute-and-finish cycle.
 
 ### C020
 - key: Decompose first because refining the details of something that should have been three specs is wasted.
@@ -223,7 +223,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: f8c0649 2026-06-10, founding text; the intake-gap-check plan (e872098, archived plan line 110) resolved the contest with the doctrine's batched ask by scoping this rule to the design conversation.
 - verdict: keep
 - reason: Intentionally different from the doctrine's mid-run batched ask; a session in the design conversation asks one at a time by design, and the recorded review Major settled which moment each rule owns.
-- passage: and wait for the answer before the next.
+- passage: and wait for it before the next.
 - flag: weak-reason
 
 ### C023
@@ -244,7 +244,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: e872098 2026-08-18, the intake-gap-check plan: a review Major found the doctrine's "asked, batched" and this step both claiming route (c), and brainstorming was scoped to the design conversation.
 - verdict: keep
 - reason: This is the sentence that records the intentional split, so removing it re-opens the contest the review closed.
-- passage: This is how route (c) of the doctrine's intake gap check is asked here, rather than in the batch its mid-run and close-out asks use.
+- passage: This is how route (c) of the doctrine's intake gap check is asked here, instead of batched as mid-run and close-out asks are.
 
 ### C025
 - key: Still enumerate the intake gaps; one-question-at-a-time is no license to skip the enumeration.
@@ -253,7 +253,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: e872098 2026-08-18, the intake-gap-check plan.
 - verdict: keep
 - reason: The pointer's own carve-out at the owner (doctrine) of the enumeration: a model fills gaps silently, and the one-question pace must not become the excuse for never listing them.
-- passage: It is no license to skip the enumeration.
+- passage: The enumeration still runs.
 
 ### C026
 - key: Answer route (a) and route (b) gaps yourself and declare them, rather than asking the operator.
@@ -265,7 +265,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - reason: The doctrine owns the three routes; drop the route glosses so the clause points ("routes (a) and (b) are answered by the session and declared, not asked") rather than carrying a partial copy that can drift from the owner's definitions. Lands at line 16 as 'and routes (a) and (b) are answered by the session and declared, not asked.', the route glosses gone; the doctrine's intake bullet defines the routes.
 - proposed: (via A034) Reduce to "routes (a) and (b) are answered by the session and declared, not asked", dropping the route glosses; the doctrine's intake bullet defines them.
 - baseline-test: yes
-- passage: Routes (a) and (b) are answered by the session and declared, not asked.
+- passage: The session answers and declares routes (a) and (b), never asking them.
 
 ### C027
 - key: Feel out the corners: edge cases, failure modes, integration points, performance, consumers, re-run behavior, and existing solutions of a similar shape.
@@ -355,7 +355,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: Installed against a named failure (the deferred offer that never lands); nothing mechanical times the offer. Flipped from keep to rewrite at section 28's close: C036's retire took the quoted excuse after this sentence's colon, so the colon becomes a period, and the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: Make the offer in the turn you recognize the fork, not a later one you control.
-- passage: Make the offer in the turn you recognize the fork, not a later one you control.
+- passage: Make the offer in the turn you recognize the fork, never a later one.
 
 ### C036
 - key: Deferring the offer to a later turn is precisely how the offer never gets made.
@@ -442,7 +442,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 83b81ac 2026-08-19, the spec-scope section.
 - verdict: keep
 - reason: Step 1 reads to understand and this reads for coverage; the incident's shape was a scope authored from what the author remembered from reconnaissance.
-- passage: The sweep is its own second pass, reading for coverage, and runs even where Explore already mapped the area.
+- passage: The sweep is its own second pass, reading for coverage, and runs even where Explore mapped the area.
 
 ### C045
 - key: Band the scout and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract".
@@ -451,7 +451,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 83b81ac 2026-08-19; the plan directed a pointer at executing-work's banding rather than a restatement.
 - verdict: keep
 - reason: Already the pointer at the owner the ownership map names for scouts.
-- passage: Band it and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract", on the built-in Explore subagent carrying that band's explicit model override.
+- passage: Band it and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract", on the Explore subagent carrying that band's explicit model override.
 
 ### C046
 - key: Run the sweep through the built-in Explore subagent carrying that band's explicit model override.
@@ -460,7 +460,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 83b81ac 2026-08-19.
 - verdict: keep
 - reason: Names the vehicle and that the band's override rides, without naming a model, so it cannot drift from executing-work's banding.
-- passage: Band it and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract", on the built-in Explore subagent carrying that band's explicit model override.
+- passage: Band it and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract", on the Explore subagent carrying that band's explicit model override.
 
 ### C047
 - key: Cite the sweep's return in the spec's Approach: the searches run and the surfaces they found.
@@ -478,7 +478,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 83b81ac 2026-08-19.
 - verdict: keep
 - reason: The route by which a sweep that reveals an oversized effort reaches the split rule instead of a bloated spec.
-- passage: Surfaces spanning independent subsystems go back through step 2's split check before any sketch.
+- passage: Surfaces spanning independent subsystems go back through step 2's split check before the sketch.
 
 ### C049
 - key: Authoring scope from memory is the anti-pattern: a contract change ships scoped to a fraction of the surfaces that speak it, the rest arriving one review round at a time.
@@ -528,7 +528,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: e872098 2026-08-18, the intake-gap-check plan: a declared assumption must never live only in a document because the operator approves plans from the recap without reading the doc.
 - verdict: keep
 - reason: Names the block, its contents and the artifacts that carry it, which the doctrine's "rides in the recap" leaves unspecified; the plan placed it here on purpose.
-- passage: The sketch, and every later recap I approve, carries an `Assumptions` block naming the route (a) and route (b) items in plain words
+- passage: The sketch and every later recap I approve carry an `Assumptions` block naming the route (a) and (b) items in plain words.
 
 ### C054
 - key: The operator's approval covers the declared assumptions, and a recap omitting the block has not shown the plan.
@@ -537,7 +537,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: e872098 2026-08-18, the intake-gap-check plan.
 - verdict: keep
 - reason: Not motivation but the consequence acted on: an approval given on a block-less recap is not approval of the plan, which the block's duty alone does not say.
-- passage: and my approval covers them.
+- passage: My approval covers them.
 - passage: A recap that omits the block has not shown the plan.
 
 ### C055
@@ -549,7 +549,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: The instance with the content type filled as `spec`, sitting where the spec is written (662e5e3: a pointer only works in the skill loaded at the moment of the act); the three patterns agree once `spec` fills the slot. Flipped from keep to rewrite at section 28's close: Standing Brief Amendment 1 names this sentence's plan-file name form and orders it current to the doctrine's landed form (`<project>_<content-type>_v<n>.md`, the form `plugins/grimoire/skills/curating-docs/references/templates.md` states and the doctrine's plan-doc bullet points at), against this entry's own reason that `spec` filling the slot is right at the site where a spec is written, which the operator's decision batch holds as the question of the amendment's reach over a keep-held restatement, so the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: 9. **Write the spec** to `docs/plans/<project>_<content-type>_v<n>.md` (increment the version if the name exists; never overwrite a prior version).
-- passage: **Write the spec** to `docs/plans/<project>_<content-type>_v<n>.md` (increment the version if the name exists; never overwrite a prior version).
+- passage: **Write the spec** to `docs/plans/<project>_<content-type>_v<n>.md`. Increment the version if the name exists, and never overwrite a prior version.
 
 ### C056
 - key: Invoke the `curating-docs` skill's create path and add the new plan to the `docs/README.md` index.
@@ -562,7 +562,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - proposed: Apply A086; leave the gating-definition sentences as written.
 - proposed: (via A086) Replace "Then invoke the `curating-docs` skill's create path: add the new plan to the `docs/README.md` index, and if it builds on or supersedes an existing plan, cross-reference both directions (a `## Related` section in the new plan, and a supersession note in the older plan's header)." with "Then run the `curating-docs` skill's create path (index entry, cross-references, backlog next-steps)."
 - baseline-test: yes
-- passage: Then run the `curating-docs` skill's create path (index entry, cross-references, backlog next-steps).
+- passage: Then run the `curating-docs` skill's create path.
 
 ### C057
 - key: Cross-reference both directions where the plan builds on or supersedes another: a `## Related` section in the new plan and a supersession note in the older plan's header.
@@ -575,7 +575,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - proposed: Handled by A086; the cross-reference mechanics leave this document.
 - proposed: (via A086) Replace "Then invoke the `curating-docs` skill's create path: add the new plan to the `docs/README.md` index, and if it builds on or supersedes an existing plan, cross-reference both directions (a `## Related` section in the new plan, and a supersession note in the older plan's header)." with "Then run the `curating-docs` skill's create path (index entry, cross-references, backlog next-steps)."
 - baseline-test: yes
-- passage: Then run the `curating-docs` skill's create path (index entry, cross-references, backlog next-steps).
+- passage: Then run the `curating-docs` skill's create path.
 
 ### C058
 - key: A plan unfindable from the index and pointing at nothing it extends is half-written.
@@ -726,7 +726,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: No hook dispatches the reader; the trivial-spec skip is the rule's own carve-out. Flipped from keep to rewrite at section 28's close: C073's retire took the because-clause after this sentence's comma, so the comma becomes a period; the round's blind lens found the keep standing on a changed sentence, so the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: The blind read that follows is separate and is not optional.
-- passage: The blind read that follows is separate and is not optional.
+- passage: A blind read follows, and it is not optional.
 
 ### C073
 - key: The blind read is required because the inline read cannot catch a gap this session already filled while reading.
@@ -767,7 +767,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: e872098 2026-08-18; the charter was split so a spec named as the subject is not contamination.
 - verdict: keep
 - reason: The exact dispatch shape the charter accepts, fixed after a faithful agent would have refused its only input.
-- passage: Dispatch the `blind-reader` agent with the spec itself as the document under review and `Reader: an implementer with no session context, engineer persona, may open the repository`.
+- passage: Dispatch the `blind-reader` agent with the spec as the document under review and `Reader: an implementer with no session context, engineer persona, may open the repository`.
 
 ### C077
 - key: Adjudicate each blind-read question one of three ways: answer it in the spec, declare it under `## Assumptions` and in the recap, or put it to the operator with a recommendation.
@@ -933,7 +933,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - reason: ead49db appended an identical skip clause for the plan review five days later; one sentence naming both dependents carries the same trigger and the same say-so duty without loss (A002). Lands merged with C103 at C103's site as 'A spec that skipped the blind read skips the gating litmus and the plan review with it, and says so;', the site chosen because the sentence names the plan review, which this entry's own site precedes; this entry's site keeps 'a spec carrying no gating definition records `gating litmus: none`.' and loses the skip clause after it, the comma becoming a period, which C091 records. Its landing respelled C091's keep sentence; C091 records the flip.
 - proposed: (via A002) Merge C092 and C103 into one sentence: a spec that skipped the blind read skips the gating litmus and the plan review with it, and says so.
 - baseline-test: yes
-- passage: A spec that skipped the blind read skips the plan review with it, and says so.
+- passage: A trivial spec of one or two sections may skip the blind read, and the plan review with it, saying so.
 
 ### C093
 - key: The instrument's known residual is that the reader's pairs may fall elsewhere than where two readings differ, passing silently; the separating feature is the second net, and the pairs' coverage of the boundary is not measured.
@@ -993,7 +993,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: ead49db 2026-09-08, applying the operator's 2026-08-18 ruling (operator memory model-tier-substitution-for-review) that design and planning work specced at the top tier waits rather than dropping to Opus at max; docs/plans/claude-kit_capacity-gate_spec_v1.md section 4 2026-09-24 extended the wait to a measured downgrade.
 - verdict: keep
 - reason: The consult's Opus-at-max stand-in and this wait are the same ladder applied to two shapes of work: review-shaped substitutes, design-shaped waits, because design strength is the axis the tiers diverge on (A009).
-- passage: Where fable cannot run at all, or that reading returned `-> downgrade`, wait rather than substitute a lower model, and record the wait.
+- passage: Where fable cannot run, or that reading returned `-> downgrade`, wait rather than substitute a lower model, and record the wait.
 
 ### C099
 - key: On a `NEEDS_CONTEXT` return, repair the Goal the reviewer could not read against and dispatch again.
@@ -1020,7 +1020,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: ead49db 2026-09-08, bounding the review to one optional re-dispatch so the plan review cannot become a review loop.
 - verdict: keep
 - reason: no finding. The one-re-dispatch bound is the loop guard; without it a Critical could cycle indefinitely at design time.
-- passage: A Critical rewrites the spec before it ships, and one re-dispatch after that rewrite is the author's call rather than a loop.
+- passage: A Critical rewrites the spec before it ships. One re-dispatch after the rewrite is the author's call, never a loop.
 
 ### C102
 - key: Record `plan review: <n> findings, <a> fixed, <b> assumed, <c> asked` beside the blind-read line.
@@ -1039,7 +1039,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - verdict: rewrite
 - landed: 16c5e61 section 28
 - reason: Merges with C092 into one skip sentence naming both dependents (A002); the trigger and the say-so duty are identical. Lands as the merged skip sentence at this entry's site, 'A spec that skipped the blind read skips the gating litmus and the plan review with it, and says so;', C092's tagged proposal supplying the wording and this reason the merge; the external-engine clause after the semicolon stands.
-- passage: A spec that skipped the blind read skips the plan review with it, and says so.
+- passage: A trivial spec of one or two sections may skip the blind read, and the plan review with it, saying so.
 
 ### C104
 - key: A session that cannot dispatch records the plan-review skip under `## Assumptions`, and the external engine's own review stands in.
@@ -1048,7 +1048,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: ead49db 2026-09-08, the external-engine carve-out matching executing-work's stand-down.
 - verdict: keep
 - reason: no finding. A worker under an external engine cannot dispatch, and the recorded skip is what keeps the spec from reading as reviewed.
-- passage: A session that cannot dispatch (a worker under an external engine) records the skip under `## Assumptions`, and that engine's own review stands in.
+- passage: A session that cannot dispatch (a worker under an external engine) records its skip under `## Assumptions`, and that engine's own review stands in.
 
 ### C105
 - key: Agree the commit model with the operator and record it in the spec header.
@@ -1154,7 +1154,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - verdict: rewrite
 - reason: The default band for work whose contract is clear and whose gate fails loudly, so the tier assigns itself unless the body names a reason to rise (C117, C118); naming the sibling file and the gate is what lets an implementer with no conversation context build it from the section text. The bound and the sonnet fallback were installed together and the fallback adds the judgment-call clause; no machinery assigns tiers (A037). The architect's reading of the seven-day dispatch list counted 35 fable, 99 opus, 41 sonnet and 0 haiku implementer dispatches.
 - proposed: **haiku:** default for well-bounded work on an established shape: a clear contract, single-responsibility scope, low integration risk and a self-surfacing gate, a build or existing test that fails loudly on wrong output. New procs, services, mappings, DTOs, tests, CRUD surfaces, renames, sweeps. Assign it only where the section text names both a sibling file and the gate, and never to a security-sensitive surface. A sibling is a file, never a style skill's convention.
-- passage: **haiku:** default for well-bounded work on an established shape: a clear contract, single-responsibility scope, low integration risk and a self-surfacing gate, a build or existing test that fails loudly on wrong output. New procs, services, mappings, DTOs, tests, CRUD surfaces, renames, sweeps. Assign it only where the section text names both a sibling file and the gate, and never to a security-sensitive surface. A sibling is a file, never a style skill's convention.
+- passage: **haiku:** default for well-bounded work on an established shape: a clear contract, single-responsibility scope, low integration risk and a self-surfacing gate, a build or existing test that fails loudly on wrong output. New procs, services, mappings, DTOs, tests, CRUD surfaces, renames, sweeps. Assign it only where the section names a sibling file and the gate, and never to a security-sensitive surface. A sibling is a file, never a style skill's convention.
 - landed: 0e5b2828 section 3
 
 ### C115
@@ -1250,7 +1250,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - reason: The reason clause is the doctrine's "Orchestration mechanics" bullet verbatim and the doctrine owns it; the exception-and-ceiling rule is brainstorming's and stays (A049). Lands as 'Inline is the deliberate exception and the escalation ceiling, never the comfortable default.', the main-thread-cost clause gone to the doctrine's owner sentence.
 - proposed: (via A049) Reduce the sentence to "Inline is the deliberate exception and the escalation ceiling, never the comfortable default", dropping ": the main thread is the most expensive place to write code".
 - baseline-test: yes
-- passage: Inline is the deliberate exception and the escalation ceiling, never the comfortable default.
+- passage: Inline is the deliberate exception and the escalation ceiling, never the default.
 
 ### C124
 - key: Write `Model:` as the model that will actually run, so an inline section on the Opus-led execution session is `Model: opus`.
@@ -1261,7 +1261,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: The specific rule for the inline case; the tier bands describe dispatched work (A040). Flipped from keep to rewrite at section 28's close: C125's rewrite recast line 44 as three rules and states this one's first as its proposal words it, so the 'Opus-led' naming and the main-thread-is-the-session clause leave this sentence (the first surviving at line 54, the second leaving the document with C147), and the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: `Model:` names the model that will actually run, so an inline section on the execution session is `Model: opus`.
-- passage: `Model:` is a bare token naming the model that will actually run, with the reasoning in the section body, so an inline section on the execution session is `Model: opus`.
+- passage: `Model:` is a bare token naming the model that runs, with the reasoning in the section body, so an inline section on the execution session is `Model: opus`.
 
 ### C125
 - key: Question rather than write the combination of `fable` plus `inline`.
@@ -1295,7 +1295,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: The instruction stays in the skill loaded at writing time (662e5e3's reasoning); curating-docs owns the values, and C126's rationale leaves (A054). Flipped from keep to rewrite at section 28's close: C125's recast of line 44 dropped the tail ', where a reader wants it anyway' after this sentence's last clause, so the sentence ends at 'section body'; the round's blind lens found the keep standing on a changed sentence, so the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: Keep the value a bare token and put the reasoning in the section body.
-- passage: `Model:` is a bare token naming the model that will actually run, with the reasoning in the section body, so an inline section on the execution session is `Model: opus`.
+- passage: `Model:` is a bare token naming the model that runs, with the reasoning in the section body, so an inline section on the execution session is `Model: opus`.
 
 ### C128
 - key: Give a section a cheap tier only if its spec is precise enough for an implementer with no conversation context to build it from the section text alone.
@@ -1306,7 +1306,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: The test and its remedy (C130) are one rule with two moves; compression is taste (A056, A057). Flipped from keep to rewrite at section 28's close: C129's fold into C121 took the clause after this sentence's semicolon, so the semicolon becomes a period, and the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: A section only earns a cheap tier if its spec is precise enough that an implementer with no conversation context can build it from the section text alone.
-- passage: A section earns a cheap tier only if an implementer with no conversation context could build it from the section text alone.
+- passage: A section earns a cheap tier only if an implementer without the conversation could build it from the section text alone.
 
 ### C129
 - key: Use the same briefability test to decide locus, and give `Locus: inline` to a section that fails it at any tier.
@@ -1372,7 +1372,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: da1a895 2026-07-14, the second constraint; d2e2f37 2026-09-05 split the ceiling into its two axes.
 - verdict: keep
 - reason: Ruled with C132 (A059); the two-axis ceiling is what keeps testing-discipline's shape bar in force past the line.
-- passage: It is a floor over the named contracts and a ceiling on nothing, and it is amendable on contact with the code, with the delta flagged in the Chapter.
+- passage: It is a floor over the named contracts and a ceiling on nothing.
 
 ### C136
 - key: Treat the `Tests:` line as amendable on contact with the code like any other spec claim, with the delta flagged in the Chapter.
@@ -1381,7 +1381,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: da1a895 2026-07-14, the third constraint.
 - verdict: keep
 - reason: Ruled with C132 (A059); amendability with a flagged delta is the drift rule applied to this line.
-- passage: It is a floor over the named contracts and a ceiling on nothing, and it is amendable on contact with the code, with the delta flagged in the Chapter.
+- passage: It may be amended on contact with the code, flagging the delta in the Chapter.
 
 ### C137
 - key: The cheaper the tier the more the `Tests:` line matters: haiku already requires its gate named, sonnet inherits judgment it need not re-derive, and at fable it is planning-Fable orienting implementing-Fable.
@@ -1402,7 +1402,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - verdict: keep
 - reason: no finding. The Audience: line is what summons executing-work's document pair; without it a docs section gets the code pair.
 - passage: Where a section's deliverable is a document for a reader, its body carries the review inputs: an `Audience:` line naming each persona and its knowledge level, the questions the document must answer for each, a `Voice:` line (`scott` | `company` | other), and the fact-base paths its claims are checked against.
-- passage: When any persona is outside the operator and the operator's own sessions, the body also carries a `Disclosure:` list of what the documents must not reveal.
+- passage: When any persona is outside the operator and the operator's sessions, the body also carries a `Disclosure:` list of what the documents must not reveal.
 
 ### C139
 - key: These lines exist for adjudication: without the audience line and the must-answer list, a blind reader's finding cannot be adjudicated, only shrugged at.
@@ -1485,7 +1485,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: The rule with its tempting-exception rejection stays; C148 is its remedy and C147's reasoning moves here (A066, A067). Flipped from keep to rewrite at section 28's close: C147's retire took the because-clause after this sentence's comma, so the comma becomes a period, and the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: Execution belongs to a session on the execution model (Opus-led today).
-- passage: Execution belongs to a session on the execution model (Opus-led today), whatever the plan's size.
+- passage: Execution belongs to a session on the execution model (Opus-led), whatever the plan's size.
 
 ### C147
 - key: A Fable-led execution session burns the shared allotment fastest where it adds least, and cannot fall back mid-session the way a dispatch can, because the session model is the session.
@@ -1507,7 +1507,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: 16c5e61 section 28
 - reason: States the act at a trigger the general rule does not name; C149's handoff mechanism folds into this sentence (A066, A070). Flipped from keep to rewrite at section 28's close: C149's rewrite folded its handoff mechanism into this sentence, so the parenthetical opens after 'not a favor' as a colon clause carrying the plan doc, and the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: When a Fable-led session is asked to execute, the move is a handoff, not a favor: the spec plus a fresh execution-model session, with the plan doc carrying the context.
-- passage: When a Fable-led session is asked to execute, the move is a handoff, not a favor: the spec plus a fresh execution-model session, with the plan doc carrying the context.
+- passage: A Fable-led session asked to execute hands off instead: the spec plus a fresh execution-model session, with the plan doc carrying the context.
 
 ### C149
 - key: Keep resting context lean and hand off via the plan doc rather than carrying context, so a long stretch recovers from the doc alone.
@@ -1532,19 +1532,20 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: Leave the review tiers as rostered.
 
 ### C151
-- key: Prefer rich references over prose: acceptance criteria as runnable checks or rubrics, and a mockup or reference implementation over a description for UI or visual work.
+- key: Prefer rich references over prose: acceptance criteria as rubrics, and a mockup or reference implementation over a description for UI or visual work.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:58
-- provenance: 5854b9b 2026-07-26, rich-references guidance absorbed from the doctrine.
-- verdict: keep
-- reason: no finding. A runnable check is the acceptance form the QA verifier can execute; prose acceptance is what it has to interpret.
-- passage: Prefer rich references over prose: acceptance criteria as runnable checks or rubrics, and for UI or visual work a mockup or reference implementation over a description.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:68
+- provenance: 5854b9b 2026-07-26, rich-references guidance absorbed from the doctrine; docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17 moved the runnable check to the `Verify:` line.
+- verdict: rewrite
+- reason: A rubric or a mockup is what an implementer reads the acceptance against without the conversation, where prose has to be interpreted. The runnable check is named on the `Verify:` line by its catalog row (F001), so this sentence leaves it out rather than give the check two carriers.
+- proposed: Prefer rich references over prose: acceptance criteria as rubrics, and for UI or visual work a mockup or reference implementation over a description.
+- passage: Prefer rich references over prose: acceptance criteria as rubrics, and for UI or visual work a mockup or reference implementation over a description.
 
 ### C152
-- key: Put the runnable check, rubric, mockup, or reference implementation on the section's `References:` line.
+- key: Put the rubric, mockup, or reference implementation on the section's `References:` line.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:58
-- provenance: 5854b9b 2026-07-26, the template line the guidance rides on.
+- provenance: 5854b9b 2026-07-26, the template line the guidance rides on; docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17 moved the runnable check to the `Verify:` line.
 - verdict: keep
 - reason: no finding. The line is where a dispatched implementer finds the reference without the conversation.
 - passage: They ride on the `References:` line.
@@ -1707,7 +1708,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - reason: The pick is the producer's instruction and stays; the trailing "the run that starts it moves to In Progress" clause is executing-work's instruction without its external-engine carve-out and leaves (A089, A090). No machinery writes the value at authoring (A091). Lands as 'and one written and deliberately parked is born `Ready`, which session start surfaces as parked rather than offering for resume.', the moves-to-`In Progress` clause gone.
 - proposed: (via A090) Drop "and which the run that starts it moves to In Progress" from line 116, keeping the pick and what Ready means at session start.
 - baseline-test: yes
-- passage: The `Status:` line is picked at authoring. A spec for a run that starts now is born `In Progress`, and one deliberately parked is born `Ready`, which session start surfaces as parked rather than offering for resume.
+- passage: Pick the `Status:` line at authoring: `In Progress` for a run that starts now, and `Ready` for one deliberately parked, which session start surfaces as parked rather than offering for resume.
 
 ### C170
 - key: See `curating-docs/SKILL.md`'s machine contract section for the frozen header and structure shape and which values it accepts, including `Model:`.
@@ -1716,7 +1717,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: 662e5e3 2026-08-01, which declared the plan-doc machine contract in curating-docs with a pointer from brainstorming because a header rule reaches an author only in the skill loaded at writing time.
 - verdict: keep
 - reason: no finding. The pointer is the mechanism that commit chose; the contract is frozen v1 and owned there.
-- passage: The header and structure above are a machine contract: `curating-docs/SKILL.md`'s machine contract section states its frozen shape and the values it accepts, including `Model:`.
+- passage: The header and structure above are a machine contract: `curating-docs/SKILL.md`'s machine contract section states its frozen shape and accepted values, including `Model:`.
 
 ### C171
 - key: Keep `## Assumptions` outside `## Sections of Work`, whose block any foreign `##` heading ends early.
@@ -1736,7 +1737,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: no provenance found (INIT-era text, 656310e 2026-06-10; a8770b3 reworded it to first person).
 - verdict: keep
 - reason: The skill's own stand-down boundary, which the doctrine's non-trivial bound does not state for a skill already loaded (A096).
-- passage: A trivial fix or a small obvious change needs no spec. Just fix it under the global rules.
+- passage: A trivial fix or a small obvious change needs no spec, so fix it under the global rules.
 
 ### C173
 - key: Where a brainstorm request turns out to be trivial, say so and offer to just do it.
@@ -1745,7 +1746,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: no provenance found (INIT-era text, 656310e 2026-06-10).
 - verdict: keep
 - reason: An operator-decision gate on the shape of a requested effort; overriding a request the operator made is covered by no standing grant, so it stays (A098).
-- passage: If I ask to brainstorm something that turns out to be trivial, say so and offer to just do it.
+- passage: If I ask to brainstorm something trivial, say so and offer to just do it.
 
 ### C174
 - key: Read a write-up or case study forwarded into the design for its diagnosis, and set its remedy aside before the sketch.
@@ -1754,7 +1755,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19, on the operator's ruling of 2026-09-18 recorded in that plan's `## Intent` that a case study is illustrative, given after a reviewer question adopted from one was cut.
 - verdict: keep
 - reason: A forwarded write-up arrives with its own fix attached, and that fix was written for the writer's incident rather than for this plan's Goal. Reading for the diagnosis alone is what keeps the plan from adopting a remedy no Goal sentence asks for, and nothing else in the skill separates the two.
-- passage: A write-up or case study forwarded into the design is read for its diagnosis, and its remedy is set aside before the sketch.
+- passage: Read a write-up or case study forwarded into the design for its diagnosis, and set its remedy aside before the sketch.
 
 ### C175
 - key: Carry a one-line summary of the `## Intent` record beside the sketch's `Assumptions` block.
@@ -1763,7 +1764,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19.
 - verdict: keep
 - reason: The record is written in the operator's words and the operator approves the sketch, so the sketch is where the record's content is shown before it is written. A record first seen in the spec would reverse the order C160 fixes for an assumption.
-- passage: Beside that block the sketch carries a one-line summary of the `## Intent` record the spec will hold.
+- passage: The sketch also carries beside it a one-line summary of the `## Intent` record the spec will hold.
 
 ### C176
 - key: Write the `## Intent` section at step 9 from the design conversation while that conversation is still in the window, carrying what and why only.
@@ -1772,7 +1773,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19; the plan's Approach paragraph "The record." states the design.
 - verdict: keep
 - reason: The conversation is the only source of the operator's words and it is gone at the next session, so the write is anchored to the one step that still holds it. The what-and-why bound keeps the record out of the Approach's job, which the scope-adjudicator is blind to by design.
-- passage: The `## Intent` section is written here, while the design conversation is still in the window. It carries what and why, never how.
+- passage: Write `## Intent` here, while the design conversation is still in the window. It carries what and why, never how.
 
 ### C177
 - key: Write the record's parts in order: the frame in the operator's words, what done does and does not need to do, the refused alternatives one per line with their reasons, the dated rulings made after the spec ships, and a provenance line.
@@ -1781,7 +1782,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19; that plan's own `## Intent` is the first instance.
 - verdict: keep
 - reason: Each part answers a reader the Approach does not serve. The plan reviewer reads the not-done half and the refusals to tell service to the Goal from an addition, and the provenance line stands in for a transcript reference, which the plan refused as machine-local and too large.
-- passage: Its parts, in order: the frame in my words where the session has them; what done does and does not need to do; the alternatives refused, each on one line with its reason; the rulings I make after the spec ships, each dated and appended the same turn; and a provenance line naming the session.
+- passage: Its parts, in order: the frame in my words where the session has them; what done does and does not need to do; the alternatives refused, each on one line with its reason; my rulings after the spec ships, each dated and appended that turn; and a provenance line naming the session.
 
 ### C178
 - key: Say in the refused-alternatives part that the conversation refused nothing where it did, and still make the not-done half refuse something.
@@ -1790,7 +1791,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19.
 - verdict: keep
 - reason: An omitted part reads the same as a forgotten one, so the empty case is stated for both parts that can be empty at the write. The rulings part is the usual empty one, since most rulings come after the spec ships, and step 10 would otherwise read its stated emptiness as the placeholder it removes. The not-done half is the half the add-decision reads against, and one that keeps nothing out makes every addition look like service to the Goal.
-- passage: An empty part says so rather than being left out. The not-done half still has to refuse something.
+- passage: An empty part is kept and says so. The not-done half still has to refuse something.
 
 ### C179
 - key: Write the record in the client-briefing register and bound it to about 4,000 bytes, read with `wc -c` over the section.
@@ -1799,7 +1800,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19, on the operator's ruling of 2026-09-18 on the relay thread that the record takes the register the operator reads.
 - verdict: keep
 - reason: The operator reads and approves this section, so it takes the register the doctrine fixes for what the operator decides from. The bound is one screen because a fresh reader reads the record whole before the spec, and a longer one becomes the design story that reader must not hold. The bound is read once, at the write, because a ruling is the operator's word and cutting one to fit would lose exactly what the rulings part exists to keep; trimming the earlier parts instead would rewrite an approved record on ordinary progress, which the freeze bars.
-- passage: The record takes the doctrine's client-briefing register. It is bounded to about 4,000 bytes, read with `wc -c` over the section at the write. A ruling appended later may carry it past the bound and is never cut to fit.
+- passage: The record takes the doctrine's client-briefing register. It is bounded to about 4,000 bytes, by `wc -c` over the section at the write. A ruling appended later may carry it past the bound and is never cut to fit.
 
 ### C180
 - key: Append a ruling made after approval to `## Intent` the same turn, dated, as a deliberate amendment recorded in the Chapter as drift.
@@ -1865,7 +1866,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: docs/plans/claude-kit_short-titles_spec_v1.md section 1, 2026-10-05, on the operator's ruling of 2026-10-03 recorded under its Intent.
 - verdict: keep
 - reason: A pull request's title is an UPPERCASE prefix naming the part of the system the work changes, then the plan's title (finishing-work's **Apply the commit model** step). A plan title already in the heading form therefore makes that title with no rewriting, and a prefix of its own would double the prefix. Existing plan titles are not retitled. The machine contract row for the title in curating-docs stays `free-form`, since the external engine's parse does not change.
-- passage: The spec's title is in the doctrine's heading form, with its main words capitalized, and carries no prefix. Its pull request adds the prefix.
+- passage: The title takes the doctrine's heading form, main words capitalized. It carries no prefix, since its pull request adds one.
 
 ### A001
 - key: Fix a `Model:` of opus or fable whose body names no reason during the spec self-review.
@@ -1877,3 +1878,48 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - proposed: requirements readable two ways and a `Model:` of opus or fable whose body names no reason, with no second inline pass.
 - passage: requirements readable two ways and a `Model:` of opus or fable whose body names no reason, with no second inline pass.
 - landed: 0e5b2828 section 3
+
+### F001
+- key: Give every section a `Verify:` line after `Tests:` stating how it is shown complete, by each catalog row it runs with its argument, or `none, because <why>`.
+- class: mechanic
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:94
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: A section that names its instrument before it is built cannot reach review with an acceptance nothing settles. The rows come from the repository's catalog rather than the skill, because the instruments differ per repository and the kit's own are instances. The line stands apart from `References:`, because a line naming both a picture and a command is read for neither, the spec's refused alternative. The none form makes a section with no instrument a stated choice rather than an omission.
+- passage: Verify: <required> how the section is shown complete: each `docs/verification.md` row it runs, with its argument, or `none, because <why>`.
+
+### F002
+- key: Run each acceptance command on the trunk at the write and record its result in the bullet as its control value, `(trunk: <value>)`.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:34
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: An acceptance command the author never ran can print something else on the trunk, as a check written to print 0 printed 9 on the holder-kill plan. A command the author ran once on the trunk is one the worker's baseline then confirms rather than discovers, which is why the run is the author's and not a worker step, the spec's refused alternative.
+- passage: Each acceptance command is run on the trunk at the write, its result recorded in the bullet as its control value, `(trunk: <value>)`.
+
+### F003
+- key: Say in the bullet, with why, when an acceptance command cannot be run on the trunk.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:34
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: The unrun command is the gap F002 closes, so one that cannot run is marked rather than left reading as checked. A reader then knows the bullet carries no control value.
+- passage: One the author cannot run there says so, with why.
+
+### F004
+- key: At the self-review, check that every `Verify:` line names rows `docs/verification.md` holds or takes the none form.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: The self-review is where coverage is checked before the spec ships, so a line naming a row the catalog lacks is caught while the author can still add the row or name another.
+- passage: Every section's `Verify:` line names rows `docs/verification.md` holds, or the none form.
+
+### F005
+- key: Seed a missing catalog by curating-docs' create path.
+- class: pointer
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- verdict: keep
+- reason: curating-docs owns the `docs/` skeletons and the create path step 9 runs, so the seed is stated there (F001 under the curating-docs SKILL.md heading) and this sentence points at it.
+- passage: A missing catalog or row is added by curating-docs' create path.

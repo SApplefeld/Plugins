@@ -16,6 +16,7 @@ Seed a new or retrofitted `docs/` library from these skeletons. Replace `<projec
 ## Living documents
 
 - **`backlog.md`** is the living handoff and next-steps doc.
+- **`verification.md`** is the instrument catalog.
 
 ## Active plans
 
@@ -74,6 +75,17 @@ Every active item carries the date it was parked: `- **<item> (YYYY-MM-DD).** <b
 ## Snapshots
 
 A done or retired item moves to `archive/backlog-YYYY-QN.md`, never struck through in place.
+```
+
+## `docs/verification.md`: Instrument Catalog
+
+```markdown
+# Verification Instruments
+
+Each row is an instrument a section's `Verify:` line names.
+
+| Instrument | Command or observation | Pass reads as | Failure here looks like | Cost and lane |
+|---|---|---|---|---|
 ```
 
 ## Backlog Snapshot: `docs/archive/backlog-YYYY-QN.md`

@@ -60,7 +60,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
   commonsStore: () => CommonsStore;
   stampTurnEndBeat: (at: number) => Promise<void>;
   meterTurnComplete: (facts: MeterTurnInput) => Promise<void>;
-  submitReplyBackstop: () => Promise<SubmitOutcome>;
+  submitReplyBackstop: (answer: string) => Promise<SubmitOutcome>;
   openWorkerAsk: (...args: AfterDeps<typeof openWorkerAskFromModule>) => ReturnType<typeof openWorkerAskFromModule>;
   persist: () => Promise<boolean>;
   activate: (nextId: string | null, reason: string) => void;
@@ -142,9 +142,8 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
-  // direct reply, the memory queue's answer head and the reply record.
-  // The backstop's fallback re-prompt carries e.answer itself. Empty where the
-  // completion carries no answer text.
+  // direct reply and its fallback re-prompt, the memory queue's answer head
+  // and the reply record. Empty where the completion carries no answer text.
   const answerScrubbed = typeof e.answer === "string" ? scrubText(e.answer).text : "";
   // Session-scoped and unconditional by design, whether or not this
   // completion matches a turn this session saw start. The plan doc's
@@ -483,7 +482,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       // queued beside an accepted one would pile into a prompt the turn
       // matcher cannot read as a delivery.
       submittedReplyBackstop = true;
-      const backstopOutcome = await submitReplyBackstop();
+      const backstopOutcome = await submitReplyBackstop(answerScrubbed);
       if (backstopOutcome.ok) {
         sess.state.decisions.push({
           timestamp: Date.now(),

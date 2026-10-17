@@ -9,23 +9,23 @@ A plan is finished when it has moved to the archive, the backlog is pruned, rela
 
 ## Docs Taxonomy
 
-Three zones, each with one job, plus one living document: the backlog.
+Three zones, each with one job, plus the living backlog.
 
 | Location | Holds | Discipline |
 |---|---|---|
 | `docs/` root | Stable about-the-solution docs (architecture, security model) and the README index | Updated in place as the solution changes |
 | `docs/plans/` | Active plans only (open or in progress) | A plan leaves the moment it is Complete or abandoned |
 | `docs/archive/` | Finished and abandoned plans (Chapters intact) and dated backlog snapshots | Immutable history; nothing here is live |
-| `docs/backlog.md` | The living handoff doc for cross-effort next-steps, active items only | Pruned-live: completed items move to a dated snapshot |
+| `docs/backlog.md` | The handoff doc for cross-effort next-steps, active items only | Pruned-live: completed items move to a dated snapshot |
 
 ## Archiving a Completed Plan
 
 Run this close path at close-out, in order:
 
 1. Confirm `Status: Complete` (or abandoned) and a final Chapter. If the plan is not done, stop.
-2. Move the file with `git mv docs/plans/<file> docs/archive/<file>` in a git repo, or a plain move otherwise. The Chapters travel untouched. Then `git add` the moved file again whenever it carries unstaged edits. `git mv` stages the index content, not the worktree content, so a doc finalized and then moved commits pre-finalization unless re-added. The `RM` pair against the file in `git status --short` is the tell.
-3. Repoint the plan's own relative links, before or right after the move. An archived sibling reached as `../archive/<file>` from `plans/` is `<file>` once the plan is itself in `archive/`. Grep the moved file for `../archive/` and fix every hit.
-4. Cross-reference. If the plan built on or superseded another, link both through a `## Related` section and mark a superseded plan in its header. Act on any cross-reference gap `docs-curator` flagged. The pointers run one way when the other plan is already archived: the moving plan gets the `## Related` section and the archived one is left alone.
+2. Move the file with `git mv docs/plans/<file> docs/archive/<file>`, or a plain move outside git. The Chapters travel untouched. Then `git add` the moved file again if it carries unstaged edits. `git mv` stages the index content, not the worktree, so those edits miss the commit unless re-added. An `RM` pair in `git status --short` is the tell.
+3. Repoint the plan's own relative links, before or right after the move. A sibling linked as `../archive/<file>` becomes `<file>` once the plan is itself in `archive/`. Grep the moved file for `../archive/` and fix every hit.
+4. Cross-reference. If the plan built on or superseded another, link both through a `## Related` section and mark a superseded plan in its header. Act on any cross-reference gap `docs-curator` flagged. If the other plan is already archived, only the moving plan gets the `## Related` section.
 5. Prune the backlog, per Backlog Pruning below.
 6. Refresh the index. `docs/README.md` and `docs/plans/README.md` both drop the plan from their active list and reflect the archive. The most-recent chain is the `Most recent:` and `Before it:` entries on the line opening `Completed plans are in`. Where either index carries it, both name the same four most recently archived plans. An archival prepends the newly closed plan and drops the oldest.
 
@@ -35,7 +35,7 @@ Archive in the same close-out that finished the work, never later or in a batch.
 
 This is the create path. Run it when `brainstorming` writes a new spec, before `executing-work` takes it:
 
-1. Add it to the active-plans list in `docs/README.md`.
+1. Add it to the active-plans list in `docs/README.md`. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks.
 2. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
 3. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
 
@@ -43,17 +43,17 @@ This is the create path. Run it when `brainstorming` writes a new spec, before `
 
 Move a done item into the quarter's snapshot at `docs/archive/backlog-YYYY-QN.md`, creating it if absent and appending within the quarter. Do not strike items through in place.
 
-The prune pass is also the aging check. Name every active item parked more than 90 days ago, with its date, for a promote, retire or keep call. Promote it: spec it now. Retire it: move to the snapshot with the reason. Keep it: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays. An undated active item is past the threshold: give it its parked date from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
+The prune pass is also the aging check. Name every active item parked over 90 days, with its date, for a promote, retire or keep call. Promote: spec it now. Retire: move it to the snapshot with the reason. Keep: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays. An undated item is past the threshold: date it from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
 
-The check also runs without a close-out. When the session-start block reports an oldest item past the threshold and no close-out is near, offer the prune pass in one line. 90 days is the tunable knob, aligned with the quarterly snapshot cadence.
+When no close-out is near and the session-start block reports an oldest item past the threshold, offer the prune pass in one line. 90 days is the tunable knob, aligned with the quarterly snapshot cadence.
 
 ## Retrofitting an Existing Tree
 
 When asked to tidy or retrofit a `docs/` that predates this structure:
 
 1. **Audit, read-only.** List every doc, read each plan's `Status` header, and classify each: active plan, completed or abandoned plan, about-the-solution doc, or stray.
-2. **Propose the migration.** Name the plans that move to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed. Where a plan has not already made that call, the stop is the material decision executing-work's blocker set names.
-3. **Apply on approval.** Create the zones and READMEs from the templates, `git mv` the completed and abandoned plans into the archive, seed the index and backlog, and report what moved. Never delete a file. Relocate it instead.
+2. **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed. Unless a plan already made that call, the stop is the material decision in executing-work's blocker set.
+3. **Apply on approval.** Create the zones and READMEs from the templates, `git mv` the completed and abandoned plans into the archive, seed the index and backlog, and report what moved. Relocate a file, never delete it.
 
 ## Plan Doc Machine Contract
 
@@ -73,23 +73,23 @@ A plan doc's header and structure are not just kit convention. An external engin
 | Chapter completed line | `Completed: <value>`, the first one in the Chapter | must start with the section number followed by a period or a space, or equal the section title exactly, case-sensitive and never a substring. Anything else leaves the section permanently open. Check an existing Chapter against these three forms before assuming it registers. A phrasing like `Completed: Section 1, <title>` matches none of them |
 | Chapter next line | `Next: <value>`, the first one in the Chapter | free-form |
 
-A plan headed `Complete (archived)` or with any other text after `Complete` still reads complete to the session-start push and the personas plugin's documentation check, so write the value exactly.
+A `Status:` value with text after `Complete` still reads complete to the session-start push and the personas plugin's documentation check, so write the value exactly.
 
-The Spec Format in `skills/brainstorming/SKILL.md` and the Chapter format in `skills/executing-work/SKILL.md` instance these rows.
+The Spec Format in `skills/brainstorming/SKILL.md` and the Chapter format in `skills/executing-work/references/closing.md` instance these rows.
 
 Changing the shape or value rule of any row is a coordinated, versioned change with the OS repo, never a drive-by edit to plan-doc prose. A value a row's existing rule already decides, `Ready` under the Status row, is not such a change.
 
-None of `## Intent`, `## Assumptions` and `## Dispatch Authorization` appears in any row above, so a plan gains any of them with no contract version change.
+None of `## Intent`, `## Assumptions` and `## Dispatch Authorization` appears in any row above, so a plan gains any of them with no contract version change. No row names a section's `Verify:` line either.
 
 `## Dispatch Authorization` goes **above** `## Sections of Work`. `## Intent` and `## Assumptions` go outside `## Sections of Work` and above `## Chapters`. A misplaced heading truncates the parse silently. Inside `## Sections of Work` it drops every later `### N.` section, and after `## Chapters` every Chapter below it stops registering.
 
-A `## Dispatch Authorization` section records a plan run's approval: who approved the run, when, and which sessions the grant covers, by default "any session holding this plan". It is an approval, never an instruction to start the run. A plan arriving by peer message runs under it once the grant stands as the peer-sessions skill states, by a trace to the operator or a chain handoff. The peer-sessions skill owns the trace, the chain handoff, the message's standing and the reply states. The section supplies no live steering, so anything the plan does not cover goes to the operator.
+A `## Dispatch Authorization` section records a plan run's approval: who approved it, when, and which sessions the grant covers, by default "any session holding this plan". It never instructs a run to start. A plan arriving by peer message runs under it once the grant stands, by a trace to the operator or a chain handoff. The peer-sessions skill owns the trace and the handoff, with the message's standing and the reply states. The section supplies no live steering, so whatever the plan does not cover goes to the operator.
 
 Adding any of these headings to an approved plan mid-run is an edit above `## Chapters`. Make it deliberately and record it in the Chapter, per the freeze rule in `skills/brainstorming/SKILL.md`'s spec format.
 
 ## Templates
 
-Seed the README, index, and backlog skeletons from `references/templates.md` rather than inventing a new shape per project.
+Seed the README, index, and backlog skeletons from `references/templates.md`, never inventing a new shape per project.
 
 ## Antipatterns
 

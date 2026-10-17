@@ -11,7 +11,7 @@ A skill is behavior-shaping prose, not documentation. If it does not change what
 
 - **Create when** the technique is non-obvious, recurs across efforts, and is general. A single project's convention goes in that project's CLAUDE.md.
 - **Do not create** for a one-off, a restatement of standard practice, or anything a hook or regex can enforce.
-- **The kit stays lean.** A new skill must beat one more paragraph in an existing skill. When in doubt, fold it in rather than add a file.
+- **A rule enters by displacing what it supersedes.** Before adding to curated prose, sweep it for every passage the addition supersedes, contradicts or restates, and cut or reword each in the same change. A plan's Approach lists each passage cut with its word count, or says the sweep found none, and a corpus-cap raise ask carries that list. Surviving growth is weighed as the next bullet says. A new skill must beat one more paragraph in an existing skill. When in doubt, fold it in rather than add a file.
 - **The size budget is a ledger rather than a ceiling.** A file that grows raises its cap in `test/size-budget.json` in the same change, and one that shrinks lowers it. Move the caps with `node <plugin-root>/scripts/kit-size.js sync --repo <the project's root> <path>...`, naming the files the change touched, a new file's first cap included, tracked or not. The bare form with no paths belongs to an audit over a clean tree. A reviewer weighs only whether the added words earn their place, and a rewording takes the shrink where one is available.
 
 ## Anatomy
@@ -20,7 +20,7 @@ A skill is behavior-shaping prose, not documentation. If it does not change what
 - **Frontmatter: always quote the description.** `name` and `description` are the two fields that matter.
 - Body: the principle, the rules that carry judgment, the antipatterns. Tables for what gets scanned, prose for the why, and a flowchart only for a decision the agent might get wrong.
 - **One owner per rule.** The doctrine's one-owner bullet and its ownership map own the principle and the forms a mention may take. When editing a rule, grep its key phrases across the kit and fix the owner, not the nearest copy.
-- Point at `curating-docs/SKILL.md`'s "Plan Doc Machine Contract" section for the plan-doc header and structure, never restating its lines.
+- `curating-docs/SKILL.md`'s "Plan Doc Machine Contract" section owns the plan-doc header and structure.
 
 ## Description Field
 
@@ -45,9 +45,9 @@ Three rules govern any rule you write:
 
 ## Checkable Facts
 
-Framing a fact so the reader can check it is the doctrine's "A claim is written in the form a reader can check" bullet.
+The doctrine's "A claim is written in the form a reader can check" bullet owns checkable framing.
 
-- **A list drawn from observed instances is stated as open unless a contract closes it.** Closure comes from a contract (a schema, an enum, a validated surface with a published shape), never from the sample agreeing with itself. So write the list as open and say what would close it, or cite the contract that already does.
+- **A list drawn from observed instances is stated as open unless a contract closes it.** Closure comes from a contract (a schema, an enum, a validated surface with a published shape), never from the sample agreeing with itself. An open list says what would close it.
 
 ## What a Sentence Must Earn
 
@@ -57,13 +57,13 @@ Curated prose in the kit's own voice meets three sentence-shape bars:
 
 - **One idea.** A sentence is one idea, about twenty words. A rule and the bound that limits it are two sentences, the bound right after the rule. They share one sentence only where the split would leave the rule readable alone. A count past twenty is the diagnostic that finds a second idea, read per sentence and never as a target. A paragraph makes one point, or says why its parts must be read together.
 - **The literal phrase.** Where a literal phrase for the thing exists, the sentence uses it. A metaphor stands only where it is the established term, and elsewhere it is mannered prose, flourish in place of direct statement, fixed by the literal phrase.
-- **A pointer where another site owns the rule.** The forms a mention may take are the doctrine's one-owner bullet's, and this bar adds none.
+- **A pointer where another site owns the rule.** The doctrine's one-owner bullet lists the forms, and this bar adds none.
 
 The three are instances of one class: prose that costs the reader more to read than it changes for them. A form none of them names is inside the bar.
 
 ## Correcting a Curated Claim
 
-**When an amendment corrects a claim a curated document states, the edit unit is the paragraph, never the sentence.** Re-derive the whole paragraph from the corrected claim. Check the claim's other carriers: the neighbouring clauses that qualified or restated it, and any sibling surface stating the same behavior. The unit is the claim on every surface carrying it, whether or not anything here names that surface. Carriers include a doctrine parity copy, the output style's register block, an agent charter, a test's assertion message, a memory record and a README's payload map, and that list is not the boundary. An amendment that corrects no claim, such as a typo fix, an added bullet or a label rename, takes whatever edit it needs.
+**When an amendment corrects a claim a curated document states, the edit unit is the paragraph, never the sentence.** Re-derive the whole paragraph from the corrected claim. The unit spans the claim's carriers: the neighbouring clauses that qualified or restated it, and every surface stating the same behavior, whether or not anything here names it. Carriers include a doctrine parity copy, the output style's register block, an agent charter, a test's assertion message, a memory record and a README's payload map, and that list is not the boundary.
 
 An insertion anchored on a block's tail, or on the next entry's first line, restores every byte of that anchor in the replacement. It then re-greps the neighbour's lead-in, with a control at HEAD proving the pattern matches the intact form.
 

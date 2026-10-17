@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's rulebook for authoring and amending behavior-shaping prose. It owns the moments where a session decides whether a new skill earns a file at all, how a SKILL.md is shaped (frontmatter, body, one owner per rule, size-budget caps), how a description states its trigger, which rule form fixes which observed failure, what facts a rule may rest on, the three sentence-shape bars for any prose the kit ships in its own voice, the paragraph-as-edit-unit rule for correcting a claim in curated prose and how carriers of that claim on other surfaces are routed, and the RED/GREEN/REFACTOR probe discipline (including the probe-corpus before-and-after pair, doctrine-probe staging, and the contaminated-RED case) that must run before a wording change is trusted. Its load class is `named-trigger`: the frontmatter says to use it when creating or editing a skill, when judging whether a wording change will change behavior, or when amending curated prose the kit ships, with triggers such as adding a new SKILL.md, reworking a skill's rules, correcting a claim a curated document states, or a kaizen change to the kit's own skills.
 
-Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by `docs/plans/claude-kit_skill-guidance-alignment_spec_v1.md` section 1 on 2026-10-05 (H001 below, with C032 retired to it and C007 and S026 retired, as that section cut those sentences to pay for the description rule). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `36998390` with its fix round at `6f26f01a`, so every live entry's `passage:` line the skill guidance alignment plan did not re-quote quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags.
+Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by `docs/plans/claude-kit_skill-guidance-alignment_spec_v1.md` section 1 on 2026-10-05 (H001 below, with C032 retired to it and C007 and S026 retired, as that section cut those sentences to pay for the description rule). Amended by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1 on 2026-10-17 (A001 below, with C073 retired to it and C070 retired to C069; C031, C047, C050, C052, C065 and C069 re-quoted after a narrow cut; C008 and C009 stand at line 14 word for word, closing the rewritten bullet). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `36998390` with its fix round at `6f26f01a`, so every live entry's `passage:` line the skill guidance alignment plan did not re-quote quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags.
 
 ### C001
 - key: Name the specific failure a skill change is meant to fix before writing the change.
@@ -317,10 +317,10 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - key: For the plan-doc header and structure, read and point at `curating-docs/SKILL.md`'s "machine contract" section rather than restating any of its lines.
 - class: pointer
 - source: plugins/grimoire/skills/writing-skills/SKILL.md:23
-- provenance: 662e5e3 2026-08-01, an external engine parsing every plan doc case-sensitively with nothing telling an author which lines are load-bearing; curating-docs took the contract and this skill a pointer.
+- provenance: 662e5e3 2026-08-01, an external engine parsing every plan doc case-sensitively with nothing telling an author which lines are load-bearing; curating-docs took the contract and this skill a pointer; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: keep
 - reason: No finding. A pointer at a frozen shape external tooling parses; the pointer sits here because this is the skill loaded when a plan doc's shape is written.
-- passage: Point at `curating-docs/SKILL.md`'s "Plan Doc Machine Contract" section for the plan-doc header and structure, never restating its lines.
+- passage: `curating-docs/SKILL.md`'s "Plan Doc Machine Contract" section owns the plan-doc header and structure.
 
 ### C032
 - key: Write a skill description as "Use when..." plus the symptoms that pull it in, and stop there.
@@ -473,11 +473,11 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 ### C047
 - key: Where two framings of one fact are both true, ship the one the reader can verify from where they sit.
 - class: rule
-- source: plugins/grimoire/skills/writing-skills/SKILL.md:52
-- provenance: a5e184b 2026-08-25, a review round whose three Majors were one defect: motivating clauses whose asserted mechanism the file's own contract or a grep denied.
+- source: plugins/grimoire/skills/writing-skills/SKILL.md:48
+- provenance: a5e184b 2026-08-25, a review round whose three Majors were one defect: motivating clauses whose asserted mechanism the file's own contract or a grep denied; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: keep
 - reason: Incident-born and unenforced. The why (C049, C135 moved here): "`memq recall` returns the whole memory store as one bounded digest" and "the memory store is available in bulk" are the same fact and only the first names something the reader can run; a rule taken on trust cannot be repaired when the fact under it moves, so the reader keeps obeying a rule that describes nothing.
-- passage: Framing a fact so the reader can check it is the doctrine's "A claim is written in the form a reader can check" bullet.
+- passage: The doctrine's "A claim is written in the form a reader can check" bullet owns checkable framing.
 
 ### C048
 - key: Name the file, command, observable event, or artifact the fact lives in, and pick the framing that makes it findable.
@@ -502,8 +502,8 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 ### C050
 - key: State a list drawn from observed instances as open unless a contract closes it.
 - class: rule
-- source: plugins/grimoire/skills/writing-skills/SKILL.md:53
-- provenance: a5e184b 2026-08-25, the same round (a search key anchored on a set name the rule's own worked examples did not carry).
+- source: plugins/grimoire/skills/writing-skills/SKILL.md:50
+- provenance: a5e184b 2026-08-25, the same round (a search key anchored on a set name the rule's own worked examples did not carry); re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: rewrite
 - landed: 22eafd6 section 31
 - reason: Merged with C052 into one rule, since the bullet's closing sentence restated its opening plus "say what would close it". The why (C136, moved here): an enumeration extracted from one fully-observed sample reads as exhaustive to its writer because every field was present and nothing contradicted it, so a reader branching on a field's absence is wrong for every instance the sample never contained. Lands at line 51 on both proposals together, read as complementary: the bold lead, then 'Closure comes from the contract (a schema, an enum, a validated surface with a published shape), never from the sample agreeing with itself.' (C051, word for word), then A051's one rule as the merged closing, 'So write the list as open and say what would close it, or cite the contract that already does.'; the fact-layer framing and C136's two sentences are gone.
@@ -511,7 +511,7 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - proposed: (via A051) One rule: state a list drawn from observed instances as open and say what would close it, or cite the contract that already does.
 - baseline-test: yes
 - passage: **A list drawn from observed instances is stated as open unless a contract closes it.**
-- passage: So write the list as open and say what would close it, or cite the contract that already does.
+- passage: An open list says what would close it.
 
 ### C051
 - key: Treat a list as closed only on a contract's authority: a schema, an enum, or a validated surface with a published shape, never a sample agreeing with itself.
@@ -525,12 +525,12 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 ### C052
 - key: Write the list as open and say what would close it, or cite the contract that already closes it.
 - class: rule
-- source: plugins/grimoire/skills/writing-skills/SKILL.md:53
-- provenance: a5e184b 2026-08-25, the same round.
+- source: plugins/grimoire/skills/writing-skills/SKILL.md:50
+- provenance: a5e184b 2026-08-25, the same round; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: rewrite
 - landed: 22eafd6 section 31
-- reason: Merged into C050; only the "say what would close it" clause is new and it rides in the merged sentence. Lands at line 51 inside C050's merged closing, 'So write the list as open and say what would close it, or cite the contract that already does.', the 'say what would close it' clause the only new words.
-- passage: So write the list as open and say what would close it, or cite the contract that already does.
+- reason: Merged into C050; only the "say what would close it" clause is new and it rides in the merged sentence. Lands at line 51 inside C050's merged closing, 'So write the list as open and say what would close it, or cite the contract that already does.', the 'say what would close it' clause the only new words. The key's cite-the-contract half rests on the bullet's lead sentence, which says closure comes from a contract.
+- passage: An open list says what would close it.
 
 ### C053
 - key: Treat any fact a rule rests on that the reader cannot check or cannot see the edges of as inside this rule, even where no bullet names its form.
@@ -645,13 +645,13 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 ### C065
 - key: For which forms a mention of another site's rule may take, read the one-owner rule under Anatomy; this bar adds no form and no exception.
 - class: pointer
-- source: plugins/grimoire/skills/writing-skills/SKILL.md:65
-- provenance: 8cdb3f5 2026-09-04, the third bar as a pointer at the Anatomy rule.
+- source: plugins/grimoire/skills/writing-skills/SKILL.md:60
+- provenance: 8cdb3f5 2026-09-04, the third bar as a pointer at the Anatomy rule; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut with the meaning unchanged.
 - verdict: rewrite
 - landed: 22eafd6 section 31
 - reason: Stands; once line 22 points at the doctrine's form list (C028), this pointer resolves through it. Flipped to rewrite at section 31's round 1: C027's pointer left this sentence saying Anatomy states the forms where it now points at the doctrine for them. Its landed sentence: 'The one-owner rule under Anatomy above points at the doctrine's bullet for the forms a mention may take; this bar adds no form to that list and no exception.'
 - proposed: The one-owner rule under Anatomy above points at the doctrine's bullet for the forms a mention may take; this bar adds no form to that list and no exception.
-- passage: The forms a mention may take are the doctrine's one-owner bullet's, and this bar adds none.
+- passage: The doctrine's one-owner bullet lists the forms, and this bar adds none.
 
 ### C066
 - key: Treat any prose that costs the reader more to read than it changes for them as inside the bar, even where none of the three bars names its form.
@@ -681,23 +681,23 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - passage: Re-derive the whole paragraph from the corrected claim.
 
 ### C069
-- key: Check the claim's other carriers: the neighbouring clauses that qualified or restated it and any sibling surface stating the same behavior.
+- key: Take the edit unit across the claim's carriers: the neighbouring clauses that qualified or restated it and every surface stating the same behavior.
 - class: rule
-- source: plugins/grimoire/skills/writing-skills/SKILL.md:71
-- provenance: ab3d766 2026-08-29, section 9.
+- source: plugins/grimoire/skills/writing-skills/SKILL.md:66
+- provenance: ab3d766 2026-08-29, section 9; re-quoted by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, a narrow corpus cut, its lead reworded in that plan's finishing pass to keep C070's edit-unit reach.
 - verdict: keep
 - reason: Stands as worded; the second round of that commit found three sibling surfaces left stating the superseded discriminator.
-- passage: Check the claim's other carriers: the neighbouring clauses that qualified or restated it, and any sibling surface stating the same behavior.
+- passage: The unit spans the claim's carriers: the neighbouring clauses that qualified or restated it, and every surface stating the same behavior, whether or not anything here names it.
 - flag: weak-reason
 
 ### C070
 - key: Treat the edit unit as the claim across every surface carrying it, whether or not this skill names that surface.
 - class: rule
 - source: plugins/grimoire/skills/writing-skills/SKILL.md:71
-- provenance: ab3d766 2026-08-29, the reach sentence rewritten after the fix round shipped one excluding two named carriers.
-- verdict: rewrite
-- landed: 22eafd6 section 31
-- reason: The rule holds; it shares an eighty-word sentence with the carrier list (C071), and the split gives each its own sentence with nothing removed. Lands at line 69 as 'The unit is the claim across every surface carrying it, and the paragraph is that unit's smallest case. A surface carrying the claim is inside the rule whether or not anything here names it.', the carrier list (C071) its own sentence after it, nothing removed; the pinned lead sentence stands once, which the doctrine-parity test declared at line 5105 pins.
+- provenance: ab3d766 2026-08-29, the reach sentence rewritten after the fix round shipped one excluding two named carriers; its rewrite had landed at 22eafd6 section 31.
+- verdict: retire
+- superseded-by: C069
+- reason: C069's sentence now puts every surface stating the behavior, named here or not, inside the edit unit, which is the reach this entry stated, so this sentence folds into it. Before that: The rule holds; it shares an eighty-word sentence with the carrier list (C071), and the split gives each its own sentence with nothing removed. Lands at line 69 as 'The unit is the claim across every surface carrying it, and the paragraph is that unit's smallest case. A surface carrying the claim is inside the rule whether or not anything here names it.', the carrier list (C071) its own sentence after it, nothing removed; the pinned lead sentence stands once, which the doctrine-parity test declared at line 5105 pins.
 - passage: The unit is the claim on every surface carrying it, whether or not anything here names that surface.
 
 ### C071
@@ -727,8 +727,9 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - class: rule
 - source: plugins/grimoire/skills/writing-skills/SKILL.md:71
 - provenance: ab3d766 2026-08-29, section 9's bound on the rule.
-- verdict: keep
-- reason: The observable predicate that keeps the paragraph rule from reaching a typo; stands as worded.
+- verdict: retire
+- superseded-by: A001
+- reason: The paragraph rule's own condition, an amendment that corrects a claim, already keeps it off a typo, so the exemption scoped nothing the condition did not. Read loosely, it also let an added bullet skip the sweep A001 requires. Before that, the observable predicate that keeps the paragraph rule from reaching a typo; stood as worded.
 - passage: An amendment that corrects no claim, such as a typo fix, an added bullet or a label rename, takes whatever edit it needs.
 
 ### C074
@@ -1735,3 +1736,13 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - verdict: keep
 - reason: Replaces C032, whose "Use when..." and stop wording produced a description with no statement of what the skill does. The reason is the plan's Assumptions in docs/plans/claude-kit_skill-guidance-alignment_spec_v1.md: the person-word list is closed at eleven words with a quoted utterance skipped, and the test reads every plugins/*/skills/*/SKILL.md. The sentence naming the test claims only what test/skill-description.test.js asserts: the character limit, the opening word and the person words (a quoted utterance skipped, closed on a single quote followed by a non-word character or the end of the value), plus the frontmatter shape, the "Use when" text and the name matching its folder.
 - passage: Open with a third-person clause saying what the skill does, then "Use when..." and its symptoms, and stop. Do not summarize the skill's process there. Write "the operator", never first- or second-person pronouns outside quoted utterances. Stay within 1,024 characters. `test/skill-description.test.js` holds the limit, the opening and person words.
+
+### A001
+- key: Before adding to curated prose, sweep it for every passage the addition supersedes, contradicts or restates, and cut or reword each in the same change; a planned change lists each cut with its word count or says the sweep found none, and a corpus-cap raise ask carries that list.
+- class: rule
+- source: plugins/grimoire/skills/writing-skills/SKILL.md:14
+- provenance: `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1, 2026-10-17; the sweep widened from the corpus to curated prose in that plan's finishing pass, on the architect's ruling of 2026-10-17.
+- verdict: keep
+- landed: 7753b1f8 section 1
+- reason: the operator's ruling of 2026-10-16, quoted under that plan's Intent: "before we're adding new language to the skills, the doctrine, or anything like that, we're checking to make sure that the existing content is compatible and potentially cut, trimmed, or adjusted for the new information we're putting in". The review convergence and verification instrument plans found about 170 words of superseded text in one evening after both had asked for a cap raise, so the sweep runs before the addition rather than at the raise. The rule obliges a sweep and a cut of what it finds, never a trade of added words for trimmed ones, which the operator retired on 2026-09-08; growth that survives the sweep is weighed by the ledger bullet's reviewer sentence. It rewrites the leanness bullet rather than sitting beside it, since C008 and C009 are the same instinct one step later, and they close it word for word.
+- passage: **A rule enters by displacing what it supersedes.** Before adding to curated prose, sweep it for every passage the addition supersedes, contradicts or restates, and cut or reword each in the same change. A plan's Approach lists each passage cut with its word count, or says the sweep found none, and a corpus-cap raise ask carries that list. Surviving growth is weighed as the next bullet says.

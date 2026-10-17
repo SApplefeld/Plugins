@@ -247,7 +247,21 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // same-directory write fence). Claim in commons FIRST; if a live earlier
   // holder exists, join as reader (no epoch bump, no ownership).
   if (e.tool === "mcp__personas__agentic_identity") {
-    const name = String((e as any).persona || "default").trim() || "default";
+    // A call naming no persona (absent, null, empty, blank, or not a string at
+    // all) is a read of the identity the session holds: it answers from the
+    // session's own state and returns before the name rule, the store read and
+    // the claim, so it switches nothing and writes nothing. Only a non-blank
+    // string name switches.
+    const rawPersona = (e as any).persona;
+    if (typeof rawPersona !== "string" || rawPersona.trim() === "") {
+      if (sess.stateNotLoaded !== null) return { result: stateNotLoadedText(sess.stateNotLoaded) };
+      return {
+        result: sess.isOwner
+          ? `persona '${sess.persona}' active (epoch ${sess.myEpoch}, owner). ${selfReviewLessonCount()} self-review lessons. ${previousSessionsText(sess.state)}`
+          : `persona '${sess.persona}': joined as reader (${arming() === "reader" ? "arming reader" : `epoch ${sess.myEpoch}`}). ${selfReviewLessonCount()} self-review lessons. ${previousSessionsText(sess.state)}`,
+      };
+    }
+    const name = rawPersona.trim();
     // The shared name rule, before any claim or store write: a persona
     // that fails it could be owned but never addressed, and its inbox
     // listing would read another persona's keys.

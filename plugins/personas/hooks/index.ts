@@ -4064,17 +4064,18 @@ export const register: Register = async (on, options) => {
         "Switch this session to a persona's store. It never evicts a live session: where another " +
         "session holds this persona and its heartbeat is current, this session joins as a passive " +
         "reader with agentic_say and agentic_inbox and no write access. Ownership is taken only " +
-        "where no live holder exists or the holder's heartbeat has gone stale.",
+        "where no live holder exists or the holder's heartbeat has gone stale. Called with no " +
+        "persona, it reports the persona this session holds and switches nothing.",
       inputSchema: {
         type: "object",
         properties: {
           persona: {
             type: "string",
             description:
-              'The persona name to activate (e.g. "default", "refactorer"). If omitted, activates "default".',
+              'The persona name to switch to (e.g. "default", "refactorer"). If omitted, the call reports ' +
+              "the persona this session holds and switches nothing.",
           },
         },
-        required: ["persona"],
       },
     }));
 
@@ -6586,8 +6587,8 @@ export const register: Register = async (on, options) => {
         commonsStore: () => commonsStoreOf($),
         stampTurnEndBeat: (at) => stampBeat(beatHostOf($), sess, at, beatFilesOf(supervisorHeartbeatPath)),
         meterTurnComplete: (facts) => meterTurnComplete($, facts),
-        submitReplyBackstop: async () => {
-          const backstopText = `[REPLY BACKSTOP] Send this exact text to the operator through the reply tool now, unchanged:\n${e.answer}`;
+        submitReplyBackstop: async (answer: string) => {
+          const backstopText = `[REPLY BACKSTOP] Send this exact text to the operator through the reply tool now, unchanged:\n${answer}`;
           const backstopOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: backstopText }));
           return backstopOutcome;
         },

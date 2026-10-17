@@ -290,6 +290,17 @@ holder_ask_file_whole() {  # <file> <first line as read>
       ROLE_TAKEUP_INSTRUCTION+="You are the Worker seat. Invoke the Skill tool for grimoire:role and take the Worker seat; its runbook is the Roles bullet of grimoire:peer-sessions. "
       ;;
   esac
+  # The persona sentence, built for every launch shape. It names the persona
+  # this launch runs on this fleet, the persona the session starts under, so a
+  # seat never reads its persona from its working directory or by calling
+  # agentic_identity. The seat itself takes the session's name, which on a
+  # channel-attached launch is the channel name, defaulting to
+  # supervisor-<persona>, so the sentence claims nothing about it. PERSONA is
+  # never empty, since it defaults to "default" above. It sits outside the
+  # role arms so each arm stays one literal, and it is spliced from PERSONA
+  # the way the coordinator and architect sentences below splice their
+  # fleet's names.
+  PERSONA_NAME_INSTRUCTION="Your persona on this fleet is ${PERSONA}: this session starts under it, so you never need to call agentic_identity to learn it. "
   # The coordinator persona's own sentences. They carry what only the plugin
   # and the launch know: that this seat is the kit's Coordinator seat on this
   # machine, how the plugin labels a record the seat sends with agentic_say and
@@ -484,7 +495,7 @@ holder_ask_file_whole() {  # <file> <first line as read>
       '[SUPERVISOR-PRIMING] ' + prefix + body
     }]}});
     process.stdout.write(json + '\n');
-  " "$ROLE_TAKEUP_INSTRUCTION$SKILL_LOAD_INSTRUCTION$COORDINATOR_STEER_INSTRUCTION$COORDINATOR_ROLE_INSTRUCTION$ARCHITECT_ROLE_INSTRUCTION$LIAISON_ROLE_INSTRUCTION$SUPERVISOR_MAILBOX_INSTRUCTION$CHANNEL_REPLY_INSTRUCTION" "$PRIMING_BODY"
+  " "$ROLE_TAKEUP_INSTRUCTION$PERSONA_NAME_INSTRUCTION$SKILL_LOAD_INSTRUCTION$COORDINATOR_STEER_INSTRUCTION$COORDINATOR_ROLE_INSTRUCTION$ARCHITECT_ROLE_INSTRUCTION$LIAISON_ROLE_INSTRUCTION$SUPERVISOR_MAILBOX_INSTRUCTION$CHANNEL_REPLY_INSTRUCTION" "$PRIMING_BODY"
 
 # Whether a goal prompt is still waiting to be written. It opens its own turn
 # once the priming turn's result line appears, so it is never folded behind the
