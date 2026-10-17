@@ -18,6 +18,10 @@ import type { RosterPersona } from "../board/roster.ts";
 /** A string field is cut to this many code points. */
 export const MAX_ASK_FIELD_LENGTH = 1_000;
 
+/** An entry's decision brief is cut to this many code points: wide enough to hold whole a brief the
+ * kit bounds at 1,800 UTF-16 units, which the field cap above would cut. */
+export const MAX_ASK_BRIEF_LENGTH = 2_000;
+
 /** Each list the reader returns holds at most this many entries. */
 export const MAX_ASKS_PER_LIST = 64;
 
@@ -32,7 +36,8 @@ export const ASK_COUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
  * One ask as the ledger writes it. `id` and `question` are the two a reading cannot do without, so
  * an entry lacking either is dropped. Every other field is null where the file carries none or
  * carries the wrong type. `status`, `opener` and `closedBy` are strings and not closed sets, so a
- * value a later plugin writes passes through verbatim. Timestamps are epoch milliseconds.
+ * value a later plugin writes passes through verbatim. Timestamps are epoch milliseconds. `brief`
+ * is the decision brief the kit drafts for the ask, several lines of text, null until drafted.
  */
 export type AskEntry = {
   id: string;
@@ -49,6 +54,7 @@ export type AskEntry = {
   closedAt: number | null;
   closedBy: string | null;
   answer: string | null;
+  brief: string | null;
 };
 
 export type LedgerReading = {
@@ -127,6 +133,7 @@ function entryOf(value: unknown): Readonly<AskEntry> | null {
     closedAt: numberField(value.closedAt),
     closedBy: textField(value.closedBy),
     answer: textField(value.answer),
+    brief: typeof value.brief === "string" ? cut(value.brief, MAX_ASK_BRIEF_LENGTH) : null,
   });
 }
 

@@ -1,6 +1,6 @@
 // The `Fleet: Decisions` card: one count line per persona that filed an ask in the last seven days,
 // then one line per open ask across every roster persona's ledger, oldest first, and the messages
-// its thread carries for each ask.
+// its thread carries for each ask, which draw the kit's decision brief where the entry carries one.
 //
 // Pure rendering: everything it draws arrives
 // as an argument, the clock included, so the same readings compose the same bytes and the thread
@@ -85,6 +85,14 @@ export const MAX_RECOMMEND_LENGTH = 80;
 const MAX_MESSAGE_QUESTION_LENGTH = 1_200;
 const MAX_MESSAGE_RECOMMEND_LENGTH = 240;
 
+/**
+ * Room for one line of a decision brief on a thread message, a bound on the escaped text as the
+ * question's is, and how many of the brief's non-blank lines are drawn. Neither keeps the message
+ * under `MAX_MESSAGE_LENGTH`: the joined lines are then held to what the heading and the link leave.
+ */
+const MAX_MESSAGE_BRIEF_LINE_LENGTH = 600;
+const MAX_MESSAGE_BRIEF_LINES = 24;
+
 /** The widest `heartbeat` draws: "just now" and "999d ago" are both eight characters. */
 const MAX_HEARTBEAT_LENGTH = 8;
 
@@ -135,6 +143,30 @@ const RECOMMEND_SEGMENT = /\?\s*Recommend:/i;
 export function questionOf(question: string): string {
   const match = RECOMMEND_SEGMENT.exec(question);
   return match === null ? question : question.slice(0, match.index + 1);
+}
+
+/** Whether an entry carries a decision brief the thread message draws: a string with at least one
+ * line left once escaped, so a brief the escape strips to nothing keeps the question.
+ * The one test of it, so the message and the thread's one edit cannot disagree. */
+export function hasBrief<T extends Pick<AskEntry, "brief">>(entry: T): entry is T & { brief: string } {
+  return typeof entry.brief === "string" && briefLines(entry.brief) !== "";
+}
+
+/**
+ * A decision brief as message lines: each of its lines escaped on its own, since the escape folds a
+ * text onto one line, and held to its own bound on the escaped text; a line left blank dropped; and
+ * the first `MAX_MESSAGE_BRIEF_LINES` of the rest rejoined. The escape trims each line and folds its
+ * runs of whitespace to one space, so an indented line draws flush left. A line opening with a
+ * hyphen still draws as a bullet, since the hyphen is not in the escape class, which is the shape
+ * the kit writes an option in.
+ */
+function briefLines(brief: string): string {
+  return brief
+    .split("\n")
+    .map((line) => inertField(line, MAX_MESSAGE_BRIEF_LINE_LENGTH))
+    .filter((line) => line !== "")
+    .slice(0, MAX_MESSAGE_BRIEF_LINES)
+    .join("\n");
 }
 
 /** An untrusted field already bounded by its own producer: escaped and guarded, never re-cut. */
@@ -336,9 +368,20 @@ export function renderDecisionsCard(
  * so a message whose every field is at its bound still ends with the link, and the close that later
  * appends the outcome line stays under the ceiling. The question gives up room first because it is
  * the one line the card already draws a cut of.
+ *
+ * An entry carrying a decision brief draws the brief's lines in place of the question and the
+ * recommendation, since the brief carries both in its own words. The lines take what the heading
+ * and the link leave, and a brief past that room is cut at its end with the ellipsis mark, so the
+ * message still ends with the link and keeps the outcome line's room.
  */
 function fitMessage(persona: string, entry: Readonly<AskEntry>, link: string | null): string {
   const head = heading(persona, entry);
+  if (hasBrief(entry)) {
+    const tail = link === null ? [] : [link];
+    // Charged as the question's room is below: every other line with the newline joining it on.
+    const brief = fit(briefLines(entry.brief), MAX_ASK_BODY_LENGTH - spent([head, ...tail]));
+    return [head, brief, ...tail].filter((line) => line !== "").join("\n");
+  }
   const recommendation =
     entry.recommend === null || entry.recommend === ""
       ? null
@@ -355,7 +398,8 @@ function fitMessage(persona: string, entry: Readonly<AskEntry>, link: string | n
 /**
  * The message the card's thread carries for one ask: the heading the card draws, the question whole
  * but for its recommendation segment, the recommendation where the worker gave one, and the link to
- * where it was asked where one is known.
+ * where it was asked where one is known. Where the entry carries a decision brief, the brief's lines
+ * stand in place of the question and the recommendation.
  */
 export function renderAskMessage(
   persona: string,
@@ -366,11 +410,12 @@ export function renderAskMessage(
 }
 
 /**
- * What an ask's message is edited to once the ledger shows it closed: the body it was posted with,
- * then one line with the outcome, the entry's status and how long ago it closed. An ask whose
- * outcome the ledger no longer shows, closed longer ago than the reader's recently-closed window,
- * keeps the same body and gains the closing word alone, with no status it cannot know. The body
- * was posted with the outcome line's room reserved, so the edit stays under the ceiling.
+ * What an ask's message is edited to once the ledger shows it closed: the body the message holds,
+ * as posted or as edited to its brief, then one line with the outcome, the entry's status and how
+ * long ago it closed. An ask whose outcome the ledger no longer shows, closed longer ago than the
+ * reader's recently-closed window, keeps the same body and gains the closing word alone, with no
+ * status it cannot know. The body was posted with the outcome line's room reserved, so the edit
+ * stays under the ceiling.
  */
 export function renderClosedMessage(body: string, entry: Readonly<AskEntry> | null, now: number): string {
   if (entry === null) return `${body}\n${CLOSED}`;

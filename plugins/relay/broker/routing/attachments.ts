@@ -1,13 +1,14 @@
 // The one path a file attached to a Discord message takes to reach a session: fetched from
 // Discord's CDN, bounded, and either handed back as the words of a pasted message or written
-// under the broker's state directory for the session to open with its own file-reading tool.
+// under the broker's state directory for the session to open with its own tools.
 //
 // This is the only code that fetches an attachment or writes one to disk, and nothing it reads out
-// of the attachment is trusted. The name decides the kind and, reduced to a safe alphabet, is the
-// one sender-chosen part of any path written here. The declared size is never consulted: the cap
-// is enforced on the bytes as they stream, since the declared size is the sender's claim. The URL
-// is fetched only when it names one of Discord's two CDN hosts over https with no port and no
-// redirect, since the broker would otherwise fetch any address a message object named.
+// of the attachment is trusted. The name decides a participant's kind, an operator's file is saved
+// as sent, and the name, reduced to a safe alphabet, is the one sender-chosen part of any path
+// written here. The declared size is never consulted: the cap is enforced on the bytes as they
+// stream, since the declared size is the sender's claim. The URL is fetched only when it names one
+// of Discord's two CDN hosts over https with no port and no redirect, since the broker would
+// otherwise fetch any address a message object named.
 //
 // Every per-file problem is a refusal with a cause from a closed list, and one file's failure never
 // stops the others: the router posts each refusal to the thread under its file's reduced name, so
@@ -121,14 +122,15 @@ export const MAX_REDUCED_NAME_LENGTH = 80;
 const PASTE_NAME = "message.txt";
 
 /**
- * Which kinds are taken in, by extension, compared without regard to letter case. The list is
- * closed: an extension absent from it is refused, whatever content type Discord reported. For a
- * text extension the content type is not consulted, since Discord derives it from the same
- * extension. For an image or a document the reported media type must also be the one named here,
- * so that a file wearing an image's extension over another kind of content is refused.
+ * Which kinds a participant's file may be, by extension, compared without regard to letter case.
+ * The list is closed: a participant's file whose extension is absent from it is refused, whatever
+ * content type Discord reported. For a text extension the content type is not consulted, since
+ * Discord derives it from the same extension. For an image or a document the reported media type
+ * must also be the one named here, so that a file wearing an image's extension over another kind of
+ * content is refused. An operator's file is not held to the list.
  *
- * Exported because the reply file reader admits exactly these kinds in the other direction, and
- * importing the lists is what keeps the two from drifting.
+ * Exported because the reply file reader names the content type of a file it posts from these
+ * lists. They bound a participant's file inbound and name content types outbound, and nothing else.
  */
 export const TEXT_EXTENSIONS: ReadonlySet<string> = new Set([
   ".txt", ".md", ".json", ".csv", ".log", ".xml", ".yaml", ".yml", ".sql", ".cs", ".js", ".ts",
@@ -177,8 +179,8 @@ const PATH_SEGMENT = new RegExp(`^[A-Za-z0-9][A-Za-z0-9._-]{0,${String(MAX_PATH_
  * or an invisible character leaves no trace. Trailing dots are dropped too, since NTFS strips them
  * from a name on creation and the path returned must be the path written. The extension is kept
  * through the cut so the kind it declares survives: a 300-character `.txt` is still a `.txt`. An
- * extension that would leave no room for a stem is cut with the rest, since no accepted kind has
- * one that long and the name still reaches a notice. A stem with nothing left, or with dots alone,
+ * extension that would leave no room for a stem is cut with the rest, since no real kind has one
+ * that long and the name still reaches a notice. A stem with nothing left, or with dots alone,
  * takes `FALLBACK_STEM`, so a result is never empty and never a bare dot sequence.
  *
  * Exported because a notice names a refused file by this form alone, and the router composes that
@@ -381,6 +383,7 @@ export function createAttachmentIntake(options: AttachmentIntakeOptions): Attach
     position: number,
     paste: boolean,
     gate: RefusalCause | null,
+    kindBound: boolean,
     sessionId: string,
     messageId: string,
     signal: AbortSignal,
@@ -389,7 +392,7 @@ export function createAttachmentIntake(options: AttachmentIntakeOptions): Attach
     const refused = (cause: RefusalCause): Outcome => ({ kind: "refused", refusal: { name, cause } });
     if (gate !== null) return refused(gate);
     if (position > MAX_ATTACHMENTS_PER_MESSAGE) return refused("count");
-    if (!acceptedKind(name, attachment.contentType)) return refused("kind");
+    if (kindBound && !acceptedKind(name, attachment.contentType)) return refused("kind");
     if (!acceptedSource(attachment.url)) return refused("source");
     // An id that cannot be written under is a broker-side fault and no cause on the list names
     // it. Refused as a file that could not be brought down, before any byte of it is fetched,
@@ -415,6 +418,8 @@ export function createAttachmentIntake(options: AttachmentIntakeOptions): Attach
     root,
     async take(attachments, senderClass, sessionId, messageId) {
       const gate = gateCause(senderClass);
+      // The kind list bounds a participant's file alone; an operator's file is saved as sent.
+      const kindBound = senderClass !== "operator";
       // The first attachment that is the paste, and only that one: a second `message.txt` is an
       // ordinary text file, saved whole like any other.
       const pasteAt = attachments.findIndex(isPaste);
@@ -423,7 +428,7 @@ export function createAttachmentIntake(options: AttachmentIntakeOptions): Attach
       const signal = AbortSignal.timeout(limitMs);
       const outcomes = await Promise.all(
         attachments.map((attachment, index) =>
-          takeOne(attachment, index + 1, index === pasteAt, gate, sessionId, messageId, signal),
+          takeOne(attachment, index + 1, index === pasteAt, gate, kindBound, sessionId, messageId, signal),
         ),
       );
       const saved: string[] = [];

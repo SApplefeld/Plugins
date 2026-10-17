@@ -26,6 +26,7 @@
 // was backing off against a down broker retries on its reconnect ceiling, and it opens when the
 // listener binds rather than when the hub is built, since no relay can reach the broker before then.
 import { randomUUID } from "node:crypto";
+import { RELAY_MAX_RECONNECT_DELAY_MS } from "../config.ts";
 import type { Registry } from "../registry.ts";
 import type { SenderClass } from "../security/senders.ts";
 
@@ -119,6 +120,14 @@ export type RelayHub = {
  */
 const MAX_RELAYS = 32;
 
+/**
+ * How long a pipe may hold a token with no session announced under it before the broker says so.
+ * It is one relay reconnect ceiling: a pipe that attached on a reconnect after a broker restart has
+ * had the whole window its session's announcement could have needed, so silence past it means the
+ * SessionStart hook did not reach the broker.
+ */
+const UNANNOUNCED_WARN_MS = RELAY_MAX_RECONNECT_DELAY_MS;
+
 export type RelayHubOptions = {
   registry: Registry;
   /**
@@ -141,7 +150,14 @@ export type RelayHubOptions = {
   onAttach?: (processToken: string) => void;
 };
 
-type Attachment = { connection: RelayConnection; replyKey: string };
+type Attachment = {
+  connection: RelayConnection;
+  replyKey: string;
+  /** When the pipe attached, for the unannounced-session warning. */
+  attachedAt: number;
+  /** True once the warning was written for this attachment, so it is written once. */
+  warned: boolean;
+};
 
 /**
  * A pipe that has gone, and the session it was watching, until the window it was opened with
@@ -193,6 +209,24 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
     }
   }
 
+  /**
+   * Says once, for each pipe that has held its token past the window with no session announced
+   * under it, that the SessionStart hook did not reach the broker. The line names no token, reply
+   * key or session: the hub holds no session for an unannounced pipe, and the token is a secret.
+   */
+  function warnUnannounced(): void {
+    const at = now();
+    for (const [processToken, attachment] of connections) {
+      if (attachment.warned || at - attachment.attachedAt < UNANNOUNCED_WARN_MS) continue;
+      if (options.registry.current(processToken) !== null) continue;
+      attachment.warned = true;
+      log(
+        `relay: a relay has been attached for ${UNANNOUNCED_WARN_MS / 1000} seconds and no session ` +
+          "has announced under its token; the session's SessionStart hook did not reach the broker",
+      );
+    }
+  }
+
   return {
     attach(processToken, connection) {
       if (connections.has(processToken)) {
@@ -207,7 +241,7 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
       }
 
       const replyKey = randomUUID();
-      connections.set(processToken, { connection, replyKey });
+      connections.set(processToken, { connection, replyKey, attachedAt: now(), warned: false });
       // The relay is back before its grace window closed, so its session was never dead.
       pending.delete(processToken);
       // Liveness is recorded straight away: the pipe existing is the signal. A relay that connects
@@ -256,6 +290,7 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
         }
         options.registry.relaySeen(processToken);
       }
+      warnUnannounced();
       reapPending();
     },
 

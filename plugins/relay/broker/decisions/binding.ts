@@ -50,9 +50,9 @@ export const MAX_ASK_RECORDS = 256;
  * that strips control characters (an astral character costs four for two units, and a markdown
  * escape's backslash two for one). The ledger strips nothing from an id, and JSON writes a control
  * character as a six-byte escape, so an id costs up to 6,000 bytes. That is 5,397 + 6,000 + 300
- * bytes of text, with the snowflake, the two stamps, the keys and the pretty print's indentation
- * under 200 more: one record under 11,900 bytes, and the cap's worth of them under 3.1 MB. A file
- * past this cap is one something else wrote.
+ * bytes of text, with the snowflake, the two stamps, the brief flag, the keys and the pretty print's
+ * indentation under 250 more: one record under 11,950 bytes, and the cap's worth of them under
+ * 3.1 MB. A file past this cap is one something else wrote.
  */
 export const MAX_ASKS_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -74,11 +74,18 @@ export type AskRecord = {
    */
   messageId: string | null;
   /**
-   * The message's text as posted, which a close edits the message back to with the outcome line
-   * under it. Kept here because the ledger stops showing an ask's entry a day after it closes, and
-   * the question and the link the message exists to carry must outlive that.
+   * The message's text as posted, or as last edited to its brief, which a close edits the message
+   * back to with the outcome line under it. Kept here because the ledger stops showing an ask's
+   * entry a day after it closes, and the question and the link the message exists to carry must
+   * outlive that.
    */
   body: string;
+  /**
+   * True once the message's body draws the entry's decision brief, or once the one edit to draw it
+   * is settled with no edit to make. False on a message posted before its brief existed, which is
+   * the one edit to its brief this record still owes. A file written before the flag reads false.
+   */
+  briefed: boolean;
   /** The entry's `openedAt`, which orders a departed persona's records when the cap drops one. */
   openedAt: number | null;
   /** When this card saw the ask closed and edited its message, or null while it is open. */
@@ -126,11 +133,14 @@ function recordOf(value: unknown): AskRecord | null {
   const persona = value.persona;
   const body = value.body;
   const id = cut(value.id, MAX_ASK_FIELD_LENGTH);
-  if (value.messageId === null) return { persona, id, messageId: null, body, openedAt, closedAt };
+  // A flag that is absent or not a boolean reads false: at worst one edit redraws a message that
+  // already carries its brief, while a record refused here would be posted a second time.
+  const briefed = value.briefed === true;
+  if (value.messageId === null) return { persona, id, messageId: null, body, briefed, openedAt, closedAt };
   if (typeof value.messageId !== "string") return null;
   const messageId = clean(value.messageId);
   if (!SNOWFLAKE.test(messageId)) return null;
-  return { persona, id, messageId, body, openedAt, closedAt };
+  return { persona, id, messageId, body, briefed, openedAt, closedAt };
 }
 
 export type LoadAskRecordsOptions = {

@@ -136,7 +136,9 @@ reason a worker wrote on a blocked entry. With
 the last path segment of each root as the project name. So a root at or just under your home
 directory would put your account name there too. The decisions card (`CHANNEL_DECISIONS_CARD`,
 which needs `CHANNEL_BOARD_ROSTER`) lists every open ask the roster's personas hold, and posts each
-ask's question, up to 1,000 code points and as its worker wrote it, to the card's thread. TypeSafe's classifier, reached
+ask to the card's thread. That message carries the ask's question, up to 1,000 code points and as
+its worker wrote it, or, once the ask's entry carries one, the decision brief the kit drafts from
+the worker's transcript. TypeSafe's classifier, reached
 under the optional step "The Jev key file" below, is the one host other than Discord this broker
 reaches unless the voice is on, and the response gate described above sends it a gated thread's
 lines. The voice, when on, ranks its spoken turns with the same key and also reaches Deepgram and

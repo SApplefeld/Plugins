@@ -7,15 +7,18 @@
 // broker last saw land.
 //
 // The card also posts into its thread. An ask the ledger shows open for the first
-// time earns one message there, carrying the question whole. That message is edited to its outcome
+// time earns one message there, carrying the question whole, or the kit's decision brief where the
+// entry carries one. A message posted before its brief existed is edited once to the brief when a
+// later reading lists the ask open with one. The ask's message is edited to its outcome
 // when its persona's reading lists the ask recently closed, and to a bare `closed` only when that
 // reading could have listed the ask open and did not: the persona is on the roster, its reading
 // holds a ledger read from a good file, and its open list is under the reader's cap, so an ask
 // absent from it is absent from the file's open asks rather than cut off past the cap. A reading
 // that cannot answer leaves the record for a later pass, since a failed read or a dropped persona
-// says nothing about the ask. Each pass posts at most `MAX_POSTS_PER_PASS` new asks and edits at
-// most `MAX_EDITS_PER_PASS` closed ones, the rest waiting for the next pass, so a fleet opening many
-// asks at once never spends a burst of messages. Which ask has which message is the ask map, keyed
+// says nothing about the ask. Each pass posts at most `MAX_POSTS_PER_PASS` new asks, edits at most
+// `MAX_EDITS_PER_PASS` closed ones and then at most `MAX_BRIEF_EDITS_PER_PASS` bare ones to their
+// brief, the rest waiting for the next pass, so a fleet opening many asks at once never spends a
+// burst of messages. Which ask has which message is the ask map, keyed
 // by persona and id as the ledger reader keys its slots, read at construction and handed to the
 // caller to persist once per pass that changed it, so a restart neither posts an ask twice nor loses
 // the message a close has to edit.
@@ -32,7 +35,7 @@ import type { Budget } from "../discord/budget.ts";
 import type { CallOutcome, DiscordTransport, ThreadMessenger } from "../discord/transport.ts";
 import { createRepeatLog } from "../repeat-log.ts";
 import type { RepeatLogSurface } from "../repeat-log.ts";
-import { openAsks, renderAskMessage, renderClosedMessage, renderDecisionsCard } from "./card.ts";
+import { hasBrief, openAsks, renderAskMessage, renderClosedMessage, renderDecisionsCard } from "./card.ts";
 import type { AskLink, OpenAsk } from "./card.ts";
 import { MAX_ASK_RECORDS, askKey, capAskRecords } from "./binding.ts";
 import type { AskRecord, DecisionsCardBinding } from "./binding.ts";
@@ -50,6 +53,10 @@ export const MAX_POSTS_PER_PASS = 3;
 
 /** How many closed asks' messages one pass edits to their outcome. The rest wait for the next pass. */
 export const MAX_EDITS_PER_PASS = 3;
+
+/** How many open asks' messages, posted before their brief existed, one pass edits to draw the brief.
+ * The rest wait for the next pass. */
+export const MAX_BRIEF_EDITS_PER_PASS = 3;
 
 /**
  * How long one reason waits before it may be logged again, on the board card's own reasoning: wide
@@ -179,6 +186,21 @@ function createRoute(missing: Route["missing"]): Route {
  */
 function accumulate(count: number, last: number | null, at: number, windowMs: number): number {
   return last !== null && at - last < windowMs ? count + 1 : 1;
+}
+
+/**
+ * Whether an edit inside the thread is settled for its record: it landed, or Discord reported the
+ * message gone or refused it permanently, which the same edit sent again would meet again. A
+ * rejected token refuses every call rather than this message, so it settles nothing, and neither
+ * does a bucket refusal or a failure Discord may not repeat.
+ */
+function editSettled(outcome: CallOutcome<unknown>): boolean {
+  return (
+    outcome.status === "ok" ||
+    (outcome.status === "failed" &&
+      outcome.fatal !== true &&
+      (outcome.missing === true || outcome.permanent === true))
+  );
 }
 
 /** The card's thread, built unconditionally from whatever this is handed: the caller decides whether
@@ -419,6 +441,7 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
         id: ask.entry.id,
         messageId: outcome.value.messageId,
         body: text,
+        briefed: hasBrief(ask.entry),
         openedAt: ask.entry.openedAt,
         closedAt: null,
       });
@@ -463,21 +486,49 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
       const outcome = await messenger.editInThread({ threadId: thread, messageId: record.messageId, text });
       settle(askEdits, outcome, "ask edit");
       // A message Discord reports gone, or refuses to edit, is settled closed: the same edit sent
-      // again is refused again, and an open record left behind would hold the map toward its cap. A
-      // rejected token refuses every call rather than this message, so its record stays open.
-      const landed =
-        outcome.status === "ok" ||
-        (outcome.status === "failed" &&
-          outcome.fatal !== true &&
-          (outcome.missing === true || outcome.permanent === true));
-      if (!landed) return;
+      // again is refused again, and an open record left behind would hold the map toward its cap.
+      if (!editSettled(outcome)) return;
       edited += 1;
       keep({ ...record, closedAt: at });
     }
   }
 
-  /** One pass over the card and its thread. The ask map is handed to the caller after it, once,
-   * whichever step changed it, a thread reported gone included. */
+  /**
+   * Edits the message of every ask the map holds open and not yet briefed whose persona's reading
+   * lists it open with a decision brief, at most `MAX_BRIEF_EDITS_PER_PASS` of them, to the message
+   * `renderAskMessage` draws for it now, so a later close appends its outcome beneath the brief.
+   * Settled as a close is: a message Discord reports gone or refuses to edit is marked briefed with
+   * the body it holds and no second attempt, a rejected token or a bucket refusal leaves the record
+   * for a later pass, and a message posted with no readable id is marked with no call made. A record
+   * the map holds closed is never briefed, and this edit never changes when it closed.
+   */
+  async function briefAsks(thread: string, ledgers: readonly LedgerReading[], links: AskLink): Promise<void> {
+    const readings = new Map<string, LedgerReading>();
+    for (const ledger of ledgers) if (!readings.has(ledger.name)) readings.set(ledger.name, ledger);
+    let edited = 0;
+    for (const record of [...asks.values()]) {
+      if (record.closedAt !== null || record.briefed) continue;
+      const entry = readings.get(record.persona)?.open.find((held) => held.id === record.id);
+      if (entry === undefined || !hasBrief(entry)) continue;
+      if (record.messageId === null) {
+        keep({ ...record, briefed: true });
+        continue;
+      }
+      if (edited >= MAX_BRIEF_EDITS_PER_PASS || !affordable(askEdits)) return;
+      const text = renderAskMessage(record.persona, entry, links(entry, record.persona));
+      const outcome = await messenger.editInThread({ threadId: thread, messageId: record.messageId, text });
+      settle(askEdits, outcome, "ask brief edit");
+      // A message Discord reports gone, or refuses to edit, keeps the body it holds: the same edit
+      // sent again is refused again, so the record is settled rather than retried every pass.
+      if (!editSettled(outcome)) return;
+      edited += 1;
+      keep({ ...record, body: outcome.status === "ok" ? text : record.body, briefed: true });
+    }
+  }
+
+  /** One pass over the card and its thread: the card, then at most `MAX_POSTS_PER_PASS` ask posts,
+   * `MAX_EDITS_PER_PASS` close edits and `MAX_BRIEF_EDITS_PER_PASS` brief edits. The ask map is
+   * handed to the caller after it, once, whichever step changed it, a thread reported gone included. */
   async function run(): Promise<void> {
     try {
       await reconcile();
@@ -507,13 +558,16 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
     if (card !== rendered) await edit(identifier, card);
 
     // The thread's messages, once the card and the thread both stand: the asks newly seen open, then
-    // the ones the ledgers have since closed. Each is bounded per pass and reads the same readings
-    // the card was drawn from, so the thread never says more than the card does.
+    // the ones the ledgers have since closed, then the ones posted bare whose brief has since been
+    // drafted. Each is bounded per pass and reads the same readings the card was drawn from, so the
+    // thread never says more than the card does.
     const thread = threadId;
     if (thread === null || messageId === null || halted) return;
     await postAsks(thread, openAsks(ledgers), links);
     if (threadId === null || halted) return;
     await closeAsks(thread, ledgers, at);
+    if (threadId === null || halted) return;
+    await briefAsks(thread, ledgers, links);
   }
 
   /**

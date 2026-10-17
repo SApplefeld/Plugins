@@ -1,6 +1,7 @@
 // The one path a file a session names on a reply takes to leave the machine: resolved, bounded to
-// the session's own working directory, to the kinds and the cap the thread accepts inbound, and
-// read whole into memory once, or refused with a cause from a closed list before anything posts.
+// the session's own working directory and to the cap the thread accepts inbound, whatever the
+// file's kind, and read whole into memory once, or refused with a cause from a closed list before
+// anything posts.
 //
 // The path is the model's own argument and nothing about it is trusted: it is read through the
 // same absolute-local-path reader the hook intake uses, both it and the directory are resolved with
@@ -34,7 +35,6 @@ export type ReplyFileCause =
   | "missing"
   | "outside"
   | "not-a-file"
-  | "kind"
   | "empty"
   | "size";
 
@@ -50,7 +50,6 @@ export const REPLY_FILE_REASONS: Readonly<Record<ReplyFileCause, string>> = {
   missing: "the file does not exist",
   outside: "the path is not under this session's working directory",
   "not-a-file": "the path is not an ordinary file",
-  kind: "this kind of file is not accepted",
   empty: "the file is empty",
   size: "the file is larger than the host's attachment limit",
 };
@@ -119,11 +118,14 @@ function extensionOf(name: string): string {
   return dot > 0 ? name.slice(dot).toLowerCase() : "";
 }
 
-/** The content type an accepted kind is posted under, or null where the kind is not on the list. */
-function contentTypeOf(extension: string): string | null {
+/** The media type sent for an extension on neither list. */
+const OTHER_CONTENT_TYPE = "application/octet-stream";
+
+/** The content type a file is posted under: the list's for a listed kind, a plain binary type otherwise. */
+function contentTypeOf(extension: string): string {
   const typed = TYPED_EXTENSIONS.get(extension);
   if (typed !== undefined) return typed;
-  return TEXT_EXTENSIONS.has(extension) ? TEXT_CONTENT_TYPE : null;
+  return TEXT_EXTENSIONS.has(extension) ? TEXT_CONTENT_TYPE : OTHER_CONTENT_TYPE;
 }
 
 /**
@@ -175,12 +177,11 @@ export async function readReplyFile(input: ReplyFileInput): Promise<ReplyFileRes
   }
   if (!info.isFile()) return refused("not-a-file");
 
-  // 8. A kind on the inbound list, judged on the reduced name since that is the name posted. The
-  // base name is taken with the platform's own separator rules.
+  // 8. The content type, picked from the reduced name since that is the name posted. No kind is
+  // refused here. The base name is taken with the platform's own separator rules.
   const api = input.platform === "win32" ? path.win32 : path.posix;
   const name = reducedName(api.basename(resolved));
   const contentType = contentTypeOf(extensionOf(name));
-  if (contentType === null) return refused("kind");
 
   // 9. and 10. The size by stat, then the bounded read, which asks for one byte past the cap so a
   // file that grew between the two calls is still refused rather than cut.
