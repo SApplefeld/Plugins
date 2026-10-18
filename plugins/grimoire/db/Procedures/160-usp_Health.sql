@@ -23,9 +23,20 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_Health
 		AUTHOR:		Scott Applefeld
 		DATE:		September 17th, 2026
-		VERSION:	v1.2
+		VERSION:	v1.3
 	*********************************************************************************************
-		NOTES:		v1.2 - 10/03/2026 - SCOTT APPLEFELD
+		NOTES:		v1.3 - 10/18/2026 - SCOTT APPLEFELD
+							lastPublish leaves each sandbox's entry. It was read from
+							mem.PublishRun, which has had no writer since the migration
+							publish left the kit and which its own script now drops. The
+							doctor never read the field.
+
+							Returns one row, one column [Json], a JSON object
+							{schemaVersion, sharedRecords, sharedEmbeddings, fleetRecords,
+							fleetEmbeddings, sandboxes: [{sandbox, records, embeddings,
+							oldestUnembedded}]}.
+
+					v1.2 - 10/03/2026 - SCOTT APPLEFELD
 							The report adds fleetRecords and fleetEmbeddings: the undeleted
 							records of every project's fleet store, which belongs to no
 							sandbox and so is counted in no sandbox's line, and their
@@ -160,10 +171,6 @@ BEGIN	-- PROCEDURE
 													AND R.[DeletedDt] IS NULL
 													AND (	@p_ModelIdentity IS NULL
 															OR E.[ModelIdentity] = @p_ModelIdentity	)	)
-					,[lastPublish]		= (	SELECT	MAX(PR.[StartedDt])
-											FROM	mem.PublishRun PR
-											WHERE	PR.[SandboxId] = SB.[SandboxId]
-													AND PR.[ErrorText] IS NULL	)
 					,[oldestUnembedded]	= (	SELECT	MIN(R.[LastPublishedDt])
 											FROM	mem.Record R
 													INNER JOIN mem.Store S

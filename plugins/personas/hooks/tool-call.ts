@@ -1655,8 +1655,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // which the supervisor's poll does not act on; supervise.sh's decide unit exits
   // the whole loop on this signal).
   // park: true writes park_requested in place of shutdown_requested, so the
-  // supervisor exits on the park code and the keeper's next start launches
-  // the persona again rather than holding it for a hand release.
+  // supervisor exits on the park code and the keeper brings the persona back
+  // at the next boot or a start after the operator's -Release.
   if (e.tool === "mcp__personas__supervisor_shutdown") {
     if (!sess.isOwner) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -1677,7 +1677,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const writeOk = await persist();
     if (writeOk) {
       if (park) {
-        return { result: `Park requested: ${reason}. The supervisor will stop after this turn ends, and the keeper's next start launches this persona again.` };
+        return { result: `Park requested: ${reason}. The supervisor will stop after this turn ends, and the keeper brings this persona back at the next boot or a start after the operator's -Release.` };
       }
       return { result: `Shutdown requested: ${reason}. The supervisor will stop after this turn ends.` };
     }
@@ -2613,6 +2613,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         // minutes the decision logs and the wait self-review measures as
         // deliveredAt - at cannot disagree.
         parsed.deliveredAt = scanAt;
+        // The ground the context line opens with, stored for the wait signal.
+        parsed.ground = ground;
         // A record that is both flagged and aged reads as urgent: the
         // sender's own flag is the stronger statement of why it is here.
         const waited = rec.urgent !== true;

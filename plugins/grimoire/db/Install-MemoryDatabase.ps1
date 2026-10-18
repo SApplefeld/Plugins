@@ -205,7 +205,21 @@ $ErrorActionPreference = 'Stop'
 # host takes it in place, changing no table and no parameter, so every row
 # stays. No client gates on this number: a hit from a host below it carries no
 # machine key and prints no machine label.
-$script:SchemaVersion = 13
+#
+# Version 14 is where each machine purges its own journal rows and the
+# publish-run objects leave. mem.usp_PurgeJournal deletes the calling
+# sandbox's mem.TurnMeter and mem.Outcome rows older than 180 days and its
+# mem.RecordStamp rows older than 90 days, at most 5,000 rows per table per
+# call, under ownership chaining, so every role's DENY DELETE on the schema
+# stays in force and mem_publisher gains EXECUTE on this one procedure.
+# The Schema script that created the publish-run table now drops it with its
+# rows where a host holds it, the Procedures script that created its append
+# procedure drops that procedure, and mem.usp_Health no longer returns a
+# sandbox's last publish time. A version 13 host takes it in place, keeping
+# every row of every other table. The client's
+# PURGE_SCHEMA_VERSION reads this number back through mem.usp_Health, and
+# `memq db-refresh` skips the purge step on a host below it.
+$script:SchemaVersion = 14
 
 # The five logins the Security scripts create, each with the role it joins
 # and the sandbox it publishes for. The logins file carries these three

@@ -13,17 +13,24 @@
 # State the operator can read lives under the entry's run directory:
 # keeper.log (one line per event, rotated at 5 MB keeping keeper.log.1), keeper.json (the last
 # run's facts), supervisor.out (the supervisor's own stdout and stderr, appended per launched run),
-# keeper.hold (present while the persona is held; -Release removes it) and keeper.park (present
-# while the persona is parked; the next start removes it, logs UNPARK and launches, and -Release
-# removes it too). A hold marker outranks a park marker: a start that finds both logs HOLD, leaves
-# both in place and launches nothing. A refusal that happens before the roster has named a run
-# directory goes to keeper-refused.log beside the roster file, the only place known at that point,
-# because a scheduled task has no console for stderr to reach.
+# keeper.hold (present while the persona is held; -Release removes it), keeper.park (present
+# while the persona is parked; a start of a later boot removes it, logs UNPARK and launches, and
+# -Release removes it too) and keeper.boot (the machine's boot time at the moment the policy parked
+# the persona or the supervisor was signalled out; -Release removes it too). The boot task fires
+# again through its retry window, so a start that finds keeper.boot within a minute of the
+# current boot time logs BOOTED and launches nothing, which leaves a persona stopped by policy this
+# boot down until the next boot or an operator's -Release. A launch, a relaunch and a fault write no
+# keeper.boot, so a repeated fire after a wrapper that was killed finds a supervisor to ADOPT. A hold
+# marker outranks both: a start that finds a hold logs HOLD, leaves every marker in place and
+# launches nothing. A refusal that happens before the roster has named a run directory goes to
+# keeper-refused.log beside the roster file, the only place known at that point, because a
+# scheduled task has no console for stderr to reach.
 #
 # Exit codes of the wrapper itself: 0 when the policy said hold, park or exit, or when -Release
-# ran, or when a hold marker was already present; 1 on a fault of the wrapper's own (an unknown
-# flag, a roster or env file that cannot be read, a supervisor that cannot be launched). Task
-# Scheduler's restart-on-failure setting is the backstop for the 1s.
+# ran, or when a hold marker was already present, or when the boot marker already named this boot
+# (BOOTED); 1 on a fault of the wrapper's own (an unknown flag, a roster or env file that cannot
+# be read, a supervisor that cannot be launched). Task Scheduler's restart-on-failure setting is
+# the backstop for the 1s.
 #
 # [CmdletBinding()] is what makes an unknown switch a binding error (exit 1) rather than a value
 # that lands in $args while the body runs anyway.
@@ -35,7 +42,7 @@ param(
     [string]$Name,
     [string]$Roster = 'D:/personas/fleet.json',
     [string]$EnvFile = 'D:/personas/keeper.env',
-    # Removes the hold and park markers and exits without launching.
+    # Removes the hold, park and boot markers and exits without launching.
     [switch]$Release,
     # Multiplies every sleep between relaunches. The DECIDE line still records the unscaled delay.
     # Exists so the unit test can walk the doubling ladder in seconds; a task never passes it. A
@@ -616,14 +623,16 @@ try {
 $script:LogPath = Join-Path $runDir 'keeper.log'
 $holdPath = Join-Path $runDir 'keeper.hold'
 $parkPath = Join-Path $runDir 'keeper.park'
+$bootPath = Join-Path $runDir 'keeper.boot'
 $statePath = Join-Path $runDir 'keeper.json'
 $outputPath = Join-Path $runDir 'supervisor.out'
 
 if ($Release) {
-    # The hold marker first, then the park marker, one RELEASE line for each file removed. A marker
-    # that cannot be removed is a fault of the wrapper's own and ends the release there.
+    # The hold marker first, then the park marker, then the boot marker, one RELEASE line for each
+    # file removed. A marker that cannot be removed is a fault of the wrapper's own and ends the
+    # release there.
     $released = 0
-    foreach ($marker in @(@{ Path = $holdPath; Kind = 'hold' }, @{ Path = $parkPath; Kind = 'park' })) {
+    foreach ($marker in @(@{ Path = $holdPath; Kind = 'hold' }, @{ Path = $parkPath; Kind = 'park' }, @{ Path = $bootPath; Kind = 'boot' })) {
         if (-not (Test-Path -LiteralPath $marker.Path -PathType Leaf)) { continue }
         try {
             Remove-Item -LiteralPath $marker.Path -Force -ErrorAction Stop
@@ -649,6 +658,37 @@ if (Test-Path -LiteralPath $holdPath -PathType Leaf) {
     }
     Write-KeeperLog "HOLD $reason"
     exit 0
+}
+
+# The boot task fires again every few minutes for an hour. The boot marker is written when the policy
+# parks the persona or the supervisor is signalled out, so a marker holding this boot's time means
+# the persona was stopped on purpose this boot, and the repeated fire leaves that stop alone. The
+# check sits after the hold check, so a hold outranks it, and before the park check, so the repeated
+# fire leaves a park marker in place. The system's boot time moves by seconds when the clock is
+# stepped after boot, so the two times are the same boot when they are within a minute. A marker that
+# is empty, unreadable or unparseable is another boot. A boot time that cannot be read, or that takes
+# more than 30 seconds to read, launches without reading or writing the marker: a repeated fire that
+# launches is the goal, and a duplicate launch is already stopped by the task's IgnoreNew and by
+# ADOPT. That launch does not protect a park during that fire.
+$bootTime = $null
+try {
+    $bootTime = (Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 30 -ErrorAction Stop).LastBootUpTime.ToUniversalTime()
+} catch {
+    Write-KeeperLog "ERROR boot time could not be read: $($_.Exception.Message)"
+}
+if ($null -ne $bootTime -and (Test-Path -LiteralPath $bootPath -PathType Leaf)) {
+    $markerBoot = [DateTimeOffset]::MinValue
+    $parsed = $false
+    try {
+        $first = @(Get-Content -LiteralPath $bootPath -Encoding UTF8 -TotalCount 1 -ErrorAction Stop)
+        if ($first.Count -gt 0) {
+            $parsed = [DateTimeOffset]::TryParse(([string]$first[0]).Trim(), [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$markerBoot)
+        }
+    } catch { }
+    if ($parsed -and [Math]::Abs(($markerBoot.UtcDateTime - $bootTime).TotalSeconds) -lt 60) {
+        Write-KeeperLog "BOOTED $bootPath"
+        exit 0
+    }
 }
 
 # A park marker is cleared by the start and never stops it. One that cannot be removed is logged
@@ -697,6 +737,20 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 # argument in the list is.
 $supervisorPath = ConvertTo-BashPath (Join-Path $repoRoot 'bin/supervise.sh')
 $arguments = @($supervisorPath) + $invocation.Arguments
+
+# Records that the persona was stopped by policy this boot. A marker that cannot be written is logged
+# and the wrapper still exits 0, as for the park marker: without it a repeated fire launches the
+# persona again, which a park or a signal exit must not allow. A boot time never read writes
+# nothing.
+function Write-KeeperBootMarker {
+    if ($null -eq $bootTime) { return }
+    try {
+        [System.IO.File]::WriteAllLines($bootPath, [string[]]@($bootTime.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)), $script:Utf8NoBom)
+    } catch {
+        Write-KeeperLog "ERROR boot marker '$bootPath' could not be written: $($_.Exception.Message)"
+        [Console]::Error.WriteLine("Start-Persona: boot marker '$bootPath' could not be written: $($_.Exception.Message)")
+    }
+}
 
 $launchCount = 0
 $delay = $script:KeeperBaseDelaySeconds
@@ -774,20 +828,25 @@ while ($true) {
             exit 0
         }
         'park' {
-            # The reason is the only line. The marker stops nothing: the next start removes it and
-            # launches, so it exists to tell that start, and the fleet reading, that the persona
-            # parked rather than stopped.
+            # The reason is the only line. The marker stops nothing: a start of a later boot removes it
+            # and launches, so it exists to tell that start, and the fleet reading, that the persona
+            # parked rather than stopped. The boot marker beside it makes a start of this boot leave
+            # the park alone.
+            Write-KeeperBootMarker
             try {
                 [System.IO.File]::WriteAllLines($parkPath, [string[]]@($decision.Reason), $script:Utf8NoBom)
             } catch {
                 # Exit 0 for the reason a hold marker that cannot be written exits 0. Without the
-                # marker the next start launches, which is what a park asks for anyway.
+                # marker a start launches, which is what a park asks for anyway.
                 Write-KeeperLog "ERROR park marker '$parkPath' could not be written: $($_.Exception.Message)"
                 [Console]::Error.WriteLine("Start-Persona: park marker '$parkPath' could not be written: $($_.Exception.Message)")
             }
             exit 0
         }
         'exit' {
+            # A signal exit stays down until the next boot, so a repeated fire of this boot's task
+            # must not bring the persona back.
+            Write-KeeperBootMarker
             exit 0
         }
         default {

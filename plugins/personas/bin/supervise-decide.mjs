@@ -43,10 +43,11 @@
  *    below, so past the grace nothing else the child does keeps it running
  * 3a. stop_park - an explicit park_requested decision newer than child start:
  *    the persona parked for an update window. The supervisor stops as it does
- *    for a shutdown and exits on the park code, so the keeper's next start
- *    launches the persona again. Sits below shutdown, since a stop for good
- *    outranks a park, and above the restart_passive row, since stopping the
- *    supervisor outranks relaunching its child
+ *    for a shutdown and exits on the park code, so the keeper brings the
+ *    persona back at the next boot or a start after the operator's
+ *    -Release. Sits below shutdown, since a stop for good outranks a park,
+ *    and above the restart_passive row, since stopping the supervisor
+ *    outranks relaunching its child
  * 4. restart_passive - a restart_requested decision newer than child start
  *    (plan item 8.3: a reader asked for the child to be relaunched, the usual
  *    reason being a pulled runtime update): the child is stopped by the EOF
@@ -115,8 +116,9 @@ export function decide(input) {
   }
 
   // 3a. An explicit park request newer than child start: the persona asked to
-  // stop for an update window and come back at the keeper's next start. Stop,
-  // on a code of its own. Below the shutdown, so a stop for good wins.
+  // stop for an update window and come back at the next boot or a start
+  // after the operator's -Release. Stop, on a code of its own. Below the
+  // shutdown, so a stop for good wins.
   if (parkRequestedTs !== null && parkRequestedTs !== undefined && parkRequestedTs > childStartTs) {
     return { action: 'stop_park', reason: `park_requested at ${parkRequestedTs} > child start ${childStartTs}` };
   }

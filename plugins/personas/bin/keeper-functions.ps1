@@ -53,8 +53,8 @@ Returns a hashtable: Action is 'hold', 'park', 'relaunch' or 'exit'; DelaySecond
 wait before the next launch (0 when not relaunching); NextDelaySeconds is the ladder value to carry
 into the next decision; NextExit1Count is the consecutive short exit-1 count to carry; Reason is one
 line of text with no newline, fit for the DECIDE log line and the hold and park markers. A park
-stops the wrapper as a hold does, and differs in that the wrapper's next start clears it and
-launches, where a hold stops every later start until it is released.
+stops the wrapper as a hold does, and differs in that the next boot ends it on its own,
+where a hold stops every later start until it is released.
 #>
 function Get-KeeperDecision {
     param(
@@ -77,7 +77,7 @@ function Get-KeeperDecision {
         6 {
             return @{
                 Action = 'park'; DelaySeconds = 0; NextDelaySeconds = $delay; NextExit1Count = 0
-                Reason = "supervisor exited 6: parked, relaunched at the keeper's next start"
+                Reason = "supervisor exited 6: parked, back at the next boot or a start after the operator's -Release"
             }
         }
         1 {

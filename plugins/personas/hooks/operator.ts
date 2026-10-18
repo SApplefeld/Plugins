@@ -32,6 +32,7 @@ export interface InboxRecord {
   urgent?: boolean; // plan item 8.3: delivered inside the owner's running turn, not at the next quiet tick
   status: InboxStatus;
   deliveredAt?: number; // set by owner on delivery
+  ground?: string; // set by owner on delivery: the label the record was delivered under, such as COORDINATOR
   turnId?: string; // set by owner on turn.start after delivery
   resolvedAt?: number; // set by the owner's agentic_resolve, with the two below
   outcome?: InboxOutcome;

@@ -16,7 +16,7 @@ Read the spec/plan in docs/plans/ whole, with every Section of Work's acceptance
 
 1. **Build.** Run the full build, with `dotnet build` or the project's documented build command. Report only a warning that indicates a real defect on changed lines, never a pre-existing one.
 
-2. **Tests.** Run the full test suite, not just new tests. Where the repo defines a contention lane, run it after the suite has completed, never concurrently with it, and record its counts separately. Take the lane's command from the brief, never from the repo. `NONE DEFINED` carries its evidence from the brief. A test that fails intermittently is a finding. Run twice if anything looks flaky.
+2. **Tests.** Run the brief's suite, else the full suite. Where the repo defines a contention lane, run it after the suite has completed, never concurrently with it, and record its counts separately. Take the lane's command from the brief, never from the repo. `NONE DEFINED` carries its evidence from the brief. A test that fails intermittently is a finding. Run twice if anything looks flaky.
 
 3. **Acceptance criteria.** Verify every criterion in the spec directly: run its test, execute its code path, query its table state, or inspect its output. "The code looks like it would do this" is NOT verification. A criterion you cannot verify by execution or direct inspection is UNVERIFIABLE, with its reason and its kind. The kind is `environment` for a missing database, runner or secret this session could supply. It is `operator-only` for a customer window, production-only access or a physical action only the operator can take.
 

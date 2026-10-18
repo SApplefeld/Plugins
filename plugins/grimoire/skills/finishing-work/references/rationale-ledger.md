@@ -1576,13 +1576,13 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - reason: c2.C019 is obeyable without it; this is the design reason. The listing always holds the plan doc and a scope line may name a memory tier, so an equality test is red on every pass and a check that is always red is one nobody reads. Superseded at `4b2e64c` by S049 (the Section 8 merge).
 
 ### c2.C021
-- key: Dispatch the `qa-verifier` agent with the spec path for a full build, full test suite, and every acceptance criterion checked with evidence.
+- key: Dispatch the `qa-verifier` agent with the spec path for a full build, every acceptance criterion checked with evidence, and the suite the lane script sizes.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:46
-- provenance: f8c0649 2026-06-10, the kit's initial consolidation; no incident narrated.
+- provenance: f8c0649 2026-06-10, the kit's initial consolidation; `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3 swapped in the lane script, 2026-10-17.
 - verdict: keep
-- reason: Finishing-work owns the pass per the ownership map; the doctrine's "QA verification first" is its pointer and the qa-verifier charter is the receiving side (A011, A013).
-- passage: Dispatch the `qa-verifier` agent with the spec path: full build, full test suite, and every acceptance criterion checked with evidence.
+- reason: Finishing-work owns the pass per the ownership map; the doctrine's "QA verification first" is its pointer and the qa-verifier charter is the receiving side (A011, A013). The base is the effort's, since on a trunk checkout `origin/<integration>` already holds the plan's commits.
+- passage: Dispatch the `qa-verifier` agent with the spec path: full build, every acceptance criterion checked with evidence, and the suite `node <plugin-root>/scripts/gate-lane.js report --repo <root> --base <base ref>` sizes. **The brief carries its verdict line and every command it prints, or the full suite on `lane: whole`.**
 
 ### c2.C022
 - key: Put the contention lane's own command in the QA brief, or state that this repo defines none.
@@ -3844,13 +3844,13 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - reason: The bar's one statement; its Commit-and-Push copy (c3.C163) retires because c3.C096 carries that model's rule whole. Superseded at `4b2e64c` by S216 (the Section 8 merge; the verdict before it was keep).
 
 ### c3.C161
-- key: Treat the branch push as resting on step 1's whole gate and the update's lane, since a push earns no gate of its own.
+- key: Treat the branch push as resting on step 1's finishing gate and the update's lane, since a push earns no gate of its own.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:89
-- provenance: 9784239 2026-08-30 (the install-surface condition keys on the trunk) and 686b947 2026-09-07 (the sentence's earlier shape); section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` reworded it on 2026-10-06 when the push stopped being a whole-gate moment.
+- provenance: 9784239 2026-08-30 (the install-surface condition keys on the trunk) and 686b947 2026-09-07 (the sentence's earlier shape); section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` reworded it on 2026-10-06 when the push stopped being a whole-gate moment; section 3 of `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` named the finishing gate on 2026-10-17.
 - verdict: keep
 - reason: The doctrine's gate bullet names no push as a whole-gate moment, so the push rests on the runs already made; this is the owner's statement, and the sentence names a lane because the commit-model bullet pin reads the push's own sentence.
-- passage: That branch push rests on step 1's whole gate and the update's lane.
+- passage: That branch push rests on step 1's finishing gate and the update's lane.
 
 ### c3.C162
 - key: The handoff gate reads the same tree that gets pushed, since only the Gate: line may change after it runs, so a second full suite would read identical bytes.
@@ -4462,8 +4462,8 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:44
 - provenance: dd5e568 2026-08-24; 55c5abc 2026-09-09 left it unchanged.
 - verdict: keep
-- reason: Each is a listing entry a correct base still produces; without the list a session re-derives the base on a false alarm.
-- passage: A sibling's later commit, an unignored untracked file and a plan with no `Files in scope:` lines surface entries without meaning a wrong base.
+- reason: Each is a listing entry a correct base still produces; without the list a session re-derives the base on a false alarm. Compressed by `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3.
+- passage: Sibling commits, untracked files and scope-less plans surface entries, not a wrong base.
 - flag: weak-reason
 
 ### S048
@@ -4488,13 +4488,13 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - proposed: Drop "and a check that fires on every healthy pass teaches its reader to wave it through..." from line 44.
 
 ### S050
-- key: Treat step 1's full-suite run as the plan's one whole gate and the gate it hands off on.
+- key: Treat step 1's run as the plan's one finishing gate and the gate it hands off on.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:48
-- provenance: 9784239 2026-08-30, gate-cadence Sections 5 and 6, a review Critical that the pass verified at step 1 and then changed the tree for four more steps; 55c5abc 2026-09-09 renumbered the steps in the paragraph; section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` made it the one whole gate on 2026-10-06, on the operator's word of 2026-10-05; section 3 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` reworded its reason to name H001 on 2026-10-06.
+- provenance: 9784239 2026-08-30, gate-cadence Sections 5 and 6, a review Critical that the pass verified at step 1 and then changed the tree for four more steps; 55c5abc 2026-09-09 renumbered the steps in the paragraph; section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` made it the one whole gate on 2026-10-06, on the operator's word of 2026-10-05; section 3 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` reworded its reason to name H001 on 2026-10-06; `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3 sized it, 2026-10-17.
 - verdict: keep
-- reason: The doctrine and testing-discipline own the gate moment and say a plan pays one green finishing run; this sentence owns where inside the pass that run lands, and H001 carries the sentences after it: a red of the plan's own is re-run whole while a fix after a green one takes the targeted lane.
-- passage: **That full-suite run is the plan's one whole gate, and the gate it hands off on.**
+- reason: The doctrine and testing-discipline own the gate moment and say a plan pays one green finishing run; this sentence owns where inside the pass that run lands, and H001 carries the sentences after it.
+- passage: **That run is the plan's one finishing gate, and the gate it hands off on.**
 
 ### S051
 - key: Run the whole gate again after the last step that changed the tree and before step 7, and hand off on that later run.
@@ -5957,16 +5957,16 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Read what each row's status counts for in the runner README's `What a row counts for` section. A mismatch on a `ruled` probe that the after leg alone carries takes writing-skills' intent test and is named in the close-out status, and one both legs carry is named in the close-out as the corpus's.
 
 ### S202
-- key: Point this step's handoff gate at step 1's whole gate, with the contention lane beside it.
+- key: Point this step's handoff gate at step 1's gate, with the contention lane beside it.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:91
 - provenance: 9784239 2026-08-30, the second Critical of that round: the pass verified first and changed the tree for four more steps, so a plan handed off on evidence predating its own edits; moved from line 87, renumbered to step 7 and its range widened from "2 through 5" to "2 through 6" by 55c5abc 2026-09-09, which inserted the goal read.
 - verdict: rewrite
 - landed: d549e65 section 5
-- reason: Step 1 owns the rule, as the sentence says, so this step keeps a pointer plus S203's stand-beside clause; the instruction, every step between step 1 and this one re-arms the gate, is unchanged by the wider range. Landed with the lane named inside the pointer, "The handoff gate, the whole gate with the contention lane beside it, runs before this step, per step 1, which owns that rule": `test/doctrine-parity.test.js`'s integration sweep selects line 91 on S208's landed phrase "the merge request is the last act on the branch" and requires a lane word on that line, which the retired "whole gate runs again first" clause had supplied; naming the lane restates nothing step 1 does not say. Section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` (2026-10-06) retired step 6's whole gate, so the pointer now names step 1's run as the handoff gate.
+- reason: Step 1 owns the rule, as the sentence says, so this step keeps a pointer plus S203's stand-beside clause; the instruction, every step between step 1 and this one re-arms the gate, is unchanged by the wider range. Landed with the lane named inside the pointer, "The handoff gate, the whole gate with the contention lane beside it, runs before this step, per step 1, which owns that rule": `test/doctrine-parity.test.js`'s integration sweep selects line 91 on S208's landed phrase "the merge request is the last act on the branch" and requires a lane word on that line, which the retired "whole gate runs again first" clause had supplied; naming the lane restates nothing step 1 does not say. Section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` (2026-10-06) retired step 6's whole gate, so the pointer now names step 1's run as the handoff gate. Section 3 of `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` sized that run, and dropped "whatever lane it ran" as implied.
 - proposed: "The handoff gate runs before this step, per step 1, which owns that rule" plus S203's clause.
 - baseline-test: yes
-- passage: The handoff gate is step 1's whole gate with the contention lane beside it
+- passage: The handoff gate is step 1's gate, with the contention lane beside it
 
 ### S203
 - key: Treat the merge gate this step's own bullets name as standing beside the handoff gate rather than in place of it.
@@ -5974,8 +5974,8 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:91
 - provenance: 9784239 2026-08-30, the corrected form of a sentence that had said the last steps run no gate while the same section made the merge and the push whole-gate moments; moved by 55c5abc 2026-09-09; the install-surface gate left it on 2026-10-06 under section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md`. Shares c3.C063's supersession with S202.
 - verdict: keep
-- reason: This step's own clause, which the compressed lead keeps beside the pointer at step 1.
-- passage: the merge gate the bullets below name stands beside it rather than in place of it.
+- reason: This step's own clause, which the compressed lead keeps beside the pointer at step 1; "rather than in place of it" restated "beside".
+- passage: the merge gate the bullets below name stands beside it.
 
 ### S204
 - key: Under Branch-and-PR and Commit-and-Push, commit the docs work from steps 5 and 6 before any push or PR, in the same commit series as the code.
@@ -6106,16 +6106,16 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - proposed: drop the "a clean merge can redden a suite" clause.
 
 ### S215
-- key: Where the update brings nothing across, no merge happened and step 1's whole gate stands.
+- key: Where the update brings nothing across, no merge happened and step 1's gate stands.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:93
 - provenance: cceff11 2026-08-31 named the Gate-line fill as the one edit after the gate, which is what makes the tree identical; 3380bf2 2026-08-31 stated the discharge; moved and its "step 5" renumbered to step 6 by 55c5abc 2026-09-09.
 - verdict: rewrite
 - landed: d549e65 section 5
-- reason: The carve-out and its bound become a two-sentence pair with S216 folded in; the branch-push reasoning moves here: the branch push lands on a PR branch rather than a trunk consumers install from, so it fires no pre-push condition and rests on the merge's gate. The branch-push sentence itself stays in the document, because c3.C161 (keep) owns it ("...since the branch push that follows lands on a PR branch rather than on a trunk consumers install from..."); only this entry's discharge sentence was compressed, and the reasoning behind the push's exemption is the c3.C161 sentence's own. Since 2026-10-06 (section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md`) the gate that stands is step 1's, the pass's one whole gate.
+- reason: The carve-out and its bound become a two-sentence pair with S216 folded in; the branch-push reasoning moves here: the branch push lands on a PR branch rather than a trunk consumers install from, so it fires no pre-push condition and rests on the merge's gate. c3.C161 owns the branch-push sentence. Since 2026-10-06 the gate that stands is step 1's, sized by `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3.
 - proposed: "Where the update brings nothing across, no merge happened and step 6's handoff gate discharges this run" plus S216's bar.
 - baseline-test: yes
-- passage: An update bringing nothing across is no merge, and step 1's whole gate stands.
+- passage: An update bringing nothing across is no merge, and step 1's gate stands.
 
 ### S216
 - key: Where the update brings anything across, run the whole gate with the contention lane beside it.
@@ -7052,19 +7052,19 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:70
 - provenance: `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2, 2026-10-06, on the operator's word of 2026-10-05 that a plan needs one whole gate; a kaizen note of 2026-09-23 recorded the second gate a trunk that moved during the pass cost at step 7. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md`'s finishing pass, 2026-10-06: a stacked branch takes G003's read and retarget at this update and merges whether or not an arm stands, while its merge keeps this entry's gate and its push and arm wait for step 7, on the architect persona's consult ruling recorded under that plan's Intent; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 dropped the closing "and the merge rests on that gate as above", which restated the paragraph's second sentence.
 - verdict: rewrite
-- reason: Step 1's full-suite run is the plan's one whole gate, so the tree it reads has to hold the trunk's commits, or step 7's update is a merge that run never read. Taking the trunk in first makes step 1 read the merged tree and leaves step 7's update to the doctrine's merge rule. A stacked branch's base may have merged or moved since the run began, and a retarget changes which branch this update merges, so it first re-reads and retargets the base by G003. It merges whether or not an arm stands, since step 1's run must read the tree that lands, and its push and arm wait for step 7, where an armed OPEN pull request's push already takes the state read's case, so the plan still pays one whole gate. Review-Only commits nothing, and Commit-and-Push in the main checkout already has its commits on the trunk, so neither has a branch to merge into. The merge sentence names the whole gate because the parity test's integration sweep requires a lane word on a merging paragraph.
+- reason: Step 1's run is the plan's one finishing gate, so the tree it reads has to hold the trunk's commits, or step 7's update is a merge that run never read. Taking the trunk in first makes step 1 read the merged tree and leaves step 7's update to the doctrine's merge rule. A stacked branch's base may have merged or moved since the run began, and a retarget changes which branch this update merges, so it first re-reads and retargets the base by G003. It merges whether or not an arm stands, since step 1's run must read the tree that lands, and its push and arm wait for step 7, where an armed OPEN pull request's push already takes the state read's case, so the plan still pays one finishing gate. Review-Only commits nothing, and Commit-and-Push in the main checkout already has its commits on the trunk, so neither has a branch to merge into. Section 3 of `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` (2026-10-17) sized step 1's gate, so the merge's own lane runs beside it: a targeted gate holds none of the trunk side's tests.
 - proposed: It takes the base in whether or not an arm stands, since step 1's gate must read the tree that lands.
-- passage: Fetch, and where it moved, merge it into the working branch, surfacing sibling-session conflicts. The merge rests on step 1's whole gate, which reads the merged tree. It applies under Branch-and-PR, under Commit-and-Push only on a worktree branch, and never under Review-Only. A branch whose pull request is based on another branch first takes step 7's stacked-parent bullet's read and retarget, so the integration branch this update fetches and merges is the one the pull request now has. It takes the base in whether or not an arm stands, since step 1's gate must read the tree that lands. The bullet's push and arm wait for step 7, where the push carrying this merge takes the state read's armed OPEN case where an arm stands.
+- passage: Fetch, and where it moved, merge it into the working branch, surfacing sibling-session conflicts. The merge takes the lane the doctrine's merge rule names, beside step 1's gate. It applies under Branch-and-PR, under Commit-and-Push only on a worktree branch, and never under Review-Only. A branch whose pull request is based on another branch first takes step 7's stacked-parent bullet's read and retarget, so the integration branch this update fetches and merges is the one the pull request now has. It takes the base in whether or not an arm stands, since step 1's gate must read the tree that lands. The bullet's push and arm wait for step 7, where the push carrying this merge takes the state read's armed OPEN case where an arm stands.
 - landed: 22dcfd78 section 2
 
 ### F002
-- key: A push still owed under Commit-and-Push takes the targeted lane over what changed since step 1's whole gate, and a pull it needs first takes the doctrine's merge rule.
+- key: A push still owed under Commit-and-Push takes the targeted lane over what changed since step 1's gate, and a pull it needs first takes the doctrine's merge rule.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:175
 - provenance: `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2, 2026-10-06, on the operator's ruling of 2026-10-05 that one full run is enough for a trunk consumers install from; supersedes S233, S234 and S235.
 - verdict: keep
 - reason: The pre-push whole gate left the doctrine's gate bullet, which now says a plan pays one green finishing run and every change after it takes the targeted lane over its own delta. The install surface is proven by that run once per plan, as every other trunk is. The sentence names the targeted lane because the commit-model bullet pin reads the push's lane in the push's own sentence. The pull clause covers a main checkout whose push is rejected because a peer advanced the trunk: the opening act does not run there, so the pull is the pass's only merge and takes the rule every merge takes.
-- passage: A push still owed takes the targeted lane over what changed since step 1's whole gate, and a pull it needs first takes the doctrine's merge rule.
+- passage: A push still owed takes the targeted lane over what changed since step 1's gate, and a pull it needs first takes the doctrine's merge rule.
 
 ### G001
 - key: Take the integration branch this skill names as the one branch-hygiene's Safe Set resolves, the pull request's base first.
@@ -7094,14 +7094,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: A stacked parent's merge is not this pull request's own. Where the repository deletes the parent's branch on merge, GitHub retargets this pull request to the parent's base, and where it keeps the branch, this pull request stays on the merged parent. So while this pull request is OPEN, a session on a branch whose pull request is based on another branch reads the base with Safe Set's read, `gh pr view <branch> --json state,baseRefName`, at every update from the base, the finishing pass's opening update taking only this bullet's read and retarget as that update states. A protected base as Safe Set names it ends the walk before any read of it. Otherwise, where the base's own pull request reads MERGED by `gh pr view <base> --json state,baseRefName`, `<base>` being its branch name, run `gh pr edit <branch> --base <name>`, `<name>` being the `baseRefName` that read printed, and read again. A base with no pull request of its own, `no pull requests found`, ends the walk, and any other failed read is a stop. Then, where `gh pr view <branch> --json autoMergeRequest` prints `"autoMergeRequest":null`, no arm stands: take the base in as the Branch-and-PR update above does and push. Arm again by the two commands above only where `gh pr view <branch> --json isDraft` prints `"isDraft":false`, since a draft would land with sections unbuilt. Otherwise leave it unarmed. Where an arm stands, take the base in only where `gh pr view <branch> --json mergeable` reads CONFLICTING, an UNKNOWN reading taken again, and that push takes the armed OPEN case of the state read above. Where that case sends the push to a new branch, the close-out names this pull request as armed and unmergeable for my word. The strand-check and the reap wait for this pull request's own merge.
 
 ### H001
-- key: Re-run each red file of step 1's whole gate at the integration branch's head first, re-run the whole gate only for a red of the plan's own, hold the handoff on a trunk red's fix or spec, and take that fix in on the targeted lane over the files it changed.
+- key: Re-run each red file of step 1's gate at the integration branch's head first, re-run that gate only for a red of the plan's own, hold the handoff on a trunk red's fix or spec, and take that fix in on the targeted lane over the files it changed.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:80
 - provenance: Section 3 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md`, 2026-10-06, appended from section 1's round 1 blind review, on the operator's ruling of 2026-10-06 that a plan pays one whole gate and fixes a trunk red before its handoff.
 - verdict: keep
 - landed: 489dade7 section 3, with its fix round at a7122a73 and the finishing pass's at b6137279
-- reason: Step 1 said a red run is re-run whole. Without the bound to the plan's own red and these sentences, a finishing pass holding only a trunk red re-runs the whole gate after the trunk's fix lands, the second whole run the one-gate rule removed, or hands off before that fix exists. The merge that takes the fix in is the doctrine's merge rule's one exception, on the operator's ruling of 2026-10-06: it takes the targeted lane over the files the fix changed even where the plan changed one of them too, since the fix's own pull request has just run them. The testing skill owns the re-run's mechanics, so this sentence points there.
-- passage: Each red file first re-runs at the integration branch's head, per the base-head bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root. A red run of the plan's own is fixed and re-run whole, and a fix after a green run takes the targeted lane. A red the trunk carries too is fixed on its own pull request or becomes a spec, and the handoff waits on one or the other. The plan's branch takes that fix in on the targeted lane over the files the fix changed, the one exception to the doctrine's merge rule.
+- reason: Without the bound to the plan's own red and these sentences, a finishing pass holding only a trunk red re-runs its gate after the trunk's fix lands, the second whole run the one-gate rule removed, or hands off before that fix exists. The merge that takes the fix in is the doctrine's merge rule's one exception, on the operator's ruling of 2026-10-06: it takes the targeted lane over the files the fix changed even where the plan changed one of them too, since the fix's own pull request has just run them, and the merge rule over the rest. The testing skill owns the re-run's mechanics, so this sentence points there.
+- passage: Each red file first re-runs at the integration branch's head, per the base-head bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root. A red run of the plan's own is fixed and re-run, and a fix after a green run takes the targeted lane. A red the trunk carries too is fixed on its own pull request or becomes a spec before the handoff. The plan's branch takes that fix in by the merge rule's one exception: the targeted lane over the fix's files, the merge rule over the rest.
 
 ### N001
 - key: Run the hygiene step at every close-out, and the archive pass when it is due.

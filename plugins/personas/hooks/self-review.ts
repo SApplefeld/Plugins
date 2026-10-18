@@ -3,6 +3,7 @@
 // Covered by check-loader-rule.mjs (scans every hooks/*.ts).
 
 import type { MemoryEntry, MonitorState } from "./agent-state.ts";
+import { COORDINATOR_GROUND } from "./operator";
 
 export interface SelfReviewOptions {
   selfReviewStreak: number;
@@ -219,7 +220,7 @@ export type KaizenSignal = "asks_unresolved" | "memory_quality" | "message_wait"
 export interface OwnRecordInput {
   decisions: Array<{ timestamp: number; loop: string; action: string; detail: string; askId?: string }>;
   memory: MemoryEntry[];
-  inbox: Array<{ at: number; deliveredAt?: number }>;
+  inbox: Array<{ at: number; deliveredAt?: number; ground?: string }>;
   // One entry per finding sent, from the finder's own ledger.
   sent: Array<{ signal: string; sentAt: number }>;
 }
@@ -272,6 +273,9 @@ function collectEvents(input: OwnRecordInput): Record<KaizenSignal, KaizenEvent[
     for (const m of group) out.memory_quality.push({ at: m.createdAt, note: "duplicate lesson: " + m.text.slice(0, 60) });
   }
   for (const r of input.inbox) {
+    // The delivery rule holds a coordinator-ground record until the turn ends,
+    // so its wait is by design. A record with no ground predates the field and counts.
+    if (r.ground === COORDINATOR_GROUND) continue;
     if (typeof r.deliveredAt === "number" && r.deliveredAt - r.at >= KAIZEN_MESSAGE_WAIT_MS) {
       out.message_wait.push({ at: r.deliveredAt, note: "waited " + Math.round((r.deliveredAt - r.at) / 60_000) + " min" });
     }
@@ -297,7 +301,7 @@ function describe(signal: KaizenSignal, count: number, events: KaizenEvent[]): {
     case "message_wait":
       return {
         title: "Kaizen: messages wait too long",
-        objective: `${count} inbox records waited ${Math.round(KAIZEN_MESSAGE_WAIT_MS / 60_000)} minutes or more before delivery (${sample}). Find what held them (a long turn, a quiet tick, a claim gap) and shorten the path. Proof: a harness case where a record sent mid-turn is delivered inside the wait bound, and one day's inbox with no record over the bound.`,
+        objective: `${count} inbox records waited ${Math.round(KAIZEN_MESSAGE_WAIT_MS / 60_000)} minutes or more before delivery (${sample}). Find what held them (a long turn, a quiet tick, a claim gap) and shorten the path. A coordinator record waits out a running turn by design; a coordinator sender whose record must land inside one sends it with the urgent flag. Proof: one day's inbox with no reader or worker record over the bound.`,
         rationale: `${count} messages waited ${Math.round(KAIZEN_MESSAGE_WAIT_MS / 60_000)}+ minutes for delivery; the finding asks for the delivery path to be shortened.`,
       };
     case "long_turns":

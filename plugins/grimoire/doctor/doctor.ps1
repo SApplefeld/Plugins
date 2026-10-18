@@ -1277,8 +1277,10 @@ else {
 # --- holding rows or a queue that could not be counted, or a prerequisite (pwsh, node)
 # --- missing so the host was not checked; PASS is everything else. Under -Fix
 # --- any WARN the health call raised runs memq db-refresh inline, which drains
-# --- the queue and refreshes the snapshot, and reports FIXED on a clean run; on
-# --- an unmapped login the refresh's own FAIL lines say what it could not do.
+# --- the queue, refreshes the snapshot and, on a schema version 14 host, last
+# --- purges this machine's turn, outcome and stamp rows past their retention.
+# --- It reports FIXED on a clean run. On an unmapped login the refresh's own
+# --- FAIL lines say what it could not do.
 # ---
 # --- The probe carries #Requires -Version 7.0 (it reads an HTTP refusal as a
 # --- result, which only pwsh's -SkipHttpErrorCheck can), while this doctor
@@ -1382,9 +1384,8 @@ else {
                 foreach ($entry in $sandboxes) {
                     if ([string]$entry.sandbox -eq $env:COMPUTERNAME) { $own = $entry; break }
                 }
-                # The health answer's lastPublish is not read: no client
-                # records a publish run, and the queue depth below is the
-                # signal for writes that have not reached the host.
+                # The queue depth below is the signal for writes that have
+                # not reached the host.
                 $dbLines += ("Sandbox " + (Get-SanitizedLine ([string]$own.sandbox) 40) + ": " +
                     (Get-SanitizedLine ([string]$own.records) 20) + " record(s), " +
                     (Get-SanitizedLine ([string]$own.embeddings) 20) + " embedding(s).")
@@ -1425,7 +1426,7 @@ else {
             }
         }
         elseif ($dbWarned) {
-            Report "WARN" "Memory database" ($dbLines + @("Fix: run memq db-refresh, or re-run doctor -Fix to run it from here (the queue drain and the snapshot refresh, inline)."))
+            Report "WARN" "Memory database" ($dbLines + @("Fix: run memq db-refresh, or re-run doctor -Fix to run it from here, inline. Among its steps are the queue drain, the snapshot refresh and the purge of this machine's old turn, outcome and stamp rows."))
         }
         else {
             Report "PASS" "Memory database" $dbLines

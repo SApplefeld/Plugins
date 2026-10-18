@@ -52,7 +52,8 @@ BEGIN	-- PROCEDURE
 							row's mem.RecordUsage row with its embeddings, so a new record
 							taking a deleted record's name starts with no usage. Its
 							mem.RecordStamp rows stay, so a resent write of the old record
-							still writes nothing.
+							still writes nothing. They stay for the retention
+							mem.usp_PurgeJournal declares, 90 days.
 
 							v1.2 - 10/04/2026 - SCOTT APPLEFELD
 							An overwrite takes @p_Space as [Machine] takes @p_Machine: a NULL

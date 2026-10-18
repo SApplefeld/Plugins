@@ -35,8 +35,9 @@
 // place: `[REDACTED-SECRET-1a2b3c4d]`. Within one session the same value always
 // mints the same placeholder, so the model can still tell one customer from
 // another, and the placeholder is swapped back for the real value on the way
-// into a tool that runs on this machine, so a `Bash` command or a `Write` still
-// carries the real key.
+// into a local restore tool or an MCP tool the host's redactorRestoreTools
+// setting names, so a `Bash` command or a `Write` still carries the real
+// key.
 //
 // Nothing is written to disk. The vault dies with the session.
 
@@ -964,6 +965,23 @@ function lettersLookRandom(token: string, named: boolean, h: number): boolean {
 const SESSION_UUID = new RegExp(`^${UUID}$`, 'i')
 const SESSION_ID_NAME = new RegExp(String.raw`sess(?:ion)?[_-]?id(?:${Q}|\s){0,6}[:=]{1,2}(?:${Q}|\s){0,4}$`, 'i')
 
+// A persona record id has the shape of the id operator.ts mints for an inbox
+// record: `<persona>-<session uuid>-<seq>`, a name, a lowercase session UUID
+// and a decimal sequence, and nothing else. Each part of the name, split on
+// `_` and `-`, is a word, a short acronym, a short number, an all-caps word
+// with up to three digits, or a single letter. An uppercase persona name would
+// otherwise read as a mixed-case key. A record id right after a key's name is
+// judged as before. So is a persona name outside those forms, such as one that
+// opens with a digit or holds a dot or a non-ASCII letter, and a UUID with no
+// numeric tail.
+const RECORD_ID = new RegExp(`^([A-Za-z][A-Za-z0-9_-]*)-${UUID}-[0-9]+$`)
+const CAPS_OR_LETTER_PART = /^[A-Za-z]$|^[A-Z]{2,}[0-9]{0,3}$/
+
+function isRecordId(token: string): boolean {
+  const m = RECORD_ID.exec(token)
+  return m !== null && m[1].split(/[_-]/).every((part) => isSlugPart(part) || isWordish(part) || CAPS_OR_LETTER_PART.test(part))
+}
+
 function looksSecret(token: string, before: string, cfg: Config): boolean {
   if (token.startsWith('REDACTED-')) return false
   if (cfg.allow.has(token) || DIGITS_ONLY.test(token)) return false
@@ -973,6 +991,7 @@ function looksSecret(token: string, before: string, cfg: Config): boolean {
   // a public id. Each `+` part has to be one, so base64 is still judged.
   if (token.includes('+') && token.split('+').every((p) => p === '' || WORD_PART.test(p) || isPublicId(p, named, cfg))) return false
   if (named && SESSION_UUID.test(token) && SESSION_ID_NAME.test(before)) return false
+  if (!named && isRecordId(token)) return false
   if (looksLikeName(token, named)) return false
 
   const h = entropy(token)

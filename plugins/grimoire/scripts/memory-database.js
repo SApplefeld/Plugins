@@ -252,7 +252,12 @@ const RUN_BUDGET_MS = 15 * 60 * 1000;
 // The drain deletes nothing on any failure and lets the next run send the lot
 // again, which is safe only because the host takes a resent row once. For an
 // outcome that is mem.Outcome's unique index over the stamp id, which
-// mem.usp_AppendOutcomes skips an id against. For a usage stamp it is
+// mem.usp_AppendOutcomes skips an id against. mem.usp_PurgeJournal deletes
+// outcome rows 180 days after they were logged, so a resend arriving after
+// that window lands a second copy. A record write is recognised by its stamp
+// id in mem.RecordStamp, whose rows mem.usp_PurgeJournal deletes 90 days after
+// they were written, so a resend arriving after that window is applied again.
+// For a usage stamp it is
 // mem.Usage's unique stamp id index on a host at version 2 to 7, and from
 // version 8 the fold mem.usp_AppendUsage writes into one mem.RecordUsage row
 // per memory, where a resent stamp changes nothing and no stamp id is stored.
@@ -2453,7 +2458,9 @@ function chunkBody(body) {
 // the host has not taken yet: `id` is the stamp id its writer generated, which
 // is also the value the host dedupes a resend on (a unique index for an
 // outcome and, on a host below version 8, for a usage stamp; the
-// mem.RecordStamp ledger for a record), `kind` says which
+// mem.RecordStamp ledger for a record, whose rows mem.usp_PurgeJournal deletes
+// 90 days after they were written, so a record write resent after that window
+// is applied again), `kind` says which
 // procedure it is bound for (usage, outcome, record or archive), and `payload`
 // is the JSON that procedure reads, exactly as the writer composed it. An
 // archive row carries its id for this table alone: mem.usp_ArchiveRecord answers
@@ -3562,6 +3569,8 @@ function outcomeEntry(segment, entry) {
 // flag that lets the write land on a name the store already holds. The stamp
 // id is the identity mem.RecordStamp recognises a resend by, so a queued row
 // sent twice stores once and never meets its own write as a refusal.
+// mem.usp_PurgeJournal deletes mem.RecordStamp rows 90 days after they were
+// written, so a resend arriving after that window is applied again.
 function recordEntry(fields) {
     const given = (name) => (fields[name] === undefined ? null : fields[name]);
     return {
@@ -3786,11 +3795,13 @@ function counted(rows) {
 // probe, then drainQueue under its own version gate, as
 // {ok, drain, schemaVersion} or a stand-down. `ok` is whether the drain ran to
 // its end. A write lock another connection holds on the queue file is
-// `contended`, which is no failure either: the host took
-// the rows and takes the next run's resend once. The host's schema version rides out beside the
-// drain, since db-refresh gates its adoption call on it. A probe the host does
-// not answer leaves the down marker, so the verbs behind it queue without a
-// probe of their own for the marker's window.
+// `contended`, which is no failure either: the host took the rows and takes
+// the next run's resend once. That holds for a record write for 90 days, since
+// mem.usp_PurgeJournal deletes mem.RecordStamp rows that old and a record
+// write resent after that window is applied again. The host's schema version
+// rides out beside the drain, since db-refresh gates its adoption and purge
+// calls on it. A probe the host does not answer leaves the down marker, so the
+// verbs behind it queue without a probe of their own for the marker's window.
 //
 // The drain reads a page at a time, so this runs page after page under the
 // run budget (drainPages) until the rows the first page found are sent, a
@@ -3917,6 +3928,59 @@ function adoptProjectStore(options) {
             skippedNames: Array.isArray(adopted.skippedNames) ? adopted.skippedNames : []
         }
     };
+}
+
+// The schema version that carries mem.usp_PurgeJournal, and the floor
+// `db-refresh` skips its purge step below. A lower host has no such procedure,
+// so it is sent nothing.
+const PURGE_SCHEMA_VERSION = 14;
+
+// Delete this machine's own journal rows past their retention through
+// mem.usp_PurgeJournal, `db-refresh`'s last step, as {ok, purged} with the rows
+// deleted from mem.TurnMeter, mem.Outcome and mem.RecordStamp, or a stand-down.
+//
+// The procedure resolves the sandbox from the login and declares the windows
+// and the batch size itself, so the call sends no parameter. It deletes, so a
+// caller makes it once per run and never resends it within one. Its three
+// deletes are separate statements, so a call that fails may still have deleted
+// rows, and the next run's call takes what is left. An answer that does not
+// carry three whole counts is refused rather than read as zero. A caller
+// running it as one step of a longer run passes that run's `deadline`, and the
+// call takes what is left of it, refused before its spawn once none is.
+function purgeJournal(options) {
+    const opts = options || {};
+    const loaded = hostConfig(opts);
+    if (!loaded.ok) return { ok: false, standDown: loaded.reason, detail: loaded.detail, path: loaded.path };
+    const config = loaded.config;
+    const deps = opts.deps || {};
+    const now = (typeof deps.now === 'function') ? deps.now : Date.now;
+    const budgetMs = Number.isFinite(opts.deadline)
+        ? callBudget(opts.deadline, now(), config.timeoutMs, SQLCMD_FLOOR_MS) : config.timeoutMs;
+    if (budgetMs === null) {
+        return { ok: false, standDown: 'budget',
+            detail: 'the run budget of ' + RUN_BUDGET_MS + ' ms was spent before the purge call' };
+    }
+    const sent = callProcedure(config, 'usp_PurgeJournal', {}, { deps, budgetMs });
+    const left = 'the rows past their retention that this call did not delete wait for the next run';
+    if (!sent.ok) {
+        if (!hostAnswered(sent.cause)) return { ok: false, standDown: 'unreachable', detail: sent.detail };
+        return {
+            ok: false,
+            standDown: 'refused',
+            detail: answeredText(sent.cause, 'the journal purge', 'usp_PurgeJournal', sent.detail, left)
+        };
+    }
+    const counts = counted(sent.rows);
+    const purged = { turnMeter: counts.turnMeter, outcome: counts.outcome, recordStamp: counts.recordStamp };
+    if (!Object.values(purged).every((n) => Number.isSafeInteger(n) && n >= 0)) {
+        return {
+            ok: false,
+            standDown: 'refused',
+            detail: 'the memory database answered the journal purge sent to mem.usp_PurgeJournal with a row '
+                + 'that does not carry three row counts, so the answer could not be read, and ' + left
+        };
+    }
+    return { ok: true, purged };
 }
 
 // One record read from the host through mem.usp_GetRecord, for a verb that
@@ -5778,6 +5842,7 @@ module.exports = {
     METER_SCHEMA_VERSION,
     RECALL_SCHEMA_VERSION,
     PAIR_VERDICT_SCHEMA_VERSION,
+    PURGE_SCHEMA_VERSION,
     ARCHIVED_SCHEMA_VERSION,
     ARCHIVED_DAYS_MAX,
     RECALL_LIMIT_MAX,
@@ -5857,6 +5922,7 @@ module.exports = {
     outcomeEntry,
     tierIdentity,
     adoptProjectStore,
+    purgeJournal,
     readRecord,
     drainOnly,
     standDownText,

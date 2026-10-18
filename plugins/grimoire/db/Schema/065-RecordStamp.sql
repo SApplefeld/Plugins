@@ -9,9 +9,11 @@
 
 	The unique index over the sandbox and the stamp id is what makes a resent
 	write land once: a call carrying a stamp its own sandbox already holds here
-	writes nothing and answers stored, however long ago the stamp was applied
-	and whatever has been written to the record since. The index is per
-	sandbox, so one sandbox's stamp never suppresses another's write.
+	writes nothing and answers stored, whatever has been written to the record
+	since. The index is per sandbox, so one sandbox's stamp never suppresses
+	another's write. A row stays for the retention mem.usp_PurgeJournal
+	declares, 90 days, after which a resent write of that stamp is applied
+	again.
 *********************************************************************************/
 ;IF NOT EXISTS(	SELECT	NULL
 				FROM	sys.schemas S

@@ -3,9 +3,18 @@
 	SCRIPT:		Security/010-Roles.sql
 	AUTHOR:		Scott Applefeld
 	DATE:		September 17th, 2026
-	VERSION:	v1.8
+	VERSION:	v1.9
 *************************************************************************************************
-	NOTES:		v1.8 - 10/12/2026 - SCOTT APPLEFELD
+	NOTES:		v1.9 - 10/18/2026 - SCOTT APPLEFELD
+						mem_publisher gains EXECUTE on mem.usp_PurgeJournal, which deletes
+						the caller's own sandbox's turn, outcome and stamp rows older than
+						their retention, under ownership chaining, so DENY DELETE on the
+						schema stays whole. mem_curator is denied it, since the curator
+						never publishes. The grant and the deny on the publish-run append
+						procedure leave with it, since the migration publish that called
+						it left the kit and its own script now drops it.
+
+				v1.8 - 10/12/2026 - SCOTT APPLEFELD
 						mem_publisher gains EXECUTE on mem.usp_PutPairVerdict, which
 						records that two records of one store are two different facts,
 						and mem.usp_ListPairVerdicts, which lists the verdicts that
@@ -105,7 +114,6 @@ GO
 ;GRANT EXECUTE ON OBJECT::mem.usp_UpsertEmbeddings	TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_AppendUsage		TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_AppendOutcomes	TO mem_publisher
-;GRANT EXECUTE ON OBJECT::mem.usp_AppendPublishRun	TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_UpsertIndexOrphans	TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_Search			TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_Nearest			TO mem_publisher
@@ -123,6 +131,7 @@ GO
 ;GRANT EXECUTE ON OBJECT::mem.usp_ListArchived	TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_PutPairVerdict	TO mem_publisher
 ;GRANT EXECUTE ON OBJECT::mem.usp_ListPairVerdicts	TO mem_publisher
+;GRANT EXECUTE ON OBJECT::mem.usp_PurgeJournal		TO mem_publisher
 GO
 
 ;DENY SELECT ON SCHEMA::mem TO mem_publisher
@@ -158,7 +167,6 @@ GO
 ;DENY EXECUTE ON OBJECT::mem.usp_UpsertEmbeddings	TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_AppendUsage		TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_AppendOutcomes		TO mem_curator
-;DENY EXECUTE ON OBJECT::mem.usp_AppendPublishRun	TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_UpsertIndexOrphans	TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_Search				TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_Nearest			TO mem_curator
@@ -175,6 +183,7 @@ GO
 ;DENY EXECUTE ON OBJECT::mem.usp_ListArchived		TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_PutPairVerdict		TO mem_curator
 ;DENY EXECUTE ON OBJECT::mem.usp_ListPairVerdicts	TO mem_curator
+;DENY EXECUTE ON OBJECT::mem.usp_PurgeJournal		TO mem_curator
 GO
 
 /************************************************************************************************

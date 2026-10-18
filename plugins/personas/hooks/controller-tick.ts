@@ -137,6 +137,7 @@ export interface TickContext extends SharedHandlerState {
   submitFleet: (changed: Parameters<typeof fleetPromptText>[0], notes: FleetLine[], movedKeys: number, fleetNow: number) => Promise<SubmitOutcome>;
   noteReconcileStoreRefused: (err: unknown) => void;
   submitReconcile: () => Promise<SubmitOutcome>;
+  submitTrunkGate: () => Promise<SubmitOutcome>;
   expectProposalTurn: () => ExpectedTurn;
   submitProposal: (expectedProposalTurn: ExpectedTurn) => Promise<SubmitOutcome>;
   submitNudge: (g: GoalNode, idleGapConverted: boolean, idleDisplay: string, controllerStampId: string | null) => Promise<{ nudgeOutcome: SubmitOutcome; unlinedAnswers: number }>;
@@ -164,6 +165,7 @@ export interface TickContext extends SharedHandlerState {
   supervisorHeartbeatPath: string;
   supervisorMailboxSkipped: Set<string>;
   reconcileEveryMs: number;
+  trunkGateHour: number | undefined;
   nudgeFloorMs: number;
   nudgeIdleMs: number;
   gitProbeMs: number;
@@ -616,11 +618,15 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
           // Mark the answer as delivered
           answer.status = "delivered";
           answer.deliveredAt = Date.now();
+          // The ground the answer is submitted under, stored so the wait
+          // signal can tell a record the delivery rule holds on purpose.
+          answer.ground = answerLabel;
           const existing = await store.get(answer.key);
           if (existing) {
             const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
             parsed.status = "delivered";
             parsed.deliveredAt = answer.deliveredAt;
+            parsed.ground = answer.ground;
             await store.set(answer.key, parsed);
           }
           // Deliver the answer as a labelled prompt.
@@ -720,11 +726,15 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
       if (deliveryBlocks === null) return false;
       oldest.status = "delivered";
       oldest.deliveredAt = Date.now();
+      // The ground the decision line and the bracket name, stored so the
+      // wait signal can tell a record the delivery rule holds on purpose.
+      oldest.ground = ground;
       const existing = await store.get(oldest.key);
       if (existing) {
         const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
         parsed.status = "delivered";
         parsed.deliveredAt = oldest.deliveredAt;
+        parsed.ground = oldest.ground;
         await store.set(oldest.key, parsed);
       }
       sess.state.decisions.push({
@@ -775,16 +785,42 @@ export async function alwaysTick(ctx: TickContext): Promise<boolean> {
   return true;
 }
 
+// A Date's local calendar date as YYYY-MM-DD, the shape trunkGateDate holds.
+function localDateOf(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// The daily trunk gate's decision for one tick, on the local date and hour
+// of `now`. With no stamp yet it stamps and does not fire: today where the
+// hour has come, so a session launched inside or after the hour gates the
+// next day, and yesterday where it has not, so the gate still fires at
+// today's hour. With a stamp it fires at or past the hour where the stamp is
+// earlier than today and no turn is open, and the date it returns is written
+// before the submit. A stamp later than today, as a clock moved back or a
+// hand edit leaves, reads as a spent day, since YYYY-MM-DD compares as a
+// string in date order. Otherwise it does nothing, returning the stamp as it
+// stands.
+export function trunkGateDecision(now: Date, hour: number, stampedDate: string | undefined, turnOpen: boolean): { act: "none" | "stamp" | "fire"; date: string } {
+  const today = localDateOf(now);
+  const pastHour = now.getHours() >= hour;
+  if (stampedDate === undefined) {
+    return { act: "stamp", date: pastHour ? today : localDateOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)) };
+  }
+  if (pastHour && stampedDate < today && !turnOpen) return { act: "fire", date: today };
+  return { act: "none", date: stampedDate };
+}
+
 // The idle part of the tick: everything that needs no turn open, run
 // after the always part where this session owns the persona and no turn
 // is open.
 export async function idleTick(ctx: TickContext): Promise<void> {
-  const { liveAsk, shadowAsk, shadowOutcome, selfReviewLessonCount, nudgeCapAskText, completionText, completionShape, noteCompletionShape, dropDecision, clearAgentHold, PROPOSAL_EVERY_MS, PLAN_RECORD_MAX_RESENDS, sess, cfg, expectedTurns, turnIsOpen, MAX_CONSECUTIVE_NUDGES, controllerTickMs, coordinatorPersona, architectPersona, fleetRoster, reconcileEveryMs, nudgeFloorMs, nudgeIdleMs, gitProbeMs, selfReviewStreak, selfReviewDebounceTurns, selfReviewMaxPerHour, costEnabled, costMaxNudgesPerHour, costMaxPluginCallsPerHour, costBackoffAfterTicks, costBackoffMaxMs, jevMode, jevLive } = ctx;
+  const { liveAsk, shadowAsk, shadowOutcome, selfReviewLessonCount, nudgeCapAskText, completionText, completionShape, noteCompletionShape, dropDecision, clearAgentHold, PROPOSAL_EVERY_MS, PLAN_RECORD_MAX_RESENDS, sess, cfg, expectedTurns, turnIsOpen, MAX_CONSECUTIVE_NUDGES, controllerTickMs, coordinatorPersona, architectPersona, fleetRoster, reconcileEveryMs, trunkGateHour, nudgeFloorMs, nudgeIdleMs, gitProbeMs, selfReviewStreak, selfReviewDebounceTurns, selfReviewMaxPerHour, costEnabled, costMaxNudgesPerHour, costMaxPluginCallsPerHour, costBackoffAfterTicks, costBackoffMaxMs, jevMode, jevLive } = ctx;
   // Section 6: the fleet wake. The steward is woken by this block rather
   // than by a cadence written into its own standing instruction. A duty
   // written "on each tick" states a trigger the runtime does not have:
-  // everything else in this tick submits nothing at all on a persona
-  // holding no active goal leaf and an empty inbox, which is exactly the
+  // everything else in this tick, save the daily [TRUNK GATE] turn the
+  // coordinator never takes, submits nothing at all on a persona holding no
+  // active goal leaf and an empty inbox, which is exactly the
   // quiet fleet on which a crashed persona most needs reporting. It runs
   // for the coordinator persona only, that being the seat whose standing
   // instruction carries the fleet duty, and only with a roster
@@ -1165,6 +1201,66 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
         }
       }
+    }
+  }
+
+  // The daily trunk gate: one [TRUNK GATE] turn a local date, at or past
+  // trunkGateHour, for a session with that option set. It sits here, above
+  // the inbox drain and ahead of the planning gate and the idle branch,
+  // so it runs on every tick with no turn open, a day the persona has work
+  // included. The coordinator persona and the default persona are skipped,
+  // as the idle proposal skips them. trunkGateDecision reads the local date
+  // and hour, since the hour is the operator's quiet hour on this box. The
+  // date is stamped and persisted before the submit, for the idle proposal's
+  // reason: the submit does not resolve until the session is next idle, so a
+  // stamp written after it would leave every tick in between queueing
+  // another copy, and a relaunch while it waits would ask again. A submit
+  // that fails has still spent the day, which the trunk_gate_failed record
+  // makes visible. A persist that throws is attempted rather than depended
+  // on, as the reconciliation block's is, so a store held unparseable does
+  // not skip the inbox drain and the actuator below; the stamp stands in
+  // memory.
+  if (trunkGateHour !== undefined && sess.persona !== coordinatorPersona && sess.persona !== "default") {
+    const trunkGateNow = Date.now();
+    const gate = trunkGateDecision(new Date(trunkGateNow), trunkGateHour, sess.state.trunkGateDate, turnIsOpen());
+    if (gate.act === "stamp") {
+      sess.state.trunkGateDate = gate.date;
+      sess.state.updatedAt = trunkGateNow;
+      try { await ctx.persist(); } catch { /* the store refused; the stamp stands in memory */ }
+    }
+    if (gate.act === "fire") {
+      const trunkGateDate = sess.state.trunkGateDate;
+      sess.state.trunkGateDate = gate.date;
+      sess.state.updatedAt = trunkGateNow;
+      // A persist that returned false is a session that has just given the
+      // persona up, and the commons yield writes this state on its way out.
+      // The stamp rolls back with the call, so the successor finds the day
+      // unspent and gates it, and no turn goes to a session that no longer
+      // holds the persona. A persist that threw ran the rollback too, and
+      // this branch submits, so the stamp goes forward again in memory.
+      try {
+        if (!await ctx.persistOrRollBack(() => {
+          sess.state.trunkGateDate = trunkGateDate;
+        })) return;
+      } catch {
+        sess.state.trunkGateDate = gate.date;
+      }
+      const trunkGateOutcome = await ctx.submitTrunkGate();
+      sess.state.decisions.push(trunkGateOutcome.ok
+        ? {
+          timestamp: trunkGateNow,
+          loop: "monitor",
+          action: "trunk_gate_asked",
+          detail: `[TRUNK GATE] turn submitted for ${gate.date} at or past hour ${trunkGateHour}`,
+        }
+        : {
+          timestamp: trunkGateNow,
+          loop: "monitor",
+          action: "trunk_gate_failed",
+          detail: `submit ${trunkGateOutcome.how}, ${gate.date} already spent: ${trunkGateOutcome.reason}`.slice(0, 200),
+        });
+      sess.state.updatedAt = Date.now();
+      try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
     }
   }
 

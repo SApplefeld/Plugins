@@ -348,12 +348,17 @@ function noteAskBrief(deps: DrainNoteDeps, action: string, askId: string, detail
 // answered, and a result carrying usage adds its counts to the fork ledger.
 // A fork that did not answer, a reply the reader or the renderer refuses,
 // and a failed scrub each drop the item under one ask_brief_fallback naming
-// why. The scrubbed brief lands on the entry, persisted first, on the commons
-// record where that still reads open, and on the persona's thread through
-// the relay's reply tool. A thrown post is logged ask_brief_unposted and the
-// brief goes once more as one [ASK BRIEF] plugin prompt through the submit
-// path the [STILL WAITING] re-raise takes, which a blocking hold does not
-// stop. Never throws: a failed drain ends with the item gone.
+// why. The renderer returns the brief as posts in order, the framing post
+// first and then the option posts, and each post is scrubbed alone: a scrub
+// that fails on any one drops the whole brief under scrub-failed. The scrubbed
+// posts joined by a blank line are the brief the entry carries, persisted
+// first, the commons record carries where that still reads open, and the
+// [ASK BRIEF] prompt quotes. The posts go to the persona's thread through the
+// relay's reply tool, one call each in order. A thrown post is logged
+// ask_brief_unposted naming its number and the count, no later post is sent,
+// and the whole joined brief goes once more as one [ASK BRIEF] plugin prompt
+// through the submit path the [STILL WAITING] re-raise takes, which a blocking
+// hold does not stop. Never throws: a failed drain ends with the item gone.
 export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, unknown>, expectedTurns: ExpectedTurn[]): Promise<void> {
   deps.session.askBriefFork = forkEntry(deps, deps.session.askBriefFork, "ask_brief_fork", noteAskBrief);
   if (deps.session.askBriefFork.since !== null || deps.session.state.askBriefOwed.length === 0) return;
@@ -373,6 +378,7 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
     if (!kept || item === null || entry === null) return;
     let fallback: string | null = null;
     let brief: string | null = null;
+    let posts: string[] = [];
     let usage: ReturnType<typeof forkUsageOf> | null = null;
     const warm = cacheReading(now, deps.cacheClock, false).warm;
     if (!warm) {
@@ -400,12 +406,20 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
         // being no timeout.
         const waitMs = typeof cfg.askOperatorWaitMs === "number" ? (cfg.askOperatorWaitMs as number) : 3_600_000;
         const parsed = parseAskBrief(typeof result.text === "string" ? result.text : "");
-        try { brief = parsed === null ? null : renderAskBrief(entry, parsed, waitMs); } catch { brief = null; }
-        if (brief === null) {
+        let rendered: string[] | null = null;
+        try { rendered = parsed === null ? null : renderAskBrief(entry, parsed, waitMs); } catch { rendered = null; }
+        if (rendered === null) {
           fallback = "unparsed";
         } else {
-          const scrubbed = scrubText(brief);
-          if (scrubbed.text === BLOCK_WITHHELD) { fallback = "scrub-failed"; brief = null; } else brief = scrubbed.text;
+          // Each post is scrubbed alone, and one withheld post withholds the
+          // brief, so the ledger never holds half of it.
+          const scrubbed = rendered.map((post) => scrubText(post).text);
+          if (scrubbed.includes(BLOCK_WITHHELD)) {
+            fallback = "scrub-failed";
+          } else {
+            posts = scrubbed;
+            brief = scrubbed.join("\n\n");
+          }
         }
       } else {
         // The result's own reason word, one of nothing-to-fork, api-error,
@@ -451,11 +465,17 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
           noteAskBrief(deps, "ask_brief_unmirrored", item.askId, `the commons write threw: ${boundedText(safeErrorText(err))}`);
         }
         let posted = true;
-        try {
-          await deps.callTool({ tool: "mcp__plugin_relay_channel-relay__reply", message: brief });
-        } catch (err) {
-          posted = false;
-          noteAskBrief(deps, "ask_brief_unposted", item.askId, `the reply tool threw: ${boundedText(safeErrorText(err))}`);
+        // The posts go in order, and the first that throws ends the sending:
+        // a later post never goes ahead of one the thread lacks.
+        for (let i = 0; i < posts.length && posted; i++) {
+          try {
+            await deps.callTool({ tool: "mcp__plugin_relay_channel-relay__reply", message: posts[i] });
+          } catch (err) {
+            posted = false;
+            noteAskBrief(deps, "ask_brief_unposted", item.askId, `part ${i + 1} of ${posts.length}: the reply tool threw: ${boundedText(safeErrorText(err))}`);
+          }
+        }
+        if (!posted) {
           // One [ASK BRIEF] submit per brief, through submitAskBriefReprompt in
           // hooks/index.ts, never retried; a refused submit is named on its own
           // line, as the reply backstop names its own.

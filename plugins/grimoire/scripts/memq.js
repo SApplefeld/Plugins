@@ -5217,7 +5217,8 @@ function usage(problem) {
         + '       memq declare-type <type>|--none\n'
         + '                (records this project\'s type tier for bare --type and the session hook)\n'
         + '       memq db-refresh\n'
-        + '                (drains the queue, then adopts this checkout\'s folder store into its remote key)\n'
+        + '                (drains the queue, then adopts this checkout\'s folder store into its remote key,\n'
+        + '                 and last purges this machine\'s journal rows past their retention)\n'
         + '       memq db-promote <name> [--sandbox <name>] [--tier project|type|operator]\n'
         + '                       [--segment <segment>]\n'
         + '       memq db-curate [--unapplied <days>] [--superseded] [--orphans]\n'
@@ -13640,93 +13641,11 @@ function wireText(value, cap, absent) {
     return value === null || value === undefined ? absent : sanitize(String(value), cap);
 }
 
-// memq db-refresh: drain the queue, then adopt this checkout's folder store into
-// its remote key.
-//
-// The drain is drainOnly's, the probe and then drainQueue under its own version
-// gates, so every row a write verb queued in an outage lands here in order, and
-// a queued record the host refuses is filed and named. The adoption follows,
-// where this working directory's key is a `remote:` one and the host is at the
-// record version: one mem.usp_AdoptProjectStore call from `path:<segment>` into
-// that key, on every refresh, since it is what sweeps rows another machine later
-// publishes under the same folder key. A `path:` working directory sends none,
-// and a host below the record version has no adoption procedure to call. The
-// exit code is 0 where every step completed and non-zero naming the step
-// otherwise. A refusal the drain filed and a stamp the host would not record
-// are not failed steps: each printed its line and the drain ran to its end; a
-// transport fault and a held record row are.
-//
-// Behind the drain, in order: the adoption; the index, mem.usp_ListIndex for
-// the shared tiers and this working directory's key, written to the
-// snapshot's index.json; and the embed pass, which embeds every row the host
-// lists without a vector from the body the host holds.
-//
-// The steps share one deadline, RUN_BUDGET_MS from the start, and each takes
-// what is left of it, so a refresh the session-start hook spawns ends inside
-// the hook's own interval between spawns.
-//
-// The project is the working directory's, or the pair the session-start hook
-// passes (dbRefreshProjectArgs), since the hook starts this verb in the store
-// root rather than in the session's directory.
-async function cmdDbRefresh(argv, options) {
-    const opts = options || {};
-    const passed = parseDbRefreshProject(argv);
-    if (passed === null) {
-        return usage('db-refresh takes no option but ' + DB_REFRESH_KEY_FLAG + ' <hex> '
-            + DB_REFRESH_SEGMENT_FLAG + ' <segment>, which the session-start hook passes together');
-    }
-    const now = opts.deps && typeof opts.deps.now === 'function' ? opts.deps.now : Date.now;
-    const deadline = now() + memoryDatabase.RUN_BUDGET_MS;
-    // The stand-down every store verb spells: the working
-    // directory is read for the project key the adoption moves the folder's
-    // records into, and an unpinned one on a network share resolves through a
-    // walk that can hang for the SMB timeout. A passed project reads no
-    // working directory.
-    if (passed.key === undefined) {
-        if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
-            process.stderr.write('memq: this call\'s working directory names a network share, so its '
-                + 'project key was not resolved (a synchronous walk under it risks hanging for the SMB '
-                + 'timeout on an unreachable host); nothing was refreshed\n');
-            process.exitCode = 1;
-            return;
-        }
-    }
-    const drained = memoryDatabase.drainOnly({ config: opts.config, deps: opts.deps, deadline });
-    if (drained.drain === undefined) {
-        process.stderr.write('memq: the drain step did not run: '
-            + shownText(memoryDatabase.standDownText(drained), DB_SYNC_REASON_CAP) + '\n');
-        process.exitCode = 1;
-        return;
-    }
-    const drain = drained.drain;
-    reportDrainRefusals(drain);
-    process.stdout.write('db-refresh: ' + drain.drained + ' queue row(s) drained'
-        + (Number.isFinite(drain.remaining) && drain.remaining > 0
-            ? ', ' + drain.remaining + ' queue row(s) still on the queue' : '')
-        + (drain.rejected > 0 ? ', ' + drain.rejected
-            + ' queue row(s) the host would not record, so no row on the host holds them' : '')
-        + (Array.isArray(drain.refused) && drain.refused.length > 0
-            ? ', ' + drain.refused.length + ' queued record(s) refused and kept under memory-snapshot/refused' : '')
-        + (drain.held > 0 ? ', ' + drain.held + ' record row(s) waiting for a host at schema version '
-            + memoryDatabase.RECORD_SCHEMA_VERSION : '')
-        + '\n');
-    // What the drain left a person to read, rendered at the failure-line cap,
-    // the refused records excepted, which the lines above already carry.
-    if (drain.detail && drain.cause !== 'refused-records') {
-        process.stderr.write('memq: ' + shownText('the drain step (' + (drain.cause || 'unclear') + '): '
-            + drain.detail, DB_SYNC_REASON_CAP) + '\n');
-    }
-    if (!drained.ok) {
-        process.stderr.write('memq: db-refresh stopped at the drain step\n');
-        process.exitCode = 1;
-        return;
-    }
-    if (drain.held > 0) {
-        process.stderr.write('memq: db-refresh stopped at the drain step: a record row is held for a newer host\n');
-        process.exitCode = 1;
-        return;
-    }
-
+// db-refresh's steps between the drain and the purge: the adoption, the
+// index and the embed pass, in that order. A step that fails prints why, sets
+// the exit code and returns, so the steps after it are skipped and the
+// purge, which cmdDbRefresh runs after this, is not.
+async function dbRefreshMiddleSteps(drained, passed, opts, deadline) {
     // The adoption, gated on the key and the host's version. A key this process
     // cannot resolve, or one that is a folder name, adopts nothing.
     let key = null;
@@ -13804,6 +13723,137 @@ async function cmdDbRefresh(argv, options) {
         process.stderr.write('memq: db-refresh stopped at the embed step\n');
         process.exitCode = 1;
     }
+}
+
+// memq db-refresh: drain the queue, then adopt this checkout's folder store into
+// its remote key.
+//
+// The drain is drainOnly's, the probe and then drainQueue under its own version
+// gates, so every row a write verb queued in an outage lands here in order, and
+// a queued record the host refuses is filed and named. The adoption follows,
+// where this working directory's key is a `remote:` one and the host is at the
+// record version: one mem.usp_AdoptProjectStore call from `path:<segment>` into
+// that key, on every refresh, since it is what sweeps rows another machine later
+// publishes under the same folder key. A `path:` working directory sends none,
+// and a host below the record version has no adoption procedure to call. The
+// exit code is 0 where every step completed and non-zero naming the step
+// otherwise. A refusal the drain filed and a stamp the host would not record
+// are not failed steps: each printed its line and the drain ran to its end; a
+// transport fault and a held record row are.
+//
+// Behind the drain, in order: the adoption; the index, mem.usp_ListIndex for
+// the shared tiers and this working directory's key, written to the
+// snapshot's index.json; the embed pass, which embeds every row the host
+// lists without a vector from the body the host holds; and the purge, one
+// mem.usp_PurgeJournal call deleting this machine's own journal rows past
+// their retention on a host at PURGE_SCHEMA_VERSION. A host below that
+// version and a budget spent before the purge each skip it without failing
+// the run.
+//
+// The steps share one deadline, RUN_BUDGET_MS from the start, and each takes
+// what is left of it, so a refresh the session-start hook spawns ends inside
+// the hook's own interval between spawns.
+//
+// The project is the working directory's, or the pair the session-start hook
+// passes (dbRefreshProjectArgs), since the hook starts this verb in the store
+// root rather than in the session's directory.
+async function cmdDbRefresh(argv, options) {
+    const opts = options || {};
+    const passed = parseDbRefreshProject(argv);
+    if (passed === null) {
+        return usage('db-refresh takes no option but ' + DB_REFRESH_KEY_FLAG + ' <hex> '
+            + DB_REFRESH_SEGMENT_FLAG + ' <segment>, which the session-start hook passes together');
+    }
+    const now = opts.deps && typeof opts.deps.now === 'function' ? opts.deps.now : Date.now;
+    const deadline = now() + memoryDatabase.RUN_BUDGET_MS;
+    // The stand-down every store verb spells: the working
+    // directory is read for the project key the adoption moves the folder's
+    // records into, and an unpinned one on a network share resolves through a
+    // walk that can hang for the SMB timeout. A passed project reads no
+    // working directory.
+    if (passed.key === undefined) {
+        if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
+            process.stderr.write('memq: this call\'s working directory names a network share, so its '
+                + 'project key was not resolved (a synchronous walk under it risks hanging for the SMB '
+                + 'timeout on an unreachable host); nothing was refreshed\n');
+            process.exitCode = 1;
+            return;
+        }
+    }
+    const drained = memoryDatabase.drainOnly({ config: opts.config, deps: opts.deps, deadline });
+    if (drained.drain === undefined) {
+        process.stderr.write('memq: the drain step did not run: '
+            + shownText(memoryDatabase.standDownText(drained), DB_SYNC_REASON_CAP) + '\n');
+        process.exitCode = 1;
+        return;
+    }
+    const drain = drained.drain;
+    reportDrainRefusals(drain);
+    process.stdout.write('db-refresh: ' + drain.drained + ' queue row(s) drained'
+        + (Number.isFinite(drain.remaining) && drain.remaining > 0
+            ? ', ' + drain.remaining + ' queue row(s) still on the queue' : '')
+        + (drain.rejected > 0 ? ', ' + drain.rejected
+            + ' queue row(s) the host would not record, so no row on the host holds them' : '')
+        + (Array.isArray(drain.refused) && drain.refused.length > 0
+            ? ', ' + drain.refused.length + ' queued record(s) refused and kept under memory-snapshot/refused' : '')
+        + (drain.held > 0 ? ', ' + drain.held + ' record row(s) waiting for a host at schema version '
+            + memoryDatabase.RECORD_SCHEMA_VERSION : '')
+        + '\n');
+    // What the drain left a person to read, rendered at the failure-line cap,
+    // the refused records excepted, which the lines above already carry.
+    if (drain.detail && drain.cause !== 'refused-records') {
+        process.stderr.write('memq: ' + shownText('the drain step (' + (drain.cause || 'unclear') + '): '
+            + drain.detail, DB_SYNC_REASON_CAP) + '\n');
+    }
+    if (!drained.ok) {
+        process.stderr.write('memq: db-refresh stopped at the drain step\n');
+        process.exitCode = 1;
+        return;
+    }
+    if (drain.held > 0) {
+        process.stderr.write('memq: db-refresh stopped at the drain step: a record row is held for a newer host\n');
+        process.exitCode = 1;
+        return;
+    }
+
+    // The steps between the drain and the purge. A step that fails sets the
+    // exit code and skips the steps after it, never the purge.
+    await dbRefreshMiddleSteps(drained, passed, opts, deadline);
+
+    // The purge: one mem.usp_PurgeJournal call on a host at the purge version,
+    // deleting this machine's own journal rows past their retention. It runs
+    // whatever the adoption, index and embed steps did, so a machine where one
+    // of them fails on every run still keeps its tables bounded. Only a drain
+    // that did not run or finish, or a held record row, stops the run before
+    // it. A host below that version has no such procedure, and a budget the earlier steps
+    // spent leaves the rows for the next run; each prints why on stdout and
+    // leaves the exit code as the earlier steps set it. A spent budget fails the
+    // embed step and not this one, because rows the purge leaves wait for the
+    // next run and lose nothing, while a record the embed pass leaves cannot be
+    // found by meaning until a later run embeds it. A call the host did not
+    // answer, refused, or answered unreadably is a failed step.
+    const purgeSchema = Number(drained.schemaVersion);
+    if (!(Number.isFinite(purgeSchema) && purgeSchema >= memoryDatabase.PURGE_SCHEMA_VERSION)) {
+        process.stdout.write('db-refresh: the purge step did not run: the memory database reports '
+            + (Number.isFinite(purgeSchema) ? 'schema version ' + purgeSchema : 'no schema version at all')
+            + ' and carries no purge procedure, which arrives at version ' + memoryDatabase.PURGE_SCHEMA_VERSION
+            + ' with plugins/grimoire/db/Install-MemoryDatabase.ps1\n');
+        return;
+    }
+    const purged = memoryDatabase.purgeJournal({ config: opts.config, deps: opts.deps, deadline });
+    if (!purged.ok && purged.standDown === 'budget') {
+        process.stdout.write('db-refresh: the purge step did not run: '
+            + shownText(memoryDatabase.standDownText(purged), DB_SYNC_REASON_CAP) + '\n');
+        return;
+    }
+    if (!purged.ok) {
+        process.stderr.write('memq: the purge step did not run: '
+            + shownText(memoryDatabase.standDownText(purged), DB_SYNC_REASON_CAP) + '\n');
+        process.exitCode = 1;
+        return;
+    }
+    process.stdout.write('db-refresh: purged ' + purged.purged.turnMeter + ' turn, ' + purged.purged.outcome
+        + ' outcome, ' + purged.purged.recordStamp + ' stamp row(s) older than retention\n');
 }
 
 // The session's project as the session-start hook hands it to a detached

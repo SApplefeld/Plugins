@@ -4122,13 +4122,13 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - passage: A blocker traced only through those sources is read as declared: the seat runs the funnel on it as on a message, and checks the worker's liveness first.
 
 ### J002
-- key: Hold a suite slot for a whole gate only at a moment the doctrine's gate bullet names, and tell a session found running one at any other moment that the moment takes the targeted lane.
+- key: Hold a suite slot for a whole gate only at a moment the doctrine's gate bullet or testing-discipline's daily-gate bullet names, and tell a session running one at any other moment to take the targeted lane.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:26
 - provenance: `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 3, 2026-10-06, after the operator's ruling of 2026-10-05 that a plan pays one whole gate.
 - verdict: keep
-- reason: The whole gate is the one run that cannot overlap another on a machine, so a session running one outside a moment the doctrine names costs the machine's wall clock for a run the lane rule did not ask for. The seat records slot holders from what it was told or read and has no request-and-grant step, so it can only tell the session which lane the moment takes. The moments stay in the doctrine's gate bullet alone, so this bullet restates none of them.
-- passage: - **Machine-resource arbitration.** Suite-slot contention and the shared-surface claims nobody else stewards. A whole gate holds a suite slot only at a moment the doctrine's gate bullet names. The seat tells a session it is told of or reads running one at any other moment that the moment takes the targeted lane.
+- reason: The whole gate is the one run that cannot overlap another on a machine, so a session running one outside a moment the doctrine names costs the machine's wall clock for a run the lane rule did not ask for. The seat records slot holders from what it was told or read and has no request-and-grant step, so it can only tell the session which lane the moment takes. The moments stay in the doctrine's gate bullet and the daily-gate bullet, so this bullet restates none.
+- passage: - **Machine-resource arbitration.** Suite-slot contention and the shared-surface claims nobody else stewards. A whole gate holds a suite slot only at a moment the doctrine's gate bullet or testing-discipline's daily-gate bullet names. The seat tells a session running one at any other moment that the moment takes the targeted lane.
 
 ### M001
 - key: Treat the board, the registry and the admin requests as this machine's own, which nothing copies off it and no other machine reads.

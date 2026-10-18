@@ -19,7 +19,8 @@
 	[WrittenBySandboxId] is the sandbox whose mem.usp_PutRecord call last wrote
 	the row. The stamp ids those calls carried are held in mem.RecordStamp,
 	one row per stamp, so a later write never erases the record of an earlier
-	one.
+	one. Each stamp row stays for the retention mem.usp_PurgeJournal declares,
+	90 days.
 
 	VISIBILITY VALUES (fixed, lowercase):
 		private		A version 6 project store row, as its publisher wrote it.

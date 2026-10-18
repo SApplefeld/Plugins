@@ -1141,6 +1141,12 @@ export interface AgentState {
   // the cost of that is a steward restating each currently unhealthy persona
   // once when it comes up.
   lastReconcileAt?: number;
+  // The local date, YYYY-MM-DD, of the last [TRUNK GATE] turn, or of the
+  // first tick's stamp, for a session whose trunkGateHour is set. It is
+  // persisted so a relaunch on the same local date does not run the gate a
+  // second time. It is absent until the first tick with the option set,
+  // which stamps it rather than firing the turn.
+  trunkGateDate?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -1997,6 +2003,17 @@ export function parseState(json: string): AgentState {
       || !Number.isFinite(state.lastReconcileAt)
       || state.lastReconcileAt > readClock)) {
     delete state.lastReconcileAt;
+  }
+
+  // The daily trunk gate's stamp, held to the YYYY-MM-DD shape the tick
+  // writes. The tick fires where the stamp is present and not today's local
+  // date, so a value of any other type or shape is never today: a relaunch
+  // past the hour would start a thirty-minute gate at once, which the first
+  // tick's stamp-without-firing exists to refuse. Dropping it puts the next
+  // tick on that branch, so the gate runs a day later at worst.
+  if (state.trunkGateDate !== undefined
+    && (typeof state.trunkGateDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(state.trunkGateDate))) {
+    delete state.trunkGateDate;
   }
 
   // L10: invariant block runs on both v2 and v3 branches.

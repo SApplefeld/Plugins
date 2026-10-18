@@ -299,9 +299,8 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - class: rule
 - source: plugins/grimoire/skills/testing-discipline/SKILL.md:49
 - provenance: 27ac5d7 2026-08-27; Standing Brief Amendment 2 of the same plan required every test to run green under the parallel runner.
-- verdict: keep
-- reason: no finding.
-- passage: Configure the runner parallel from day one, so a dependent test fails at birth rather than at the retrofit.
+- verdict: retire
+- reason: Cut on 2026-10-17 by section 3 of `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md`, the orchestrator's call, to pay for the sized gate; no other rule reads it.
 - flag: weak-reason
 
 ### C031
@@ -309,9 +308,8 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - class: rule
 - source: plugins/grimoire/skills/testing-discipline/SKILL.md:50
 - provenance: 27ac5d7 2026-08-27, the cost shapes.
-- verdict: keep
-- reason: no finding.
-- passage: A real spawn belongs only where a shell, a CLI or a cross-process boundary is the subject.
+- verdict: retire
+- reason: Cut with C030, on the same call; the per-process cost sentence beside it still prices a spawn.
 - flag: weak-reason
 
 ### C032
@@ -390,13 +388,13 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - flag: stale
 
 ### C039
-- key: Run the whole gate at finishing, before the plan's handoff.
+- key: Run the finishing gate before the plan's handoff, on the lane the lane script prints.
 - class: rule
 - source: plugins/grimoire/skills/testing-discipline/SKILL.md:59
-- provenance: a321af3 2026-08-30 (the moment) and 9784239 2026-08-30 (the one-moment reading), gate-cadence plan.
+- provenance: a321af3 2026-08-30 (the moment) and 9784239 2026-08-30 (the one-moment reading), gate-cadence plan; `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3, 2026-10-17, on the operator's ruling that day.
 - verdict: keep
 - reason: Pinned phrase on both copies; the doctrine names the moments, this skill the mechanics, finishing-work the run inside its pass.
-- passage: **The whole gate** runs at finishing, before the plan's handoff
+- passage: **The whole gate** is the full suite. The finishing gate runs at finishing, before the plan's handoff, on the lane the lane script prints from the repository's lane map, `test/gate-lanes.json` in the kit. The script is `scripts/gate-lane.js` under the kit plugin root. It prints `lane: whole` where the map cannot bound the delta or the daily gate below has no fresh green run, and its header lists each case.
 
 ### C040
 - key: Run the whole gate before a push only where that push lands on a trunk consumers install from directly with no CI gating the merge.
@@ -408,14 +406,14 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - passage: and before a push only where that push lands on a trunk consumers install from directly with no CI gating the merge.
 
 ### C041
-- key: Treat finishing's own full-suite run as the handoff gate, pay it once per plan, and take the targeted lane over every change after it; the run that ends green is the one paid, and a trunk red's fix comes in on the targeted lane.
+- key: Treat finishing's own run as the handoff gate, pay it once per plan, and take the targeted lane over every change after it; the run that ends green is the one paid, and a trunk red's fix comes in on the targeted lane.
 - class: mechanic
 - source: plugins/grimoire/skills/testing-discipline/SKILL.md:59
-- provenance: 9784239 2026-08-30, gate-cadence Section 6: a reader took "at finishing, before the plan's handoff" as two moments and looked for a second gate no procedure runs. Section 1 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` added the once-per-plan and ends-green sentences on 2026-10-06, on the operator's word of 2026-10-05 that a plan needs one whole gate. Section 2 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` added the trunk-red sentence on 2026-10-06, on the operator's ruling of 2026-10-06 that a plan pays one whole gate and fixes a trunk red before its handoff.
+- provenance: 9784239 2026-08-30, gate-cadence Section 6: a reader took "at finishing, before the plan's handoff" as two moments. `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 1 added the once-per-plan and ends-green sentences, and `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 the trunk-red one, both 2026-10-06 on operator rulings. `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3 cut the gloss and the trunk-red pointer's lane clause, 2026-10-17.
 - verdict: rewrite
 - landed: 4520e999 section 2, with its fix round at ec9371b8
-- reason: The parity test asserts this sentence on this skill; the doctrine's sentence was left as approved because it reads correctly under this gloss. The once-per-plan sentence is pinned alike on this skill and both doctrine copies. A red the trunk carries too is fixed on its own pull request, so re-running the whole gate after it would buy the second whole run the one-gate rule removed.
-- passage: Finishing and the handoff are one moment rather than two: finishing's own full-suite run is the gate the plan hands off on. A plan pays one green finishing run, and every change after it takes the targeted lane over its own delta. The one whole gate is the run that ends green: a red of the plan's own is fixed and re-run whole, since none has passed yet. A red the integration branch's head carries too is the trunk's, and the base-head bullet below routes its fix, which the plan's branch takes in on the targeted lane that bullet states. A gate whose only reds are the trunk's is the one paid once each of them is fixed or has become a spec.
+- reason: The parity test asserts this sentence on this skill; the doctrine's sentence was left as approved because it reads correctly under this gloss. The once-per-plan sentence is pinned alike on this skill and both doctrine copies. A red the trunk carries too is fixed on its own pull request, so re-running the gate after it would buy the second run the one-gate rule removed. The re-run takes a fresh report, so a fix touching a `whole` path sends it whole.
+- passage: Finishing and the handoff are one moment. A plan pays one green finishing run, and every change after it takes the targeted lane over its own delta. The one finishing gate is the run that ends green, so a red of the plan's own is fixed and the gate re-run on a fresh lane-script report. A red the integration branch's head carries too is the trunk's, and the base-head bullet below routes its fix. A gate whose only reds are the trunk's is the one paid once each of them is fixed or has become a spec.
 
 ### C042
 - key: Decide the pre-push whole gate on the trunk's surface, never a repo's name, and drop it the day the trunk gains branch protections and a merge gate.
@@ -454,13 +452,13 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - passage: **The contention lane** holds the tests whose subject is genuinely machine-shared state (a machine-global tier, a real shared lock), each saying so in its own text.
 
 ### C046
-- key: Run the contention lane serially, beside the whole gate wherever the whole gate runs, and at a section close whenever that delta touched machine-shared state.
+- key: Run the contention lane serially, beside the finishing gate or any whole gate, and at a section close whenever that delta touched machine-shared state.
 - class: rule
 - source: plugins/grimoire/skills/testing-discipline/SKILL.md:60
 - provenance: 27ac5d7 2026-08-27 review Major (the lane never ran at section close, so a machine-shared change could close green with its tests skipped); schedule restated at a321af3.
 - verdict: keep
 - reason: Pinned schedule on both copies, with the finishing pass and the qa-verifier pinned at their points of action.
-- passage: It runs serially, beside the whole gate wherever the whole gate runs, and at section close whenever that section's delta touched the lane's subject.
+- passage: It runs serially, beside the finishing gate or any whole gate, and at section close whenever that section's delta touched the lane's subject.
 
 ### C047
 - key: Move a main-gate test that needs the box to itself into the contention lane rather than retrying the main gate until it passes.
@@ -602,7 +600,7 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - verdict: rewrite
 - landed: 4520e999 section 2, with its fix round at ec9371b8
 - reason: The protocol is this skill's; the doctrine's retained clause was re-synced to four rungs at efcfa16, and the qa-verifier's "run twice" is the surface that gives way. Amendment 2 note at section 32's close: "re-synced to four rungs at efcfa16" describes the doctrine before section 1, where the four rungs sat in the doctrine's gate bullet; section 1 removed them there, and at HEAD the doctrine's red-is-a-signal bullet (line 120) points at this skill's red protocol for them, so this skill is their only carrier, which strengthens the keep and A079.
-- passage: **Solo, then class, then a full re-run with no code change, then a clean tree.** Solo separates the test from its neighbors. The class run separates the fixture from the box. The unchanged full re-run separates the code from the machine. The same red at the integration branch's head, re-run in a clean worktree, or in the lane baseline you recorded, separates a red that was there before you from one you caused.
+- passage: **Solo, then class, then a full re-run with no code change, then a clean tree.** Solo separates the test from its neighbors. The class run separates the fixture from the box. The unchanged full re-run separates the code from the machine. The same red at the base head the base-head bullet above defines separates a red that was there before you from one you caused.
 - flag: stale
 
 ### C060
@@ -626,16 +624,16 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - passage: **Name it flake or regression, with the reason, before moving on.** The reason cites the discriminating output from step 1, never the timing or the feel of the failure.
 
 ### C062
-- key: Record the suite's wall clock alongside the pass/fail counts at a baseline, and name the lane the baseline ran on; read the whole gate's clock against the previous plan's finishing Chapter on the same machine.
+- key: Record the suite's wall clock alongside the pass/fail counts at a baseline, and name the lane the baseline ran on; read the whole gate's clock against the daily gate's last run on the same machine, else the last `lane: whole` finishing Chapter, else the last with no verdict line.
 - class: rule
 - source: plugins/grimoire/skills/testing-discipline/SKILL.md:77
-- provenance: 27ac5d7 2026-08-27 (the wall-clock capture would have been orphaned when Section 2 shrank the authoring bullet, a review Major) and efcfa16 2026-08-27 (the lane name, from the unscoped-baseline Critical). Section 2 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` added the whole gate's reading on 2026-10-06, since no plan-start run records a whole-gate clock.
+- provenance: 27ac5d7 2026-08-27 (a review Major) and efcfa16 2026-08-27 (the lane name, an unscoped-baseline Critical); `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 added the whole gate's reading on 2026-10-06.
 - verdict: rewrite
 - landed: 627ad10 section 32; 4520e999 section 2 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md`, with its fix round at ec9371b8
-- reason: The two rules stay; the purpose clause moves here: a later run needs a figure to diff against rather than a recollection, and a lane to diff it on, because a targeted run's clock says nothing about a whole gate's. Lands at line 82 as "The suite's wall clock is recorded alongside the pass/fail counts already captured at a baseline, and the baseline names the lane it was run on."
+- reason: The two rules stay; the purpose clause moves here: a later run needs a figure to diff against rather than a recollection, and a lane to diff it on, because a targeted run's clock says nothing about a whole gate's. A targeted finishing gate's clock compares with no whole run, so the fallback names the last whole one.
 - proposed: Drop the purpose clause; the bullet reads as the two rules.
 - baseline-test: yes
-- passage: Record the suite's wall clock beside the baseline's pass/fail counts, and name the lane the baseline ran on. The whole gate's clock is read against the previous plan's finishing Chapter on the same machine, which sits under `docs/archive/`, or recorded as having none there, since no plan-start run records one.
+- passage: Record the suite's wall clock beside the baseline's pass/fail counts, and name the lane the baseline ran on. The whole gate's clock is read against the daily gate's last run on the same machine, else the last `lane: whole` finishing Chapter under `docs/archive/`, else the last one with no verdict line.
 
 ### C063
 - key: Route wall-clock growth past a few minutes as a finding, such as a fast lane for day-to-day edits, rather than absorbing it.
@@ -647,7 +645,7 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - reason: Reads as an absolute threshold; state that the growth is first established under the contention rule, then routed. Lands at line 82 as "Growth is established under the contention rule below before it is read. Established growth past a few minutes is a finding to route, a fast lane for day-to-day edits or the whole gate at the moments that earn it, never a fact of life to absorb."
 - proposed: C063 states its dependency: growth established under the contention rule, past a few minutes, is a finding to route.
 - baseline-test: yes
-- passage: Growth established under the contention rule below, past a few minutes, is a finding to route, never a fact of life to absorb.
+- passage: Growth past a few minutes, net of skipped slow suites, is a finding under the contention rule below.
 
 ### C064
 - key: Give every measured figure recorded in a journal-layer artifact a moment-pin.
@@ -708,6 +706,7 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - provenance: 7ef71e3 2026-09-01, the bar the operator made load-bearing in Decision 1, written as the one-sentence pointer at the doctrine's ban the plan's Section 1 prescribed.
 - verdict: retire
 - reason: row 1245 shrink, which restated the doctrine's journey rule. The doctrine's "Documents ship the current state" bullet carries the bar: "Code comments and shipped artifacts state what is true now... Dates, evidence and claim-status marks go in the journal layer.".
+- landed: `docs/plans/claude-kit_daily-trunk-gate_spec_v1.md` section 3, which cut the sentence's last form, "The doctrine's journey ban (...) defines the journal layer, so a curated document, a code comment and a skill body carry no dated-evidence annotation."
 - passage: Elsewhere the ban holds, so a curated document, a code comment and a skill body carry no dated-evidence annotation.
 
 ### C070
@@ -858,6 +857,16 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - landed: 658a62e7 section 1
 - reason: With the claim gone, a suite starts on a clean poll, and an overlap red is the one evidence that the retirement was wrong for some suite. The note goes to the kaizen inbox rather than project memory so the count taken on or after 2026-10-05 finds it wherever the suite lives; the second sentence says so because the kaizen bar otherwise routes a project-specific gotcha to memory.
 - passage: A red seen with another suite, build or embedding pass on the box that passes on a solo re-run is contention evidence. It goes to the kaizen inbox as a note stating which suite cannot share the box with what, whatever repository the suite belongs to.
+
+### X002
+- key: Run the trunk's whole gate once a day with the slow suites admitted, skip a day whose diff holds no code file, route a red narrowed to one commit as a trunk red that day, and revert a commit with no fix draft by the next run.
+- class: rule
+- source: plugins/grimoire/skills/testing-discipline/SKILL.md:62
+- provenance: `docs/plans/claude-kit_daily-trunk-gate_spec_v1.md` section 3, from stage 4 of `docs/plans/claude-kit_review-verification_program_v1.md` and its decision 5, which fixes the cadence at once a day; the revert window of one run is the architect's default while the plan's Open Questions entry awaits the operator.
+- verdict: keep
+- landed: `docs/plans/claude-kit_daily-trunk-gate_spec_v1.md` section 3
+- reason: The finishing gate finds a trunk red only when the next plan finishes, on that plan's clock, and it admits the slow suites only where the changeset touches persona paths. A daily run on the trunk's tip finds the red the day it lands and names the commit that turned it red. The fix goes on the base-head bullet's trunk-red route, which already says why a trunk red is never left for later, so this bullet points there rather than restating it. The revert gives the fix one run first, since a revert is a pull request a person reviews.
+- passage: **The daily gate is the trunk's whole gate once a day, slow suites admitted, skipped where the day's diff holds no code file.** A red narrowed to one trunk commit takes the base-head bullet's trunk-red route that day. A commit with no fix draft by the next run is reverted by an architect plan, its work returning under a new plan.
 
 ### A001
 - key: Rebuild before gating when a merge's diff touches the sources a local build artifact is stamped from, the kit repository's `plugins/grimoire/hooks/` among them.

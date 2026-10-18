@@ -154,6 +154,11 @@
       "title": "Reconciliation cadence (ms)",
       "description": "How long between the [RECONCILE] prompts the coordinator persona's controller tick submits, which are the only trigger for the kit Coordinator seat's reconciliation pass. Default 4 hours, that seat's own cadence: the claim probe's window is one full cadence and the registry prune's staleness test is twice it, so a shorter run of either could fire nothing a four-hourly run misses. A value at or below zero takes the default, since it would otherwise be satisfied by every tick."
     },
+    "trunkGateHour": {
+      "type": "number",
+      "title": "Daily trunk gate hour",
+      "description": "The local hour, a whole number from 0 to 23, at or past which this session's controller tick submits one [TRUNK GATE] turn a local date, in which the persona runs tools/trunk-gate/run.mjs from its working directory. The coordinator persona and the default persona never take the turn. An absent value, or any other value, runs no gate. Set it on one session per checkout, since each session with it set gates the trunk on its own."
+    },
     "supervisorMailbox": {
       "type": "string",
       "default": "",
@@ -176,13 +181,19 @@
       "type": "boolean",
       "default": true,
       "title": "Transcript redactor",
-      "description": "Whether the redactor hides secrets from the transcript: a value a tool prints, a prompt carries, a context block holds or a subagent task quotes is swapped for a placeholder before the model reads it, the real value is restored only inside Bash, PowerShell, Write, Edit, MultiEdit and NotebookEdit, in a call that writes no store, and a store surface carrying a raw secret is refused. true by default. false passes every event through untouched."
+      "description": "Whether the redactor hides secrets from the transcript: a value a tool prints, a prompt carries, a context block holds or a subagent task quotes is swapped for a placeholder before the model reads it, the real value is restored only inside Bash, PowerShell, Write, Edit, MultiEdit and NotebookEdit, in a call that writes no store, or inside an MCP tool redactorRestoreTools names, and a store surface carrying a raw secret is refused. true by default. false passes every event through untouched."
     },
     "credentialFiles": {
       "type": "string",
       "default": "",
       "title": "Credential files",
       "description": "A comma-separated list of absolute paths whose secrets the redactor hides from session start. A file whose name ends in .env contributes the value of every line whose key is KEY, TOKEN, SECRET, PASSWORD, PASS or PWD, or ends in an underscore and one of them; any other file contributes its whole trimmed content. A missing or unreadable file contributes nothing and is logged once. Empty by default, which seeds nothing from this setting."
+    },
+    "redactorRestoreTools": {
+      "type": "string",
+      "default": "",
+      "title": "Redactor restore tools",
+      "description": "A comma-separated list of the MCP tools that receive a secret's real value in place of its placeholder, as Bash, PowerShell, Write, Edit, MultiEdit and NotebookEdit do, with their results scanned and the handed values re-hidden. An entry is either a tool name, mcp__<server>__<tool>, which restores that tool, or a server name, mcp__<server>, which restores every tool of that server except the refused ones. Any other entry is dropped and logged once at session start. A tool on the redactor's refused list never restores, whatever this setting names, and the persona tools whose text another persona or a shared store reads and the relay's reply tool are on it. The setting applies only while redactor is true. Empty by default, which restores into the six local tools alone."
     }
   }
 }

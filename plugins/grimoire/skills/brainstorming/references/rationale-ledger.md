@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's brainstorming skill: it governs the collaborative design conversation that precedes any new feature, project, or non-trivial change, and it ends by producing a written spec in `docs/plans/` that the executing-work skill runs on. It owns these moments: the pre-design memory and backlog recall, the scope check that splits an oversized request into sub-project specs, the one-question-at-a-time design dialog, the offer of the design council at a hard fork, the contract-surface scout sweep that derives files in scope, the plan sketch, the spec write and its indexing, the spec self-review with its blind read and plan review, the choice of commit model, the per-section model tier and locus assignment, the `Tests:` and document-review lines, the Fable-usage rules, and the frozen spec format and header contract. A session loads it as a `named-trigger`: the frontmatter says to use it when the operator wants to think through a problem before building, or on any substantial new effort without an existing spec, with phrases like "let's think through", "help me design", or "spec this out".
 
-Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: C151 rewritten to its passage as it now reads, C152's key reworded, and F001 to F005 added under the plan's letter F for the `Verify:` line, the write-time run and the catalog check.
+Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: C151 rewritten to its passage as it now reads, C152's key reworded, and F001 to F005 added under the plan's letter F for the `Verify:` line, the write-time run and the catalog check. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C024, C034, C045, C046, C055, C072, C095, C097, C104, C164 and C180 rewritten to their passages as they now read. They point the intake routes at the doctrine bullet that letters them, the capacity reading, the Workflow route and the external engine at the files that hold them, and the scout band at the file now holding it, state when `## Operator Verification` is owed, and cut restatements to pay.
 
 ### C001
 - key: Explore the problem space in conversation with the operator, then capture the agreement as a spec for executing-work to run.
@@ -241,10 +241,10 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Ask route (c) intake gaps one at a time inside this conversation rather than in the batched form used mid-run and at close-out.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:16
-- provenance: e872098 2026-08-18, the intake-gap-check plan: a review Major found the doctrine's "asked, batched" and this step both claiming route (c), and brainstorming was scoped to the design conversation.
-- verdict: keep
-- reason: This is the sentence that records the intentional split, so removing it re-opens the contest the review closed.
-- passage: This is how route (c) of the doctrine's intake gap check is asked here, instead of batched as mid-run and close-out asks are.
+- provenance: e872098 2026-08-18, the intake-gap-check plan: a review Major found the doctrine's "asked, batched" and this step both claiming route (c), and brainstorming was scoped to the design conversation; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names the doctrine bullet that letters the routes by its file and bold lead.
+- verdict: rewrite
+- reason: This is the sentence that records the intentional split, so removing it re-opens the contest the review closed. The sentence names the doctrine bullet by its file and bold lead because the routes are lettered there and nowhere on this page, and C026's routes (a) and (b) and step 8's route (a) and (b) items read against it.
+- passage: This is how route (c) of `operating-instructions/SKILL.md`'s "Enumerate the gaps at intake, ask selectively, declare the rest" bullet is asked here, not batched as at mid-run and close-out.
 
 ### C025
 - key: Still enumerate the intake gaps; one-question-at-a-time is no license to skip the enumeration.
@@ -336,15 +336,15 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - baseline-test: yes
 
 ### C034
-- key: Err toward offering the council; lower the bar to offer, never the bar to run.
+- key: Lower the bar to offer the council, never the bar to run.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:22
-- provenance: dc87c38 2026-06-28, a deliberate lowering of the offer bar.
+- provenance: dc87c38 2026-06-28, a deliberate lowering of the offer bar; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which cut the lead restating the lowered bar.
 - verdict: rewrite
 - landed: 16c5e61 section 28
-- reason: Real but minor contest with the council's "Offered only at genuine forks"; this later, deliberate rule at the offer's owner wins, and the council's envelope line is the side to bring current. Flipped from keep to rewrite at section 28's close: C033's retire took the sentence this one's opening 'So' referred back to, so the conjunction leaves and the sentence opens with a capital, and the sentence was respelled to stand as landed. Landed as the proposal below.
+- reason: Real but minor contest with the council's "Offered only at genuine forks"; this later, deliberate rule at the offer's owner wins, and the council's envelope line is the side to bring current. Flipped from keep to rewrite at section 28's close: C033's retire took the sentence this one's opening 'So' referred back to, so the conjunction leaves and the sentence opens with a capital, and the sentence was respelled to stand as landed. Landed as the proposal below. The lead "Err toward offering" restated the lowered offer bar the rest of the sentence states, and was cut to pay for that section's pointers.
 - proposed: Err toward offering, and lower the bar to offer, never the bar to run.
-- passage: Err toward offering, and lower the bar to offer, never the bar to run.
+- passage: Lower the bar to offer, never the bar to run.
 
 ### C035
 - key: Make the council offer in the turn you recognize the fork, not a later turn.
@@ -445,22 +445,22 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: The sweep is its own second pass, reading for coverage, and runs even where Explore mapped the area.
 
 ### C045
-- key: Band the scout and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract".
+- key: Band the scout and state its return contract per `executing-work/references/implementing.md`'s "Band the scout by question shape, and state its return contract".
 - class: pointer
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:24
-- provenance: 83b81ac 2026-08-19; the plan directed a pointer at executing-work's banding rather than a restatement.
-- verdict: keep
-- reason: Already the pointer at the owner the ownership map names for scouts.
-- passage: Band it and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract", on the Explore subagent carrying that band's explicit model override.
+- provenance: 83b81ac 2026-08-19; the plan directed a pointer at executing-work's banding rather than a restatement; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names the file now holding the bullet.
+- verdict: rewrite
+- reason: Already the pointer at the owner the ownership map names for scouts. The pointer names `executing-work/references/implementing.md`, which holds the bullet since the skill-compaction-fit plan moved it out of `SKILL.md`, so a reader no longer takes a second hop through the skill's contents table.
+- passage: Band it and state its return contract per `executing-work/references/implementing.md`'s "Band the scout by question shape, and state its return contract", on the Explore subagent carrying that band's explicit model override.
 
 ### C046
 - key: Run the sweep through the built-in Explore subagent carrying that band's explicit model override.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:24
-- provenance: 83b81ac 2026-08-19.
-- verdict: keep
-- reason: Names the vehicle and that the band's override rides, without naming a model, so it cannot drift from executing-work's banding.
-- passage: Band it and state its return contract per `executing-work/SKILL.md`'s "Band the scout by question shape, and state its return contract", on the Explore subagent carrying that band's explicit model override.
+- provenance: 83b81ac 2026-08-19; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which re-pointed the shared sentence's file (C045).
+- verdict: rewrite
+- reason: Names the vehicle and that the band's override rides, without naming a model, so it cannot drift from executing-work's banding. The passage changed only in C045's file pointer, and this claim's words stand.
+- passage: Band it and state its return contract per `executing-work/references/implementing.md`'s "Band the scout by question shape, and state its return contract", on the Explore subagent carrying that band's explicit model override.
 
 ### C047
 - key: Cite the sweep's return in the spec's Approach: the searches run and the surfaces they found.
@@ -544,15 +544,15 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Write the spec to `docs/plans/<project>_spec_v1.md`, incrementing the version where the name exists, and never overwriting a prior version.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:28
-- provenance: f8c0649 2026-06-10, founding text; curating-docs became the owner of the plan doc's name at b49a47b 2026-06-19 and 662e5e3 2026-08-01.
+- provenance: f8c0649 2026-06-10, founding text; curating-docs became the owner of the plan doc's name at b49a47b 2026-06-19 and 662e5e3 2026-08-01; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which compressed the version sentence.
 - verdict: rewrite
 - landed: 16c5e61 section 28
-- reason: The instance with the content type filled as `spec`, sitting where the spec is written (662e5e3: a pointer only works in the skill loaded at the moment of the act); the three patterns agree once `spec` fills the slot. Flipped from keep to rewrite at section 28's close: Standing Brief Amendment 1 names this sentence's plan-file name form and orders it current to the doctrine's landed form (`<project>_<content-type>_v<n>.md`, the form `plugins/grimoire/skills/curating-docs/references/templates.md` states and the doctrine's plan-doc bullet points at), against this entry's own reason that `spec` filling the slot is right at the site where a spec is written, which the operator's decision batch holds as the question of the amendment's reach over a keep-held restatement, so the sentence was respelled to stand as landed. Landed as the proposal below.
+- reason: The instance with the content type filled as `spec`, sitting where the spec is written (662e5e3: a pointer only works in the skill loaded at the moment of the act); the three patterns agree once `spec` fills the slot. Flipped from keep to rewrite at section 28's close: Standing Brief Amendment 1 names this sentence's plan-file name form and orders it current to the doctrine's landed form (`<project>_<content-type>_v<n>.md`, the form `plugins/grimoire/skills/curating-docs/references/templates.md` states and the doctrine's plan-doc bullet points at), against this entry's own reason that `spec` filling the slot is right at the site where a spec is written, which the operator's decision batch holds as the question of the amendment's reach over a keep-held restatement, so the sentence was respelled to stand as landed. Landed as the proposal below. The version sentence was compressed to pay for that section's pointers, its claim unchanged.
 - proposed: 9. **Write the spec** to `docs/plans/<project>_<content-type>_v<n>.md` (increment the version if the name exists; never overwrite a prior version).
-- passage: **Write the spec** to `docs/plans/<project>_<content-type>_v<n>.md`. Increment the version if the name exists, and never overwrite a prior version.
+- passage: **Write the spec** to `docs/plans/<project>_<content-type>_v<n>.md`. Increment the version where the name exists, never overwriting a prior one.
 
 ### C056
-- key: Invoke the `curating-docs` skill's create path and add the new plan to the `docs/README.md` index.
+- key: Invoke the `curating-docs` skill's create path, which registers the new plan in the docs indexes.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:28
 - provenance: b49a47b 2026-06-19, Document Backlog Handling, which created curating-docs and this invocation.
@@ -721,12 +721,12 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Run the blind read that follows the inline pass; it is separate and not optional.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:30
-- provenance: e872098 2026-08-18; its review found the first dispatch would have been refused by the reader's charter, which is why the dispatch is now fixed in words.
+- provenance: e872098 2026-08-18; its review found the first dispatch would have been refused by the reader's charter, which is why the dispatch is now fixed in words; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which dropped a word from the sentence.
 - verdict: rewrite
 - landed: 16c5e61 section 28
-- reason: No hook dispatches the reader; the trivial-spec skip is the rule's own carve-out. Flipped from keep to rewrite at section 28's close: C073's retire took the because-clause after this sentence's comma, so the comma becomes a period; the round's blind lens found the keep standing on a changed sentence, so the sentence was respelled to stand as landed. Landed as the proposal below.
+- reason: No hook dispatches the reader; the trivial-spec skip is the rule's own carve-out. Flipped from keep to rewrite at section 28's close: C073's retire took the because-clause after this sentence's comma, so the comma becomes a period; the round's blind lens found the keep standing on a changed sentence, so the sentence was respelled to stand as landed. Landed as the proposal below. The sentence lost its "it" to pay for that section's pointers, its claim unchanged.
 - proposed: The blind read that follows is separate and is not optional.
-- passage: A blind read follows, and it is not optional.
+- passage: A blind read follows and is not optional.
 
 ### C073
 - key: The blind read is required because the inline read cannot catch a gap this session already filled while reading.
@@ -959,12 +959,12 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Dispatch the `plan-reviewer` agent with the spec path alone, never the design conversation, at dispatch table row "Plan review" on executing-work's Reviewer Dispatch template.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:30
-- provenance: ead49db 2026-09-08, which set the charter's frontmatter effort to low for the Agent-tool fallback and routed the default dispatch through Workflow to reach high.
+- provenance: ead49db 2026-09-08, which set the charter's frontmatter effort to low for the Agent-tool fallback and routed the default dispatch through Workflow to reach high; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names the files holding the template and the capacity reading.
 - verdict: rewrite
 - landed: 16c5e61 section 28
-- reason: The apparent conflicts with the consult's Agent-tool default and the charter's frontmatter low are one design: each judge's default route is whichever delivers Fable at high given its own frontmatter effort (A005). Brainstorming owns the dispatch; the charter's copy is the receiving side. Flipped from keep to rewrite at section 28's close: C096's retire took the clause after this sentence's semicolon, so the semicolon becomes a period, and the sentence was respelled to stand as landed. Landed as the proposal below.
+- reason: The apparent conflicts with the consult's Agent-tool default and the charter's frontmatter low are one design: each judge's default route is whichever delivers Fable at high given its own frontmatter effort (A005). Brainstorming owns the dispatch; the charter's copy is the receiving side. Flipped from keep to rewrite at section 28's close: C096's retire took the clause after this sentence's semicolon, so the semicolon becomes a period, and the sentence was respelled to stand as landed. Landed as the proposal below. The sentence names `executing-work/references/review.md`, which holds the dispatch table and the Reviewer Dispatch template, and `executing-work/references/implementing.md`, which holds the capacity reading, since neither is on this page. C098's "that reading" and C143's "Executing-work's capacity reading" read against this first use.
 - proposed: Dispatch the `plan-reviewer` agent with the spec path alone, never the design conversation, at fable and effort high through Workflow's `agent()` on executing-work's Reviewer Dispatch template.
-- passage: Dispatch the `plan-reviewer` agent with the spec path alone, never the design conversation, at dispatch table row "Plan review" on executing-work's Reviewer Dispatch template, after executing-work's capacity reading.
+- passage: Dispatch the `plan-reviewer` agent with the spec path alone, never the design conversation, at dispatch table row "Plan review" on `executing-work/references/review.md`'s Reviewer Dispatch template, after `executing-work/references/implementing.md`'s capacity reading.
 
 ### C096
 - key: The doctrine's standing Workflow grant covers the plan review, a read-only agent whose effort the Agent tool cannot set, and the plan review is none of executing-work's per-section rows.
@@ -981,10 +981,10 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Where Workflow is unavailable, dispatch the plan reviewer through the Agent tool at `model: 'fable'` and the charter's frontmatter effort, and record the effort it ran at beside the row's.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:30
-- provenance: ead49db 2026-09-08, the fallback route the frontmatter low exists for.
-- verdict: keep
-- reason: no finding. The record of the lower effort is what keeps the section from reading as reviewed at the tier the skill names.
-- passage: Without Workflow, use the Agent tool at `model: 'fable'` and the charter's frontmatter effort, and record the effort it ran at beside the row's.
+- provenance: ead49db 2026-09-08, the fallback route the frontmatter low exists for; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names Workflow as the route in executing-work's review reference.
+- verdict: rewrite
+- reason: no finding. The record of the lower effort is what keeps the section from reading as reviewed at the tier the skill names. Workflow is named as `executing-work/references/review.md`'s Workflow route, the file C095 names. Its bullet "Dispatching on the Workflow route" says what the route is, and its "Where Workflow is unavailable" paragraph is the rule this sentence instances for the plan review.
+- passage: Without `executing-work/references/review.md`'s Workflow route, use the Agent tool at `model: 'fable'` and the charter's frontmatter effort, and record the effort it ran at beside the row's.
 
 ### C098
 - key: Where fable cannot be run at all, or executing-work's capacity reading returned `-> downgrade`, wait rather than substitute a lower model, and record the wait.
@@ -1045,10 +1045,10 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: A session that cannot dispatch records the plan-review skip under `## Assumptions`, and the external engine's own review stands in.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:30
-- provenance: ead49db 2026-09-08, the external-engine carve-out matching executing-work's stand-down.
-- verdict: keep
-- reason: no finding. A worker under an external engine cannot dispatch, and the recorded skip is what keeps the spec from reading as reviewed.
-- passage: A session that cannot dispatch (a worker under an external engine) records its skip under `## Assumptions`, and that engine's own review stands in.
+- provenance: ead49db 2026-09-08, the external-engine carve-out matching executing-work's stand-down; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which points the external engine at the skill that names it.
+- verdict: rewrite
+- reason: no finding. A worker under an external engine cannot dispatch, and the recorded skip is what keeps the spec from reading as reviewed. The clause points at `curating-docs/SKILL.md`, whose machine contract section names the external engine, and the Spec Format's freeze sentence reads against this first use.
+- passage: A session that cannot dispatch (a worker under an external engine, per `curating-docs/SKILL.md`) records its skip under `## Assumptions`, and that engine's own review stands in.
 
 ### C105
 - key: Agree the commit model with the operator and record it in the spec header.
@@ -1653,13 +1653,13 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: An assumption made during execution rides the Chapter's `Assumptions:` line instead, in this form with `, section N` added inside the parenthetical.
 
 ### C164
-- key: Use the optional `## Operator Verification` section for checks only the operator can run, each item naming what they run or observe and what outcome reopens the work.
+- key: Use the `## Operator Verification` section, owed for any check only the operator can run, each item naming what they run or observe and what outcome reopens the work.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:102
-- provenance: a00a4ea 2026-08-06, a kaizen fix after an effort whose last gate was operator-only had no way to close (kaizen/archive/2026-08-06-operator-verification-handoff.md).
-- verdict: keep
-- reason: no finding. The handoff is content rather than a status because Complete is the frozen contract's only terminal value.
-- passage: (Optional.) Checks only I can run: a customer window, a production deploy, a real-device action. Each item names what I run or observe and what outcome reopens the work.
+- provenance: a00a4ea 2026-08-06, a kaizen fix after an effort whose last gate was operator-only had no way to close (kaizen/archive/2026-08-06-operator-verification-handoff.md); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which states when the section is owed in place of the bare optional marking.
+- verdict: rewrite
+- reason: no finding. The handoff is content rather than a status because Complete is the frozen contract's only terminal value. The section is owed for any check only the operator can run and not owed otherwise. That is what "(Optional.)" meant, and it is how C068 routes a Goal sentence only the operator can deliver. The bare marking read as optional even where step 10 sends an item, so the marking was the sentence that changed, and C068 stands.
+- passage: Owed for any check only I can run: a customer window, a production deploy, a real-device action. Each item names what I run or observe and what outcome reopens the work.
 
 ### C165
 - key: Never write an Operator Verification item as a Section of Work.
@@ -1806,10 +1806,10 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Append a ruling made after approval to `## Intent` the same turn, dated, as a deliberate amendment recorded in the Chapter as drift.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:147
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19.
-- verdict: keep
-- reason: C162 states the deliberate amendment for any edit above `## Chapters`, and this sentence names `## Intent` as one section that rule reaches, so a ruling has a home the fingerprint rule already accounts for. The sentence counts nothing, since the freeze's rule is stated over every heading above `## Chapters` rather than over an enumerated few, and a count would be wrong the next time one is added. Step 9's closing sentence points here rather than restating it. The same-turn bound is what keeps a ruling from dying with the conversation, which is the gap the section exists to close.
-- passage: `## Intent` is a section such an amendment reaches: a ruling I make after the spec ships is appended there the same turn, dated, on the same terms, recorded in the Chapter as drift.
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which cut the clause restating what the same terms carry.
+- verdict: rewrite
+- reason: C162 states the deliberate amendment for any edit above `## Chapters`, and this sentence names `## Intent` as one section that rule reaches, so a ruling has a home the fingerprint rule already accounts for. The sentence counts nothing, since the freeze's rule is stated over every heading above `## Chapters` rather than over an enumerated few, and a count would be wrong the next time one is added. Step 9's closing sentence points here rather than restating it. The same-turn bound is what keeps a ruling from dying with the conversation, which is the gap the section exists to close. The trailing "recorded in the Chapter as drift" restated what "on the same terms" carries from the freeze sentence before it (C162), and was cut to pay for that section's pointers.
+- passage: `## Intent` is a section such an amendment reaches: a ruling I make after the spec ships is appended there the same turn, dated, on the same terms.
 
 ### C181
 - key: Put `## Intent` in the spec template between `## Goal` and `## Approach`, described as what the operator asked for and why, in their words, what and why only.

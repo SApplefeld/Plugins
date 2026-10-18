@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's rulebook for keeping a project's `docs/` folder a curated library rather than an attic of finished plans. It owns four moments: archiving a plan that has reached Complete or abandoned (the close path), registering and cross-referencing a newly written plan (the create path), pruning and age-checking `docs/backlog.md`, and retrofitting an existing `docs/` tree into the three-zone taxonomy. It also owns the frozen v1 plan-doc header contract, stating the exact line shapes and value rules an external parser reads, and the placement rules for the `## Intent`, `## Assumptions` and `## Dispatch Authorization` headings. Its load class is `named-trigger`: its own description says to use it during finishing-work when a plan reaches Complete, when a new plan is written that should be indexed, or when someone asks to tidy, retrofit, or reorganize a project's `docs/` folder.
 
-Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 and F002 added under the plan's letter F for the catalog seed and the `Verify:` line's contract standing.
+Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 and F002 added under the plan's letter F for the catalog seed and the `Verify:` line's contract standing. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C015, C022, C027 and C030 rewritten to their passages as they now read, and C032 given a second passage for its blocker-set sentence. They point `docs-curator` at the finishing-work step that dispatches it, the session-start block at its hook and the blocker set at its file, register a new plan in both indexes the close path refreshes, and cut the knob sentence's alignment clause to pay.
 
 ### C001
 - key: Treat a plan as finished only once it is archived, the backlog is pruned, related plans link each other, and the index matches reality.
@@ -158,13 +158,13 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - passage: 4. Cross-reference. If the plan built on or superseded another, link both through a `## Related` section and mark a superseded plan in its header.
 
 ### C015
-- key: Act on any cross-reference gap the `docs-curator` flagged.
+- key: Act on any cross-reference gap the `docs-curator` agent flagged at finishing-work's Documentation curation step.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:32
-- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 3 (finishing-work acts on the curator's cross-ref gaps via this skill).
-- verdict: keep
-- reason: The owner's duty; finishing-work restates it as the map's pointer surface.
-- passage: Act on any cross-reference gap `docs-curator` flagged.
+- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 3 (finishing-work acts on the curator's cross-ref gaps via this skill); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which points the agent at the finishing-work step that dispatches it.
+- verdict: rewrite
+- reason: The owner's duty; finishing-work restates it as the map's pointer surface. The sentence points at `skills/finishing-work/SKILL.md`'s Documentation curation step, which dispatches the agent and receives its report, whose `LIBRARY HYGIENE` block carries the cross-reference gaps, since this page never says what the agent is or when it runs.
+- passage: Act on any cross-reference gap `docs-curator` flagged at `skills/finishing-work/SKILL.md`'s Documentation curation step.
 
 ### C016
 - key: When the related plan is already archived, add the `## Related` section only to the moving plan and leave the archived one untouched.
@@ -230,13 +230,13 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - baseline-test: yes
 
 ### C022
-- key: Add a newly written spec to the active-plans list in `docs/README.md` before handing it to `executing-work`.
+- key: Add a newly written spec to the active-plans lists in `docs/README.md` and `docs/plans/README.md` before handing it to `executing-work`.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:48
-- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 4 (brainstorming registers a new plan in the index).
-- verdict: keep
-- reason: The owner's create-path step; brainstorming:28 invokes the create path by name and is the pointer surface. Memory plans-authored-elsewhere-never-reach-the-index records that plans skipping this step stay unlisted until their own close-out.
-- passage: 1. Add it to the active-plans list in `docs/README.md`.
+- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 4 (brainstorming registers a new plan in the index); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names both indexes the close path refreshes.
+- verdict: rewrite
+- reason: The owner's create-path step; brainstorming:28 invokes the create path by name and is the pointer surface. Memory plans-authored-elsewhere-never-reach-the-index records that plans skipping this step stay unlisted until their own close-out. The step names both indexes the close path's step 6 (C018) drops the plan from, since `references/templates.md` seeds an active list in each, `## Active plans` in `docs/README.md` and `## Current` in `docs/plans/README.md`. The one-index wording was the sentence that changed, and C018 stands.
+- passage: 1. Add it to the active-plans lists in `docs/README.md` and `docs/plans/README.md`.
 
 ### C023
 - key: For a new plan that builds on or supersedes another, add a `## Related` section linking both directions and note the supersession in the older plan's header.
@@ -284,14 +284,14 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - key: On each prune pass read every active item's parked date and name each item older than 90 days, with its date, for a promote, retire, or keep call.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:56
-- provenance: fa5df56 2026-08-09, the backlog-visibility plan (docs/archive/backlog-visibility_spec_v1.md): parked items sat unseen, so the prune pass doubles as a 90-day aging check.
+- provenance: fa5df56 2026-08-09, the backlog-visibility plan (docs/archive/backlog-visibility_spec_v1.md): parked items sat unseen, so the prune pass doubles as a 90-day aging check; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which cut the knob sentence's alignment clause.
 - verdict: rewrite
 - landed: 368ae03 section 33
-- reason: The check and its three outcomes with their mechanics all stay; the paragraph is split one sentence per rule and loses only its summary sentence. The tunable-knob sentence stays because the doctrine's craft rule asks for the knob to be named. session-start.js reports the oldest parked date but adjudicates nothing. Lands at line 50 split one sentence per rule and outcome: "Promote it: spec it now. Retire it: move to the snapshot with the reason. Keep it: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays, so it ages from the adjudication." Every mechanic and the knob sentence stay; "An item never sits silently past the threshold;" is gone. C028, C062 and C063 are recorded as flips forced by this entry.
+- reason: The check and its three outcomes with their mechanics all stay; the paragraph is split one sentence per rule and loses only its summary sentence. The tunable-knob sentence stays because the doctrine's craft rule asks for the knob to be named. session-start.js reports the oldest parked date but adjudicates nothing. Lands at line 50 split one sentence per rule and outcome: "Promote it: spec it now. Retire it: move to the snapshot with the reason. Keep it: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays, so it ages from the adjudication." Every mechanic and the knob sentence stay; "An item never sits silently past the threshold;" is gone. C028, C062 and C063 are recorded as flips forced by this entry. The knob stays named. Its alignment with the quarterly snapshot cadence, the why of 90 days, lives in this reason, cut from the sentence to pay for that section's pointers.
 - proposed: Split the paragraph into one sentence per rule and outcome, keeping every mechanic and the knob, and drop the summary sentence.
 - baseline-test: yes
 - passage: The prune pass is also the aging check. Name every active item parked over 90 days, with its date, for a promote, retire or keep call.
-- passage: 90 days is the tunable knob, aligned with the quarterly snapshot cadence.
+- passage: 90 days is the tunable knob.
 
 ### C028
 - key: When keeping an aged item, write the fresh adjudication date ahead of the original as `(YYYY-MM-DD, parked YYYY-MM-DD)` with the reason it stays.
@@ -314,13 +314,13 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - passage: An undated item is past the threshold: date it from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
 
 ### C030
-- key: Offer the prune pass in one line when the session-start block reports an oldest item past the threshold and no close-out is near.
+- key: Offer the prune pass in one line when `hooks/session-start.js`'s block reports an oldest item past the threshold and no close-out is near.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:56
-- provenance: fa5df56 2026-08-09, the backlog-visibility plan ("a standalone trigger").
-- verdict: keep
-- reason: The session-start block (session-start.js) raises the signal and this sentence is what turns it into an offer; without it the block is a number nobody acts on outside a close-out.
-- passage: When no close-out is near and the session-start block reports an oldest item past the threshold, offer the prune pass in one line.
+- provenance: fa5df56 2026-08-09, the backlog-visibility plan ("a standalone trigger"); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names the hook that writes the block.
+- verdict: rewrite
+- reason: The session-start block (session-start.js) raises the signal and this sentence is what turns it into an offer; without it the block is a number nobody acts on outside a close-out. The sentence names `hooks/session-start.js`, the hook that writes the block, since this page never says what the session-start block is.
+- passage: When no close-out is near and `hooks/session-start.js`'s block reports an oldest item past the threshold, offer the prune pass in one line.
 
 ### C031
 - key: Start a retrofit with a read-only audit: list every doc, read each plan's `Status` header, and classify each as active plan, completed or abandoned plan, about-the-solution doc, or stray.
@@ -338,13 +338,14 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - key: Propose the migration, naming which plans move, what the index and backlog will hold, and which READMEs get seeded, then stop and move nothing until confirmed.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:57
-- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's retrofit mode ("read-only proposal first, apply on approval").
+- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's retrofit mode ("read-only proposal first, apply on approval"); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which points the blocker set at the file that lists it.
 - verdict: rewrite
 - landed: 368ae03 section 33
-- reason: The gate is a blast-radius stop over a library-wide batch of moves and it stays, because which plans leave the live library is the operator's call over the library's own shape; the stop is stated twice and collapses to one sentence that carries its reason. The gate is the material-decision member of executing-work's closed blocker set rather than the doctrine's stop-for-a-yes rule, whose two-part test a move inside the working tree meets on neither part, so a plan run reaching this stop has a member to declare it under. No standing grant covers a retrofit, so this is not a loop-maintenance gate. Landed at `368ae03` as the step ending "Move nothing until it is confirmed; this is a destructive-enough batch to earn the confirmation."; "Present it and stop." is gone.
+- reason: The gate is a blast-radius stop over a library-wide batch of moves and it stays, because which plans leave the live library is the operator's call over the library's own shape; the stop is stated twice and collapses to one sentence that carries its reason. The gate is the material-decision member of executing-work's closed blocker set rather than the doctrine's stop-for-a-yes rule, whose two-part test a move inside the working tree meets on neither part, so a plan run reaching this stop has a member to declare it under. No standing grant covers a retrofit, so this is not a loop-maintenance gate. Landed at `368ae03` as the step ending "Move nothing until it is confirmed; this is a destructive-enough batch to earn the confirmation."; "Present it and stop." is gone. The sentence naming the gate's blocker-set member carries this reason's claim, so it is quoted as this entry's second passage, and it names `executing-work/SKILL.md`, the file that lists the blocker set.
 - proposed: State the proposal contents and one stop sentence that names the batch as destructive enough to earn the confirmation.
 - baseline-test: yes
 - passage: **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed.
+- passage: Unless a plan already made that call, the stop is the material decision in `executing-work/SKILL.md`'s blocker set.
 - flag: stale
 
 ### C033

@@ -2,13 +2,14 @@
 // hooks/index.ts imports. It keeps secrets out of the session transcript: a
 // value a tool prints, a prompt carries, a context block holds or a subagent
 // task quotes is swapped for a stable placeholder before the model reads it,
-// and the real value comes back only inside a tool that runs on this machine,
-// in a call the store list does not name. A use line can still write
-// somewhere off that list. Everything that decides what a secret is lives in
-// ./redactor-detect.ts, the detector ported from the transcript-redactor mod;
-// this file turns it into the plain steps index.ts runs inside its own
-// handlers, at the events where text enters the conversation and at the tools
-// where a placeholder must become real again.
+// and the real value comes back only inside one of six local tools, or an
+// MCP tool the redactorRestoreTools setting names, in a call the store list
+// does not name. A use line can still write somewhere off that list.
+// Everything that decides what a secret is lives in ./redactor-detect.ts, the
+// detector ported from the transcript-redactor mod; this file turns it into
+// the plain steps index.ts runs inside its own handlers, at the events where
+// text enters the conversation and at the tools where a placeholder must
+// become real again.
 //
 // The plugin is one hooks module, so this file registers nothing and never
 // sees `$`. Each export takes an event's fields, or the answer a handler's
@@ -81,14 +82,15 @@
 // runs, as in `cp x body.md && memq put n d --body-file body.md`, which is
 // scanned as it stood before. No wrapper is unwrapped and no expansion is
 // performed. A PowerShell line is split by PowerShell's quoting and a Bash line
-// by bash's, and a line ending inside an open quote is withheld.
+// by bash's, and a line ending inside an open quote is refused with a sentence
+// naming the cause.
 //
-// The comment at redactor-detect.ts:58-61 (detect.ts:42-45 in the mod) is the
+// The comment at redactor-detect.ts:61-64 (detect.ts:42-45 in the mod) is the
 // mod's own: it says a tool that hands its input to the network gets the
 // placeholder as written. That file is ported whole and its comment stays as
 // the mod wrote it; for Bash and PowerShell on this engine the rule above
 // supersedes it, since each restores every line the store rule does not
-// catch.
+// catch, and so does an MCP tool the redactorRestoreTools setting names.
 //
 // The vault is seeded at session start. index.ts reads the five environment
 // names, the three files under the home's .claude directory and each path in
@@ -141,11 +143,12 @@ import {
   type WalkState,
 } from "./redactor-detect";
 
-// The detector's knobs, constants here since no setting names them: the six
-// local tools, the two shells among them, no allow list, email hiding off,
-// restore on, notices on, the entropy floors 3.6 and 3.0, the length floor
-// 24, no extra prefixes. This set is the one gate on which tools restore: a
-// tool outside it restores nothing, whatever the store rule says of its line.
+// The detector's knobs: the six local tools, the two shells among them,
+// plus the MCP tools the redactorRestoreTools setting names through
+// setRestoreTools; no allow list, email hiding off, restore on, notices on,
+// the entropy floors 3.6 and 3.0, the length floor 24, no extra prefixes.
+// restoresInto reads the set, the server set and REFUSED_TOOLS: a tool none
+// admits restores nothing, whatever the store rule says of its line.
 const RESTORE_TOOLS = "Bash,PowerShell,Write,Edit,MultiEdit,NotebookEdit";
 const DETECTOR_OPTIONS: Record<string, unknown> = {
   secrets: true,
@@ -161,7 +164,8 @@ const DETECTOR_OPTIONS: Record<string, unknown> = {
   allowPrefixes: "",
   denyPrefixes: "",
 };
-const cfg: Config = makeConfig(DETECTOR_OPTIONS);
+// Reassigned by setRestoreTools; every closure below reads it at the call.
+let cfg: Config = makeConfig(DETECTOR_OPTIONS);
 
 // The program and verb pairs that write a store that outlives the session.
 // A Bash or PowerShell line is a store line when both words of a pair stand
@@ -238,6 +242,53 @@ export const REFUSED_TOOLS: ReadonlySet<string> = new Set([
   "WebSearch",
 ]);
 
+// The MCP servers the redactorRestoreTools setting names, each as the
+// `mcp__<server>` prefix: a tool restores where serverOf its name is in this
+// set. The tool names the setting names sit in cfg.restoreTools beside the
+// six. setRestoreTools replaces both.
+let restoreServers: ReadonlySet<string> = new Set();
+
+// The server prefix of an MCP tool name, `mcp__<server>` for
+// `mcp__<server>__<tool>`: the text before the second `__`. Null where the
+// name is not a string, does not open with `mcp__`, holds no second `__`, or
+// has an empty server or tool part, so `mcp__eleos`, `mcp____x` and
+// `mcp__a__` each give null and `mcp__a__b__c` gives `mcp__a`. index.ts
+// reads it to tell an MCP tool name from any other dropped entry.
+export function serverOf(tool: unknown): string | null {
+  if (typeof tool !== "string" || !tool.startsWith("mcp__")) return null;
+  const cut = tool.indexOf("__", 5);
+  return cut > 5 && cut + 2 < tool.length ? tool.slice(0, cut) : null;
+}
+
+// Whether an entry is an MCP server name: it opens with `mcp__`, holds no
+// second `__`, and its server part is not empty.
+function isServerName(entry: string): boolean {
+  return entry.startsWith("mcp__") && entry.length > 5 && !entry.includes("__", 5);
+}
+
+// Reads plugin.json's `redactorRestoreTools` setting, which index.ts hands
+// over at register, and rebuilds the restore set from it: the six fixed
+// tools plus each entry that is an MCP tool name, and the server set from
+// each entry that is an MCP server name. An entry is trimmed and read
+// case-sensitively, since tool names are. Any other entry, and a tool entry
+// REFUSED_TOOLS names, is dropped, and the dropped entries come back as the
+// bare strings, in order, for index.ts to log. A setting that is not a
+// string reads as empty. Each call replaces the last call's set.
+export function setRestoreTools(setting: unknown): string[] {
+  const tools: string[] = [];
+  const servers = new Set<string>();
+  const dropped: string[] = [];
+  const entries = typeof setting === "string" ? setting.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
+  for (const entry of entries) {
+    if (serverOf(entry) !== null && !REFUSED_TOOLS.has(entry)) tools.push(entry);
+    else if (isServerName(entry)) servers.add(entry);
+    else dropped.push(entry);
+  }
+  cfg = makeConfig({ ...DETECTOR_OPTIONS, restoreTools: [...RESTORE_TOOLS.split(","), ...tools] });
+  restoreServers = servers;
+  return dropped;
+}
+
 // The surfaces a refused shell line is named by: a memq line by the memq
 // write, since the shared memory database is the store it reaches, and any
 // other store line by its shell, Bash or PowerShell.
@@ -263,6 +314,8 @@ export const SCAN_CAP = (10_000 - SCAN_BASE_MS) * SCAN_CHARS_PER_MS;
 
 const WITHHELD =
   "redactor could not scan this result in time, so it was withheld. Narrow the output (head, grep, offset) and retry.";
+export const REFUSED_BEFORE_RUN =
+  "redactor failed before this call ran, so the call was refused. Narrow the command and retry.";
 export const BLOCK_WITHHELD = "[redactor withheld this text: the scan failed]";
 
 // The answers index.ts returns where a step threw before the event went down:
@@ -435,7 +488,7 @@ function memqShellCommandOf(e: ToolCallInput): string | null {
 // that opens with a quote ends at its closing quote, and a `<#` opening a word
 // outside quotes starts a block comment that runs to `#>`. Two PowerShell
 // readings differ from the shell's, each in the direction of a read too many
-// or a withheld call: a backtick before a newline cuts the word, which is
+// or a refused call: a backtick before a newline cuts the word, which is
 // PowerShell's reading only where a space precedes it, and a backtick escape
 // letter such as `n is read as the letter. No expansion is performed, so a
 // quoted `"$(cat f)"` is one word as written and an unquoted one splits at its
@@ -507,20 +560,37 @@ function commandWords(command: string, powerShell: boolean): string[] {
 // it. A line whose text holds `--body-file` is split by its shell's quoting,
 // and every word after a `--body-file` word is a path handed to `fs.read` as
 // the split yields it, relative paths included. Each file's text is charged to
-// the scan budget and scanned as a command's own text is, and a split that
-// ends inside an open quote throws. A `--body-file` inside a wrapper's quoted
-// string, `bash -c "memq put n d --body-file f"`, is part of one word and is
-// never reached. A budget error is the refusal; any other error, an `fs.read`
-// that rejects included, escapes so the caller withholds the call, since a
-// file the read cannot return may still be one memq reads.
+// the scan budget and scanned as a command's own text is. A split that ends
+// inside an open quote or block comment, and a file the read rejects, throws
+// or does not hold, are each refused with a sentence naming the cause, since
+// the call has not run and a file the read cannot return may still be one memq
+// reads. The file sentence quotes the path as the split yielded it, scrubbed
+// (the split can join a secret the command scan saw in pieces) and cut to 200
+// code points. A `--body-file` inside a wrapper's quoted string,
+// `bash -c "memq put n d --body-file f"`, is part of one word and is never
+// reached. A budget error is the memq refusal; any other error from the split
+// or the scan escapes, and the caller refuses the call before it runs.
 export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: string) => Promise<unknown> }, remainingMs: number): Promise<string | null> {
   const command = memqShellCommandOf(e);
   if (command === null || !command.includes("--body-file")) return null;
-  const words = commandWords(command, e.tool === "PowerShell");
+  let words: string[];
+  try {
+    words = commandWords(command, e.tool === "PowerShell");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    const open = message.includes("block comment") ? "an open block comment" : message.includes("open quote") ? "an open quote" : null;
+    if (open === null) throw err;
+    return `redactor: this command ends inside ${open}, so the call was refused before it ran. Close it, or write the body to a file with the Write tool and name it with --body-file.`;
+  }
   const charge = scanBudget(remainingMs);
   for (let i = 0; i + 1 < words.length; i++) {
     if (words[i] !== "--body-file") continue;
-    const text = String(await fs.read(words[i + 1]));
+    let text: string;
+    try {
+      text = String(await fs.read(words[i + 1]));
+    } catch {
+      return `redactor: could not read the file this command's --body-file names (${Array.from(scrub(words[i + 1])).slice(0, 200).join("")}), so the call was refused before it ran. Write the file in its own call first, then run memq.`;
+    }
     try {
       charge(text);
       if (scrub(text) !== text) return refusalFor(MEMQ_SURFACE);
@@ -532,9 +602,73 @@ export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: strin
   return null;
 }
 
-// What the handler's `next` receives: for a local tool whose line writes no
-// store, the input with its placeholders restored; for a store line and any
-// other call, the input as written, placeholders included. Every placeholder
+// Whether a call restores: its tool is in the restore set, or its server
+// prefix is in the server set, and it is not on REFUSED_TOOLS, and it is not
+// a shell store line. The refused check runs here, at the call, since a
+// server entry can cover a refused tool, and a restore after the refusal
+// would carry the real value into the store the refusal protects.
+function restoresInto(e: ToolCallInput): boolean {
+  if (!cfg.restore || REFUSED_TOOLS.has(e.tool) || storingShell(e)) return false;
+  if (cfg.restoreTools.has(e.tool)) return true;
+  const server = serverOf(e.tool);
+  return server !== null && restoreServers.has(server);
+}
+
+// The four reasons a live placeholder went down as written, each the tail
+// of the notice unrestoredNotice builds.
+export const NOT_RESTORE_TOOL_REASON = "it is not a restore tool; name an MCP tool in redactorRestoreTools, or use Bash, PowerShell, Write or Edit";
+export const STORE_LINE_REASON = "a shell line that writes a store keeps its placeholders";
+export const REFUSED_TOOL_REASON = "a refused tool never receives a real value";
+export const SERVED_TOOL_REASON = "the plugin serves this tool itself and restores nothing into it";
+
+// The depth the live-placeholder search reads to, the detector walk's own
+// bound, so a cyclic or very deep input ends the search rather than the stack.
+const LIVE_SEARCH_DEPTH = 64;
+
+// Whether any string under `v`, to LIVE_SEARCH_DEPTH, holds a SECRET token
+// the vault restores. It reads in place and copies nothing. A placeholder
+// cannot sit in base64, whose alphabet holds no `[` or `]`, so no string is
+// decoded. The envelope's own fields, the tool name, the call id and the
+// loop id, are left out at the top level.
+function holdsLivePlaceholder(v: unknown, depth = 0): boolean {
+  if (typeof v === "string") {
+    if (!v.includes("[REDACTED-SECRET-")) return false;
+    for (const t of v.match(/\[REDACTED-SECRET-[0-9a-f]{8}\]/g) ?? []) if (restore(t) !== t) return true;
+    return false;
+  }
+  if (v === null || typeof v !== "object" || depth >= LIVE_SEARCH_DEPTH) return false;
+  for (const [k, x] of Object.entries(v)) {
+    if (depth === 0 && (k === "tool" || k === "tool_use_id" || k === "agentId")) continue;
+    if (holdsLivePlaceholder(x, depth + 1)) return true;
+  }
+  return false;
+}
+
+// The notice index.ts posts under the tool row where a call went down with a
+// live placeholder as written, or null where the call restores or holds
+// none. `nextRan` says whether the handler's next(e) ran with this call: a
+// call the module served itself never reached toolCallDown, so nothing was
+// restored into it whatever restoresInto reads. A live placeholder is a
+// SECRET token the vault restores, one restore() turns into another string;
+// a LITERAL token, or a SECRET token the vault does not know, is not one.
+// The reason is the first rule that kept the value out: a shell store line,
+// then the refused list, then a call the module served, then the restore
+// set. The text names the tool and the reason, never a value. It never
+// throws: an input the search cannot read earns no notice.
+export function unrestoredNotice(e: ToolCallInput, nextRan: boolean): string | null {
+  try {
+    if (nextRan && restoresInto(e)) return null;
+    if (!holdsLivePlaceholder(e)) return null;
+    const reason = storingShell(e) ? STORE_LINE_REASON : REFUSED_TOOLS.has(e.tool) ? REFUSED_TOOL_REASON : !nextRan ? SERVED_TOOL_REASON : NOT_RESTORE_TOOL_REASON;
+    return `redactor: ${e.tool} received the placeholder as written: ${reason}`;
+  } catch {
+    return null;
+  }
+}
+
+// What the handler's `next` receives: for a tool restoresInto admits, the
+// input with its placeholders restored; for a store line and any other
+// call, the input as written, placeholders included. Every placeholder
 // kind the mod's restore covers is restored, a
 // LITERAL one giving back the placeholder text it stands for. `handed` holds
 // the real values this call was given, the SECRET restores alone, so whatever
@@ -543,7 +677,7 @@ export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: strin
 export type ToolCallDown = { input: ToolCallInput; handed: Set<string> };
 export function toolCallDown(e: ToolCallInput): ToolCallDown {
   const handed = new Set<string>();
-  if (!cfg.restore || !cfg.restoreTools.has(e.tool) || storingShell(e)) return { input: e, handed };
+  if (!restoresInto(e)) return { input: e, handed };
   const restoreTracked = (s: string): string => {
     const out = restore(s);
     if (out === s) return s;
@@ -601,10 +735,12 @@ export function toolCallBack(tool: string, r: ToolCallResult, handed: Set<string
 }
 
 // The fail-closed answer for a tool call whose redactor step threw: with no
-// answer from beneath the call is refused, since the tool has not run; with
-// one, the whole answer is withheld, an error result staying an error.
+// answer from beneath the call is refused and the sentence says it was refused
+// before it ran; with one, the whole answer is withheld in the result-side
+// sentence, an error result staying an error.
 export function withheldToolResult(r?: ToolCallResult): ToolCallResult {
-  if (r !== undefined && r.deny === undefined && r.isError) return { isError: true as const, result: WITHHELD, text: WITHHELD };
+  if (r === undefined) return { deny: REFUSED_BEFORE_RUN };
+  if (r.deny === undefined && r.isError) return { isError: true as const, result: WITHHELD, text: WITHHELD };
   return { deny: WITHHELD };
 }
 

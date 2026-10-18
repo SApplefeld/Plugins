@@ -25,7 +25,7 @@ Run this close path at close-out, in order:
 1. Confirm `Status: Complete` (or abandoned) and a final Chapter. If the plan is not done, stop.
 2. Move the file with `git mv docs/plans/<file> docs/archive/<file>`, or a plain move outside git. The Chapters travel untouched. Then `git add` the moved file again if it carries unstaged edits. `git mv` stages the index content, not the worktree, so those edits miss the commit unless re-added. An `RM` pair in `git status --short` is the tell.
 3. Repoint the plan's own relative links, before or right after the move. A sibling linked as `../archive/<file>` becomes `<file>` once the plan is itself in `archive/`. Grep the moved file for `../archive/` and fix every hit.
-4. Cross-reference. If the plan built on or superseded another, link both through a `## Related` section and mark a superseded plan in its header. Act on any cross-reference gap `docs-curator` flagged. If the other plan is already archived, only the moving plan gets the `## Related` section.
+4. Cross-reference. If the plan built on or superseded another, link both through a `## Related` section and mark a superseded plan in its header. Act on any cross-reference gap `docs-curator` flagged at `skills/finishing-work/SKILL.md`'s Documentation curation step. If the other plan is already archived, only the moving plan gets the `## Related` section.
 5. Prune the backlog, per Backlog Pruning below.
 6. Refresh the index. `docs/README.md` and `docs/plans/README.md` both drop the plan from their active list and reflect the archive. The most-recent chain is the `Most recent:` and `Before it:` entries on the line opening `Completed plans are in`. Where either index carries it, both name the same four most recently archived plans. An archival prepends the newly closed plan and drops the oldest.
 
@@ -35,7 +35,7 @@ Archive in the same close-out that finished the work, never later or in a batch.
 
 This is the create path. Run it when `brainstorming` writes a new spec, before `executing-work` takes it:
 
-1. Add it to the active-plans list in `docs/README.md`. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks.
+1. Add it to the active-plans lists in `docs/README.md` and `docs/plans/README.md`. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks.
 2. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
 3. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
 
@@ -45,14 +45,14 @@ Move a done item into the quarter's snapshot at `docs/archive/backlog-YYYY-QN.md
 
 The prune pass is also the aging check. Name every active item parked over 90 days, with its date, for a promote, retire or keep call. Promote: spec it now. Retire: move it to the snapshot with the reason. Keep: write the fresh adjudication date ahead of the original, `(YYYY-MM-DD, parked YYYY-MM-DD)`, with the reason it stays. An undated item is past the threshold: date it from git history, or today's marked `backfilled`, and adjudicate it in the same pass.
 
-When no close-out is near and the session-start block reports an oldest item past the threshold, offer the prune pass in one line. 90 days is the tunable knob, aligned with the quarterly snapshot cadence.
+When no close-out is near and `hooks/session-start.js`'s block reports an oldest item past the threshold, offer the prune pass in one line. 90 days is the tunable knob.
 
 ## Retrofitting an Existing Tree
 
 When asked to tidy or retrofit a `docs/` that predates this structure:
 
 1. **Audit, read-only.** List every doc, read each plan's `Status` header, and classify each: active plan, completed or abandoned plan, about-the-solution doc, or stray.
-2. **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed. Unless a plan already made that call, the stop is the material decision in executing-work's blocker set.
+2. **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed. Unless a plan already made that call, the stop is the material decision in `executing-work/SKILL.md`'s blocker set.
 3. **Apply on approval.** Create the zones and READMEs from the templates, `git mv` the completed and abandoned plans into the archive, seed the index and backlog, and report what moved. Relocate a file, never delete it.
 
 ## Plan Doc Machine Contract

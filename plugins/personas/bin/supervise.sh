@@ -32,8 +32,8 @@
 #   4 = restart budget exhausted
 #   5 = stopped, but a process from the child is alive or unverifiable
 #       despite every retry
-#   6 = park_requested honored: the keeper's next start launches the persona
-#       again
+#   6 = park_requested honored: the keeper brings the persona back at the
+#       next boot or a start after the operator's -Release
 
 set -u
 set -o pipefail
@@ -5360,8 +5360,9 @@ while true; do
 
   # A park is read next, the same way, and a shutdown read above outranks it.
   # The child records park_requested and exits on its own, and the answer the
-  # keeper needs from that is exit 6, which is what writes the park marker so
-  # its next start launches the persona again.
+  # keeper needs from that is exit 6, which is what writes the park marker, and
+  # the keeper brings the persona back at the next boot or a start after the
+  # operator's -Release.
   PARK_REQUESTED_TS=$(get_fact "$WORKDIR" "$PERSONA" "park_requested")
   if [ -n "$PARK_REQUESTED_TS" ] && [ "$PARK_REQUESTED_TS" -gt "$CHILD_START_TS" ]; then
     log "STOP_PARK: park_requested at $PARK_REQUESTED_TS > child start $CHILD_START_TS"

@@ -1,13 +1,13 @@
 // ask-brief.ts: the parts of the decision brief the controller tick
 // drafts for a worker's ask. An accepted worker ask owes one item on the
 // state's askBriefOwed queue; the tick's drain takes the oldest, forks the
-// session's own transcript for the brief's parts as JSON, renders the message
-// in the client-briefing register and lands it on the ledger entry, the
+// session's own transcript for the brief's parts as JSON, renders the posts
+// in the client-briefing register and lands them on the ledger entry, the
 // commons record and the persona's thread. This file holds the item's life,
 // the take-and-drop move, the drafter prompt, the reader of the fork's reply
 // and the renderer with its bound, which scrubs each field before it escapes
-// it. hooks/drains.ts holds the drain, the scrub of the whole message, the
-// mirror, the post, the decisions and the drain's fork watch, and
+// it. hooks/drains.ts holds the drain, the scrub of each post, the mirror,
+// the posts, the decisions and the drain's fork watch, and
 // hooks/index.ts the fork call and the persist, as closures.
 
 import { bracketSafeText, LINE_TERMINATOR, oneLine, type AskBriefOwed, type AskEntry } from "./agent-state";
@@ -26,7 +26,7 @@ export const ASK_BRIEF_LIFE_MS = 10 * 60_000;
 // counts the escapes, and each < and > twice.
 export const ASK_BRIEF_RECOMMEND_MAX = 120;
 
-// The most UTF-16 units the rendered message may measure, exclusive: the
+// The most UTF-16 units each rendered post may measure, exclusive: the
 // relay's message ceiling of 1,900 less room for what the relay adds.
 export const ASK_BRIEF_MAX_UNITS = 1800;
 
@@ -38,14 +38,21 @@ export const ASK_BRIEF_OPTIONS_MAX = 4;
 // counted, so the fixed lines never reach the bound on a title alone.
 export const ASK_BRIEF_TITLE_MAX = 120;
 
-// The most UTF-16 units the renderer keeps of each field, escapes counted and each < and > twice.
+// The most UTF-16 units the renderer keeps of each field. Every field but an
+// option's brings and costs is measured on the escaped text, each < and >
+// twice. Brings and costs are measured on the fork's text before the escape,
+// each character once, so a text under the cap is never cut. Two options at
+// their caps with no escapes and the title at its cap fill an option post to
+// 1,746 units plus the ask id's length, so an id of 53 units still fits, and
+// an escaped pair that reaches ASK_BRIEF_MAX_UNITS throws instead of being cut
+// or split.
 export const ASK_BRIEF_CAPS = Object.freeze({
   situation: 400,
   decision: 200,
   stakes: 300,
   name: 60,
-  brings: 200,
-  costs: 200,
+  brings: 350,
+  costs: 350,
   recommendation: 300,
   unanswered: 200,
 });
@@ -193,6 +200,16 @@ function firstUnits(text: string, units: number): string {
   return run !== null && run[0].length % 2 === 1 ? cut.slice(0, -1) : cut;
 }
 
+// The first `units` UTF-16 units of text, each character counting one, less
+// one where the cut would leave a high surrogate without its pair. It measures
+// the fork's own words, before any escape.
+function firstPlainUnits(text: string, units: number): string {
+  if (text.length <= units) return text;
+  const cut = text.slice(0, units);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
 // Text with a backslash before each character Discord reads as formatting, so
 // the fork's words show as written: \ * _ ~ ` | # [ ], a - or + that opens the
 // text and the full stop of an opening ordered-list marker. A bare URL is left
@@ -256,11 +273,16 @@ function unansweredLead(blocking: boolean, waitMs: number, recommend: string): s
   return `the work is stopped until the operator answers; after ${Math.max(1, Math.round(waitMs / 60_000))} minutes the hold lifts and the work proceeds on the worker's recommendation, ${named}.`;
 }
 
-// Composes the message the thread, the entry and the record carry: a bold
-// title line naming the entry, the ask id under it as Discord small text, then
-// one bold label line per part, each followed by its text and a blank line:
-// Situation, Decision, Stakes, Options, Recommendation and If unanswered.
-// Each option is a bold numbered line with Brings: and Costs: lines under it.
+// Composes the posts the thread, the entry and the record carry, as an array
+// the caller posts in order. The first is the framing post: a bold title line
+// naming the entry, the ask id under it as Discord small text, then one bold
+// label line per part, each followed by its text and a blank line: Situation,
+// Decision, Stakes, Recommendation and If unanswered. Each later post holds
+// one pair of the options, in order, the last post one option where the count
+// is odd: the same title line with " (options N-M)" or " (option N)" inside
+// the bold, the id line, a bold Options label, then each option as a bold
+// numbered line with Brings: and Costs: lines under it, numbered across the
+// posts. Two options render as two posts, three as three and four as three.
 // If unanswered is the sentence composed from entry.blocking and waitMs, then
 // a second sentence that opens on a fixed phrase and closes on the fork's own
 // text, with a full stop added where the text does not end in ., ? or !; an
@@ -268,20 +290,25 @@ function unansweredLead(blocking: boolean, waitMs: number, recommend: string): s
 // and its recommend are scrubbed by the transcript redactor first, where a
 // withheld scrub throws. Each is then folded to one line and escaped by
 // escapeMarkdown, and then held to its cap in ASK_BRIEF_CAPS, measured on the
-// escaped text, so the escapes count against the cap. The title and id, store
-// data, take the bracket turn, the title held to ASK_BRIEF_TITLE_MAX and
+// escaped text, so the escapes count against the cap. An option's brings and
+// costs are the exception: they are cut to their caps before the escape, each
+// character counting once, so a text under the cap renders whole. The title
+// and id, store data, take the bracket turn, the title held to ASK_BRIEF_TITLE_MAX and
 // escaped, the id left as it is. A cut name or title loses its trailing space,
-// since a bold close after a space does not close. The whole stays under
+// since a bold close after a space does not close. Each post stays under
 // ASK_BRIEF_MAX_UNITS, escapes and markup counted. Every length here, the caps
-// included, is in relay units: each < and > counts twice, since the relay adds
-// a backslash before each. The cut runs in this order: the options lose units
-// first, then the situation, then the stakes and the recommendation, which
-// share their allotment by shareUnits as the options share theirs.
-// Throws where the fixed lines alone, the labels, the title, the decision, the
-// option names and the If unanswered part, reach the bound, and throws where
-// any field opens a line with ASK: or any rendered line would; the caller
-// treats either throw as unparsed.
-export function renderAskBrief(entry: AskEntry, parsed: ParsedBrief, waitMs: number): string {
+// but the brings and costs caps included, is in relay units: each < and >
+// counts twice, since the relay adds a backslash before each. Only the framing
+// post is cut, in this order: the stakes and the recommendation share their
+// allotment by shareUnits, then the situation takes what is left. An option
+// post holds one pair of options, the odd last option alone, and its texts are
+// never cut beyond their caps. A pair whose escaped texts reach the bound
+// throws and is never cut or split.
+// Throws where the framing post's fixed lines alone, the labels, the title,
+// the decision and the If unanswered part, reach the bound, where an option
+// post reaches it, and where any field opens a line with ASK: or any rendered
+// line would; the caller treats each throw as unparsed.
+export function renderAskBrief(entry: AskEntry, parsed: ParsedBrief, waitMs: number): string[] {
   const raw = [parsed.situation, parsed.decision, parsed.stakes, parsed.recommendation, parsed.unanswered, ...parsed.options.flatMap((o) => [o.name, o.brings, o.costs])];
   if (raw.some(opensAnAskLine)) throw new Error("a field of the reply opens a line with ASK:");
   const scrubbed = (text: string): string => {
@@ -295,40 +322,45 @@ export function renderAskBrief(entry: AskEntry, parsed: ParsedBrief, waitMs: num
   const stakes = cap(parsed.stakes, ASK_BRIEF_CAPS.stakes);
   const recommendation = cap(parsed.recommendation, ASK_BRIEF_CAPS.recommendation);
   const unanswered = cap(parsed.unanswered, ASK_BRIEF_CAPS.unanswered);
-  const options = parsed.options.map((o) => ({ name: cap(o.name, ASK_BRIEF_CAPS.name).trimEnd(), brings: cap(o.brings, ASK_BRIEF_CAPS.brings), costs: cap(o.costs, ASK_BRIEF_CAPS.costs) }));
+  const plainCap = (text: string, max: number): string => escapeMarkdown(firstPlainUnits(oneLine(scrubbed(text)).trim(), max));
+  const options = parsed.options.map((o) => ({ name: cap(o.name, ASK_BRIEF_CAPS.name).trimEnd(), brings: plainCap(o.brings, ASK_BRIEF_CAPS.brings), costs: plainCap(o.costs, ASK_BRIEF_CAPS.costs) }));
   const title = firstUnits(escapeMarkdown(bracketSafeText(oneLine(scrubbed(entry.entryTitle)))), ASK_BRIEF_TITLE_MAX).trimEnd();
   const lead = unansweredLead(entry.blocking, waitMs, scrubbed(entry.recommend));
   const opening = `${lead.charAt(0).toUpperCase()}${lead.slice(1)}`;
   const tail = unanswered === "" ? opening : `${opening} By the time an answer comes, ${unanswered}${/[.?!]$/.test(unanswered) ? "" : "."}`;
-  const compose = (s: string, st: string, r: string, texts: string[]): string => [
+  const idLine = `-# ask ${bracketSafeText(oneLine(entry.id))}`;
+  const compose = (s: string, st: string, r: string): string => [
     `**Decision brief: ${title}**`,
-    `-# ask ${bracketSafeText(oneLine(entry.id))}`,
+    idLine,
     "",
     "**Situation**", s, "",
     "**Decision**", decision, "",
     "**Stakes**", st, "",
-    "**Options**",
-    ...options.flatMap((o, i) => [`**${i + 1}. ${o.name}**`, `Brings: ${texts[2 * i]}`, `Costs: ${texts[2 * i + 1]}`, ""]),
     "**Recommendation**", r, "",
     "**If unanswered**", tail,
   ].join("\n");
-  const optionTexts = options.flatMap((o) => [o.brings, o.costs]);
-  const fixed = relayUnits(compose("", "", "", optionTexts.map(() => "")));
+  const fixed = relayUnits(compose("", "", ""));
   if (fixed >= ASK_BRIEF_MAX_UNITS) throw new Error("the brief's fixed lines alone reach the bound");
   let left = ASK_BRIEF_MAX_UNITS - 1 - fixed;
   const [stakesKeep, recommendationKeep] = shareUnits([relayUnits(stakes), relayUnits(recommendation)], left);
   left -= stakesKeep + recommendationKeep;
   const situationKeep = Math.min(relayUnits(situation), left);
-  left -= situationKeep;
-  const optionKeep = shareUnits(optionTexts.map(relayUnits), left);
-  const message = compose(
-    firstUnits(situation, situationKeep),
-    firstUnits(stakes, stakesKeep),
-    firstUnits(recommendation, recommendationKeep),
-    optionTexts.map((t, i) => firstUnits(t, optionKeep[i])),
-  );
+  const posts = [compose(firstUnits(situation, situationKeep), firstUnits(stakes, stakesKeep), firstUnits(recommendation, recommendationKeep))];
+  for (let from = 0; from < options.length; from += 2) {
+    const pair = options.slice(from, from + 2);
+    const numbers = pair.length === 1 ? `option ${from + 1}` : `options ${from + 1}-${from + 2}`;
+    const post = [
+      `**Decision brief: ${title} (${numbers})**`,
+      idLine,
+      "",
+      "**Options**",
+      ...pair.flatMap((o, k) => [...(k === 0 ? [] : [""]), `**${from + k + 1}. ${o.name}**`, `Brings: ${o.brings}`, `Costs: ${o.costs}`]),
+    ].join("\n");
+    if (relayUnits(post) >= ASK_BRIEF_MAX_UNITS) throw new Error("an option post reaches the bound");
+    posts.push(post);
+  }
   // A field's text opens its own line, and the fixed lines carry store data,
-  // the id and the recommend, so this checks every line the message holds.
-  if (opensAnAskLine(message)) throw new Error("a line of the brief opens with ASK:");
-  return message;
+  // the id and the recommend, so this checks every line each post holds.
+  if (posts.some(opensAnAskLine)) throw new Error("a line of the brief opens with ASK:");
+  return posts;
 }

@@ -3,7 +3,9 @@
 #
 #   .\bin\Register-PersonaTasks.ps1 [-Roster <path>] [-EnvFile <path>] [-RepoRoot <path>]
 #       [-LauncherRoot <path>] [-User <name>] [-Credential <pscredential>]
-#       [-StartupDelay <ISO 8601 duration>] [-Prune] [-Start] [-WhatIf]
+#       [-StartupDelay <ISO 8601 duration>] [-StartupStagger <ISO 8601 duration>]
+#       [-RetryInterval <ISO 8601 duration>] [-RetryWindow <ISO 8601 duration>]
+#       [-Prune] [-Start] [-WhatIf]
 #
 # Requires an elevated PowerShell session, the same requirement
 # D:/discord-channels/install/Register-BrokerTask.ps1 carries for the same reason: registering a
@@ -44,6 +46,24 @@
 # The value is an ISO 8601 duration of hours, minutes and seconds; the default is PT2M, written
 # once as $KeeperDefaultStartupDelay below.
 #
+# -StartupStagger spreads the persona tasks across the boot so their Password logons do not all land
+# in one second. The first enabled roster entry fires after -StartupDelay and each later one fires
+# -StartupStagger later than the one before it, so a task's delay is -StartupDelay plus its
+# zero-based position among the enabled entries times -StartupStagger. A disabled entry takes no
+# position. The default is PT15S, written once as $KeeperDefaultStartupStagger below, and -WhatIf
+# prints each task's computed delay.
+#
+# -RetryInterval and -RetryWindow make the boot trigger repeat: after its first fire the trigger
+# fires again every -RetryInterval for -RetryWindow, so a task whose logon failed at boot is
+# started by a later fire, since the scheduler's restart-on-failure setting does not retry a logon
+# that failed. The repetition does not stop a running persona when the window ends. The defaults
+# are PT5M and PT1H, written once as $KeeperDefaultRetryInterval and
+# $KeeperDefaultRetryWindow below. -RetryInterval is refused below one minute or above 31 days,
+# and -RetryWindow below -RetryInterval or above 31 days, before the password prompt.
+# A fire that finds the task still running is ignored by
+# -MultipleInstances IgnoreNew. A trigger lives in the scheduler, so a machine takes a changed
+# delay, stagger or repetition only when this script is run on it again.
+#
 # Every task is registered with the Password logon type, which is what lets a persona's git reach
 # Windows Credential Manager, Git Credential Manager's store and the Azure CLI token cache. Those
 # all sit behind the account's user-scope DPAPI key, and Windows unlocks that key at task start
@@ -66,15 +86,69 @@ param(
     [string]$User = [Security.Principal.WindowsIdentity]::GetCurrent().Name,
     [pscredential]$Credential,
     [string]$StartupDelay,
+    [string]$StartupStagger,
+    [string]$RetryInterval,
+    [string]$RetryWindow,
     [switch]$Prune,
     [switch]$Start,
     [switch]$WhatIf
 )
 
-# The one place the default startup delay is written. The script body fills an unbound
-# -StartupDelay from it, and both functions below take it as their parameter default, so a caller
-# reaching either function directly gets the same value the script run does.
+# The one place each default is written. The script body fills an unbound -StartupDelay,
+# -StartupStagger, -RetryInterval or -RetryWindow from its variable, and both functions below take
+# them as their parameter defaults, so a caller reaching either function directly gets the same
+# values the script run does.
 $KeeperDefaultStartupDelay = 'PT2M'
+$KeeperDefaultStartupStagger = 'PT15S'
+$KeeperDefaultRetryInterval = 'PT5M'
+$KeeperDefaultRetryWindow = 'PT1H'
+
+<#
+.SYNOPSIS
+Returns the value as a TimeSpan, throwing unless it is an ISO 8601 duration of hours, minutes and
+seconds, naming the parameter.
+
+.DESCRIPTION
+Uppercase PT, then hours, minutes and seconds with at least one digit, is the whole class this
+script admits; -cnotmatch because -notmatch ignores case and would pass pt2m through to the
+scheduler. A value of that shape too large for a TimeSpan takes the same refusal rather than the
+conversion's own unnamed error. Every duration parameter is checked here, where the operator is
+watching, rather than left for Register-ScheduledTask to refuse at the write or for the task engine
+to misread at boot.
+#>
+function ConvertFrom-IsoDuration {
+    param([Parameter(Mandatory)][string]$ParameterName, [AllowNull()][AllowEmptyString()][string]$Value)
+    $refusal = "Get-PersonaTaskDefinitions: -$ParameterName '$Value' must be an ISO 8601 " +
+        "duration of hours, minutes and seconds, such as PT2M or PT1M30S."
+    if ($Value -cnotmatch '\APT(?:\d+H)?(?:\d+M)?(?:\d+S)?\z' -or $Value -notmatch '\d') {
+        throw $refusal
+    }
+    try {
+        return [System.Xml.XmlConvert]::ToTimeSpan($Value)
+    } catch {
+        throw $refusal
+    }
+}
+
+<#
+.SYNOPSIS
+Writes a TimeSpan as an ISO 8601 duration of hours, minutes and seconds, in the form the scheduler
+prints it back.
+
+.DESCRIPTION
+Hours carry every whole hour, so a day is 24H and never a D designator, and a part that is zero is
+left out: 105 seconds is PT1M45S, 120 seconds is PT2M and a zero span is PT0S.
+#>
+function Format-IsoDuration {
+    param([Parameter(Mandatory)][TimeSpan]$Span)
+    $hours = [int][math]::Floor($Span.TotalHours)
+    $text = 'PT'
+    if ($hours -gt 0) { $text += "$($hours)H" }
+    if ($Span.Minutes -gt 0) { $text += "$($Span.Minutes)M" }
+    if ($Span.Seconds -gt 0) { $text += "$($Span.Seconds)S" }
+    if ($text -eq 'PT') { $text = 'PT0S' }
+    return $text
+}
 
 <#
 .SYNOPSIS
@@ -235,19 +309,38 @@ function Get-PersonaTaskDefinitions {
         [Parameter(Mandatory)][string]$EnvFile,
         [Parameter(Mandatory)][string]$User,
         [string]$StartupDelay = $KeeperDefaultStartupDelay,
+        [string]$StartupStagger = $KeeperDefaultStartupStagger,
+        [string]$RetryInterval = $KeeperDefaultRetryInterval,
+        [string]$RetryWindow = $KeeperDefaultRetryWindow,
         # Set, the action runs <LauncherRoot>\Start-InstalledPersona.ps1 rather than
         # <RepoRoot>\bin\Start-Persona.ps1. Register-PersonaTasks copies the launcher there before
         # it writes a task, so what must exist at this point is the launcher's source under RepoRoot.
         [string]$LauncherRoot
     )
-    # Checked here, where the operator is watching, rather than left for Register-ScheduledTask to
-    # refuse at the write or for the task engine to misread at boot. Uppercase PT, then hours,
-    # minutes and seconds with at least one digit, is the whole class this script admits; -cnotmatch
-    # because -notmatch ignores case and would pass pt2m through to the scheduler.
-    if ($StartupDelay -cnotmatch '\APT(?:\d+H)?(?:\d+M)?(?:\d+S)?\z' -or $StartupDelay -notmatch '\d') {
-        throw "Get-PersonaTaskDefinitions: -StartupDelay '$StartupDelay' must be an ISO 8601 " +
-            "duration of hours, minutes and seconds, such as PT2M or PT1M30S."
+    $baseDelay = ConvertFrom-IsoDuration -ParameterName 'StartupDelay' -Value $StartupDelay
+    $staggerStep = ConvertFrom-IsoDuration -ParameterName 'StartupStagger' -Value $StartupStagger
+    $retryIntervalSpan = ConvertFrom-IsoDuration -ParameterName 'RetryInterval' -Value $RetryInterval
+    $retryWindowSpan = ConvertFrom-IsoDuration -ParameterName 'RetryWindow' -Value $RetryWindow
+    # The Task Scheduler takes a repetition interval of one minute to 31 days, and registers a
+    # repetition duration of 31 days. A value outside those may reach the scheduler's refusal only
+    # at the write, after the password prompt. A window shorter than the interval
+    # would end before the trigger's first repeat, so no failed logon would be retried. So the
+    # interval is held to the scheduler's range and the window runs from the interval to 31 days,
+    # which the scheduler registers, and anything else is refused here instead.
+    if ($retryIntervalSpan -lt [TimeSpan]::FromMinutes(1) -or $retryIntervalSpan -gt [TimeSpan]::FromDays(31)) {
+        throw "Get-PersonaTaskDefinitions: -RetryInterval '$RetryInterval' must be at least one " +
+            "minute and at most 31 days, the range the Task Scheduler takes."
     }
+    if ($retryWindowSpan -lt $retryIntervalSpan) {
+        throw "Get-PersonaTaskDefinitions: -RetryWindow '$RetryWindow' must be at least " +
+            "-RetryInterval '$RetryInterval', or the trigger never repeats inside it."
+    }
+    if ($retryWindowSpan -gt [TimeSpan]::FromDays(31)) {
+        throw "Get-PersonaTaskDefinitions: -RetryWindow '$RetryWindow' must be at most 31 days, " +
+            "a length the Task Scheduler registers."
+    }
+    # The zero-based position among the enabled entries, so a disabled entry takes no slot.
+    $slot = 0
     $startScript = Join-Path (Join-Path $RepoRoot 'bin') 'Start-Persona.ps1'
     $sourceScript = $startScript
     if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
@@ -349,8 +442,21 @@ function Get-PersonaTaskDefinitions {
         # is a fleet that needs no logon at all.
         $trigger = New-ScheduledTaskTrigger -AtStartup
         # Held back so the channel broker's own boot task, which fires at PT30S, is listening
-        # before the first persona child attaches its Discord channel.
-        $trigger.Delay = $StartupDelay
+        # before the first persona child attaches its Discord channel, and held back a further
+        # -StartupStagger per enabled entry ahead of this one so the logons do not share a second.
+        $trigger.Delay = Format-IsoDuration ($baseDelay + [TimeSpan]::FromTicks($staggerStep.Ticks * $slot))
+        $slot++
+        # New-ScheduledTaskTrigger -AtStartup takes no repetition parameters and the object offers no
+        # settable Repetition.Interval, so the repetition is built on a -Once trigger, which does,
+        # and that trigger's Repetition is assigned across. Only the repetition is used; the -Once
+        # trigger's own start time is discarded. A later fire against a running task is ignored by
+        # the IgnoreNew setting below.
+        $repeater = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+            -RepetitionInterval $retryIntervalSpan -RepetitionDuration $retryWindowSpan
+        $trigger.Repetition = $repeater.Repetition
+        # The -Once repetition arrives with StopAtDurationEnd true, which would stop a running
+        # persona when the retry window ends; a running persona must outlive the window.
+        $trigger.Repetition.StopAtDurationEnd = $false
         # Password rather than the broker's S4U, for the reason the header gives: only a logon the
         # scheduler holds the password for unlocks the account's user-scope DPAPI key, and every
         # credential store a persona's git reads sits behind that key. RunLevel Limited for the
@@ -398,6 +504,9 @@ function Write-PersonaTaskDefinition {
     Write-Output "  action: $($Definition.Action.Execute) $($Definition.Action.Arguments)"
     Write-Output "  trigger: $($Definition.Trigger.CimClass.CimClassName)"
     Write-Output "  startupDelay: $($Definition.Trigger.Delay)"
+    Write-Output "  retryInterval: $($Definition.Trigger.Repetition.Interval)"
+    Write-Output "  retryWindow: $($Definition.Trigger.Repetition.Duration)"
+    Write-Output "  stopAtDurationEnd: $($Definition.Trigger.Repetition.StopAtDurationEnd)"
     Write-Output "  account: $($Definition.Principal.UserId)"
     Write-Output "  logon: $($Definition.Principal.LogonType)"
     Write-Output "  runlevel: $($Definition.Principal.RunLevel)"
@@ -474,6 +583,9 @@ function Register-PersonaTasks {
         [bool]$IsElevated = (Test-IsElevated),
         [string[]]$ExistingTaskNames,
         [string]$StartupDelay = $KeeperDefaultStartupDelay,
+        [string]$StartupStagger = $KeeperDefaultStartupStagger,
+        [string]$RetryInterval = $KeeperDefaultRetryInterval,
+        [string]$RetryWindow = $KeeperDefaultRetryWindow,
         [string]$LauncherRoot
     )
 
@@ -504,7 +616,8 @@ function Register-PersonaTasks {
     }
 
     $definitions = Get-PersonaTaskDefinitions -Entries $Entries -RepoRoot $RepoRoot -Roster $Roster `
-        -EnvFile $EnvFile -User $User -StartupDelay $StartupDelay -LauncherRoot $LauncherRoot
+        -EnvFile $EnvFile -User $User -StartupDelay $StartupDelay -StartupStagger $StartupStagger `
+        -RetryInterval $RetryInterval -RetryWindow $RetryWindow -LauncherRoot $LauncherRoot
     $definitionsByTaskName = @{}
     foreach ($definition in $definitions) { $definitionsByTaskName[$definition.TaskName] = $definition }
 
@@ -634,6 +747,15 @@ if ($MyInvocation.InvocationName -ne '.') {
         if ([string]::IsNullOrEmpty($StartupDelay)) {
             $StartupDelay = $KeeperDefaultStartupDelay
         }
+        if ([string]::IsNullOrEmpty($StartupStagger)) {
+            $StartupStagger = $KeeperDefaultStartupStagger
+        }
+        if ([string]::IsNullOrEmpty($RetryInterval)) {
+            $RetryInterval = $KeeperDefaultRetryInterval
+        }
+        if ([string]::IsNullOrEmpty($RetryWindow)) {
+            $RetryWindow = $KeeperDefaultRetryWindow
+        }
         # Resolve-AbsolutePath's GetUnresolvedProviderPathFromPSPath throws its own generic message
         # for a drive that does not exist ("Cannot find drive. A drive with the name 'Z' does not
         # exist."), naming neither the parameter nor the value that carried it. Each call is wrapped
@@ -682,6 +804,7 @@ if ($MyInvocation.InvocationName -ne '.') {
 
         Register-PersonaTasks -Entries $entries -RepoRoot $repoRootResolved -Roster $rosterResolved `
             -EnvFile $envFileResolved -User $User -Credential $Credential -StartupDelay $StartupDelay `
+            -StartupStagger $StartupStagger -RetryInterval $RetryInterval -RetryWindow $RetryWindow `
             -LauncherRoot $launcherRootResolved -Prune:$Prune -Start:$Start -WhatIf:$WhatIf
     } catch {
         # Console.Error.WriteLine, not Write-Error: Write-Error under $ErrorActionPreference =

@@ -56,9 +56,10 @@ type FleetRow = {
   // Where this persona stands, from the process keeper's marker and state file
   // qualified by whether a live session holds its commons claim. "held" is
   // either marker deciding the next start, a keeper.hold stopping it or a
-  // keeper.park being cleared so it launches, and it outranks the rest
-  // because it decides what happens next whatever is running now. "stopped"
-  // is a signalled exit (130 or 143), on which bin/keeper-functions.ps1
+  // keeper.park whose boot marker stops it until the next boot or the
+  // operator's -Release, and it outranks the rest because it decides what
+  // happens next whatever is running now. "stopped" is a signalled exit
+  // (130 or 143), on which bin/keeper-functions.ps1
   // returns Action 'exit' and the wrapper leaves without relaunching and
   // without writing a marker.
   // Under a live claim it holds only while that claim's heartbeat is older
@@ -146,11 +147,12 @@ export const FLEET_RESTART_REASON_MAX = 200;
 // The keeper half of one row, read from the three files the process keeper
 // leaves in a run directory. keeper.hold or keeper.park decides the standing,
 // because either marker is what bin/Start-Persona.ps1's next start reads
-// before it launches anything: a hold stops that start, a park clears itself
-// and lets it go on; keeper.json carries the ladder value for the next
-// decision, the last supervisor exit and the reason recorded for a hold or a
-// park. Every read is guarded on its own, so a file that is missing or
-// unreadable lands in the row's note and the rest of the row still reports.
+// before it launches anything: a hold stops that start, and the boot marker a
+// park writes stops it until the next boot or the operator's -Release;
+// keeper.json carries the ladder value for the next decision, the last
+// supervisor exit and the reason recorded for a hold or a park. Every read is
+// guarded on its own, so a file that is missing or unreadable lands in the
+// row's note and the rest of the row still reports.
 // Both text fields are held to the plugin's free-text bound: a run directory
 // sits inside its persona's own writable tree, so the text in it is a
 // persona's to write.
@@ -295,13 +297,13 @@ const readKeeperHalf = async (host: FleetHost, rundir: string | null): Promise<K
     holdReasonSource = statePath;
   }
   // Either marker decides the next start, so either one outranks the exit
-  // code: keeper.hold stops it and keeper.park is cleared so it launches, and
-  // both read "held" here. holdReasonSource still names which file fed the
-  // reason, keeper.hold or keeper.park, and the keeper's own reason text
-  // names a park where one is in force; on the keeper.json fallback the
-  // source reads keeper.json either way. A marker check that threw decides
-  // next, because every standing below it is a statement that no marker is
-  // there.
+  // code: keeper.hold stops it and keeper.park's boot marker stops it until
+  // the next boot or the operator's -Release, and both read "held" here.
+  // holdReasonSource still names which file fed the reason, keeper.hold or
+  // keeper.park, and the keeper's own reason text names a park where one is
+  // in force; on the keeper.json fallback the source reads keeper.json either
+  // way. A marker check that threw decides next, because every standing below
+  // it is a statement that no marker is there.
   // That case reaches the reader in the row's note and not in its action: the
   // standing it produces is "unknown", which fleetActionOf does not outrank a
   // live claim with, so a persona that is up reads running and the note names
@@ -414,9 +416,9 @@ function fleetCommonsOf(
 // running, whatever ladder that file records. "held" outranks the claim all
 // the same, because the marker is a statement about what happens next rather
 // than about what is running now: a keeper.hold means the keeper will not
-// start this persona again, a keeper.park means the next start clears it and
-// launches the persona anyway, and either way a session still holding the
-// claim under it is the session that is going away.
+// start this persona again, a keeper.park means the persona is back at the
+// next boot or at a start after the operator's -Release, and either way a
+// session still holding the claim under it is the session that is going away.
 // A signalled exit is settled against the clock, because that same file is
 // written at an exit and never at a launch: lastExitCode 143 stands in
 // keeper.json for the whole of the next run, so treating it as outranking the
