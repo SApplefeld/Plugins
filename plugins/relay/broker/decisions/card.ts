@@ -7,19 +7,23 @@
 // this card lives in is edited only when its text changes.
 //
 // Every string read from a ledger file is written by a worker and reaches a trusted channel here, so
-// each takes `inertField`, the full escape for text a worker wrote, under the same
-// expansion allowance. A persona's name comes from the roster file and takes the same escape, as the
-// board card gives it. The link is the one string here this module does not compose: `links` is the
-// sightings module's `linkFor`, which checks every identifier it interpolates against `SNOWFLAKE`.
+// each takes `inertField`, the full escape for text a worker wrote, under the same expansion
+// allowance. A brief's line keeps the kit's bold or small-text markers where the line carries them
+// unescaped, and everything else on it takes the same escape once. A persona's name comes from the
+// roster file and takes the same escape, as the board card gives it. The link is the one string here
+// this module does not compose: `links` is the sightings module's `linkFor`, which checks every
+// identifier it interpolates against `SNOWFLAKE`.
 import {
   fit,
   heartbeat,
   inertField,
+  inertText,
   MAX_CARD_LENGTH,
   MAX_MESSAGE_LENGTH,
   span,
 } from "../discord/render.ts";
 import { MAX_ROSTER_PERSONA_NAME_LENGTH } from "../board/roster.ts";
+import { visible } from "../sanitize.ts";
 import { ASK_COUNT_WINDOW_MS } from "./ledger.ts";
 import type { AskEntry, LedgerReading } from "./ledger.ts";
 
@@ -153,17 +157,61 @@ export function hasBrief<T extends Pick<AskEntry, "brief">>(entry: T): entry is 
 }
 
 /**
- * A decision brief as message lines: each of its lines escaped on its own, since the escape folds a
- * text onto one line, and held to its own bound on the escaped text; a line left blank dropped; and
- * the first `MAX_MESSAGE_BRIEF_LINES` of the rest rejoined. The escape trims each line and folds its
- * runs of whitespace to one space, so an indented line draws flush left. A line opening with a
- * hyphen still draws as a bullet, since the hyphen is not in the escape class, which is the shape
- * the kit writes an option in.
+ * The kit's own escape layer: a backslash before one of the characters the kit's `escapeMarkdown`
+ * escapes (`plugins/personas/hooks/ask-brief.ts` in the Grimoire repository). Those are the
+ * backslash, the asterisk, the underscore, the tilde, the backtick, the pipe, the hash, the square
+ * brackets, and the three of a line-opening list marker: the hyphen, the plus and the full stop of
+ * `1.`. A backslash before any other character is not the kit's and is kept. The three list-marker
+ * escapes are stripped anywhere on the line, though the kit writes them only at a field's opening,
+ * so only a direct ledger writer's mid-line one draws without its backslash.
+ */
+const KIT_ESCAPE = /\\([\\*_~`|#[\]+.-])/gu;
+
+/** Text with the kit's escape layer removed, so the full escape after it puts each character behind
+ * one backslash at most. */
+function unescapeKit(text: string): string {
+  return text.replace(KIT_ESCAPE, "$1");
+}
+
+/** The two markers of the line shapes the kit writes a brief's structure in. */
+const BOLD = "**";
+const SMALL = "-# ";
+
+/**
+ * One line of a decision brief as a message line. The line takes `visible` first, so a planted
+ * invisible character cannot defeat the shape read, and its shape is read on that line before
+ * anything else, so only markers the kit wrote bare qualify: the kit escapes every marker in a
+ * worker's words, which therefore never open a shape. A line opening and closing with two asterisks
+ * around at least one character draws bold, and one opening with a hyphen, a hash and a space draws
+ * as small text. Either keeps its markers; what is between them loses the kit's escape layer and
+ * then takes the full escape, so each character draws behind one backslash at most and a mention,
+ * a link, a heading or a fence inside the shape still draws as text. That is cut to the line's
+ * bound less the markers' room. Every other line, and a shape with nothing left once escaped,
+ * loses the kit's escape layer and takes the full escape whole.
+ */
+function briefLine(raw: string): string {
+  const line = visible(raw);
+  if (line.length > 2 * BOLD.length && line.startsWith(BOLD) && line.endsWith(BOLD)) {
+    const inner = inertText(unescapeKit(line.slice(BOLD.length, -BOLD.length)));
+    if (inner !== "") return `${BOLD}${fit(inner, MAX_MESSAGE_BRIEF_LINE_LENGTH - 2 * BOLD.length)}${BOLD}`;
+  } else if (line.startsWith(SMALL)) {
+    const rest = inertText(unescapeKit(line.slice(SMALL.length)));
+    if (rest !== "") return `${SMALL}${fit(rest, MAX_MESSAGE_BRIEF_LINE_LENGTH - SMALL.length)}`;
+  }
+  return inertField(unescapeKit(line), MAX_MESSAGE_BRIEF_LINE_LENGTH);
+}
+
+/**
+ * A decision brief as message lines: each of its lines drawn on its own by `briefLine`, since the
+ * escape folds a text onto one line; a line left blank dropped; and the first
+ * `MAX_MESSAGE_BRIEF_LINES` of the rest rejoined. Each line is trimmed and its runs of whitespace
+ * folded to one space, so an indented line draws flush left. A line opening with a hyphen still
+ * draws as a bullet, since the hyphen is not in the escape class.
  */
 function briefLines(brief: string): string {
   return brief
     .split("\n")
-    .map((line) => inertField(line, MAX_MESSAGE_BRIEF_LINE_LENGTH))
+    .map(briefLine)
     .filter((line) => line !== "")
     .slice(0, MAX_MESSAGE_BRIEF_LINES)
     .join("\n");
