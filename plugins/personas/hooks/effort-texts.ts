@@ -7,6 +7,7 @@
 export const EFFORT_REFUSED_TEXT =
   "Refused: a new effort starts only in a turn the operator or the coordinator persona started, and this turn is neither. " +
   "An act the operator or the coordinator persona directed is retried in a turn one of them opens, not proposed. " +
+  "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so finish this step and take the act up there. " +
   "Send any other idea to the coordinator persona with agentic_say, opening the text with [PROPOSAL].";
 
 // The one refusal goal_autonomy gives outside a turn the operator started.
@@ -14,13 +15,16 @@ export const EFFORT_REFUSED_TEXT =
 // one the operator set.
 export const AUTONOMY_REFUSED_TEXT =
   "Refused: the autonomy level is the operator's to set, in a turn the operator starts on this persona's own thread, " +
-  "and this turn is not one. Ask the operator to set it there.";
+  "and this turn is not one. " +
+  "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, and the operator's word on the level is taken up there. " +
+  "Any other setting waits for the operator's own word, so ask the operator to set it.";
 
 // The one refusal goal_resume gives on an entry awaiting the operator's yes,
 // or a node under one, outside a turn the operator or the coordinator
 // persona started.
 export const AWAITING_YES_RESUME_REFUSED_TEXT =
   "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator or the coordinator persona started may resume it. " +
+  "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so a yes in it is taken up there. " +
   "It stays as it is until that word reaches you.";
 
 // The refusal goal_add gives a plan the autonomy level admitted when the
@@ -43,6 +47,7 @@ export function unpromptedPlanNotUndoneText(cause: string, nodeId: string): stri
 // yes outside a turn the operator or the coordinator persona started.
 export const AWAITING_YES_DROP_REFUSED_TEXT =
   "Refused: this entry waits for the operator's word, and only a turn the operator or the coordinator persona started may drop it. " +
+  "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so a word to drop it is taken up there. " +
   "It stays paused until that word reaches you.";
 
 // The one refusal goal_edit drop gives on a plan's open closing leaf.
@@ -56,6 +61,7 @@ export const CLOSING_LEAF_DROP_REFUSED_TEXT =
 // persona started.
 export const AWAITING_YES_DONE_REFUSED_TEXT =
   "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator or the coordinator persona started may complete it. " +
+  "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so a word to complete it is taken up there. " +
   "It stays as it is until that word reaches you.";
 
 // The record goal_add sends the coordinator persona for a plan the autonomy

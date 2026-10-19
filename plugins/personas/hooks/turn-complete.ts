@@ -21,6 +21,7 @@ import type { noteMemoryOwedDropped as noteMemoryOwedDroppedFromModule, notePair
 import type { PluginHost } from "./host";
 import { answeredOrThrow, type HookBudget, type LiveAskResult } from "./jev-live";
 import { MEMORY_OWED_MAX, pushMemoryOwed } from "./memory-writer";
+import { chainReprompt, openRepromptWindow } from "./mid-turn-reprompt";
 import { listInboxRecords, writeReplyRecord } from "./operator";
 import type { PlanRecordReading } from "./plan-record";
 import { PLAN_HEALTH_RECENT_MAX, PLAN_HEALTH_TEXT_MAX, isPlanEntry } from "./plan-route";
@@ -61,6 +62,10 @@ export interface TurnCompleteContext extends SharedHandlerState {
   stampTurnEndBeat: (at: number) => Promise<void>;
   meterTurnComplete: (facts: MeterTurnInput) => Promise<void>;
   submitReplyBackstop: (answer: string) => Promise<SubmitOutcome>;
+  // The [MID-TURN MESSAGE] re-prompt over the carried window, which opens
+  // at the closing turn's start stamp where no earlier one is still open;
+  // hooks/index.ts wires it over hooks/mid-turn-reprompt.ts.
+  queueMidTurnReprompt: (turnStartedAt: number) => Promise<void>;
   openWorkerAsk: (...args: AfterDeps<typeof openWorkerAskFromModule>) => ReturnType<typeof openWorkerAskFromModule>;
   persist: () => Promise<boolean>;
   activate: (nextId: string | null, reason: string) => void;
@@ -119,6 +124,8 @@ export interface TurnCompleteContext extends SharedHandlerState {
   setCurrentTurnNudged: (value: boolean) => void;
   currentTurnIsChannelOrigin: () => boolean;
   setCurrentTurnIsChannelOrigin: (value: boolean) => void;
+  currentTurnIsReprompt: () => boolean;
+  setCurrentTurnIsReprompt: (value: boolean) => void;
   setCurrentTurnIsPriming: (value: boolean) => void;
   setCurrentTurnSenderClass: (value: ChannelSender["senderClass"]) => void;
   setCurrentTurnOriginKind: (value: string) => void;
@@ -139,7 +146,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -464,8 +471,11 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // kind: the kind is reset by every completion, a subagent's included,
   // while the channel flag survives one, so a turn that is both a nudge and
   // channel-origin would otherwise post the nudge's answer.
+  // A mid-turn re-prompt turn carries the operator's thread words, so its
+  // answer is backfilled too, on its own flag, which survives a subagent's
+  // completion as the channel flag does.
   let submittedReplyBackstop = false;
-  if (!skipped && sess.isOwner && completesGateTurn && currentTurnIsChannelOrigin() && !replyCalledThisTurn() && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
+  if (!skipped && sess.isOwner && completesGateTurn && (currentTurnIsChannelOrigin() || currentTurnIsReprompt()) && !replyCalledThisTurn() && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
     try {
       await toolCall({ tool: "mcp__plugin_relay_channel-relay__reply", message: answerScrubbed });
       sess.state.decisions.push({
@@ -499,7 +509,10 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // The flag clears only on the persona's own turn end, so a subagent's
   // completion inside the channel turn leaves it set and the persona's own
   // completion afterwards is still backfilled.
-  if (completesGateTurn) setCurrentTurnIsChannelOrigin(false);
+  if (completesGateTurn) {
+    setCurrentTurnIsChannelOrigin(false);
+    setCurrentTurnIsReprompt(false);
+  }
 
   // Item 2 sub-bullet (f016b69): a turn that did real work with no open
   // root logs one `untracked_work` decision and leaves the goal tree
@@ -1793,12 +1806,36 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // A completion naming a subagent loop is never the persona's own turn
   // end, whatever turn id it carries, as at completesGateTurn above.
   const completesSubagent = typeof e.agentId === "string" && e.agentId.length > 0;
+  // The re-prompt window opens at every owner turn end, the ones the gate
+  // below skips included, at the start stamp read off openTurns above
+  // before the delete. A turn end that scans nothing, because a reply
+  // backstop went out or another turn is open, leaves its window for the
+  // next owner turn end that scans, which reads from this start.
+  if (removedOwnEntry && !completesSubagent && sess.isOwner && mapStartedAt !== undefined) openRepromptWindow(sess, mapStartedAt);
   if (removedOwnEntry && !completesSubagent && sess.isOwner && !turnOpenAfterDelete && !submittedReplyBackstop && drain !== null) {
     void Promise.resolve().then(async () => {
       // The ring is read by identity as well as length, since a save
       // that trims it swaps the array for a shorter one.
       const ring = sess.state.decisions;
       const logged = ring.length;
+      // The operator's mid-turn messages come before new work: the
+      // re-prompt over the carried window, which opens at this turn's
+      // start where no earlier one is still open, is queued ahead of the
+      // drain's submit. Its spawn runs here, off the hook chain, after the
+      // previous owner turn end's re-prompt has settled, so two that
+      // overlap never take one record twice. A failure inside it is its
+      // own skip decision and never stops the drain, and a throw past that
+      // is one decision here.
+      try {
+        if (mapStartedAt !== undefined) await chainReprompt(sess, () => queueMidTurnReprompt(mapStartedAt));
+      } catch (err) {
+        sess.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "monitor",
+          action: "mid_turn_reprompt_skipped",
+          detail: `read-failed: the re-prompt at a turn's end threw: ${safeErrorText(err)}`.slice(0, 200),
+        });
+      }
       try {
         if (!(await drain()) && (sess.state.decisions !== ring || sess.state.decisions.length !== logged)) await persist();
       } catch (err) {

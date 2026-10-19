@@ -271,13 +271,31 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return { deny: `agentic_identity: 'persona' ${nameProblem} (got '${name}').` };
     }
     // A store that is not an object of persona entries throws here, as a
-    // store that does not parse does, before the session takes the new
-    // name, resets its untracked-work line or releases its old claim. A
+    // store that does not parse does, and a target slot that does not parse
+    // as a persona state is refused below, both before the session takes the
+    // new name, resets its untracked-work line or releases its old claim. A
     // refused switch leaves the session on the persona it held.
     const store: Record<string, unknown> = await fsExists(sess.storePath)
       ? parsePersonaStore(await fsRead(sess.storePath))
       : {};
     const previousPersona = sess.persona;
+    // An absent or falsy slot stays absent and takes the default state
+    // below. A slot that does not parse refuses the switch with a deny that
+    // names the persona and the one the session stays on, and never the
+    // parse error, which can carry slot content. The state parse passes a
+    // decisions log that is not a list, which the pushes below would throw
+    // on after the rename, so that slot is refused the same way.
+    let slotState: AgentState | null = null;
+    if (store[name]) {
+      try {
+        slotState = parseState(JSON.stringify(store[name]));
+        if (!Array.isArray(slotState.decisions)) throw new Error("decisions is not a list");
+      } catch {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        const stays = previousPersona ? `persona '${previousPersona}'` : "no persona";
+        return { deny: `agentic_identity: the store slot of persona '${name}' does not parse as a persona state; the session ${previousPersona ? "stays on" : "holds"} ${stays}.` };
+      }
+    }
     sess.persona = name;
     // The held untracked_work line lives in the previous persona's log, so
     // a switch starts the new persona's line afresh rather than carrying
@@ -295,8 +313,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       const existing = store[name] as AgentState | undefined;
       // The store parsed as an object, so the state below is the persona's own.
       sess.stateNotLoaded = null;
-      if (existing) {
-        sess.state = parseState(JSON.stringify(existing));
+      if (slotState) {
+        sess.state = slotState;
         sess.state.persona = name;
       } else {
         sess.state = createDefaultState(name, sess.mySessionId);
@@ -330,8 +348,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // own. This is how a session whose session.start did not finish
     // recovers its state: the goal tools answer from it once this has run.
     sess.stateNotLoaded = null;
-    if (existing) {
-      sess.state = parseState(JSON.stringify(existing));
+    if (slotState) {
+      sess.state = slotState;
       sess.state.persona = name;
     } else {
       sess.state = createDefaultState(name, sess.mySessionId);
@@ -1840,6 +1858,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const awaitingAbove = awaitingEntryAtOrAbove(sess.state, target);
     const admittedBy = !awaitingAbove ? ""
       : currentTurnEntry() !== null && currentTurnEntry()!.kind === "delivery" ? `; admitted by coordinator record ${(currentTurnEntry() as Extract<ExpectedTurn, { kind: "delivery" }>).recordId}`
+      : currentTurnEntry()?.kind === "reprompt" ? "; admitted by the operator's mid-turn re-prompt"
       : `; admitted by origin ${currentTurnOriginKind()}`;
     if (awaitingAbove && awaitingAbove !== target) {
       awaitingAbove.awaitingYes = undefined;

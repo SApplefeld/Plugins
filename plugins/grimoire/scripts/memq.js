@@ -13641,11 +13641,46 @@ function wireText(value, cap, absent) {
     return value === null || value === undefined ? absent : sanitize(String(value), cap);
 }
 
+// db-refresh's verdict as the run goes, for the result file: `begin` opens the
+// named step, `say` prints a failure line to stderr and keeps it as the open
+// step's, and `fail` sets the exit code and, for the first step to fail, keeps
+// that step and the lines it printed as the result's step and detail. `threw`
+// is a throw out of the open step, kept the same way with the thrown text at
+// the failure-line cap as the detail; it prints nothing and sets no exit code,
+// since the caller rethrows and the dispatcher's catch does both.
+function dbRefreshVerdict() {
+    const verdict = { step: null, detail: '' };
+    let open = null;
+    let lines = [];
+    return {
+        verdict,
+        begin(step) {
+            open = step;
+            lines = [];
+        },
+        say(text) {
+            process.stderr.write(text);
+            lines.push(text.replace(/\n$/, ''));
+        },
+        fail(step) {
+            process.exitCode = 1;
+            if (verdict.step !== null) return;
+            verdict.step = step;
+            verdict.detail = lines.join('\n');
+        },
+        threw(err) {
+            if (verdict.step !== null) return;
+            verdict.step = open;
+            verdict.detail = shownText(failureText(err), DB_SYNC_REASON_CAP);
+        }
+    };
+}
+
 // db-refresh's steps between the drain and the purge: the adoption, the
 // index and the embed pass, in that order. A step that fails prints why, sets
 // the exit code and returns, so the steps after it are skipped and the
-// purge, which cmdDbRefresh runs after this, is not.
-async function dbRefreshMiddleSteps(drained, passed, opts, deadline) {
+// purge, which dbRefreshSteps runs after this, is not.
+async function dbRefreshMiddleSteps(drained, passed, opts, deadline, run) {
     // The adoption, gated on the key and the host's version. A key this process
     // cannot resolve, or one that is a folder name, adopts nothing.
     let key = null;
@@ -13662,40 +13697,42 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline) {
         }
     }
     if (key !== null && key.startsWith('remote:')) {
+        run.begin('adoption');
         const schema = Number(drained.schemaVersion);
         if (!(Number.isFinite(schema) && schema >= memoryDatabase.RECORD_SCHEMA_VERSION)) {
-            process.stderr.write('memq: the adoption step did not run: the memory database reports '
+            run.say('memq: the adoption step did not run: the memory database reports '
                 + (Number.isFinite(schema) ? 'schema version ' + schema : 'no schema version at all')
                 + ' where the adoption needs version ' + memoryDatabase.RECORD_SCHEMA_VERSION
                 + '; re-run plugins/grimoire/db/Install-MemoryDatabase.ps1 against the host\n');
-            process.exitCode = 1;
+            run.fail('adoption');
             return;
         }
         const adopted = memoryDatabase.adoptProjectStore({
             config: opts.config, deps: opts.deps, fromKey: 'path:' + segment, toKey: key, deadline
         });
         if (!adopted.ok) {
-            process.stderr.write('memq: the adoption step did not run: '
+            run.say('memq: the adoption step did not run: '
                 + shownText(memoryDatabase.standDownText(adopted), DB_SYNC_REASON_CAP) + '\n');
-            process.exitCode = 1;
+            run.fail('adoption');
             return;
         }
         reportAdoption(adopted.adopted, segment, key);
     }
 
     // The index: the shared tiers and this key, in one spawn, into index.json.
+    run.begin('index');
     const listed = memoryDatabase.listIndex(key, { config: opts.config, deps: opts.deps, probed: true, deadline });
     if (!listed.ok) {
-        process.stderr.write('memq: the index step did not run: ' + shownText(listed.cause === 'standDown'
+        run.say('memq: the index step did not run: ' + shownText(listed.cause === 'standDown'
             ? memoryDatabase.standDownText({ ...listed, standDown: listed.standDown }) : listed.detail, DB_SYNC_REASON_CAP) + '\n');
-        process.exitCode = 1;
+        run.fail('index');
         return;
     }
     const written = memoryDatabase.writeSnapshotIndex(indexSections(listed.rows, key));
     if (!written.ok) {
-        process.stderr.write('memq: the index step did not finish: the snapshot index was not written ('
+        run.say('memq: the index step did not finish: the snapshot index was not written ('
             + shownText(written.detail, 300) + ')\n');
-        process.exitCode = 1;
+        run.fail('index');
         return;
     }
     process.stdout.write('db-refresh: index.json holds ' + listed.rows.length + ' row(s) for the shared tiers'
@@ -13703,10 +13740,11 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline) {
 
     // The embed pass: every row the host lists without a vector, from the
     // body the host holds.
+    run.begin('embed');
     const embedded = await memoryDatabase.embedUnembedded({ config: opts.config, deps: opts.deps, deadline });
     if (!embedded.ok) {
-        process.stderr.write('memq: the embed step did not run: ' + shownText(embedded.detail, DB_SYNC_REASON_CAP) + '\n');
-        process.exitCode = 1;
+        run.say('memq: the embed step did not run: ' + shownText(embedded.detail, DB_SYNC_REASON_CAP) + '\n');
+        run.fail('embed');
         return;
     }
     const notEmbedded = embedded.unembedded + embedded.unstored + embedded.unread;
@@ -13714,14 +13752,14 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline) {
         + (notEmbedded > 0 ? ', ' + notEmbedded + ' not embedded' : '')
         + (embedded.skipped > 0 ? ', ' + embedded.skipped + ' left for the publish on the machine that holds the file' : '')
         + (embedded.outOfBudget ? ', the run budget was spent so it stopped there' : '') + '\n');
-    for (const reason of embedded.failed) process.stderr.write('memq: ' + shownText(reason, DB_SYNC_REASON_CAP) + '\n');
+    for (const reason of embedded.failed) run.say('memq: ' + shownText(reason, DB_SYNC_REASON_CAP) + '\n');
     // An endpoint that did not answer is a box without one, where search by
     // meaning is simply absent and the rows wait for the next refresh; a host
     // that would not store a vector, a body it did not return, or a spent
     // budget is the embed step failing.
     if (embedded.unstored > 0 || embedded.unread > 0 || embedded.outOfBudget) {
-        process.stderr.write('memq: db-refresh stopped at the embed step\n');
-        process.exitCode = 1;
+        run.say('memq: db-refresh stopped at the embed step\n');
+        run.fail('embed');
     }
 }
 
@@ -13757,6 +13795,12 @@ async function dbRefreshMiddleSteps(drained, passed, opts, deadline) {
 // The project is the working directory's, or the pair the session-start hook
 // passes (dbRefreshProjectArgs), since the hook starts this verb in the store
 // root rather than in the session's directory.
+//
+// Every path that prints a verdict ends in last-refresh.json under the
+// snapshot directory (writeRefreshResult), naming the first step that failed,
+// so the next session start and the doctor can say a detached run failed. A
+// usage error writes none, since bad arguments are a hand run's mistake, and
+// a result that could not be written costs the record, never the run's exit.
 async function cmdDbRefresh(argv, options) {
     const opts = options || {};
     const passed = parseDbRefreshProject(argv);
@@ -13766,6 +13810,7 @@ async function cmdDbRefresh(argv, options) {
     }
     const now = opts.deps && typeof opts.deps.now === 'function' ? opts.deps.now : Date.now;
     const deadline = now() + memoryDatabase.RUN_BUDGET_MS;
+    const run = dbRefreshVerdict();
     // The stand-down every store verb spells: the working
     // directory is read for the project key the adoption moves the folder's
     // records into, and an unpinned one on a network share resolves through a
@@ -13773,18 +13818,45 @@ async function cmdDbRefresh(argv, options) {
     // working directory.
     if (passed.key === undefined) {
         if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
-            process.stderr.write('memq: this call\'s working directory names a network share, so its '
+            run.say('memq: this call\'s working directory names a network share, so its '
                 + 'project key was not resolved (a synchronous walk under it risks hanging for the SMB '
                 + 'timeout on an unreachable host); nothing was refreshed\n');
-            process.exitCode = 1;
+            run.fail('stand-down');
+            recordDbRefresh(run, now);
             return;
         }
     }
+    // A step that throws is recorded as failing and the throw goes on to the
+    // caller, which prints it and sets the exit code as for any other verb.
+    try {
+        await dbRefreshSteps(passed, opts, deadline, run);
+    } catch (err) {
+        run.threw(err);
+        recordDbRefresh(run, now);
+        throw err;
+    }
+    recordDbRefresh(run, now);
+}
+
+// The run's verdict into last-refresh.json: ok with exit code 0 where no step
+// failed, and exit code 1 otherwise, the code every failure path of the verb
+// exits with. writeRefreshResult throws for nothing, and its answer is not
+// read: a result it could not write costs the record alone.
+function recordDbRefresh(run, now) {
+    const failed = run.verdict.step !== null;
+    memoryDatabase.writeRefreshResult({
+        ok: !failed, step: run.verdict.step, exitCode: failed ? 1 : 0, detail: run.verdict.detail
+    }, { now });
+}
+
+// db-refresh's steps from the drain on, each failure recorded on `run`.
+async function dbRefreshSteps(passed, opts, deadline, run) {
+    run.begin('drain');
     const drained = memoryDatabase.drainOnly({ config: opts.config, deps: opts.deps, deadline });
     if (drained.drain === undefined) {
-        process.stderr.write('memq: the drain step did not run: '
+        run.say('memq: the drain step did not run: '
             + shownText(memoryDatabase.standDownText(drained), DB_SYNC_REASON_CAP) + '\n');
-        process.exitCode = 1;
+        run.fail('drain');
         return;
     }
     const drain = drained.drain;
@@ -13802,23 +13874,23 @@ async function cmdDbRefresh(argv, options) {
     // What the drain left a person to read, rendered at the failure-line cap,
     // the refused records excepted, which the lines above already carry.
     if (drain.detail && drain.cause !== 'refused-records') {
-        process.stderr.write('memq: ' + shownText('the drain step (' + (drain.cause || 'unclear') + '): '
+        run.say('memq: ' + shownText('the drain step (' + (drain.cause || 'unclear') + '): '
             + drain.detail, DB_SYNC_REASON_CAP) + '\n');
     }
     if (!drained.ok) {
-        process.stderr.write('memq: db-refresh stopped at the drain step\n');
-        process.exitCode = 1;
+        run.say('memq: db-refresh stopped at the drain step\n');
+        run.fail('drain');
         return;
     }
     if (drain.held > 0) {
-        process.stderr.write('memq: db-refresh stopped at the drain step: a record row is held for a newer host\n');
-        process.exitCode = 1;
+        run.say('memq: db-refresh stopped at the drain step: a record row is held for a newer host\n');
+        run.fail('drain');
         return;
     }
 
     // The steps between the drain and the purge. A step that fails sets the
     // exit code and skips the steps after it, never the purge.
-    await dbRefreshMiddleSteps(drained, passed, opts, deadline);
+    await dbRefreshMiddleSteps(drained, passed, opts, deadline, run);
 
     // The purge: one mem.usp_PurgeJournal call on a host at the purge version,
     // deleting this machine's own journal rows past their retention. It runs
@@ -13832,6 +13904,7 @@ async function cmdDbRefresh(argv, options) {
     // next run and lose nothing, while a record the embed pass leaves cannot be
     // found by meaning until a later run embeds it. A call the host did not
     // answer, refused, or answered unreadably is a failed step.
+    run.begin('purge');
     const purgeSchema = Number(drained.schemaVersion);
     if (!(Number.isFinite(purgeSchema) && purgeSchema >= memoryDatabase.PURGE_SCHEMA_VERSION)) {
         process.stdout.write('db-refresh: the purge step did not run: the memory database reports '
@@ -13847,9 +13920,9 @@ async function cmdDbRefresh(argv, options) {
         return;
     }
     if (!purged.ok) {
-        process.stderr.write('memq: the purge step did not run: '
+        run.say('memq: the purge step did not run: '
             + shownText(memoryDatabase.standDownText(purged), DB_SYNC_REASON_CAP) + '\n');
-        process.exitCode = 1;
+        run.fail('purge');
         return;
     }
     process.stdout.write('db-refresh: purged ' + purged.purged.turnMeter + ' turn, ' + purged.purged.outcome
@@ -14441,6 +14514,7 @@ function resetUncaughtLatch() {
 module.exports = {
     USAGE_FILE,
     INDEX_FILE,
+    DB_SYNC_REASON_CAP,
     lastAliveMs,
     frontmatterBlock,
     frontmatterUnclosed,

@@ -332,15 +332,21 @@ const BUDGET_PATH = 'test/size-budget.json';
 // what makes that true on purpose.
 const CORPUS_CAP_KEY = 'corpus-cap';
 
-// A rationale ledger, the one prose class the corpus cap excludes by name. The
-// corpus itself is every other budget key that answers to neither this shape nor
-// a path under test/, read straight from the budget rather than from a count
-// carried here, so a document a later section adds to a measured root joins the
-// corpus the moment its cap does.
+// The corpus cap excludes two prose shapes. One is any rationale ledger, matched
+// by path shape across every skill. The other is the one file
+// home/grimoire-doctrine.md, the copy of the operating-instructions skill body the
+// session-start hook regenerates: the sum already counts that skill, and counting
+// its copy too would charge the doctrine twice. test/doctrine-parity.test.js
+// pins the copy byte-identical to the skill body, and its own per-file cap still
+// reds it growing. The corpus itself is every other budget key that answers to
+// neither of these nor a path under test/, read straight from the budget rather
+// than from a count carried here, so a document a later section adds to a
+// measured root joins the corpus the moment its cap does.
 const RATIONALE_LEDGER = /\/references\/rationale-ledger\.md$/;
+const DOCTRINE_MIRROR = 'home/grimoire-doctrine.md';
 
 function isCorpusPath(relPath) {
-    return relPath !== CORPUS_CAP_KEY && !relPath.startsWith('test/') && !RATIONALE_LEDGER.test(relPath);
+    return relPath !== CORPUS_CAP_KEY && relPath !== DOCTRINE_MIRROR && !relPath.startsWith('test/') && !RATIONALE_LEDGER.test(relPath);
 }
 
 // Why a file fails the ratchet. Each reason is distinct because a gate that can

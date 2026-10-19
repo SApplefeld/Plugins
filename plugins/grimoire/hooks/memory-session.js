@@ -144,9 +144,11 @@
 // block's structure), the line count and per-line length are capped with the
 // remainder counted, no path is ever built from a row's name, and the block
 // carrying them names the lines as data, not instructions. The snapshot line
-// carries an age this file computes and nothing from the file. The run-scoped
-// block carries environment content, the store root inside the pending path,
-// and the path is emitted verbatim or not at all, because it is a destination
+// carries an age this file computes and nothing from the file. The refresh
+// line carries a step word from the reader's closed set and an age this file
+// computes, and nothing else from the file. The run-scoped block carries
+// environment content, the store root inside the pending path, and the path
+// is emitted verbatim or not at all, because it is a destination
 // the session acts on rather than text it reads, and a reduced one would be a
 // wrong directory stated confidently. Verbatim is not unfenced: the path goes
 // out on its own indented line named as data, the same framing the type index
@@ -173,16 +175,18 @@ const MEMQ_SCRIPT = path.join(__dirname, '..', 'scripts', 'memq.js');
 // How long this marker holds the next refresh off, which is the client's own
 // run budget.
 //
-// A refresh has no state file and can honestly run for minutes: it drains the
-// queue, takes the index and embeds whatever carries no vector. Its ceiling
-// is RUN_BUDGET_MS in scripts/memory-database.js, fifteen minutes, past which
-// the client refuses to start another boundary call. So this is a minute
-// past that ceiling: inside it, a run may still be in flight, and a second
-// session-start spawn would put two refreshes on one machine other sessions'
-// work already shares, both
-// draining the same queue and writing the same snapshot. The minute is the
-// overshoot the client declares, the one call that may cross its deadline
-// finishing within the sqlcmd spawn floor of it.
+// A refresh leaves no state this marker can read while it runs, and can
+// honestly run for minutes: it drains the queue, takes the index and embeds
+// whatever carries no vector. Its result file beside the snapshot records how
+// a run ended, never whether one is running, so the interval is what holds
+// two runs apart. Its ceiling is RUN_BUDGET_MS in scripts/memory-database.js,
+// fifteen minutes, past which the client refuses to start another boundary
+// call. So this is a minute past that ceiling: inside it, a run may still be
+// in flight, and a second session-start spawn would put two refreshes on one
+// machine other sessions' work already shares, both draining the same queue
+// and writing the same snapshot. The minute is the overshoot the client
+// declares, the one call that may cross its deadline finishing within the
+// sqlcmd spawn floor of it.
 const DB_SYNC_ATTEMPT_STALE_MS = 16 * 60 * 1000;
 
 // The snapshot is older than this before the hook says how old it is: a
@@ -1055,6 +1059,46 @@ function snapshotLine(snapshot, refresh, shownFromSnapshot, runScoped) {
         + '`memq recall`, `memq find`, and `memq get <name>` read the memory database directly.';
 }
 
+// The one line about the last refresh's result, or null. The refresh runs
+// detached with its output discarded, so a run that fails at every start is
+// otherwise read only at a hand run nobody makes; where the client's result
+// file says the last run failed, this names the step and how long ago. The
+// line carries only the reader's step word, from its closed set with
+// `unknown` for anything outside it, and an age this file computed from the
+// result's own stamp; nothing else in the file reaches the line, since the
+// hook's output is the session's trusted context and the file's detail is
+// the server's text and the names of records the embed pass could not
+// embed, which another person may have written. A hand run of `memq db-refresh` prints that detail. The
+// refresh's own answer decides the tail, as the snapshot line's does:
+// 'spawned' and 'held' each mean one was started recently, this call or
+// inside the marker's interval, and say nothing of whether it is still
+// running, since a refresh that fails fast has ended while the marker still
+// holds; 'withheld' names the hand run. A run-scoped session hears nothing,
+// for the reason its refresh is withheld: a fleet of workers can neither fix
+// the machine's refresh nor run one without contention, and the machine's own
+// sessions hear the line. A success, no file, a file the reader refuses, and
+// a client module without the reader, which a plugin cache one version behind
+// can supply, are each silent; the require is guarded as readSnapshot's is,
+// so a module that throws on load costs this line and never the blocks
+// already built.
+function refreshResultLine(refresh, runScoped) {
+    if (runScoped) return null;
+    let db;
+    try { db = require('../scripts/memory-database.js'); } catch { return null; }
+    if (typeof db.readRefreshResult !== 'function' || typeof db.snapshotAgeText !== 'function') return null;
+    let read;
+    try {
+        read = db.readRefreshResult();
+        if (!read.ok || read.result.ok || !Number.isFinite(read.result.endedAtMs)) return null;
+    } catch { return null; }
+    return 'Kit memory refresh: the last `memq db-refresh` on this machine failed at its '
+        + read.result.step + ' step, ' + db.snapshotAgeText(read.result.endedAtMs, Date.now()) + ' ago'
+        + (refresh === 'withheld'
+            ? '; run `memq db-refresh` by hand, which shows why and takes a fresh one.'
+            : '; a background refresh was started recently, and a hand run of `memq db-refresh` shows why'
+                + ' the last one failed.');
+}
+
 // The fleet memory block: the records the shared memory database holds for
 // this project's recent work, five lines at most.
 //
@@ -1307,6 +1351,12 @@ async function main() {
         const snapshotNote = redirected !== null ? redirected
             : snapshotLine(snapshot, refresh, shownFromSnapshot, runScoped !== null);
         if (snapshotNote !== null) blocks.push(snapshotNote);
+        // The last refresh's failure, where there was one, follows the
+        // snapshot line's slot: after it where it spoke, alone where the
+        // snapshot is fresh. Under a redirected store root the stand-down
+        // line above stands alone, as it does for the snapshot line.
+        const refreshNote = redirected !== null ? null : refreshResultLine(refresh, runScoped !== null);
+        if (refreshNote !== null) blocks.push(refreshNote);
         // The drift line rides last, after whatever named the project tier's
         // index, because it is a fact about records that block has just
         // listed. It is outside the run branch above rather than inside it:

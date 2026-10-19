@@ -1405,6 +1405,20 @@ else {
             else {
                 $dbLines += "Queue: empty."
             }
+            # A last memq db-refresh that failed rides beside the queue depth for
+            # the same reason: it is worth reporting on a host that is away. The
+            # detail is the server's text and the names of records the embed pass
+            # could not embed, so it takes the sanitizer at this report's cap. The step is the reader's
+            # closed-set word, sanitized on the same rule. The time comes from
+            # endedAtMs, a number, because pwsh 7's ConvertFrom-Json coerces an
+            # ISO string to a DateTime and Windows PowerShell 5.1 does not.
+            if ($health.lastRefresh.ok -and -not $health.lastRefresh.result.ok) {
+                $dbWarned = $true
+                $dbLines += ("Refresh: the last memq db-refresh on this machine failed at its " +
+                    (Get-SanitizedLine ([string]$health.lastRefresh.result.step) 20) + " step (" +
+                    (Get-SanitizedLine ([DateTimeOffset]::FromUnixTimeMilliseconds([int64]$health.lastRefresh.result.endedAtMs).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)) 40) + "): " +
+                    (Get-SanitizedLine ([string]$health.lastRefresh.result.detail) 120))
+            }
         }
 
         if ($dbFailed) {

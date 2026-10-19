@@ -45,7 +45,7 @@ One rule governs everything below:
 | `memq decay-prune [--archive <name>]... [--archive-type <name>]... [--archive-operator <name>]... [--confirm-shared]` | The pass's one mutation path over the store's own records, and it archives only what its flags name. A shared-tier archival needs `--confirm-shared`: always for `--archive-operator`, and for `--archive-type` whenever the scan of declaring projects finds more than one or cannot run. Running the Decay Pass owns when to supply it. Refuses a pinned target. |
 | `memq decay-done` | Touch the decay stamp that records a completed pass, `~/.claude/memory-snapshot/decay-stamp`. |
 | `memq declare-type <type>\|--none` | Record the type tier this project opts into, keyed by the working directory's project key, in this machine's `~/.claude/memory-snapshot/project-types.json`. `--none` clears it. Bare `--type`, the type surfaces of `find` and `recall`, and session start's type block read it. |
-| `memq db-refresh` | Drain the queue, refresh the snapshot, purge expired rows. Session start runs it detached. |
+| `memq db-refresh` | Queue drain, snapshot refresh, old-row purge. Runs detached at start; next start names failures. |
 | `memq db-promote <name> [--sandbox <name>] [--tier project\|type\|operator] [--segment <segment>]` | Move one project record into the operator store on the host and archive the source. Curator login only. Nothing on disk changes. |
 | `memq db-curate [--unapplied <days>] [--superseded] [--orphans]` | The curator's three lists off the host: records unapplied inside a window, live records another supersedes, and orphans. Curator login only. Writes nothing. |
 

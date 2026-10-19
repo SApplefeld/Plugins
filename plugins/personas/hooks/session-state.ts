@@ -33,6 +33,21 @@ export interface SessionState {
   staleAfterMs: number; // F9a: single-source the staleness threshold
   turnStartedAt: number | null; // plan item 8.3: this session's clock at turn.start, null between turns
   workdir: string; // the directory this session runs in, "" until session.start reads it
+  // The newest transcript record timestamp a mid-turn re-prompt covered, or
+  // null where none has been queued; hooks/mid-turn-reprompt.ts takes no
+  // record at or before it. In memory only, never persisted.
+  repromptCoveredUntil: number | null;
+  // The start stamp of the oldest owner turn whose re-prompt window has not
+  // been read whole, or null where every window was; the scan's stamp, so a
+  // window a refused submit, a failed read or a skipped turn end left open
+  // is read again at the next owner turn end. In memory only, never persisted.
+  repromptWindowFrom: number | null;
+  // Whether the re-prompt's id-pending skip has been logged, once per session.
+  repromptIdPendingLogged: boolean;
+  // The latest owner turn end's re-prompt, settled or in flight, which the
+  // next one's starts after; hooks/mid-turn-reprompt.ts links it. Never
+  // rejects. In memory only.
+  repromptChain: Promise<void>;
   cacheWarmUntil: number | null; // the clock's warm-until instant, which the beat publishes
   // The controller tick's fleet watcher's last reading, for the coordinator
   // persona alone: one entry per persona a reading of this session's has

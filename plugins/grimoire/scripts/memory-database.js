@@ -598,6 +598,29 @@ function newestTakenAt(index) {
     return newest;
 }
 
+// A JSON file of this client's read whole and parsed, as {ok: true, parsed,
+// stat} or {ok: false, reason}: `absent` for no file, and `unreadable` for one
+// that is not a regular file, does not parse, or is past the bytes `ceiling()`
+// answers, refused on its size before a byte is read. The ceiling is a
+// function so a ceiling that cannot be computed is an unreadable file rather
+// than a throw. It throws for nothing, so a hook can read through it.
+function readBoundedJson(file, ceiling) {
+    let stat;
+    let text;
+    try {
+        stat = fs.statSync(file);
+        if (!stat.isFile() || stat.size > ceiling()) return { ok: false, reason: 'unreadable' };
+        text = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+        return { ok: false, reason: err && err.code === 'ENOENT' ? 'absent' : 'unreadable' };
+    }
+    try {
+        return { ok: true, parsed: JSON.parse(text), stat };
+    } catch {
+        return { ok: false, reason: 'unreadable' };
+    }
+}
+
 // The parsed index.json with the facts a reader keys a cache on, as
 // {ok, index, takenAt, takenAtMs, size, mtimeMs}, or {ok: false, reason} with
 // reason `absent` for no file and `unreadable` for a file that is there and is
@@ -608,18 +631,9 @@ function newestTakenAt(index) {
 // no section carries one. `projects` is a map with no prototype, so a key the
 // file names, `__proto__` among them, is a key and nothing else.
 function readSnapshotIndex() {
-    const file = snapshotIndexPath();
-    let stat;
-    let text;
-    try {
-        stat = fs.statSync(file);
-        if (!stat.isFile() || stat.size > snapshotIndexCeiling()) return { ok: false, reason: 'unreadable' };
-        text = fs.readFileSync(file, 'utf8');
-    } catch (err) {
-        return { ok: false, reason: err && err.code === 'ENOENT' ? 'absent' : 'unreadable' };
-    }
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { return { ok: false, reason: 'unreadable' }; }
+    const read = readBoundedJson(snapshotIndexPath(), snapshotIndexCeiling);
+    if (!read.ok) return read;
+    const { parsed, stat } = read;
     const index = emptyIndex();
     if (parsed === null || typeof parsed !== 'object' || parsed.version !== SNAPSHOT_INDEX_VERSION) {
         return { ok: false, reason: 'unreadable' };
@@ -748,6 +762,94 @@ function writeSnapshotIndex(taken, options) {
     } catch (err) {
         return { ok: false, detail: errText(err) };
     }
+}
+
+// --------------------------------------------------------- the refresh result --
+//
+// How the last `memq db-refresh` on this machine ended, as one small file
+// beside the snapshot index: {version, endedAt, ok, step, exitCode, detail}.
+// `step` is the first step that failed, a word from REFRESH_STEPS, and null on
+// a run that failed none; `detail` is what the verb printed to stderr for that
+// step, or the thrown text where the step threw. The verb writes it on every path that prints a verdict, so a refresh
+// the session-start hook ran detached, its output discarded, still says how it
+// ended. A refresh the process died inside writes nothing, and the result
+// before it stands.
+//
+// The reader's answer reaches the session's context, so the step it returns is
+// always a word of the closed set or `unknown`, never a string the file chose.
+//
+// The ceiling is the arithmetic of the largest file the writer can produce: a
+// detail of REFRESH_DETAIL_CAP UTF-16 units, each at most six bytes once
+// JSON.stringify writes it (a control character or a lone surrogate as \uXXXX),
+// is 7,200 bytes, and the other fields are under 200. Past 8,192 bytes the
+// file is not one this writer wrote.
+const REFRESH_RESULT_FILE = 'last-refresh.json';
+const REFRESH_RESULT_VERSION = 1;
+const REFRESH_RESULT_CEILING = 8192;
+// memq's DB_SYNC_REASON_CAP, the cap its failure lines are rendered at.
+const REFRESH_DETAIL_CAP = 1200;
+const REFRESH_STEPS = Object.freeze(['stand-down', 'drain', 'adoption', 'index', 'embed', 'purge']);
+
+// The result file under the store root passed, as hostHealth names its queue
+// file, or under the snapshot directory in the home.
+function refreshResultPath(options) {
+    const opts = options || {};
+    const dir = typeof opts.storeRoot === 'string' && opts.storeRoot !== ''
+        ? path.join(opts.storeRoot, SNAPSHOT_DIR) : snapshotDir();
+    return path.join(dir, REFRESH_RESULT_FILE);
+}
+
+// Write how a refresh ended, as {ok, file} or {ok: false, detail}. `result` is
+// {ok, step, exitCode, detail}; a step outside REFRESH_STEPS is written as
+// null, and the detail is cut at REFRESH_DETAIL_CAP here, so a file any caller
+// writes is one the reader's ceiling admits. It throws for nothing: an
+// unwritable result costs the record, never the refresh.
+function writeRefreshResult(result, options) {
+    const opts = options || {};
+    const now = (typeof opts.now === 'function') ? opts.now : Date.now;
+    const given = result !== null && typeof result === 'object' ? result : {};
+    try {
+        const file = refreshResultPath(opts);
+        const detail = given.detail === null || given.detail === undefined ? '' : String(given.detail);
+        writeAtomically(file, JSON.stringify({
+            version: REFRESH_RESULT_VERSION,
+            endedAt: new Date(now()).toISOString(),
+            ok: given.ok === true,
+            step: REFRESH_STEPS.includes(given.step) ? given.step : null,
+            exitCode: Number.isInteger(given.exitCode) ? given.exitCode : 0,
+            detail: detail.slice(0, REFRESH_DETAIL_CAP)
+        }) + '\n');
+        return { ok: true, file };
+    } catch (err) {
+        return { ok: false, detail: errText(err) };
+    }
+}
+
+// The last refresh's result, as {ok: true, result} with `endedAtMs` beside the
+// file's fields, or {ok: false, reason} with `absent` for no file and
+// `unreadable` for anything else: a file past REFRESH_RESULT_CEILING, refused
+// before it is read, one that does not parse, another version, or a field of
+// the wrong type. A step outside REFRESH_STEPS reads as `unknown`, and so does
+// a failed run naming no step, so a caller rendering a failure's step renders
+// a word of the closed set. It spawns nothing and throws for nothing.
+function readRefreshResult(options) {
+    const read = readBoundedJson(refreshResultPath(options), () => REFRESH_RESULT_CEILING);
+    if (!read.ok) return read;
+    const p = read.parsed;
+    if (p === null || typeof p !== 'object' || Array.isArray(p) || p.version !== REFRESH_RESULT_VERSION
+        || typeof p.ok !== 'boolean' || typeof p.endedAt !== 'string' || !Number.isInteger(p.exitCode)
+        || typeof p.detail !== 'string') {
+        return { ok: false, reason: 'unreadable' };
+    }
+    const endedAtMs = Date.parse(p.endedAt);
+    if (!Number.isFinite(endedAtMs)) return { ok: false, reason: 'unreadable' };
+    const step = REFRESH_STEPS.includes(p.step) ? p.step : (p.step === null && p.ok ? null : 'unknown');
+    return {
+        ok: true,
+        result: {
+            version: p.version, endedAt: p.endedAt, endedAtMs, ok: p.ok, step, exitCode: p.exitCode, detail: p.detail
+        }
+    };
 }
 
 // The directory a tier's bodies sit under, by its key: the hashed project
@@ -2287,16 +2389,24 @@ function curate(options) {
 // store and writes nothing into it. The queue file is named from the store root
 // the caller passes rather than resolved here, because the doctor is the caller
 // and the store root is the one path it already knows.
+//
+// `lastRefresh` rides on every return, whatever the host said: the last memq
+// db-refresh's result as readRefreshResult answers it, {ok: true, result} or
+// {ok: false, reason}, handed back unshaped. It is read under the same store
+// root as the queue file, since a failed refresh is worth reporting on a host
+// that is away.
 function hostHealth(options) {
     const opts = options || {};
     const loaded = hostConfig(opts);
     const queueFile = typeof opts.storeRoot === 'string' && opts.storeRoot !== ''
         ? path.join(opts.storeRoot, QUEUE_FILE) : queuePath();
     const queueDepthValue = fs.existsSync(queueFile) ? queueDepth(queueFile) : 0;
+    const lastRefresh = typeof opts.storeRoot === 'string' && opts.storeRoot !== ''
+        ? readRefreshResult({ storeRoot: opts.storeRoot }) : readRefreshResult();
     if (!loaded.ok) {
         return {
             ok: false, standDown: loaded.reason, detail: loaded.detail, path: loaded.path,
-            queueDepth: queueDepthValue
+            queueDepth: queueDepthValue, lastRefresh
         };
     }
     const config = loaded.config;
@@ -2314,10 +2424,11 @@ function hostHealth(options) {
             detail: hostAnswered(run.cause)
                 ? 'the memory database refused this usp_Health call: ' + run.detail : run.detail,
             path: loaded.path,
-            queueDepth: queueDepthValue
+            queueDepth: queueDepthValue,
+            lastRefresh
         };
     }
-    return { ok: true, health: counted(run.rows), queueDepth: queueDepthValue, path: loaded.path };
+    return { ok: true, health: counted(run.rows), queueDepth: queueDepthValue, lastRefresh, path: loaded.path };
 }
 
 // The judge calibration counts: mem.usp_JevCalibration under the config's own
@@ -5937,6 +6048,11 @@ module.exports = {
     SNAPSHOT_DIR,
     readSnapshotIndex,
     writeSnapshotIndex,
+    REFRESH_RESULT_FILE,
+    REFRESH_DETAIL_CAP,
+    REFRESH_STEPS,
+    writeRefreshResult,
+    readRefreshResult,
     snapshotRecordPath,
     writeSnapshotRecord,
     readSnapshotRecord,

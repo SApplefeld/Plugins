@@ -53,7 +53,15 @@ export function targetPersonaOf(arg: unknown, own: string): { persona: string } 
 // carries the closed goal's id and the ids of every goal the close completed
 // with it, so the turn's answer is read against the records shown under those
 // goals and no other.
-export type ExpectedTurn = { text: string; settledText?: string } & ({ kind: "delivery"; recordId: string; ground: string; seatLead: boolean; answersAsk?: true } | { kind: "nudge" } | { kind: "plugin" } | { kind: "proposal" } | { kind: "memoryCheck"; goalId: string; goalIds: string[] });
+//
+// A reprompt entry is the [MID-TURN MESSAGE] turn hooks/mid-turn-reprompt.ts
+// queues at a turn's end for the operator-class messages that arrived while
+// that turn ran. It carries the timestamps of the transcript records it
+// covers and the class the scan read, which is only ever the operator's. A
+// turn that matched it stands as the operator's own for the effort gate, the
+// autonomy tool and the ask lift; every other consumer of the kind treats it
+// as a plugin entry.
+export type ExpectedTurn = { text: string; settledText?: string } & ({ kind: "delivery"; recordId: string; ground: string; seatLead: boolean; answersAsk?: true } | { kind: "nudge" } | { kind: "plugin" } | { kind: "proposal" } | { kind: "memoryCheck"; goalId: string; goalIds: string[] } | { kind: "reprompt"; coveredAt: number[]; senderClass: "operator" });
 
 // Whether a turn's opening text is the text an entry was submitted with, on
 // either of the entry's two keys. An empty turn text (a continuation) and an

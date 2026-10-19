@@ -228,6 +228,7 @@ import { recallInjection as recallInjectionFromModule, recognitionAsk as recogni
 import { controllerTick, drainInbox, heartbeatTick, type TickContext } from "./controller-tick";
 import { serveToolCall, type EffortAct, type ToolCallContext } from "./tool-call";
 import { serveTurnComplete, type TurnCompleteContext } from "./turn-complete";
+import { readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, liftHeldAsksForReprompt } from "./mid-turn-reprompt";
 
 // Names this module exports whose bodies live in the concern modules above.
 export type ChannelSender = ChannelSenderFromModule;
@@ -1460,6 +1461,10 @@ const sess: SessionState = {
   staleAfterMs: 90_000,
   turnStartedAt: null,
   workdir: "",
+  repromptCoveredUntil: null,
+  repromptWindowFrom: null,
+  repromptIdPendingLogged: false,
+  repromptChain: Promise.resolve(),
   cacheWarmUntil: null,
   fleetHealth: undefined,
   fleetFirstReadingDone: false,
@@ -2504,18 +2509,25 @@ const appendToChannelLog = async (dp: any, lines: string[]): Promise<string> => 
 // the heartbeat tick calls it on its owner check. One newline rule (one JSON
 // object per line, separator inserted when the existing file does not end in a
 // newline) so the two paths can never disagree on the log's byte layout.
+// The persona, session, epoch and state are bound at entry. An identity call
+// that switches persona during the awaits below replaces the live fields, so
+// the log line and the release name the yielded persona, never the new one.
 export const yieldNow = async (dp: any, onDisk: { activeSessionId: string; epoch: number }): Promise<void> => {
-  const rec = yieldRecord(sess.persona, sess.mySessionId, onDisk.activeSessionId, sess.myEpoch, onDisk.epoch);
-  sess.state.decisions.push(rec.decision);
+  const persona = sess.persona;
+  const sessionId = sess.mySessionId;
+  const epoch = sess.myEpoch;
+  const state = sess.state;
+  const rec = yieldRecord(persona, sessionId, onDisk.activeSessionId, epoch, onDisk.epoch);
+  state.decisions.push(rec.decision);
   sess.isOwner = false;
-  try { dp.ui.log(`Agentic: yielded '${sess.persona}' to ${onDisk.activeSessionId} (epoch ${onDisk.epoch})`); } catch { /* non-fatal */ }
+  try { dp.ui.log(`Agentic: yielded '${persona}' to ${onDisk.activeSessionId} (epoch ${onDisk.epoch})`); } catch { /* non-fatal */ }
   try {
     await appendLines(dp, sess.yieldLogPath, [rec.logLine]);
   } catch { /* non-fatal */ }
   // F13: release the commons claim so an exited session does not lock the
   // persona for the full 90s staleness window.
   try {
-    await releaseResource(commonsStoreOf(dp), `persona:${sess.persona}`, sess.mySessionId, Date.now(), commonsMeta());
+    await releaseResource(commonsStoreOf(dp), `persona:${persona}`, sessionId, Date.now(), commonsMeta());
   } catch { /* non-fatal */ }
 };
 
@@ -2703,36 +2715,121 @@ async function foldSettledPlans(dp: any): Promise<void> {
   }
 }
 
+// Whether the session moved under a guarded write since the write captured
+// its persona, epoch and state. Nothing but the session's own code writes
+// these fields, so any one of the three differing is the session's own move.
+// The state is compared too, so a state replaced under the write counts as a
+// move even where the persona and the epoch read as they did at the capture.
+function movedSince(startPersona: string, startEpoch: number, startState: AgentState): boolean {
+  return sess.persona !== startPersona || sess.myEpoch !== startEpoch || sess.state !== startState;
+}
+
+// The one decision a guarded write logs when it starts over because its own
+// session moved the persona, the epoch or the state under it, for both of
+// persist's restart points.
+function pushPersistRestarted(startPersona: string, startEpoch: number): void {
+  sess.state.decisions.push({
+    timestamp: Date.now(),
+    loop: "worker",
+    action: "persist_restarted_own_switch",
+    detail: `write started on persona '${startPersona}' at epoch ${startEpoch} and found the session on persona '${sess.persona}' at epoch ${sess.myEpoch}; restarted from the live state`,
+  });
+}
+
+// The step and the bound of each wait a guarded write makes for its own
+// session's persona switch to settle. The wait is a $.clock sleep, and a clock
+// wait spends the calling hook's own 10,000 ms budget while it runs. The bound
+// is per wait, the file's 2,000 ms write bound. A write can wait at its start,
+// after its store read and after its claims read, and a settled wait starts
+// the write over, so one write can wait more than once and nothing bounds its
+// waits taken together. The wait counts its steps rather than reading the
+// clock.
+const PERSIST_SWITCH_STEP_MS = 50;
+const PERSIST_SWITCH_BOUND_MS = 2_000;
+
+// Whether the session is part way through a switch of its own. A settled
+// owner's state carries its persona, its session and its epoch, since every
+// path that makes a session an owner sets the three together. The identity
+// tool sets the persona first and the session and the epoch on the state
+// only after up to three awaits, so a write that reads the session in that stretch
+// finds them apart. The one exception is a switch back to a persona whose
+// slot already names this session at the session's current epoch, which
+// reads as settled and costs one redundant write, never a yield.
+function sessionMidSwitch(): boolean {
+  return sess.state.persona !== sess.persona
+    || sess.state.activeSessionId !== sess.mySessionId
+    || sess.state.epoch !== sess.myEpoch;
+}
+
+// Waits in clock steps for the session's switch to settle. Answers "settled"
+// once the three fields agree, "lost" where the session gave the persona up
+// while it waited, and "refused" where the bound ran out first, after logging
+// the refusal with the bound and the live fields. Nothing here writes the
+// store or yields.
+async function waitOutOwnSwitch(dp: any): Promise<"settled" | "lost" | "refused"> {
+  for (let waited = 0; waited < PERSIST_SWITCH_BOUND_MS; waited += PERSIST_SWITCH_STEP_MS) {
+    await dp.clock.sleep(PERSIST_SWITCH_STEP_MS);
+    if (!sess.isOwner) return "lost";
+    if (!sessionMidSwitch()) return "settled";
+  }
+  sess.state.decisions.push({
+    timestamp: Date.now(),
+    loop: "worker",
+    action: "persist_refused_mid_switch",
+    detail: `the session's own switch did not settle within ${PERSIST_SWITCH_BOUND_MS} ms, so the write was refused: persona '${sess.persona}' against state '${sess.state.persona}', session ${sess.mySessionId} against state ${sess.state.activeSessionId}, epoch ${sess.myEpoch} against state ${sess.state.epoch}`,
+  });
+  return "refused";
+}
+
 // M7: single guarded-write path shared by every store write site.
 // Closes over sess so all write sites share one yield + write path.
 // `rollBackOnYield` is for a caller that advanced a value for the write it is
 // asking for here, whether that value is a field of sess.state or one the
-// session holds only in memory. Every false return below is this session
-// giving the persona up, and the caller cannot undo that advance afterwards:
-// the commons branch writes sess.state before it returns false, and the
-// owner check at the top of this function makes every later call a no-op, so
-// a rollback assigned after the call rests in memory while the advanced value
-// rests on disk. The callback runs on each false path before anything is
+// session holds only in memory. Every false return below is a refused write:
+// this session giving the persona up, or a switch of its own that did not
+// settle within the wait's bound. After a yield the caller cannot undo that
+// advance: the commons branch writes the yielded persona's state before it
+// returns false, and the owner check at the top of this function makes every
+// later call a no-op, so a rollback assigned after the call rests in memory
+// while the advanced value rests on disk. The callback runs on each false path before anything is
 // written, so what lands in the store is the rolled-back value.
 export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<boolean> => {
   if (!sess.isOwner) { rollBackOnYield?.(); return false; }
-  sess.state.updatedAt = Date.now();
+  // A write that starts while the session's own switch is under way waits
+  // for it to settle before it captures anything below, and refuses where
+  // the session gives the persona up meanwhile or the bound runs out.
+  if (sessionMidSwitch() && (await waitOutOwnSwitch(dp)) !== "settled") { rollBackOnYield?.(); return false; }
+  // The write judges the store on disk against the session, persona, epoch
+  // and state it holds here, never against the live fields once an await
+  // returns. Nothing but this session's own code writes these fields. So a
+  // persona, epoch or state that differs from its capture once the store
+  // read or the claims read is back was moved by the session under this
+  // write, and the write starts over below. A switch still under way at
+  // either read is waited out first and then starts the write over the same
+  // way. An owner flag dropped by then is a yield the session already took,
+  // so the write returns false. A disk that disagrees while the fields hold
+  // still is read as a rival's claim, and the write yields to it.
+  const startPersona = sess.persona;
+  const startSessionId = sess.mySessionId;
+  const startEpoch = sess.myEpoch;
+  const startState = sess.state;
+  startState.updatedAt = Date.now();
 
   // A goal completed or abandoned since the last write loses its tasks here,
   // at the write, rather than at the next load: a long-lived session never
   // reloads, and its closed goal's tasks would otherwise stay in its state.
-  reapCompletedGoalTasks(sess.state);
+  reapCompletedGoalTasks(startState);
 
   // A record whose timeout passed since the last write expires here too, at the
   // write, for the same reason: a long-lived session never reloads, so a load
   // reap alone would leave a day-old intention reading as open in its state and
   // in every write it made.
-  reapTurnRecords(sess.state, Date.now());
+  reapTurnRecords(startState, Date.now());
 
   // The ask ledger's bounds run here too, at the write: a closed entry past
   // its keep drops, and the list is cut to its cap, oldest closed first. Open
   // entries never drop at a write; the open cap is openAsk's refusal.
-  pruneAsks(sess.state, Date.now());
+  pruneAsks(startState, Date.now());
 
   // Item 5 (Bounded store): cap the decision log and memory at push time,
   // not only when the file happens to be parsed at a session load - a
@@ -2740,47 +2837,51 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   // held over 500 decisions against a cap of 200 that only ever applied on
   // read. Overflow rolls to the append-only channel log rather than being
   // silently dropped.
-  if (sess.state.decisions.length > DECISIONS_MAX) {
-    const overflow = sess.state.decisions.slice(0, sess.state.decisions.length - DECISIONS_MAX);
+  // Both rolls work wholly on the persona and the state captured above. An
+  // identity call during a roll's append leaves the roll to land on the
+  // state that call replaced, which nothing writes again, and the restart
+  // after the store read rolls the live state under its own persona.
+  if (startState.decisions.length > DECISIONS_MAX) {
+    const overflow = startState.decisions.slice(0, startState.decisions.length - DECISIONS_MAX);
     // Round 47: append before trimming - a failed write must not lose the
     // overflow with no record anywhere. Only drop the in-memory entries
     // once the log actually holds them.
     try {
-      await appendToChannelLog(dp, overflow.map((d) => JSON.stringify({ persona: sess.persona, kind: "decision", rolledAt: Date.now(), record: d })));
-      sess.state.decisions = sess.state.decisions.slice(-DECISIONS_MAX);
+      await appendToChannelLog(dp, overflow.map((d) => JSON.stringify({ persona: startPersona, kind: "decision", rolledAt: Date.now(), record: d })));
+      startState.decisions = startState.decisions.slice(-DECISIONS_MAX);
     } catch (err) {
       // Round 50 point 3: name the refusal instead of staying silent - the
       // overflow stays in memory for the next persist() to retry, but the
       // next gate must be able to tell "nothing to roll" from "roll refused".
-      sess.state.decisions.push({
+      startState.decisions.push({
         timestamp: Date.now(),
         loop: "worker",
         action: "channel_window_roll_failed",
-        detail: `decision cap roll refused, overflow kept in memory (persona: ${sess.persona}): ${err instanceof Error ? err.message : String(err)}`,
+        detail: `decision cap roll refused, overflow kept in memory (persona: ${startPersona}): ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   }
-  if (sess.state.memory.length > MEMORY_MAX) {
+  if (startState.memory.length > MEMORY_MAX) {
     // Evict oldest non-pinned entries first; pinned entries never roll off.
-    const pinned = sess.state.memory.filter((m) => m.pinned);
-    const unpinned = sess.state.memory.filter((m) => !m.pinned).sort((a, b) => a.createdAt - b.createdAt);
+    const pinned = startState.memory.filter((m) => m.pinned);
+    const unpinned = startState.memory.filter((m) => !m.pinned).sort((a, b) => a.createdAt - b.createdAt);
     const keepUnpinnedCount = Math.max(0, MEMORY_MAX - pinned.length);
     const overflowCount = unpinned.length - keepUnpinnedCount;
     if (overflowCount > 0) {
       const overflow = unpinned.slice(0, overflowCount);
       const kept = unpinned.slice(overflowCount);
       try {
-        await appendToChannelLog(dp, overflow.map((m) => JSON.stringify({ persona: sess.persona, kind: "memory", rolledAt: Date.now(), record: m })));
+        await appendToChannelLog(dp, overflow.map((m) => JSON.stringify({ persona: startPersona, kind: "memory", rolledAt: Date.now(), record: m })));
         // Restore original relative order (createdAt) across pinned + kept.
-        sess.state.memory = [...pinned, ...kept].sort((a, b) => a.createdAt - b.createdAt);
+        startState.memory = [...pinned, ...kept].sort((a, b) => a.createdAt - b.createdAt);
       } catch (err) {
         // Round 50 point 3: same naming as the decision cap above - the
         // overflow stays in memory for the next persist() to retry.
-        sess.state.decisions.push({
+        startState.decisions.push({
           timestamp: Date.now(),
           loop: "worker",
           action: "channel_window_roll_failed",
-          detail: `memory cap roll refused, overflow kept in memory (persona: ${sess.persona}): ${err instanceof Error ? err.message : String(err)}`,
+          detail: `memory cap roll refused, overflow kept in memory (persona: ${startPersona}): ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     }
@@ -2788,14 +2889,31 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   const store: Record<string, unknown> = await dp.fs.exists(sess.storePath)
     ? (JSON.parse(await dp.fs.read(sess.storePath)) as Record<string, unknown>)
     : {};
-  const onDisk = store[sess.persona] as AgentState | undefined;
+  // The session moved under this write while a roll's append or the store
+  // read was in flight. An owner flag dropped by now is a yield the session
+  // already took, through another write or an identity call that joined as
+  // a reader, so this write refuses as every other false path does and logs
+  // nothing of its own. A persona, epoch or state that moved means the store
+  // just read is the disk as it stood before the session's own write, so it
+  // is judged by nothing: the write starts over from a fresh capture, reads
+  // the disk the session's own write left, and writes the live state. No
+  // rollback runs on a restart, since nothing is refused. A switch still
+  // under way is waited out first, then starts the write over the same way.
+  if (!sess.isOwner) { rollBackOnYield?.(); return false; }
+  const waitedAtStoreRead = sessionMidSwitch();
+  if (waitedAtStoreRead && (await waitOutOwnSwitch(dp)) !== "settled") { rollBackOnYield?.(); return false; }
+  if (waitedAtStoreRead || movedSince(startPersona, startEpoch, startState)) {
+    pushPersistRestarted(startPersona, startEpoch);
+    return persist(dp, rollBackOnYield);
+  }
+  const onDisk = store[startPersona] as AgentState | undefined;
   // F9 invariant: three sites raise the epoch: agentic_identity (commons winner),
   // session.start claim (heartbeat stale), and controller-tick promotion (heartbeat
   // stale). The two heartbeat-based sites and the commons check all use the same
   // staleAfterMs threshold (F9a: single-sourced via sess.staleAfterMs), so they
   // cannot disagree on liveness. The epoch check and commons check here remain as
   // defense in depth.
-  if (onDisk && shouldYield(onDisk, sess.mySessionId, sess.myEpoch)) {
+  if (onDisk && shouldYield(onDisk, startSessionId, startEpoch)) {
     rollBackOnYield?.();
     await yieldNow(dp, onDisk);
     return false;
@@ -2803,9 +2921,17 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   // Commons: check machine-global arbitration (Stage 2 integration).
   // If a live competitor has an earlier claim on this persona, yield.
   try {
-    const resource = `persona:${sess.persona}`;
+    const resource = `persona:${startPersona}`;
     const claims = await readAllClaims(commonsStoreOf(dp), sess.staleAfterMs);
-    if (shouldYieldCommons(claims, resource, sess.mySessionId)) {
+    // The resource above names the persona the session held before the
+    // claims read. A session that moved under that read is judged by nothing
+    // here, since a yield would hand over the persona it holds now on a claim
+    // read for another one, another epoch or another state. Control falls to
+    // the checks after this try, which refuse, wait out the switch or start
+    // over.
+    const movedUnderClaimsRead = !sess.isOwner || sessionMidSwitch()
+      || movedSince(startPersona, startEpoch, startState);
+    if (!movedUnderClaimsRead && shouldYieldCommons(claims, resource, startSessionId)) {
       // Before the write below, which is the one this branch makes: the
       // caller's advanced field would otherwise land in the store with the
       // write that was asked for refused.
@@ -2813,33 +2939,38 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
       const winner = commonsWinner(claims, resource);
       // Write to the yield log for observability (same as epoch-based yield).
       const rec = yieldRecord(
-        sess.persona,
-        sess.mySessionId,
+        startPersona,
+        startSessionId,
         winner ?? "unknown",
-        sess.myEpoch,
+        startEpoch,
         0, // No epoch in commons; use 0 as a sentinel
       );
-      try {
-        await appendLines(dp, sess.yieldLogPath, [rec.logLine]);
-      } catch { /* non-fatal */ }
-      sess.state.decisions.push({
+      // The yield is recorded and ownership dropped before the first await,
+      // as yieldNow does. An identity call that switches persona during the
+      // awaits below replaces the live persona, state and owner flag, so
+      // everything after this point names the yielded persona and its state.
+      const yieldedState = startState;
+      yieldedState.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",
         action: "persona_yield_commons",
         detail: `Yielded ${resource} to ${winner} (commons arbitration)`,
       });
       sess.isOwner = false;
-      try { dp.ui.log(`Agentic: yielded '${sess.persona}' to ${winner} (commons)`); } catch { /* non-fatal */ }
+      try {
+        await appendLines(dp, sess.yieldLogPath, [rec.logLine]);
+      } catch { /* non-fatal */ }
+      try { dp.ui.log(`Agentic: yielded '${startPersona}' to ${winner} (commons)`); } catch { /* non-fatal */ }
       // F13: release the commons claim so an exited session does not lock the
       // persona for the full 90s staleness window.
       try {
-        await releaseResource(commonsStoreOf(dp), resource, sess.mySessionId, Date.now(), commonsMeta());
+        await releaseResource(commonsStoreOf(dp), resource, startSessionId, Date.now(), commonsMeta());
       } catch { /* non-fatal */ }
       // Persist the yield decision to disk before returning
       const store2: Record<string, unknown> = await dp.fs.exists(sess.storePath)
         ? (JSON.parse(await dp.fs.read(sess.storePath)) as Record<string, unknown>)
         : {};
-      store2[sess.persona] = sess.state;
+      store2[startPersona] = yieldedState;
       await dp.fs.write(sess.storePath, JSON.stringify(store2, null, 2));
       return false;
     }
@@ -2858,7 +2989,17 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
     // every other yield path makes.
     if (!sess.isOwner) return false;
   }
-  store[sess.persona] = sess.state;
+  // The claims read is a second await the session can move under, and the
+  // store object above was read before it, so the store read's tests run
+  // again here, before that store is written.
+  if (!sess.isOwner) { rollBackOnYield?.(); return false; }
+  const waitedAtClaimsRead = sessionMidSwitch();
+  if (waitedAtClaimsRead && (await waitOutOwnSwitch(dp)) !== "settled") { rollBackOnYield?.(); return false; }
+  if (waitedAtClaimsRead || movedSince(startPersona, startEpoch, startState)) {
+    pushPersistRestarted(startPersona, startEpoch);
+    return persist(dp, rollBackOnYield);
+  }
+  store[startPersona] = startState;
   await dp.fs.write(sess.storePath, JSON.stringify(store, null, 2));
   return true;
 };
@@ -3443,6 +3584,11 @@ export const register: Register = async (on, options) => {
   // message, captured at turn.start from the flag above so turn.complete
   // can act on it after the flag has already reset for the next prompt.
   let currentTurnIsChannelOrigin = false;
+  // Whether the turn now running matched a `reprompt` entry. Only the reply
+  // backstop reads it, so the re-prompt turn's answer reaches the thread
+  // while the score and memory paths still treat it as a plugin turn. Like
+  // the flag above it outlives a subagent's completion inside the turn.
+  let currentTurnIsReprompt = false;
   // What the real prompt.submit hook saw on each genuine external prompt
   // whose turn has not opened yet: the prompt's text, the text the hook
   // chain beneath settled it to where it reported one, its origin kind
@@ -3520,16 +3666,19 @@ export const register: Register = async (on, options) => {
   // turn goal_autonomy may set the level in. It reads as
   // turnIsOperatorsOrCoordinators with the coordinator branch removed: a
   // priming turn is not, a turn that matched an expected turn is not
-  // whatever its kind or ground, and any
-  // other turn is only where the reading it took carries one of the
-  // operator's kinds. So a nudge or delivery turn that opens while a channel
+  // whatever its kind or ground unless the entry is a mid-turn re-prompt,
+  // and any other turn is only where the reading it took carries one of
+  // the operator's kinds. So a nudge or delivery turn that opens while a channel
   // prompt's reading still waits for its own turn is not the operator's,
   // since that turn matched its expected-turn entry. A channel turn whose
   // envelope names the participant class is not the operator's either: it is
   // a person in the thread, whose words carry no authority.
   const turnIsOperators = (): boolean => {
     if (currentTurnIsPriming) return false;
-    if (currentTurnEntry !== null) return false;
+    // The one matched entry that is the operator's: the [MID-TURN MESSAGE]
+    // re-prompt, which carries only messages the harness recorded as
+    // delivered from the operator's thread under the operator class.
+    if (currentTurnEntry !== null) return currentTurnEntry.kind === "reprompt";
     if (currentTurnOriginKind === "channel" && currentTurnSenderClass === "participant") return false;
     return OPERATOR_ORIGIN_KINDS.has(currentTurnOriginKind);
   };
@@ -5974,6 +6123,7 @@ export const register: Register = async (on, options) => {
     // then clear the handoff flag so an unrelated later turn never inherits
     // it. Reset the reply-tracking flag for the turn now starting.
     currentTurnIsChannelOrigin = lastPromptWasChannelOrigin;
+    currentTurnIsReprompt = false;
     lastPromptWasChannelOrigin = false;
     const currentTurnIsExternal = lastPromptWasExternal;
     lastPromptWasExternal = false;
@@ -6091,6 +6241,14 @@ export const register: Register = async (on, options) => {
         countResetSinceNudgeOpened = false;
       }
       if (matched.kind === "memoryCheck" && e.turnId) memoryCheckTurns.set(e.turnId, { goalId: matched.goalId, goalIds: matched.goalIds });
+      if (matched.kind === "reprompt") currentTurnIsReprompt = true;
+      // The re-prompt is the operator's own turn, so it lifts the held asks
+      // as the prompt.submit hook lifts them for an operator's prompt. That
+      // hook never sees the plugin's own submit: its own-origin guard passes
+      // it through first.
+      if (matched.kind === "reprompt" && sess.isOwner && liftHeldAsksForReprompt(sess.state, Date.now())) {
+        try { await persist($); } catch { /* persist could not read or write the store; the lift's line waits in memory */ }
+      }
     } else {
       currentTurnKind = "unaccounted";
       // A delivery entry outlives its record when no turn opens with a
@@ -6658,6 +6816,29 @@ export const register: Register = async (on, options) => {
           const backstopOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: backstopText }));
           return backstopOutcome;
         },
+        // The [MID-TURN MESSAGE] re-prompt, hooks/mid-turn-reprompt.ts: the
+        // scan over the closing turn's window, then one turn carrying what
+        // it took, framed with the context blocks as a delivery is. The
+        // blocks are built whatever opens meanwhile, since the re-prompt is
+        // queued either way. A refused submit withdraws the follow-ups the
+        // blocks offered, as a refused delivery does.
+        queueMidTurnReprompt: async (turnStartedAt: number) => {
+          const repromptHost = { getHome: hostOf($).getHome, run: (argv: readonly string[], init: ProcessRunInit) => runChild($, argv, init), pluginRoot: $.plugin.root };
+          const scanned = await readMidTurnMessages(repromptHost, sess, turnStartedAt);
+          if (scanned.kind !== "taken") return;
+          const repromptBody = repromptText(scanned.messages);
+          const repromptFollowUps: string[] = [];
+          const repromptBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => true }, repromptBody, contextSourcesOf($, undefined, repromptFollowUps));
+          const framedRepromptText = deliveryWithContext(repromptBlocks ?? [], repromptBody);
+          const repromptEntry = expectTurn({ kind: "reprompt", coveredAt: scanned.messages.map((m) => m.at), senderClass: "operator", text: framedRepromptText });
+          const repromptOutcome = await submitExpectedTurn($, expectedTurns, repromptEntry);
+          if (repromptOutcome.ok) {
+            noteRepromptQueued(sess, scanned.messages);
+          } else {
+            withdrawFollowUpsOffered(repromptFollowUps);
+            noteRepromptRefused(sess, repromptOutcome.how, repromptOutcome.reason);
+          }
+        },
         openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),
         persist: () => persist($),
         activate: (nextId, reason) => activate($, nextId, reason),
@@ -6702,6 +6883,8 @@ export const register: Register = async (on, options) => {
         setCurrentTurnNudged: (value) => { currentTurnNudged = value; },
         currentTurnIsChannelOrigin: () => currentTurnIsChannelOrigin,
         setCurrentTurnIsChannelOrigin: (value) => { currentTurnIsChannelOrigin = value; },
+        currentTurnIsReprompt: () => currentTurnIsReprompt,
+        setCurrentTurnIsReprompt: (value) => { currentTurnIsReprompt = value; },
         setCurrentTurnIsPriming: (value) => { currentTurnIsPriming = value; },
         setCurrentTurnSenderClass: (value) => { currentTurnSenderClass = value; },
         setCurrentTurnOriginKind: (value) => { currentTurnOriginKind = value; },
