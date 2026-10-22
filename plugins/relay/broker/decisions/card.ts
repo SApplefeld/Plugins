@@ -9,17 +9,20 @@
 // Every string read from a ledger file is written by a worker and reaches a trusted channel here, so
 // each takes `inertField`, the full escape for text a worker wrote, under the same expansion
 // allowance. A brief's line keeps the kit's bold or small-text markers where the line carries them
-// unescaped, and everything else on it takes the same escape once. A persona's name comes from the
-// roster file and takes the same escape, as the board card gives it. The link is the one string here
-// this module does not compose: `links` is the sightings module's `linkFor`, which checks every
-// identifier it interpolates against `SNOWFLAKE`.
+// unescaped, and everything else on it takes `inertKitText` once: the kit's own escape class with
+// `<` and `>` added, which leaves parentheses and a bare URL as the kit left them, so the line draws
+// no wider than the kit counted it. A persona's name comes from the roster file and takes the full
+// escape, as the board card gives it. The link is the one string here this module does not compose:
+// `links` is the sightings module's `linkFor`, which checks every identifier it interpolates against
+// `SNOWFLAKE`.
 import {
   fit,
   heartbeat,
   inertField,
-  inertText,
+  inertKitText,
   MAX_CARD_LENGTH,
   MAX_MESSAGE_LENGTH,
+  spacedRunEnds,
   span,
 } from "../discord/render.ts";
 import { MAX_ROSTER_PERSONA_NAME_LENGTH } from "../board/roster.ts";
@@ -91,11 +94,29 @@ const MAX_MESSAGE_RECOMMEND_LENGTH = 240;
 
 /**
  * Room for one line of a decision brief on a thread message, a bound on the escaped text as the
- * question's is, and how many of the brief's non-blank lines are drawn. Neither keeps the message
- * under `MAX_MESSAGE_LENGTH`: the joined lines are then held to what the heading and the link leave.
+ * question's is, and how many of a part's non-blank lines are drawn. The kit's renderer
+ * (`plugins/personas/hooks/ask-brief.ts` in the Grimoire repository) caps each field in its own
+ * units with `ASK_BRIEF_CAPS` and `ASK_BRIEF_RECOMMEND_MAX`, counting the escapes and each `<` and
+ * `>` twice, and the brief escape draws a kit unit as one unit at most, since it escapes what the
+ * kit escaped, less the list-marker escapes the unescape drops, and gives `<` and `>` the one
+ * backslash the kit counted. So a kit line draws no wider than the kit measured it, and 810 is a
+ * ceiling no kit line reaches: the widest is the If unanswered sentence, 170 units of fixed text
+ * with a wait of up to six digits of minutes, then the worker's recommendation (120 units) and the
+ * unanswered text (200 units), which is under 500. A brings or
+ * costs line is cut by the kit before its escape, at 350 characters, and draws to at most 708. The
+ * bound still holds a line a writer other than the kit wrote. Neither bound keeps a message under
+ * `MAX_MESSAGE_LENGTH`: the joined lines of a part are then held to the room its message has.
  */
-const MAX_MESSAGE_BRIEF_LINE_LENGTH = 600;
+const MAX_MESSAGE_BRIEF_LINE_LENGTH = 810;
 const MAX_MESSAGE_BRIEF_LINES = 24;
+
+/** The most parts a brief draws as messages: the kit writes a framing part and at most two option
+ * parts, and a part past this count is dropped. */
+export const MAX_BRIEF_PARTS = 3;
+
+/** What the line opening each part of the kit's brief begins with, bare, since the kit escapes every
+ * asterisk in a worker's words. */
+const BRIEF_PART_MARKER = "**Decision brief:";
 
 /** The widest `heartbeat` draws: "just now" and "999d ago" are both eight characters. */
 const MAX_HEARTBEAT_LENGTH = 8;
@@ -149,9 +170,9 @@ export function questionOf(question: string): string {
   return match === null ? question : question.slice(0, match.index + 1);
 }
 
-/** Whether an entry carries a decision brief the thread message draws: a string with at least one
- * line left once escaped, so a brief the escape strips to nothing keeps the question.
- * The one test of it, so the message and the thread's one edit cannot disagree. */
+/** Whether an entry carries a decision brief that draws any message: a string with at least one
+ * line left once escaped, so a brief the escape strips to nothing draws none. The one test of it,
+ * gating `renderBriefMessages` and the thread's parts pass. */
 export function hasBrief<T extends Pick<AskEntry, "brief">>(entry: T): entry is T & { brief: string } {
   return typeof entry.brief === "string" && briefLines(entry.brief) !== "";
 }
@@ -167,7 +188,7 @@ export function hasBrief<T extends Pick<AskEntry, "brief">>(entry: T): entry is 
  */
 const KIT_ESCAPE = /\\([\\*_~`|#[\]+.-])/gu;
 
-/** Text with the kit's escape layer removed, so the full escape after it puts each character behind
+/** Text with the kit's escape layer removed, so the brief escape after it puts each character behind
  * one backslash at most. */
 function unescapeKit(text: string): string {
   return text.replace(KIT_ESCAPE, "$1");
@@ -178,27 +199,30 @@ const BOLD = "**";
 const SMALL = "-# ";
 
 /**
- * One line of a decision brief as a message line. The line takes `visible` first, so a planted
- * invisible character cannot defeat the shape read, and its shape is read on that line before
- * anything else, so only markers the kit wrote bare qualify: the kit escapes every marker in a
- * worker's words, which therefore never open a shape. A line opening and closing with two asterisks
- * around at least one character draws bold, and one opening with a hyphen, a hash and a space draws
- * as small text. Either keeps its markers; what is between them loses the kit's escape layer and
- * then takes the full escape, so each character draws behind one backslash at most and a mention,
- * a link, a heading or a fence inside the shape still draws as text. That is cut to the line's
- * bound less the markers' room. Every other line, and a shape with nothing left once escaped,
- * loses the kit's escape layer and takes the full escape whole.
+ * One line of a decision brief as a message line. The line takes `spacedRunEnds` and then `visible`
+ * first. A URL run then ends where the kit's does, and a planted invisible character cannot defeat
+ * the shape read. The shape is read on that line before anything else, so only markers the kit
+ * wrote bare qualify: the kit escapes every marker in a worker's words, which therefore never open
+ * a shape. A line opening and closing with two asterisks around at least one character draws bold,
+ * and one opening with a hyphen, a hash and a space draws as small text. Either keeps its markers;
+ * what is between them loses the kit's escape layer and then takes the brief escape,
+ * `inertKitText`, so each character the kit escaped draws behind one backslash, `<` and `>` draw
+ * behind one, and a mention, a link, a heading or a fence inside the shape still draws as text.
+ * Parentheses and a bare URL's own characters draw as the kit left them, bare, which is what keeps
+ * the line no wider than the kit counted it. That is cut to the line's bound less the markers'
+ * room. Every other line, and a shape with nothing left once escaped, loses the kit's escape layer
+ * and takes the brief escape whole.
  */
 function briefLine(raw: string): string {
-  const line = visible(raw);
+  const line = visible(spacedRunEnds(raw));
   if (line.length > 2 * BOLD.length && line.startsWith(BOLD) && line.endsWith(BOLD)) {
-    const inner = inertText(unescapeKit(line.slice(BOLD.length, -BOLD.length)));
+    const inner = inertKitText(unescapeKit(line.slice(BOLD.length, -BOLD.length)));
     if (inner !== "") return `${BOLD}${fit(inner, MAX_MESSAGE_BRIEF_LINE_LENGTH - 2 * BOLD.length)}${BOLD}`;
   } else if (line.startsWith(SMALL)) {
-    const rest = inertText(unescapeKit(line.slice(SMALL.length)));
+    const rest = inertKitText(unescapeKit(line.slice(SMALL.length)));
     if (rest !== "") return `${SMALL}${fit(rest, MAX_MESSAGE_BRIEF_LINE_LENGTH - SMALL.length)}`;
   }
-  return inertField(unescapeKit(line), MAX_MESSAGE_BRIEF_LINE_LENGTH);
+  return fit(inertKitText(unescapeKit(line)), MAX_MESSAGE_BRIEF_LINE_LENGTH);
 }
 
 /**
@@ -206,7 +230,8 @@ function briefLine(raw: string): string {
  * escape folds a text onto one line; a line left blank dropped; and the first
  * `MAX_MESSAGE_BRIEF_LINES` of the rest rejoined. Each line is trimmed and its runs of whitespace
  * folded to one space, so an indented line draws flush left. A line opening with a hyphen still
- * draws as a bullet, since the hyphen is not in the escape class.
+ * draws as a bullet, since the unescape drops the kit's backslash before it and the brief escape's
+ * class does not put one back.
  */
 function briefLines(brief: string): string {
   return brief
@@ -215,6 +240,45 @@ function briefLines(brief: string): string {
     .filter((line) => line !== "")
     .slice(0, MAX_MESSAGE_BRIEF_LINES)
     .join("\n");
+}
+
+/**
+ * A brief's parts as raw text: a part runs from one line opening `**Decision brief:` to the next
+ * such line, and the lines before the first such line are the first part's opening, so a brief with
+ * none is one part. The marker is read on `visible(line)`, so an invisible character cannot hide or
+ * forge a split. `briefLine` reads `visible(spacedRunEnds(raw))` instead. A tab reads as a space in
+ * both, turned by `spacedRunEnds` in one and collapsed by `visible` in the other, so the two reads
+ * differ only where an ASCII control from the vertical tab to the carriage return, or a byte order
+ * mark, sits inside a bare marker, which the kit never writes. Nothing is escaped here: the split
+ * reads the bare markers the kit wrote.
+ */
+function briefParts(brief: string): string[] {
+  const parts: string[][] = [[]];
+  let marked = false;
+  for (const line of brief.split("\n")) {
+    if (visible(line).startsWith(BRIEF_PART_MARKER)) {
+      if (marked) parts.push([]);
+      marked = true;
+    }
+    parts[parts.length - 1]?.push(line);
+  }
+  return parts.map((lines) => lines.join("\n"));
+}
+
+/**
+ * The messages a brief draws as, one per part in order, each finished: escaped line by line by
+ * `briefLines` and held with the ellipsis cut to its message's room. At most `MAX_BRIEF_PARTS` parts
+ * are drawn and the rest dropped, and a part that draws to nothing is omitted. The last message
+ * takes the closing line, so it is held to `MAX_ASK_BODY_LENGTH`; a message before it is never
+ * edited and is held to `MAX_MESSAGE_LENGTH`. An entry with no brief draws none.
+ */
+export function renderBriefMessages(entry: Readonly<AskEntry>): string[] {
+  if (!hasBrief(entry)) return [];
+  const drawn = briefParts(entry.brief)
+    .slice(0, MAX_BRIEF_PARTS)
+    .map(briefLines)
+    .filter((part) => part !== "");
+  return drawn.map((part, index) => fit(part, index === drawn.length - 1 ? MAX_ASK_BODY_LENGTH : MAX_MESSAGE_LENGTH));
 }
 
 /** An untrusted field already bounded by its own producer: escaped and guarded, never re-cut. */
@@ -415,21 +479,11 @@ export function renderDecisionsCard(
  * link are kept whole, the recommendation takes its own bound, and the question takes what is left,
  * so a message whose every field is at its bound still ends with the link, and the close that later
  * appends the outcome line stays under the ceiling. The question gives up room first because it is
- * the one line the card already draws a cut of.
- *
- * An entry carrying a decision brief draws the brief's lines in place of the question and the
- * recommendation, since the brief carries both in its own words. The lines take what the heading
- * and the link leave, and a brief past that room is cut at its end with the ellipsis mark, so the
- * message still ends with the link and keeps the outcome line's room.
+ * the one line the card already draws a cut of. An entry's brief never reaches this message: it is
+ * drawn as messages of its own by `renderBriefMessages`.
  */
 function fitMessage(persona: string, entry: Readonly<AskEntry>, link: string | null): string {
   const head = heading(persona, entry);
-  if (hasBrief(entry)) {
-    const tail = link === null ? [] : [link];
-    // Charged as the question's room is below: every other line with the newline joining it on.
-    const brief = fit(briefLines(entry.brief), MAX_ASK_BODY_LENGTH - spent([head, ...tail]));
-    return [head, brief, ...tail].filter((line) => line !== "").join("\n");
-  }
   const recommendation =
     entry.recommend === null || entry.recommend === ""
       ? null
@@ -446,8 +500,8 @@ function fitMessage(persona: string, entry: Readonly<AskEntry>, link: string | n
 /**
  * The message the card's thread carries for one ask: the heading the card draws, the question whole
  * but for its recommendation segment, the recommendation where the worker gave one, and the link to
- * where it was asked where one is known. Where the entry carries a decision brief, the brief's lines
- * stand in place of the question and the recommendation.
+ * where it was asked where one is known. It draws the same bytes whether or not the entry carries a
+ * decision brief, which `renderBriefMessages` draws as messages after it.
  */
 export function renderAskMessage(
   persona: string,
@@ -458,8 +512,9 @@ export function renderAskMessage(
 }
 
 /**
- * What an ask's message is edited to once the ledger shows it closed: the body the message holds,
- * as posted or as edited to its brief, then one line with the outcome, the entry's status and how
+ * What the message a close edits is edited to once the ledger shows the ask closed: the body that
+ * message holds, which is the ask's message or, once the brief's parts are posted, the last part's
+ * message, then one line with the outcome, the entry's status and how
  * long ago it closed. An ask whose outcome the ledger no longer shows, closed longer ago than the
  * reader's recently-closed window, keeps the same body and gains the closing word alone, with no
  * status it cannot know. The body was posted with the outcome line's room reserved, so the edit

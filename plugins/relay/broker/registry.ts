@@ -293,9 +293,12 @@ export type SessionRecord = {
   /**
    * The directory the session was launched in, as its SessionStart payload's `cwd` reported it
    * through the absolute-local-path reader, and null when none was reported or the reader refused
-   * it. Written on every SessionStart, a start naming none clearing it, and left as it was by every
-   * other event. It is an instruction to open a directory, as a transcript path is an instruction
-   * to open a file: it is never rendered, never logged and never published on `GET /sessions`.
+   * it. Each SessionStart but a compaction's writes it, a start naming none clearing it, and every
+   * other event leaves it as it was. A compaction never records one: it fires inside the running
+   * process wherever a tool call has moved the shell, so it is no launch. It leaves a refreshed
+   * record's directory as it was, and a record it opens holds none. It is an instruction to open a
+   * directory, as a transcript path is an instruction to open a file: it is never rendered, never
+   * logged and never published on `GET /sessions`.
    * Persisted, because a restart keeps a live session and must still know where its files may come
    * from.
    */
@@ -612,9 +615,12 @@ export function createRegistry(options: RegistryOptions): Registry {
       previous.state = "live";
       previous.source = intake.source ?? previous.source;
       previous.name = intake.sessionName ?? previous.name;
-      // Unlike the source and the name, never kept from an earlier start: a directory the latest
-      // start did not vouch for is not one a reply may send from.
-      previous.workdir = intake.workdir ?? null;
+      // A compaction fires inside the running process, in whatever directory a tool call last moved
+      // its shell to, so its directory vouches for nothing about where the session lives and the
+      // recorded one stands. Every other start is a launch, and unlike the source and the name its
+      // directory is never kept from an earlier start: a directory the latest launch did not vouch
+      // for is not one a reply may send from.
+      previous.workdir = intake.source === "compact" ? previous.workdir : (intake.workdir ?? null);
       previous.lastHookAt = now();
       previous.lastEngagementAt = now();
       return previous;
@@ -685,7 +691,8 @@ export function createRegistry(options: RegistryOptions): Registry {
       turnActiveAt: null,
       harnessNotice: null,
       title: null,
-      workdir: intake.workdir ?? null,
+      // A compaction vouches for no directory, here as in the refresh above.
+      workdir: intake.source === "compact" ? null : (intake.workdir ?? null),
     };
     sessions.set(sessionId, record);
     // A fresh record starts fresh announcement bookkeeping: a held change or a changed flag from

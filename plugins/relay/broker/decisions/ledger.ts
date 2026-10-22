@@ -19,8 +19,9 @@ import type { RosterPersona } from "../board/roster.ts";
 export const MAX_ASK_FIELD_LENGTH = 1_000;
 
 /** An entry's decision brief is cut to this many code points: wide enough to hold whole a brief the
- * kit bounds at 1,800 UTF-16 units, which the field cap above would cut. */
-export const MAX_ASK_BRIEF_LENGTH = 2_000;
+ * kit writes as at most three parts, each under 1,800 UTF-16 units, joined by blank lines, which
+ * the field cap above would cut. */
+export const MAX_ASK_BRIEF_LENGTH = 6_000;
 
 /** Each list the reader returns holds at most this many entries. */
 export const MAX_ASKS_PER_LIST = 64;

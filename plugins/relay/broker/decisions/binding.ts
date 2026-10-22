@@ -1,7 +1,8 @@
 // Persistence for the decisions card: its own thread, so a broker restart edits the card it already
 // owns instead of opening a second "Fleet: Decisions" thread beside the first one, and the map from
-// each ask to the message this card posted for it in that thread, so a restart neither posts an ask
-// a second time nor loses the message a close has to edit.
+// each ask to the messages this card posted for it in that thread, its own and one per part of its
+// decision brief, so a restart neither posts an ask or a part a second time nor loses the message a
+// close has to edit.
 //
 // The thread binding is a thin caller over the shared binding module (`broker/card-binding.ts`),
 // which owns that snapshot's format, write and failure handling; this file supplies only the card's
@@ -22,7 +23,7 @@ import {
 import { readCappedFile } from "../capped-read.ts";
 import { clean, isWellFormed } from "../sanitize.ts";
 import { SNOWFLAKE } from "../security/senders.ts";
-import { MAX_ASK_BODY_LENGTH } from "./card.ts";
+import { MAX_ASK_BODY_LENGTH, MAX_BRIEF_PARTS } from "./card.ts";
 import { MAX_ASK_FIELD_LENGTH, cut } from "./ledger.ts";
 
 export type DecisionsCardBinding = CardBinding;
@@ -51,8 +52,10 @@ export const MAX_ASK_RECORDS = 256;
  * escape's backslash two for one). The ledger strips nothing from an id, and JSON writes a control
  * character as a six-byte escape, so an id costs up to 6,000 bytes. That is 5,397 + 6,000 + 300
  * bytes of text, with the snowflake, the two stamps, the brief flag, the keys and the pretty print's
- * indentation under 250 more: one record under 11,950 bytes, and the cap's worth of them under
- * 3.1 MB. A file past this cap is one something else wrote.
+ * indentation under 250 more. The tail adds at most `MAX_BRIEF_PARTS` snowflakes of 20 digits, each
+ * with its quotes, its comma and its line's indentation, and the key, under 150 bytes: one record
+ * under 12,100 bytes, and the cap's worth of them under 3.1 MB. A file past this cap is one
+ * something else wrote.
  */
 export const MAX_ASKS_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -69,23 +72,32 @@ export type AskRecord = {
   /** The ledger entry's own id, unique inside one persona's ledger and not across personas. */
   id: string;
   /**
-   * The message posted for it, or null where Discord accepted the post but returned no readable id.
-   * A null is kept so the ask is not posted again, and its close is marked with no edit to make.
+   * The message posted for it, or null where Discord accepted the post but returned no readable id,
+   * or refused the ask's own message for its content. A null is kept so the ask is not posted again,
+   * and its close is marked with no edit to make when no part follows.
    */
   messageId: string | null;
   /**
-   * The message's text as posted, or as last edited to its brief, which a close edits the message
-   * back to with the outcome line under it. Kept here because the ledger stops showing an ask's
-   * entry a day after it closes, and the question and the link the message exists to carry must
-   * outlive that.
+   * The text of the message a close edits, which the close edits back to with the outcome line under
+   * it: the last part's message once one is posted, and the ask's own message until then. Kept here
+   * because the ledger stops showing an ask's entry a day after it closes, and the text the message
+   * exists to carry must outlive that. Held to `MAX_ASK_BODY_LENGTH`, so the close stays under the
+   * message ceiling whichever message it edits.
    */
   body: string;
   /**
-   * True once the message's body draws the entry's decision brief, or once the one edit to draw it
-   * is settled with no edit to make. False on a message posted before its brief existed, which is
-   * the one edit to its brief this record still owes. A file written before the flag reads false.
+   * True once no more part of the entry's decision brief is owed: every part is posted, or the parts
+   * are settled short with no more to post. False while a part is owed or no brief has shown. A file
+   * written before the flag reads false. A record written before the tail with the flag true carries
+   * the brief cut into its own message, and gets no parts.
    */
   briefed: boolean;
+  /**
+   * The ids of the messages posted for the brief's parts, in order, after the ask's own message, at
+   * most `MAX_BRIEF_PARTS` of them, and empty for an ask with no part posted. The next part owed is
+   * the one at the tail's length. A file written before the tail reads empty.
+   */
+  tailIds: string[];
   /** The entry's `openedAt`, which orders a departed persona's records when the cap drops one. */
   openedAt: number | null;
   /** When this card saw the ask closed and edited its message, or null while it is open. */
@@ -112,13 +124,36 @@ function stampOf(value: unknown): number | null | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** A message id out of the file, normalized and checked as the thread binding's identifiers are, or
+ * null where it is not one. */
+function snowflakeOf(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const id = clean(value);
+  return SNOWFLAKE.test(id) ? id : null;
+}
+
+/** The tail out of the file: empty where the field is absent, and undefined where it is anything but
+ * an array of at most `MAX_BRIEF_PARTS` message ids. */
+function tailOf(value: unknown): string[] | undefined {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_BRIEF_PARTS) return undefined;
+  const ids: string[] = [];
+  for (const held of value) {
+    const id = snowflakeOf(held);
+    if (id === null) return undefined;
+    ids.push(id);
+  }
+  return ids;
+}
+
 /**
- * One record out of the file, or null where it is not one. The message id is interpolated into a
- * token-bearing request path on the next edit, so it is normalized and checked as the thread binding's
- * identifiers are, and a record naming something else is refused rather than carried. A record with
- * no persona names no reading that could ever close it, and one with no body has nothing for a
- * close to edit the message back to, so each is refused too. The id is held to the ledger's own
- * field width and the body to the message ceiling, which are the widest this card wrote.
+ * One record out of the file, or null where it is not one. The message id and each tail id are
+ * interpolated into a token-bearing request path on the edit that closes the ask, so each is
+ * normalized and checked as the thread binding's identifiers are, and a record naming something
+ * else is refused rather than carried. A record with no persona names no reading that could ever
+ * close it, and one with no body has nothing for a close to edit the message back to, so each is
+ * refused too. The id is held to the ledger's own field width and the body to the message ceiling,
+ * which are the widest this card wrote.
  */
 function recordOf(value: unknown): AskRecord | null {
   if (!isRecord(value) || typeof value.id !== "string") return null;
@@ -133,14 +168,17 @@ function recordOf(value: unknown): AskRecord | null {
   const persona = value.persona;
   const body = value.body;
   const id = cut(value.id, MAX_ASK_FIELD_LENGTH);
-  // A flag that is absent or not a boolean reads false: at worst one edit redraws a message that
-  // already carries its brief, while a record refused here would be posted a second time.
+  // A flag that is absent or not a boolean reads false: at worst a message that already carries its
+  // brief gains the brief's parts after it, while a record refused here would be posted a second time.
   const briefed = value.briefed === true;
-  if (value.messageId === null) return { persona, id, messageId: null, body, briefed, openedAt, closedAt };
-  if (typeof value.messageId !== "string") return null;
-  const messageId = clean(value.messageId);
-  if (!SNOWFLAKE.test(messageId)) return null;
-  return { persona, id, messageId, body, briefed, openedAt, closedAt };
+  const tailIds = tailOf(value.tailIds);
+  if (tailIds === undefined) return null;
+  if (value.messageId === null) {
+    return { persona, id, messageId: null, body, briefed, tailIds, openedAt, closedAt };
+  }
+  const messageId = snowflakeOf(value.messageId);
+  if (messageId === null) return null;
+  return { persona, id, messageId, body, briefed, tailIds, openedAt, closedAt };
 }
 
 export type LoadAskRecordsOptions = {

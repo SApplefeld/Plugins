@@ -7,21 +7,30 @@
 // broker last saw land.
 //
 // The card also posts into its thread. An ask the ledger shows open for the first
-// time earns one message there, carrying the question whole, or the kit's decision brief where the
-// entry carries one. A message posted before its brief existed is edited once to the brief when a
-// later reading lists the ask open with one. The ask's message is edited to its outcome
+// time earns one message there, carrying the question whole, and never edited to the kit's decision
+// brief. Where the entry carries a brief, open or recently closed, each of its parts follows as a
+// message of its own, in order, the next part owed posted on each pass until every part is in the
+// thread. The last message an ask has is edited to its outcome
 // when its persona's reading lists the ask recently closed, and to a bare `closed` only when that
 // reading could have listed the ask open and did not: the persona is on the roster, its reading
 // holds a ledger read from a good file, and its open list is under the reader's cap, so an ask
 // absent from it is absent from the file's open asks rather than cut off past the cap. A reading
 // that cannot answer leaves the record for a later pass, since a failed read or a dropped persona
-// says nothing about the ask. Each pass posts at most `MAX_POSTS_PER_PASS` new asks, edits at most
-// `MAX_EDITS_PER_PASS` closed ones and then at most `MAX_BRIEF_EDITS_PER_PASS` bare ones to their
-// brief, the rest waiting for the next pass, so a fleet opening many asks at once never spends a
-// burst of messages. Which ask has which message is the ask map, keyed
-// by persona and id as the ledger reader keys its slots, read at construction and handed to the
-// caller to persist once per pass that changed it, so a restart neither posts an ask twice nor loses
-// the message a close has to edit.
+// says nothing about the ask, and so does a recently closed entry whose brief still owes a part while
+// that part can still be posted. The outcome lands under a partial brief on five paths. A part post
+// that lands with no readable id, and a part Discord refuses once for its content, each settle the
+// record at the parts posted. An ask's own message Discord refuses once for its content is kept
+// with no id and settles nothing short: its parts post on the next pass and its close lands under
+// the last part, or marks it closed with no edit where it has none. A post route stopped by
+// refusals lets a close land on the parts it has. An entry the reading no longer shows closes with
+// what it has. A brief whose parts no longer reach past the tail is settled at what was posted, and
+// a closed entry with no brief at all closes on the parts it has. Each pass posts
+// new asks and then the parts owed, at most `MAX_POSTS_PER_PASS` messages between them, and then
+// edits at most `MAX_EDITS_PER_PASS` closed ones, the rest waiting for the next pass, so a fleet
+// opening many asks at once never spends a burst of messages. Which ask has which messages is the
+// ask map, keyed by persona and id as the ledger reader keys its slots, read at construction and
+// handed to the caller to persist once per pass that changed it, so a restart neither posts an ask
+// twice nor loses the message a close has to edit.
 //
 // This module reads no setting of its own: whether the card is built at all, and what it reads to
 // draw it, are its caller's to decide. It takes the ledger readings, the link resolver, the two
@@ -35,7 +44,16 @@ import type { Budget } from "../discord/budget.ts";
 import type { CallOutcome, DiscordTransport, ThreadMessenger } from "../discord/transport.ts";
 import { createRepeatLog } from "../repeat-log.ts";
 import type { RepeatLogSurface } from "../repeat-log.ts";
-import { hasBrief, openAsks, renderAskMessage, renderClosedMessage, renderDecisionsCard } from "./card.ts";
+import { fit, visible } from "../sanitize.ts";
+import {
+  MAX_ASK_BODY_LENGTH,
+  hasBrief,
+  openAsks,
+  renderAskMessage,
+  renderBriefMessages,
+  renderClosedMessage,
+  renderDecisionsCard,
+} from "./card.ts";
 import type { AskLink, OpenAsk } from "./card.ts";
 import { MAX_ASK_RECORDS, askKey, capAskRecords } from "./binding.ts";
 import type { AskRecord, DecisionsCardBinding } from "./binding.ts";
@@ -48,15 +66,21 @@ import type { LedgerReading } from "./ledger.ts";
  */
 export const DECISIONS_THREAD_NAME = "Fleet: Decisions";
 
-/** How many newly seen open asks one pass posts into the thread. The rest wait for the next pass. */
+/** How many messages one pass posts into the thread, newly seen open asks and their briefs' parts
+ * counted together. The rest wait for the next pass. */
 export const MAX_POSTS_PER_PASS = 3;
 
 /** How many closed asks' messages one pass edits to their outcome. The rest wait for the next pass. */
 export const MAX_EDITS_PER_PASS = 3;
 
-/** How many open asks' messages, posted before their brief existed, one pass edits to draw the brief.
- * The rest wait for the next pass. */
-export const MAX_BRIEF_EDITS_PER_PASS = 3;
+/**
+ * One pass's posts into the thread: how many have been spent, and whether a post that did not land
+ * has ended the posting, since the next post would meet the same bucket or the same refusal. A part
+ * refused for its content is spent without ending the posting, since the thread still takes other
+ * messages, so a pass never sends Discord more than `MAX_POSTS_PER_PASS` posts, landed or refused.
+ * The ask posts and the brief's parts share it, so the two together post at most `MAX_POSTS_PER_PASS`.
+ */
+type Posting = { posted: number; ended: boolean };
 
 /**
  * How long one reason waits before it may be logged again, on the board card's own reasoning: wide
@@ -66,6 +90,17 @@ const REPEAT_WINDOW_MS = 5 * 60 * 1000;
 
 /** Refusals of one route inside the decay window, after which that route is not attempted again. */
 const MAX_PERMANENT_FAILURES = 3;
+
+/**
+ * Discord's JSON error codes for a message refused for what it says rather than for where it was
+ * sent, from Discord's opcodes and status codes page
+ * (https://docs.discord.com/developers/topics/opcodes-and-status-codes): 50035 invalid form body,
+ * 50006 an empty message, 200000 blocked by automatic moderation, 240000 blocked by the harmful
+ * links filter, and 20009 explicit content. The same text is refused the same way on every pass,
+ * while the thread still takes other messages, so an ask's own message or a brief part refused with
+ * one of these settles its own ask and never counts against the post route every ask shares.
+ */
+const CONTENT_REFUSAL_CODES: ReadonlySet<number> = new Set([50035, 50006, 200000, 240000, 20009]);
 
 /**
  * Rebuilds inside the decay window after Discord reported the card gone, after which the card is
@@ -410,41 +445,183 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
   }
 
   /**
-   * Posts one message per open ask the map does not hold yet, oldest first and at most
-   * `MAX_POSTS_PER_PASS` of them. A call that does not land ends the posting for this pass, since
-   * the next ask would meet the same bucket or the same refusal; the next pass starts over from the
-   * oldest ask still missing.
+   * Posts one message per open ask the map does not hold yet, oldest first, under the pass's
+   * `posting` count. The message draws no brief, and its record owes the brief's parts until the
+   * parts pass settles them. A call that does not land ends the posting for this pass, parts
+   * included; the next pass starts over from the oldest ask still missing.
+   *
+   * A message Discord refuses with one of `CONTENT_REFUSAL_CODES` is refused for what it says, so it
+   * never counts against the post route: the ask is kept with no message id and the refused text as
+   * its body, with one line naming the persona, the ask id and the code and no ask text. It is never
+   * posted again, and the posting ends for this pass as any failed post ends it, so its parts post
+   * on the next pass and its close lands under the last part, or marks it closed with no edit where
+   * it has none. Any other refusal counts on the route and leaves the ask to be posted again.
    *
    * A map holding `MAX_ASK_RECORDS` open asks posts nothing: the cap could only make room by
    * dropping an open record, and the ask that record named would then be posted again on the next
    * pass, forever. The pass says so once, with a count and no ask's text, and the posting resumes
    * when a close frees a record.
    */
-  async function postAsks(thread: string, open: readonly OpenAsk[], links: AskLink): Promise<void> {
-    let posted = 0;
+  async function postAsks(thread: string, open: readonly OpenAsk[], links: AskLink, posting: Posting): Promise<void> {
     let held = openRecords();
     for (const ask of open) {
       if (asks.has(askKey(ask.persona, ask.entry.id))) continue;
-      if (posted >= MAX_POSTS_PER_PASS || !affordable(askPosts)) return;
+      if (posting.ended || posting.posted >= MAX_POSTS_PER_PASS || !affordable(askPosts)) return;
       if (held >= MAX_ASK_RECORDS) {
         repeats("the ask map is full, the rest wait for a close", `${String(MAX_ASK_RECORDS)} open asks posted`);
         return;
       }
       const text = renderAskMessage(ask.persona, ask.entry, links(ask.entry, ask.persona));
       const outcome = await messenger.postToThread({ threadId: thread, text });
+      // A refusal of this ask's own content is decided before `settle`, so it never counts on the
+      // post route: the thread still takes other messages, and the same text is refused the same way
+      // on every pass. The ask is kept with no message id, as a post that landed with none is, so it
+      // is never posted again and its parts and close proceed from the next pass. Every other outcome
+      // folds into the route as it does for any ask post.
+      if (
+        outcome.status === "failed" &&
+        outcome.permanent === true &&
+        outcome.fatal !== true &&
+        outcome.missing !== true &&
+        outcome.code !== undefined &&
+        CONTENT_REFUSAL_CODES.has(outcome.code)
+      ) {
+        posting.ended = true;
+        // The line goes to the log directly rather than through the repeat log, which keys on the
+        // reason alone and would name only the first refused ask in its window. Each ask is refused
+        // once and the pass ends on it, so at most one such line is written a pass. The persona name
+        // and the ask id are ledger text, and the broker's log callback writes to the console before
+        // its file logger strips control characters, so both are stripped here.
+        log(
+          `decisions card: an ask's own message was refused for its content, it is not posted again ` +
+            `(persona ${visible(ask.persona)}, ask ${visible(ask.entry.id)}, Discord code ${String(outcome.code)})`,
+        );
+        keep({
+          persona: ask.persona,
+          id: ask.entry.id,
+          messageId: null,
+          body: text,
+          briefed: false,
+          tailIds: [],
+          openedAt: ask.entry.openedAt,
+          closedAt: null,
+        });
+        return;
+      }
       settle(askPosts, outcome, "ask post");
-      if (outcome.status !== "ok") return;
-      posted += 1;
+      if (outcome.status !== "ok") {
+        posting.ended = true;
+        return;
+      }
+      posting.posted += 1;
       held += 1;
       keep({
         persona: ask.persona,
         id: ask.entry.id,
         messageId: outcome.value.messageId,
         body: text,
-        briefed: hasBrief(ask.entry),
+        briefed: false,
+        tailIds: [],
         openedAt: ask.entry.openedAt,
         closedAt: null,
       });
+    }
+  }
+
+  /**
+   * Posts the brief's parts after their asks' messages, under the same `posting` count as the ask
+   * posts. For each record the map holds open and owing a part, in map order, whose persona's
+   * reading carries the entry open or recently closed with a brief, the parts are read from that
+   * entry's brief on this pass by `renderBriefMessages`, and the next part owed, the one at the
+   * tail's length, is posted. Its id is appended to the tail and its text, cut to the close's room,
+   * becomes the body the close edits, until the tail holds every part, which settles the record
+   * `briefed`. A brief whose parts no longer reach past the tail is settled with nothing posted.
+   *
+   * A post that does not land, other than one refused for its content, ends the posting for this
+   * pass, and the next pass continues from the
+   * part still owed, so no part is posted twice. A part Discord refuses with one of
+   * `CONTENT_REFUSAL_CODES` is refused for what it says, so the record is settled at the parts posted
+   * at once, with one line naming the count and no text, and the refusal
+   * never counts against the post route: one refused message never holds its close, the records
+   * behind it or the asks every pass posts. The refused post is one of the pass's posts, and the
+   * pass goes on to the next record. Any other refusal counts on the post route as an ask
+   * post's does and leaves the part owed, so an archived thread or a lost permission stops the
+   * route rather than settling every waiting brief short. A part that lands with no readable id
+   * leaves the body and the tail as they were, so the close edits a message it has an id for, and
+   * settles the record at the parts posted with one line naming the count and no text. A record
+   * whose persona has no reading this pass, or whose entry shows no brief, waits. A record the map
+   * holds closed is never given parts.
+   *
+   * Those three settles are three of the five paths the module header names on which an outcome
+   * lands under a partial brief. The other two, a post route stopped by refusals and an entry the
+   * reading no longer shows, are `closeAsks`'s.
+   */
+  async function postParts(thread: string, ledgers: readonly LedgerReading[], posting: Posting): Promise<void> {
+    const readings = new Map<string, LedgerReading>();
+    for (const ledger of ledgers) if (!readings.has(ledger.name)) readings.set(ledger.name, ledger);
+    for (const held of [...asks.values()]) {
+      if (held.closedAt !== null || held.briefed) continue;
+      const ledger = readings.get(held.persona);
+      const entry =
+        ledger?.open.find((shown) => shown.id === held.id) ??
+        ledger?.recentlyClosed.find((shown) => shown.id === held.id);
+      if (entry === undefined || !hasBrief(entry)) continue;
+      const parts = renderBriefMessages(entry);
+      let record = held;
+      while (!record.briefed) {
+        const text = parts[record.tailIds.length];
+        if (text === undefined) {
+          record = { ...record, briefed: true };
+          keep(record);
+          break;
+        }
+        if (posting.ended || posting.posted >= MAX_POSTS_PER_PASS || !affordable(askPosts)) return;
+        const outcome = await messenger.postToThread({ threadId: thread, text });
+        // A refusal of this part's own content is decided before `settle`, so it never counts on
+        // the post route: the thread still takes other messages, and only this ask's brief is done.
+        // Every other outcome folds into the route as an ask post's does.
+        if (
+          outcome.status === "failed" &&
+          outcome.permanent === true &&
+          outcome.fatal !== true &&
+          outcome.missing !== true &&
+          outcome.code !== undefined &&
+          CONTENT_REFUSAL_CODES.has(outcome.code)
+        ) {
+          posting.posted += 1;
+          repeats(
+            "a brief part was refused for its content, the ask's later parts are not posted",
+            `${String(record.tailIds.length)} of ${String(parts.length)} part(s) posted, Discord code ${String(outcome.code)}`,
+          );
+          record = { ...record, briefed: true };
+          keep(record);
+          break;
+        }
+        settle(askPosts, outcome, "brief part post");
+        if (outcome.status !== "ok") {
+          posting.ended = true;
+          return;
+        }
+        posting.posted += 1;
+        const posted = outcome.value.messageId;
+        if (posted === null) {
+          repeats(
+            "a brief part landed with no readable id, the ask's later parts are not posted",
+            `${String(record.tailIds.length + 1)} of ${String(parts.length)} part(s) posted`,
+          );
+          record = { ...record, briefed: true };
+          keep(record);
+          break;
+        }
+        const tailIds = [...record.tailIds, posted];
+        record = {
+          ...record,
+          body: fit(text, MAX_ASK_BODY_LENGTH),
+          tailIds,
+          briefed: tailIds.length === parts.length,
+        };
+        keep(record);
+      }
     }
   }
 
@@ -458,13 +635,23 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
   }
 
   /**
-   * Edits the message of every ask the map holds open whose persona's reading shows it closed, at
-   * most `MAX_EDITS_PER_PASS` of them: to its outcome where the reading lists it recently closed,
-   * and to closed alone where the reading could have listed it open and does not. A record whose
-   * persona has no reading this pass, or whose reading cannot answer, is left for a later pass. A
-   * message Discord reports gone or refuses to edit is marked closed too, with no second attempt. A
-   * rejected token refuses every call rather than this message, so its record stays open. A message
-   * that was posted with no readable id is marked closed with no call made.
+   * Edits the last message of every ask the map holds open whose persona's reading shows it closed,
+   * at most `MAX_EDITS_PER_PASS` of them: to its outcome where the reading lists it recently closed,
+   * and to closed alone where the reading could have listed it open and does not. The last message
+   * is the tail's last part where the tail holds one and the ask's own message otherwise, and the
+   * edit carries the body the record holds. A record whose persona has no reading this pass, or
+   * whose reading cannot answer, is left for a later pass, and so is one still owing a part of the
+   * brief its recently closed entry carries while that part can still be posted. The outcome lands
+   * under a partial brief on the same five paths the module header names. A record `postParts`
+   * settled short, by a part with no readable id, a part refused for its content, or a brief whose
+   * parts no longer reach past the tail, owes no part and closes on the parts it has, and so does a
+   * record whose closed entry carries no brief at all. Once the post
+   * route is stopped no part can arrive, so the close lands with its outcome on the parts the record
+   * has. An entry the reading no longer shows at all supplies no parts, so its record closes with
+   * what it has. A message Discord reports gone or refuses to edit is marked closed too, with
+   * no second attempt. A rejected token refuses every call rather than this message, so its record
+   * stays open. A record with no message of a readable id to edit is marked closed with no call
+   * made.
    */
   async function closeAsks(thread: string, ledgers: readonly LedgerReading[], at: number): Promise<void> {
     const readings = new Map<string, LedgerReading>();
@@ -476,14 +663,19 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
       if (ledger === undefined) continue;
       if (ledger.open.some((entry) => entry.id === record.id)) continue;
       const closed = ledger.recentlyClosed.find((entry) => entry.id === record.id) ?? null;
+      // A close waits for the parts its brief still owes only while they can still be posted. Once
+      // the post route is stopped no part arrives, so the close lands with its outcome on the last
+      // message the record holds.
+      if (closed !== null && !record.briefed && hasBrief(closed) && !askPosts.stopped) continue;
       if (closed === null && !answers(ledger)) continue;
-      if (record.messageId === null) {
+      const last = record.tailIds[record.tailIds.length - 1] ?? record.messageId;
+      if (last === null) {
         keep({ ...record, closedAt: at });
         continue;
       }
       if (edited >= MAX_EDITS_PER_PASS || !affordable(askEdits)) return;
       const text = renderClosedMessage(record.body, closed, at);
-      const outcome = await messenger.editInThread({ threadId: thread, messageId: record.messageId, text });
+      const outcome = await messenger.editInThread({ threadId: thread, messageId: last, text });
       settle(askEdits, outcome, "ask edit");
       // A message Discord reports gone, or refuses to edit, is settled closed: the same edit sent
       // again is refused again, and an open record left behind would hold the map toward its cap.
@@ -493,42 +685,10 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
     }
   }
 
-  /**
-   * Edits the message of every ask the map holds open and not yet briefed whose persona's reading
-   * lists it open with a decision brief, at most `MAX_BRIEF_EDITS_PER_PASS` of them, to the message
-   * `renderAskMessage` draws for it now, so a later close appends its outcome beneath the brief.
-   * Settled as a close is: a message Discord reports gone or refuses to edit is marked briefed with
-   * the body it holds and no second attempt, a rejected token or a bucket refusal leaves the record
-   * for a later pass, and a message posted with no readable id is marked with no call made. A record
-   * the map holds closed is never briefed, and this edit never changes when it closed.
-   */
-  async function briefAsks(thread: string, ledgers: readonly LedgerReading[], links: AskLink): Promise<void> {
-    const readings = new Map<string, LedgerReading>();
-    for (const ledger of ledgers) if (!readings.has(ledger.name)) readings.set(ledger.name, ledger);
-    let edited = 0;
-    for (const record of [...asks.values()]) {
-      if (record.closedAt !== null || record.briefed) continue;
-      const entry = readings.get(record.persona)?.open.find((held) => held.id === record.id);
-      if (entry === undefined || !hasBrief(entry)) continue;
-      if (record.messageId === null) {
-        keep({ ...record, briefed: true });
-        continue;
-      }
-      if (edited >= MAX_BRIEF_EDITS_PER_PASS || !affordable(askEdits)) return;
-      const text = renderAskMessage(record.persona, entry, links(entry, record.persona));
-      const outcome = await messenger.editInThread({ threadId: thread, messageId: record.messageId, text });
-      settle(askEdits, outcome, "ask brief edit");
-      // A message Discord reports gone, or refuses to edit, keeps the body it holds: the same edit
-      // sent again is refused again, so the record is settled rather than retried every pass.
-      if (!editSettled(outcome)) return;
-      edited += 1;
-      keep({ ...record, body: outcome.status === "ok" ? text : record.body, briefed: true });
-    }
-  }
-
-  /** One pass over the card and its thread: the card, then at most `MAX_POSTS_PER_PASS` ask posts,
-   * `MAX_EDITS_PER_PASS` close edits and `MAX_BRIEF_EDITS_PER_PASS` brief edits. The ask map is
-   * handed to the caller after it, once, whichever step changed it, a thread reported gone included. */
+  /** One pass over the card and its thread: the card, then the ask posts and the brief's parts, at
+   * most `MAX_POSTS_PER_PASS` posts between them, then at most `MAX_EDITS_PER_PASS` close edits. The
+   * ask map is handed to the caller after it, once, whichever step changed it, a thread reported gone
+   * included. */
   async function run(): Promise<void> {
     try {
       await reconcile();
@@ -558,16 +718,18 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
     if (card !== rendered) await edit(identifier, card);
 
     // The thread's messages, once the card and the thread both stand: the asks newly seen open, then
-    // the ones the ledgers have since closed, then the ones posted bare whose brief has since been
-    // drafted. Each is bounded per pass and reads the same readings the card was drawn from, so the
-    // thread never says more than the card does.
+    // the parts their briefs still owe, under one count of posts, then the asks the ledgers have
+    // since closed, so a close that waits on no part lands beneath the last part posted. Each is
+    // bounded per pass and reads the same readings the card was drawn from, so the thread never
+    // says more than the card does.
     const thread = threadId;
     if (thread === null || messageId === null || halted) return;
-    await postAsks(thread, openAsks(ledgers), links);
+    const posting: Posting = { posted: 0, ended: false };
+    await postAsks(thread, openAsks(ledgers), links, posting);
+    if (threadId === null || halted) return;
+    await postParts(thread, ledgers, posting);
     if (threadId === null || halted) return;
     await closeAsks(thread, ledgers, at);
-    if (threadId === null || halted) return;
-    await briefAsks(thread, ledgers, links);
   }
 
   /**

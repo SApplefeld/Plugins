@@ -41,8 +41,9 @@ function failureLine(error) {
     // A thrown value whose fields cannot be read still ends the process with a line naming that.
     message = "the thrown value could not be described";
   }
-  // The class broker/sanitize.ts's isInvisible strips, plus U+0085, U+2028 and U+2029, which a log
-  // reader may take as line breaks. Inlined because this file cannot import TypeScript.
+  // The class broker/sanitize.ts's isInvisible strips, plus the tab, since a log line is read in a
+  // terminal where a tab misaligns columns, plus U+0085, U+2028 and U+2029, which a log reader may
+  // take as line breaks. Inlined because this file cannot import TypeScript.
   const clean = `${code} ${message}`.replace(
     /[\u0000-\u001f\u007f\u0085\u00ad\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}]/gu,
     " ",

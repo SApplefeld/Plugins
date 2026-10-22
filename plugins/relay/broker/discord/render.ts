@@ -129,6 +129,71 @@ export function inertText(value: string): string {
 }
 
 /**
+ * Display syntax a line of the kit's decision brief may not carry: the class the kit's own
+ * `escapeMarkdown` escapes (`plugins/personas/hooks/ask-brief.ts` in the Grimoire repository) with
+ * `<` and `>` added, which is `MARKDOWN` less the two parentheses.
+ *
+ * The parentheses stay bare because the kit leaves them bare and counts each once, and a masked
+ * link needs `[` and `]`, which are escaped, so bare parentheses compose none. The kit leaves `<`
+ * and `>` to the relay, which escapes them itself and counts each twice; the card stands in for the
+ * relay here, so each gains the one backslash the kit budgeted. Written in the kit's order with the
+ * two inserted after the pipe, so the pin test reads the kit's literal with `<>` added.
+ */
+export const KIT_BRIEF_MARKDOWN = /[\\*_~`|<>#[\]]/g;
+
+/**
+ * A bare URL on a brief line, matched as the kit matches one: `http://` or `https://`, then a run
+ * of characters that are none of whitespace, `<`, `>`, the backtick, the backslash, `*`, `~`, `|`,
+ * `[` and `]`. The run is drawn as it is, since a backslash inside one would reach the link, and
+ * Discord takes the whole run as the link, so an `_`, a `#` or a parenthesis inside it draws no
+ * syntax. Every character that opens a chip, a fence, a spoiler, emphasis or a link ends the run,
+ * and what follows one is escaped as text.
+ */
+export const KIT_BRIEF_URL_RUN = /https?:\/\/[^\s<>`\\*~|[\]]+/g;
+
+/**
+ * Text with each of six characters the kit's `\s` holds turned to a space: the five ASCII
+ * controls from the tab to the carriage return, and the byte order mark. All but the tab are in
+ * `isInvisible`'s class, which `visible` strips before the run is read. The tab is outside it, and
+ * `visible` collapses it to a space itself, but it is turned here with the rest so this class is
+ * the kit's own and not that class less one member. Written as numbers, as `isInvisible` is. A
+ * caller that takes `visible` before `inertKitText` takes this first, or the characters are gone
+ * before the run is read.
+ */
+export function spacedRunEnds(value: string): string {
+  return [...value]
+    .map((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return (code >= 0x09 && code <= 0x0d) || code === 0xfeff ? " " : character;
+    })
+    .join("");
+}
+
+/**
+ * Text the kit measured, for a line of its decision brief: visible, with every lone surrogate
+ * replaced by U+FFFD as `inertText` does, and escaped with `KIT_BRIEF_MARKDOWN` outside every
+ * `KIT_BRIEF_URL_RUN`, which is left as it is.
+ *
+ * The kit counts a brief part in relay units, every UTF-16 unit once and `<` and `>` twice, and
+ * holds each part under its bound before the card sees it. An escape here that the kit did not
+ * budget would draw the part wider than the kit counted and let the message's room cut it, so the
+ * class and the run are the kit's own and the two measure a part alike. The characters
+ * `spacedRunEnds` names become a space first, so a run ends where the kit's does.
+ * The card's other fields keep `inertText`, which escapes the parentheses too.
+ */
+export function inertKitText(value: string): string {
+  const text = visible(spacedRunEnds(value)).replace(LONE_SURROGATE, "\uFFFD");
+  const escaped = (run: string): string => run.replace(KIT_BRIEF_MARKDOWN, (character) => `\\${character}`);
+  let drawn = "";
+  let at = 0;
+  for (const url of text.matchAll(KIT_BRIEF_URL_RUN)) {
+    drawn += escaped(text.slice(at, url.index)) + url[0];
+    at = url.index + url[0].length;
+  }
+  return drawn + escaped(text.slice(at));
+}
+
+/**
  * Display syntax a table cell drawn outside a fence may not carry, which is `MARKDOWN` less the
  * emphasis marks.
  *
@@ -543,7 +608,7 @@ function openingGlyph(attribution: string): string {
  * Every whitespace character except the line break: what can sit between the start of a line and a
  * marker while leaving that marker the thing which opens the line.
  *
- * A class source rather than a compiled pattern, because three separate readings need it and one of
+ * A class source rather than a compiled pattern, because four separate readings need it and one of
  * them is itself composed from a template. The space and the tab are not the class Discord draws a
  * line with, and reading only those two is how a marker walks past a guard: a no-break space, an en
  * quad, and an ideographic space each sit in front of a marker and leave it opening the line as
@@ -2202,6 +2267,27 @@ function withoutPipes(value: string): string {
 }
 
 /**
+ * A line-leading quote marker, with whatever space precedes it captured so the escape keeps it.
+ *
+ * Reads every whitespace character but the line break behind the marker, as `ATTRIBUTION_OPENERS`,
+ * `SUBTEXT_OPENER` and `HEADING_OPENER` do, so the four line-leading guards agree on what may sit
+ * between the start of a line and its marker. Those three read only text that has passed through
+ * `newlinesOnly`, which makes every break a newline, so the next-line reading below is this
+ * guard's alone.
+ *
+ * Also opens a line after the next-line character, written \x85. Discord ends a line there, and
+ * it is the one break the `ODD_BREAKS` rule names that JavaScript's multiline `^` does not start
+ * a line after; the line and paragraph separators already end a line for `^`. The alternation
+ * captures the character so the escape keeps it.
+ *
+ * The space run stops at \r, \u2028 and \u2029, the break characters `^` already starts a line at
+ * and `LINE_SPACE` also admits. A break inside the run is itself a line start, which the next match
+ * position reads, so stopping there changes no output and keeps the scan linear. A run that read
+ * through them would rescan the rest of a long run of separators from every one of them.
+ */
+const QUOTE_OPENER = new RegExp(`(^|\\x85)((?:(?![\\r\\u2028\\u2029])${LINE_SPACE})*)>`, "gm");
+
+/**
  * Neutralizes the chip and quote syntax outside fenced code blocks, leaves the inside of one as it
  * was written, and neutralizes a line-leading quote marker everywhere.
  *
@@ -2227,7 +2313,7 @@ function withoutChips(value: string): string {
   // The line-leading pass runs second and over everything, where it finds only the markers the
   // first pass left inside fences: one already escaped is preceded by its backslash rather than by
   // the start of its line.
-  return escaped.replace(/^([ \t]*)>/gm, "$1\\>");
+  return escaped.replace(QUOTE_OPENER, "$1$2\\>");
 }
 
 /**

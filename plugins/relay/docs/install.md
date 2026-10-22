@@ -137,8 +137,9 @@ the last path segment of each root as the project name. So a root at or just und
 directory would put your account name there too. The decisions card (`CHANNEL_DECISIONS_CARD`,
 which needs `CHANNEL_BOARD_ROSTER`) lists every open ask the roster's personas hold, and posts each
 ask to the card's thread. That message carries the ask's question, up to 1,000 code points and as
-its worker wrote it, or, once the ask's entry carries one, the decision brief the kit drafts from
-the worker's transcript. TypeSafe's classifier, reached
+its worker wrote it. Once the ask's entry carries the decision brief the kit drafts from the
+worker's transcript, the brief follows the ask's message as one message per part the kit wrote, at most three.
+TypeSafe's classifier, reached
 under the optional step "The Jev key file" below, is the one host other than Discord this broker
 reaches unless the voice is on, and the response gate described above sends it a gated thread's
 lines. The voice, when on, ranks its spoken turns with the same key and also reaches Deepgram and
@@ -361,7 +362,8 @@ values in `hooks/settings-fragment.json` and its pins. The fragment stays in the
 `settings` owner's template.
 
 A `plugin` host also relies on the adapter for a session's start directory. The broker reads it from
-the `cwd` field of the `SessionStart` post, and it bounds the one file a session's reply may carry
+the `cwd` field of the `SessionStart` post that launches the session, never a compaction's, and it
+bounds the one file a session's reply may carry
 ("A session can send one file" in `operations.md`). Where the adapter's `SessionStart` post carries
 no `cwd`, every file a session names is refused as `this session's working directory is not recorded
 or no longer exists`, and the reply's text is not posted either.

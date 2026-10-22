@@ -190,6 +190,17 @@ function refusalReason(body: unknown): string | null {
   return `(${String(refusal.code)}: ${message})`;
 }
 
+/**
+ * Discord's JSON error code from a refusal's body, and undefined for a body that carries no numeric
+ * one. Read apart from `refusalReason`, which needs a readable message as well: a caller deciding
+ * what a refusal means needs the code whether or not the message survives the strip.
+ */
+function refusalCode(body: unknown): number | undefined {
+  if (typeof body !== "object" || body === null) return undefined;
+  const code = (body as Record<string, unknown>).code;
+  return typeof code === "number" ? code : undefined;
+}
+
 /** Folds one attempt into an outcome, leaving the caller to read the body of a successful one. */
 function classify(result: RawResult): CallOutcome<unknown> {
   if (result.kind === "failed") {
@@ -211,14 +222,17 @@ function classify(result: RawResult): CallOutcome<unknown> {
   if (result.status >= 400 && result.status < 500) {
     // Discord refused the request, not the moment. Retrying it unchanged writes forever, and a
     // 404 says the identifier the call carried no longer names anything. The reason rides along
-    // when the body carries one, because a refusal of the request is one a reader has to fix.
+    // when the body carries one, because a refusal of the request is one a reader has to fix, and
+    // so does Discord's code, which tells a caller what was refused.
     const reason = refusalReason(result.body);
+    const code = refusalCode(result.body);
     return {
       status: "failed",
       error: reason === null ? `HTTP ${result.status}` : `HTTP ${result.status} ${reason}`,
       rate,
       permanent: true,
       missing: result.status === 404,
+      ...(code === undefined ? {} : { code }),
     };
   }
   if (result.status < 200 || result.status >= 300) {

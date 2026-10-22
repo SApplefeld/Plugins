@@ -7,6 +7,10 @@
 // `discord/bindings.ts` re-admit a session title from files anything running as this user can
 // rewrite, and they get the whole normalization from here rather than from the renderer.
 // `import-hygiene.test.ts` pins that direction.
+//
+// The one character class two surfaces share, what reaches Discord and what reaches the model, is
+// `isInvisible` below: the code points that render as nothing on every surface. A tab has a width on
+// every surface, so it is outside the class and survives the strip as a space does.
 
 /** Identity and display strings are capped: they are persisted and later rendered into Discord. */
 export const MAX_FIELD_LENGTH = 256;
@@ -56,11 +60,19 @@ export function clean(value: string): string {
 /**
  * Code points that can reorder or hide text with no visual trace.
  *
- * The class covers C0 and DEL, the soft hyphen, the bidirectional overrides and isolates, the
- * zero-width family, the word joiner, the variation selectors, the byte order mark, and the Unicode
- * tag block, which encodes a full hidden copy of ASCII that renders as nothing at all and is the
- * standard way text is smuggled past a reader. It is a class of what is invisible, not of what is
- * merely unusual: a homoglyph, a right-to-left script, and an emoji are all legible and all stay.
+ * The class covers C0 but the tab, DEL, the soft hyphen, the bidirectional overrides and isolates,
+ * the zero-width family, the word joiner, the variation selectors, the byte order mark, and the
+ * Unicode tag block, which encodes a full hidden copy of ASCII that renders as nothing at all and is
+ * the standard way text is smuggled past a reader. It is a class of what renders as nothing on every
+ * surface, the rule `docs/security-model.md` states for it, not of what is merely unusual: a
+ * homoglyph, a right-to-left script, and an emoji are all legible and all stay.
+ *
+ * The tab is outside it because it has a width on every surface: a Discord message inside a fence
+ * and outside one, a terminal, and the text the model reads. It moves the next character along the
+ * line and draws as blank space, which the space does too, and the class never held the space. It
+ * composes no syntax the escapes stop, and a tab-indented recipe inside a fence is drawn as written.
+ * The newline stays in: `withoutInvisible` keeps line structure by splitting on it first, and in a
+ * single-line field `visible` strips it, which is what keeps a crafted field on one line.
  *
  * Held here rather than beside any one consumer because two very different surfaces need the same
  * class and must not drift: what reaches Discord, and what reaches the model. A person reads both
@@ -71,7 +83,8 @@ export function clean(value: string): string {
  */
 export function isInvisible(code: number): boolean {
   return (
-    code <= 0x1f ||
+    // C0 but the tab, which has a width on every surface and is whitespace rather than invisible.
+    (code <= 0x1f && code !== 0x09) ||
     code === 0x7f ||
     // Soft hyphen: renders as nothing until a line break falls on it.
     code === 0x00ad ||
@@ -173,9 +186,9 @@ export function cleanWellFormed(value: string): string | null {
 /**
  * Strips the invisible reordering characters and collapses runs of whitespace to one space.
  *
- * For a title or a card field, which are single-line by construction. The class itself is shared
- * with the path that carries text to the model, so the two cannot come to disagree about which
- * characters are allowed to be invisible.
+ * For a title or a card field, which are single-line by construction, so a tab there draws as the
+ * one space a run of spaces does. The class itself is shared with the path that carries text to the
+ * model, so the two cannot come to disagree about which characters are allowed to be invisible.
  */
 export function visible(value: string): string {
   return [...value]
@@ -289,14 +302,14 @@ const UNSAFE_IN_AUTHOR = /["<>[\]\n\u0085\u2028\u2029]/g;
  * harness's own framing. Still attacker-chosen text: this bounds where it can reach, not what it
  * says.
  *
- * A tab becomes a space first, since the invisible class would otherwise remove it and join two
- * words. Compatibility folding (NFKC) comes next, so a fullwidth or small-form bracket, quote or
- * angle becomes the ASCII character it draws as and meets the replacement below. The invisible
- * class then goes through the line-preserving strip, so a line break survives to be replaced by a
- * space rather than vanishing. The replacement runs before the cut so every character counted is
- * one that is carried, the cut is on code points so it never leaves half an astral character, and
- * the edges are trimmed so a replaced character there is not carried as padding. A result can be
- * empty, which is the caller's to fall back from.
+ * A tab becomes a space first, since a name is one line of words and carries one separator between
+ * two of them, never a width. Compatibility folding (NFKC) comes next, so a fullwidth or small-form
+ * bracket, quote or angle becomes the ASCII character it draws as and meets the replacement below.
+ * The invisible class then goes through the line-preserving strip, so a line break survives to be
+ * replaced by a space rather than vanishing. The replacement runs before the cut so every character
+ * counted is one that is carried, the cut is on code points so it never leaves half an astral
+ * character, and the edges are trimmed so a replaced character there is not carried as padding. A
+ * result can be empty, which is the caller's to fall back from.
  */
 export function boundedAuthor(value: string): string {
   const replaced = withoutInvisible(value.replace(/\t/g, " ").normalize("NFKC"))

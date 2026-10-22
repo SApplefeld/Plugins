@@ -76,8 +76,8 @@ function ascending(left: bigint, right: bigint): number {
  * one paragraph is layout, not content, and a comparison that treated it as content would call a
  * reflowed copy of the same words a different text.
  *
- * Collapsing runs before the strip because the invisible class contains the whitespace characters:
- * a tab or a newline is C0, so stripping first would delete the only separator between two words
+ * Collapsing runs before the strip because the invisible class contains whitespace characters,
+ * the newline among them, so stripping first would delete the only separator between two words
  * and weld them into one, a shingle the text never contained. Collapsing first turns every
  * separator into a plain space, leaving the strip to remove only what was genuinely invisible, the
  * zero-width family and its neighbours. It then runs again, because a stripped zero-width

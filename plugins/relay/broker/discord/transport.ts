@@ -54,6 +54,12 @@ export type CallOutcome<T> =
        * dead and cannot be reused.
        */
       missing?: boolean;
+      /**
+       * Discord's JSON error code from the refusal's body, present only when Discord's body carried
+       * a numeric one. It tells a refusal of what the request said apart from a refusal of the
+       * caller, which the status alone cannot.
+       */
+      code?: number;
     };
 
 export type DiscordTransport = {
