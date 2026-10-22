@@ -1,12 +1,12 @@
 // pr-docs.ts: the before-tool guard that holds a pull request until docs/ is
 // committed.
 //
-// The documentation work (drift curation, plan archival, backlog prune, index
-// refresh) ships in the same pull request as the code, not as a follow-up, so
-// a PR-creation command (gh pr create, az repos pr create) is refused while
-// docs/ has uncommitted changes. A chain that runs git commit ahead of the PR
-// create commits the docs itself and is allowed. This applies to any caller,
-// the main session included.
+// The documentation work (drift curation, plan archival, backlog prune) ships in
+// the same pull request as the code, not as a follow-up, so a PR-creation
+// command (gh pr create, az repos pr create) is refused while docs/ has
+// uncommitted changes. A chain that runs git commit ahead of the PR create
+// commits the docs itself and is allowed. This applies to any caller, the
+// main session included.
 //
 // The docs check runs where the PR create runs: a cd, pushd or Set-Location
 // ahead of it moves the check to that directory, and a target that does not
@@ -96,7 +96,7 @@ export const PR_DOCS_COMMAND_PHRASE = "Blocked: docs/ has uncommitted changes, s
 // The hook's stderr line, byte for byte.
 const PR_DOCS_REFUSAL =
   `Blocked: docs/ has uncommitted changes, so this PR would ship without them. The documentation ` +
-  `work (curation, plan archival, backlog prune, index refresh) ships in the same PR as the code, ` +
+  `work (curation, plan archival, backlog prune) ships in the same PR as the code, ` +
   `never as a follow-up. Commit the docs work into the branch (the finishing-work close-out runs ` +
   `curating-docs), then open the PR.\n`;
 

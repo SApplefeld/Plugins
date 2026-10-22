@@ -20,7 +20,7 @@ Seed a new or retrofitted `docs/` library from these skeletons. Replace `<projec
 
 ## Active plans
 
-(List active plans, or "None at present.")
+See `plans/`, where each plan's `Status:` header is its state.
 
 ## Archive
 
@@ -41,7 +41,7 @@ See `archive/`.
 
 ## Current
 
-(List active plans, or "None at present.")
+Each plan in this folder carries its state in its `Status:` header.
 ```
 
 ## `docs/archive/README.md`
@@ -86,6 +86,13 @@ Each row is an instrument a section's `Verify:` line names.
 
 | Instrument | Command or observation | Pass reads as | Failure here looks like | Cost and lane |
 |---|---|---|---|---|
+
+## Failure by Area
+
+Each row is a top-level area of the repository. Area names its path prefixes, and Skip names paths there a reviewer need not read for context, or `none`. A changed file under a Skip path is still reviewed.
+
+| Area | What failure looks like here | What sees it | Skip |
+|---|---|---|---|
 ```
 
 ## Backlog Snapshot: `docs/archive/backlog-YYYY-QN.md`

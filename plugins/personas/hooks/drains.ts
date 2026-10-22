@@ -1,15 +1,16 @@
 // drains.ts: the owed work the controller tick and the heartbeat drain one
-// item at a time, each behind a fork watch, and the supervisor mailbox pass.
+// item at a time, each behind a fork watch, and the two mailbox passes.
 // It holds the memory drain, which writes a turn's owed record, with
 // writeMemoryRecord, the one memq put of a persona's record, and the
 // decisions its writes log; the ask brief drain, which drafts a worker ask's
-// decision brief and posts it; the pair drain, which drafts the [PAIR
-// DRAFTS] block a decay scan owes; and the pass over the supervisor's
-// mailbox. hooks/index.ts holds the wiring: the deps each call takes, the
-// session object these functions read and write, the fork watches among its
-// fields, the fork and completion model requests, whose scrub
-// test-personas/redactor-module-test.mjs reads from that file, and the [ASK
-// BRIEF] and [SUPERVISOR] submits, whose frames
+// decision brief and writes it onto the ask entry and the commons record; the
+// pair drain, which drafts the [PAIR DRAFTS] block a decay scan owes; the
+// pass over the supervisor's mailbox; and the pass over the orphan sweeper's
+// findings file. hooks/index.ts holds the wiring: the
+// deps each call takes, the session object these functions read and write,
+// the fork watches among its fields, the fork and completion model requests,
+// whose scrub test-personas/redactor-module-test.mjs reads from that file,
+// and the [SUPERVISOR] and [ORPHAN SWEEP] submits, whose frames
 // test-personas/injection-ledger.mjs reads from that file.
 //
 // No `import $` and no side effects at load. The engine's loader follows `$`
@@ -51,8 +52,8 @@ export type DrainsSession = Pick<SessionState, "persona" | "mySessionId" | "isOw
 // write that gives the persona up; the memq run; the scrubbed transcript
 // fork and the memory fallback's scrubbed Haiku completion, with the
 // completion reader and the no-text note; the follow-up queue's decision
-// writer; the reply tool call; the [ASK BRIEF] and [SUPERVISOR] submits; and
-// the JSONL append the ack file takes.
+// writer; the [SUPERVISOR] and [ORPHAN SWEEP] submits; and the JSONL append
+// the two ack files take.
 export interface DrainsDeps {
   session: DrainsSession;
   host: PluginHost;
@@ -65,10 +66,9 @@ export interface DrainsDeps {
   completionText: (value: unknown) => string | null;
   noteCompletionShape: (site: string, value: unknown) => void;
   pushFollowUpDecision: FollowUpDecide;
-  callTool: (call: { tool: string; message: string }) => Promise<unknown>;
-  submitAskBriefReprompt: (expectedTurns: ExpectedTurn[], brief: string) => Promise<SubmitOutcome>;
   appendLines: (path: string, lines: string[]) => Promise<void>;
   submitSupervisorShutdown: (expectedTurns: ExpectedTurn[], rec: { id: string; text: string }) => Promise<SubmitOutcome>;
+  submitOrphanSweep: (expectedTurns: ExpectedTurn[], findingLines: string[]) => Promise<SubmitOutcome>;
 }
 
 // The slice of DrainsDeps a decision note reads, which a caller holding no
@@ -352,13 +352,11 @@ function noteAskBrief(deps: DrainNoteDeps, action: string, askId: string, detail
 // first and then the option posts, and each post is scrubbed alone: a scrub
 // that fails on any one drops the whole brief under scrub-failed. The scrubbed
 // posts joined by a blank line are the brief the entry carries, persisted
-// first, the commons record carries where that still reads open, and the
-// [ASK BRIEF] prompt quotes. The posts go to the persona's thread through the
-// relay's reply tool, one call each in order. A thrown post is logged
-// ask_brief_unposted naming its number and the count, no later post is sent,
-// and the whole joined brief goes once more as one [ASK BRIEF] plugin prompt
-// through the submit path the [STILL WAITING] re-raise takes, which a blocking
-// hold does not stop. Never throws: a failed drain ends with the item gone.
+// first, and the commons record carries where that still reads open, which
+// the fleet decisions card reads. The drain posts nothing and submits no
+// prompt: the card is the brief's one surface. expectedTurns is the tick's
+// argument, which this drain does not read. Never throws: a failed drain ends
+// with the item gone.
 export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, unknown>, expectedTurns: ExpectedTurn[]): Promise<void> {
   deps.session.askBriefFork = forkEntry(deps, deps.session.askBriefFork, "ask_brief_fork", noteAskBrief);
   if (deps.session.askBriefFork.since !== null || deps.session.state.askBriefOwed.length === 0) return;
@@ -378,7 +376,6 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
     if (!kept || item === null || entry === null) return;
     let fallback: string | null = null;
     let brief: string | null = null;
-    let posts: string[] = [];
     let usage: ReturnType<typeof forkUsageOf> | null = null;
     const warm = cacheReading(now, deps.cacheClock, false).warm;
     if (!warm) {
@@ -417,7 +414,6 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
           if (scrubbed.includes(BLOCK_WITHHELD)) {
             fallback = "scrub-failed";
           } else {
-            posts = scrubbed;
             brief = scrubbed.join("\n\n");
           }
         }
@@ -446,9 +442,9 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
       noteAskBrief(deps, "ask_brief_dropped", item.askId, "the ask closed while the fork ran");
     } else {
       live.brief = brief;
-      // The brief is durable before the mirror and the post; a write that
-      // gives the persona up ends the drain here, and one across which the
-      // ask closed mirrors and posts nothing.
+      // The brief is durable before the mirror; a write that gives the
+      // persona up ends the drain here, and one across which the ask closed
+      // mirrors nothing.
       if (!(await deps.persist())) return;
       if (live.status !== "open") {
         noteAskBrief(deps, "ask_brief_dropped", item.askId, "the ask closed while the brief was written");
@@ -458,31 +454,13 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
         // that remains is the store round trip between that read and its
         // write, since the store has no compare-and-set: a close landing
         // inside it is written back to open. A thrown mirror is named on its
-        // own line, and the post still goes.
+        // own line, and the brief stays on the entry.
         try {
           await updateAskRecordBrief(deps.store, deps.session.persona, item.askId, brief);
         } catch (err) {
           noteAskBrief(deps, "ask_brief_unmirrored", item.askId, `the commons write threw: ${boundedText(safeErrorText(err))}`);
         }
-        let posted = true;
-        // The posts go in order, and the first that throws ends the sending:
-        // a later post never goes ahead of one the thread lacks.
-        for (let i = 0; i < posts.length && posted; i++) {
-          try {
-            await deps.callTool({ tool: "mcp__plugin_relay_channel-relay__reply", message: posts[i] });
-          } catch (err) {
-            posted = false;
-            noteAskBrief(deps, "ask_brief_unposted", item.askId, `part ${i + 1} of ${posts.length}: the reply tool threw: ${boundedText(safeErrorText(err))}`);
-          }
-        }
-        if (!posted) {
-          // One [ASK BRIEF] submit per brief, through submitAskBriefReprompt in
-          // hooks/index.ts, never retried; a refused submit is named on its own
-          // line, as the reply backstop names its own.
-          const outcome = await deps.submitAskBriefReprompt(expectedTurns, brief);
-          if (!outcome.ok) noteAskBrief(deps, "ask_brief_reprompt_refused", item.askId, `the re-prompt ${outcome.how}: ${boundedText(safeErrorText(outcome.reason))}`);
-        }
-        noteAskBrief(deps, "ask_brief", item.askId, `inputTokens ${usage?.inputTokens ?? 0}, outputTokens ${usage?.outputTokens ?? 0}, cacheReadInputTokens ${usage?.cacheReadInputTokens ?? 0}, posted ${posted}`);
+        noteAskBrief(deps, "ask_brief", item.askId, `inputTokens ${usage?.inputTokens ?? 0}, outputTokens ${usage?.outputTokens ?? 0}, cacheReadInputTokens ${usage?.cacheReadInputTokens ?? 0}`);
       }
     }
     try { await deps.persist(); } catch { /* the store refused; the lines above wait for one that parses */ }
@@ -757,5 +735,158 @@ export async function drainSupervisorMailbox(
     return outcome;
   }
   await writeAcks();
+  return outcome;
+}
+
+// --- The orphan sweeper's findings ---
+//
+// bin/orphan-sweep.ps1, run by the KitOrphanSweep scheduled task, appends one
+// JSON line per orphaned process tree to the file the orphanSweepFindings
+// option names, and this plugin writes the ack file beside it, the findings
+// path with .ack.jsonl appended, as the sweeper names its seen file with
+// .seen.json appended. The sweeper is the findings file's only writer and
+// this plugin the ack file's. A record is
+// a JSON object whose id is a non-empty string; every other field is the
+// sweeper's and passes through as data.
+
+// One findings line read as a record, or the reason it is not one. The line
+// is kept whole, trimmed of the line ending a Windows writer leaves, since it
+// is the line the turn carries.
+function parseOrphanFindingLine(line: string): { id: string; line: string } | { problem: string } {
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return { problem: "is not JSON" }; }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { problem: "is not a JSON object" };
+  const id = (parsed as Record<string, unknown>).id;
+  if (typeof id !== "string" || id.length === 0) return { problem: "has no id that is a non-empty string" };
+  return { id, line: line.trim() };
+}
+
+// The most findings one [ORPHAN SWEEP] turn carries, and the most characters
+// of finding text, summed over the finding lines as read, before quoting.
+// A pass takes findings in file order and stops at the first that would pass
+// either bound; the first finding always goes, however long, so a finding
+// over the text bound is still delivered, alone.
+const ORPHAN_SWEEP_FINDINGS_MAX = 20;
+const ORPHAN_SWEEP_TEXT_MAX = 40_000;
+
+// One controller tick's pass over the findings file. A line whose id is
+// already in the ack file is passed over, so no finding is delivered twice.
+// The other findings of the pass, up to the two bounds above, are delivered
+// in one turn opening [ORPHAN SWEEP ids=<n>], n the count of findings it
+// carries, submitted through the expected-turn path. Findings past the
+// bounds get no ack line, so the next pass delivers them. A pass that
+// reaches its findings while a turn is open, by `turnOpen` at that moment,
+// acknowledges and delivers nothing: a turn submitted into an open turn is
+// queued rather than answered, so the findings stay unacknowledged for the
+// first idle tick's pass, and no state is kept between the two. One
+// delivered line per submitted finding is written before the submit, and a
+// pass that cannot read or write the ack file acts on nothing, so a finding
+// can never be delivered without the line that keeps it from being delivered
+// again; a submit that opens no turn adds a failed line per submitted finding
+// beside its delivered one. A line that is not a
+// record is never acknowledged, and is logged once per session under the key
+// `skipped` holds. A missing, empty or unreadable findings file is a pass
+// that does nothing. Nothing here throws. The [ORPHAN SWEEP] turn's text and
+// its submit are submitOrphanSweep's, in hooks/index.ts.
+export async function drainOrphanSweep(
+  deps: DrainsDeps,
+  findingsPath: string,
+  expectedTurns: ExpectedTurn[],
+  skipped: Set<string>,
+  turnOpen: () => boolean,
+): Promise<{ delivered: boolean; logged: boolean }> {
+  const outcome = { delivered: false, logged: false };
+  let findingsText: string;
+  let ackText = "";
+  const ackPath = `${findingsPath}.ack.jsonl`;
+  try {
+    if (!(await deps.host.fileExists(findingsPath))) return outcome;
+    findingsText = String(await deps.host.readFile(findingsPath));
+    // An empty findings file is the healthy steady state, and needs no ack read.
+    if (findingsText.trim() === "") return outcome;
+    if (await deps.host.fileExists(ackPath)) ackText = String(await deps.host.readFile(ackPath));
+  } catch {
+    return outcome;
+  }
+  const handled = new Set<string>();
+  for (const ackLine of ackText.split("\n")) {
+    if (ackLine.trim() === "") continue;
+    try {
+      const a: unknown = JSON.parse(ackLine);
+      if (a !== null && typeof a === "object" && typeof (a as { id?: unknown }).id === "string") handled.add((a as { id: string }).id);
+    } catch { /* a line this plugin did not write whole acknowledges nothing */ }
+  }
+  // The sweeper appends each finding whole with its newline, so a findings
+  // file that does not end in one has its last line still being written.
+  // That line is left for the next pass, which reads it whole, rather than
+  // read here as a malformed record.
+  const lines = findingsText.split("\n");
+  if (!findingsText.endsWith("\n")) lines.pop();
+  const findings: { id: string; line: string }[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === "") continue;
+    const rec = parseOrphanFindingLine(line);
+    if ("problem" in rec) {
+      const key = `${index}:${line}`;
+      if (!skipped.has(key)) {
+        skipped.add(key);
+        deps.session.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "monitor",
+          action: "orphan_sweep_line_skipped",
+          detail: `findings line ${index + 1} ${rec.problem}; skipped and not acknowledged`.slice(0, 200),
+        });
+        outcome.logged = true;
+      }
+      continue;
+    }
+    if (handled.has(rec.id)) continue;
+    handled.add(rec.id);
+    findings.push(rec);
+  }
+  if (findings.length === 0 || turnOpen()) return outcome;
+  const batch: { id: string; line: string }[] = [];
+  let batchText = 0;
+  for (const f of findings) {
+    if (batch.length === ORPHAN_SWEEP_FINDINGS_MAX) break;
+    if (batch.length > 0 && batchText + f.line.length > ORPHAN_SWEEP_TEXT_MAX) break;
+    batch.push(f);
+    batchText += f.line.length;
+  }
+  // New ack lines are appended through appendLines in hooks/index.ts, which
+  // reads the file again immediately before its write, as the mailbox pass's
+  // are.
+  try {
+    await deps.appendLines(ackPath, batch.map((f) => JSON.stringify({ id: f.id, at: Date.now(), action: "delivered" })));
+  } catch {
+    return outcome;
+  }
+  const sweepOutcome = await deps.submitOrphanSweep(expectedTurns, batch.map((f) => f.line));
+  // A submit that opened no turn keeps each finding's delivered line, which
+  // is what keeps it from being submitted again, and adds a failed line
+  // beside it, so the ack file does not claim a delivery that never reached
+  // the session.
+  if (!sweepOutcome.ok) {
+    const reason = `${sweepOutcome.how}: ${sweepOutcome.reason}`.slice(0, 200);
+    try {
+      await deps.appendLines(ackPath, batch.map((f) => JSON.stringify({ id: f.id, at: Date.now(), action: "failed", reason })));
+    } catch { /* the delivered lines stand; the decision below names the failure */ }
+  }
+  deps.session.state.decisions.push(sweepOutcome.ok
+    ? {
+      timestamp: Date.now(),
+      loop: "monitor",
+      action: "orphan_sweep_delivered",
+      detail: `${batch.length} findings submitted as [ORPHAN SWEEP ids=${batch.length}]`,
+    }
+    : {
+      timestamp: Date.now(),
+      loop: "monitor",
+      action: "orphan_sweep_failed",
+      detail: `${batch.length} findings submit ${sweepOutcome.how}; left delivered: ${sweepOutcome.reason}`.slice(0, 200),
+    });
+  outcome.delivered = true;
+  outcome.logged = true;
   return outcome;
 }

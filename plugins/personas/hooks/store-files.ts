@@ -1,4 +1,4 @@
-// store-files.ts: store files: the file names a persona keeps in its working directory, the
+// store-files.ts: store files: the file names a persona keeps in its launch directory, the
 // reading of a persona store and a supervisor mailbox line, the store id of a
 // persona and the meter drain bounds.
 //
@@ -36,7 +36,7 @@ export function parsePersonaStore(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-// The three files a supervised session keeps beside its working directory, and
+// The three files a supervised session keeps in its launch directory, and
 // the resolver that anchors them to the directory the session was launched in
 // rather than to wherever the working directory has since moved.
 //
@@ -66,13 +66,18 @@ export function parsePersonaStore(text: string): Record<string, unknown> {
 // option is set, heartbeatPathOf returns it; every heartbeat read and write in
 // hooks/index.ts goes through heartbeatPathOf. This module holds the file names.
 //
-// sess.workdir is captured at session.start from the launch cwd, before any
-// tool call can move it. For a supervisor-launched child that is the same
-// directory the supervisor holds, because supervise.sh:119 cds to the absolute
-// WORKDIR it resolved at :107 before launching. For a session started by hand
-// it is whatever cwd that launcher had, which anchoring still improves on. The
-// bare names are the fallback for the one case that leaves sess.workdir empty,
-// a session.start whose cwd could not be read at all.
+// The anchor is the launch directory, sess.memqLaunchDir, which the first
+// session.start captures from its cwd and $.state holds across a reload of the
+// plugin's code. A reload whose $.state read fails has no held value to read
+// and anchors to its own cwd, as a first start does. sess.workdir alone is not
+// the anchor, because session.start fires again on a reload with whatever cwd
+// the session has moved to; it stands in only where no launch directory is
+// known. For a supervisor-launched child the launch directory is the one the
+// supervisor holds, because supervise.sh cds to the absolute WORKDIR it
+// resolves before launching. For a session started by hand it is
+// whatever cwd that launcher had, which anchoring still improves on. The bare
+// names are the fallback for the one case that leaves both empty, a
+// session.start whose cwd could not be read at all.
 //
 // The join is unconditional "/", as rosterRunDir's own join in hooks/fleet.ts is: Windows
 // resolves a forward slash, and every path this can see is either a Windows

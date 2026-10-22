@@ -30,6 +30,8 @@
 // test-personas/fixtures/recognition-containment.json holds the containment
 // verdicts the `cmd:` matcher gives.
 
+import { STRICT_SEAT } from "./guards/agent-class";
+
 // Characters of command text one match runs over, the nudge's command match
 // included.
 // A longer command is read as its head and its tail joined by a line break,
@@ -480,12 +482,6 @@ export const NUDGE_AGENT_TYPE_KEYS = ["subagent_type", "subagentType", "agent_ty
 const NUDGE_ERROR_FLAG_KEYS = ["is_error", "isError", "error"];
 const NUDGE_EXIT_CODE_KEYS = ["exit_code", "exitCode", "code", "returnCode", "status"];
 
-// The read-only judgment seats a started subagent receives no pointer in, by
-// suffix so a plugin-namespaced id resolves and a longer name that merely
-// contains one does not. A seat dispatched to hold a context that inherited
-// nothing is not handed store text.
-const NUDGE_STRICT_SEAT = /(^|[:/])(?:adversarial-reviewer|blind-reviewer|security-reviewer|performance-reviewer|council-member|design-facilitator|consultant|blind-reader|prose-reviewer|plan-reviewer|corpus-drafter|scope-adjudicator)$/i;
-
 // One record of the nudge's index: its tier and the key the tier is read
 // under, its filename, its admitted triggers and anchor paths, and its
 // machine scope or null.
@@ -814,9 +810,13 @@ export function nudgeStartedAgents(payload: NudgePayload): string[] {
 }
 
 // Whether a started subagent is a read-only judgment seat, by any of the
-// agent types it is started as.
+// agent types it is started as. The roster is the classifier's: STRICT_SEAT
+// in guards/agent-class.ts, the one pattern the read-only guard classifies
+// from, matched by suffix so a plugin-namespaced id resolves and a longer
+// name that merely contains one does not. A seat dispatched to hold a
+// context that inherited nothing is not handed store text.
 export function nudgeStrictSeat(payload: NudgePayload): boolean {
-  return nudgeStartedAgents(payload).some((type) => NUDGE_STRICT_SEAT.test(type));
+  return nudgeStartedAgents(payload).some((type) => STRICT_SEAT.test(type));
 }
 
 // The command a Bash or PowerShell call runs, "" for any other tool.

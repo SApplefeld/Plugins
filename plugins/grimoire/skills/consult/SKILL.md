@@ -17,7 +17,7 @@ Stuck sessions feel almost done, not stuck, so the triggers are a counted floor 
 - **(d) The general license:** a hard-to-reverse or load-bearing decision the spec does not cover, where you would otherwise be guessing.
 - **(e) The design stop:** a fix whose add-decision adds a mechanism no Goal sentence, Intent clause or acceptance bullet names. Executing-work's step 4 convenes its judge, never the `consultant`, because that judge must never receive the querent's lean.
 
-A spec gap is the operator's only where the answer turns on preference, cost or risk appetite. Where it turns on facts about the system, it is rulable. A mixed question is ruled first, so only the small real fork reaches the operator.
+Whether a spec gap is the operator's is the test in the doctrine's intake bullet, opening "Enumerate the gaps at intake". Where it turns on facts about the system, it is rulable. A mixed question is ruled first, so only the small real fork reaches the operator.
 
 ## Brief Contents
 

@@ -758,7 +758,7 @@ function main() {
     }
 
     if (completedUnarchived > 0) {
-        blocks.push(`${completedUnarchived} plan doc(s) in docs/plans/ are marked Status: Complete but still sit there unarchived. At the next close-out, run the curating-docs skill to move them into docs/archive/, prune the backlog, and refresh the index. Reminder, not a blocker.`);
+        blocks.push(`${completedUnarchived} plan doc(s) in docs/plans/ are marked Status: Complete but still sit there unarchived. At the next close-out, run the curating-docs skill to move them into docs/archive/ and prune the backlog. Reminder, not a blocker.`);
     }
 
     // One block rather than a clause inside each of the three figures the scan

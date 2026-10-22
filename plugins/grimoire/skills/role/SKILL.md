@@ -5,7 +5,7 @@ description: "The /role seat-takeover ritual and the contract for the coordinato
 
 # Role
 
-`/role <Seat>` is one command that runs a seat takeover: the name check, the runbook load, the wake arm, the board and store read, the registry write, and the announcement, in the ritual's order below. This skill also owns the coordinator-directory contract and the standing-grant rail, whose first instance is the standing-delegation model. A restatement of either elsewhere is a designed copy bound to this skill, which governs where they disagree, and a curation pass never deletes one as drift.
+`/role <Seat>` is one command that runs a seat takeover: the name check, the runbook load, the wake arm, the board and store read, the registry write, and the announcement, in the ritual's order below. This skill also owns the coordinator-directory contract and the standing-grant rail, whose first instance is the standing-delegation model. A restatement of either elsewhere is a designed copy bound to this skill, which governs where they disagree.
 
 ## Coordinator Directory
 
@@ -62,6 +62,10 @@ The push moments, closed with their class: a session rewrites `Remaining:` and i
 `/role Admin` prepares and asks rather than self-arming its open mandate. Step 3 arms its wake as for any seat, and that arm grants no mandate. Taking a seat confers nothing per the never-a-privilege rule, and authorizing the particular session holding it stays the operator's act.
 
 Every seat carries one duty beyond its runbook: kit friction it meets is filed in the kaizen inbox by the seat itself, standing-authorized per the doctrine's kaizen capture bullet, and the seat carries on, never actioning it inline and never shelving it. The duty is stated per seat because an ownerless duty is discharged by the least busy party, in a fleet reliably the party least likely to have seen the friction.
+
+## Authority Over Machine-Shared State
+
+Authority over machine-shared state follows the seat a session holds. The coordinating seats are the Coordinator, Architect, Admin, Liaison and Expert. The working class is the Worker seat, any session holding no seat, and every dispatched agent. Machine-shared state is what another live session, agent or the operator's tools hold on this machine. Its acts include ending a process the actor's own work did not start, any kill by image name among them. They include a stash, discarding reset, checkout or restore, clean, branch delete or worktree remove on a shared checkout. They include deleting or overwriting another party's files, the `.kit/scratch/` tree outside the actor's own subfolder among them. A coordinating seat runs such an act under the doctrine's stop-for-a-yes test. A working-class session never does, with no emergency carve-out. It asks the live coordinator, or the operator where none is seated, naming the act, target, holder and need under the Worker seat's public-board cap. The ask never gates, and with no answer the session declares `BLOCKED`. The asked seat performs the act or declines, replies with which and why, and never grants leave to run it. The session records the reply in its Chapter. A dispatched agent reports the need to its orchestrator under `BLOCKED` instead.
 
 ## Standing Grants
 

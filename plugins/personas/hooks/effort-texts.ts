@@ -3,10 +3,10 @@
 // for hooks/index.ts, which imports these by name. Pure text.
 
 // The one refusal the four acts that start a new effort give outside a turn
-// the operator or the coordinator persona started.
+// the operator, the coordinator persona or the architect persona's [QUEUE] record started.
 export const EFFORT_REFUSED_TEXT =
-  "Refused: a new effort starts only in a turn the operator or the coordinator persona started, and this turn is neither. " +
-  "An act the operator or the coordinator persona directed is retried in a turn one of them opens, not proposed. " +
+  "Refused: a new effort starts only in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, and this turn is none of them. " +
+  "An act the operator, the coordinator persona or the architect persona's [QUEUE] record directed is retried in a turn one of them opens, not proposed. " +
   "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so finish this step and take the act up there. " +
   "Send any other idea to the coordinator persona with agentic_say, opening the text with [PROPOSAL].";
 
@@ -20,10 +20,10 @@ export const AUTONOMY_REFUSED_TEXT =
   "Any other setting waits for the operator's own word, so ask the operator to set it.";
 
 // The one refusal goal_resume gives on an entry awaiting the operator's yes,
-// or a node under one, outside a turn the operator or the coordinator
-// persona started.
+// or a node under one, outside a turn the operator, the coordinator persona
+// or the architect persona's [QUEUE] record started.
 export const AWAITING_YES_RESUME_REFUSED_TEXT =
-  "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator or the coordinator persona started may resume it. " +
+  "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started may resume it. " +
   "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so a yes in it is taken up there. " +
   "It stays as it is until that word reaches you.";
 
@@ -44,9 +44,9 @@ export function unpromptedPlanNotUndoneText(cause: string, nodeId: string): stri
 }
 
 // The one refusal goal_edit drop gives on an entry awaiting the operator's
-// yes outside a turn the operator or the coordinator persona started.
+// yes outside a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started.
 export const AWAITING_YES_DROP_REFUSED_TEXT =
-  "Refused: this entry waits for the operator's word, and only a turn the operator or the coordinator persona started may drop it. " +
+  "Refused: this entry waits for the operator's word, and only a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started may drop it. " +
   "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so a word to drop it is taken up there. " +
   "It stays paused until that word reaches you.";
 
@@ -57,10 +57,10 @@ export const CLOSING_LEAF_DROP_REFUSED_TEXT =
   "To give up the plan, drop the plan entry itself.";
 
 // The one refusal goal_done by name gives on an entry awaiting the operator's
-// yes, or on a node under one, outside a turn the operator or the coordinator
-// persona started.
+// yes, or on a node under one, outside a turn the operator, the coordinator
+// persona or the architect persona's [QUEUE] record started.
 export const AWAITING_YES_DONE_REFUSED_TEXT =
-  "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator or the coordinator persona started may complete it. " +
+  "Refused: this entry waits for the operator's word, or sits under a plan that does, and only a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started may complete it. " +
   "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so a word to complete it is taken up there. " +
   "It stays as it is until that word reaches you.";
 

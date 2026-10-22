@@ -2,13 +2,13 @@
 // drafts for a worker's ask. An accepted worker ask owes one item on the
 // state's askBriefOwed queue; the tick's drain takes the oldest, forks the
 // session's own transcript for the brief's parts as JSON, renders the posts
-// in the client-briefing register and lands them on the ledger entry, the
-// commons record and the persona's thread. This file holds the item's life,
-// the take-and-drop move, the drafter prompt, the reader of the fork's reply
-// and the renderer with its bound, which scrubs each field before it escapes
-// it. hooks/drains.ts holds the drain, the scrub of each post, the mirror,
-// the posts, the decisions and the drain's fork watch, and
-// hooks/index.ts the fork call and the persist, as closures.
+// in the client-briefing register and lands them on the ledger entry and
+// the commons record, which the Fleet: Decisions card reads. This
+// file holds the item's life, the take-and-drop move, the drafter prompt,
+// the reader of the fork's reply and the renderer with its bound, which
+// scrubs each field before it escapes it. hooks/drains.ts holds the drain,
+// the scrub of each post, the mirror, the decisions and the drain's fork
+// watch, and hooks/index.ts the fork call and the persist, as closures.
 
 import { bracketSafeText, LINE_TERMINATOR, oneLine, type AskBriefOwed, type AskEntry } from "./agent-state";
 import { BLOCK_WITHHELD, scrubText } from "./redactor";

@@ -24,8 +24,8 @@
 // that transcript may be another persona's. The excluded session is left out of
 // both the ring read and the fallback.
 //
-// Which folder. The harness keys a transcript folder on the working directory
-// with every character outside ASCII letters and digits turned to a hyphen,
+// Which folder. The harness keys a transcript folder on the launch directory,
+// the directory the session was launched in, with every character outside ASCII letters and digits turned to a hyphen,
 // and projectKey in bin/supervise-liveness.mjs is that rule. The harness has
 // written one directory under two letter cases, so the folder is found by
 // listing the transcript root and taking every entry whose name equals the key
@@ -480,8 +480,9 @@ export function recap(flags, opts = {}) {
   const now = opts.now === undefined ? Date.now() : opts.now;
   const notes = [];
   const storePath = path.resolve(opts.cwd || process.cwd(), flags.store || STORE_FILENAME);
-  // The store sits in the persona's working directory, which is the directory
-  // the transcript folder is keyed on.
+  // The store sits in the session's launch directory, and the transcript folder
+  // is keyed on that directory, so this script runs there or is handed --store.
+  // The live working directory is not that directory once a shell has moved.
   const workdir = path.dirname(storePath);
   const home = String(env.USERPROFILE || env.HOME || os.homedir());
   const projectsDir = path.resolve(flags.projects || path.join(home, '.claude', 'projects'));

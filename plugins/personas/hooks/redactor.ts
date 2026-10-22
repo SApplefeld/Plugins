@@ -302,12 +302,19 @@ export function refusalFor(surface: string): string {
   return `redactor: this call would store a real secret through ${surface}. Use its placeholder.`;
 }
 
-// The scan's pace, taken at 1,000 characters a millisecond, under half the
-// slowest whole scrub the detector test measures, so a slower machine has
-// room. The base covers the walk and the vault work around a scan. SCAN_CAP
-// is what the full 10 s hook budget scans at that pace: a call whose strings
-// add up to more is withheld rather than passed on unscanned, whatever the
-// budget reads. Exported so a test derives an oversized text from them.
+// The scan's pace, taken at 1,000 characters a millisecond, is the charge's
+// estimate: the slowest measured whole scrub, 8 MB in 4,834 ms, ran at about
+// 1,655 characters a millisecond, so the estimate sits near 60 percent of it
+// and a slower machine has room. The clock is the control behind it: the
+// budget's tick reads it before each of the detector's whole-text passes and
+// withholds once the deadline has passed. The hint probes between two reads,
+// the `includes` and gate tests that decide whether a pass runs, are linear
+// reads the clock does not time, so a machine slower than the estimate runs
+// past the deadline by the pass in flight plus the probes after it. The base
+// covers the walk and the vault work around a scan. SCAN_CAP is what the
+// full 10 s hook budget scans at that pace: a call whose strings add up to
+// more is withheld rather than passed on unscanned, whatever the budget
+// reads. Exported so a test derives an oversized text from them.
 export const SCAN_CHARS_PER_MS = 1_000;
 export const SCAN_BASE_MS = 300;
 export const SCAN_CAP = (10_000 - SCAN_BASE_MS) * SCAN_CHARS_PER_MS;
@@ -333,21 +340,50 @@ export const LIVE_TAG_TOOLS: ReadonlySet<string> = new Set(["Agent"]);
 // The throw a scan budget makes, so a refusal can tell it from any other.
 class ScanBudgetError extends Error {}
 
-// One call's scan budget over `remainingMs`, the hook's remaining time read
-// once at the call. Every string the call scans is charged before its scan,
-// cumulatively, and the charge throws where the scans so far plus this one
-// would not finish inside the budget: the caller then withholds or refuses.
-type Charge = (text: string) => void;
-function scanBudget(remainingMs: number): Charge {
-  let chars = 0;
-  return (text) => {
-    chars += text.length;
-    if (chars > SCAN_CAP) throw new ScanBudgetError("redactor: text too large to scan");
-    if (remainingMs < SCAN_BASE_MS + chars / SCAN_CHARS_PER_MS) throw new ScanBudgetError("redactor: out of time");
-  };
+// The clock the scan budget and its tick read: the monotonic clock,
+// performance.now, unless a test moves it through setScanClock. Monotonic,
+// so a wall-clock jump during a scan never moves a deadline. Wrapped, since
+// the unbound method throws in Node on its Performance brand check. One
+// value for the whole module, since the hook runs on one clock, and a seam
+// only so a test can cross a deadline without waiting for one.
+let scanClock: () => number = () => performance.now();
+export function setScanClock(now: () => number): void {
+  scanClock = now;
 }
 
-const scrub = (text: string): string => scrubSecrets(text, cfg);
+// One call's scan budget over `remainingMs`, the hook's remaining time read
+// once at the call, with the clock read once beside it. `charge` is the
+// pre-check: every string the call scans is charged before its scan,
+// cumulatively, and it throws where the scans so far plus this one would not
+// finish inside the budget at the assumed pace. `scrub` is the control: it
+// runs the detector with a tick that reads the clock before every whole-text
+// pass and before each blob decode, and throws once the clock has passed the
+// deadline, the clock at the call plus `remainingMs` less SCAN_BASE_MS. The
+// hint probes between passes are linear reads the tick does not time, so a
+// scan slower than the pace assumes ends past the deadline by the pass or
+// blob decode in flight plus the probes after it, rather than running its
+// remaining passes. `tick` is the same check for a caller that decodes a
+// media value itself through `walk`, handed in the walk's state. An
+// `Infinity` budget has an infinite deadline and a tick that never throws.
+// Either throw is the same ScanBudgetError, and the caller's branch on it
+// withholds or refuses.
+type Budget = { charge: (text: string) => void; scrub: (text: string) => string; tick: () => void };
+function scanBudget(remainingMs: number): Budget {
+  let chars = 0;
+  const deadline = scanClock() + remainingMs - SCAN_BASE_MS;
+  const tick = (): void => {
+    if (scanClock() > deadline) throw new ScanBudgetError("redactor: out of time");
+  };
+  return {
+    charge: (text) => {
+      chars += text.length;
+      if (chars > SCAN_CAP) throw new ScanBudgetError("redactor: text too large to scan");
+      if (remainingMs < SCAN_BASE_MS + chars / SCAN_CHARS_PER_MS) throw new ScanBudgetError("redactor: out of time");
+    },
+    scrub: (text) => scrubSecrets(text, cfg, tick),
+    tick,
+  };
+}
 
 // A word as the store list names it: its basename, a trailing .exe or .cmd
 // removed, in lower case.
@@ -425,18 +461,19 @@ function storingShell(e: ToolCallInput): boolean {
 // stands, so the test is whether the scan changed any string. The tags the
 // scan collects are not the test, since the detector records a placeholder
 // it meets in a credential context even where it rewrites nothing. Each
-// string is charged to `charge` before its scan. An input the walk cannot read
-// whole counts as holding one.
-function holdsRawSecret(e: object, charge: Charge): boolean {
+// string is charged to `budget` before its scan and scrubbed through it, so
+// the clock bounds the refusal's scan as it bounds every other. An input the
+// walk cannot read whole counts as holding one.
+function holdsRawSecret(e: object, budget: Budget): boolean {
   const args: Record<string, unknown> = { ...(e as Record<string, unknown>) };
   delete args.tool;
   delete args.tool_use_id;
   delete args.agentId;
   let changed = false;
-  const st: WalkState = { incomplete: false };
+  const st: WalkState = { incomplete: false, tick: budget.tick };
   walk(args, (s) => {
-    charge(s);
-    const out = scrubSecrets(s, cfg);
+    budget.charge(s);
+    const out = budget.scrub(s);
     if (out !== s) changed = true;
     return out;
   }, st);
@@ -559,17 +596,19 @@ function commandWords(command: string, powerShell: boolean): string[] {
 // model composed from a placeholder holds the real value, since Write restores
 // it. A line whose text holds `--body-file` is split by its shell's quoting,
 // and every word after a `--body-file` word is a path handed to `fs.read` as
-// the split yields it, relative paths included. Each file's text is charged to
-// the scan budget and scanned as a command's own text is. A split that ends
-// inside an open quote or block comment, and a file the read rejects, throws
-// or does not hold, are each refused with a sentence naming the cause, since
-// the call has not run and a file the read cannot return may still be one memq
-// reads. The file sentence quotes the path as the split yielded it, scrubbed
+// the split yields it, relative paths included. Every file is read first, then
+// each file's text is charged to one scan budget for the call and scanned as a
+// command's own text is. Files whose text passes SCAN_CAP in total take the
+// memq refusal before the next read. A split that ends inside an open quote or block
+// comment, and a file the read rejects, throws or does not hold, are each
+// refused with a sentence naming the cause, since the call has not run and a
+// file the read cannot return may still be one memq reads. The file sentence quotes the path as the split yielded it, scrubbed
 // (the split can join a secret the command scan saw in pieces) and cut to 200
 // code points. A `--body-file` inside a wrapper's quoted string,
 // `bash -c "memq put n d --body-file f"`, is part of one word and is never
-// reached. A budget error is the memq refusal; any other error from the split
-// or the scan escapes, and the caller refuses the call before it runs.
+// reached. A budget error on a file's scan is the memq refusal; any other
+// error from the split or a scan, a budget error on the path's scrub among
+// them, escapes, and the caller refuses the call before it runs.
 export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: string) => Promise<unknown> }, remainingMs: number): Promise<string | null> {
   const command = memqShellCommandOf(e);
   if (command === null || !command.includes("--body-file")) return null;
@@ -582,22 +621,34 @@ export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: strin
     if (open === null) throw err;
     return `redactor: this command ends inside ${open}, so the call was refused before it ran. Close it, or write the body to a file with the Write tool and name it with --body-file.`;
   }
-  const charge = scanBudget(remainingMs);
+  const texts: string[] = [];
+  let total = 0;
   for (let i = 0; i + 1 < words.length; i++) {
     if (words[i] !== "--body-file") continue;
     let text: string;
     try {
       text = String(await fs.read(words[i + 1]));
     } catch {
-      return `redactor: could not read the file this command's --body-file names (${Array.from(scrub(words[i + 1])).slice(0, 200).join("")}), so the call was refused before it ran. Write the file in its own call first, then run memq.`;
+      return `redactor: could not read the file this command's --body-file names (${Array.from(scanBudget(remainingMs).scrub(words[i + 1])).slice(0, 200).join("")}), so the call was refused before it ran. Write the file in its own call first, then run memq.`;
     }
-    try {
-      charge(text);
-      if (scrub(text) !== text) return refusalFor(MEMQ_SURFACE);
-    } catch (err) {
-      if (err instanceof ScanBudgetError) return refusalFor(MEMQ_SURFACE);
-      throw err;
-    }
+    // The charge would refuse these files anyway, so stop reading once they
+    // pass SCAN_CAP: a command naming one large file hundreds of times then
+    // holds no more than the cap and one read, and the refusal reads no clock.
+    total += text.length;
+    if (total > SCAN_CAP) return refusalFor(MEMQ_SURFACE);
+    texts.push(text);
+  }
+  // Every file is read before the one budget is made, so its deadline is
+  // read from the clock on this side of every wait the engine does not
+  // charge, and the files share one bound on characters and time rather
+  // than each taking the hook's whole remaining time.
+  const budget = scanBudget(remainingMs);
+  try {
+    for (const text of texts) budget.charge(text);
+    for (const text of texts) if (budget.scrub(text) !== text) return refusalFor(MEMQ_SURFACE);
+  } catch (err) {
+    if (err instanceof ScanBudgetError) return refusalFor(MEMQ_SURFACE);
+    throw err;
   }
   return null;
 }
@@ -697,7 +748,7 @@ export function toolCallDown(e: ToolCallInput): ToolCallDown {
 // row. A hidden value beside a part of the result the walk cannot rewrite
 // withholds the whole result, since that part may hold the same secret.
 export function toolCallBack(tool: string, r: ToolCallResult, handed: Set<string>, remainingMs: number): { r: ToolCallResult; hidden: number } {
-  const charge = scanBudget(remainingMs);
+  const budget = scanBudget(remainingMs);
   const rehideHanded = (text: string): string => {
     let out = text;
     for (const v of [...handed].sort((a, b) => b.length - a.length)) if (v.length >= 4 && out.includes(v)) out = out.split(v).join(mint("SECRET", v));
@@ -706,18 +757,18 @@ export function toolCallBack(tool: string, r: ToolCallResult, handed: Set<string
   if (r.deny !== undefined) {
     // A refusal from beneath may quote the input it refused, real values
     // and all, and the model reads it as the tool's answer.
-    const d = collect(() => (charge(r.deny), rehideHanded(scrub(escapeLiteralTags(r.deny)))));
+    const d = collect(() => (budget.charge(r.deny), rehideHanded(budget.scrub(escapeLiteralTags(r.deny)))));
     return { r: d.tags.size === 0 ? r : { deny: d.value }, hidden: 0 };
   }
   const escape = !LIVE_TAG_TOOLS.has(tool);
-  const st: WalkState = { incomplete: false };
+  const st: WalkState = { incomplete: false, tick: budget.tick };
   // The result and the text often hold the same string: scan it once.
   const memo = new Map<string, string>();
   const clean = (s: string): string => {
     const done = memo.get(s);
     if (done !== undefined) return done;
-    charge(s);
-    const out = rehideHanded(scrub(escape ? escapeLiteralTags(s) : s));
+    budget.charge(s);
+    const out = rehideHanded(budget.scrub(escape ? escapeLiteralTags(s) : s));
     memo.set(s, out);
     return out;
   };
@@ -750,10 +801,10 @@ export function withheldToolResult(r?: ToolCallResult): ToolCallResult {
 // hook above attached, with secrets replaced by placeholders, or the same
 // event where nothing was hidden. `hidden` is the count index.ts toasts.
 export function scrubPrompt(e: PromptSubmitInput, remainingMs: number): { e: PromptSubmitInput; hidden: number } {
-  const charge = scanBudget(remainingMs);
+  const budget = scanBudget(remainingMs);
   const { value, tags } = collect(() => {
-    charge(e.text);
-    return { text: scrub(e.text), context: e.context?.map((c) => (charge(c), scrub(c))) };
+    budget.charge(e.text);
+    return { text: budget.scrub(e.text), context: e.context?.map((c) => (budget.charge(c), budget.scrub(c))) };
   });
   if (tags.size === 0) return { e, hidden: 0 };
   return { e: { ...e, text: value.text, ...(value.context ? { context: value.context } : {}) }, hidden: countHidden(tags) };
@@ -764,10 +815,10 @@ export function scrubPrompt(e: PromptSubmitInput, remainingMs: number): { e: Pro
 // rewritten block would carry the key on to the hooks above, so they are left
 // out once any block changed.
 export function scrubContextBlocks(r: PromptContextResult, remainingMs: number): PromptContextResult {
-  const charge = scanBudget(remainingMs);
+  const budget = scanBudget(remainingMs);
   const blocks = r.blocks.map((b) => {
-    charge(b.text);
-    return { ...b, text: scrub(b.text) };
+    budget.charge(b.text);
+    return { ...b, text: budget.scrub(b.text) };
   });
   if (blocks.every((b, i) => b.text === r.blocks[i].text)) return r;
   return { blocks };
@@ -787,9 +838,10 @@ export function withheldContextBlocks(r: PromptContextResult): PromptContextResu
 export function scrubAttachment(e: PromptAttachmentInput, r: PromptAttachmentResult, remainingMs: number): PromptAttachmentResult {
   if (r.text == null) return r;
   const text = r.text;
-  scanBudget(remainingMs)(text);
+  const budget = scanBudget(remainingMs);
+  budget.charge(text);
   const isFile = e.type === "file" || e.type === "edited_text_file";
-  const out = isFile ? scrub(escapeLiteralTags(text)) : scrub(text);
+  const out = isFile ? budget.scrub(escapeLiteralTags(text)) : budget.scrub(text);
   return out === text ? r : { text: out };
 }
 
@@ -798,11 +850,11 @@ export function scrubAttachment(e: PromptAttachmentInput, r: PromptAttachmentRes
 // Agent tool gets no restore, so this is a second layer: a value that slipped
 // into the prompt some other way still reaches the subagent as a placeholder.
 export function scrubSpawn(e: AgentSpawnInput, remainingMs: number): AgentSpawnInput {
-  const charge = scanBudget(remainingMs);
-  charge(e.prompt);
-  const prompt = scrub(e.prompt);
-  charge(e.description);
-  const description = scrub(e.description);
+  const budget = scanBudget(remainingMs);
+  budget.charge(e.prompt);
+  const prompt = budget.scrub(e.prompt);
+  budget.charge(e.description);
+  const description = budget.scrub(e.description);
   return prompt === e.prompt && description === e.description ? e : { ...e, prompt, description };
 }
 
@@ -823,7 +875,8 @@ export function setRedactorOn(on: boolean): void {
 export function scrubText(text: string): { text: string; hidden: number } {
   if (!redactorOn || typeof text !== "string") return { text, hidden: 0 };
   try {
-    const { value, tags } = collect(() => (scanBudget(Infinity)(text), scrub(text)));
+    const budget = scanBudget(Infinity);
+    const { value, tags } = collect(() => (budget.charge(text), budget.scrub(text)));
     return value === text ? { text, hidden: 0 } : { text: value, hidden: countHidden(tags) };
   } catch {
     return { text: BLOCK_WITHHELD, hidden: 0 };
@@ -839,15 +892,15 @@ export function scrubText(text: string): { text: string; hidden: number } {
 // does; index.ts withholds then.
 export function scrubServed(r: ToolCallResult, served: boolean, remainingMs: number): { r: ToolCallResult; hidden: number } {
   if (!redactorOn) return { r, hidden: 0 };
-  const charge = scanBudget(remainingMs);
+  const budget = scanBudget(remainingMs);
   let changed = false;
   const clean = (s: string): string => {
-    charge(s);
-    const out = scrub(s);
+    budget.charge(s);
+    const out = budget.scrub(s);
     if (out !== s) changed = true;
     return out;
   };
-  const st: WalkState = { incomplete: false };
+  const st: WalkState = { incomplete: false, tick: budget.tick };
   const { value, tags } = collect(() => (served ? walk(r, clean, st) : { ...r, context: r.context?.map(clean) }));
   if (!changed) return { r, hidden: 0 };
   if (st.incomplete) return { r: withheldToolResult(r), hidden: 0 };

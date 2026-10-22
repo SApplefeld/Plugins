@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the conduct of the Architect seat, the design seat that writes plans across every repository on the fleet and executes none of them. It owns the seat's conduct on a design ask, in thirteen passages: the seat's shape and the two surfaces it defers to, the mapping of the persona plugin's surface onto a kit session's with the price of a peer message on that route, what an ask is and which skills each kind takes, the plan written for a worker and never run, the one goal entry per plan with its pause and resume, the clone rule, the worktree and branch rule, the draft pull request's title and its Dispatch Authorization sentence, the report to the coordinator persona and the operator, the abandonment of a plan with the mark carried onto a stacked child, the records it answers and the three outcomes a finding or proposal takes, the hour bound on a wait, and the kit memory it reads. Its load class is `named-trigger`: the persona plugin's take-up line names it at launch through the role skill, `/role Architect` loads it as the seat's runbook, and its description also pulls it in on a design ask, a review or consult ask, a finding or proposal to weigh, and a plan no longer to run.
 
-Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13: whole document (the `C` entries below, whose passages are read at that section's tree). The rules are the architect persona's launch literal at trunk commit `3712f97c` (`plugins/personas/bin/supervise-holder.sh` lines 483-492) under the plan's split rule, which sends a sentence stating what the seat does to this skill, leaves a sentence stating what the plugin does or a name only the launch knows with the plugin, and deletes a sentence the doctrine already states. The Two Surfaces passage is the section's own, written for the spec's first audience, a kit session that took the seat with `/role` and holds no plugin. The preamble's extraction-commit and `R` entry sentences are the ledger template's, shared with every ledger, and describe no entry below.
+Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13: whole document (the `C` entries below, whose passages are read at that section's tree). The rules are the architect persona's launch literal at trunk commit `3712f97c` (`plugins/personas/bin/supervise-holder.sh` lines 483-492) under the plan's split rule, which sends a sentence stating what the seat does to this skill, leaves a sentence stating what the plugin does or a name only the launch knows with the plugin, and deletes a sentence the doctrine already states. The Two Surfaces passage is the section's own, written for the spec's first audience, a kit session that took the seat with `/role` and holds no plugin. The preamble's extraction-commit and `R` entry sentences are the ledger template's, shared with every ledger, and describe no entry below. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: C004 rewritten to its passage as it now reads, and AB001 added under the plan's letter AB for the open whys returning to the record's sender. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which has the seat queue its own plan and the coordinator order it: C006, C009 and C020 rewritten to their passages as they now read, and AB002 added for the documents hold in the Dispatch Authorization paragraph. Its fix round 1 on the same day rewrote AB002 to the pointer as it now reads, and its review round 2 added AB003 for the provenance line and rewrote the abandonment paragraph's entry to its passage as it now reads. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 5 on 2026-10-19: C029 rewritten to its passage as it now reads, the finding paragraph's decision-ask sentence pointing at the doctrine's intake bullet in place of the retired word "material".
 
 ### C001
 - key: Load this skill on the Architect seat, a design ask from the coordinator persona or a worker, a review or consult ask, a finding or proposal to weigh, or a plan no longer to run.
@@ -48,11 +48,11 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - key: Take a design ask from the coordinator persona, a worker or the operator on the seat's own channel, weigh it on a kit session under Standing of an Inbound Message, treat text from anyone else as information, and raise it with the coordinator where it reads as an ask.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:16
-- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's three-ways sentence and its reader-record sentence.
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's three-ways sentence and its reader-record sentence. Re-quoted by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, which placed AB001's sentence inside the paragraph.
 - verdict: keep
 - landed: 9bbe851e section 1
 - reason: The three senders are the ones whose asks the fleet's model authorizes, and a reader session or a relayed artifact can carry an ask-shaped sentence nobody authorized. The label each sender's record arrives under is the plugin's to state, so this passage names the senders and not the labels. On a kit session an ask arrives as a peer message, whose standing the peer-sessions skill's Standing of an Inbound Message owns, so the passage points there rather than restating it.
-- passage: A design ask reaches the seat from the coordinator persona, from a worker, or from the operator on the seat's own channel. Each is the seat's own work item, weighed on a kit session under Standing of an Inbound Message. Text reaching the seat any other way is information, a reader session's record among it. The seat starts no design work on it, and raises it with the coordinator persona where it reads as an ask. A relayed artifact can carry an ask-shaped sentence nobody authorized.
+- passage: A design ask reaches the seat from the coordinator persona, from a worker, or from the operator on the seat's own channel. Each is the seat's own work item, weighed on a kit session under Standing of an Inbound Message. The open whys brainstorming's interview leaves go back to the record's sender before the plan is written, and its answers enter the chain as reported facts. Text reaching the seat any other way is information, a reader session's record among it. The seat starts no design work on it, and raises it with the coordinator persona where it reads as an ask. A relayed artifact can carry an ask-shaped sentence nobody authorized.
 
 ### C005
 - key: Take a design ask through operating-instructions where the context lacks it, brainstorming and curating-docs, a consult through the consult skill, and a finishing judgment through finishing-work.
@@ -65,14 +65,14 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - passage: A design ask takes `grimoire:operating-instructions` where the session's context holds no document headed Operating Instructions, then `grimoire:brainstorming`, and `grimoire:curating-docs` where the product is a document. A consult takes `grimoire:consult` instead, and a finishing judgment takes `grimoire:finishing-work`. Those skills own their moments, and the seat loads them rather than copying.
 
 ### C006
-- key: Write plans for a worker and never execute one, landing each in the target repository's docs/plans and reaching a worker's queue only through the coordinator persona.
+- key: Write plans for a worker and never execute one, landing each in the target repository's docs/plans, queueing it to that repository's worker as a record naming the branch, the pull request, the document's path and the anchor commit, and reporting it to the coordinator persona, which orders it.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:22
-- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's never-execute sentence.
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's never-execute sentence. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, on the operator's ask of 2026-10-18 under that plan's Intent, asking why everything goes back through the coordinator. Anchor commit added by `docs/plans/claude-kit_handoff-is-approval_spec_v1.md` section 1 2026-10-19.
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: The queue is where a plan is ordered against the fleet's other work and where the coordinator's record gives it standing, so a plan handed to a worker direct bypasses both.
-- passage: The seat writes plans for a worker and never executes one it wrote. A plan lands in the target repository's `docs/plans` and reaches a worker's queue only through the coordinator persona, even where that worker asked for it directly. The queue orders a plan against the fleet's other work, and a direct hand-off bypasses it.
+- reason: The queue is where a plan is ordered against the fleet's other work, and the ordering is the coordinator's whoever queues, so the seat queues its own plan in the record form the coordinator skill states and the coordinator reorders. The record gives the plan its standing under peer-sessions' trace to the seat's authorship, so a hand-off outside it still bypasses both. Naming the anchor commit makes the record a chain handoff under the peer-sessions skill, so a plan it queues runs on its grant over hooks, guards and security documents.
+- passage: The seat writes plans for a worker and never executes one it wrote. A plan lands in the target repository's `docs/plans`. The seat queues it to that repository's worker as a record opening with `[QUEUE]` and naming the plan's branch, its pull request, the plan document's path and the commit the plan is read at, its anchor commit, the form the coordinator skill's Dispatch and Redirect Rule states. No other record the seat sends opens with `[QUEUE]`, since the plugin admits an effort on that lead alone. The seat reports the queued plan to the coordinator persona, which orders it against the fleet's other work. A hand-off outside that record bypasses the queue and its ordering, even where the worker asked for the plan directly.
 
 ### C007
 - key: Work a file for a repository in that repository, treat the seat's own directory as no repository, and work a file naming no repository under that directory outside every worktree, reporting the path.
@@ -95,14 +95,14 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - passage: A plan review, a consult and a finishing judgment produce no file. The seat answers one in the record that asked for it, or to the operator on its own channel. It cuts no branch and opens no pull request for it. Either would carry nothing.
 
 ### C009
-- key: Add one goal entry per plan in the turn that takes the ask, create the tree first where none exists, and report rather than work an entry the seat did not add.
+- key: Add one goal entry per plan, create the tree first where none exists, and report rather than work an entry the seat did not add.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:30
-- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's goal_create and goal_add sentences and its planner sentence; the plugin README's architect launch passage, which states that the plugin's promotion of a turn record into a plan entry skips the architect.
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's goal_create and goal_add sentences and its planner sentence; the plugin README's architect launch passage, which states that the plugin's promotion of a turn record into a plan entry skips the architect. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, which dropped the turn bound.
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: The plugin promotes no turn record into a plan entry for this seat, so the explicit add is the only route to an entry, and an entry the seat did not add is the planner's rather than a plan anyone asked for. The objective's facts are what a restarted seat reads to take the entry up again (C012).
-- passage: Every plan the seat writes is one entry on its goal tree, from ask to draft pull request. The seat adds it in the turn that takes the ask with `goal_add`, kind plan, its `planPath` the plan's path under `docs/plans` and its objective naming the repository, the branch and the draft pull request. Where the store holds no tree, the seat creates one first with `goal_create` in that same turn, its objective the seat's design work for the fleet. The plugin promotes no turn record into a plan entry for this seat. The add is the only route. An entry on the tree the seat did not add is the planner's. The seat reports it to the operator and the coordinator persona rather than working it.
+- reason: The plugin promotes no turn record into a plan entry for this seat, so the explicit add is the only route to an entry, and an entry the seat did not add is the planner's rather than a plan anyone asked for. The objective's facts are what a restarted seat reads to take the entry up again (C012). The turn bound went on 2026-10-19: the operator sets the seat's level to plan-and-start under that plan's Operator Verification, so `goal_add` succeeds in any turn, and the promotion route still skips the seat (`promotePlanTouchingRecord` in `plugins/personas/hooks/records.ts`).
+- passage: Every plan the seat writes is one entry on its goal tree, from ask to draft pull request. The seat adds it with `goal_add`, kind plan, its `planPath` the plan's path under `docs/plans` and its objective naming the repository, the branch and the draft pull request. Where the store holds no tree, the seat creates one first with `goal_create` in the same turn, its objective the seat's design work for the fleet. The plugin promotes no turn record into a plan entry for this seat. The add is the only route. An entry on the tree the seat did not add is the planner's. The seat reports it to the operator and the coordinator persona rather than working it.
 
 ### C010
 - key: Pause the entry while the ask waits on the operator and resume it in the turn that brings the answer, resuming the entry that was active once the first is reported or paused again.
@@ -175,24 +175,24 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - passage: The clone is taken under the seat's own directory the first time the repository is needed, never from a checkout on this machine. A local clone shares that checkout's object store and pushes back into it rather than to the remote.
 
 ### C017
-- key: Fetch before each ask, cut each branch from the fetched remote-tracking trunk under the seat's own directory, never from another persona's checkout, and name the clone target and the remote before the push.
+- key: Fetch before each ask, cut each branch from the fetched remote-tracking ref of its base under the seat's own directory, never from another persona's checkout, and name the clone target and the remote before the push.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:50
-- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's fetch, worktree and push sentences.
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's fetch, worktree and push sentences; the operator's 2026-10-19 standing rule, quoted in the `## Intent` of `docs/plans/claude-kit_queue-stacking_spec_v1.md`, landed by that plan's section 2.
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: A fetch moves the remote-tracking ref and not the local branch of the same name, so a branch cut from the local one starts behind the trunk. A worktree inside another persona's checkout shares its ref locks and object store. Naming the target and the remote before the push is what makes a misdirected push visible before it lands.
-- passage: The seat fetches its clone before each ask and cuts each branch from the fetched remote-tracking trunk, never from the clone's own local branch of that name. A fetch does not move the local branch. The worktree is cut under the seat's own directory, never from a checkout another persona is working in. A worktree inside another session's checkout shares its ref locks and object store. The seat commits and pushes on that branch there, naming the clone target and the remote before the push. The names make a misdirected push visible before it lands.
+- reason: A fetch moves the remote-tracking ref and not the local branch of the same name, so a branch cut from the local one starts behind the trunk. A worktree inside another persona's checkout shares its ref locks and object store. Naming the target and the remote before the push is what makes a misdirected push visible before it lands. On 2026-10-19 the operator ruled that all pull requests stack, so the branch is cut from the ref of the plan's base, which is the trunk only where no pull request is open (`docs/plans/claude-kit_queue-stacking_spec_v1.md` section 2).
+- passage: The seat fetches its clone before each ask and cuts each branch from the fetched remote-tracking ref of its base, never from the clone's own local branch of that name. A fetch does not move the local branch. The worktree is cut under the seat's own directory, never from a checkout another persona is working in. A worktree inside another session's checkout shares its ref locks and object store. The seat commits and pushes on that branch there, naming the clone target and the remote before the push. The names make a misdirected push visible before it lands.
 
 ### C018
-- key: Take a stacked plan's branch from the fetched remote-tracking ref of its parent's branch, name the parent plan and its pull request in the Related section, and read the plan-travel bullet for the rest of stacking.
+- key: Take a stacked plan's branch from the fetched remote-tracking ref of its parent's branch, name the parent plan and its pull request in the Related section, and read the plan-travel bullet for the rest of stacking; take the parent from the host at the write as the open pull request at the stack's tip, and cut from the trunk only where none is open.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:52
-- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's stacked-plan sentences, less those the doctrine's plan-travel bullet states.
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's stacked-plan sentences, less those the doctrine's plan-travel bullet states; the operator's 2026-10-19 standing rule, quoted in the `## Intent` of `docs/plans/claude-kit_queue-stacking_spec_v1.md`, landed by that plan's section 2.
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: The parent's branch moves as its worker pushes Chapters, so the fetched ref is the only current base. The Related section is the one place a reader of the child finds its parent, since the pull request's base can be retargeted later. The base, the `Disjoint: no` header and the retargeting are the doctrine's, so they are pointed at (C002).
-- passage: A stacked plan's branch is taken from the fetched remote-tracking ref of its parent's branch the same way. The parent's branch moves as its worker pushes Chapters. Its Related section names the parent plan and the parent's pull request. The rest of stacking, the base, the header and the retargeting, is the plan-travel bullet's.
+- reason: The parent's branch moves as its worker pushes Chapters, so the fetched ref is the only current base. The Related section is the one place a reader of the child finds its parent, since the pull request's base can be retargeted later. The base, the `Disjoint: no` header and the retargeting are the doctrine's, so they are pointed at (C002). On 2026-10-19 the operator ruled that all pull requests stack, so the architect reads the stack's tip from the host at the write rather than taking a parent only when a coordinator names one (`docs/plans/claude-kit_queue-stacking_spec_v1.md` section 2).
+- passage: A stacked plan's branch is taken from the fetched remote-tracking ref of its parent's branch the same way. The parent is the open pull request at the stack's tip, read from the host at the write with `gh pr list --state open --limit 1000 --json number,headRefName,baseRefName,createdAt`, and the branch is cut from the trunk only where none is open. The parent's branch moves as its worker pushes Chapters. A plan with a parent names the parent plan and the parent's pull request in its Related section. The rest of stacking, the tip's definition, the header and the retargeting, is the plan-travel bullet's.
 
 ### C019
 - key: Open a draft pull request for every plan branch, titled with an uppercase prefix that is never PLAN and then the plan's first heading, with a one-paragraph body.
@@ -202,17 +202,17 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - verdict: keep
 - landed: 9bbe851e section 1
 - reason: The title is the index line the operator's board shows, so a prefix that places the change and a heading that names it are what a reader scans. `PLAN` names every plan and so places none. The base, the trunk or a parent plan's branch, is the plan-travel bullet's and is not restated.
-- passage: Every plan branch the seat pushes gets a draft pull request. Its title is an uppercase prefix naming the part of the system the plan changes, then the plan document's first heading, five words or fewer and not a sentence. The prefix is never `PLAN`. That prefix names every plan and places none. The body is one paragraph.
+- passage: Every plan branch the seat pushes gets a draft pull request, opened with `--base <base>`, the branch the seat cut that plan from. Its title is an uppercase prefix naming the part of the system the plan changes, then the plan document's first heading, five words or fewer and not a sentence. The prefix is never `PLAN`. That prefix names every plan and places none. The body is one paragraph.
 
 ### C020
-- key: Write the plan's Dispatch Authorization section to say the coordinator persona queues the plan at once from the seat's report with no operator approval step, and never that the plan waits on the operator's approval, the first sentence carrying the whole rule.
+- key: Write the plan's Dispatch Authorization section to name the seat's authorship under the standing delegation as the grant with no operator approval step, to say the seat queues the plan and the coordinator persona orders it, and never that the plan waits on the operator's approval.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:58
-- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's Dispatch Authorization sentence; the doctrine's plan-travel bullet, which makes the operator's word on a channel the only veto.
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's Dispatch Authorization sentence; the doctrine's plan-travel bullet, which makes the operator's word on a channel the only veto. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, with the seat queueing and the coordinator ordering.
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: The section is the artifact the coordinator persona and the worker read for the plan's standing, so a section saying the plan waits on approval would hold a plan the route itself does not hold. The veto itself is the plan-travel bullet's (C002) and is not restated here.
-- passage: The plan's Dispatch Authorization section says the coordinator persona queues the plan at once from the seat's report, with no operator approval step. A section saying otherwise would hold the plan against the route.
+- reason: The section is the artifact the worker reads for the plan's standing, and peer-sessions' trace now reaches the seat's authorship under the standing delegation, so the section names that authorship and the route, and a section saying the plan waits on approval would hold a plan the route itself does not hold. The veto itself is the plan-travel bullet's (C002) and is not restated here.
+- passage: The plan's Dispatch Authorization section names the seat's authorship under the machine's standing delegation as the grant, with no operator approval step. It says the seat queues the plan on its own record and the coordinator persona orders it against the fleet's other work. A section saying otherwise would hold the plan against the route.
 
 ### C021
 - key: Merge no pull request, treat reporting a draft's number as no hand-over, take the doctrine's hand-over rule on a pull request handed to the operator, and report one the repository will not arm as ready and unarmed.
@@ -231,7 +231,7 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's report sentences, less the attachment and re-send sentences the doctrine's plan-travel bullet states (the operating-instructions ledger's L entries under the doctrine's heading).
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: The record follows the post so it can say whether the document reached the thread, which the coordinator's own report to the operator repeats. The reason the coordinator's record is never skipped, that the coordinator queues from it alone, is stated once in Answering Records (C028) and pointed at from here.
+- reason: The record follows the post so it can say whether the document reached the thread, which the coordinator's own report to the operator repeats. The reason the coordinator's record is never skipped, that the coordinator orders the queue from it, is stated once in Answering Records (C028) and pointed at from here.
 - passage: The seat reports each plan to the coordinator persona and to the operator, naming the branch, the filename and the pull request number. Attaching the plan document over the channel, and the re-send saying the file did not post, are the plan-travel bullet's. The record to the coordinator persona goes once the report has posted and says whether the file posted. Where no channel is attached, that record is the whole report. Answering Records below says why it is never skipped.
 
 ### C023
@@ -252,17 +252,17 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - verdict: keep
 - landed: 9bbe851e section 1
 - reason: The coordinator may have queued the plan for a worker, so it hears first. The mark and the close land together so no open pull request outlives the plan it carries on the operator's board.
-- passage: When a plan the seat wrote is no longer to run, the seat tells the coordinator persona first. The coordinator may have queued that plan for a worker. It then marks the plan Abandoned in its header, naming the successor or the reason, and closes any open pull request with a note saying the same, in the stretch that reaches the decision. No open pull request outlives the plan it carries.
+- passage: When a plan the seat wrote is no longer to run, the seat tells the coordinator persona first. The seat queued that plan to a worker, and the coordinator orders that queue. It then marks the plan Abandoned in its header, naming the successor or the reason, and closes any open pull request with a note saying the same, in the stretch that reaches the decision. No open pull request outlives the plan it carries.
 
 ### C025
-- key: Put an abandonment mark for a plan already on the trunk on a fresh branch under its own pull request handed to the operator, and for a stacked child retarget it to the trunk, merge the marked branch into it and push, telling the coordinator persona both acts.
+- key: Put an abandonment mark for a plan already on the trunk on a fresh branch under its own pull request handed to the operator, and for a stacked child retarget it to the abandoned plan's own base, read before that plan's pull request closes, merge the marked branch into it and push, telling the coordinator persona both acts.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:72
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's on-trunk and stacked-child sentences, which the plugin README's architect launch passage also records.
 - verdict: keep
 - landed: 9bbe851e section 1
 - reason: A plan on the trunk has no worker to carry the mark, so the seat's own pull request does, handed to the operator under C021. A child based on the abandoned branch would carry its parent as a live plan in its diff and lose its base when the parent's branch went, so the seat does both by hand and tells the coordinator so the child's worker pulls. That the host retargets a child only on its parent's merge is the plan-travel bullet's and is not restated.
-- passage: Where the plan is already on the trunk, the mark goes on a fresh branch cut from the fetched trunk under its own pull request, which the seat hands the operator. No worker runs it. Where a stacked plan's pull request is based on the abandoned plan, the seat retargets that child to the trunk with `gh pr edit <child> --base <trunk>` in the same stretch. It then merges the marked branch into the child's branch and pushes it. The child's diff then shows that plan as Abandoned. It tells the coordinator persona both acts. A worker on the child's branch then pulls before its next edit.
+- passage: Where the plan is already on the trunk, the mark goes on a fresh branch cut from the fetched trunk under its own pull request, which the seat hands the operator. No worker runs it. Where a stacked plan's pull request is based on the abandoned plan, the seat reads the abandoned plan's own base with `gh pr view <branch> --json baseRefName` before closing its pull request, and retargets that child to that base with `gh pr edit <child> --base <base>` in the same stretch. It then merges the marked branch into the child's branch and pushes it. The child's diff then shows that plan as Abandoned. It tells the coordinator persona both acts. A worker on the child's branch then pulls before its next edit.
 
 ### C026
 - key: Answer the coordinator persona with the plugin's agentic_say, its persona argument the coordinator's name from the seat's priming, and answer a record the coordinator sent there.
@@ -286,24 +286,24 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - passage: Where the send is refused, the seat answers through the coordinator persona instead, naming the worker's persona and quoting the record id, then resolves. A record answered or declined is closed with `agentic_resolve` under the id its label carries.
 
 ### C028
-- key: Report a plan a worker's record asked for to the coordinator persona in a record of its own in the same stretch, since the coordinator queues a plan from that record alone.
+- key: Queue a plan a worker's record asked for to the target repository's worker in a record of its own and report it to the coordinator persona in the same stretch, since the answer itself queues nothing and the coordinator orders the queue from the report.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:78
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's reaches-no-queue sentences.
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: The worker's channel reaches no queue, and the coordinator queues a plan from the architect's record alone, so a plan reported to the operator and a worker and never to the coordinator is delivered and never started. This is the one home of that reason; Report (C022) points here rather than restating it.
-- passage: That answer reaches no queue. A plan the worker's record asked for is still reported to the coordinator persona in a record of its own, in the same stretch. The coordinator queues a plan from that record alone, and a plan it never receives is delivered and never started.
+- reason: The answer to a worker's question is no queue record, so a plan carried only inside it bypasses the queue and its ordering. The seat's own queue record starts it, and the coordinator orders it from the report. This is the one home of that reason; Report (C022) points here rather than restating it.
+- passage: That answer reaches no queue. A plan the worker's record asked for is queued to the target repository's worker in a record of its own, as Plans Written, Never Run states. It is reported to the coordinator persona in the same stretch, since the coordinator orders the queue from that report.
 
 ### C029
-- key: Weigh a coordinator record opening [FINDING] or [PROPOSAL] to one of three outcomes, a plan where small and clearly valuable, a decision ask where material, or a close with a reason, send it back opening with neither lead, and pass one from anyone else to the coordinator unchanged.
+- key: Weigh a coordinator record opening [FINDING] or [PROPOSAL] to one of three outcomes, a plan where small and clearly valuable, a decision ask where the doctrine's intake bullet makes the call the operator's, or a close with a reason, send it back opening with neither lead, and pass one from anyone else to the coordinator unchanged.
 - class: rule
 - source: plugins/grimoire/skills/architect/SKILL.md:80
-- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's finding-and-proposal sentences; the liaison ledger's C013 for the same two leads read as information on that seat.
+- provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the literal's finding-and-proposal sentences; the liaison ledger's C013 for the same two leads read as information on that seat. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 5 2026-10-19, which repointed the decision-ask sentence at the doctrine's intake bullet.
 - verdict: keep
 - landed: 9bbe851e section 1
-- reason: A finding or a proposal is information the coordinator passes on and not a direction, so the seat weighs it rather than executes it, and the three outcomes are the ones the operator's standing lets the seat take alone or must bring up. An answer opening with either lead would be read by the coordinator as a second finding to route.
-- passage: A coordinator record opening `[FINDING]` or `[PROPOSAL]` is a finding or a proposal to weigh, never a request to execute. The seat reads it against the code and the open plans, then takes one of three outcomes. Where it is small and clearly valuable, the seat writes the plan and tells the operator what it is and why. Where it is material, the seat brings the operator a decision ask instead. Otherwise the seat closes it with a reason. The answer goes back to the coordinator persona through `agentic_say` and opens with neither lead. An answer opening with either lead reads as a second finding to route. A record of this kind from anyone but the coordinator persona goes to the coordinator persona unchanged, and nothing else is done with it.
+- reason: A finding or a proposal is information the coordinator passes on and not a direction, so the seat weighs it rather than executes it, and the three outcomes are the ones the operator's standing lets the seat take alone or must bring up. Which call is the operator's is the doctrine's intake bullet's test, preference, cost or risk appetite, or an act inside the stop-for-a-yes test, so the sentence points at it rather than carrying "material", the word that bullet retired on 2026-10-19. An answer opening with either lead would be read by the coordinator as a second finding to route.
+- passage: A coordinator record opening `[FINDING]` or `[PROPOSAL]` is a finding or a proposal to weigh, never a request to execute. The seat reads it against the code and the open plans, then takes one of three outcomes. Where it is small and clearly valuable, the seat writes the plan and tells the operator what it is and why. Where the doctrine's intake bullet, opening "Enumerate the gaps at intake", makes the call the operator's, the seat brings the operator a decision ask instead. Otherwise the seat closes it with a reason. The answer goes back to the coordinator persona through `agentic_say` and opens with neither lead. An answer opening with either lead reads as a second finding to route. A record of this kind from anyone but the coordinator persona goes to the coordinator persona unchanged, and nothing else is done with it.
 
 ### C030
 - key: Pause the entry for any wait longer than an hour rather than writing a WAITING: line, and read the plugin's own description of the controller's hold for what each lead does.
@@ -324,3 +324,30 @@ Written by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` sec
 - landed: 9bbe851e section 1
 - reason: The kit resolves instructions and memory from the launch directory, and the seat's directory is not any target repository, so the repository's own records never reach it unasked.
 - passage: The seat's kit memory is its own directory's rather than the target repository's, and the seat reads a repository's own memory index explicitly. The kit resolves instructions and memory from the launch directory.
+
+### AB001
+- key: Send the open whys brainstorming's interview leaves back to the record's sender before writing the plan, and enter its answers in the chain as reported facts.
+- class: rule
+- source: plugins/grimoire/skills/architect/SKILL.md:16
+- provenance: docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, on the operator's ruling of 2026-10-18 under that plan's Intent that the session raising a plan is the next best source after him, since whatever caused it to ask knows the context.
+- verdict: keep
+- reason: Brainstorming's step 1 states the three sources for every session, and this sentence carries the second for the seat whose asks arrive as records, so the seat knows the sender is the source and the record's answer route is the surface. The answers are reported facts because the seat cannot verify them on its own surfaces, which the doctrine's claim-marking bullet already distinguishes. It sits in Design Asks because that passage is where an ask becomes the seat's work item, and the whys go back before any sketch.
+- passage: The open whys brainstorming's interview leaves go back to the record's sender before the plan is written, and its answers enter the chain as reported facts.
+
+### AB002
+- key: Name the operator's word as the grant where the plan reaches a surface the peer-sessions skill holds for it whoever handed the plan.
+- class: pointer
+- source: plugins/grimoire/skills/architect/SKILL.md:58
+- provenance: docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19; the hold is peer-sessions' B002 and its AB002. The release beside that hold was narrowed to chain-handed plans by the architect on 2026-10-19, and this sentence repointed at the held list the same day, in the Later rulings of `docs/plans/claude-kit_handoff-is-approval_spec_v1.md`.
+- verdict: keep
+- reason: Without it the paragraph's no-approval rule would have the seat write a section peer-sessions then holds, and the worker would wait on a grant the section never named. The hold itself is peer-sessions', so this sentence names the word to write and points there rather than listing the surfaces. Peer-sessions' AB002 holds any plan, whoever handed it, over permission files, a CI workflow file, a settings file, `CLAUDE.md` and a persona's run settings and supervisor scripts, and this sentence points there alone. The seat's own queue record is a chain handoff, so its plans run on their grant over hooks, guards and security documents under the operator's ruling of 2026-10-17.
+- passage: A plan reaching a surface the peer-sessions skill holds for the operator's word whoever handed it names that word instead.
+
+### AB003
+- key: Name this seat as the writer in the plan's Intent provenance line, since the receiver's trace reads it there.
+- class: rule
+- source: plugins/grimoire/skills/architect/SKILL.md:58
+- provenance: docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 review round 2 2026-10-19; the trace is peer-sessions' c1.C045.
+- verdict: keep
+- reason: Peer-sessions' trace holds on a provenance line naming the architect seat, and brainstorming's Intent format asks only for a line naming the session. Without this sentence a plan written to the rules could name a session alone, fail the receiver's trace and wait for the operator, the round trip the queue route removes.
+- passage: The plan's `## Intent` provenance line names this seat as its writer, since the receiver's trace reads it there.

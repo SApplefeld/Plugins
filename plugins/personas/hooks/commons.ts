@@ -27,7 +27,7 @@ export interface CommonsEntry {
   lastSeen: number; // ms timestamp, refreshed on every heartbeat tick
   claims: CommonsClaim[];
   turnStartedAt?: number | null; // the session's clock at turn.start, null between turns
-  workdir?: string; // the directory the session runs in, "" when unknown
+  workdir?: string; // the session's launch directory, where its store sits, "" when unknown
   cacheWarmUntil?: number | null; // the instant the session's prompt cache is read as warm until, null before a main request; absent in an older build's entry
 }
 

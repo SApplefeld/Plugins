@@ -33,6 +33,8 @@ A technical assertion the brief marks inferred or reported is unverified, so che
 
 5. **Do not commit or stage.** Leave your changes as unstaged edits and stage nothing; the orchestrator stages what it accepts after review and owns the commit model. Staging nothing is the contract: it keeps your half-finished work out of any commit that takes the index as it stands.
 
+You are working class per the role skill: end no process you did not start, never one by image name, perform no git operation past your own files, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
+
 ## Status Protocol
 
 End your report with exactly one status:

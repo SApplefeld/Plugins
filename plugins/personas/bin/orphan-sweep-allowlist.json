@@ -1,0 +1,4 @@
+[
+  { "match": "supervise-holder.sh", "launcher": "plugins/personas/bin/supervise.sh" },
+  { "match": "supervise.sh", "launcher": "plugins/personas/bin/Start-Persona.ps1" }
+]

@@ -979,8 +979,9 @@ read_settings_architect_persona() {
 # Usage: read_settings_liaison_persona <settings-file> [dev_mode: 0|1, default 1]
 # Prints the liaisonPersona a settings file the caller provided carries, so
 # bin/supervise.sh can export LIAISON_PERSONA on the provided branch to the
-# same value the emit branch exports. The plugin reads no liaison setting, so
-# this read is the key's only consumer. It takes the architect key's rule
+# same value the emit branch exports. The plugin no longer reads the key:
+# its effort gate admits an architect record on its [QUEUE] lead in whatever
+# session it lands. It takes the architect key's rule
 # through the same shared read: the loaded id alone, no default, a name outside
 # the persona class or naming "default" refused with the value named, and the
 # same refusals of a file that cannot hold options, each naming this function.

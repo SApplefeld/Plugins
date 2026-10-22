@@ -1,7 +1,7 @@
 // bin/mid-turn-reprompt-scan.mjs - The operator messages that arrived while
 // a turn was running, read from the session's own transcript.
 //
-//   node bin/mid-turn-reprompt-scan.mjs <home> <workdir> <session id> <stamp>
+//   node bin/mid-turn-reprompt-scan.mjs <home> <launch directory> <session id> <stamp>
 //
 // The persona plugin runs this at a turn's end, from hooks/mid-turn-reprompt.ts,
 // because a hook reads a file only whole and only under 4 MiB, and a
@@ -14,8 +14,9 @@
 // transcript only grows and no later read could reach it either.
 //
 // Which file. The transcript root is <home>/.claude/projects, the folder is
-// the one whose name equals projectKey(workdir) without regard to case, as
-// transcriptFolders resolves it, and the file is <session id>.jsonl. A
+// the one whose name equals projectKey applied to the session's launch
+// directory, the second argument, without regard to case, as transcriptFolders
+// resolves it, and the file is <session id>.jsonl. A
 // session id the file-name guard in transcriptPathsFor refuses names no file.
 //
 // Which records. A message the harness delivers while a turn is running is
@@ -70,10 +71,10 @@ const SCAN_GROWTH = 4;
  * @returns {{home: string, workdir: string, sessionId: string, stamp: number}}
  */
 export function parseArgs(argv) {
-  if (argv.length !== 4) throw new Error('usage: mid-turn-reprompt-scan.mjs <home> <workdir> <session id> <stamp>');
+  if (argv.length !== 4) throw new Error('usage: mid-turn-reprompt-scan.mjs <home> <launch directory> <session id> <stamp>');
   const [home, workdir, sessionId, stampText] = argv;
   const stamp = Number(stampText);
-  if (!home || !workdir || !sessionId) throw new Error('home, workdir and session id must each be non-empty');
+  if (!home || !workdir || !sessionId) throw new Error('home, launch directory and session id must each be non-empty');
   if (!Number.isFinite(stamp)) throw new Error('the stamp must be a number of milliseconds');
   return { home, workdir, sessionId, stamp };
 }

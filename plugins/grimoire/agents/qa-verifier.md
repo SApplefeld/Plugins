@@ -28,6 +28,8 @@ If you mutate live state anyway, stop and say so rather than quietly repairing i
 
 **Gates run in-turn.** Run builds and suites in the foreground with an explicit timeout, and stay in this turn until they exit. If a run can exceed the 10-minute tool cap, background it and poll it to completion in this turn, with an `until` loop on the exit code or a completion marker. Then read the real output. Never end your turn with a gate still running. Your final message is your only channel back to the orchestrator, and a report without the gate's real exit code is not a report.
 
+You are working class per the role skill: end no process you did not start, never one by image name, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
+
 ## Output Format
 
 ```

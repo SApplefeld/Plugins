@@ -12,19 +12,19 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's rulebook for keeping a project's `docs/` folder a curated library rather than an attic of finished plans. It owns four moments: archiving a plan that has reached Complete or abandoned (the close path), registering and cross-referencing a newly written plan (the create path), pruning and age-checking `docs/backlog.md`, and retrofitting an existing `docs/` tree into the three-zone taxonomy. It also owns the frozen v1 plan-doc header contract, stating the exact line shapes and value rules an external parser reads, and the placement rules for the `## Intent`, `## Assumptions` and `## Dispatch Authorization` headings. Its load class is `named-trigger`: its own description says to use it during finishing-work when a plan reaches Complete, when a new plan is written that should be indexed, or when someone asks to tidy, retrofit, or reorganize a project's `docs/` folder.
 
-Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 and F002 added under the plan's letter F for the catalog seed and the `Verify:` line's contract standing. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C015, C022, C027 and C030 rewritten to their passages as they now read, and C032 given a second passage for its blocker-set sentence. They point `docs-curator` at the finishing-work step that dispatches it, the session-start block at its hook and the blocker set at its file, register a new plan in both indexes the close path refreshes, and cut the knob sentence's alignment clause to pay.
+Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 and F002 added under the plan's letter F for the catalog seed and the `Verify:` line's contract standing. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C015, C022, C027 and C030 rewritten to their passages as they now read, and C032 given a second passage for its blocker-set sentence. They point `docs-curator` at the finishing-work step that dispatches it, the session-start block at its hook and the blocker set at its file, register a new plan in both indexes the close path refreshes, and cut the knob sentence's alignment clause to pay. Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 6 on 2026-10-19: the skill entries C018 and C022 retired with the close path's index step and the create path's list sentence, and the template entries C015 and C028 rewritten to the pointer sentences that replace the seeded plan lists. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which widened the trace to the architect seat's authorship and routed a gap the plan leaves by the doctrine's intake bullet: J002 and J004 rewritten to their passages as they now read. Its fix round 1 on the same day repointed C032's second passage at the blocker-set member as it now reads. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the create path's Failure by Area seed, and C056 rewritten to its passage as it now reads.
 
 ### C001
-- key: Treat a plan as finished only once it is archived, the backlog is pruned, related plans link each other, and the index matches reality.
+- key: Treat a plan as finished only once it is archived, the backlog is pruned, and related plans link each other.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:8
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan (docs/archive/claude-kit_docs-lifecycle_spec_v1.md), whose Goal records that plans were closed in place and docs/plans/ drifted into an attic.
 - verdict: rewrite
 - landed: 368ae03 section 33
-- reason: The definition is the owner's statement of finished and stays; the three sentences of failure narrative around it are the plan's Goal restated and are not needed to obey the definition. The class still recurs (memory plans-authored-elsewhere-never-reach-the-index, 2026-08-30), which is why the definition itself is not up for trimming. Lands at line 8 (section 33's close): "A plan is finished when it has moved to the archive, the backlog is pruned, related plans point at each other, and the index reflects reality. Closing a plan is not finishing it." The three sentences of failure narrative are gone and the definition opens the document.
+- reason: The definition is the owner's statement of finished and stays; the three sentences of failure narrative around it are the plan's Goal restated and are not needed to obey the definition. The class still recurs (memory plans-authored-elsewhere-never-reach-the-index, 2026-08-30), which is why the definition itself is not up for trimming. Lands at line 8 (section 33's close): "A plan is finished when it has moved to the archive, the backlog is pruned, related plans point at each other, and the index reflects reality. Closing a plan is not finishing it." The three sentences of failure narrative are gone and the definition opens the document. The index clause was dropped by `docs/plans/claude-kit_queue-stacking_spec_v1.md` on 2026-10-19, since the indexes no longer list plans and an archival changes nothing in them.
 - proposed: Open the skill with the finished-plan definition and the one-line "closing is not finishing" sentence, dropping the three sentences of failure narrative, whose why now lives in the C001 ledger entry.
 - baseline-test: yes
-- passage: A plan is finished when it has moved to the archive, the backlog is pruned, related plans point at each other, and the index reflects reality. Closing a plan is not finishing it.
+- passage: A plan is finished when it has moved to the archive, the backlog is pruned, and related plans point at each other. Closing a plan is not finishing it.
 
 ### C002
 - key: Keep stable about-the-solution docs and the README index in the `docs/` root, updating them in place as the solution changes.
@@ -191,8 +191,8 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:34
 - provenance: afc7790 2026-07-25, which "names both index files rather than one".
-- verdict: keep
-- reason: Two indexes move on every archival (memory archiving-a-plan-touches-two-indexes-not-three, applied x10); finishing-work's one-index wording is the surface that gives way, since this skill owns index refresh.
+- verdict: retire
+- reason: The close path's step 6, which had both indexes drop the plan from their active lists and rewrite the four-plan recency line, is cut with the lists and the line it maintained, and the close path ends at step 5. Retired by docs/plans/claude-kit_queue-stacking_spec_v1.md section 6 on the operator's words of 2026-10-18: "I'm fine with retiring them wholesale. I don't read them, I just thought they helped you."
 - passage: 6. Refresh the index. `docs/README.md` and `docs/plans/README.md` both drop the plan from their active list and reflect the archive. The most-recent chain is the `Most recent:` and `Before it:` entries on the line opening `Completed plans are in`. Where either index carries it, both name the same four most recently archived plans. An archival prepends the newly closed plan and drops the oldest.
 
 ### C019
@@ -234,8 +234,8 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:48
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 4 (brainstorming registers a new plan in the index); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names both indexes the close path refreshes.
-- verdict: rewrite
-- reason: The owner's create-path step; brainstorming:28 invokes the create path by name and is the pointer surface. Memory plans-authored-elsewhere-never-reach-the-index records that plans skipping this step stay unlisted until their own close-out. The step names both indexes the close path's step 6 (C018) drops the plan from, since `references/templates.md` seeds an active list in each, `## Active plans` in `docs/README.md` and `## Current` in `docs/plans/README.md`. The one-index wording was the sentence that changed, and C018 stands.
+- verdict: retire
+- reason: The create path's sentence adding a new plan to the active lists in `docs/README.md` and `docs/plans/README.md` is cut, since neither index carries a per-plan list; step 1 keeps the `docs/verification.md` seeding. Retired by docs/plans/claude-kit_queue-stacking_spec_v1.md section 6 on the operator's words of 2026-10-18: "I'm fine with retiring them wholesale. I don't read them, I just thought they helped you."
 - passage: 1. Add it to the active-plans lists in `docs/README.md` and `docs/plans/README.md`.
 
 ### C023
@@ -338,14 +338,14 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - key: Propose the migration, naming which plans move, what the index and backlog will hold, and which READMEs get seeded, then stop and move nothing until confirmed.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:57
-- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's retrofit mode ("read-only proposal first, apply on approval"); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which points the blocker set at the file that lists it.
+- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's retrofit mode ("read-only proposal first, apply on approval"); amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which points the blocker set at the file that lists it. Repointed by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, whose blocker-set member no longer says "material decision".
 - verdict: rewrite
 - landed: 368ae03 section 33
-- reason: The gate is a blast-radius stop over a library-wide batch of moves and it stays, because which plans leave the live library is the operator's call over the library's own shape; the stop is stated twice and collapses to one sentence that carries its reason. The gate is the material-decision member of executing-work's closed blocker set rather than the doctrine's stop-for-a-yes rule, whose two-part test a move inside the working tree meets on neither part, so a plan run reaching this stop has a member to declare it under. No standing grant covers a retrofit, so this is not a loop-maintenance gate. Landed at `368ae03` as the step ending "Move nothing until it is confirmed; this is a destructive-enough batch to earn the confirmation."; "Present it and stop." is gone. The sentence naming the gate's blocker-set member carries this reason's claim, so it is quoted as this entry's second passage, and it names `executing-work/SKILL.md`, the file that lists the blocker set.
+- reason: The gate is a blast-radius stop over a library-wide batch of moves and it stays, because which plans leave the live library is the operator's call over the library's own shape; the stop is stated twice and collapses to one sentence that carries its reason. The gate is the member of executing-work's closed blocker set for an uncovered decision that is the operator's, since the library's shape turns on his preference under the doctrine's intake bullet, rather than the doctrine's stop-for-a-yes rule, whose two-part test a move inside the working tree meets on neither part, so a plan run reaching this stop has a member to declare it under. No standing grant covers a retrofit, so this is not a loop-maintenance gate. Landed at `368ae03` as the step ending "Move nothing until it is confirmed; this is a destructive-enough batch to earn the confirmation."; "Present it and stop." is gone. The sentence naming the gate's blocker-set member carries this reason's claim, so it is quoted as this entry's second passage, and it names `executing-work/SKILL.md`, the file that lists the blocker set.
 - proposed: State the proposal contents and one stop sentence that names the batch as destructive enough to earn the confirmation.
 - baseline-test: yes
 - passage: **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed.
-- passage: Unless a plan already made that call, the stop is the material decision in `executing-work/SKILL.md`'s blocker set.
+- passage: Unless a plan already made that call, the stop is the blocker-set member in `executing-work/SKILL.md` for a decision the spec does not cover that is the operator's.
 - flag: stale
 
 ### C033
@@ -579,13 +579,13 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - passage: Adding any of these headings to an approved plan mid-run is an edit above `## Chapters`. Make it deliberately and record it in the Chapter, per the freeze rule in `skills/brainstorming/SKILL.md`'s spec format.
 
 ### C056
-- key: Seed README, index, and backlog skeletons from `references/templates.md` rather than inventing a new shape per project.
+- key: Seed every skeleton from `references/templates.md` rather than inventing a new shape per project.
 - class: pointer
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:100
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 2 ("templates are referenced, not inlined into every caller").
 - verdict: keep
-- reason: No finding; the pointer at the skeleton source.
-- passage: Seed the README, index, and backlog skeletons from `references/templates.md`, never inventing a new shape per project.
+- reason: The pointer at the skeleton source names no list of skeletons, since a list here falls behind each skeleton the templates gain, as it fell behind the catalog's.
+- passage: Seed every skeleton from `references/templates.md`, never inventing a new shape per project.
 
 ### C057
 - key: Do not close a plan in place by flipping status to Complete and never moving the file.
@@ -726,14 +726,14 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - passage: A `## Dispatch Authorization` section records a plan run's approval: who approved it, when, and which sessions the grant covers, by default "any session holding this plan". It never instructs a run to start.
 
 ### J002
-- key: Run a plan that arrives by peer message under its `## Dispatch Authorization` section only once the grant stands as the peer-sessions skill states, by a trace to the operator or a chain handoff.
+- key: Run a plan that arrives by peer message under its `## Dispatch Authorization` section only once the grant stands as the peer-sessions skill states, by a trace to the operator's word or to the architect seat's authorship under the standing delegation, or a chain handoff.
 - class: rule
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:86
-- provenance: 2993ac4 2026-08-25, the review's Critical: a peer could author a section and have a receiver run work the operator never approved; f75e235 2026-08-26 found the same gap in the architecture doc. The kit-goal ledger's C030, moved here from the deleted kit-goal skill's ledger by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which gave the section's definition to curating-docs.
+- provenance: 2993ac4 2026-08-25, the review's Critical: a peer could author a section and have a receiver run work the operator never approved; f75e235 2026-08-26 found the same gap in the architecture doc. The kit-goal ledger's C030, moved here from the deleted kit-goal skill's ledger by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which gave the section's definition to curating-docs. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, which widened the trace's target as peer-sessions' H001 states.
 - verdict: keep
 - landed: 1aa3fff5 section 4
-- reason: Any peer can commit such a section and no tool performs the trace, so a receiver that runs a plan on the section's presence alone lets whoever wrote the plan hand it work. The peer-sessions skill owns the trace and the chain handoff, and this sentence points there (J003).
-- passage: A plan arriving by peer message runs under it once the grant stands, by a trace to the operator or a chain handoff.
+- reason: Any peer can commit such a section and no tool performs the trace, so a receiver that runs a plan on the section's presence alone lets whoever wrote the plan hand it work. The peer-sessions skill owns the trace and the chain handoff, and this sentence points there (J003). Widened on 2026-10-19 to the architect seat's authorship, which peer-sessions' H001 owns.
+- passage: A plan arriving by peer message runs under it once the grant stands, by a trace to the operator's word or to the architect seat's authorship under the machine's standing delegation, or by a chain handoff.
 
 ### J003
 - key: Read the peer-sessions skill for the trace, the chain handoff, the message's standing and the reply states.
@@ -746,14 +746,14 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - passage: The peer-sessions skill owns the trace and the handoff, with the message's standing and the reply states.
 
 ### J004
-- key: Take anything the plan does not cover to the operator, since a `## Dispatch Authorization` section supplies no live steering.
-- class: rule
+- key: Route a gap the plan leaves by the doctrine's intake bullet, since a `## Dispatch Authorization` section supplies no live steering.
+- class: pointer
 - source: plugins/grimoire/skills/curating-docs/SKILL.md:86
-- provenance: 61a9825 2026-08-29, as the kit-goal ledger's C038; moved here from the deleted kit-goal skill's ledger by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which gave the section's definition to curating-docs.
+- provenance: 61a9825 2026-08-29, as the kit-goal ledger's C038; moved here from the deleted kit-goal skill's ledger by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which gave the section's definition to curating-docs. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, which gave the intake bullet the test for a gap that is the operator's (its H004).
 - verdict: keep
 - landed: 1aa3fff5 section 4
-- reason: The section is committed before the run starts, so it answers only what the plan already states. A question it does not cover is the material decision executing-work's closed blocker set reserves to the operator, and the grant is never read as licence to decide it.
-- passage: The section supplies no live steering, so whatever the plan does not cover goes to the operator.
+- reason: The section is committed before the run starts, so it answers only what the plan already states. A gap it leaves is routed as any intake gap, by the doctrine's intake bullet, which decides whether the fleet or the operator closes it, and the grant is never read as licence past that.
+- passage: The section supplies no live steering, so a gap the plan leaves takes the doctrine's intake routes, opening "Enumerate the gaps at intake".
 
 ### F001
 - key: At the create path, seed a missing `docs/verification.md` from the templates with a row per instrument the spec's `Verify:` lines name.
@@ -773,11 +773,20 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - reason: No consumer parses the line, as none parses `Tests:` or `References:`, so the contract stays at v1. The sentence says so where the contract is stated, because a line added to the spec template reads as a contract change to a reader who never opens the rows (C066).
 - passage: No row names a section's `Verify:` line either.
 
+### AE001
+- key: At the create path, seed the Failure by Area table where the catalog lacks it, and a row for each top-level area the spec's Files in scope touch that the table lacks.
+- class: rule
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:37
+- provenance: docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md section 3 2026-10-21, stage 8 of the review-verification program (docs/review-verification-program.md), carrying its frame: "a per-area 'what failure looks like here' section in each repository's `docs/`, read by the reviewer brief."
+- verdict: keep
+- reason: Rows are each repository's own, so no skill can carry them, and the create path is the one step that runs when a spec is written. Seeding by the areas the spec touches grows the table where a reviewer will next read it, rather than all at once.
+- passage: Seed the Failure by Area table, and a row per top-level area the spec's Files in scope touch, where either is missing.
+
 ## plugins/grimoire/skills/curating-docs/references/templates.md
 
 This document is a set of copy-ready skeletons for a project's `docs/` library: the index README, the active-plans README, the archive README, the living backlog, and the dated quarterly backlog snapshot. It owns the moment when a session seeds a new `docs/` library or retrofits an existing one, deciding what files exist, what headings and placeholder text each carries, where a plan or a backlog item lives at each point in its life, and how each is named. It also fixes the naming shapes (`<project>_<content-type>_v<n>.md`, `backlog-YYYY-QN.md`), the dated backlog item form, and the archive-on-close rule that the skeletons state to their own readers. A session loads it as a `plan-run` reference: it carries no frontmatter and no statement of when it loads, but its content is only usable at the specific act of creating or reorganizing the docs tree, which sits inside a plan run, so it is read immediately before that act rather than at session start.
 
-Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templates.md`). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `2bef94c9` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 to F003 added under the plan's letter F for the catalog's index line and skeleton.
+Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templates.md`). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `2bef94c9` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 to F003 added under the plan's letter F for the catalog's index line and skeleton. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the Failure by Area table.
 
 ### C001
 - key: Build a new or retrofitted `docs/` library from the skeletons in this document.
@@ -911,13 +920,13 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templat
 - passage: ## Active plans
 
 ### C015
-- key: List each active plan in `plans/` under the index's Active plans section with a one-line description, and write "None at present." when there are none.
+- key: Under the index's Active plans section, point at `plans/` and say that each plan's `Status:` header is its state.
 - class: mechanic
 - source: plugins/grimoire/skills/curating-docs/references/templates.md:26
 - provenance: b49a47b 2026-06-19.
-- verdict: keep
-- reason: the SKILL owns when the list is refreshed and this owns what the seeded section looks like, including its empty form; delete it and a seeded index carries a heading with no instruction. The close path requires both this list and the plans README's to be refreshed, so the pair is duplication between two outputs by design.
-- passage: (List active plans, or "None at present.")
+- verdict: rewrite
+- reason: The seeded per-plan list and its empty form are cut with the indexes' lists by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 6, on the operator's words of 2026-10-18, "I'm fine with retiring them wholesale. I don't read them, I just thought they helped you." One pointer sentence replaces them, so a seeded heading still carries an instruction.
+- passage: See `plans/`, where each plan's `Status:` header is its state.
 
 ### C016
 - key: Give the index an `## Archive` section.
@@ -1029,14 +1038,14 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templat
 - passage: - When a plan relates to or supersedes another, cross-reference it in a `## Related` section.
 
 ### C028
-- key: Give the plans README a `## Current` section listing the active plans, or "None at present." when empty.
+- key: Give the plans README a `## Current` section saying that each plan beside it carries its state in its `Status:` header.
 - class: mechanic
 - source: plugins/grimoire/skills/curating-docs/references/templates.md:49
 - provenance: b49a47b 2026-06-19.
-- verdict: keep
-- reason: the index and the plans README both list active plans by design, and the SKILL's close path requires both to be refreshed, so this is duplication between two generated outputs rather than a rule stated twice.
+- verdict: rewrite
+- reason: The seeded per-plan list is cut with the indexes' lists by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 6, on the operator's words of 2026-10-18, "I'm fine with retiring them wholesale. I don't read them, I just thought they helped you." One pointer sentence replaces it under the heading.
 - passage: ## Current
-- passage: (List active plans, or "None at present.")
+- passage: Each plan in this folder carries its state in its `Status:` header.
 
 ### C029
 - key: Title `docs/archive/README.md` with the heading `# Archive`.
@@ -1275,3 +1284,12 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templat
 - verdict: keep
 - reason: Each column is a question a reader asks of an instrument: its name, what to run or look at, what a pass shows, what a failure in this area looks like, and what it costs and where it runs. A row may name an observation as well as a command, so a browser walk at a viewport has a home beside the tests.
 - passage: | Instrument | Command or observation | Pass reads as | Failure here looks like | Cost and lane |
+
+### AE001
+- key: Give the catalog a Failure by Area table under the instrument table, with the columns Area, What failure looks like here, What sees it and Skip, one row per top-level area of the repository.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/references/templates.md:94
+- provenance: docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md section 3 2026-10-21, stage 8 of the review-verification program (docs/review-verification-program.md), carrying its frame: "a per-area 'what failure looks like here' section in each repository's `docs/`, read by the reviewer brief."
+- verdict: keep
+- reason: The instrument table says how one check fails, and a reviewer reading a diff asks how the area it touches fails, which in this kit is often silent: a plugin absent with the engine still answering, a suite at exit 0 with no summary. The table lives in the catalog rather than a second file, since the catalog already answers what failure looks like here. Skip names context a reviewer need not read, never a changed file, since a skip read as a pass would turn review off on the files a diff changed. Area names path prefixes, so a dispatch can match a changed file against it.
+- passage: | Area | What failure looks like here | What sees it | Skip |

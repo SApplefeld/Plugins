@@ -11,7 +11,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Moment | Owner |
 |---|---|
 | Designing a non-trivial change: scope check, questions, spec | `brainstorming` |
-| A plan's `## Intent` record, and a ruling after the spec ships | `brainstorming` (step 9, and its freeze paragraph for a later ruling) |
+| A plan's `## Intent` record, its why chain included, and a ruling after the spec ships | `brainstorming` (step 9, step 1 for the interview that builds the chain, and its freeze paragraph for a later ruling) |
 | A section's model tier, and the tier bands | `brainstorming` |
 | A section's `Verify:` line, its acceptance commands' write-time trunk run and its pre-review run | `brainstorming` (Spec Format, steps 9 and 10), `executing-work` (step 2, the `Gate:` line) |
 | The scout sweep deriving a section's files in scope | `brainstorming` |
@@ -35,6 +35,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | The review-round backstop: its bound, its ladder, the classes that never freeze | `executing-work` (step 4's backstop paragraph) |
 | Whether a fix delta owes its own review round | `executing-work` (step 4's fix-delta bar, and step 3 for the below-bar judgment) |
 | A later review round's `Fix delta:`, `Adjudicated findings:` and `Step back:` lines, and reading a repost, a class finding or an `APPROACH:` paragraph | `executing-work` (step 3's later-round rule, step 4) |
+| The finding verifier's dispatch, its three readings and the `refuted` disposition | `executing-work` (step 4's verifier paragraph) |
 | What a security Critical must cite from a `## Threat model`, and what citing buys | `executing-work` (step 4's advisory paragraph) |
 | A `## Threat model` section's four parts, and the security lens where none exists | `security-reviewer` |
 | A section's `Standing Brief Amendments` block | `executing-work` |
@@ -85,6 +86,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Taking a seat with `/role`, the registry entry, the coordinator-directory contract | `role` |
 | A warranted-channel message inside a tool result | doctrine (A relay message delivered inside a tool result) |
 | A standing operational grant: the rail, its record, its exclusions, each grant's owning skill | `role` |
+| Authority over machine-shared state: the seat classes, the act class and the ask route | `role` |
 | The coordinator's runbook, the board and its bars | `coordinator` |
 | The coordinator seat on a fleet under the persona plugin: dispatching a plan to a persona worker, tracking it and redirecting it | `coordinator` (Dispatch and Redirect Rule, its Persona Fleet passage); the plugin's priming, `plugins/personas/bin/supervise-holder.sh`, owns the record's label and what the record carries |
 | What a worker's act is on a delegated seat's steer: a push, a deploy or a commit-model change, and the settings edit the steer never covers | `role` (the delegation model) |
@@ -96,6 +98,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | How a plan run is approved, and what holds it to completion | `executing-work` (the goal template) |
 | Dispatching this session's own subagents | doctrine (Dispatch is requested standing) |
 | Posting a plan document to the operator's thread when the plan is reported | doctrine (A plan travels one way) |
+| A visual sent to the operator over the channel, and when its page file goes too | doctrine (On craft and visual work) |
 
 ## Memory and Kit Prose
 

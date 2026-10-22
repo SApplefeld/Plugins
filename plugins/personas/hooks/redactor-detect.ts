@@ -128,7 +128,7 @@ function keyedHash(text: string): string {
 // taken again with a counter until the tag is free.
 export function mint(kind: Kind, raw: string): string {
   hidden++
-  const value = kind === 'LITERAL' ? raw : restore(unpark(raw))
+  const value = kind === 'LITERAL' ? raw : restore(unpark(raw, false))
   const seen = byValue.get(value)
   if (seen) {
     if (kind === 'SECRET') remember(value)
@@ -219,6 +219,42 @@ let echoIndex: EchoIndex | null = null
 // The values minted during the current scan, to hide at their other spots.
 let local: Set<string> | null = null
 
+// The clock check the current scan runs before each whole-text pass, the
+// tick scrubSecrets was handed, and null where no caller set one. It throws
+// once the caller's deadline has passed, so a scan ends between two passes
+// rather than running on past the hook's budget. Saved and restored by
+// scrubSecrets as `parked` and `local` are, so a nested scan never leaves
+// the outer scan holding its tick.
+type Tick = () => void
+let clockTick: Tick | null = null
+
+// Reads the clock where the current scan holds a tick, and throws through
+// it once the deadline has passed. Called before every whole-text pass by
+// clocked, and once per blob by parkMedia's BLOB replacer.
+function tickNow(): void {
+  if (clockTick !== null) clockTick()
+}
+
+// Reads the clock before a whole-text pass and hands the text back, so a
+// pass is written `clocked(out).replace(...)` and the check runs before the
+// regex starts, never while one is mid-match. A pass is one call that reads
+// the whole text: a replace, a matchAll, a split, a rolling-hash walk over
+// it, or the whole-value base64 check, whose test, decode and scan run under
+// one read. The hint probes that decide whether a pass runs, an `includes`
+// or a gate `.test` over the text, are linear reads and are not clocked.
+// Work inside a callback, a replace over one match or mint putting the
+// parked spans back into the value it hides, is not clocked either, with
+// one exception: parkMedia's BLOB replacer reads the clock through tickNow
+// before each blob's decode, the one callback that does. A function
+// replacer runs once its regex has found every match, so a throw there
+// aborts the replace with no regex mid-match, as a throw before a pass
+// does. So a scan ends past its deadline by the pass or the blob decode in
+// flight plus the probes after it.
+function clocked(text: string): string {
+  tickNow()
+  return text
+}
+
 // Short or all-letter values (`postgres`) are left out: hiding every later
 // `postgres` in unrelated output would make the session unreadable.
 function echoable(value: string): boolean {
@@ -276,15 +312,15 @@ function buildEchoIndex(values: Iterable<string>): EchoIndex {
 
 function rehideKnown(text: string): string {
   if (echo.size === 0 || text.length < PREFIX) return text
-  return rehideWith(text, (echoIndex ??= buildEchoIndex(echo)))
+  return rehideWith(clocked(text), (echoIndex ??= buildEchoIndex(echo)))
 }
 
 // The values minted in one scan, hidden at their other spots in it. A few
 // values are found faster one by one than by the rolling hash.
 function rehideLocal(text: string, values: Set<string>): string {
-  if (values.size > 64) return rehideWith(text, buildEchoIndex(values))
+  if (values.size > 64) return rehideWith(clocked(text), buildEchoIndex(values))
   let out = text
-  for (const v of [...values].sort((a, b) => b.length - a.length)) if (out.includes(v)) out = out.split(v).join(mint('SECRET', v))
+  for (const v of [...values].sort((a, b) => b.length - a.length)) if (out.includes(v)) out = clocked(out).split(v).join(mint('SECRET', v))
   return out
 }
 
@@ -346,11 +382,14 @@ function park(span: string): string {
   return `${parked.mark}${parked.spans.length - 1}${parked.mark}`
 }
 
-function unpark(text: string): string {
+// Puts the parked spans back. `clock` is false where the text is one value
+// inside a pass, as mint's is, so the clock is read only before a whole-text
+// unpark and never while a regex is mid-match.
+function unpark(text: string, clock = true): string {
   const p = parked
   if (!p || !text.includes(p.mark)) return text
   let out = text
-  for (let i = 0; i < 3 && out.includes(p.mark); i++) out = out.replace(p.re, (_m, n: string) => p.spans[Number(n)] ?? '')
+  for (let i = 0; i < 3 && out.includes(p.mark); i++) out = (clock ? clocked(out) : out).replace(p.re, (_m, n: string) => p.spans[Number(n)] ?? '')
   return out
 }
 
@@ -558,7 +597,7 @@ function scrubVendors(text: string, cfg: Config): string {
   let out = text
   for (const { hint, re } of VENDOR) {
     if (typeof hint === 'string' ? !out.includes(hint) : !hint.test(out)) continue
-    out = out.replace(re, (m) => (cfg.allow.has(m) || m.includes('[REDACTED-') ? m : mint('SECRET', m)))
+    out = clocked(out).replace(re, (m) => (cfg.allow.has(m) || m.includes('[REDACTED-') ? m : mint('SECRET', m)))
   }
   return out
 }
@@ -1038,16 +1077,16 @@ function pairOut(cfg: Config, head: string, value: string, tail = ''): string {
 
 function parkOpaque(text: string): string {
   let out = text
-  if (out.includes('"signature"')) out = out.replace(THINKING_SIG, (_m, head: string, sig: string) => head + park(sig))
-  if (out.includes('redacted_thinking')) out = out.replace(REDACTED_THINKING, (_m, head: string, data: string) => head + park(data))
-  if (out.includes('sha')) out = out.replace(SRI, (m) => park(m))
+  if (out.includes('"signature"')) out = clocked(out).replace(THINKING_SIG, (_m, head: string, sig: string) => head + park(sig))
+  if (out.includes('redacted_thinking')) out = clocked(out).replace(REDACTED_THINKING, (_m, head: string, data: string) => head + park(data))
+  if (out.includes('sha')) out = clocked(out).replace(SRI, (m) => park(m))
   return out
 }
 
 function scrubKeyBlocks(text: string, cfg: Config): string {
   let out = text
-  if (out.includes('PRIVATE KEY')) out = out.replace(PRIVATE_KEY, (m) => (cfg.allow.has(m) ? m : mint('SECRET', m)))
-  if (out.includes('Private-Lines:')) out = out.replace(PUTTY_PRIVATE, (_m, head: string, body: string) => head + mint('SECRET', body))
+  if (out.includes('PRIVATE KEY')) out = clocked(out).replace(PRIVATE_KEY, (m) => (cfg.allow.has(m) ? m : mint('SECRET', m)))
+  if (out.includes('Private-Lines:')) out = clocked(out).replace(PUTTY_PRIVATE, (_m, head: string, body: string) => head + mint('SECRET', body))
   return out
 }
 
@@ -1078,16 +1117,16 @@ const URL_PASSWORD_WORD = /^(?:password|passwd|pass|pw|pwd|secret|<[^>]*>)$/i
 function scrubUrls(text: string, cfg: Config): string {
   let out = text
   if (out.includes('://')) {
-    out = out.replace(URL_PASSWORD, (m, head: string, password: string) =>
+    out = clocked(out).replace(URL_PASSWORD, (m, head: string, password: string) =>
       WHOLE_TAG.test(password) || cfg.allow.has(password) || URL_PASSWORD_WORD.test(password) ? m : `${head}:${mint('SECRET', password)}@`,
     )
-    out = out.replace(URL_USERINFO, (m, head: string, user: string) => {
+    out = clocked(out).replace(URL_USERINFO, (m, head: string, user: string) => {
       if (cfg.allow.has(user) || !/[0-9]/.test(user) || !/[A-Za-z]/.test(user) || looksLikeName(user, true)) return m
       return entropy(user) >= cfg.contextMinEntropy ? `${head}${mint('SECRET', user)}@` : m
     })
   }
   if (out.includes('=')) {
-    out = out.replace(URL_PARAM, (m, head: string, value: string) => (urlParamSecret(value, cfg) ? head + mint('SECRET', value) : m))
+    out = clocked(out).replace(URL_PARAM, (m, head: string, value: string) => (urlParamSecret(value, cfg) ? head + mint('SECRET', value) : m))
   }
   return out
 }
@@ -1109,26 +1148,26 @@ function urlParamSecret(raw: string, cfg: Config): boolean {
 function scrubCommandLines(text: string, cfg: Config): string {
   let out = text
   if (/-(?:pass|api|token|client|auth|access)/.test(out)) {
-    out = out.replace(CLI_FLAG, (m, head: string, quote: string, v: string) => {
+    out = clocked(out).replace(CLI_FLAG, (m, head: string, quote: string, v: string) => {
       if (/^[A-Z][A-Z0-9_]*$/.test(v) || /^[A-Za-z_]+=/.test(v) || /^[A-Za-z]+(?:[-_][A-Za-z]+)+$/.test(v)) return m
       return pairOut(cfg, head, v, quote)
     })
   }
   if (/\s-(?:u|U|-user|-proxy-user)\b/.test(out)) {
-    out = out.replace(CLI_USERPASS, (m, head: string, v: string) => (DIGITS_ONLY.test(v) ? m : pairOut(cfg, head, v)))
+    out = clocked(out).replace(CLI_USERPASS, (m, head: string, v: string) => (DIGITS_ONLY.test(v) ? m : pairOut(cfg, head, v)))
   }
-  if (/mysql|mariadb/.test(out)) out = out.replace(MYSQL_P, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes(':')) out = out.replace(PGPASS, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes('password')) out = out.replace(NETRC, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes('gh')) out = out.replace(GH_SECRET, (_m, head: string, _q: string, v: string) => pairOut(cfg, head, v))
+  if (/mysql|mariadb/.test(out)) out = clocked(out).replace(MYSQL_P, (_m, head: string, v: string) => pairOut(cfg, head, v))
+  if (out.includes(':')) out = clocked(out).replace(PGPASS, (_m, head: string, v: string) => pairOut(cfg, head, v))
+  if (out.includes('password')) out = clocked(out).replace(NETRC, (_m, head: string, v: string) => pairOut(cfg, head, v))
+  if (out.includes('gh')) out = clocked(out).replace(GH_SECRET, (_m, head: string, _q: string, v: string) => pairOut(cfg, head, v))
   if (CMD_PW_GATE.test(out)) {
-    for (const re of CMD_PW) out = out.replace(re, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
+    for (const re of CMD_PW) out = clocked(out).replace(re, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
   }
-  if (out.includes('pass:')) out = out.replace(OPENSSL_PASS, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes('smbclient')) out = out.replace(SMB_USER, (_m, head: string, v: string) => pairOut(cfg, head, v))
-  if (out.includes('htpasswd')) out = out.replace(HTPASSWD, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
-  if (/net[ \t]+user/i.test(out)) out = out.replace(NET_USER, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
-  if (out.includes('rabbitmqctl')) out = out.replace(RABBIT_USER, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
+  if (out.includes('pass:')) out = clocked(out).replace(OPENSSL_PASS, (_m, head: string, v: string) => pairOut(cfg, head, v))
+  if (out.includes('smbclient')) out = clocked(out).replace(SMB_USER, (_m, head: string, v: string) => pairOut(cfg, head, v))
+  if (out.includes('htpasswd')) out = clocked(out).replace(HTPASSWD, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
+  if (/net[ \t]+user/i.test(out)) out = clocked(out).replace(NET_USER, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
+  if (out.includes('rabbitmqctl')) out = clocked(out).replace(RABBIT_USER, (_m, head: string, q: string, v: string) => pairOut(cfg, head, v, q))
   return out
 }
 
@@ -1148,33 +1187,33 @@ function scrubAssignments(text: string, cfg: Config): string {
     return head + v + tail
   }
   if (/pass|secret|key|token|pw/i.test(out)) {
-    out = out.replace(STRONG_QUOTED, (_m, head: string, _q: string, key: string, quote: string, v: string) => value(head + quote, key, v, quote))
-    out = out.replace(APP_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
-    out = out.replace(STRONG_LINE, (_m, head: string, key: string, v: string) => value(head, key, v))
-    out = out.replace(ENV_PASS, (_m, head: string, _k: string, v: string) => value(head, '', v))
-    out = out.replace(BLOCK_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
-    out = out.replace(KV_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
+    out = clocked(out).replace(STRONG_QUOTED, (_m, head: string, _q: string, key: string, quote: string, v: string) => value(head + quote, key, v, quote))
+    out = clocked(out).replace(APP_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
+    out = clocked(out).replace(STRONG_LINE, (_m, head: string, key: string, v: string) => value(head, key, v))
+    out = clocked(out).replace(ENV_PASS, (_m, head: string, _k: string, v: string) => value(head, '', v))
+    out = clocked(out).replace(BLOCK_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
+    out = clocked(out).replace(KV_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
   }
   if (PW_SYMBOL.test(out)) {
-    out = out.replace(QUOTED_VALUE, (m, q: string, v: string, offset: number, whole: string) => {
+    out = clocked(out).replace(QUOTED_VALUE, (m, q: string, v: string, offset: number, whole: string) => {
       if (!looksGenerated(v) || isStandIn(v) || cfg.allow.has(v)) return m
       // A MIME boundary is random by design and public.
       if (/boundary=$/i.test(whole.slice(Math.max(0, offset - 9), offset))) return m
       return q + mint('SECRET', v) + q
     })
   }
-  if (/password|identified/i.test(out)) out = out.replace(SQL_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head + "'", v, "'"))
-  if (out.includes('variable')) out = out.replace(HCL_DEFAULT, (_m, head: string, v: string) => pairOut(cfg, head, v, '"'))
+  if (/password|identified/i.test(out)) out = clocked(out).replace(SQL_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head + "'", v, "'"))
+  if (out.includes('variable')) out = clocked(out).replace(HCL_DEFAULT, (_m, head: string, v: string) => pairOut(cfg, head, v, '"'))
   if (out.includes('"value"')) {
-    out = out.replace(JSON_NAME_VALUE, (_m, head: string, name: string, v: string) => sibling(head, name, v, '"'))
-    out = out.replace(JSON_VALUE_NAME, (_m, head: string, v: string, tail: string, name: string) => sibling(head, name, v, tail))
-    out = out.replace(TF_OUTPUT, (_m, head: string, name: string, v: string) => (PW_NAME.test(name) ? value(head, name, v, '"') : _m))
+    out = clocked(out).replace(JSON_NAME_VALUE, (_m, head: string, name: string, v: string) => sibling(head, name, v, '"'))
+    out = clocked(out).replace(JSON_VALUE_NAME, (_m, head: string, v: string, tail: string, name: string) => sibling(head, name, v, tail))
+    out = clocked(out).replace(TF_OUTPUT, (_m, head: string, name: string, v: string) => (PW_NAME.test(name) ? value(head, name, v, '"') : _m))
   }
   if (/"random_(?:password|string)"/.test(out)) {
-    out = out.replace(TF_RESULT, (m, head: string, v: string) => (WHOLE_TAG.test(v) || cfg.allow.has(v) ? m : `${head}${mint('SECRET', v)}"`))
+    out = clocked(out).replace(TF_RESULT, (m, head: string, v: string) => (WHOLE_TAG.test(v) || cfg.allow.has(v) ? m : `${head}${mint('SECRET', v)}"`))
   }
   if (/-[ \t]+name:/.test(out)) {
-    out = out.replace(YAML_NAME_VALUE, (_m, indent: string, head: string, name: string, q: string, v: string) => sibling(indent + head, name, v, q))
+    out = clocked(out).replace(YAML_NAME_VALUE, (_m, indent: string, head: string, name: string, q: string, v: string) => sibling(indent + head, name, v, q))
   }
   if (/INSERT[ \t]+INTO/i.test(out)) out = scrubSqlInserts(out, cfg)
   return out
@@ -1185,7 +1224,7 @@ function scrubAssignments(text: string, cfg: Config): string {
 // characters per INSERT. Quoted values only; a number is never a key.
 function scrubSqlInserts(text: string, cfg: Config): string {
   const ranges: [number, number][] = []
-  for (const m of text.matchAll(SQL_INSERT)) {
+  for (const m of clocked(text).matchAll(SQL_INSERT)) {
     const names = m[1]!.split(',').map((c) => c.trim().replace(/^[`"[]|[`"\]]$/g, ''))
     const kinds = names.map((n) => (PW_NAME.test(n) ? 'pw' : KEY_NAME.test(n) && !/(?:^|_)id$|public/i.test(n) ? 'key' : ''))
     if (!kinds.some(Boolean)) continue
@@ -1244,28 +1283,28 @@ function cookieSecret(raw: string, cfg: Config): boolean {
 function scrubCookies(text: string, cfg: Config): string {
   let out = text
   if (/cookie|-b\s/i.test(out)) {
-    out = out.replace(COOKIE, (_m, head: string, header: string) =>
+    out = clocked(out).replace(COOKIE, (_m, head: string, header: string) =>
       head +
       header.replace(COOKIE_PAIR, (pair, sep: string, name: string, v: string) =>
         !COOKIE_ATTR.test(name) && cookieSecret(v, cfg) ? sep + name + mint('SECRET', v) : pair,
       ),
     )
   }
-  if (out.includes('\t')) out = out.replace(COOKIES_TXT, (m, head: string, v: string) => (cookieSecret(v, cfg) ? head + mint('SECRET', v) : m))
-  if (out.includes('"value"')) out = out.replace(HAR_COOKIE, (m, head: string, v: string) => (cookieSecret(v, cfg) ? `${head}${mint('SECRET', v)}"` : m))
+  if (out.includes('\t')) out = clocked(out).replace(COOKIES_TXT, (m, head: string, v: string) => (cookieSecret(v, cfg) ? head + mint('SECRET', v) : m))
+  if (out.includes('"value"')) out = clocked(out).replace(HAR_COOKIE, (m, head: string, v: string) => (cookieSecret(v, cfg) ? `${head}${mint('SECRET', v)}"` : m))
   return out
 }
 
 function scrubAuthBlobs(text: string, cfg: Config): string {
   let out = text
   if (/asic|"auth"|'auth'/.test(out)) {
-    out = out.replace(BASIC_AUTH, (m, head: string, v: string) => {
+    out = clocked(out).replace(BASIC_AUTH, (m, head: string, v: string) => {
       if (v.length % 4 !== 0 || cfg.allow.has(v)) return m
       return /^[\x21-\x7e]+:[\x20-\x7e]+$/.test(decodeBase64Head(v)) ? head + mint('SECRET', v) : m
     })
   }
   if (out.includes('.')) {
-    out = out.replace(BOOTSTRAP, (m, id: string, secret: string, offset: number, whole: string) => {
+    out = clocked(out).replace(BOOTSTRAP, (m, id: string, secret: string, offset: number, whole: string) => {
       if (!/[0-9]/.test(secret) || !/[a-z]/.test(secret) || countsUp(secret)) return m
       return NAMED.test(whole.slice(Math.max(0, offset - 64), offset)) ? `${id}.${mint('SECRET', secret)}` : m
     })
@@ -1322,11 +1361,17 @@ function base64HoldsSecret(b64: string): boolean {
 // Data URIs are parked whole. A blob is hidden as ONE placeholder when a key
 // name stands in front of it, or it decodes to text that holds a key or a
 // credentials file; otherwise it is parked, never shredded into thousands.
+// Each blob reads the clock first, an allowed one included, since its decode
+// of up to 1 MB is the one step inside a pass that takes real time: a text
+// dense with blobs ends between two of them once the deadline has passed,
+// the throw aborting the replace and reaching the caller as one between
+// passes does.
 function parkMedia(text: string, cfg: Config): string {
   let out = text
-  if (out.includes(';base64,')) out = out.replace(DATA_URI, (m) => park(m))
+  if (out.includes(';base64,')) out = clocked(out).replace(DATA_URI, (m) => park(m))
   if (/Content-Transfer-Encoding/i.test(out)) out = mintMimeSecrets(out, cfg)
-  out = out.replace(BLOB, (m, offset: number, whole: string) => {
+  out = clocked(out).replace(BLOB, (m, offset: number, whole: string) => {
+    tickNow()
     if (cfg.allow.has(m)) return m
     if (m.includes('\n') && !evenlyWrapped(m)) return m
     // The text before it on the same line, at most 120 characters.
@@ -1344,7 +1389,7 @@ function parkMedia(text: string, cfg: Config): string {
 function mintMimeSecrets(text: string, cfg: Config): string {
   const ranges: [number, number][] = []
   for (const body of mimeBodies(text)) {
-    const b64 = text.slice(body.start, body.end).split(/\r?\n/).map(stripPfx).join('')
+    const b64 = clocked(text.slice(body.start, body.end)).split(/\r?\n/).map(stripPfx).join('')
     if (base64HoldsSecret(b64)) ranges.push([body.start, body.end])
   }
   if (ranges.length === 0) return text
@@ -1388,7 +1433,7 @@ type MimeBody = { start: number; end: number; lines: [number, number][]; text: b
 function mimeBodies(text: string): MimeBody[] {
   const found: MimeBody[] = []
   if (!/Content-Transfer-Encoding/i.test(text)) return found
-  for (const m of text.matchAll(CTE)) {
+  for (const m of clocked(text).matchAll(CTE)) {
     const at = m.index!
     // The header block ends at the next blank line; a part's headers are
     // short, so a block that runs on for 20 lines is not a MIME part.
@@ -1448,7 +1493,7 @@ function mimeBodySpans(text: string, spans: Spans): void {
 // soft: a token after `token=` inside one is still judged.
 function mailSpans(text: string, spans: Spans, boundaries: Set<string>): void {
   if (/(?:Signature|Seal|Message-I[Dd]|References|Received|Feedback-ID|X-SG-|X-MSFBL|X-Gm-|X-Google-)/.test(text)) {
-    for (const m of text.matchAll(MAIL_HEADER)) {
+    for (const m of clocked(text).matchAll(MAIL_HEADER)) {
       const at = m.index!
       const end = at + m[0].length
       const prevStart = text.lastIndexOf('\n', at - 2) + 1
@@ -1458,17 +1503,17 @@ function mailSpans(text: string, spans: Spans, boundaries: Set<string>): void {
       if (inBlock) spans.add(at, end, true)
     }
   }
-  if (text.includes('=?')) for (const m of text.matchAll(ENCODED_WORD)) spans.add(m.index!, m.index! + m[0].length, true)
-  if (/multipart\//i.test(text)) for (const m of text.matchAll(BOUNDARY)) boundaries.add(m[1]!.replace(/^-+|[-=]+$/g, ''))
+  if (text.includes('=?')) for (const m of clocked(text).matchAll(ENCODED_WORD)) spans.add(m.index!, m.index! + m[0].length, true)
+  if (/multipart\//i.test(text)) for (const m of clocked(text).matchAll(BOUNDARY)) boundaries.add(m[1]!.replace(/^-+|[-=]+$/g, ''))
 }
 
 function protectedSpans(text: string, boundaries: Set<string>): Spans {
   const spans = new Spans()
   mimeBodySpans(text, spans)
   mailSpans(text, spans, boundaries)
-  if (text.includes('fonts.gstatic.com')) for (const m of text.matchAll(PUBLIC_URL)) spans.add(m.index!, m.index! + m[0].length)
+  if (text.includes('fonts.gstatic.com')) for (const m of clocked(text).matchAll(PUBLIC_URL)) spans.add(m.index!, m.index! + m[0].length)
   // The Cloudflare Web Analytics beacon token is public, on every page.
-  if (text.includes('data-cf-beacon')) for (const m of text.matchAll(CF_BEACON)) spans.add(m.index!, m.index! + m[0].length)
+  if (text.includes('data-cf-beacon')) for (const m of clocked(text).matchAll(CF_BEACON)) spans.add(m.index!, m.index! + m[0].length)
   return spans.seal()
 }
 
@@ -1508,7 +1553,7 @@ function scrubTokens(text: string, cfg: Config): string {
     }
     return looksSecret(token, beforeAt(whole, offset), cfg) ? mint('SECRET', token) : token
   }
-  return text.replace(SCAN, (m: string, slashed: string | undefined, offset: number, whole: string) => {
+  return clocked(text).replace(SCAN, (m: string, slashed: string | undefined, offset: number, whole: string) => {
     if (slashed === undefined) return judge(m, offset, whole)
     if (m.includes('/')) {
       const span = spans.at(offset)
@@ -1519,19 +1564,25 @@ function scrubTokens(text: string, cfg: Config): string {
   })
 }
 
-export function scrubSecrets(text: string, cfg: Config): string {
+// `tick`, where given, is called before every whole-text pass and before
+// each blob decode in parkMedia, and may throw to end the scan there. A call
+// made with none runs under the tick of the scan it is nested in, so the
+// outer deadline bounds its passes too.
+export function scrubSecrets(text: string, cfg: Config, tick?: Tick): string {
   if (text.length < 8) return text
-  // A whole value that is base64 (or base64url) of text holding a secret.
-  if (text.length >= 256 && BASE64_VALUE.test(text) && !cfg.allow.has(text) && base64HoldsSecret(text)) return mint('SECRET', text)
+  const outerTick = clockTick
   const outer = parked
   const outerLocal = local
+  clockTick = tick ?? outerTick
   parked = startParking(text)
   local = new Set()
   try {
+    // A whole value that is base64 (or base64url) of text holding a secret.
+    if (text.length >= 256 && BASE64_VALUE.test(clocked(text)) && !cfg.allow.has(text) && base64HoldsSecret(text)) return mint('SECRET', text)
     let out = rehideKnown(text)
     out = parkOpaque(out)
     out = scrubKeyBlocks(out, cfg)
-    if (out.includes('eyJ')) out = out.replace(DOTTED, (m) => scrubJwtChain(m, cfg))
+    if (out.includes('eyJ')) out = clocked(out).replace(DOTTED, (m) => scrubJwtChain(m, cfg))
     out = scrubVendors(out, cfg)
     out = scrubUrls(out, cfg)
     out = scrubCommandLines(out, cfg)
@@ -1545,6 +1596,7 @@ export function scrubSecrets(text: string, cfg: Config): string {
     if (local.size > 0) out = rehideLocal(out, local)
     return unpark(out)
   } finally {
+    clockTick = outerTick
     parked = outer
     local = outerLocal
   }
@@ -1590,13 +1642,21 @@ const MEDIA_KEYS = new Set(['data', 'base64', 'b64_json', 'imageData', 'thumbnai
 const BASE64_VALUE = /^[A-Za-z0-9+/_-]{256}[A-Za-z0-9+/_-]*={0,2}$/
 const MAX_DEPTH = 64
 
-// Set when the walk met a part it could not rewrite: deeper than MAX_DEPTH,
-// or an object that is not plain data. A hook that finds a secret elsewhere
-// in the same result then withholds it rather than hand the part on raw.
-export type WalkState = { incomplete: boolean }
+// `incomplete` is set when the walk met a part it could not rewrite: deeper
+// than MAX_DEPTH, or an object that is not plain data. A hook that finds a
+// secret elsewhere in the same result then withholds it rather than hand the
+// part on raw. `tick`, where the caller holds a budget, is its clock check,
+// read before each media value's decode, the one step the walk takes itself
+// outside `fn`, so a crossed deadline throws to the caller's catch before
+// the decoder runs. The one state object is shared down the recursion.
+export type WalkState = { incomplete: boolean; tick?: Tick }
 
 export function walk(value: unknown, fn: (s: string) => string, st: WalkState = { incomplete: false }, depth = 0, key = ''): unknown {
-  if (typeof value === 'string') return MEDIA_KEYS.has(key) && BASE64_VALUE.test(value) && !base64HoldsSecret(value) ? value : fn(value)
+  if (typeof value === 'string') {
+    if (!MEDIA_KEYS.has(key) || !BASE64_VALUE.test(value)) return fn(value)
+    st.tick?.()
+    return base64HoldsSecret(value) ? fn(value) : value
+  }
   if (value === null || typeof value !== 'object') return value
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value
   if (depth >= MAX_DEPTH) {

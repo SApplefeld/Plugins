@@ -126,6 +126,7 @@ export function buildSelfReviewInput(
 
   const prompt = [
     "Review the following worker activity. If there is a clear, actionable lesson (a mistake worth avoiding or a pattern worth reinforcing), respond with the lesson text only (<=200 chars). If the worker is doing fine and there is nothing worth distilling, respond with exactly: NONE.",
+    "The persona's own runbook decides when an entry is closed. Draw no lesson about the timing of goal_done or of closing an entry.",
     "",
     goalContext,
     "",
@@ -177,6 +178,30 @@ export function isSelfScoringLesson(text: string): boolean {
   const externallyGrounded =
     /\b(test passed|tests? pass|proof|operator (?:said|corrected|confirmed|reported)|fixed|verified|confirmed by)\b/.test(lower);
   return selfReferential && !externallyGrounded;
+}
+
+// --- isClosureTimingLesson ---
+// A lesson about when an entry should have been closed is refused, because the
+// self-review receives no runbook and so cannot tell a right close from a wrong
+// one. The persona's own skill owns when an entry closes. The pattern is two
+// closed lists. First, any text naming a goal tool (goal_done, goal_edit,
+// goal_add, goal_resume, goal_create, bare or inside the qualified name
+// mcp__personas__goal_done), since every use of those tools is the runbook's
+// rule and no timing word is needed. A name such as goal_done_root is no tool.
+// Second, one sentence (the text split on ".", ";" and ":") that names closing
+// (or closure), completing, finishing or marking an entry, plan, goal, root,
+// task or step (or its plural) and also carries a timing word: premature,
+// prematurely, early, too soon, before, after, until, draft.
+// The closing verb, the noun and the timing word must share a sentence.
+export function isClosureTimingLesson(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (/(?<![a-z0-9])goal_(?:done|edit|add|resume|create)\b/.test(lower)) return true;
+  return lower.split(/[.;:]/).some(
+    (sentence) =>
+      /\b(?:clos(?:e|ed|es|ing|ure)|complet(?:e|ed|es|ing)|finish(?:ed|es|ing)?|mark(?:ed|s|ing)?)\b/.test(sentence) &&
+      /\b(?:entry|entries|plans?|goals?|roots?|tasks?|steps?)\b/.test(sentence) &&
+      /\b(?:premature|prematurely|early|too soon|before|after|until|draft)\b/.test(sentence),
+  );
 }
 
 // --- reviewOwnRecord ---
@@ -257,7 +282,7 @@ function collectEvents(input: OwnRecordInput): Record<KaizenSignal, KaizenEvent[
       out.asks_unresolved.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
     } else if (d.action === "turn_over_hour") {
       out.long_turns.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
-    } else if (d.action === "memory_lesson_refused") {
+    } else if (d.action === "memory_lesson_refused" && d.detail.startsWith("self-scoring")) {
       out.memory_quality.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
     }
   }

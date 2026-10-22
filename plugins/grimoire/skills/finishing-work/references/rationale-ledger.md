@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the completion pass for a finished effort: it governs the ordered steps that take an effort from "the last section compiles" to verified behavior, the advisory reviews, an adversarial review, documentation that matches reality, and a closed plan doc. It owns the moments where finishing reviewers are dispatched and at what model and effort, where a gate that cannot run at its assigned tier is confirmed unavailable and what ladder of retry, compensation or fallback follows, where a dispatched agent is judged wedged, never-started, faulted or merely quiet and what liveness readings and windows decide that, where the tree-state bracket around the reviewing rounds is captured and compared, and where the finishing pass opens its compaction boundary. Its load class is `named-trigger`: the frontmatter says to use it when all sections of a plan in docs/plans/ are implemented, or when the operator says wrap up, finish, close out, or hand off.
 
-Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 (`skills.finishing-work.c2.md`); lines 66-110 (`skills.finishing-work.c3.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/archive/claude-kit_review-tier-decay_spec_v1.md` on 2026-09-10 (`U` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`V` entries below, their source lines read at that pass's fix rounds 1 to 3). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 2 on 2026-09-20 (W001 to W008 below, the entries amended in place carrying its provenance, and the retired entries naming it). Amended by `docs/archive/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md` on 2026-09-20 (W009 to W013 below, renumbered from that plan's own W001 to W005 where the two amendments opened the same series in parallel). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (P001 below, with S112 retired to it), and by that plan's section 4 on 2026-09-22 (P002 and P003 below). Amended by `docs/plans/claude-kit_capacity-gate_spec_v1.md` on 2026-09-24, section 2's rule written up by section 4 (Z001 below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (W012 below, amended in place). Redrafted on 2026-09-26 by section 4 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `9b437a2e` with its fix round at `a7ae70e2`, so every live entry's `passage:` line quotes the text at `a7ae70e2`, the `flag:` lines record that pass's flags, and A002 below is the body-header rule that fix round restated. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which placed the Jev promise check over the Goal before the final adversarial review (`B` entries below). Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below, with S221 retired to it, S222's passage re-pointed, A002's key reworded and P003's reason retensed). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: S025 deleted with its passage, c3.C158 and W012 rewritten to their passages as they now read, and c1.C036's and c3.C038's reasons reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the finishing pass's boundary declaration, which replaced S025's `open` call). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2 on 2026-10-06 (`F` entries below: F001, the integration-branch merge before step 1, and F002, the Commit-and-Push push on the targeted lane, with S233, S234 and S235 retired to F002), which made step 1's full-suite run the plan's one whole gate and sent step 6, step 7's merges and every push to the lanes the doctrine names. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 2 on 2026-10-06 (`G` entries below: G001, the integration branch's owner at the base ref, G002, the base named on the pull request open, and G003, a stacked pull request retargeted when its parent merges, with S033, S219 and S229 amended in place). Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 5 on 2026-10-06 (G003 amended in place, its arm again waiting on a pull request that is not a draft). Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 3 on 2026-10-06 (`H` entry below: H001, step 1's red file re-run at the integration branch's head). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and left `memq` reading no outcome journal: step 8's closing paragraph left the file, so c3.C142 to c3.C150 are deleted with it, and c3.C118 with its passage; c3.C121 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md` section 3 on 2026-10-12 (`N` entries below; c3.C109, c3.C125, c3.C131, c3.C140, S241 and S242 amended in place, carrying its provenance). Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 1 on 2026-10-13, which moved the advisory lenses and the scope adjudicator to Opus (c1.C003, c1.C105, S006, S010, S078, S091, S093, T018, W001 and W008 rewritten in place, carrying its provenance, and S087's reason reworded). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 2 on 2026-10-13, which runs the final adversarial review at Opus where every section is cleared and waives it for one cleared section (c1.C003, c3.C043, S006, S008, S010, S074, S076, S078, S079, T001, B001, F001 and S093 rewritten in place, and c3.C044, S083, S092 and P002 retired, carrying its provenance). Amended by that plan's finishing pass on 2026-10-13 (`E` entries below: E001 and E002, the cleared definition, and E003 to E005, step 3's waiver, cleared and uncleared cases).
+Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 (`skills.finishing-work.c2.md`); lines 66-110 (`skills.finishing-work.c3.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/archive/claude-kit_review-tier-decay_spec_v1.md` on 2026-09-10 (`U` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`V` entries below, their source lines read at that pass's fix rounds 1 to 3). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 2 on 2026-09-20 (W001 to W008 below, the entries amended in place carrying its provenance, and the retired entries naming it). Amended by `docs/archive/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md` on 2026-09-20 (W009 to W013 below, renumbered from that plan's own W001 to W005 where the two amendments opened the same series in parallel). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (P001 below, with S112 retired to it), and by that plan's section 4 on 2026-09-22 (P002 and P003 below). Amended by `docs/plans/claude-kit_capacity-gate_spec_v1.md` on 2026-09-24, section 2's rule written up by section 4 (Z001 below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (W012 below, amended in place). Redrafted on 2026-09-26 by section 4 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `9b437a2e` with its fix round at `a7ae70e2`, so every live entry's `passage:` line quotes the text at `a7ae70e2`, the `flag:` lines record that pass's flags, and A002 below is the body-header rule that fix round restated. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which placed the Jev promise check over the Goal before the final adversarial review (`B` entries below). Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below, with S221 retired to it, S222's passage re-pointed, A002's key reworded and P003's reason retensed). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: S025 deleted with its passage, c3.C158 and W012 rewritten to their passages as they now read, and c1.C036's and c3.C038's reasons reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the finishing pass's boundary declaration, which replaced S025's `open` call). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 2 on 2026-10-06 (`F` entries below: F001, the integration-branch merge before step 1, and F002, the Commit-and-Push push on the targeted lane, with S233, S234 and S235 retired to F002), which made step 1's full-suite run the plan's one whole gate and sent step 6, step 7's merges and every push to the lanes the doctrine names. Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 2 on 2026-10-06 (`G` entries below: G001, the integration branch's owner at the base ref, G002, the base named on the pull request open, and G003, a stacked pull request retargeted when its parent merges, with S033, S219 and S229 amended in place). Amended by `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` section 5 on 2026-10-06 (G003 amended in place, its arm again waiting on a pull request that is not a draft). Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 3 on 2026-10-06 (`H` entry below: H001, step 1's red file re-run at the integration branch's head). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and left `memq` reading no outcome journal: step 8's closing paragraph left the file, so c3.C142 to c3.C150 are deleted with it, and c3.C118 with its passage; c3.C121 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md` section 3 on 2026-10-12 (`N` entries below; c3.C109, c3.C125, c3.C131, c3.C140, S241 and S242 amended in place, carrying its provenance). Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 1 on 2026-10-13, which moved the advisory lenses and the scope adjudicator to Opus (c1.C003, c1.C105, S006, S010, S078, S091, S093, T018, W001 and W008 rewritten in place, carrying its provenance, and S087's reason reworded). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 2 on 2026-10-13, which runs the final adversarial review at Opus where every section is cleared and waives it for one cleared section (c1.C003, c3.C043, S006, S008, S010, S074, S076, S078, S079, T001, B001, F001 and S093 rewritten in place, and c3.C044, S083, S092 and P002 retired, carrying its provenance). Amended by that plan's finishing pass on 2026-10-13 (`E` entries below: E001 and E002, the cleared definition, and E003 to E005, step 3's waiver, cleared and uncleared cases). Amended by `docs/plans/claude-kit_corpus-cuts_spec_v1.md` section 1 on 2026-10-19 (H001 rewritten in place to the pointer that replaced the finishing gate's red-route restatement, and N002 retired to c3.C125 with no `passage:` line, since this ledger's parity pin holds every passage verbatim in the live source and the hygiene sentence it quoted is cut). Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 4 on 2026-10-19 (S212 and S245 amended in place, carrying its provenance: step 7's walk over the open pull requests based on the branch before the ready, the ready's hold under a draft parent, and the release of a held child from the parent's own pass), and by that plan's section 7 on 2026-10-19 (c3.C034, c3.C043 and S204 rewritten in place to the sentences that dropped the close path's index refresh). Amended by `docs/archive/claude-kit_ready-is-the-review-signal_spec_v1.md` section 1 on 2026-10-19 (S212 and S245 rewritten in place, carrying its provenance, under the operator's ruling that a pull request is marked ready whatever its parent reads).
 
 ### c1.C001
 - key: Run the finishing steps in order.
@@ -362,13 +362,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - baseline-test: yes
 
 ### c1.C038
-- key: Call a dispatch wedged only when its status still reads `running`, its liveness reading has shown no sign of life for the window its shape sets or that window elapsed with no usable reading, and it has not answered a `SendMessage` probe within the probe window its shape sets.
+- key: Call a dispatch wedged only when four observations hold: its status still reads `running`, its liveness reading has shown no sign of life for the window its shape sets or that window elapsed with no usable reading, it has not answered a `SendMessage` probe within the probe window its shape sets, and its open-call reading, the count of `tool_use` ids no `tool_result` answers, is zero.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:18
-- provenance: d66c58d 2026-08-23, three finishing reviewers held `running` for 4.7 hours; 8a2daa8 2026-08-26 added the no-usable-reading arm for the unreadable instrument.
-- verdict: keep
-- reason: The owner of the hallmark; the doctrine's two liveness bullets are pinned by test to defer here and carry none of it.
-- passage: A dispatch is wedged when all three hold. Its status still reads `running`. Its liveness reading has shown no sign of life for the window its shape sets, or that window has elapsed since dispatch with no usable reading. It has not answered a `SendMessage` probe within the probe window its shape sets.
+- provenance: d66c58d 2026-08-23, three finishing reviewers held `running` for 4.7 hours; 8a2daa8 2026-08-26 added the no-usable-reading arm for the unreadable instrument; rewritten 2026-10-18 by the finishing-pass-rules plan, section 3, on a haiku fixture measured that day holding a 150-second wait, and on the parallel batch at agent-a37a1eecd130c6a2b.jsonl lines 56 to 63; rewritten 2026-10-19 by the finishing-rules-drift plan, section 1, naming the session transcript's location.
+- verdict: rewrite
+- landed: 9d6cd5eb section 3
+- reason: The owner of the hallmark; the doctrine's two liveness bullets are pinned by test to defer here and carry none of it. The fourth observation answers #456, an agent holding a long tool call open killed for its silence: the harness appends the call's assistant line before its result, and a parallel batch returns its results in any order, so open calls are counted as unanswered ids rather than read off the last line, and parsed rather than grepped because a tool result can quote the string `tool_use`.
+- passage: Its status still reads `running`. Its liveness reading has shown no sign of life for the window its shape sets, or that window has elapsed since dispatch with no usable reading. It has not answered a `SendMessage` probe within the probe window its shape sets. Its open-call reading below is zero.
+- passage: **The open-call reading is a set difference over the transcript's `assistant` and `user` lines, never its last line or a grep.** A parallel batch writes each `tool_use` as its own `assistant` line and returns the results on separate `user` lines in any order, so the last line reads closed while a call in the batch is still open, and a tool result can quote the string `tool_use`. Other line types repeat the blocks and are skipped. Read `node -e 'const s=new Set();require("fs").readFileSync(process.argv[1],"utf8").split("\n").forEach(l=>{let o;try{o=JSON.parse(l)}catch{return}const c=o.message&&o.message.content;if(!Array.isArray(c))return;for(const b of c){if(!b)continue;if(o.type==="assistant"&&b.type==="tool_use")s.add(b.id);else if(o.type==="user"&&b.type==="tool_result")s.delete(b.tool_use_id)}});console.log(s.size)' <transcript>`, or the host shell's JSON equivalent. A count above zero is an open call: hold the dispatch as working. A `0` is proven only by this command printing above zero at a transcript holding an open call, the session's own read inside that call. That transcript is `~/.claude/projects/<launch directory, non-alphanumerics as dashes>/<session id>.jsonl`, the id being `CLAUDE_CODE_SESSION_ID`. With no agent id or file at the dispatch's path, the observation holds on the elapsed-time fallback below. An unproven `0`, or no digit at a present file, is recorded, reported at each wake, and leaves the hallmark short.
 
 ### c1.C039
 - key: Let the dispatch's shape decide the reading and the windows: byte growth on its class's windows for one that took a turn, the pair of counts on the five-minute first-turn and probe windows for one whose counts both read zero, and elapsed time on its class's windows where the instrument is unreadable.
@@ -389,22 +391,26 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Once a probe is away, the reading is the non-synthetic assistant-line count wherever the transcript is readable, whatever the shape.
 
 ### c1.C041
-- key: Treat a quiet running dispatch as working short of all three hallmark observations.
+- key: Treat a quiet running dispatch as working short of all four hallmark observations, and an unanswered probe as uninformative while a tool call is open.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:18
-- provenance: d66c58d 2026-08-23; c6f08c5 2026-08-23 qualified the doctrine's false absolute to the same bar.
-- verdict: keep
-- reason: The disposition half of the rule's spine; the doctrine's copies point here.
-- passage: Short of all three observations, a quiet running dispatch is working.
+- provenance: d66c58d 2026-08-23; c6f08c5 2026-08-23 qualified the doctrine's false absolute to the same bar; rewritten 2026-10-18 by the finishing-pass-rules plan, section 3.
+- verdict: rewrite
+- landed: 9d6cd5eb section 3
+- reason: The disposition half of the rule's spine; the doctrine's copies point here. #456 killed an agent inside a long tool call on an unanswered probe, and a probe is delivered at the agent's next tool round, so it cannot land until the call returns.
+- passage: Short of all four observations, a quiet running dispatch is working. An unanswered probe is uninformative while a tool call is open, since it cannot land until the call returns.
 
 ### c1.C042
-- key: Never kill a dispatch for being quiet short of the whole hallmark.
+- key: Never kill a dispatch for being quiet short of the whole hallmark, and with the whole hallmark only on the fault sign, or at the close of the outer window with no tool call open, the silence recorded.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:18
-- provenance: d66c58d 2026-08-23.
-- verdict: keep
-- reason: The bar half of the spine. The run-level stop at c1.C063 is this rule's own stated exception for a probe that cannot be sent, not a conflict.
+- provenance: d66c58d 2026-08-23; rewritten 2026-10-18 by the finishing-pass-rules plan, section 3, on the operator's outer-window ruling of that day; rewritten 2026-10-19 by the finishing-rules-drift plan, section 1, reading the sign by JSON parse.
+- verdict: rewrite
+- landed: 9d6cd5eb section 3
+- reason: The bar half of the spine. The run-level stop at c1.C063 is this rule's own stated exception for a probe that cannot be sent, not a conflict. #456 set the operator's bar at no kill on silence alone, so the fault sign, the harness's recorded API fault as the agent's last act, is the one positive sign of death this harness shows, read from parsed JSON so a tool result quoting the marker cannot raise it; the operator ruled the outer window for a dispatch alive but dead to every reading, which only the harness locking the agent up can produce, so an unattended run is not held forever. An open call is a reading, so it goes to the operator rather than to the stop.
 - passage: Nothing short of the whole hallmark authorizes killing any dispatch **for being quiet**, and every dispatch site points here rather than restating it.
+- passage: With all four, before the outer window closes, TaskStop only on the fault sign below. With no sign, hold it as working and report the readings to the operator. The outer window is four times the class's growth window. It closes that long after the last sign of life, read as the hallmark's shape reads it, and an open call is a sign at every wake that finds it open and at the first wake that finds it returned. When it closes with status still `running`, TaskStop with the silence recorded. A call open longer than an outer window is reported to the operator at each wake.
+- passage: **The positive sign of death is the fault sign, a closed list of one.** Among the transcript's `"type":"assistant"` lines the last carries `"model":"<synthetic>"`, the harness's API-error placeholder. Read it after the never-started paragraph's path control, parsing each line as JSON, as `node -e 'let m;require("fs").readFileSync(process.argv[1],"utf8").split("\n").forEach(l=>{let o;try{o=JSON.parse(l)}catch{return}if(o&&o.type==="assistant")m=o.message&&o.message.model});console.log(m==="<synthetic>"?1:0)' <transcript>`, or the host shell's JSON equivalent. A `1` is the sign: a failed model call was the agent's last act, with no assistant line after it inside the probe window. A later `user` line does not clear it, since only an assistant line shows the agent acted again.
 
 ### c1.C043
 - key: For a kill on any other ground, a brief invalidated mid-flight, a tree-mutating probe, or a deliberate replacement, go to executing-work, which owns them as a TaskStop with no window to wait out.
@@ -416,14 +422,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: A kill on other grounds, such as a brief invalidated mid-flight, a tree-mutating probe or a deliberate replacement, is executing-work's TaskStop with no window to wait out.
 
 ### c1.C044
-- key: Take this rule's own exception: the stop-first TaskStop ahead of the synthetic-only shape's transient-fault re-dispatch.
+- key: Take this rule's own kills needing no sign: the stop-first TaskStop ahead of the synthetic-only shape's re-dispatch, the never-started stop and the run-level stop, each a reading of a shape rather than of a silence.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:18
-- provenance: 8a2daa8 2026-08-26.
-- verdict: keep
-- reason: The exception stated beside the bar, pointing at line 24 as its owner.
-- passage: This rule's own such kill is the stop-first TaskStop before the synthetic-only fault's re-dispatch, which the never-started paragraph below mandates.
-- flag: stale
+- provenance: 8a2daa8 2026-08-26; rewritten 2026-10-18 by the finishing-pass-rules plan, section 3, on the operator's ruling of that day.
+- verdict: rewrite
+- landed: 9d6cd5eb section 3
+- reason: The exceptions stated beside the bar, each pointing at its owning paragraph. Under #456 the operator ruled that the never-started and run-level stops stand as written: a dispatch that wrote no assistant line in ten minutes, where a healthy first line lands in seconds, is a reading of a shape rather than a silence, and that route ended the 4.7-hour wedge the rule was written for.
+- passage: Three kills of this rule's own need no sign, each a reading of a shape, not a silence: the stop-first TaskStop before the synthetic-only fault's re-dispatch, the never-started stop beside it, and the run-level stop below.
 
 ### c1.C045
 - key: Rely on the probe to discriminate, since status reads `running` for healthy and wedged alike and a flat window only earns the probe; an agent that can take a tool round answers and one waiting on an authorization cannot.
@@ -595,9 +601,9 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Where the lookup fails and the agent id cannot be recovered, TaskStop the run's own task id at the close of the fallback's two windows with status still `running`.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:22
-- provenance: 8a2daa8 2026-08-26, "a Workflow dispatch whose agent id cannot be recovered has neither reading nor probe and now has a stated exit".
+- provenance: 8a2daa8 2026-08-26, "a Workflow dispatch whose agent id cannot be recovered has neither reading nor probe and now has a stated exit"; reason amended 2026-10-18 by the finishing-pass-rules plan, section 3, on the operator's ruling of that day.
 - verdict: keep
-- reason: The hallmark's own carve-out for a probe term that is unsatisfiable; the doctrine's bullet defers the hallmark and its exceptions here.
+- reason: The hallmark's own carve-out for a probe term that is unsatisfiable; the doctrine's bullet defers the hallmark and its exceptions here. #456's fault sign is read from a transcript, and this stop exists for a dispatch with none, so the operator's ruling keeps it as written.
 - passage: So at the close of the elapsed-time fallback's two windows, with status still `running`, TaskStop the run's own task id.
 
 ### c1.C064
@@ -917,9 +923,9 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: At the close of the probe window with both counts still zero, TaskStop the dispatch and enter the ladder.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:28
-- provenance: 8a2daa8 2026-08-26, verification-artifacts Section 2; the unchanged-hallmark clause answers process-rule-repairs round 4's "hallmark defined twice with different contents".
+- provenance: 8a2daa8 2026-08-26, verification-artifacts Section 2; the unchanged-hallmark clause answers process-rule-repairs round 4's "hallmark defined twice with different contents"; reason amended 2026-10-18 by the finishing-pass-rules plan, section 3, on the operator's ruling of that day.
 - verdict: keep
-- reason: The one exit the never-started shape has, and the clause saying the predicate is unchanged is what keeps a reader from building a second hallmark.
+- reason: The one exit the never-started shape has, and the clause saying the predicate is unchanged is what keeps a reader from building a second hallmark. #456's bar of no kill on silence alone leaves it standing under the operator's ruling, since the shape is the reading rather than a silence.
 - passage: With both still zero five minutes after that send, TaskStop and enter the ladder below.
 
 ### c1.C098
@@ -1175,10 +1181,11 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Include the evidence in that record: the verbatim error, or the `message.model` distribution with counts for a substitution, the `<synthetic>` count pair for each synthetic-only fault, and for each wedge the dispatch, how long status read `running`, the artifact showing no growth or the growth reading recorded unavailable, the pair of zero counts at the first-turn window's close, the elapsed time with readings unavailable on the fallback, and the unanswered or unsendable probe.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:36
-- provenance: 8a2daa8 2026-08-26, one evidence form per shape the unified budget admits.
-- verdict: keep
-- reason: No finding of its own; a downgrade the operator cannot re-run from is the silent downgrade e2752d1 removed.
-- passage: The evidence is the verbatim error, the `message.model` tally or the `<synthetic>` count pair, or for a wedge its time at `running`, its liveness reading and the probe.
+- provenance: 8a2daa8 2026-08-26, one evidence form per shape the unified budget admits. Rewritten 2026-10-18 by the finishing-pass-rules plan's finishing pass, on the docs curator's drift item D4.
+- verdict: rewrite
+- landed: a80a5c80 finishing pass
+- reason: No finding of its own; a downgrade the operator cannot re-run from is the silent downgrade e2752d1 removed. The open-call and fault-sign readings are what authorize the hallmark's stops, so the record names them beside the liveness reading.
+- passage: The evidence is the verbatim error, the `message.model` tally or the `<synthetic>` count pair, or for a wedge its time at `running`, liveness, open-call and fault-sign readings and the probe.
 
 ### c1.C124
 - key: Name the compensation or fallback again in the close-out status so the operator can decide whether to re-run the gate where fable is reachable.
@@ -2693,13 +2700,13 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - flag: stale
 
 ### c3.C034
-- key: Order this step: append the Chapter with `Gate:` open, run the probe set where called for either side of the archive, prune and index refresh but ahead of the targeted run, finish the archive, prune and index refresh, run the targeted lane over the files they changed, then fill the `Gate:` line from step 1's run and that one.
+- key: Order this step: append the Chapter with `Gate:` open, run the probe set where called for either side of the archive and the prune but ahead of the targeted run, finish the archive and the prune, run the targeted lane over the files they changed, then fill the `Gate:` line from step 1's run and that one.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:70
 - provenance: cceff11 2026-08-31 wrote the order out (append, archive, gate, fill); e0ef09c 2026-09-06 placed the probe run in it; section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` replaced the whole gate here with the targeted lane on 2026-10-06.
-- verdict: keep
-- reason: The order was written out because a reader left to infer it wrote the Chapter in a circle with the gate; "ahead of that run" is a start order and is compatible with the run going beside the backgrounded probe run (A021, K15 F123 not real). The gate after the archive is the targeted lane because the doctrine sends every change after step 1's green run to the targeted lane over its own delta.
-- passage: Here the gate is this step's targeted run. Append the Chapter with its `Gate:` line left open. Start any probe run this step calls for ahead of that run, either side of the archive, the prune and the index refresh. Finish those three, then run the targeted lane over the files they changed. Fill the `Gate:` line from step 1's run and that one.
+- verdict: rewrite
+- reason: The order was written out because a reader left to infer it wrote the Chapter in a circle with the gate; "ahead of that run" is a start order and is compatible with the run going beside the backgrounded probe run (A021, K15 F123 not real). The gate after the archive is the targeted lane because the doctrine sends every change after step 1's green run to the targeted lane over its own delta. Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 7 on 2026-10-19: the close path no longer refreshes an index, so the sentence names the archive and the prune alone.
+- passage: Here the gate is this step's targeted run. Append the Chapter with its `Gate:` line left open. Start any probe run this step calls for ahead of that run, either side of the archive and the prune. Finish those two, then run the targeted lane over the files they changed. Fill the `Gate:` line from step 1's run and that one.
 
 ### c3.C035
 - key: Place the probe run loosely because its parser admits shapes under the plugin and home directory alone, which the `docs/` edits cannot disturb, and ahead of the gate so the two never share the box.
@@ -2787,16 +2794,16 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Then invoke the `curating-docs` skill and run its close path in full
 
 ### c3.C043
-- key: `git mv` the plan from `docs/plans/` into `docs/archive/`, act on the docs-curator's cross-reference gaps, prune `docs/backlog.md` of items this effort completed into the quarter's archive snapshot, and refresh the `docs/README.md` index.
+- key: `git mv` the plan from `docs/plans/` into `docs/archive/`, act on the docs-curator's cross-reference gaps, and prune `docs/backlog.md` of items this effort completed into the quarter's archive snapshot.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:72
-- provenance: b49a47b 2026-06-19 and fa5df56 2026-08-09, the close path's mechanics as restated in finishing-work; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 deleted the trailing sentence c3.C044 carried, so the passage ends at the index refresh.
+- provenance: b49a47b 2026-06-19 and fa5df56 2026-08-09, the close path's mechanics as restated in finishing-work; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 deleted the trailing sentence c3.C044 carried, so the passage then ended at the index refresh.
 - verdict: rewrite
 - landed: d549e65 section 5
-- reason: curating-docs owns the mechanic and its close path refreshes both `docs/README.md` and `docs/plans/README.md`, which this partial copy drops (A045, real); the safe change is to keep the invocation and a one-line summary and take the steps from curating-docs (A044).
+- reason: curating-docs owns the mechanic, and its close path then refreshed both `docs/README.md` and `docs/plans/README.md`, which this partial copy dropped (A045, real); the safe change is to keep the invocation and a one-line summary and take the steps from curating-docs (A044). Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 7 on 2026-10-19: the close path no longer refreshes an index, so the passage drops that step.
 - proposed: (via A044) Replace the four-item mechanic with "invoke curating-docs and run its close path in full (archive move, cross-references, backlog prune including items the spec names as covered, index refresh)".
 - baseline-test: yes
-- passage: run its close path in full: the archive, the cross-references, the backlog prune (including items the spec names as covered) and the index refresh.
+- passage: run its close path in full: the archive, the cross-references and the backlog prune (including items the spec names as covered).
 
 ### c3.C044
 - key: Do not call a plan closed until it has left `docs/plans/`.
@@ -3096,14 +3103,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Present a consolidated walkthrough of every changed file, what changed and why, organized by section, with a diff summary, then stop and let the operator review before anything is committed.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:88
-- provenance: 656310e 2026-06-10, the walkthrough dates from the marketplace migration; 830ff28 2026-06-17 set the three commit models.
+- provenance: 656310e 2026-06-10, the walkthrough dates from the marketplace migration; 830ff28 2026-06-17 set the three commit models; rewritten 2026-10-19 by the finishing-rules-drift plan's finishing pass, so the walkthrough carries the deviation drift items and remedy receipts step 5 routes to it.
 - verdict: rewrite
 - landed: d549e65 section 5
 - reason: The stop stands as a blast-radius hold and the doctrine's ranking lets the operator's live word lift it (A113, A116); the bullet gains one sentence stating that an authorized commit or push takes the Commit-and-Push bullet's mechanics and the pass resumes at step 7, closing the gap two probes filled the same way (A114, A115). The landed sentence names the targeted lane the Commit-and-Push bullet names for the push, that bullet's pre-push whole gate having left on 2026-10-06 under section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md`, so the two bullets state one rule for one push and the push sentence names its lane as the doctrine-parity pin requires.
 - proposed: (via A114) Add to the Review-Only bullet: on the operator's word to commit or push, that act takes the Commit-and-Push bullet's mechanics including the docs predicate and the pre-push gate, and the pass resumes at step 7.
 - baseline-test: yes
 - passage: On my word to commit or push, that act takes the Commit-and-Push bullet's mechanics, its docs predicate and the targeted lane that bullet names for the push. The pass then resumes at step 7.
-- passage: present a consolidated walkthrough of every changed file, what changed and why, organized by section, with a diff summary, the staged changes being the review surface. Then stop, since I review before anything is committed.
+- passage: present a consolidated walkthrough of every changed file, what changed and why, organized by section, with a diff summary, the deviation drift items and the remedy receipts, the staged changes being the review surface. Then stop, since I review before anything is committed.
 
 ### c3.C074
 - key: With the docs commit already on the branch, update from origin and surface any sibling-session conflicts for resolution.
@@ -5134,37 +5141,42 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: Give a `mistake` with no basis the tag's default stop.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:62
-- provenance: dd5e568 2026-08-24, a run-stopping tag names the basis it rests on; 55c5abc 2026-09-09 renumbered the step.
-- verdict: keep
+- provenance: dd5e568 2026-08-24, a run-stopping tag names the basis it rests on; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1.
+- verdict: rewrite
+- landed: dc7cdfb3 section 1
 - reason: Line 62 owns the missing-basis stop and the gate is operator-decision.
-- passage: A `mistake` means the code may be wrong, not just the docs, and one with no basis takes the tag's default stop.
+- passage: A `mistake` means the code may be wrong, and one with no basis takes the tag's default stop.
 
 ### S118
-- key: Treat a `mistake` whose basis survives the pre-change read as a true blocker: stop, put it to the operator, and resolve it by a code, spec or doc fix before the PR.
+- key: Clear a surviving `mistake` without a stop only where its remedy is doc wording alone and the as-built read shows the code right and the doc wrong, and fix it; a remedy reaching code, the spec or a recorded decision, or one the read leaves unsettled, stops for the operator before the PR.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:62
-- provenance: b9c7f85 2026-06-14 and f758743 2026-06-23 for the true-blocker stop, dd5e568 2026-08-24 conditioned it on the pre-change read; 55c5abc 2026-09-09 renumbered the step.
-- verdict: keep
-- reason: The stop guards a possible code defect reaching the PR on a docs-only reconciliation; drift routing is finishing-work's under the ownership map with the doctrine as pointer.
-- passage: One whose basis survives the pre-change read below is a true blocker: stop, put it to me, and resolve it with a code, spec or doc fix before the PR.
+- provenance: b9c7f85 2026-06-14 and f758743 2026-06-23 for the true-blocker stop, dd5e568 2026-08-24 conditioned it on the pre-change read; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1.
+- verdict: rewrite
+- landed: dc7cdfb3 section 1
+- reason: The stop guards a possible code defect reaching the PR on a docs-only reconciliation, so it stays the default and holds wherever the remedy reaches code, the spec or a recorded decision, or the read cannot settle which side is wrong. A wording-only remedy the as-built read confirms reaches neither, so stopping it only delays a fix the session can verify itself (evidence #325 and #373). Drift routing is finishing-work's under the ownership map.
+- passage: It clears doc wording alone, where your as-built read shows the code right and the doc wrong.
+- passage: A remedy reaching code, the spec or a recorded decision, or unsettled, stops for me before the PR.
 
 ### S119
-- key: Record a `deviation` in the final Chapter and surface it in the PR description for awareness, with no stop.
+- key: Record every remedy with its receipt, and each `deviation` with no stop, in the final Chapter and on the surface that carries the report: the PR description, the Review-Only walkthrough, or under Commit-and-Push the close-out status.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:62
-- provenance: f758743 2026-06-23, documentation for PRs; 55c5abc 2026-09-09 renumbered the step.
-- verdict: keep
+- provenance: f758743 2026-06-23, documentation for PRs; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1; rewritten 2026-10-19 by the finishing-rules-drift plan, section 1, naming the cleared remedy's surface per commit model.
+- verdict: rewrite
+- landed: dc7cdfb3 section 1
 - reason: A deviation is a deliberate as-built choice; recording without stopping is what lets a deviation-only effort flow through a long run.
-- passage: A `deviation` is the docs reflecting a deliberate as-built choice. Record it in the final Chapter and surface it in the PR description, with no stop.
+- passage: Record every remedy with its receipt, and each `deviation` with no stop, in the final Chapter and on the surface that carries the report: the PR description, the Review-Only walkthrough, or under Commit-and-Push the close-out status.
 
 ### S120
-- key: Never silently reconcile a `mistake` the read leaves standing.
+- key: Never silently reconcile: a surviving `mistake` stops the run unless the remedy test clears it.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:62
-- provenance: f758743 2026-06-23, the first limb of the bold sentence; 55c5abc 2026-09-09 renumbered the step.
-- verdict: keep
-- reason: The doctrine's "nothing is ever silently reconciled" points here, so this limb is the bar it lands on.
-- passage: **Never silently reconcile a `mistake` the read leaves standing.**
+- provenance: f758743 2026-06-23, the first limb of the bold sentence; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1.
+- verdict: rewrite
+- landed: dc7cdfb3 section 1
+- reason: The bar every reconciliation lands on: the stop is the default, and only the wording-only remedy S118 bounds is cleared without one.
+- passage: **Never silently reconcile: a surviving `mistake` stops unless the remedy test clears it.**
 
 ### S121
 - key: Never halt the run for a `deviation`.
@@ -5579,13 +5591,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: A refutation retires the pre-change premise and nothing else, so re-decide the class on the surviving spec and code legs.
 
 ### S166
-- key: Keep an item the surviving legs still support in the list under its class, and let it stop the run where that class is `mistake`.
+- key: Keep an item the surviving legs still support in the list under its class, and put it through the remedy test where that class is `mistake`.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:68
-- provenance: dd5e568 2026-08-24, Section 1 of the verification-artifacts plan; moved from line 64 by 55c5abc 2026-09-09.
-- verdict: keep
-- reason: A refutation retires the pre-change premise and nothing else; a mistake on its remaining legs is still a mistake.
-- passage: An item they still support keeps its class and stays in the list, and as a `mistake` it stops the run.
+- provenance: dd5e568 2026-08-24, Section 1 of the verification-artifacts plan; moved from line 64 by 55c5abc 2026-09-09; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1.
+- verdict: rewrite
+- landed: dc7cdfb3 section 1
+- reason: A refutation retires the pre-change premise and nothing else; a mistake on its remaining legs is still a mistake, so it takes the remedy test S118 bounds.
+- passage: An item they still support keeps its class and stays in the list, and a `mistake` takes the remedy test.
 
 ### S167
 - key: Drop only an item with nothing left standing from the drift list, and record it as refuted.
@@ -5984,10 +5997,10 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - provenance: 9b562c0 2026-06-23, Document Closing: docs hand off before the PR merges so locked-down branches cannot strand them; f758743 2026-06-23 added the PreToolUse verification; moved and its "steps 4 and 5" renumbered by 55c5abc 2026-09-09.
 - verdict: rewrite
 - landed: d549e65 section 5
-- reason: The rule stands with its four-item list; the governance reason moves here: where neither author can release their own PR, a separate docs PR is a dead-end, so the docs ride the one authored PR. pr-docs-guard.js enforces only the dirty-docs half at PR creation and fails open, so the prose is not superseded.
+- reason: The rule stands with its list; the governance reason moves here: where neither author can release their own PR, a separate docs PR is a dead-end, so the docs ride the one authored PR. pr-docs-guard.js enforces only the dirty-docs half at PR creation and fails open, so the prose is not superseded. Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 7 on 2026-10-19: the docs work no longer includes an index refresh.
 - proposed: keep the sentence; drop "where neither author can release their own PR, a separate docs PR is a governance dead-end".
 - baseline-test: yes
-- passage: For Branch-and-PR and Commit-and-Push, the docs work from steps 5 and 6 (the curator's edits, the archival `git mv`, the backlog prune, the index refresh) is committed *before* any push or PR, in the same commit series as the code.
+- passage: For Branch-and-PR and Commit-and-Push, the docs work from steps 5 and 6 (the curator's edits, the archival `git mv` and the backlog prune) is committed *before* any push or PR, in the same commit series as the code.
 
 ### S205
 - key: Ship the docs in the same PR as the code, never as a follow-up.
@@ -6072,16 +6085,17 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - proposed: drop "so a close-out that verifies counts and then integrates has verified nothing"; keep at most "integration is itself a writer" as the bound.
 
 ### S212
-- key: Under Branch-and-PR, with the docs commit already on the branch, update from origin and surface any sibling-session conflicts for resolution.
+- key: Under Branch-and-PR, with the docs commit already on the branch, update from origin and surface any sibling-session conflicts for resolution; then, before the pull request is marked ready, list the open pull requests based on this branch and bring this finish to each: a message to the coordinator for a draft a worker may hold, and a merge and push for a finished child, which reads OPEN and not a draft.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:93
-- provenance: 830ff28 2026-06-17, integration with sibling-conflict surfacing; the merge gate that follows it from 9784239 2026-08-30; moved from line 89 by 55c5abc 2026-09-09.
+- provenance: 830ff28 2026-06-17, integration with sibling-conflict surfacing; the merge gate that follows it from 9784239 2026-08-30; moved from line 89 by 55c5abc 2026-09-09. Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 4, 2026-10-19, under the operator's 2026-10-19 standing rule quoted in that plan's `## Intent`: every plan stacks and no pull request is marked ready before its parent, so the bullet gained the sub-bullet walking the stacked children before the ready. Amended by `docs/archive/claude-kit_ready-is-the-review-signal_spec_v1.md` section 1, 2026-10-19, under the operator's ready ruling, which that plan's `## Intent` records: the hold was the coordinator's reading of the stacking rule, never the operator's, so the walk lost its finished-draft read.
 - verdict: rewrite
 - landed: d549e65 section 5
-- reason: The rule stands; the bullet rewrites one rule per sentence with the reason clause (S214) moved here, so the update is gated as a merge because a clean merge can redden a suite in files neither parent changed.
+- reason: The rule stands; the bullet rewrites one rule per sentence with the reason clause (S214) moved here, so the update is gated as a merge because a clean merge can redden a suite in files neither parent changed. The walk over the stacked children sits in this bullet because the parent's finish, its docs commit and this update, is what a child based on this branch conflicts with the moment the parent merges: main's history holds merges whose purpose includes resolving `docs/backlog.md` and the two indexes, `a711954d`, `3018c736` and `a58026f7`, where each side added its newest entry at one spot, and a repair pushed after the operator approves the child dismisses that approval under main's ruleset, read from the host at `rulesets/23182015` as the plan's Approach records, so the push runs before he sits down. The draft read gates the push because a draft may be a branch a worker holds: an unstarted child takes this branch in at its start by executing-work's start walk and a mid-run child at its own opening update, so each gets a message to the coordinator and no push. On 2026-10-19 the operator ruled that ready is their signal to review, marked when the plan is finished whatever its parent reads, since they review the oldest green pull request first and approve in that order (`docs/archive/claude-kit_ready-is-the-review-signal_spec_v1.md`, its `## Intent`); the hold before a parent's ready was the coordinator's own reading of their stacking change, and it is gone. So a finished child is a draft only where its worker ended before its ready, the coordinator's take-in case, and the walk lost the finished-draft read that found children the hold kept. A child reading OPEN and not a draft is finished and held by nobody, so this session merges its own branch into it in a worktree of its own, under the conflict rule that start walk states and the lane the doctrine's merge rule names, and tells the coordinator the number so its next report names the review the push dismissed. The coordinator's pass is the backstop for what this walk cannot reach, never the carrier of the operator's sitting (`docs/plans/claude-kit_queue-stacking_spec_v1.md` section 4).
 - proposed: one sentence for the update and the conflict surfacing.
 - baseline-test: yes
 - passage: with the docs commit on the branch, update from origin and surface any sibling-session conflicts.
+- passage: The open pull requests based on this branch take this finish before it is marked ready. `gh pr list --base <branch> --state open --json number,headRefName` lists them, each a stacked child, and `gh pr view <child> --json state,isDraft` says who holds each. A draft is a branch a worker may hold. It gets one message to the coordinator naming the child, and no push: an unstarted child takes this branch in at its start by executing-work's start walk, under Workspace and siblings in its `references/starting.md`, and a mid-run child at its own finishing pass's opening update. A child reading OPEN and `"isDraft":false` is finished and held by nobody. A child reading MERGED or CLOSED takes nothing and is recorded in the final Chapter. The OPEN non-draft takes the push: merge this branch into it in a worktree of this session's own, resolve a conflict in the files that start walk's conflict rule names by that rule, run the lane the doctrine's merge rule names over the files either side changed, and push. Then tell the coordinator the child's number, so its next report to me names the review the push dismissed, and record the child's number and tip in the final Chapter. This finish is what the child conflicts with once this pull request merges, and a repair pushed after my approval dismisses it, so the walk runs before the ready.
 
 ### S213
 - key: Where the update brings commits across, verify the branch builds, then run the lane the doctrine's merge rule names, with the contention lane beside it where that lane is the whole gate.
@@ -6165,13 +6179,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Open the pull request only where none is open for the branch (`gh pr list --head <branch> --state open`), and otherwise push and refresh its body with `gh pr edit <branch> --body-file <path>`. To open one, push the branch and run `gh pr create --base <integration>` on GitHub or `az repos pr create --target-branch <integration>` on Azure DevOps Git, or, with no CLI or auth, surface the "create a pull request" URL the host prints.
 
 ### S220
-- key: Have the PR carry the title, a by-section summary, the test evidence, the archival summary, and the deviation drift items.
+- key: Have the PR carry its title, by-section summary, test evidence, archival summary, deviation drift items and remedy receipts.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:168
-- provenance: f758743 2026-06-23, documentation carried into PRs; the deviation items from the drift-routing rule at step 5; moved by 55c5abc 2026-09-09.
-- verdict: keep
-- reason: Step 5 disposes of a deviation and this enumerates the PR's contents, meeting at one item; the drift items are what the body-file control (S223) exists to carry safely.
-- passage: The PR carries the title, a by-section summary, the test evidence, the archival summary, and the deviation drift items.
+- provenance: f758743 2026-06-23, documentation carried into PRs; the deviation items from the drift-routing rule at step 5; moved by 55c5abc 2026-09-09. Rewritten 2026-10-18 by the finishing-pass-rules plan's finishing pass, on the docs curator's drift item D5.
+- verdict: rewrite
+- landed: a80a5c80 finishing pass
+- reason: Step 5 disposes of a deviation and this enumerates the PR's contents, meeting at one item; the drift items are what the body-file control (S223) exists to carry safely. Step 5 records every cleared curator remedy with its receipt in the PR description, so the list names the receipts.
+- passage: The PR carries its title, by-section summary, test evidence, archival summary, deviation drift items and remedy receipts.
 
 ### S221
 - key: Write the PR title in the doctrine's commit-title form: an uppercase surface prefix, the change as a proper sentence with a period, a "so" clause where the effect is not obvious, informative words first.
@@ -6426,14 +6441,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Offer a kaizen pass in one line only where the inbox has pending items, the predicate rather than your read of the session deciding.
 
 ### S245
-- key: Mark the pull request ready (`gh pr ready <branch>`), then arm auto-merge with no precondition, by reading the pull request's node id and enabling auto-merge through the `enablePullRequestAutoMerge` mutation with `mergeMethod: MERGE`; where either command errors, mark ready alone and name the pull request as up and unarmed.
+- key: Mark the pull request ready (`gh pr ready <branch>`) with no read of its parent pull request, then arm auto-merge with no precondition, by reading the pull request's node id and enabling auto-merge through the `enablePullRequestAutoMerge` mutation with `mergeMethod: MERGE`; where either command errors, the host refusing the arm on a base that is not a protected branch among them, the pull request stays ready and is named up and unarmed.
 - class: mechanic
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:93
-- provenance: docs/backlog.md 2026-09-13, batch 2 ruling 4 of the corpus rewrite's rulings, landed by the corpus-rewrite follow-up plan's section 2; the arming precondition from that section's review round 1, where all three lenses read `gh pr merge --help` ("Automatically merge only after necessary requirements are met").
-- verdict: keep
-- reason: The arm is unconditional: where auto-merge should not happen the repository has it disabled, and where it is allowed the arm lands the merge once whatever review the repository requires is finished, so the step reads no rule before arming and V001 carries the flat arm's passage with its spelling. `MERGE` is the method the kit repository allows (auto-merge and merge commits only), and a merge commit is what keeps the branch inside `git branch --merged <integration-ref>` for the reap (S246), where a squash never enters it, which is why a squash-only repository takes the same up-and-unarmed close-out as a host with no equivalent. `gh pr ready` runs even where the pull request is already ready, since `gh pr create` opens non-draft by default; the command's exit status against an already-ready pull request was not checked and the text asserts none. The close waits on nothing because a merge that lands later is met by whichever session's strand-check detects it (S229). Whether a draft opens earlier than finishing is undecided (ruling 4) and this entry claims nothing about it.
+- provenance: docs/backlog.md 2026-09-13, batch 2 ruling 4 of the corpus rewrite's rulings, landed by the corpus-rewrite follow-up plan's section 2; the arming precondition from that section's review round 1, where all three lenses read `gh pr merge --help` ("Automatically merge only after necessary requirements are met"). Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 4, 2026-10-19, under the operator's 2026-10-19 standing rule quoted in that plan's `## Intent`: no pull request is marked ready before its parent, and the parent's own pass releases a finished child it finds held, so the coordinator never marks a plan's pull request ready. Amended by `docs/archive/claude-kit_ready-is-the-review-signal_spec_v1.md` section 1, 2026-10-19, under the operator's ready ruling, which that plan's `## Intent` records: the hold was the coordinator's reading of the stacking rule, never the operator's, so the ready reads no parent and releases no child.
+- verdict: rewrite
+- reason: On 2026-10-19 the operator ruled that ready is their signal to review, marked when the plan is finished whatever its parent reads, since they review the oldest green pull request first and approve in that order (`docs/archive/claude-kit_ready-is-the-review-signal_spec_v1.md`, its `## Intent`); the hold before a parent's ready was the coordinator's own reading of their stacking change, and it is gone. So the ready reads no parent, holds no child and releases none: a finished child is marked ready by its own pass, and the coordinator still never marks a plan's pull request ready. A stacked pull request's arm errs on its unprotected base, as `docs/archive/claude-kit_stacked-pr-base_spec_v1.md` records, so the close-out names it up and unarmed rather than failing the pass, and the coordinator's arm pass or a stacked child's start walk arms it once the host retargets it to the trunk. The arm is unconditional: where auto-merge should not happen the repository has it disabled, and where it is allowed the arm lands the merge once whatever review the repository requires is finished, so the step reads no rule before arming and V001 carries the flat arm's passage with its spelling. `MERGE` is the method the kit repository allows (auto-merge and merge commits only), and a merge commit is what keeps the branch inside `git branch --merged <integration-ref>` for the reap (S246), where a squash never enters it, which is why a squash-only repository takes the same up-and-unarmed close-out as a host with no equivalent. `gh pr ready` runs even where the pull request is already ready, since `gh pr create` opens non-draft by default; the command's exit status against an already-ready pull request was not checked and the text asserts none. The close waits on nothing because a merge that lands later is met by whichever session's strand-check detects it (S229). Whether a draft opens earlier than finishing is undecided (ruling 4) and this entry claims nothing about it.
 - passage: Then mark it ready with `gh pr ready <branch>`, even where it already is.
-- passage: Where either command errors, the host has no equivalent, or the repository refuses `MERGE`, the pull request stays ready and the close-out names it up and unarmed.
+- passage: The ready reads no parent pull request, since ready is my signal to review whatever the stack holds.
+- passage: Where either command errors, the host has no equivalent, or the repository refuses `MERGE`, the pull request stays ready and the close-out names it up and unarmed. The host refuses the arm on a base that is not a protected branch, so a stacked pull request stays up and unarmed until the coordinator's arm pass or a stacked child's start walk arms it on the trunk.
 - passage: `MERGE` keeps the branch inside `git branch --merged` for the reap below, which a squash-merged branch never enters.
 
 ### S246
@@ -6449,11 +6465,11 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - key: End a fix round on executing-work's terminal condition, step 4's "The loop ends on the class of what remains".
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:54
-- provenance: 5620b2b 2026-09-07 pointed the fix rounds at the terminal condition, 9463de7 2026-09-09 rewrote the line for Section 4, 55c5abc 2026-09-09 widened the coverage to step 4's items after Section 6's round 1 found the rule naming only steps 2 and 3 as fix sources; 6983398 2026-09-10 left the sentence unchanged; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 dropped the quoted terminal condition, which rides the step 4 loop the sentence points at.
+- provenance: 5620b2b 2026-09-07 pointed the fix rounds at the terminal condition, 9463de7 2026-09-09 rewrote the line for Section 4, 55c5abc 2026-09-09 widened the coverage to step 4's items after Section 6's round 1 found the rule naming only steps 2 and 3 as fix sources; 6983398 2026-09-10 left the sentence unchanged; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 dropped the quoted terminal condition, which rides the step 4 loop the sentence points at. docs/plans/claude-kit_finding-verifier-vote_spec_v1.md section 3 2026-10-20 added the clause that the finding verifier's dispatch rides with the step 4 loop.
 - verdict: rewrite
 - reason: The terminal condition is executing-work's and rides the step 4 loop this sentence points at; the coverage names every place this pass runs a fix round, including the goal read's items.
-- proposed: A fix round this pass runs, here, at step 3 or on step 4's items, takes executing-work's step 4 loop (`skills/executing-work/SKILL.md` under the kit plugin root), stopping on that step's review-round backstop, with the changeset the base ref defines standing where that skill reads the section's files.
-- passage: A fix round this pass runs, here, at step 3 or on step 4's items, takes executing-work's step 4 loop (`skills/executing-work/SKILL.md` under the kit plugin root), stopping on that step's review-round backstop, with the changeset the base ref defines standing where that skill reads the section's files.
+- proposed: A fix round this pass runs, here, at step 3 or on step 4's items, takes executing-work's step 4 loop (`skills/executing-work/SKILL.md` under the kit plugin root), the finding verifier's dispatch riding with it, stopping on that step's review-round backstop, with the changeset the base ref defines standing where that skill reads the section's files.
+- passage: A fix round this pass runs, here, at step 3 or on step 4's items, takes executing-work's step 4 loop (`skills/executing-work/SKILL.md` under the kit plugin root), the finding verifier's dispatch riding with it, stopping on that step's review-round backstop, with the changeset the base ref defines standing where that skill reads the section's files.
 - landed: 22dcfd78 section 2
 
 ### T002
@@ -7016,16 +7032,17 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Each body header takes the doctrine's heading form, and the body takes the prose register.
 
 ### B001
-- key: Before the final adversarial review, write a promises file holding one entry per Goal sentence, run the promises check against it over the changeset's source files, re-read each promise over 0.6, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
+- key: Before the final adversarial review, write a promises file holding one entry per Goal sentence, run the promises check against it over the changeset's source files, re-read each promise over 0.6, and quote its `jev promises:` line on the final Chapter's `Gate:` line. Where that line reads `not checked (code too long)`, run the check once per section over its in-scope source files intersected with the changeset listing, quote each section's line, re-read only a promise every scored section doubts over 0.6, and record a section with no such file, or still not checked, as such.
 - class: rule
 - source: plugins/grimoire/skills/finishing-work/SKILL.md:96
-- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 ran the promise check before the review's waiver as well as before its dispatch.
+- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 ran the promise check before the review's waiver as well as before its dispatch; rewritten 2026-10-18 by the finishing-pass-rules plan, section 2.
 - verdict: rewrite
 - landed: 549de22b section 3
-- reason: The section checks read each section's own promises, and only a reading over the Goal asks whether the sections together built what the plan set out to. Quoting the closing line leaves the reading in the record whatever it said, so a not-checked run is visible rather than silent.
+- reason: The section checks read each section's own promises, and only a reading over the Goal asks whether the sections together built what the plan set out to. Quoting the closing line leaves the reading in the record whatever it said, so a not-checked run is visible rather than silent. The checker refuses an over-long changeset (#582), so the per-section run plus the goal read keep a reading in the record.
 - proposed: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
-- passage: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
+- passage: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line. Where `not checked (code too long)` prints, run the file per section over its `Files in scope:` source files intersected with the changeset listing, quoting each line. Re-read a promise only where every scored section doubts it over 0.6, since one section's fulfilment scores low elsewhere. A section with no such file, or still `not checked`, is recorded so and never retried. Step 4's goal read stands whatever printed. Each section's `Verify:` results on its Chapter's `Gate:` line are the acceptance its run confirms.
 - landed: 22dcfd78 section 2
+- landed: b68e8cce section 2
 
 ### D001
 - key: Title a pull request with an UPPERCASE prefix naming the part of the system the work changes, then the doctrine's heading form, the prefix never `PLAN`.
@@ -7094,14 +7111,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: A stacked parent's merge is not this pull request's own. Where the repository deletes the parent's branch on merge, GitHub retargets this pull request to the parent's base, and where it keeps the branch, this pull request stays on the merged parent. So while this pull request is OPEN, a session on a branch whose pull request is based on another branch reads the base with Safe Set's read, `gh pr view <branch> --json state,baseRefName`, at every update from the base, the finishing pass's opening update taking only this bullet's read and retarget as that update states. A protected base as Safe Set names it ends the walk before any read of it. Otherwise, where the base's own pull request reads MERGED by `gh pr view <base> --json state,baseRefName`, `<base>` being its branch name, run `gh pr edit <branch> --base <name>`, `<name>` being the `baseRefName` that read printed, and read again. A base with no pull request of its own, `no pull requests found`, ends the walk, and any other failed read is a stop. Then, where `gh pr view <branch> --json autoMergeRequest` prints `"autoMergeRequest":null`, no arm stands: take the base in as the Branch-and-PR update above does and push. Arm again by the two commands above only where `gh pr view <branch> --json isDraft` prints `"isDraft":false`, since a draft would land with sections unbuilt. Otherwise leave it unarmed. Where an arm stands, take the base in only where `gh pr view <branch> --json mergeable` reads CONFLICTING, an UNKNOWN reading taken again, and that push takes the armed OPEN case of the state read above. Where that case sends the push to a new branch, the close-out names this pull request as armed and unmergeable for my word. The strand-check and the reap wait for this pull request's own merge.
 
 ### H001
-- key: Re-run each red file of step 1's gate at the integration branch's head first, re-run that gate only for a red of the plan's own, hold the handoff on a trunk red's fix or spec, and take that fix in on the targeted lane over the files it changed.
+- key: Point step 1's red route at testing-discipline's whole-gate and base-head bullets and its merge exception at the doctrine's gate bullet.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:80
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:84
 - provenance: Section 3 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md`, 2026-10-06, appended from section 1's round 1 blind review, on the operator's ruling of 2026-10-06 that a plan pays one whole gate and fixes a trunk red before its handoff.
 - verdict: keep
 - landed: 489dade7 section 3, with its fix round at a7122a73 and the finishing pass's at b6137279
-- reason: Without the bound to the plan's own red and these sentences, a finishing pass holding only a trunk red re-runs its gate after the trunk's fix lands, the second whole run the one-gate rule removed, or hands off before that fix exists. The merge that takes the fix in is the doctrine's merge rule's one exception, on the operator's ruling of 2026-10-06: it takes the targeted lane over the files the fix changed even where the plan changed one of them too, since the fix's own pull request has just run them, and the merge rule over the rest. The testing skill owns the re-run's mechanics, so this sentence points there.
-- passage: Each red file first re-runs at the integration branch's head, per the base-head bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root. A red run of the plan's own is fixed and re-run, and a fix after a green run takes the targeted lane. A red the trunk carries too is fixed on its own pull request or becomes a spec before the handoff. The plan's branch takes that fix in by the merge rule's one exception: the targeted lane over the fix's files, the merge rule over the rest.
+- reason: The base-head re-run, the bound to the plan's own red, the hold on a trunk red's fix or spec and the merge rule's one exception are each stated whole by their owners, the testing skill's whole-gate and base-head bullets and the doctrine's gate bullet. A restatement here would drift from them, so the sentence names the owners and the paragraph keeps only the one-gate and contention-lane sentences.
+- passage: The whole-gate and base-head bullets of `skills/testing-discipline/SKILL.md` under the kit plugin root own the red route, and the doctrine's "After each step, run the lane the moment calls for" bullet owns the merge exception.
 
 ### N001
 - key: Run the hygiene step at every close-out, and the archive pass when it is due.
@@ -7116,12 +7133,12 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 ### N002
 - key: Disposition the pairs `decay-scan` shows and repair the drift it reports at every close-out, whether or not the archive pass is due.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:188
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:189
 - provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12.
-- verdict: keep
+- verdict: retire
+- superseded-by: c3.C125
 - landed: ad41f892 section 3
-- reason: A step hung on the machine's one decay stamp would reach ten pairs per tier a fortnight, so the duplicate backlog would grow; the scan writes no record and no stamp, so running it every close-out costs a read.
-- passage: The hygiene step dispositions the pairs `decay-scan` shows and repairs the drift it reports, whether or not the archive pass is due.
+- reason: The skill's sentence that had the hygiene step disposition the pairs `decay-scan` shows and repair the drift it reports, whether or not the archive pass is due, is cut. The bold lead carries the every-close-out cadence, N001 keeps it, and the sentence that stays, "The memory-system skill's Running the Decay Pass owns both cadences whole.", is c3.C125's and c3.C131's passage, so the pointer lives in those entries and this one carries no passage. The memory-system skill's Running the Decay Pass owns the pair and drift routing. The reason for running it at every close-out stands there: a step hung on the machine's one decay stamp would reach ten pairs per tier a fortnight, so the duplicate backlog would grow, and the scan writes no record and no stamp, so running it every close-out costs a read. The verdict before it was keep.
 
 ### E001
 - key: Count a section cleared when its last review round ran its lens at Fable and ended the loop under findings.md's terminal condition, its lens being the prose-reviewer for a document-pair-only section and the adversarial-reviewer otherwise.

@@ -119,7 +119,7 @@ Written by `docs/plans/claude-kit_liaison-seat_spec_v1.md` section 1 on 2026-09-
 - source: plugins/grimoire/skills/liaison/SKILL.md:44
 - provenance: docs/plans/claude-kit_liaison-seat_spec_v1.md section 1 2026-09-30; the persona plugin's companion plan, section 2, whose charter carries the same three refusals.
 - verdict: keep
-- reason: An ask reaches the fleet's work only through the architect's plan and the coordinator's queue, which is where it is checked and ordered. A seat doing any of the three would put a thread's words into work nobody reviewed.
+- reason: An ask reaches the fleet's work only through the architect's plan, which the architect queues and the coordinator orders. A seat doing any of the three would put a thread's words into work nobody reviewed.
 - passage: The seat writes no plan, clones no repository and queues no work.
 
 ### C013

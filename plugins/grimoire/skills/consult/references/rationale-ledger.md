@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's escalation instrument: it tells a session how to convene one fresh-context judge, the `consultant` agent, to rule on a single question the session cannot settle on its own. It owns the moments where a session is stuck mid-execution and must decide whether and how to escalate: a second failed attempt at the same problem, a BLOCKED that turns on a decision, a systematic-debugging dead end, a hard-to-reverse or load-bearing decision the spec does not cover, and the design stop, which the floor carries as its own shape while executing-work's step 4 convenes its seat. It also owns the shape of the consult brief, the model and dispatch route for the consultant, the adjudication of the returned ruling, and the choice between the consult and its siblings (design-council, cold, the diff reviewers). Load class: `named-trigger` - the frontmatter says to use it mid-execution at the trigger floor and when the operator asks for a consult or a second opinion on a problem, so it is loaded before convening a consult rather than at session or plan start.
 
-Extracted at `6bc07fb`: whole document (`skills.consult.SKILL.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `3ba47390` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags.
+Extracted at `6bc07fb`: whole document (`skills.consult.SKILL.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `3ba47390` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which moved the operator's-gap test to the doctrine's intake bullet: C017 rewritten to the pointer that replaced its first sentence.
 
 ### C001
 - key: Convene a consult when you hit the trigger floor mid-execution or when the operator asks for a consult or second opinion on a problem.
@@ -159,13 +159,13 @@ Extracted at `6bc07fb`: whole document (`skills.consult.SKILL.md`). Re-extracted
 - passage: **(d) The general license:** a hard-to-reverse or load-bearing decision the spec does not cover, where you would otherwise be guessing.
 
 ### C017
-- key: Send a spec gap to the operator only where the answer turns on preference, cost, or risk appetite; rule on it yourself where it turns on facts about the system.
-- class: rule
+- key: Read which spec gaps are the operator's from the doctrine's intake bullet, and rule on a gap yourself where it turns on facts about the system.
+- class: pointer
 - source: plugins/grimoire/skills/consult/SKILL.md:19
-- provenance: 1d9c467 2026-08-15, the plan's preference-versus-facts discriminator (decided 2026-08-15).
+- provenance: 1d9c467 2026-08-15, the plan's preference-versus-facts discriminator (decided 2026-08-15). Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, which moved the test to the doctrine's intake bullet (its H004).
 - verdict: keep
-- reason: The discriminator binds two seats and each reads it on its own surface: the consultant to know what it may rule, the session to know what to send up. Operator-decision class; it both creates and bounds the gate, so it stays.
-- passage: A spec gap is the operator's only where the answer turns on preference, cost or risk appetite. Where it turns on facts about the system, it is rulable.
+- reason: The test binds every session at intake, not only the consultant and a stuck session, so its one statement moved to the always-loaded bullet and this sentence points there by the bullet's lead. The facts clause stays, since it is what the consultant may rule on, and the mixed-question sentence after it still bounds what reaches the operator.
+- passage: Whether a spec gap is the operator's is the test in the doctrine's intake bullet, opening "Enumerate the gaps at intake". Where it turns on facts about the system, it is rulable.
 
 ### C018
 - key: Rule a mixed question first, so only the small real fork reaches the operator rather than the whole tangle.

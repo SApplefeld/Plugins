@@ -2494,34 +2494,52 @@ export function activateNext(state: AgentState, completedId?: string): string | 
   return null;
 }
 
+// Whether the root is the planner's: it exists and either has no direct
+// child or every direct child carries source "controller", the stamp the
+// planner's own entries take. An entry a session added by hand through
+// goal_add carries "worker", as does the plan entry the [QUEUE] record's
+// promotion adds, the legacy migration stamps "operator", and an
+// entry with no source reads as hand-added. The rule reads direct children
+// only, never deeper descendants, since the closing leaf the controller adds
+// under a plan also carries "controller" and a worker may add under a plan.
+// The claim is read from the entries, never from planningRounds: a root the
+// planner filled once falls back to its seat the moment a hand-added entry
+// sits under it, and a root the planner has never touched is still the
+// planner's while nothing sits under it.
+export function isPlannersRoot(state: AgentState): boolean {
+  const root = state.goals.find((g) => g.parentId === null);
+  if (!root) return false;
+  return state.goals.every((g) => g.parentId !== root.id || g.source === "controller");
+}
+
 // Whether the root's work is all done and the root completes with no planner
-// call. True when the root is open (not complete, abandoned or blocked), the
-// planner has never broken it down (planningRounds is 0), it has at least one
-// descendant, at least one descendant is complete, and every descendant is
-// complete or abandoned. A root the planner has planned before stays the
-// planner's, since the planner returns to it for the next batch of plans. A
-// root with no descendants, or whose descendants are all abandoned, or with a
-// blocked descendant, is not finished and stays with isPlanningDue.
+// call. True when the root is open (not complete, abandoned or blocked), it is
+// its seat's rather than the planner's (isPlannersRoot is false), at least one
+// descendant is complete, and every descendant is complete or abandoned. A
+// seat's root whose descendants are all abandoned, or with a blocked
+// descendant, is neither finished nor planner-due: it stays pending and idle
+// until goal_add adds work under it or goal_create replace: true replaces
+// it. A planner's root is never finished here and stays with isPlanningDue.
 export function isRootFinished(state: AgentState): boolean {
   const root = state.goals.find((g) => g.parentId === null);
   if (!root) return false;
   if (root.status === "complete" || root.status === "abandoned" || root.status === "blocked") return false;
-  if ((root.planningRounds || 0) !== 0) return false;
+  if (isPlannersRoot(state)) return false;
   const descendants = state.goals.filter((g) => g.parentId !== null);
-  if (descendants.length === 0) return false;
   if (!descendants.some((g) => g.status === "complete")) return false;
   return descendants.every((g) => g.status === "complete" || g.status === "abandoned");
 }
 
 // Check whether planning is due (R5).
-// Due when: root exists, not complete/abandoned, has no
-// pending/active/paused descendants, and is not finished by isRootFinished.
-// Blocked counts as no work.
+// Due when: root exists, not complete/abandoned/blocked, has no
+// pending/active/paused descendants, and is the planner's (isPlannersRoot).
+// Blocked counts as no work. The two claims are exclusive by construction,
+// so this never reads isRootFinished.
 export function isPlanningDue(state: AgentState): boolean {
   const root = state.goals.find((g) => g.parentId === null);
   if (!root) return false;
   if (root.status === "complete" || root.status === "abandoned" || root.status === "blocked") return false;
-  if (isRootFinished(state)) return false;
+  if (!isPlannersRoot(state)) return false;
   const descendants = state.goals.filter((g) => g.parentId !== null);
   const hasWork = descendants.some(
     (g) => g.status === "pending" || g.status === "active" || g.status === "paused"

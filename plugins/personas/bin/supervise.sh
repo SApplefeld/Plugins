@@ -97,12 +97,11 @@ while [ $# -gt 0 ]; do
 done
 
 # --- Resolve workdir to an absolute path, then change into it (plan item 1) ---
-# The plugin's hooks resolve their store and heartbeat sidecar paths relative
-# to the child process's own cwd, while this script's poll loop reads them as
-# "$WORKDIR/...". Launching the supervisor from anywhere but WORKDIR used to
-# split those two: the child wrote its store next to wherever the caller's
-# shell happened to be, and the poll loop kept reading an empty WORKDIR. The
-# supervisor now owns that cd itself, so any caller cwd works.
+# The child's hooks resolve their store against the directory the child
+# starts in, which they hold across a reload of the plugin's code, and this
+# script's poll loop reads that store as "$WORKDIR/...". So the child must
+# start in WORKDIR, and this script owns that cd, so any caller cwd works.
+# The heartbeat sidecar path reaches the child absolute, in HEARTBEAT_PATH.
 if [ ! -d "$WORKDIR" ]; then
   echo "workdir not found: $WORKDIR" >&2
   exit 1

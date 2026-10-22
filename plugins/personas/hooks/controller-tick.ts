@@ -36,14 +36,14 @@ import { claimResource, commonsWinner, readAllClaims, readAllEntries, type Commo
 import { compactionPassStep, type CompactionPassDeps, type CompactionPassOption } from "./compaction-pass";
 import { backoffFactor, bumpWindow, effectiveWindowCount, estimateTokens, fnv1aHash, shouldRunClassify } from "./cost-ledger";
 import { splitOf } from "./decision-journal";
-import type { drainSupervisorMailbox as drainSupervisorMailboxFromModule } from "./drains";
+import type { drainOrphanSweep as drainOrphanSweepFromModule, drainSupervisorMailbox as drainSupervisorMailboxFromModule } from "./drains";
 import { fleetReadingOf, readFleetRows, type FleetLine, type fleetPromptText } from "./fleet";
 import type { PluginHost } from "./host";
 import type { HookBudget, LiveAskResult } from "./jev-live";
 import { SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
 import { CONTROLLER_DECISION, PLAN_SWITCH, PLAN_SWITCH_NO_MATCH, controllerLabelsOf, controllerLastAnswerText, controllerStateText, kaizenLine, resolverOf, type ControllerStateFact } from "./question-catalog";
-import { FINDING_COOLOFF_MS, FINDING_UNROUTABLE_AFTER_MS, buildSelfReviewInput, dedupeSelfReview, evictSelfReview, isSelfScoringLesson, reviewOwnRecord, shouldSelfReview } from "./self-review";
+import { FINDING_COOLOFF_MS, FINDING_UNROUTABLE_AFTER_MS, buildSelfReviewInput, dedupeSelfReview, evictSelfReview, isClosureTimingLesson, isSelfScoringLesson, reviewOwnRecord, shouldSelfReview } from "./self-review";
 import type { SessionState } from "./session-state";
 import { safeErrorText } from "./text";
 import { AGENT_HOLD_REPORT_MS } from "./turn-state-text";
@@ -122,6 +122,7 @@ export interface TickContext extends SharedHandlerState {
   meterDrainStep: (now: number) => void;
   appendToChannelLog: (lines: string[]) => Promise<string>;
   drainSupervisorMailbox: (...args: AfterDeps<typeof drainSupervisorMailboxFromModule>) => ReturnType<typeof drainSupervisorMailboxFromModule>;
+  drainOrphanSweep: (...args: AfterDeps<typeof drainOrphanSweepFromModule>) => ReturnType<typeof drainOrphanSweepFromModule>;
   drainMemoryOwed: () => Promise<void>;
   drainAskBriefOwed: (cfg: Record<string, unknown>, expectedTurns: ExpectedTurn[]) => Promise<void>;
   drainPairDraftOwed: (turnOpen: (turnId: string) => boolean) => Promise<void>;
@@ -160,10 +161,11 @@ export interface TickContext extends SharedHandlerState {
   MAX_CONSECUTIVE_NUDGES: number;
   staleAfterMs: number;
   controllerTickMs: number;
-  architectLegRefusal: string;
   supervisorMailbox: string;
   supervisorHeartbeatPath: string;
   supervisorMailboxSkipped: Set<string>;
+  orphanSweepFindings: string;
+  orphanSweepSkipped: Set<string>;
   reconcileEveryMs: number;
   trunkGateHour: number | undefined;
   nudgeFloorMs: number;
@@ -518,14 +520,14 @@ export async function drainInbox(ctx: TickContext): Promise<boolean> {
 }
 
 export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
-  const { withdrawFollowUpsOffered, recordFailedDelivery, sess, turnIsOpen, coordinatorPersona, architectPersona, architectLegRefusal } = ctx;
+  const { withdrawFollowUpsOffered, recordFailedDelivery, sess, turnIsOpen, coordinatorPersona, architectPersona } = ctx;
   // D3: drain operator inbox (one record per call, owner only).
   // List pending inbox records whose writer may reach this persona
   // (deliveryGroundIn over one claims read: a reader claim on it, the
-  // coordinator persona owned, a named persona owned when this persona
-  // is the coordinator or the architect, or the architect persona owned
-  // by the writer of an answer agentic_say admitted on the answer leg
-  // and stamped), take the lowest at, mark delivered, submit as a prompt
+  // coordinator persona owned, a named persona other than default owned,
+  // whatever this persona is, or the architect persona owned by the writer
+  // of an answer agentic_say admitted on the answer leg and stamped), take
+  // the lowest at, mark delivered, submit as a prompt
   // opening with the provenance label that same read produced.
   // D5: if a pending record answers the open ask, close the ask first
   // (ask_answered path) before the general drain.
@@ -568,7 +570,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
             timestamp: Date.now(),
             loop: "monitor",
             action: "operator_skipped_no_claim",
-            detail: `answer ${answer.id} from ${answer.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own${architectLegRefusal})`,
+            detail: `answer ${answer.id} from ${answer.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own)`,
           });
         } else if ("refused" in answerGround || answerProblem !== null) {
           answer.status = "skipped";
@@ -690,7 +692,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
         timestamp: Date.now(),
         loop: "monitor",
         action: "operator_skipped_no_claim",
-        detail: `record ${rec.id} writer ${rec.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own${architectLegRefusal}; marked skipped)`,
+        detail: `record ${rec.id} writer ${rec.from} holds no live claim that reaches '${persona}' (no reader claim, no '${coordinatorPersona}' persona claim, no named persona of its own; marked skipped)`,
       });
     }
     for (const { rec, persona: writerPersona, problem } of badName) {
@@ -765,13 +767,18 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
 // no turn is open, after which the tick ends as the inbox drain's does,
 // so nothing else queues behind a session that has been asked to leave;
 // a shutdown read while a turn is open stays in the mailbox for the first
-// idle tick's pass. The cost bookkeeping stays in the idle part, below
+// idle tick's pass. Then the orphan sweeper's findings file, where the
+// orphanSweepFindings option names one and the mailbox pass delivered no
+// shutdown: every unacknowledged finding is delivered as one labelled turn
+// where no turn is open, after which the tick ends the same way; while a
+// turn is open the findings stay for the first idle tick's pass. The cost
+// bookkeeping stays in the idle part, below
 // the fleet block: its persist is the bare store write whose throw the
 // fleet's tick-failure reading reports, and its sweep collects stale
 // commons entries the fleet block must read first. Resolves false where
 // nothing more runs this tick.
 export async function alwaysTick(ctx: TickContext): Promise<boolean> {
-  const { sess, expectedTurns, turnIsOpen, supervisorMailbox, supervisorMailboxSkipped } = ctx;
+  const { sess, expectedTurns, turnIsOpen, supervisorMailbox, supervisorMailboxSkipped, orphanSweepFindings, orphanSweepSkipped } = ctx;
   // 1. Owner check.
   if (!sess.isOwner) return false;
   if (supervisorMailbox !== "") {
@@ -780,6 +787,13 @@ export async function alwaysTick(ctx: TickContext): Promise<boolean> {
       try { await ctx.persist(); } catch { /* the store refused; the lines above wait in memory */ }
     }
     if (mailbox.delivered) return false;
+  }
+  if (orphanSweepFindings !== "") {
+    const sweep = await ctx.drainOrphanSweep(orphanSweepFindings, expectedTurns, orphanSweepSkipped, turnIsOpen);
+    if (sweep.logged) {
+      try { await ctx.persist(); } catch { /* the store refused; the lines above wait in memory */ }
+    }
+    if (sweep.delivered) return false;
   }
 
   return true;
@@ -1681,7 +1695,16 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             // Item 8.2: a memory entry comes from a proof passing or an
             // operator correction, never from the classifier scoring its
             // own confusion. Refuse the latter before the dedupe check.
-            if (isSelfScoringLesson(lesson)) {
+            // A lesson about when an entry was closed is refused first: the
+            // runbook owns that rule and the review never reads it.
+            if (isClosureTimingLesson(lesson)) {
+              sess.state.decisions.push({
+                timestamp: Date.now(),
+                loop: "memory",
+                action: "memory_lesson_refused",
+                detail: `closure-timing lesson refused: ${lesson.slice(0, 80)}`,
+              });
+            } else if (isSelfScoringLesson(lesson)) {
               sess.state.decisions.push({
                 timestamp: Date.now(),
                 loop: "memory",
@@ -1954,9 +1977,10 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   const root = sess.state.goals.find((g) => g.parentId === null);
 
   // 3a. A finished root completes with no planner call: every descendant
-  // is complete or abandoned, at least one is complete, and the planner
-  // has never broken the root down (isRootFinished). isPlanningDue reads
-  // false for such a root, so this is read first and consumes the tick.
+  // is complete or abandoned, at least one is complete, and the root is its
+  // seat's, holding a direct child the planner did not add (isRootFinished).
+  // isPlanningDue reads false for such a root, since the planner's claim and
+  // the seat's are exclusive, so this is read first and consumes the tick.
   // It waits while a planner call is in flight: a tree edited into the
   // finished shape during that call takes the call's own outcome, and a
   // root completed under it would receive the call's plans.
@@ -1967,8 +1991,9 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   }
 
   // 3. Planning gate (R1, R5): planning runs here, NOT in a tool handler.
-  // Due when root exists, not complete/abandoned, no
-  // pending/active/paused descendants, and the root is not finished.
+  // Due when root exists, not complete/abandoned/blocked, no
+  // pending/active/paused descendants, and the root is the planner's: no
+  // direct child, or every direct child its own (isPlannersRoot).
   // M8: reentrancy guard: a planner call slower than one tick must not fire twice.
   if (isPlanningDue(sess.state) && !ctx.planningInFlight()) {
     ctx.setPlanningInFlight(true);

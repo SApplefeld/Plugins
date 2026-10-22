@@ -1061,8 +1061,8 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // readPlanDocument in hooks/index.ts reads, because a persona works its plan in a linked worktree
   // while sess.workdir stays the launch checkout, whose copy gains no
   // Chapter and no Complete status until the plan's branch merges.
-  // sess.workdir remains the anchor the persona store and the workdir files
-  // resolve against, and no document is ever read under it. Where the call
+  // The held launch directory is the anchor the persona store and the workdir
+  // files resolve against, and no document is ever read under it. Where the call
   // throws or answers with no directory, the reading is unreadable with the
   // live directory named as unavailable, and it takes the same once-per-
   // holder plan_record_unreadable log as a document the reader cannot read.

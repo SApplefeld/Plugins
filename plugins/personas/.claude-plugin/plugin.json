@@ -110,7 +110,7 @@
       "type": "string",
       "default": "",
       "title": "Liaison persona name",
-      "description": "The persona name this file offers as the liaison: the seat several people talk with in one thread, which shapes their asks into briefs for the architect and relays status from the coordinator, and whose own launch receives the liaison charter. The supervisor reads it to build that charter and the coordinator's clause answering the liaison's status asks. The plugin reads nothing from it, since the liaison sends as a named persona and is reached as one. The supervisor refuses a name of 'default', the coordinator's or the architect's own name, and a liaison named in a file that names no architect. Where this file names no liaison, the fleet has none and neither text is built."
+      "description": "The persona name this file offers as the liaison: the seat several people talk with in one thread, which shapes their asks into briefs for the architect and relays status from the coordinator, and whose own launch receives the liaison charter. The supervisor reads it to build that charter and the coordinator's clause answering the liaison's status asks. The plugin does not read it: the effort gate admits an architect record on its [QUEUE] lead in whatever session it lands. The supervisor refuses a name of 'default', the coordinator's or the architect's own name, and a liaison named in a file that names no architect. Where this file names no liaison, the fleet has none and neither text is built."
     },
     "fleetRoster": {
       "type": "string",
@@ -164,6 +164,12 @@
       "default": "",
       "title": "Supervisor mailbox path",
       "description": "The mailbox file the supervisor that launched this session writes, <rundir>/mailbox.jsonl. The controller tick reads it and writes mailbox.ack.jsonl beside it: a probe is acknowledged with no turn spent, and a shutdown request is delivered once as a turn opening [SUPERVISOR id=<id>]. The supervisor writes this; left unset, as in an interactive session, the tick reads no mailbox."
+    },
+    "orphanSweepFindings": {
+      "type": "string",
+      "default": "",
+      "title": "Orphan sweep findings path",
+      "description": "The findings file the KitOrphanSweep scheduled task writes, one JSON line per process tree that outlived its session. The controller tick reads it and writes <findings>.ack.jsonl beside it, delivering every finding not yet acknowledged as one turn opening [ORPHAN SWEEP ids=<n>], which posts each to this session's thread and kills nothing. Set it on one session per machine; left unset, the tick reads no findings file."
     },
     "heartbeatPath": {
       "type": "string",

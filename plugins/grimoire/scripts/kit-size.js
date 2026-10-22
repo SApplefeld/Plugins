@@ -412,7 +412,7 @@ function corpusCapFailure(budget, measuredByPath) {
         reason: REASONS.CORPUS_OVER_CAP,
         size: sum,
         cap,
-        detail: sum + ' words against a cap of ' + cap + ', ' + (sum - cap) + ' over; a raise is an operator ruling, per the corpus cap item in docs/backlog.md'
+        detail: sum + ' words against a cap of ' + cap + ', ' + (sum - cap) + ' over; a sync naming corpus-cap raises it once the change states its trim effort, else the raise is the operator\'s, per the writing-skills size budget bullet'
     };
 }
 

@@ -55,6 +55,8 @@ export type BeatSession = {
   isOwner: boolean;
   turnStartedAt: number | null;
   workdir: string;
+  // The launch directory session.start resolved, "" until one is known.
+  memqLaunchDir: string;
   // The instant the prompt cache is read as warm until, or null where no
   // main request has been stamped; stampCommons writes it into the entry.
   cacheWarmUntil: number | null;
@@ -66,6 +68,19 @@ export type BeatSession = {
 // session resolved, and the supervisor's path, or "" where no launcher named
 // one or where the caller has already written it from the same instant.
 export type BeatFiles = { sidecarPath: string; supervisorPath: string };
+
+// The directory a session's store and yield log resolve against, the
+// heartbeat sidecar too where no launcher names its path, and the workdir
+// its commons entry publishes: the launch directory where one is known, else
+// the session's working directory. session.start fires again on a reload of
+// the plugin's code with whatever cwd the session has moved to, so the
+// working directory alone would carry the store away from where the
+// supervisor and a coordinator read it. hooks/index.ts's anchorDirOf and
+// stampCommons below both read it, so both writers of the commons entry's
+// workdir publish one directory.
+export function launchDirOf(sess: Pick<BeatSession, "memqLaunchDir" | "workdir">): string {
+  return sess.memqLaunchDir !== "" ? sess.memqLaunchDir : sess.workdir;
+}
 
 // Whether a session id can key a metered row. "pending" is the placeholder
 // before $.session.id answers, and every session sharing it would collide.
@@ -136,12 +151,12 @@ export async function stampSupervisorFile(host: Pick<BeatHost, "writeFile">, ses
   await host.writeFile(path, JSON.stringify({ sessionId: sess.mySessionId, lastSeen: at, turnStartedAt: sess.turnStartedAt }));
 }
 
-// The session's own commons entry: its turn state, workdir and cache
-// warm-until instant stamped onto it and its lastSeen refreshed, its claims
-// left as they are. Creates the entry with no claims when absent. One process
-// writes this key, but the claim writes in hooks/commons.ts and this stamp
-// each read-modify-write it across an await, ordered by the event loop rather
-// than by a lock.
+// The session's own commons entry: its turn state, its launch directory as
+// the workdir and its cache warm-until instant stamped onto it and its
+// lastSeen refreshed, its claims left as they are. Creates the entry with no
+// claims when absent. One process writes this key, but the claim writes in
+// hooks/commons.ts and this stamp each read-modify-write it across an await,
+// ordered by the event loop rather than by a lock.
 async function stampCommons(store: CommonsStore, sess: BeatSession, at: number): Promise<void> {
   const key = commonsKey(sess.mySessionId);
   const raw = await store.get(key);
@@ -149,7 +164,7 @@ async function stampCommons(store: CommonsStore, sess: BeatSession, at: number):
     ? (raw as CommonsEntry)
     : { sessionId: sess.mySessionId, lastSeen: at, claims: [], turnStartedAt: null, workdir: "" };
   existing.turnStartedAt = sess.turnStartedAt;
-  existing.workdir = sess.workdir;
+  existing.workdir = launchDirOf(sess);
   existing.cacheWarmUntil = sess.cacheWarmUntil;
   existing.lastSeen = at;
   await store.set(key, existing);

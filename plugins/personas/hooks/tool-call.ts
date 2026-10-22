@@ -1107,10 +1107,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       if (named.parentId === null) {
         // The root completes by name on one admission: every descendant
         // is complete or abandoned with at least one complete, in a turn
-        // the operator or the coordinator persona opened. That is the
-        // operator's word that a breakdown the planner made is done, which
-        // isRootFinished cannot read on its own (a planned root stays the
-        // planner's there). The tool's note is the root_complete detail,
+        // the operator, the coordinator persona or the architect persona's
+        // [QUEUE] record opened. That is the operator's word that a breakdown the planner
+        // made is done, which isRootFinished cannot read on its own (a root
+        // whose entries are all the planner's stays the planner's there).
+        // The tool's note is the root_complete detail,
         // the same decision the controller's own completion writes, and
         // none of the leaf follow-on below runs.
         if (named.status === "complete" || named.status === "abandoned") {
@@ -1129,10 +1130,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         }
         if (!turnMayStartEffort("goal_done_root")) {
           setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
-          return { deny: `Cannot complete ${byNameId}: it is the root, and the root closes only on the operator's or the coordinator persona's word, in a turn one of them opened. Retry in such a turn; this turn was not one.` };
+          return { deny: `Cannot complete ${byNameId}: it is the root, and the root closes only in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record opened. Retry in such a turn; this turn was not one.` };
         }
-        // A finished root is exactly the state the planner is due in, so a
-        // planner call the last tick started can still be out. The tick's
+        // A root whose entries are all the planner's own and all done is the
+        // state the planner is due in, so a planner call the last tick
+        // started can still be out. The tick's
         // own finished-root path refuses under an in-flight call for the
         // same reason: a call that resolves after the root closed would add
         // plan nodes under a complete root. The planner also re-reads the
@@ -1163,9 +1165,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         return { deny: `Cannot complete ${byNameId}: status is "${named.status}" and its child ${openChild.id} is "${openChild.status}". Complete or drop every child first.` };
       }
       // An entry awaiting the operator's yes, or a node under one, completes
-      // by name only in a turn the operator or the coordinator persona
-      // started, since completing it would settle the wait without that
-      // word.
+      // by name only in a turn the operator, the coordinator persona or the
+      // architect persona's [QUEUE] record started, since completing it would settle the
+      // wait without that word.
       const awaitingAbove = awaitingEntryAtOrAbove(sess.state, named);
       if (awaitingAbove && !turnIsOperatorsOrCoordinators()) {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -1803,7 +1805,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     }
     const nodeId = String((e as any).nodeId || "").trim();
     // An entry awaiting the operator's yes, or a node under one, is resumed
-    // only in a turn the operator or the coordinator persona started.
+    // only in a turn the operator, the coordinator persona or the architect
+    // persona started.
     // Outside those turns a call naming one is refused, and a call naming
     // none passes over them to the other paused entries.
     const mayResumeAwaiting = turnMayStartEffort("goal_resume_awaiting");
@@ -1856,9 +1859,15 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // that word on the entry, so the entry's flag goes, and its awaiting
     // reason with it. An entry above the resumed node stays paused.
     const awaitingAbove = awaitingEntryAtOrAbove(sess.state, target);
+    // A delivery turn names the seat whose record admitted the resume, read
+    // from the entry's ground against the grounds the effort gate admits.
+    const resumeEntry = currentTurnEntry();
+    const deliverySeat = (ground: string): string => ground === COORDINATOR_GROUND ? "coordinator record"
+      : architectPersona !== "" && ground === `WORKER:${architectPersona}` ? "architect record"
+      : `${ground} record`;
     const admittedBy = !awaitingAbove ? ""
-      : currentTurnEntry() !== null && currentTurnEntry()!.kind === "delivery" ? `; admitted by coordinator record ${(currentTurnEntry() as Extract<ExpectedTurn, { kind: "delivery" }>).recordId}`
-      : currentTurnEntry()?.kind === "reprompt" ? "; admitted by the operator's mid-turn re-prompt"
+      : resumeEntry !== null && resumeEntry.kind === "delivery" ? `; admitted by ${deliverySeat(resumeEntry.ground)} ${resumeEntry.recordId}`
+      : resumeEntry?.kind === "reprompt" ? "; admitted by the operator's mid-turn re-prompt"
       : `; admitted by origin ${currentTurnOriginKind()}`;
     if (awaitingAbove && awaitingAbove !== target) {
       awaitingAbove.awaitingYes = undefined;
@@ -1980,19 +1989,12 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   }
 
   // The closing clause of agentic_say's and agentic_inbox's reach refusal,
-  // naming the legs that could have admitted the target. The architect
-  // persona is named only where the plugin holds one, and the answer leg
-  // only to the session that owns it.
-  const reachDenyTail = (persona: string, verb: "push" | "read"): string => {
-    if (persona === coordinatorPersona || (architectPersona !== "" && persona === architectPersona)) {
-      return `owns no named persona of its own to ${verb} from`;
-    }
-    if (architectPersona === "") return `'${persona}' is not the coordinator persona`;
-    const seats = `'${persona}' is neither the coordinator persona nor the '${architectPersona}' architect persona`;
-    return sess.isOwner && sess.persona === architectPersona
-      ? `${seats}, and no live owner of '${persona}' has a record to '${architectPersona}' that is delivered or answered`
-      : seats;
-  };
+  // naming the two refusals the reach rule still gives a session that holds
+  // no reader claim on the target and not the coordinator persona: it owns no
+  // named persona of its own, or it owns the target itself. The worker leg
+  // reaches any other persona, so no seat is named.
+  const reachDenyTail = (persona: string, verb: "push" | "read"): string =>
+    `owns no named persona of its own to ${verb} from, or owns '${persona}' itself`;
 
   // D2: Serve agentic_say (a message to the owner of a persona)
   // Plan D2: agentic_say(text, answers?, urgent?, persona?). The target is
@@ -2020,10 +2022,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return { deny: `agentic_say cannot address '${persona}': this session owns that persona, and the owner does not need to send itself a message.` };
     }
     // The reach rule: a live reader claim on the target, the coordinator
-    // persona held by this session, the target being the coordinator or
-    // architect persona while this session owns a named persona of its
-    // own, or this session owning the architect persona while the target's
-    // owner has an open record to it.
+    // persona held by this session, the target being any persona this
+    // session does not own while it owns a named persona of its own, or
+    // this session owning the architect persona while the target's owner
+    // has an open record to it.
     // An answer admitted on the answer leg is stamped with the id of the
     // record that opened it, and the delivery sites admit it on that stamp
     // without reading the architect's inbox again.
@@ -2064,7 +2066,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       // carries it.
       try { await persist(); } catch { /* persist could not read or write the store; the entry waits in memory */ }
     }
-    return { result: `Message sent to owner of ${persona} (id: ${id}${urgent ? ", urgent: delivered inside the owner's running turn if one is in flight" : ", delivered on the owner's next quiet tick or as its running turn ends, each further waiting message following as the previous delivery turn ends, or, unless it is labelled COORDINATOR at delivery, into a turn already running once it has waited past the break-in bound; a delivery on the wait alone is not replied to, and the owner closes the record with agentic_resolve"})` };
+    return { result: `Message sent to owner of ${persona} (id: ${id}${urgent ? ", urgent: delivered inside the owner's running turn if one is in flight" : ", delivered on the owner's next quiet tick or as its running turn ends, each further waiting message following as the previous delivery turn ends, or, unless it is labelled COORDINATOR or WORKER under the architect persona at delivery, into a turn already running once it has waited past the break-in bound; a delivery on the wait alone is not replied to, and the owner closes the record with agentic_resolve"})` };
   }
 
   // D2: Serve agentic_inbox (replies from the owner of a persona)
@@ -2103,7 +2105,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // reader in another working directory sees the same entry. The heartbeat
     // file cannot give it that: it sits in one session's own launch directory.
     let ownerTurnStartedAt: number | null = null;
-    // The owner's working directory rides on the result too, so a
+    // The owner's launch directory rides on the result too, so a
     // coordinator in another repository knows where the worker's own
     // store file sits without asking for it in a record.
     let ownerWorkdir: string | null = null;
@@ -2532,7 +2534,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // (deliveryGroundIn over one claims read, the tick's own rule) reaches
   // the owner inside the running turn, either because the sender flagged
   // it urgent or because it has waited breakInAfterMs without being
-  // delivered, a leg no coordinator-ground record takes. The age leg is
+  // delivered, a leg no coordinator-ground or architect-ground record
+  // takes. The age leg is
   // what a long turn needs: a turn that runs for
   // hours holds every record sent during it, and no sender can be asked to
   // predict that, so waiting past the bound is itself the qualification.
@@ -2606,18 +2609,28 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       // a worker has no instruction for and would read as a steer to act on
       // without an operator round trip. A coordinator record still breaks in
       // on the sender's own urgent flag, and otherwise waits for the tick.
-      // Reader and worker brackets carry no delegated authority under that
-      // instruction whatever marker they arrive with.
+      // A record under the architect persona's WORKER ground is passed over
+      // the same way, where the plugin holds an architect. In a session where
+      // an architect record admits an effort, it admits one only as a prompt,
+      // in the delivery turn the effort gate reads, and the instruction names
+      // the architect bracket inside a tool result as carrying no delegated
+      // authority, so a record taken on its wait would be delivered into a
+      // turn the gate refuses and spent where it cannot be acted on. The wait
+      // leg skips every architect record anyway, in the coordinator's and the
+      // default persona's sessions too, where none admits an effort. It still
+      // breaks in on the sender's own urgent flag. Every other reader and
+      // worker bracket carries no delegated authority under that instruction
+      // whatever marker it arrives with.
       for (const rec of candidates) {
         if (rec.urgent === true) continue;
         const ground = groundFor(rec);
-        // A coordinator-ground record never takes the wait leg. The worker
-        // steer instruction names only the flagged coordinator bracket as
-        // carrying no delegated authority, so a coordinator record reaches a
-        // tool result on the flagged leg alone. The ground it is compared
-        // against is the one deliveryGroundIn produces, read from the same
-        // constant, so producer and check cannot drift.
+        // A coordinator-ground or architect-ground record never takes the
+        // wait leg, so it reaches a tool result on the flagged leg alone. The
+        // grounds it is compared against are the ones deliveryGroundIn
+        // produces, the coordinator's read from the same constant, so
+        // producer and check cannot drift.
         if (ground === null || ground === COORDINATOR_GROUND) continue;
+        if (architectPersona !== "" && ground === `WORKER:${architectPersona}`) continue;
         grounds.set(rec, ground);
         break;
       }

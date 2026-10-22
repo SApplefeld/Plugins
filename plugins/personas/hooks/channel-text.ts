@@ -39,10 +39,16 @@ export function targetPersonaOf(arg: unknown, own: string): { persona: string } 
 //
 // A delivery entry also carries what the effort gate reads for its turn,
 // fixed when the entry is built: `ground`, the value deliveryGroundIn gave
-// the record, and `seatLead`, whether the record's own text opens with
-// [FINDING] or [PROPOSAL]. `answersAsk` is set on the one delivery the
-// ask-answer path queues, the record that answers an open ask, and is
-// absent on every other, so the turn-score call's next_trigger outcome can
+// the record, `seatLead`, whether the record's own text opens with
+// [FINDING], [PROPOSAL] or [STARTED], `queueLead`, whether it opens with
+// [QUEUE], the lead the architect persona writes on a queue instruction and
+// on nothing else, and `deliveredTo`, the persona the session held when the
+// drain built the entry, so the gate's architect branch reads the lead and
+// the persona the record reached, never the text at the act or the persona
+// the session holds then, which agentic_identity can change inside the turn.
+// `answersAsk` is set on the one
+// delivery the ask-answer path queues, the record that answers an open
+// ask, and is absent on every other, so the turn-score call's next_trigger outcome can
 // tell an answered ask from any other delivered record.
 //
 // A proposal entry is the idle proposal's [PROPOSE] turn. It is a plugin
@@ -61,7 +67,7 @@ export function targetPersonaOf(arg: unknown, own: string): { persona: string } 
 // turn that matched it stands as the operator's own for the effort gate, the
 // autonomy tool and the ask lift; every other consumer of the kind treats it
 // as a plugin entry.
-export type ExpectedTurn = { text: string; settledText?: string } & ({ kind: "delivery"; recordId: string; ground: string; seatLead: boolean; answersAsk?: true } | { kind: "nudge" } | { kind: "plugin" } | { kind: "proposal" } | { kind: "memoryCheck"; goalId: string; goalIds: string[] } | { kind: "reprompt"; coveredAt: number[]; senderClass: "operator" });
+export type ExpectedTurn = { text: string; settledText?: string } & ({ kind: "delivery"; recordId: string; ground: string; seatLead: boolean; queueLead: boolean; deliveredTo: string; answersAsk?: true } | { kind: "nudge" } | { kind: "plugin" } | { kind: "proposal" } | { kind: "memoryCheck"; goalId: string; goalIds: string[] } | { kind: "reprompt"; coveredAt: number[]; senderClass: "operator" });
 
 // Whether a turn's opening text is the text an entry was submitted with, on
 // either of the entry's two keys. An empty turn text (a continuation) and an

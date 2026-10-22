@@ -13,10 +13,10 @@ The operator types `restart-recap` in the persona's Discord thread, or asks what
 
 ## Inputs
 
-The script needs three things: its own path, the working directory to run in, and this persona's name.
+The script needs three things: its own path, the launch directory or the store's path under it, and this persona's name.
 
 - **The script.** A persona launched normally runs the plugin's installed copy. Its folder is in `~/.claude/plugins/installed_plugins.json`: `plugins['personas@applefeld']` holds a list, and the `installPath` of the entry with the newest `lastUpdated` is the folder. For example, `node -e "const r=require(require('os').homedir()+'/.claude/plugins/installed_plugins.json').plugins['personas@applefeld'];console.log(r.slice().sort((a,b)=>Date.parse(b.lastUpdated)-Date.parse(a.lastUpdated))[0].installPath)"`. The script is `bin/restart-recap.mjs` under that folder. A persona launched with `supervise.sh --dev` runs the plugin from its development checkout instead, so the script to run is `bin/restart-recap.mjs` in that checkout.
-- **The working directory.** Run the script from this persona's working directory, where `.agentic-personas.json` sits. That file is the persona store, the plugin's record of each persona's goals and sessions. The script reads the store there and finds the transcript folder from that directory.
+- **The launch directory.** `.agentic-personas.json` sits in the directory this session was launched in, however far the shell has moved since. For a persona the supervisor starts, that is the directory of the file `$HEARTBEAT_PATH` names. `.agentic-personas.json` is the persona store, the plugin's record of each persona's goals and sessions. The script reads the store in the directory it runs in, or at the path `--store` names, and finds the transcript folder from the store's directory. So run it with the shell in the launch directory. From a shell that has moved, pass `--store` with the store's absolute path under the launch directory.
 - **`--persona`.** This persona's name. The launch priming states it, and a call to the plugin's `agentic_identity` tool with no persona reports the persona this session holds and switches nothing. The script needs it wherever the store holds more than one persona.
 
 The script leaves out the session `CLAUDE_CODE_SESSION_ID` names, which is this one. It reads two earlier sessions by default, and `--sessions <n>` changes that. A session whose last record is more than 48 hours old prints as one line with its age, and `--since <hours>` changes that window.
@@ -26,8 +26,10 @@ The script leaves out the session `CLAUDE_CODE_SESSION_ID` names, which is this 
 One command runs it, and it never fails the call:
 
 ```
-node <script> --persona <name>
+node <script> --persona <name> [--store <path>]
 ```
+
+The `--store` flag is for a shell that has moved off the launch directory, as the launch directory bullet under Inputs says.
 
 The script always exits 0. Line one of its output is the header, and the lines after it are the digest. Anything it could not read is named on stderr, one line each, and it still prints the header.
 

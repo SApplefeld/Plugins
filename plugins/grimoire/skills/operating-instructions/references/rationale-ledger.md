@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the operator's core operating doctrine: the house ruleset for how a session thinks, decides, builds, verifies, communicates, and stays in scope. It owns the moments of directness and register in replies, prose and commit-message style, language and data-access defaults, resolving which surface governs when two disagree, deciding what to ask versus decide at intake, capturing kit friction, driving an effort through a plan doc from analysis to close-out, and marking and verifying every load-bearing claim before it ships. Its frontmatter says to use it when the session's context holds no document headed Operating Instructions and a non-trivial task begins, or when such a session is unsure how the operator wants work approached, and calls it the always-apply house ruleset. In Claude Code the same text loads at session start through `~/.claude/CLAUDE.md`, and the skill is the fallback where it is absent, so its load class is `session-start`.
 
-Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lines 110-205 (`skills.operating-instructions.c2.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`S` entries below, their source lines read at that pass's fix round 1). The mirror `home/grimoire-doctrine.md` is byte-identical to this document under `test/doctrine-parity.test.js`, so its claims are recorded once, here. Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-22 by section 1 of `docs/plans/claude-kit_prose-register_spec_v1.md`, which added the structure layer of the prose register after the plain-prose bullet (`P` entries below), and by that plan's section 4 on 2026-09-22 (P008 below). Redrafted on 2026-09-26 by section 2 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `63045e8d` with its fix round at `68cce656`, so every live entry's `passage:` line quotes the text at `68cce656`, the `flag:` and `ruled:` lines record that pass's flags and the operator's rulings, and P009 below is the heading rule that section added. Amended on 2026-09-26 by section 12 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, which moved the claims true only of the operator's setup or of one harness version to memory on the operator's ruling of that date (`A` entries below, and the `ruled:` lines on the `flag: environment` entries). Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: each live entry's `passage:` line quotes the text that section landed, and an entry whose rule a row dropped or merged into its owner reads `verdict: retire` with a reason naming the row. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with c2.C147 retired to B001). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c1.C044, c1.C100, c1.C103 and c2.C086 rewritten to their passages as they now read, and c1.C058's and c2.C086's reasons reworded. Amended by section 1 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` on 2026-10-06, which states one whole gate per plan and the operator's merge ruling of 2026-10-01: c1.C132 and c1.C145 rewritten to their passages as they now read. Amended by section 1 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` on 2026-10-06, which reads a suite-wide no-regressions claim against the integration branch's head and carries the operator's ruling of that date that a trunk red is fixed before the handoff: c1.C140 rewritten to its passage as it now reads, and c2.C135's provenance corrected to name it. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c1.C132's note-push exemption passage retired with the push it exempted. Amended by section 1 of `docs/plans/claude-kit_board-and-ready-mark_spec_v1.md` on 2026-10-07, which reads a board line's status live from its source and hands the operator a pull request marked ready with auto-merge armed: c2.C086 rewritten to its passages as they now read, with its key widened to name both. Amended by section 1 of `docs/plans/claude-kit_plan-lifecycle_spec_v1.md` on 2026-10-07, which added the plan-lifecycle bullet (L001 below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: c2.C057 rewritten to its passage as it now reads, with its reason and provenance reworded. Amended by section 3 of `docs/plans/claude-kit_ask-open-tool_spec_v1.md` on 2026-10-12, which added the filing rule to the batches bullet (D001 below). Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12, which added the plan-posting sentences to the plan-travel bullet (L001 rewritten in place).
+Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lines 110-205 (`skills.operating-instructions.c2.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`S` entries below, their source lines read at that pass's fix round 1). The mirror `home/grimoire-doctrine.md` is byte-identical to this document under `test/doctrine-parity.test.js`, so its claims are recorded once, here. Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-22 by section 1 of `docs/plans/claude-kit_prose-register_spec_v1.md`, which added the structure layer of the prose register after the plain-prose bullet (`P` entries below), and by that plan's section 4 on 2026-09-22 (P008 below). Redrafted on 2026-09-26 by section 2 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `63045e8d` with its fix round at `68cce656`, so every live entry's `passage:` line quotes the text at `68cce656`, the `flag:` and `ruled:` lines record that pass's flags and the operator's rulings, and P009 below is the heading rule that section added. Amended on 2026-09-26 by section 12 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, which moved the claims true only of the operator's setup or of one harness version to memory on the operator's ruling of that date (`A` entries below, and the `ruled:` lines on the `flag: environment` entries). Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: each live entry's `passage:` line quotes the text that section landed, and an entry whose rule a row dropped or merged into its owner reads `verdict: retire` with a reason naming the row. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with c2.C147 retired to B001). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c1.C044, c1.C100, c1.C103 and c2.C086 rewritten to their passages as they now read, and c1.C058's and c2.C086's reasons reworded. Amended by section 1 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` on 2026-10-06, which states one whole gate per plan and the operator's merge ruling of 2026-10-01: c1.C132 and c1.C145 rewritten to their passages as they now read. Amended by section 1 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` on 2026-10-06, which reads a suite-wide no-regressions claim against the integration branch's head and carries the operator's ruling of that date that a trunk red is fixed before the handoff: c1.C140 rewritten to its passage as it now reads, and c2.C135's provenance corrected to name it. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c1.C132's note-push exemption passage retired with the push it exempted. Amended by section 1 of `docs/plans/claude-kit_board-and-ready-mark_spec_v1.md` on 2026-10-07, which reads a board line's status live from its source and hands the operator a pull request marked ready with auto-merge armed: c2.C086 rewritten to its passages as they now read, with its key widened to name both. Amended by section 1 of `docs/plans/claude-kit_plan-lifecycle_spec_v1.md` on 2026-10-07, which added the plan-lifecycle bullet (L001 below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: c2.C057 rewritten to its passage as it now reads, with its reason and provenance reworded. Amended by section 3 of `docs/plans/claude-kit_ask-open-tool_spec_v1.md` on 2026-10-12, which added the filing rule to the batches bullet (D001 below). Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12, which added the plan-posting sentences to the plan-travel bullet (L001 rewritten in place). Amended by section 1 of `docs/plans/claude-kit_queue-stacking_spec_v1.md` on 2026-10-19, which made every plan stack on the open pull request at the stack's tip (L001 rewritten in place). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19, which added the interview sentence to the Analyze bullet (AB001 below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 3 on 2026-10-19, which added the measured-figure sentences to the grounding bullet (AB002 and AB003 below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which gave the intake bullet's route (c) the test for a gap that is the operator's: c1.C068 rewritten to its passage as it now reads, and AB004 added for the test sentence. Its fix round 1 on the same day rewrote c2.C072 to the judgment bullet's fork sentence as it now reads. Amended by section 4 of `docs/plans/claude-kit_doctrine-to-hooks_spec_v1.md` on 2026-10-21, which moved four bullets' mechanical halves to the `em-dash` and `git-commit-gate` guards: c1.C024, c1.C032, c1.C034, c2.C028, c2.C029, c2.C031 and c2.C033 rewritten to their passages as they now read, and c1.C025 retired. Amended by `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 on 2026-10-21, which added the rendered-visual sentences to the craft bullet (AD001 and AD002 below, written at that plan's finishing pass).
 
 ### c1.C001
 - key: Apply this doctrine to any non-trivial task you take on.
@@ -244,17 +244,17 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:24
 - provenance: 830ff28 2026-06-17, the fork port ("CLAUDE.md: no-em-dash rule").
 - verdict: keep
-- reason: The doctrine owns the ban and every other site restates or points at it; no hook or test sweeps for em dashes, the operator-tier memory shows the sweep is done by hand, so the rule stays and only its reason moves to this ledger. Keep verdict overtaken by the kaizen prose batch section 4 fold (Decisions item 4 of the rewrite plan, declared): the lead reads "No em dashes on any outward-facing surface." and the bullet names code comments, SQL scripts, copy, documents written for an audience, and shipped skills and charters as covered, with an internal plan document or a journal-layer artifact tolerated; the replacement set (c1.C025) is unchanged.
-- passage: **No em dashes on any outward-facing surface.** That covers code comments, SQL scripts, copy, documents for an audience, and shipped skills and charters. Internal plan documents and journal-layer artifacts are tolerated.
+- reason: The doctrine owns the ban and every other site restates or points at it. The `em-dash` guard refuses the byte in a Write or Edit outside the plan and journal directories, and test/em-dash-sweep.test.js sweeps the shipped markdown, so the bullet drops its covered-surface list. The lead still binds the surfaces no guard sees.
+- passage: **No em dashes on any outward-facing surface.** Internal plan documents and journal-layer artifacts are tolerated. The `em-dash` guard refuses the byte in a Write or Edit outside `docs/plans`, `docs/archive` and `.kit`, and names the replacement punctuation.
 
 ### c1.C025
 - key: Use commas, periods, parentheses, colons, or a spaced hyphen in place of an em dash.
 - class: mechanic
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:24
 - provenance: 830ff28 2026-06-17, the fork port.
-- verdict: keep
-- reason: The replacement set for every surface but the operator's own voice, where scott-writing-style's shorter list governs; the style skill's omission of the spaced hyphen is a partial restatement on its side, not a contradiction.
-- passage: Use commas, periods, parentheses, colons, or a spaced hyphen instead.
+- verdict: retire
+- reason: The `em-dash` guard's refusal names the replacement set, so the bullet names the guard (c1.C024) instead. scott-writing-style's shorter list still governs the operator's own voice.
+- proposed: Drop the em-dash bullet's last sentence.
 - flag: stale
 - ruled: keep 2026-09-26
 
@@ -315,13 +315,13 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - passage: The litmus: a sentence whose deletion changes what the reader would do is state. One that only changes what they know about us is journey.
 
 ### c1.C032
-- key: Write a commit title as an UPPERCASE surface prefix an outsider can place, then the change as a proper sentence with a capital first letter, capitalized proper nouns, and a period.
+- key: Pick a commit-title prefix an outsider can place and capitalize proper nouns; the git-commit-gate guard refuses a title off the rest of the shape.
 - class: mechanic
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:28
 - provenance: 9521c6e 2026-08-31 (three-layer rule after a zero-context reader test); ebce5df 2026-08-31 (casing and sentence form ruled by the operator the same day).
 - verdict: keep
-- reason: An operator ruling with no commit-msg hook behind it; the extraction finding under c1.C034 does not touch this sentence.
-- passage: The title is an UPPERCASE surface prefix an outsider can place, such as `DOCTRINE:`, then the change as a proper sentence: capital first letter, capitalized proper nouns, closing period.
+- reason: An operator ruling the `git-commit-gate` guard now enforces: it refuses a title off the prefix, capital, period or 100-character shape and names the fault, so the bullet keeps what no guard tests.
+- passage: The `git-commit-gate` guard refuses a title off the house shape and names the fault. Pick a prefix an outsider can place, such as `DOCTRINE:`, and capitalize proper nouns.
 
 ### c1.C033
 - key: Add a "so <consequence>" clause to the commit title when the effect is not obvious from the change itself.
@@ -335,13 +335,13 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - ruled: keep 2026-09-26
 
 ### c1.C034
-- key: Put the informative words first in a commit title, keeping it near 70 characters with about 100 as the soft ceiling.
+- key: Put the informative words first in a commit title, since list views cut near 70 characters.
 - class: mechanic
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:28
 - provenance: 9521c6e 2026-08-31.
 - verdict: keep
-- reason: The prose sets 100 as the soft ceiling and gives 70 as where list views truncate, so the instruction is informative words first, not a 70-character target; the claims-list paraphrase is the defect, and the passage stands.
-- passage: Put informative words first. List views cut near 70 characters, and 100 is the soft ceiling.
+- reason: Informative words first, with 70 as where list views truncate rather than a target. The 100-character ceiling is now the `git-commit-gate` guard's refusal, since a guard cannot warn.
+- passage: Put informative words first, since list views cut near 70 characters.
 
 ### c1.C035
 - key: Open the commit body with one client-briefing sentence saying what the thing is and what this commit did to it, for a reader who does not know the plan or component.
@@ -693,13 +693,13 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - passage: At any intake, whether a prompt, handoff, spec or dispatch brief, list what it does not state before building on it.
 
 ### c1.C068
-- key: Route each gap three ways: resolve it from an existing source with the source cited, decide and declare it when low-blast and reversible with a conventional default, or ask it batched with a recommendation when material and the operator's to make.
+- key: Route each gap three ways: resolve it from an existing source with the source cited, decide and declare it naming the default taken when it is not the operator's, or ask it batched with a recommendation when it is the operator's under the test the bullet states.
 - class: mechanic
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:58
-- provenance: e872098 2026-08-18, the intake gap check plan, which wired the same routes into brainstorming, executing-work and the close-out in one wave.
+- provenance: e872098 2026-08-18, the intake gap check plan, which wired the same routes into brainstorming, executing-work and the close-out in one wave. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, which replaced route (b)'s low-blast qualifier and route (c)'s undefined "material" with AB004's test.
 - verdict: keep
-- reason: This is the owner's whole routing rule; the judgment section's low-blast pick and high-blast fork are its restatement for a fork met in work, and the skills apply the routes at their own moments (A046, A047). Route (c) is an operator-decision gate and stays (A050).
-- passage: (a) Resolve a gap an existing source answers, such as doctrine, memory, the plan doc or house style, citing it. (b) Decide and declare a low-blast, reversible gap that has a conventional default. (c) Ask a material gap that is mine, batched, with a recommendation.
+- reason: This is the owner's whole routing rule; the judgment section's low-blast pick and high-blast fork are its restatement for a fork met in work, and the skills apply the routes at their own moments (A046, A047). Route (c) is an operator-decision gate and stays (A050), and AB004 states which gaps pass it. Route (b)'s low-blast, reversible qualifier went with the test, since an act inside the stop-for-a-yes test is the high-blast or irreversible class it named, and a gap outside that class with no conventional default was left with no route.
+- passage: (a) Resolve a gap an existing source answers, such as doctrine, memory, the plan doc or house style, citing it. (b) Decide and declare a gap that is not mine, naming the default taken. (c) Ask a gap that is mine, batched, with a recommendation.
 
 ### c1.C069
 - key: Carry every declared assumption into the dialog, not only a document: into the recap the operator approves, into a `BLOCKED:` or decision ask when a material gap appears mid-run, and into the close-out status when made while the operator was away.
@@ -1826,13 +1826,13 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - passage: Isolate, repeat, capture and file a genuine flake rather than rationalizing it.
 
 ### c2.C028
-- key: Stage only the files you changed, and never blanket `git add <dir>`.
+- key: Stage only the files you changed.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:124
 - provenance: b9c7f85 2026-06-14 installed the lead; 19a570c 2026-07-12, the concurrency-safeguards plan, from a field incident where a pathspec-less commit swept a staged section into a docs-only commit that shipped red.
 - verdict: keep
-- reason: No hook under plugins/grimoire/hooks/ inspects `git add` or the index, so the prose is the only guard, and the incident class recurs on every shared checkout (memory two-sessions-one-checkout-commit-freeze). The checklist line and the executing-work scope check are the re-read prompt and the loop's instance, both by design.
-- passage: Stage only the files you changed, never a blanket `git add <dir>`, and name-and-leave work that is not yours.
+- reason: The incident class recurs on every shared checkout (memory two-sessions-one-checkout-commit-freeze). The `git-commit-gate` guard refuses a blanket add and a `git commit -a`, so that clause became c2.C029's guard sentence, and choosing which files are yours stays prose. The checklist line and the executing-work scope check are the re-read prompt and the loop's instance, both by design.
+- passage: Stage only the files you changed, and name-and-leave work that is not yours.
 - flag: stale
 - ruled: keep 2026-09-26
 
@@ -1842,8 +1842,8 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:124
 - provenance: b9c7f85 2026-06-14, the initial doctrine consolidation; the reason (git cannot split a mixed file) is what the review-and-record plan's Section 15 record cites when it rejects a split commit.
 - verdict: keep
-- reason: The disposition for work you did not touch, distinct from c2.C043's hold when your own file set overlaps a peer's stage; executing-work cites the doctrine as owner.
-- passage: name-and-leave work that is not yours. Git cannot split a mixed file, and a blanket add reverts another session's committed work.
+- reason: The disposition for work you did not touch, distinct from c2.C043's hold when your own file set overlaps a peer's stage; executing-work cites the doctrine as owner. Its last sentence names the guard that holds the blanket-add half.
+- passage: name-and-leave work that is not yours. Git cannot split a mixed file, and a blanket add reverts another session's committed work. The `git-commit-gate` guard refuses a blanket add and a `git commit -a`.
 
 ### c2.C030
 - key: Re-read any shared file immediately before it enters your commit and hold while it carries content you did not author.
@@ -1860,8 +1860,8 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:124
 - provenance: 19a570c 2026-07-12, the concurrency-safeguards plan's pathspec trap.
 - verdict: keep
-- reason: The committer's half of the staged-list read; c2.C042 is the peer's half on the same command, added after 92b3e2d showed one direction alone could not protect the peer. Nothing mechanical reads the index for the session.
-- passage: Then stage exactly your target and read `git diff --cached --name-only` over the whole index as its own step, never chained with the add and the commit. Your chain can sweep a peer's stage exactly as theirs can sweep yours. Commit without a pathspec only when that list is exactly your target.
+- reason: The committer's half of the staged-list read; c2.C042 is the peer's half on the same command, added after 92b3e2d showed one direction alone could not protect the peer. The `git-commit-gate` guard refuses the chained form, and the read itself stays prose.
+- passage: Then stage exactly your target and read `git diff --cached --name-only` over the whole index as its own step. The `git-commit-gate` guard refuses an add, commit or push chained with another command. Commit without a pathspec only when that list is exactly your target.
 
 ### c2.C032
 - key: Use a pathspec commit only when the named files' worktree state is the reviewed state.
@@ -1873,13 +1873,13 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - passage: Commit with one only on tracked paths whose worktree state is the reviewed state
 
 ### c2.C033
-- key: Make the staged-list read its own step and read its output before issuing the commit; never chain the add, the read, and the commit into one command.
+- key: Make the staged-list read its own step and read its output before issuing the commit.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:124
 - provenance: d3f987f 2026-08-25, kaizen batch amendment (c): the index is a shared mutable surface, the read is a separate step, the trap is symmetric.
 - verdict: keep
-- reason: Incident-born, unenforced, and the symmetry clause is what makes a session recognise a peer's chain as the same hazard as its own; executing-work applies it to the plan-doc commit and names the doctrine as the rule.
-- passage: read `git diff --cached --name-only` over the whole index as its own step, never chained with the add and the commit.
+- reason: Incident-born: the index is a shared mutable surface. The `git-commit-gate` guard refuses the chain, so the bullet names it (c2.C031), and reading the output before the commit stays prose, since no guard remembers an earlier command. executing-work applies it to the plan-doc commit and names the doctrine as the rule.
+- passage: read `git diff --cached --name-only` over the whole index as its own step.
 
 ### c2.C034
 - key: Account for `git mv` staging its paths implicitly.
@@ -2251,13 +2251,13 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - passage: For a low-blast, reversible pick, such as an icon or default copy, decide, ship, and offer a swap menu.
 
 ### c2.C072
-- key: For a high-blast or genuinely underspecified fork, present the real options and get the operator's call before acting.
+- key: For a fork that is the operator's under the intake gap check, present the real options and get the operator's call before acting.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:146
-- provenance: b9c7f85 2026-06-14, the home CLAUDE.md consolidation; the message narrates no incident, so the why is no provenance found.
+- provenance: b9c7f85 2026-06-14, the home CLAUDE.md consolidation; the message narrates no incident, so the why is no provenance found. Rewritten by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, which gave the intake bullet the test for a gap that is the operator's (AB004).
 - verdict: keep
-- reason: An operator-decision gate on architecture and product or risk forks, hard to reverse and undetectable by any hook; the interrupt-only rule, the batching rule and the intake route reach the same disposition from different triggers, and c2.C070's recommendation-first means a decision ask never closes by listing options without a pick.
-- passage: For a high-blast or genuinely underspecified fork, such as architecture or a product or risk tradeoff, present the real options and get my call first.
+- reason: An operator-decision gate on product or risk forks, hard to reverse and undetectable by any hook; the gate reaches only the fork the intake bullet's test makes the operator's (AB004), since a high-blast fork that turns on facts about the system is decided and declared under route (b) like any other gap; the interrupt-only rule, the batching rule and the intake route reach the same disposition from different triggers, and c2.C070's recommendation-first means a decision ask never closes by listing options without a pick.
+- passage: For a fork that is mine under the intake gap check, such as a product or risk tradeoff, present the real options and get my call first.
 
 ### c2.C073
 - key: In debugging and build work, name the fork even after you have chosen it.
@@ -2580,19 +2580,19 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - provenance: 38b1487 2026-08-29 carries the bullet in its current form; this sentence's own first install was not traced separately, and testing-discipline:85 cites the doctrine's machine-budget bullet as its source.
 - verdict: keep
 - reason: Doctrine owns it; testing-discipline restates it with a citation, which is the pointer shape. No machinery reads a dying run for you.
-- passage: A run that dies partway, at a fraction that moves between attempts, is contention: clear the box and re-run before reading the failure.
+- passage: A run that dies partway, at a fraction that moves between attempts, is contention: get the box cleared and re-run before reading the failure.
 
 ### c2.C105
 - key: Stop a running app host or test runner before every build.
 - class: rule
-- source: plugins/grimoire/skills/operating-instructions/SKILL.md:174
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:184
 - provenance: b9c7f85 2026-06-14 installed the bullet in home/CLAUDE.md with no incident in the message; the incident lives in the memory record leaked-testhost-false-green (project <project>), applied eight times, last five days before this audit. The clause naming this setup moved to memory a-leftover-testhost-locks-the-dlls (type tier `dotnet`) on the operator's ruling of 2026-09-26, under `docs/plans/claude-kit_corpus-compression_spec_v1.md` section 12.
 - verdict: rewrite
 - landed: a2ca9e5 section 1
-- reason: The rule stays, with its DLL-lock bound in the `dotnet` type-tier memory (the incident recurs and no hook stops a testhost); the compress rewrite only moves the sibling reason clauses to this ledger. The pending kaizen note of 2026-09-07 (now a `migrated` kaizen issue) records that "stop it" read as a machine-wide kill by image name and took down five sessions' MCP children, so the rewrite should scope the stop to processes the actor can attribute to its own tree. On 2026-09-26 section 12 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` proposes `flag: environment` under the operator's bar of that day, which asks whether a claim would apply to a coworker on a different setup. Its first sentence, the DLL lock and stale-binary false-green, is Windows and .NET behavior; the scoping clause (never a machine-wide kill by image name) is a general safety rule from the kaizen note of 2026-09-07 and stays, so the proposal is an amend then a move of the first sentence to the `dotnet` type tier.
+- reason: The rule stays, with its DLL-lock bound in the `dotnet` type-tier memory (the incident recurs and no hook stops a testhost); the compress rewrite only moves the sibling reason clauses to this ledger. The pending kaizen note of 2026-09-07 (now a `migrated` kaizen issue) records that "stop it" read as a machine-wide kill by image name and took down five sessions' MCP children, so the rewrite should scope the stop to processes the actor can attribute to its own tree. On 2026-09-26 section 12 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` proposes `flag: environment` under the operator's bar of that day, which asks whether a claim would apply to a coworker on a different setup. Its first sentence, the DLL lock and stale-binary false-green, is Windows and .NET behavior; the scoping clause (never a machine-wide kill by image name) is a general safety rule from the kaizen note of 2026-09-07 and stays, so the proposal is an amend then a move of the first sentence to the `dotnet` type tier. On 2026-10-18 section 1 of `docs/plans/claude-kit_shared-state-authority_spec_v1.md` moved the kill clause into the bullet's bold lead as the seat-class rule, which the role skill's Authority Over Machine-Shared State section owns, and the stop sentence keeps only the own-tree scope.
 - proposed: Keep the four imperatives and the DLL-lock bound, move the other three reason clauses to this ledger, and fold the kaizen note's own-process-tree scoping into the stop sentence.
 - baseline-test: yes
-- passage: Stop a running app host or test runner before every build, scoped to processes you can attribute to your own tree, never a machine-wide kill by image name.
+- passage: **Only a coordinating seat, as the role skill names them, may act on machine-shared state, a kill by image name among such acts.** Stop a running app host or test runner your own work started before every build.
 - flag: environment
 - ruled: amend 2026-09-26
 
@@ -2749,16 +2749,17 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - passage: `finishing-work`'s unavailability rule owns the triggers, the cadence, each probe window the dispatch's shape sets, and the wedge hallmark a kill for quiet needs.
 
 ### c2.C120
-- key: Never treat silence as the evidence licensing a replacement, and never race a rival agent into a quiet agent's files.
+- key: Short of finishing-work's outer window, never treat silence as the evidence licensing a kill or a replacement, and never race a rival agent into a quiet agent's files.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:182
-- provenance: d8a3355 2026-08-23: the bullet had said "no completion notification means a dispatched agent is alive; act on that", which the wedge hallmark made false; c6f08c5 2026-08-23 corrected "states" to "names" for executing-work's dispatch sites.
+- provenance: d8a3355 2026-08-23: the bullet had said "no completion notification means a dispatched agent is alive; act on that", which the wedge hallmark made false; c6f08c5 2026-08-23 corrected "states" to "names" for executing-work's dispatch sites. Passage and reason amended 2026-10-18 by the finishing-pass-rules plan, section 3, on the architect's option-A ruling.
 - verdict: rewrite
 - landed: a2ca9e5 section 1
-- reason: Both imperatives and the files-held premise stay, with the pinned hallmark clause. Two reason clauses move here: silence does not discriminate a healthy dispatch from a wedged one (the probe bullet already says so), and two agents writing the same files is what turns one wrong guess into hours of real damage.
+- landed: 9d6cd5eb section 3
+- reason: Both imperatives and the files-held premise stay, with the pinned hallmark clause. Two reason clauses move here: silence does not discriminate a healthy dispatch from a wedged one (the probe bullet already says so), and two agents writing the same files is what turns one wrong guess into hours of real damage. The finishing-pass-rules plan bounds the silence ban at the outer window under the operator's ruling 1, whose close with the silence recorded is the unavailability rule's own TaskStop, since a flat ban contradicted the ruled window.
 - proposed: Open on "what silence tells you is that the dispatch has not finished and still holds its files", keep the never-replace, never-race and TaskStop-first sentences with the pinned hallmark clause, and move the two reason clauses to this ledger.
 - baseline-test: yes
-- passage: Silence alone never licenses a kill, a replacement, or a rival agent racing into the files the dispatch still holds.
+- passage: Silence alone never licenses a kill, a replacement, or a rival agent racing into the files the dispatch still holds, short of finishing-work's outer window.
 
 ### c2.C121
 - key: When a decision change or a failed attempt requires replacing an agent, TaskStop it explicitly before dispatching the successor.
@@ -3227,14 +3228,14 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - passage: The rail's delegation instance names the three covered acts inside a plan whose dispatch the rail covers and the seat names, as the role skill states them.
 
 ### L001
-- key: Run every plan one way: the author writes it on a branch cut from the trunk under a draft pull request, it is queued for a worker when reported with the operator's word the only veto, the worker finishes on that branch and marks the pull request ready with auto-merge armed, and the operator approves last; cut a plan that builds on an unmerged plan from that plan's branch, and never write a worker's next step into a pull request body; where a channel is attached and its reply tool offers a file argument, attach a plan document reported to the operator over it, named by its absolute path under the session's working directory, at the draft's report or, for a plan with no draft yet reported, at the message handing over the written spec; write the report to be read from its words alone, and where a file is refused and nothing posts, send the report again without it, saying the file did not post.
+- key: Run every plan one way: the author writes it on a branch cut from its base under a draft pull request, it is queued for a worker when reported with the operator's word the only veto, the worker finishes on that branch and marks the pull request ready with auto-merge armed, and the operator approves last; base every plan on the branch of the open pull request at the stack's tip when it is queued, the trunk only where none is open, take the base in at a trunk plan's start by merge, wait on no merge, mark a finished plan's pull request ready whatever its parent reads, and never write a worker's next step into a pull request body; where a channel is attached and its reply tool offers a file argument, attach a plan document reported to the operator over it, named by its absolute path under the session's working directory, at the draft's report or, for a plan with no draft yet reported, at the message handing over the written spec; write the report to be read from its words alone, and where a file is refused and nothing posts, send the report again without it, saying the file did not post.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:86
-- provenance: the operator's ask of 2026-10-07 on the architect's channel to lock the plan lifecycle into doctrine, quoted in the `## Intent` of `docs/plans/claude-kit_plan-lifecycle_spec_v1.md` ("I would really like to just consistently lock that into doctrine immediately."), landed by that plan's section 1; the stacking cut is the architect's option one, which the operator took on the same day; the plan-posting sentences are the operator's ask of 2026-10-12 on the architect's channel, quoted in the `## Intent` of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` ("It would be amazing if you could simply post your finished Plan Documents to Discord."), with the operator's ruling of that day that the rule is a general doctrine rule rather than the architect's alone, landed by that plan's section 1.
+- provenance: the operator's ask of 2026-10-07 on the architect's channel to lock the plan lifecycle into doctrine, quoted in the `## Intent` of `docs/plans/claude-kit_plan-lifecycle_spec_v1.md` ("I would really like to just consistently lock that into doctrine immediately."), landed by that plan's section 1; the stacking cut is the architect's option one, which the operator took on the same day; the plan-posting sentences are the operator's ask of 2026-10-12 on the architect's channel, quoted in the `## Intent` of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` ("It would be amazing if you could simply post your finished Plan Documents to Discord."), with the operator's ruling of that day that the rule is a general doctrine rule rather than the architect's alone, landed by that plan's section 1. The stacking sentences are the operator's words of 2026-10-05 and 2026-10-18 and the standing rule they set on 2026-10-19, quoted in the `## Intent` of `docs/plans/claude-kit_queue-stacking_spec_v1.md`, landed by that plan's section 1.
 - verdict: rewrite
-- landed: a4430deb section 1, with its fix rounds at beb9a5ed, e4067170, f55f96ba and d2a0232d
-- reason: On 2026-10-07 the operator asked for the pattern they run plans by to be locked into doctrine, because plans had travelled a mix of routes: some were queued from their drafts, others were sent to the operator to approve or merge first, and a merged draft sent its worker to cut a fresh branch, so the operator's board stopped showing what was outstanding. The steward then proposed writing a worker's next step into the pull request, which this bullet refuses because the plan doc and its Chapters already carry it. The pattern lived in pieces across the default commit model, the finishing pass and the architect's README, and no one surface every seat reads stated it whole, so it lands here beside the plan-doc bullet. The finishing pass already marks ready, arms auto-merge and retargets a stacked child, so this bullet states the route and points at no new mechanism. A plan document reported over a channel is attached to the report where the reply tool takes a file. The report is written to be read from its words alone, because over the relay the operator reads the message and its attachment and nothing a filename or a pull request number points at. Where a refused file leaves nothing posted, the report goes again without it, saying the file did not post.
-- passage: **A plan travels one way, from a draft on its own branch to a ready pull request I approve last.** One route keeps every outstanding plan on my board and puts only finished work in front of me. It is the Branch-and-PR route, and a plan recording another commit model closes under that model. The author writes the plan on a branch cut from the trunk and opens a draft pull request. That draft on my board is the plan put in front of me, so the plan is queued for a worker when it is reported. My word on a channel is the only veto, and the queue never waits on my approval. Where a channel is attached and its reply tool offers a file argument, a plan document reported to me over that channel is attached to the report. The file is named by its absolute path under the session's working directory. It goes with the report of the plan's draft, or, for a plan with no draft yet reported, with the message handing me the written spec. The report is written to be read from its words alone. Over the channel I read the message and what it attaches, never what a filename or a pull request number points at. Where a file is refused and nothing posts, the report goes again without it, saying the file did not post. A draft is a worker's, and I merge none. The worker starts on the plan's branch and pushes its Chapters there. Its finishing pass marks the pull request ready and arms auto-merge, the one signal I review on. A plan that builds on an unmerged plan is cut from that plan's branch, its draft based on that branch and its header reading `Disjoint: no`. The host retargets it to the trunk when the parent merges and its branch is deleted. Where the branch is kept, step 7 of `finishing-work` retargets it. A plan already on the trunk when its worker starts takes its own branch from the trunk under its own pull request. The worker's next step is never written into a pull request body. The plan doc is the source of truth, and the Chapter's `Next:` line is the parsed next step.
+- landed: a4430deb section 1, with its fix rounds at beb9a5ed, e4067170, f55f96ba and d2a0232d; the stacking sentences at 11717904, section 1 of `docs/plans/claude-kit_queue-stacking_spec_v1.md`, with its fix round after it
+- reason: On 2026-10-07 the operator asked for the pattern they run plans by to be locked into doctrine, because plans had travelled a mix of routes: some were queued from their drafts, others were sent to the operator to approve or merge first, and a merged draft sent its worker to cut a fresh branch, so the operator's board stopped showing what was outstanding. The steward then proposed writing a worker's next step into the pull request, which this bullet refuses because the plan doc and its Chapters already carry it. The pattern lived in pieces across the default commit model, the finishing pass and the architect's README, and no one surface every seat reads stated it whole, so it lands here beside the plan-doc bullet. The finishing pass already marks ready, arms auto-merge and retargets a stacked child, so this bullet states the route and points at no new mechanism. A plan document reported over a channel is attached to the report where the reply tool takes a file. The report is written to be read from its words alone, because over the relay the operator reads the message and its attachment and nothing a filename or a pull request number points at. Where a refused file leaves nothing posted, the report goes again without it, saying the file did not post. On 2026-10-18 the operator said they had reminded the fleet to stack pull requests several times ("having to make reminders about stacking PRs is something I've done multiple times now"), and on 2026-10-19 they ruled that all pull requests stack, no worker waits on a merge, and ready marks a finished plan whatever its parent reads (`docs/archive/claude-kit_ready-is-the-review-signal_spec_v1.md`). The bullet had stacked only a plan that builds on an unmerged plan, so the queue-stacking plan made every plan stack on the open pull request at the stack's tip and put the rule here, where every session reads it.
+- passage: **A plan travels one way, from a draft on its own branch to a ready pull request I approve last.** One route keeps every outstanding plan on my board and puts only finished work in front of me. It is the Branch-and-PR route, and a plan recording another commit model closes under that model. The author writes the plan on a branch cut from its base, read from the host at the write, and opens a draft pull request on that base. That draft on my board is the plan put in front of me, so the plan is queued for a worker when it is reported. My word on a channel is the only veto, and the queue never waits on my approval. Where a channel is attached and its reply tool offers a file argument, a plan document reported to me over that channel is attached to the report. The file is named by its absolute path under the session's working directory. It goes with the report of the plan's draft, or, for a plan with no draft yet reported, with the message handing me the written spec. The report is written to be read from its words alone. Over the channel I read the message and what it attaches, never what a filename or a pull request number points at. Where a file is refused and nothing posts, the report goes again without it, saying the file did not post. A draft is a worker's, and I merge none. The worker starts on the plan's branch and pushes its Chapters there. Its finishing pass marks the pull request ready and arms auto-merge, the one signal I review on. Every plan stacks. Its base, its parent, is the branch of the open pull request at the stack's tip when the plan is queued, the one no other open pull request is based on and the most recently created where more than one, whichever worker holds it and whether or not the plan uses its content. The plan's own pull request, and any pull request stacked on it, never count in that reading. The base is the trunk only where that reading finds none. The plan's header reads `Disjoint: no`, and no header exempts the plan from its base. The host retargets the plan's pull request to the trunk when that parent merges and the parent's branch is deleted. Where the branch is kept, step 7 of `finishing-work` retargets it. A plan already on the trunk when its worker starts takes its own branch from the trunk under its own pull request, and takes the base in at its start by merge, as `executing-work` states. No worker's start waits on a pull request reading MERGED. A pull request is marked ready whatever its parent reads, even where the host refuses the arm. The worker's next step is never written into a pull request body. The plan doc is the source of truth, and the Chapter's `Next:` line is the parsed next step.
 
 ### D001
 - key: Where `ask_open` is available, also file each decision that is the operator's with it, carrying the choice the work proceeds on; never file an offer of further work, a "let me know if", a status question or a check the operator did not ask for; set `blocking` only where the next step is irreversible without the answer or a plan waits on it, and open that turn's closing text with `BLOCKED:`.
@@ -3245,6 +3246,60 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - reason: The `ask_open` tool files a question onto the operator's board without ending the turn, so the doctrine has to say which questions belong there. A decision that is the operator's goes on the board with the choice the work continues on, so the work does not stall for the answer. An offer of further work, a "let me know if", a status question or an unrequested check is not a decision, and filing one buries the real asks. Only an irreversible next step or a plan that waits on the answer blocks, because every other step can be redone once the operator rules. A blocking ask also opens the closing text with `BLOCKED:`, so the thread shows the stop the ledger holds. "Also" keeps the brief going to the operator's channel, since the tool sends nothing there. The passage extends the batching rule it joins (c1.C063) and changes none of that rule's sentences.
 - passage: Where `ask_open` is available, also file each decision that is mine with it, carrying the choice the work proceeds on. Never file an offer of further work, a "let me know if", a status question or a check I did not ask for, since each buries the real asks. Set `blocking` only where the next step is irreversible without my answer or a plan waits on it, and open that turn's closing text with `BLOCKED:`.
 
+### AB001
+- key: Interview the ask, asking why until a constraint our tools cannot change, and build for the point inside it.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:82
+- provenance: docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, on the operator's ruling of 2026-10-18 under that plan's Intent that the altitude question is an interview, why repeated until a constraint our tools cannot change, applied to the fleet's plans and to his.
+- verdict: keep
+- reason: The bullet is the always-loaded principle every design step instantiates, and brainstorming's step 1 (its AB001) owns the interview's mechanics, the chain's shape and its three sources, so this sentence points at it in one line rather than restating it. It sits after the read-first sentences because the interview is the first question of the analysis and before the concerns and the plan, which it shapes.
+- passage: Interview the ask, asking why until a constraint our tools cannot change, and build for the point inside it.
+
+### AB002
+- key: Measure each figure in a decision ask and name its source.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:164
+- provenance: docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 3 2026-10-19, on the operator's approval of 2026-10-18 under that plan's Intent ("Let's do all of the above"), whose Goal asks that every decision ask carry measured facts or say which fact it could not measure.
+- verdict: keep
+- reason: The bullet asked for real numbers before advising, but no bullet held a decision ask to them, and a figure the operator decides on is the one an estimate costs most. It joins this bullet rather than the client-briefing bullet because this one owns where the numbers come from, and that bullet owns the ask's order and register. It overlaps the send-time question c2.C134, which checks every figure at send, and keeps as a gate at a different moment.
+- passage: A figure in a decision ask is measured and names its source.
+
+### AB003
+- key: Name a figure that cannot be measured unmeasured rather than estimating it, as the "cannot measure" bullet states.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:164
+- provenance: docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 3 2026-10-19, on the operator's approval of 2026-10-18 under that plan's Intent ("Let's do all of the above"), whose Goal asks that every decision ask carry measured facts or say which fact it could not measure.
+- verdict: keep
+- reason: An estimate in a decision ask reads as a measurement, so the operator would decide on a number nobody took. The word unmeasured is the plain label that keeps the gap visible. The sentence points at c1.C123 for what to do when the source is down, rather than restating its substitutes and its unreachable-source naming.
+- passage: One that cannot be measured is named unmeasured rather than estimated, per the "cannot measure" bullet.
+
+### AB004
+- key: Treat a gap as the operator's only where it turns on preference, cost or risk appetite, or where closing it is an act inside the stop-for-a-yes test.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:70
+- provenance: docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 4 2026-10-19, on the operator's ask of 2026-10-18 under that plan's Intent for "FAR more autonomy"; the test is the architect's reading of that ask, recorded there as open to a Later ruling.
+- verdict: keep
+- reason: Route (c) asked a material gap that is the operator's with no test for which gaps are his, and the one statement of the test sat in the consult skill, where only a stuck session read it. The test now sits in the always-loaded bullet, and consult's C017 and executing-work's blocker set point here by the bullet's lead. Its second prong is the stop-for-a-yes test's own, so an act others depend on or one the fleet could not undo still reaches the operator whatever the gap turns on.
+- passage: A gap is mine where it turns on preference, cost or risk appetite, or where closing it is an act inside the stop-for-a-yes test.
+
+### AD001
+- key: Send a visual for the operator over the channel as an image rendered with `scripts/render-html.js` and read before attaching.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:168
+- provenance: `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 2026-10-21, on the operator's word of 2026-10-20 its Dispatch Authorization quotes; written at its finishing pass under the architect's record 153.
+- verdict: keep
+- reason: An image the session never read can show the operator a broken layout, so reading it first makes it one round of c2.C077's present-the-output rule, and the named script gives every session one tool.
+- passage: A visual for me over the channel goes out as an image rendered with `scripts/render-html.js` under the kit plugin root and read before attaching, as one round of this bullet.
+
+### AD002
+- key: Send the page file beside the image only where the page is genuinely interactive.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:168
+- provenance: `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 2026-10-21, on the operator's word of 2026-10-20 its Dispatch Authorization quotes; written at its finishing pass under the architect's record 153.
+- verdict: keep
+- reason: On a phone a page file is a detour, and the image shows a static page whole, so the file goes only where the operator must act on the page.
+- passage: The page file rides beside the image only where it is genuinely interactive, since opening one on a phone costs me a detour.
+
 ## home/grimoire-doctrine.md
 
 This document is the installed mirror of the operating-instructions skill body: `home/grimoire-doctrine.md` is byte-identical to `plugins/grimoire/skills/operating-instructions/SKILL.md` under `test/doctrine-parity.test.js`, and it is loaded at every session start through the `@grimoire-doctrine.md` import in `home/CLAUDE.md`. One extraction serves both, so every claim of the mirror is the entry of the same claim under the heading above, and no entry is repeated here.
@@ -3253,7 +3308,7 @@ This document is the installed mirror of the operating-instructions skill body: 
 
 This document is the kit's ownership map: a lookup table that names, for each moment the kit governs, the one document whose text is the rule for that moment. It owns the moment of resolving which skill or doctrine section governs a situation when two documents speak to it, the moment of placing a new rule you are about to write, and the moment you are in a situation with no rule you can find; it also owns the amendment protocol for moving a row and the handling of a moment it lists as unowned or contested. A session loads it on a named trigger: when two documents speak to one moment, when a rule must be placed, or when the governing rule for the current moment cannot be found.
 
-Extracted at `6bc07fb`: whole document (`skills.operating-instructions.references.ownership-map.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 4 on 2026-09-19 (C075 and C076 below, and C012 amended). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 4 on 2026-09-20 (C077 to C079 below, and C021 amended in place onto the two tiers), and at that plan's finishing pass on 2026-09-21 (C080 below, split out of C079, which is narrowed in place). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C081 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (`P` entries below, with C035 retired to P001). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `8954074c` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: row 995 dropped the pointer-and-copy column, each live entry's `passage:` line quotes the text that section landed, C002, C004 and P001 read `verdict: retire` naming their rows, and M001 below carries the legend C004 split into. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which added the Jev promise check row (`B` entries below). Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`D` entries below, the two rows it added under Coordination and Seats). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C012, C026, C048, C049, C057 and W002 rewritten to their rows as they now read, and C047's and C077's reasons reworded. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: C046 and C060 deleted with their rows. Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12 (N001 below). Amended by section 1 of `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` on 2026-10-13, which seated the Architect in the kit's skills (O001 below, with D001 rewritten to its row as it now reads and its key, provenance and reason reworded). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17 (F001 below, the `Verify:` row).
+Extracted at `6bc07fb`: whole document (`skills.operating-instructions.references.ownership-map.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 4 on 2026-09-19 (C075 and C076 below, and C012 amended). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 4 on 2026-09-20 (C077 to C079 below, and C021 amended in place onto the two tiers), and at that plan's finishing pass on 2026-09-21 (C080 below, split out of C079, which is narrowed in place). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C081 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (`P` entries below, with C035 retired to P001). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `8954074c` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: row 995 dropped the pointer-and-copy column, each live entry's `passage:` line quotes the text that section landed, C002, C004 and P001 read `verdict: retire` naming their rows, and M001 below carries the legend C004 split into. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which added the Jev promise check row (`B` entries below). Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`D` entries below, the two rows it added under Coordination and Seats). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C012, C026, C048, C049, C057 and W002 rewritten to their rows as they now read, and C047's and C077's reasons reworded. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: C046 and C060 deleted with their rows. Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12 (N001 below). Amended by section 1 of `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` on 2026-10-13, which seated the Architect in the kit's skills (O001 below, with D001 rewritten to its row as it now reads and its key, provenance and reason reworded). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17 (F001 below, the `Verify:` row). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 1 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: C075 rewritten to its row as it now reads, naming the why chain. Amended by `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 on 2026-10-21 (AC001 below, the rendered-visual row, written at that plan's finishing pass).
 
 ### C001
 - key: State a rule whole in its owning document, with its grant, bounds, and carve-outs together.
@@ -3962,13 +4017,13 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - passage: The doctrine's "One owner per moment, and the map names it" bullet states the rule this map serves, and its Which Text Governs section states the ranking.
 
 ### C075
-- key: Read the `brainstorming` skill for a plan's `## Intent` record: its parts, its register, its byte bound, who writes it and where a ruling made after the spec ships lands.
+- key: Read the `brainstorming` skill for a plan's `## Intent` record: its parts, the why chain among them, its register, its byte bound, who writes it and where a ruling made after the spec ships lands.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:16
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 4 2026-09-19; sections 1 to 3 installed the record at brainstorming step 9 and pointed six surfaces at it, and the map carried no row for the moment.
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 4 2026-09-19; sections 1 to 3 installed the record at brainstorming step 9 and pointed six surfaces at it, and the map carried no row for the moment. Amended in place by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, which named the why chain in the row so a reader meeting the chain on a charter finds its owner.
 - verdict: keep
 - reason: The record is read by more seats than any other part of a spec bar the Goal, so the map's job of naming one owner is exactly what a reader meeting it on a charter needs. The owner column names step 9 and the freeze paragraph together because the write and the later ruling are one moment split across two of brainstorming's own passages, and a reader sent to the skill without the second would find no home for a ruling made after approval.
-- passage: | A plan's `## Intent` record, and a ruling after the spec ships | `brainstorming` (step 9, and its freeze paragraph for a later ruling) |
+- passage: | A plan's `## Intent` record, its why chain included, and a ruling after the spec ships | `brainstorming` (step 9, step 1 for the interview that builds the chain, and its freeze paragraph for a later ruling) |
 
 ### C076
 - key: Read the `executing-work` skill for the add-decision written before a section or a fix is built, and for the design stop it fires.
@@ -4159,6 +4214,33 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - verdict: keep
 - reason: The line and its trunk run are the spec author's, so brainstorming owns them, and the run before review and its quote on the Chapter are the section loop's, so executing-work owns those. One row names both halves so a session placing a rule about the instrument finds each owner.
 - passage: | A section's `Verify:` line, its acceptance commands' write-time trunk run and its pre-review run | `brainstorming` (Spec Format, steps 9 and 10), `executing-work` (step 2, the `Gate:` line) |
+
+### AA001
+- key: Look up authority over machine-shared state, the seat classes, the act class and the ask route, in the role skill.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:88
+- provenance: docs/plans/claude-kit_shared-state-authority_spec_v1.md section 1, 2026-10-18.
+- verdict: keep
+- reason: No row owned the moment, so the kill rule and the stash rules lived in scattered prose that never reached the party that broke them; the row names the role skill as the one owner a session resolves to.
+- passage: | Authority over machine-shared state: the seat classes, the act class and the ask route | `role` |
+
+### AC001
+- key: Look up the finding verifier's dispatch, its three readings and the `refuted` disposition in executing-work step 4.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:38
+- provenance: docs/plans/claude-kit_finding-verifier-vote_spec_v1.md section 3, 2026-10-20.
+- verdict: keep
+- reason: The verifier's dispatch, readings and disposition are stated whole in step 4's verifier paragraph, and finishing-work and review.md point at it, so the row names that paragraph as the one owner.
+- passage: | The finding verifier's dispatch, its three readings and the `refuted` disposition | `executing-work` (step 4's verifier paragraph) |
+
+### AD001
+- key: Look up the rule for a visual sent to the operator over the channel, and when its page file goes too, in the doctrine's craft bullet.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:100
+- provenance: `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 2026-10-21, on the operator's word of 2026-10-20 its Dispatch Authorization quotes; written at its finishing pass under the architect's record 153.
+- verdict: keep
+- reason: No row owned the moment, and the rule sits in a doctrine bullet rather than a skill, so the row points there.
+- passage: | A visual sent to the operator over the channel, and when its page file goes too | doctrine (On craft and visual work) |
 
 ## plugins/grimoire/output-styles/kit.md
 

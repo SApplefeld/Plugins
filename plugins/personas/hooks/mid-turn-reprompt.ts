@@ -57,6 +57,7 @@
 
 import type { PluginHost } from "./host";
 import { type AgentState, LINE_TERMINATOR, liftAsk, openBlockingAsks } from "./agent-state";
+import { launchDirOf } from "./beat";
 import { reactivateAskedEntry } from "./plan-route";
 import { quoteCarriedLines } from "./operator";
 import { scrubText } from "./redactor";
@@ -77,6 +78,11 @@ export type RepromptHost = Pick<PluginHost, "getHome"> & {
 export type RepromptSession = {
   mySessionId: string;
   workdir: string;
+  // The directory the session was launched in, held across a reload. The scan
+  // reads this one: the host keys the transcript folder on the launch
+  // directory, while workdir is re-read from wherever the session has moved
+  // by a reload. Empty where none is held, and then workdir stands.
+  memqLaunchDir: string;
   state: AgentState;
   // The newest record timestamp a queued re-prompt covered, or null where
   // none has been queued this session.
@@ -118,7 +124,9 @@ export function repromptMessageLine(senderClass: "operator", at: number): string
 }
 
 // The scan's argv: node, the script under the plugin root, then the home,
-// the working directory, the session id and the turn's start stamp.
+// the directory the scan keys the transcript folder on, the session id and
+// the turn's start stamp. readMidTurnMessages passes the launch directory,
+// falling back to the working directory where none is held.
 export function repromptScanArgv(pluginRoot: string, home: string, workdir: string, sessionId: string, stamp: number): string[] {
   return ["node", `${pluginRoot}/bin/mid-turn-reprompt-scan.mjs`, home, workdir, sessionId, String(stamp)];
 }
@@ -280,7 +288,8 @@ export async function readMidTurnMessages(host: RepromptHost, sess: RepromptSess
   }
   let res: unknown;
   try {
-    res = await host.run(repromptScanArgv(host.pluginRoot, home, sess.workdir, sess.mySessionId, stamp), { cwd: sess.workdir, timeoutMs: RECAP_TIMEOUT_MS });
+    const scanDir = launchDirOf(sess);
+    res = await host.run(repromptScanArgv(host.pluginRoot, home, scanDir, sess.mySessionId, stamp), { cwd: scanDir, timeoutMs: RECAP_TIMEOUT_MS });
   } catch (err) {
     const detail = `run failed: ${String(err).slice(0, 150)}`;
     skipped(sess, "read-failed", detail);

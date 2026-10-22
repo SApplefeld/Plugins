@@ -179,7 +179,8 @@ export interface SessionState {
   meterBeatInFlight: boolean;
   // The id of the persona's own last turn this session metered, "" until one.
   meterLastTurnId: string;
-  // The launch directory kitMemq runs memq from: the first non-empty
+  // The launch directory kitMemq runs memq from and the store, the yield log
+  // and the goal history resolve against: the first non-empty
   // directory a session.start captured, "" until one has. A later
   // session.start leaves it, because its cwd is wherever the session stands
   // then. This field is the module's copy. A reload of the plugin's code

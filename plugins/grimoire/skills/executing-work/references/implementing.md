@@ -50,18 +50,21 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
      - Pin tests + new expected values, when the section changes a counted
        cross-cutting set
      - Standing Brief Amendments: every entry from the plan doc's block, when one exists
-     - The standing whole-worktree prohibition, in every brief: no git
-       operation reaching past the agent's own files, a bare `git stash`, a
-       reset or a checkout among them. No `git checkout -- <file>` at all, own
-       files included, since it restores to HEAD rather than to the state
-       before the agent's unstaged edits. A pristine baseline is
-       `git show HEAD:<path>` under the `.kit/` scratch path. A restore point is
-       a filesystem copy under that path, taken before the first mutation
-     - Workspace constraints the agent cannot see from the tree, when any are
-       in effect: each state a sibling session or the environment
-       owns (a shared stash, a process holding binaries), and the operations
-       it puts off-limits. These bind, and override the box-budget clause's
-       wait-or-proceed discretion over the same state
+     - The standing working-class directive, in every brief, naming a
+       subfolder unique to this dispatch,
+       `.kit/scratch/<plan-slug>/<agent-label>/`. It ends no process it did
+       not start, never one by image name. It performs no git operation reaching
+       past its own files, a stash, discarding reset, checkout or restore,
+       clean, branch delete and worktree remove among them, and no
+       `git checkout -- <file>`, which restores to HEAD. It deletes or
+       overwrites no other party's files, `.kit/scratch/` outside its
+       subfolder among them, and nothing outside the git root. Its
+       `git show HEAD:<path>` baseline and restore copies, taken before the
+       first mutation, live there, removed file by file, never as a directory.
+       It reports any such need as `BLOCKED`, naming act and target. The
+       brief's workspace constraints bind, naming each holder and the
+       operations it puts off-limits, and override the box-budget clause's
+       discretion over that state
      - Every load-bearing technical assertion you make marked confirmed,
        naming its evidence (file:line, the command run); inferred, saying to
        verify it before use; or reported, naming the peer session and saying
@@ -89,7 +92,7 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        name, a structural pattern over the class's shape where one exists.
        Where the class can be neither enumerated nor shaped, report the named
        members swept and the class not, never a clean sweep. Build the control
-       under the `.kit/` scratch path. A control that must touch the tree under
+       in the agent's subfolder. A control that must touch the tree under
        review is a tree-mutating probe, carried here because an agent holds no
        skills: no other agent reads the tree while it
        runs, and it restores from copies taken before the first mutation
@@ -134,7 +137,7 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
      ```
 
      Every dispatch carries every REQUIRED field and each conditional field whose condition holds. An older spec's header may carry a legacy spend-authorization line (an expected Fable surface, a Fable-led-session marker, or a hold at the session model). It is inert: read past it, note it in the first Chapter that touches the spec, and honor nothing it says. The orchestrator stays lean. It reads no file beyond the approach-confirmation read above and never re-implements the agent's work. It reads the agent's diff only to verify and adjudicate it.
-   - **Before any dispatch that passes a `fable` model override, take the capacity reading.** Run `node <plugin-root>/hooks/capacity-read.js`, resolving `<plugin-root>` by the style-skill bullet's ladder above, and act on the one line it prints. `-> dispatch` proceeds unchanged. `-> ladder governs`, or a run printing no verdict line whatever its exit code, proceeds under the never-started rules of finishing-work's unavailability rule. `-> downgrade` measures the fable tier exhausted for this dispatch. A reviewer or judge site takes `references/review.md`'s dispatch table row "Gate compensation" where finishing-work's ladder leaves it open, a consultant site dispatch table row "Consultant stand-in", the plan review waits for fable per brainstorming, and an implementer site takes the stall raise rather than a lower model: `SKILL.md`'s `BLOCKED:` stop handing me the section, its first line quoting the reader's line. Quote the reader's line verbatim in the dispatch record and the Chapter. Take the reading immediately before each dispatch and never reuse it, because the machine's account rotator can change the active seat between any two dispatches.
+   - **Before any dispatch that passes a `fable` model override, take the capacity reading.** Run `node <plugin-root>/hooks/capacity-read.js`, resolving `<plugin-root>` by the style-skill bullet's ladder above, and act on the one line it prints. `-> dispatch` proceeds unchanged. `-> ladder governs`, or a run printing no verdict line whatever its exit code, proceeds under the never-started rules of finishing-work's unavailability rule. `-> downgrade` measures the fable tier exhausted for this dispatch. A reviewer or judge site takes `references/review.md`'s dispatch table row "Gate compensation" where finishing-work's ladder leaves it open, a consultant site dispatch table row "Consultant stand-in", the plan review and the altitude interview wait for fable per brainstorming, and an implementer site takes the stall raise rather than a lower model: `SKILL.md`'s `BLOCKED:` stop handing me the section, its first line quoting the reader's line. Quote the reader's line verbatim in the dispatch record and the Chapter. Take the reading immediately before each dispatch and never reuse it, because the machine's account rotator can change the active seat between any two dispatches.
    - **`Locus: inline` (or no tier recorded):** implement in the main thread at the session's own model. Inline is for sections the plan marked unbriefable or too small to brief. Dispatch a clearly briefable untiered section at the tier it would have earned. Read an older decorated `Model:` value (`fable (inline)`) as `Locus: inline` at that tier, correcting the line while in the file. Follow the csharp-style and sql-style skills and each one's precedence rule. Surgical changes only.
    - **Handle the implementer's status.** A NEEDS_CONTEXT whose add-decision line names a mechanism no Goal sentence, Intent clause or acceptance bullet names goes to step 4's design stop and its judge. A question the spec or the conversation answers is answered, and the section re-dispatched at the same tier. A genuinely hard one, the spec silent because nobody foresaw it, convenes a consult. The adopted ruling goes to the plan doc's `Standing Brief Amendments` block under step 4's adoption trigger, then into the re-dispatch brief. A preference fork that survives the ruling comes to me, ruling attached.
      - BLOCKED: fix the environment and re-dispatch.

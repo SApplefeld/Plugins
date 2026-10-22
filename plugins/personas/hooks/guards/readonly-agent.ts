@@ -673,7 +673,7 @@ function describeTarget(t: string): string {
   return String(t).replace(new RegExp(`${SUB_SPAN}+`, 'g'), '$(unresolved substitution)');
 }
 
-function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[]): string {
+export function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[]): string {
   const inBody = (i: number) => bodies !== undefined && bodies.some(b => i >= b.from && i < b.to);
   const chars = cmd.split('');
   const dqEscapes = /["\\$`]/;
@@ -754,7 +754,7 @@ function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[]): strin
 // outside the range. A body already found is data, so an introduction inside one
 // opens nothing: an introduction falling in a range is skipped, which keeps a
 // range from running past the terminator the shell reads.
-function heredocBodies(cmd: string, masked: string): Span[] {
+export function heredocBodies(cmd: string, masked: string): Span[] {
   const bodies: Span[] = [];
   const intro = /(?<!<)<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)")(?=[ \t\r\n;|&)]|$)/g;
   let m: RegExpExecArray | null;
@@ -920,7 +920,7 @@ function parseIntro(intro: string): { stream: IntroToken[]; heredoc: { delim: st
 // construction. Anything outside the shape leaves the body scanned, and every
 // unresolvable value (a destination built from a variable, a missing terminator)
 // refuses.
-async function heredocExemption(cmd: string, cwd: string, strict: boolean, host: LexHost): Promise<{ from: number; to: number } | null> {
+export async function heredocExemption(cmd: string, cwd: string, strict: boolean, host: LexHost): Promise<{ from: number; to: number } | null> {
   const firstNL = cmd.indexOf('\n');
   if (firstNL < 0) return null;                       // a heredoc body sits on a later line
   const parsed = parseIntro(cmd.slice(0, firstNL));
@@ -997,7 +997,7 @@ async function heredocExemption(cmd: string, cwd: string, strict: boolean, host:
 // every pattern the guard matches, so the only thing that reading changes is the
 // spelling of an operand whose own bytes carry a newline, which resolves to a path
 // in the same place either way.
-function spliceContinuations(cmd: string, bodies: readonly Span[]): string {
+export function spliceContinuations(cmd: string, bodies: readonly Span[]): string {
   const chars = cmd.split('');
   for (let i = 1; i < chars.length; i++) {
     if (chars[i] !== '\n' || chars[i - 1] !== '\\') continue;
@@ -1031,7 +1031,7 @@ function spliceContinuations(cmd: string, bodies: readonly Span[]): string {
 // substitution span rides as its sentinel bytes: the expansion's value is
 // unknowable, so the span must tokenize as one opaque word rather than as raw
 // $( text a whitespace split would break apart.
-function segment(cmd: string, masked: string, from: number): string {
+export function segment(cmd: string, masked: string, from: number): string {
   const cut = masked.slice(from).search(/[;|&<>)\n\x01]/);
   const to = cut < 0 ? cmd.length : from + cut;
   let out = '';
@@ -1070,7 +1070,7 @@ function unquote(t: string): string {
 // quoted run any character but a letter, a digit or one of _ - . / : = , + is one
 // a shell may rewrite (a variable, a brace, a glob, an escape, a PowerShell
 // expression or splat), and a substitution span is never literal.
-function tokens(seg: string, literal?: boolean[]): string[] {
+export function tokens(seg: string, literal?: boolean[]): string[] {
   const out: string[] = [];
   let cur: string | null = null as string | null;
   let lit = true;
@@ -1117,7 +1117,7 @@ function tokens(seg: string, literal?: boolean[]): string[] {
 // name (wc -l docs/rm) reads as an invocation, which matters only if a following
 // operand then places in the tree. The mask keeps a name inside a quoted argument
 // from matching at all.
-function commandPositions(masked: string, names: readonly string[]): { name: string; at: number }[] {
+export function commandPositions(masked: string, names: readonly string[]): { name: string; at: number }[] {
   const re = new RegExp(
     `(?:^|[\\s;|&(\`${SUB_SPAN}])\\\\?(?:[^\\s;|&(]*[\\\\/])?(${names.join('|')})(?:\\.(?:exe|cmd|bat|ps1))?(?=\\s|$|${SUB_SPAN})`,
     'gi'
@@ -1185,7 +1185,7 @@ function lastPathSwitchBefore(cmd: string, masked: string, end: number): string 
 // base elsewhere (cd C:/Users && cd $FOO && rm README.md), judging from the
 // payload cwd can deny an operand the shell resolves outside the tree. That
 // cost leans toward denial and is the price of keeping the checks armed.
-async function effectiveDirs(cmd: string, masked: string, at: number, cwd: string, host: LexHost): Promise<string[]> {
+export async function effectiveDirs(cmd: string, masked: string, at: number, cwd: string, host: LexHost): Promise<string[]> {
   const target = lastPathSwitchBefore(cmd, masked, at);
   if (target === null) return [cwd];
   const bare = unquote(target);
@@ -1216,7 +1216,7 @@ async function effectiveDirs(cmd: string, masked: string, at: number, cwd: strin
 // cannot be resolved before the shell runs, which is the fail-open direction: a
 // descriptor dup (2>&1), a path built through any other shell or environment
 // variable, a ~user path, the null device.
-function resolveTarget(raw: string, base: string, host: LexHost): string | null {
+export function resolveTarget(raw: string, base: string, host: LexHost): string | null {
   const path = host.path;
   let s = String(raw || '').trim().replace(/^["']|["']$/g, '');
   if (!s) return null;
@@ -1296,7 +1296,7 @@ const GIT_MUTATIONS = new Set([
 // git global flags that take their value as a separate following token. An
 // =-joined form (--git-dir=x) is one token and consumes nothing, so the
 // subcommand after it is still read correctly.
-const GIT_VALUE_FLAGS = /^(?:-C|-c|--git-dir|--work-tree|--namespace|--exec-path|--config-env)$/;
+export const GIT_VALUE_FLAGS = /^(?:-C|-c|--git-dir|--work-tree|--namespace|--exec-path|--config-env)$/;
 
 // git runs an alias as its subcommand, and `-c alias.<name>=<value>` defines one
 // for the invocation, so the command's real verb sits in a config value rather
@@ -1737,7 +1737,7 @@ function looksLikePath(s: string): boolean {
 // The operands of one cmdlet invocation: the values of the named path parameters
 // (-Path / -FilePath / -LiteralPath / -Destination, joined by a space or a
 // colon), and the positional operands in order.
-function cmdletOperands(toks: readonly string[]): { named: Record<string, string>; positional: string[] } {
+export function cmdletOperands(toks: readonly string[]): { named: Record<string, string>; positional: string[] } {
   const named: Record<string, string> = {};
   const positional: string[] = [];
   for (let i = 0; i < toks.length; i++) {
@@ -1759,7 +1759,7 @@ function cmdletOperands(toks: readonly string[]): { named: Record<string, string
 // positional operand of an item cmdlet is PowerShell's -Path parameter, so it
 // counts as a path whatever it looks like (Remove-Item test); later positionals
 // are filtered by shape.
-function cmdletPaths(name: string, named: Record<string, string>, positional: readonly string[]): string[] {
+export function cmdletPaths(name: string, named: Record<string, string>, positional: readonly string[]): string[] {
   if (PS_COPY_NAMES.test(name)) {
     const dest = named.destination || positional[1];
     return (dest && looksLikePath(dest)) ? [dest] : [];
@@ -2059,7 +2059,7 @@ const NESTED_FLAGS = /^-{1,2}(?:[a-z]*c|command|cmd|p|print)$/i;
 // whole tail after /c to its parser the same way. A -c, -Command or -p flag takes
 // exactly one word, and adjacent quoting makes one word out of several runs
 // (`sh -c "git"" push"`), which the tokenizer already joins.
-function nestedPayloads(cmd: string, masked: string): string[] {
+export function nestedPayloads(cmd: string, masked: string): string[] {
   const out: string[] = [];
   for (const hit of commandPositions(masked, NESTED_EXECUTORS)) {
     // A here-string operand is one word of the segment that follows the <<<,

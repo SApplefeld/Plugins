@@ -650,45 +650,54 @@ export interface ArchitectLine {
 /**
  * The provenance ground a record from `writer` carries when delivered to
  * `target`, read from claims and records already read, or a refusal when the
- * writer may not reach the target at all. Reach holds on any of four legs:
- * the writer holds a reader claim on the target (a reader steering the
- * owner it reads); the writer owns the coordinator persona (the
- * coordinator addressing any persona); the target is the coordinator
- * persona or the architect persona and the writer owns a named persona
- * other than `default` (a worker pushing to either seat); or the answer
- * leg below. Every claim leg is a claim a session issues itself: any
- * plugin-loaded session on this machine can take a reader claim, own a
- * named persona through agentic_identity, or own the coordinator persona
- * while no live session holds it. Excluding `persona:default` keeps out a
- * session that has done none of that, which is every plugin-loaded session
- * at start, and nothing more.
+ * writer may not reach the target at all. A target the writer itself owns
+ * is refused before any leg is read, since an owner does not message
+ * itself. Reach then holds on any of four legs: the writer holds a reader
+ * claim on the target (a reader steering the owner it reads); the writer
+ * owns the coordinator persona (the coordinator addressing any persona);
+ * the writer owns a named persona other than `default` (a named persona's
+ * owner addressing any persona, the worker leg); or the answer leg below.
+ * The worker leg tests nothing about the target, so a record to a persona
+ * no live session owns waits for that persona's next drain. Every claim
+ * leg is a claim a session issues itself: any plugin-loaded session on
+ * this machine can take a reader claim, own a named persona through
+ * agentic_identity, or own the coordinator persona while no live session
+ * holds it. Excluding `persona:default` keeps out a session that has done
+ * none of that, which is every plugin-loaded session at start, and nothing
+ * more.
  *
- * The answer leg lets the architect answer a worker that asked it, and it
- * is judged at send. The writer owns the architect persona, the target
- * persona has a live owner, and that owner's session wrote a record to the
- * architect persona whose status is `delivered` or `answered` and which
- * passes deliveryRecordProblem: a record the architect has taken delivery
- * of and not resolved. The ground then carries that record's id as
- * `answersRecord`, which agentic_say stamps on the answer it writes. At
+ * The answer leg marks the architect's answer to a persona that asked it,
+ * and it is judged at send. The writer owns the architect persona, the
+ * target persona has a live owner, and that owner's session wrote a record
+ * to the architect persona whose status is `delivered` or `answered` and
+ * which passes deliveryRecordProblem: a record the architect has taken
+ * delivery of and not resolved. The ground then carries that record's id
+ * as `answersRecord`, which agentic_say stamps on the answer it writes. At
  * delivery the leg holds on that stamp and on the writer still owning the
  * architect persona, with no read of the architect's inbox, so an answer
- * admitted at send is delivered even where the architect resolves the
- * worker's record, or the target changes owner, before it arrives. The
- * stamp's value is never spliced into a label or any other text.
+ * admitted at send is delivered under the architect's label even where the
+ * architect resolves the record it answers, or the target changes owner,
+ * before it arrives. The stamp's value is never spliced into a label or
+ * any other text.
  *
  * The ground names the strongest standing the writer holds, in this order:
  * `COORDINATOR` when the writer owns the coordinator persona;
  * `READER:<target>` when the writer holds a reader claim on the target;
- * on the worker leg to the coordinator, `READER:<persona>` naming the
- * alphabetically first persona the writer reads where it reads any, and
- * otherwise `WORKER:<persona>` naming the alphabetically first named
- * persona it owns; on the worker leg to the architect, that
- * `WORKER:<persona>` whatever else the writer reads, since the architect
- * works a WORKER record as its own and reads a READER record as
- * information; and `WORKER:<architect persona>` on the answer leg, whatever
- * else the writer reads. A reader claim on another persona is not a reach
- * leg by itself. The gate and the label are one rule over one claims array, so a
- * record that is delivered is a record that is labelled.
+ * `WORKER:<architect persona>` when the writer owns the architect persona,
+ * on the answer leg or the worker leg, whatever other persona it owns or
+ * reads; on the worker leg to any persona but the architect,
+ * `READER:<persona>` naming the alphabetically first persona the writer
+ * reads where it reads any, and otherwise `WORKER:<persona>` naming the
+ * alphabetically first named persona it owns; and on the worker leg to the
+ * architect, that `WORKER:<persona>` whatever else the writer reads, since
+ * the architect works a WORKER record as its own and reads a READER record
+ * as information. A reader claim on another persona is not a reach leg by
+ * itself. The gate and the label are one rule over one claims array, so a
+ * record that is delivered is a record that is labelled. The label names
+ * only a persona the writer owns or reads under the claims read here, so a
+ * `WORKER:<architect persona>` label proves its writer owned the architect
+ * persona at the moment the label was given, which the effort gate in
+ * hooks/index.ts reads.
  *
  * The persona a READER or WORKER ground would name is store data any
  * process can write straight into the claims, so it is held to the bracket
@@ -723,27 +732,31 @@ export function deliveryGroundIn(
   architect: ArchitectLine,
 ): DeliveryGround {
   if (holdsOwnerClaim(claims, writer, coordinatorPersona)) return { ground: COORDINATOR_GROUND };
-  const seatTarget = target === coordinatorPersona || (architect.persona !== "" && target === architect.persona);
-  const workerLeg = seatTarget && holdsOwnerClaim(claims, writer, undefined, "default");
+  if (holdsOwnerClaim(claims, writer, target)) return { refused: "no_claim" };
+  const workerLeg = holdsOwnerClaim(claims, writer, undefined, "default");
   const readerPersonas = readerPersonasOf(claims, writer);
   const readsTarget = readerPersonas.includes(target);
-  // The answer leg is read whenever the worker leg does not hold, so a send
-  // it admits is stamped even where a reader claim on the target labels it.
-  const opener = workerLeg ? null : answerLegOpener(claims, target, writer, architect);
+  // The answer leg is read beside the worker leg, so an architect's answer
+  // is stamped even where the worker leg or a reader claim on the target
+  // would admit it unstamped.
+  const opener = answerLegOpener(claims, target, writer, architect);
+  // The answer leg holds only for a writer owning the architect persona, so
+  // this one test covers it and the worker leg alike.
+  const ownsArchitect = architect.persona !== "" && holdsOwnerClaim(claims, writer, architect.persona);
   let kind: string;
   let persona: string;
   if (readsTarget) {
     kind = "READER";
     persona = target;
+  } else if (ownsArchitect) {
+    kind = "WORKER";
+    persona = architect.persona;
   } else if (workerLeg && readerPersonas.length > 0 && target !== architect.persona) {
     kind = "READER";
     persona = readerPersonas[0];
   } else if (workerLeg) {
     kind = "WORKER";
     persona = ownedNamedPersonasOf(claims, writer)[0];
-  } else if (opener !== null) {
-    kind = "WORKER";
-    persona = architect.persona;
   } else {
     return { refused: "no_claim" };
   }

@@ -1,11 +1,11 @@
 ---
 name: curating-docs
-description: "Keeps a project's docs/ folder a curated library rather than an attic. Use when a plan reaches Complete during finishing-work, when a new plan is written that should be indexed and cross-referenced, or when asked to tidy, retrofit, or reorganize a project's docs/ folder. Symptoms: completed plans piling up in docs/plans/, a backlog doc that only grows, plans that never reference each other, a docs/ tree with no index."
+description: "Keeps a project's docs/ folder a curated library rather than an attic. Use when a plan reaches Complete during finishing-work, when a new plan is written that should be cross-referenced, or when asked to tidy, retrofit, or reorganize a project's docs/ folder. Symptoms: completed plans piling up in docs/plans/, a backlog doc that only grows, plans that never reference each other, a docs/ tree with no index."
 ---
 
 # Curating Docs
 
-A plan is finished when it has moved to the archive, the backlog is pruned, related plans point at each other, and the index reflects reality. Closing a plan is not finishing it.
+A plan is finished when it has moved to the archive, the backlog is pruned, and related plans point at each other. Closing a plan is not finishing it.
 
 ## Docs Taxonomy
 
@@ -13,7 +13,7 @@ Three zones, each with one job, plus the living backlog.
 
 | Location | Holds | Discipline |
 |---|---|---|
-| `docs/` root | Stable about-the-solution docs (architecture, security model) and the README index | Updated in place as the solution changes |
+| `docs/` root | Stable about-the-solution docs (architecture, security model) and the README, the index of the stable documents rather than of plans | Updated in place as the solution changes |
 | `docs/plans/` | Active plans only (open or in progress) | A plan leaves the moment it is Complete or abandoned |
 | `docs/archive/` | Finished and abandoned plans (Chapters intact) and dated backlog snapshots | Immutable history; nothing here is live |
 | `docs/backlog.md` | The handoff doc for cross-effort next-steps, active items only | Pruned-live: completed items move to a dated snapshot |
@@ -27,7 +27,6 @@ Run this close path at close-out, in order:
 3. Repoint the plan's own relative links, before or right after the move. A sibling linked as `../archive/<file>` becomes `<file>` once the plan is itself in `archive/`. Grep the moved file for `../archive/` and fix every hit.
 4. Cross-reference. If the plan built on or superseded another, link both through a `## Related` section and mark a superseded plan in its header. Act on any cross-reference gap `docs-curator` flagged at `skills/finishing-work/SKILL.md`'s Documentation curation step. If the other plan is already archived, only the moving plan gets the `## Related` section.
 5. Prune the backlog, per Backlog Pruning below.
-6. Refresh the index. `docs/README.md` and `docs/plans/README.md` both drop the plan from their active list and reflect the archive. The most-recent chain is the `Most recent:` and `Before it:` entries on the line opening `Completed plans are in`. Where either index carries it, both name the same four most recently archived plans. An archival prepends the newly closed plan and drops the oldest.
 
 Archive in the same close-out that finished the work, never later or in a batch.
 
@@ -35,7 +34,7 @@ Archive in the same close-out that finished the work, never later or in a batch.
 
 This is the create path. Run it when `brainstorming` writes a new spec, before `executing-work` takes it:
 
-1. Add it to the active-plans lists in `docs/README.md` and `docs/plans/README.md`. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks.
+1. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks. Seed the Failure by Area table, and a row per top-level area the spec's Files in scope touch, where either is missing.
 2. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
 3. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
 
@@ -52,7 +51,7 @@ When no close-out is near and `hooks/session-start.js`'s block reports an oldest
 When asked to tidy or retrofit a `docs/` that predates this structure:
 
 1. **Audit, read-only.** List every doc, read each plan's `Status` header, and classify each: active plan, completed or abandoned plan, about-the-solution doc, or stray.
-2. **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed. Unless a plan already made that call, the stop is the material decision in `executing-work/SKILL.md`'s blocker set.
+2. **Propose the migration.** Name the plans moving to the archive, what the index and backlog will hold, and which READMEs get seeded. Move nothing until it is confirmed. Unless a plan already made that call, the stop is the blocker-set member in `executing-work/SKILL.md` for a decision the spec does not cover that is the operator's.
 3. **Apply on approval.** Create the zones and READMEs from the templates, `git mv` the completed and abandoned plans into the archive, seed the index and backlog, and report what moved. Relocate a file, never delete it.
 
 ## Plan Doc Machine Contract
@@ -83,13 +82,13 @@ None of `## Intent`, `## Assumptions` and `## Dispatch Authorization` appears in
 
 `## Dispatch Authorization` goes **above** `## Sections of Work`. `## Intent` and `## Assumptions` go outside `## Sections of Work` and above `## Chapters`. A misplaced heading truncates the parse silently. Inside `## Sections of Work` it drops every later `### N.` section, and after `## Chapters` every Chapter below it stops registering.
 
-A `## Dispatch Authorization` section records a plan run's approval: who approved it, when, and which sessions the grant covers, by default "any session holding this plan". It never instructs a run to start. A plan arriving by peer message runs under it once the grant stands, by a trace to the operator or a chain handoff. The peer-sessions skill owns the trace and the handoff, with the message's standing and the reply states. The section supplies no live steering, so whatever the plan does not cover goes to the operator.
+A `## Dispatch Authorization` section records a plan run's approval: who approved it, when, and which sessions the grant covers, by default "any session holding this plan". It never instructs a run to start. A plan arriving by peer message runs under it once the grant stands, by a trace to the operator's word or to the architect seat's authorship under the machine's standing delegation, or by a chain handoff. The peer-sessions skill owns the trace and the handoff, with the message's standing and the reply states. The section supplies no live steering, so a gap the plan leaves takes the doctrine's intake routes, opening "Enumerate the gaps at intake".
 
 Adding any of these headings to an approved plan mid-run is an edit above `## Chapters`. Make it deliberately and record it in the Chapter, per the freeze rule in `skills/brainstorming/SKILL.md`'s spec format.
 
 ## Templates
 
-Seed the README, index, and backlog skeletons from `references/templates.md`, never inventing a new shape per project.
+Seed every skeleton from `references/templates.md`, never inventing a new shape per project.
 
 ## Antipatterns
 
