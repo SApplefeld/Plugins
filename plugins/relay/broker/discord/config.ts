@@ -29,11 +29,11 @@ export type DiscordConfig = {
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5_000;
 const DEFAULT_DWELL_MS = 60_000;
-const DEFAULT_IDLE_AFTER_MS = 120_000;
+export const DEFAULT_IDLE_AFTER_MS = 120_000;
 // Four hours. The backstop exists to catch a hard kill, which fires no hook, so it is set well
 // past any pause a working session takes: a long tool call, a compaction, or a session parked at
 // a prompt are all silences that must not be reported as a death.
-const DEFAULT_EXITED_AFTER_MS = 4 * 60 * 60 * 1000;
+export const DEFAULT_EXITED_AFTER_MS = 4 * 60 * 60 * 1000;
 
 function integerAtLeast(raw: string | undefined, minimum: number, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;

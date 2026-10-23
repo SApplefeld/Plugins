@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { comparablePath, defaultEventsPath } from "./board/events.ts";
 import { assertTokenFileIsProtected } from "./discord/credentials.ts";
 
@@ -291,6 +292,27 @@ export type BrokerConfig = {
    * and greater than `voiceHoldFirstMs`.
    */
   voiceHoldSecondMs: number;
+  /**
+   * The address the web surface's own listener binds, or null when `CHANNEL_WEB_BIND` is unset,
+   * which leaves the surface off: no second server is created and the broker is its loopback
+   * listener alone. Read here as written, an IPv4 literal or the word `tailscale`; the tailnet
+   * range check and the literal's resolution are `loadWebConfig`'s in broker/web/config.ts, which
+   * takes these six values rather than the environment.
+   */
+  webBind: string | null;
+  /** The web surface's port. */
+  webPort: number;
+  /** The tailnet logins the web surface admits, split on commas and trimmed, possibly empty here. */
+  webOperators: readonly string[];
+  /**
+   * The tailnet node names the web surface admits, or null when `CHANNEL_WEB_DEVICES` is unset or
+   * empty, which leaves the node unchecked.
+   */
+  webDevices: readonly string[] | null;
+  /** The Tailscale CLI the web surface resolves peers with: a path, or a name found on PATH. */
+  webTailscale: string;
+  /** Absolute path to the directory the web surface's pages are served from. */
+  webStaticRoot: string;
 };
 
 /**
@@ -547,6 +569,11 @@ const DEFAULT_RETAIN_TERMINAL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_SESSIONS = 500;
 const DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_LOG_MAX_FILES = 5;
+// One above the loopback port, so a host reading its own process list tells the two apart at a
+// glance. A bare `tailscale` is found on PATH, which is where the installer puts the CLI.
+const DEFAULT_WEB_PORT = 8788;
+const DEFAULT_WEB_TAILSCALE = "tailscale";
+const WEB_LIST_SEPARATOR = ",";
 
 function integerAtLeast(raw: string | undefined, minimum: number, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
@@ -863,6 +890,29 @@ function defaultStateFile(env: NodeJS.ProcessEnv): string {
   return path.join(base, "sapplefeld-channels", "broker-state.json");
 }
 
+/**
+ * A comma-separated list as the web surface's two allowlists are written: each entry trimmed,
+ * empty entries dropped, and null for an unset or empty value, which is how the device list says
+ * "unchecked". Whether an empty operator list is an error is `loadWebConfig`'s call, since the
+ * lists mean nothing while `CHANNEL_WEB_BIND` is unset.
+ */
+function webList(raw: string | undefined): readonly string[] | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  return raw
+    .split(WEB_LIST_SEPARATOR)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "");
+}
+
+/**
+ * The web surface's pages, beside this module rather than under the working directory: under a
+ * scheduled task the working directory is whatever the task was given, and a page served from the
+ * wrong tree is a 404 for every route.
+ */
+function defaultWebStaticRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "web", "static");
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
   const config: BrokerConfig = {
     // Zero is legal only here, where it means "any free port" and is what the tests bind. Every
@@ -1093,6 +1143,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MAX_VOICE_HOLD_SECOND_MS,
       DEFAULT_VOICE_HOLD_SECOND_MS,
     ),
+    // The web surface's six, read here and only here so the installer's env allowlist pin sees
+    // them, and validated in broker/web/config.ts, where the surface is: the bind is kept as
+    // written because the tailnet range check and the `tailscale` literal belong to that module.
+    // Unset by default, and unset is the absence of the machinery: no second listener is created.
+    webBind: env.CHANNEL_WEB_BIND?.trim() || null,
+    webPort: integerAtLeast(env.CHANNEL_WEB_PORT, 1, DEFAULT_WEB_PORT),
+    webOperators: webList(env.CHANNEL_WEB_OPERATORS) ?? [],
+    webDevices: webList(env.CHANNEL_WEB_DEVICES),
+    webTailscale: env.CHANNEL_WEB_TAILSCALE?.trim() || DEFAULT_WEB_TAILSCALE,
+    webStaticRoot: env.CHANNEL_WEB_STATIC_ROOT?.trim() || defaultWebStaticRoot(),
   };
   // Flux refuses an eager threshold above the end-of-turn threshold, so the pair is refused here
   // rather than at the socket. With eager off the eager threshold is never sent, and the pair is

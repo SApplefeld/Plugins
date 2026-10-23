@@ -1,7 +1,9 @@
 # Installing a host
 
 One broker per host, one Discord bot identity per host, one channel per host. A broker reaches its
-sessions over localhost, so it cannot serve another machine.
+sessions over localhost. Its one optional second listener, the web surface, binds a Tailscale
+address and serves the operator's own pages to the tailnet devices the keys under "The web surface
+(optional)" name. Nothing else is reachable from another machine.
 
 `operations.md` and `security-model.md`, named in this guide, live in the source repository and
 do not ship in the public folder.
@@ -484,6 +486,47 @@ To turn the voice on and join a channel:
 5. Type `voice off` in the same thread to end it, which works after the session has ended too. The bot also leaves when the last operator leaves the channel and after `CHANNEL_VOICE_IDLE_MS` with no operator audio, so an empty channel is not metered.
 
 The two commands are whole-line and not case-sensitive, and only an operator's are commands. From a participant, `voice on` is words for the session and the bot does not join. One voice runs per broker: from another session's thread, `voice on` and `voice off` are told the voice is in use. `voice on` needs a live session; in a thread whose session has ended it is handled as any message to an ended session is, while `voice off` there still ends the voice. The bot hears operator accounts only; a participant's voice is dropped before anything reads it. With `CHANNEL_VOICE` off, `voice on` and `voice off` are ordinary text for the session.
+
+### The web surface (optional)
+
+The broker can serve its own status pages to your phone and desktop over Tailscale. It is off
+unless `CHANNEL_WEB_BIND` is set, and off means no second listener exists. Install Tailscale on
+this host and on each device, signed in under one login, then add to `broker.env`:
+
+```
+CHANNEL_WEB_BIND=tailscale
+CHANNEL_WEB_OPERATORS=you@example.com
+CHANNEL_WEB_DEVICES=your-phone,your-desktop
+```
+
+`CHANNEL_WEB_BIND` is this host's tailnet IPv4 address, or the word `tailscale`, which reads it
+from `tailscale ip -4` at start. Any address outside 100.64.0.0/10 refuses the start, so the pages
+can never be served on loopback, a LAN or a public interface. `CHANNEL_WEB_OPERATORS` is the
+comma-separated list of tailnet logins admitted, at least one. `CHANNEL_WEB_DEVICES` is optional.
+When it is set, a device must be on it by its tailnet node name as well as signed in under an
+admitted login, since a fleet machine signed in under your login would otherwise be admitted too.
+Set it, and leave this host off it. A process run by any account on this host can reach the pages
+as this host's node, so a list without the host refuses it (T5 in `docs/security-model.md`). A
+browser on this host is refused too, so open the pages from the phone or another desktop.
+`CHANNEL_WEB_PORT` (default 8788), `CHANNEL_WEB_TAILSCALE` (the CLI, default `tailscale` on PATH)
+and `CHANNEL_WEB_STATIC_ROOT` (the pages' directory, an absolute path) rarely need setting.
+
+Every request is identified by `tailscale whois`, so there is no token and no password. All six
+keys are on the installer's allowlist, so a value set by hand survives the next install.
+
+On Windows, allow the web port inbound on the Tailscale interface. Windows Firewall can place that
+interface in a profile where Node has no inbound rule, and a device's request is then dropped
+before the broker sees it. From an elevated PowerShell, with the port matching `CHANNEL_WEB_PORT`:
+
+```
+New-NetFirewallRule -DisplayName 'Channels web surface' -Direction Inbound -Protocol TCP -LocalPort 8788 -InterfaceAlias 'Tailscale' -Action Allow
+```
+
+The rule admits that one port on that one interface, and
+`Remove-NetFirewallRule -DisplayName 'Channels web surface'` takes it out. Restart the broker. Its
+log then reads `broker: web surface on http://<address>:<port>, admitting N login(s) on M device(s)`.
+Open that exact address from an admitted device, since any other spelling of it answers 400.
+[`operations.md`](operations.md) describes the pages under "The web surface".
 
 ## 3. Install the service
 

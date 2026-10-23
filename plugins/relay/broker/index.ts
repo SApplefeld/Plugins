@@ -78,6 +78,15 @@ import {
 import type { PermissionDesk } from "./security/permission.ts";
 import { loadSenderGate } from "./security/senders.ts";
 import { createQuestionDesk } from "./question-desk.ts";
+import { loadWebConfig } from "./web/config.ts";
+import type { WebConfig } from "./web/config.ts";
+import { createTailscaleIdentity } from "./web/identity.ts";
+import { createWebPass, webPassSources } from "./web/pass.ts";
+import type { WebPass } from "./web/pass.ts";
+import { createWebServer, registerViewHandlers, registerWatermarkHandlers } from "./web/server.ts";
+import type { WebServer } from "./web/server.ts";
+import { DEFAULT_THRESHOLDS } from "./web/views.ts";
+import { openWatermarks, watermarksFileFor } from "./web/watermarks.ts";
 import type {
   QuestionAlert,
   QuestionEntryView,
@@ -116,6 +125,8 @@ export type Broker = {
   registry: Registry;
   /** The port actually bound, which differs from the configured one when that port is 0. */
   port: number;
+  /** The web surface's bound port, or null when `CHANNEL_WEB_BIND` is unset and none was opened. */
+  webPort: number | null;
   /** The rotating-file logger this broker started with, so the caller can log a line beside it. */
   logger: Logger;
   stop: () => Promise<void>;
@@ -1024,11 +1035,16 @@ export async function startBroker(
   let sttKey: string | null;
   // And the fast tier's Anthropic key, under the same rule.
   let fastKey: string | null;
+  // The web surface's configuration, on the same terms: null is the surface off, and a bind
+  // outside the tailnet or an empty operator list refuses the start here, before any listener
+  // exists, with the key named on disk.
+  let web: WebConfig | null;
   try {
     judgeKey = readJudgeKey(config, warn);
     const stateRoot = path.dirname(config.stateFile);
     sttKey = config.voice ? readVoiceSttKey(config.voiceSttKeyFile, stateRoot) : null;
     fastKey = config.voice ? readVoiceFastKey(config.voiceFastKeyFile, stateRoot) : null;
+    web = loadWebConfig(config);
   } catch (error) {
     const message = `broker: refusing to start: ${String(error)}`;
     console.error(message);
@@ -1697,6 +1713,11 @@ export async function startBroker(
   let refresh: NodeJS.Timeout | null = null;
   let inFlight: Promise<void> = Promise.resolve();
   let gateway: MessageSource | null = null;
+  // The web surface's own listener, opened after the loopback one binds and only where `web` is
+  // configured. Declared here, with the other optional surfaces, because the teardown closes it.
+  let webServer: WebServer | null = null;
+  // The timer that runs the readers the web views draw on; absent with the listener.
+  let webPass: WebPass | null = null;
   // The voice module, built after the gateway starts and only where `CHANNEL_VOICE` is on. The
   // inbound router's command seam reaches it through this closure, since the router is built
   // before the gateway it needs.
@@ -2337,9 +2358,64 @@ export async function startBroker(
   const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : config.port;
 
+  // The web surface is a sibling of the Discord surfaces: with `CHANNEL_WEB_BIND` unset there is
+  // no second server at all, and the broker's listening sockets are what they were. It binds after
+  // the loopback listener so a tailnet address that is not up fails through the ordinary stop,
+  // which clears every timer and closes the loopback socket, rather than through a second copy of
+  // the bind-failure path above. Sections 2, 4 and 5 register their `/web/<name>` handlers on it
+  // inside this block.
+  let webPort: number | null = null;
+  if (web !== null) {
+    webServer = createWebServer({
+      config: web,
+      identity: createTailscaleIdentity({ cli: web.tailscale }),
+      log: logger,
+    });
+    // The views read from this pass and never from a file of their own. It is built beside the
+    // listener and not inside the Discord block, so it runs with Discord absent.
+    const pass = createWebPass({
+      config,
+      sources: webPassSources(config, note),
+      thresholds:
+        discord === null
+          ? DEFAULT_THRESHOLDS
+          : { idleAfterMs: discord.idleAfterMs, exitedAfterMs: discord.exitedAfterMs },
+      records: () => registry.list(),
+      signals: (record) => ({
+        needsAttention: permissions.waiting().has(record.sessionId),
+        blocked: standingBlocked(record),
+      }),
+      log: note,
+    });
+    webPass = pass;
+    // The operator's marks sit beside the registry snapshot, and the views take them with each reading.
+    const marks = openWatermarks(watermarksFileFor(config.stateFile), note);
+    const readings = () => ({ ...pass.readings(), marks: marks.marks() });
+    registerViewHandlers(webServer.register, readings);
+    registerWatermarkHandlers(webServer.register, readings, marks, { log: logger });
+    try {
+      // The first pass runs before the listener opens, so no request waits on the cold read.
+      pass.start();
+      webPort = await webServer.listen();
+    } catch (error) {
+      // Stopped here as well as in stop(), so a failure further into the teardown leaves no timer.
+      pass.stop();
+      const message = `broker: failed to start the web surface on ${web.bind}:${String(web.port)}: ${String(error)}`;
+      console.error(message);
+      logger.error(message);
+      await stop();
+      throw error;
+    }
+    note(
+      `broker: web surface on http://${web.bind}:${String(webPort)}, admitting ${String(web.operators.length)} login(s)` +
+        (web.devices === null ? " on any device" : ` on ${String(web.devices.length)} device(s)`),
+    );
+  }
+
   // The fleet card, under both of its conditions: the knob and a configured channel. Off either
   // way means the machinery is absent rather than idle, so nothing opens a thread, nothing runs on
-  // a timer, and claude-swap's files are never read.
+  // a timer, and this card reads none of claude-swap's files; the web pass reads them on its own
+  // timer while CHANNEL_WEB_BIND is set.
   const usageCard = createUsageCard(
     usageCardWiring({
       config,
@@ -2370,8 +2446,9 @@ export async function startBroker(
 
   // The board card, under all three of its conditions: the knob, a configured channel, and at least
   // one project root or a configured roster path. Off any of those ways means the machinery is
-  // absent rather than idle, so nothing opens a thread, nothing runs on a timer, and no plan doc,
-  // store file or event stream is read.
+  // absent rather than idle, so nothing opens a thread, nothing runs on a timer, and this card reads
+  // no plan doc, store file or event stream; the web pass reads them on its own timer while
+  // CHANNEL_WEB_BIND is set.
   const boardCard = createBoardCard(
     boardCardWiring({
       config,
@@ -2398,8 +2475,8 @@ export async function startBroker(
 
   // The decisions card, under its three conditions: the knob and a roster (which is what `sightings`
   // being non-null already reflects) and a configured channel. Off any way means the machinery is
-  // absent rather than idle, so no ledger is read, nothing opens a thread and nothing runs on a
-  // timer. The roster and the ledgers are read on this card's own pass, as the board card reads them
+  // absent rather than idle, so this card reads no ledger, nothing opens a thread and nothing runs
+  // on a timer; the web pass reads the ledgers on its own timer while CHANNEL_WEB_BIND is set. The roster and the ledgers are read on this card's own pass, as the board card reads them
   // on its own: each card reads the file under the one capped, last-good-reading read.
   const decisionsCardBindingFile = path.join(path.dirname(config.stateFile), "decisions-card.json");
   const decisionsAsksFile = path.join(path.dirname(config.stateFile), "decisions-asks.json");
@@ -2528,6 +2605,10 @@ export async function startBroker(
     // the session as exactly the reset the release exists to avoid; the wait is bounded inside the
     // desk, so a stuck socket delays shutdown by no more than that bound.
     await questionDesk.releaseAll();
+    // The web listener goes down with the loopback one; it holds nothing a held question waits on.
+    // The pass is synchronous, so clearing its timer leaves nothing running to wait for.
+    webPass?.stop();
+    if (webServer !== null) await webServer.close();
     // Keep-alive sockets would otherwise hold close() open until they time out.
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -2595,6 +2676,7 @@ export async function startBroker(
     server,
     registry,
     port,
+    webPort,
     logger,
     stop,
     restart,

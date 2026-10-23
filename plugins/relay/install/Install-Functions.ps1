@@ -657,6 +657,15 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_VOICE_TURN_HOLD',
     'CHANNEL_VOICE_TURN_HOLD_MS',
     'CHANNEL_VOICE_COMPLETE_THRESHOLD',
+    # The web surface's six. The bind is an address or the word tailscale, the two lists are tailnet
+    # logins and node names, and the CLI entry is a path: none is a credential, and the surface has
+    # no token to carry here.
+    'CHANNEL_WEB_BIND',
+    'CHANNEL_WEB_PORT',
+    'CHANNEL_WEB_OPERATORS',
+    'CHANNEL_WEB_DEVICES',
+    'CHANNEL_WEB_TAILSCALE',
+    'CHANNEL_WEB_STATIC_ROOT',
     'CHANNEL_BROKER_LOG_FILE',
     'CHANNEL_BROKER_LOG_MAX_BYTES',
     'CHANNEL_BROKER_LOG_MAX_FILES',

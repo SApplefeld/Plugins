@@ -69,6 +69,15 @@ export const MAX_PLANS_PER_ROOT = 64;
 export const MAX_INTAKE_STATUS_LENGTH = 120;
 export const MAX_INTAKE_NEXT_LENGTH = 400;
 
+/**
+ * The longest Goal text a parse keeps, in code points, and the most section headings or Chapters it
+ * lists. A plan doc is read whole up to `MAX_PLAN_FILE_BYTES`, and a parse is held across ticks, so
+ * what a parse carries out of that text is bounded on its own. The Goal of a plan is a paragraph;
+ * the list bound sits far above the dozen sections or Chapters a plan runs to.
+ */
+export const MAX_INTAKE_GOAL_LENGTH = 2_000;
+export const MAX_OUTLINE_ENTRIES = 500;
+
 /** The parsed contract values of one plan doc, with no knowledge of where the text came from. */
 export type PlanParse = {
   /**
@@ -89,7 +98,30 @@ export type PlanParse = {
    * is model-written text.
    */
   next: string | null;
+  /**
+   * The text under `## Goal`, line breaks kept and the whole held to `MAX_INTAKE_GOAL_LENGTH`; null
+   * when the doc has no Goal section or the section is empty. Set by `parsePlan` on every parse. A
+   * `PlanParse` built by hand may omit it, which the board card does, since it never draws it.
+   */
+  goal: string | null;
+  /**
+   * The `### N.` headings inside the Sections of Work block, each with whether a Chapter registers
+   * it as completed under the same three forms `completed` counts. Set by `parsePlan` on every
+   * parse; bounded to `MAX_OUTLINE_ENTRIES`.
+   */
+  sectionList: readonly PlanSection[];
+  /**
+   * The Chapters in the Chapters block with each one's first `Completed:` and `Next:` value, in file
+   * order and bounded to the last `MAX_OUTLINE_ENTRIES`. Set by `parsePlan` on every parse.
+   */
+  chapterList: readonly PlanChapter[];
 };
+
+/** One section heading of a plan doc and whether some Chapter registers it as completed. */
+export type PlanSection = { number: number; name: string; done: boolean };
+
+/** One Chapter of a plan doc: its number and the first `Completed:` and `Next:` values it carries. */
+export type PlanChapter = { number: number; completed: string | null; next: string | null };
 
 /** One swept plan doc: its contract values, where it lives, and when it last moved. */
 export type PlanReading = PlanParse & {
@@ -207,6 +239,7 @@ export type PlanSweep = {
 const STATUS = /^Status:(.*)$/;
 const SECTIONS_HEADING = /^##\s+Sections of Work\s*$/;
 const CHAPTERS_HEADING = /^##\s+Chapters\s*$/;
+const GOAL_HEADING = /^##\s+Goal\s*$/;
 // Written in the same linear form as BLOCK_HEADING below, with the title in group 2 or group 3
 // according to which branch matched. The terminators are escapes, never live characters.
 export const SECTION = /^###\s+(\d+)\.(?:\s([^\r\u2028\u2029]*)|\s*[\r\u2028\u2029]([^\r\u2028\u2029]*))$/;
@@ -392,7 +425,30 @@ export function parsePlan(text: string): PlanParse | null {
       latest === null || latest.next === null
         ? null
         : bounded(latest.next, MAX_INTAKE_NEXT_LENGTH),
+    goal: goalText(lines),
+    sectionList: sections.slice(0, MAX_OUTLINE_ENTRIES).map((section) => ({
+      number: Number(section.number),
+      name: bounded(section.title, MAX_INTAKE_STATUS_LENGTH),
+      done: registers(section, completions),
+    })),
+    chapterList: chapters.slice(-MAX_OUTLINE_ENTRIES).map((chapter) => ({
+      number: chapter.number,
+      completed:
+        chapter.completed === null ? null : bounded(chapter.completed, MAX_INTAKE_STATUS_LENGTH),
+      next: chapter.next === null ? null : bounded(chapter.next, MAX_INTAKE_NEXT_LENGTH),
+    })),
   };
+}
+
+/**
+ * The text of the `## Goal` block: its lines as written, outer blank lines dropped, cut to
+ * `MAX_INTAKE_GOAL_LENGTH` code points. Null for a doc with no Goal heading and for one whose block
+ * holds nothing. The block ends at the next `##` heading, as every block here does.
+ */
+function goalText(lines: string[]): string | null {
+  const text = blockLines(lines, GOAL_HEADING).join("\n").trim();
+  if (text === "") return null;
+  return [...text.slice(0, MAX_INTAKE_GOAL_LENGTH * 2)].slice(0, MAX_INTAKE_GOAL_LENGTH).join("");
 }
 
 /**
@@ -491,6 +547,15 @@ function statPlansDirectory(dir: string): number | null {
 }
 
 /**
+ * The names ordered newest modification time first, ties in name order. A file whose stat fails
+ * sorts after every file that has one.
+ */
+function byNewestModified(dir: string, names: readonly string[]): string[] {
+  const moved = new Map(names.map((name) => [name, statPlanFile(path.join(dir, name))?.mtimeMs ?? -Infinity]));
+  return [...names].sort((a, b) => (moved.get(b) as number) - (moved.get(a) as number) || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
  * The plan files directly under one root's `docs/plans`, by name, in a stable order and bounded by
  * `MAX_PLANS_PER_ROOT`, alongside how many names the bound left out. A `README.md` (any case) is
  * excluded before the bound is applied, so it costs nothing against `MAX_PLANS_PER_ROOT` and never
@@ -505,11 +570,16 @@ function statPlansDirectory(dir: string): number | null {
  * A root whose directory is missing or unreadable lists nothing, and that is not a failure: a
  * project with no plans directory has no open plans. The listing is one level deep and files only,
  * so `docs/archive/` and any nested directory are outside it by construction.
+ *
+ * With `newestFirst` the names run by file modification time, newest first, so the bound drops the
+ * oldest files rather than the last names. A held listing keeps the order it was listed in, so an
+ * archived file edited in place keeps its place until a file is added to or removed from the folder.
  */
 function planFiles(
   dir: string,
   held: SweepPlansOptions["heldListing"],
   listed: PlanDirectoryListing[],
+  newestFirst: boolean,
 ): PlanListing {
   const movedAt = statPlansDirectory(dir);
   const holding = movedAt === null ? undefined : held?.(dir, movedAt);
@@ -531,6 +601,7 @@ function planFiles(
       .filter((entry) => entry.isFile() && MARKDOWN_SUFFIX.test(entry.name) && !isReadmeStem(entry.name))
       .map((entry) => entry.name)
       .sort();
+    if (newestFirst) named = byNewestModified(dir, named);
   } catch {
     return { names: [], dropped: 0 };
   }
@@ -564,6 +635,26 @@ function planFiles(
  * per-root cap allows comes back with the count the cap left out.
  */
 export function sweepPlans(roots: readonly string[], options: SweepPlansOptions = {}): PlanSweep {
+  return sweepDirectory(roots, ["docs", "plans"], options);
+}
+
+/**
+ * The plan docs completed work is filed under, `docs/archive/plans` under each root, read with the
+ * same listing, caps, holds and parser as the live sweep. A plan found here is read like any other;
+ * the caller decides what an archived plan means. The listing runs newest file first and is bounded
+ * by `MAX_PLANS_PER_ROOT`, so a root archiving more files than that loses its oldest and has the
+ * count in `truncated`.
+ */
+export function sweepArchivedPlans(roots: readonly string[], options: SweepPlansOptions = {}): PlanSweep {
+  return sweepDirectory(roots, ["docs", "archive", "plans"], options, true);
+}
+
+function sweepDirectory(
+  roots: readonly string[],
+  segments: readonly string[],
+  options: SweepPlansOptions,
+  newestFirst = false,
+): PlanSweep {
   const read = options.readPlan ?? readPlanFile;
   const readings: PlanReading[] = [];
   const failures: PlanFailure[] = [];
@@ -571,8 +662,8 @@ export function sweepPlans(roots: readonly string[], options: SweepPlansOptions 
 
   const listings: PlanDirectoryListing[] = [];
   for (const root of roots) {
-    const dir = path.join(root, "docs", "plans");
-    const listing = planFiles(dir, options.heldListing, listings);
+    const dir = path.join(root, ...segments);
+    const listing = planFiles(dir, options.heldListing, listings, newestFirst);
     if (listing.dropped > 0) truncated.push({ root, dropped: listing.dropped });
     for (const name of listing.names) {
       const file = path.join(dir, name);

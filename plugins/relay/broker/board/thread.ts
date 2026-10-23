@@ -544,6 +544,9 @@ export function createBoardCard(options: BoardCardOptions): BoardCard | null {
         sections: reading.sections,
         completed: reading.completed,
         next: reading.next,
+        goal: reading.goal,
+        sectionList: reading.sectionList,
+        chapterList: reading.chapterList,
       };
       kept.set(reading.path, {
         parse,
