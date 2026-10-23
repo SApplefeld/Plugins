@@ -1,7 +1,7 @@
 # Registers the KitOrphanSweep scheduled task, which runs orphan-sweep.ps1 every fifteen minutes.
 #
-#   .\bin\Register-OrphanSweepTask.ps1 -FindingsPath <path> [-SweeperPath <path>] [-User <name>]
-#       [-Start] [-Remove] [-WhatIf]
+#   .\bin\Register-OrphanSweepTask.ps1 -FindingsPath <path> [-SweeperPath <path> | -LauncherRoot <path>]
+#       [-User <name>] [-Start] [-Remove] [-WhatIf]
 #
 # The task runs Windows PowerShell 5.1, by its System32 path, on orphan-sweep.ps1 with
 # -FindingsPath <path>. The sweeper reads the process table, appends findings to that file and
@@ -13,13 +13,22 @@
 # plugin's orphanSweepFindings option names, and a task without it would sweep into nowhere.
 #
 # -SweeperPath names the sweeper to run. Left unbound it is orphan-sweep.ps1 beside this script,
-# resolved from $PSScriptRoot, which is right for a checkout and for an installed copy of the bin
-# folder; pass it to point at a copy elsewhere.
+# resolved from $PSScriptRoot, which is right for a checkout; pass it to point at a copy elsewhere.
+# A sweeper under a plugins\marketplaces or plugins\cache folder is refused unless -LauncherRoot is
+# given, since a plugin update replaces both folders and the task would then run nothing.
 #
-# The trigger is AtStartup with a repetition every fifteen minutes with no end. New-ScheduledTaskTrigger
-# -AtStartup takes no repetition parameters, so the repetition is built on a -Once trigger and
-# assigned across, and its StopAtDurationEnd is set false after the copy, since the -Once
-# repetition arrives with it true.
+# -LauncherRoot runs the sweep from the installed personas plugin instead. The script copies
+# bin/Start-InstalledOrphanSweep.ps1 and the shared bin/installed-plugin-functions.ps1 it
+# dot-sources into that folder, and the task's action runs the launcher copy with -FindingsPath
+# and the -ConfigDir this script resolves. At each fire the launcher runs the installed plugin's
+# current orphan-sweep.ps1 from the folder the install record names (the launcher's own header
+# says how). A root under a plugins\marketplaces or plugins\cache folder is refused, as is a root
+# inside the personas plugin folder this script runs from, and so is -SweeperPath beside
+# -LauncherRoot, since the two name different actions. -WhatIf prints the copy it would make and
+# makes none.
+#
+# The task's only trigger is a one-time trigger at the registration moment, repeating every fifteen
+# minutes with no end; Get-OrphanSweepTaskDefinition says why.
 #
 # The principal is -User with the S4U logon at the Limited run level: the sweeper needs no stored
 # password and no DPAPI key, and an elevated task would write a findings file an unelevated session
@@ -39,6 +48,7 @@
 param(
     [Parameter(Mandatory)][string]$FindingsPath,
     [string]$SweeperPath,
+    [string]$LauncherRoot,
     [string]$User = [Security.Principal.WindowsIdentity]::GetCurrent().Name,
     [switch]$Start,
     [switch]$Remove,
@@ -48,6 +58,16 @@ param(
 $OrphanSweepTaskName = 'KitOrphanSweep'
 $OrphanSweepInterval = New-TimeSpan -Minutes 15
 $OrphanSweepTimeLimit = New-TimeSpan -Minutes 5
+$OrphanSweepLauncherName = 'Start-InstalledOrphanSweep.ps1'
+$InstalledPluginFunctionsName = 'installed-plugin-functions.ps1'
+
+# $PluginInstallFolderPattern, the folders a plugin update replaces, comes from the shared functions
+# file beside this script, which a -LauncherRoot run also copies beside the launcher.
+if (-not (Test-Path -LiteralPath "$PSScriptRoot\installed-plugin-functions.ps1" -PathType Leaf)) {
+    throw "Register-OrphanSweepTask: '$PSScriptRoot\installed-plugin-functions.ps1' does not exist; " +
+        "it ships beside this script in the personas plugin's bin folder."
+}
+. "$PSScriptRoot\installed-plugin-functions.ps1"
 
 <#
 .SYNOPSIS
@@ -82,13 +102,16 @@ Builds the KitOrphanSweep definition: action, trigger, principal and settings.
 Every object comes from the ScheduledTasks builders, which work in memory and contact no service,
 so -WhatIf can print what they built. The powershell.exe path is pinned rather than the bare name,
 since an unqualified -Execute resolves by PATH search at every boot, and a task with no loaded
-profile can get that wrong.
+profile can get that wrong. ScriptPath is the file the action runs with -FindingsPath: the sweeper
+itself, or the launcher in -LauncherRoot that runs the installed one. A non-empty ConfigDir is
+appended as the launcher's -ConfigDir; the sweeper route passes none.
 #>
 function Get-OrphanSweepTaskDefinition {
     param(
-        [Parameter(Mandatory)][string]$SweeperPath,
+        [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$FindingsPath,
-        [Parameter(Mandatory)][string]$User
+        [Parameter(Mandatory)][string]$User,
+        [string]$ConfigDir
     )
 
     if ([string]::IsNullOrEmpty($env:SystemRoot)) {
@@ -102,18 +125,23 @@ function Get-OrphanSweepTaskDefinition {
     }
 
     $argumentString = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass " +
-        "-File `"$SweeperPath`" -FindingsPath `"$FindingsPath`""
+        "-File `"$ScriptPath`" -FindingsPath `"$FindingsPath`""
+    if (-not [string]::IsNullOrEmpty($ConfigDir)) {
+        # A backslash before the closing quote escapes it on powershell.exe's command line, and a
+        # folder such as a drive root ends in one, so a trailing backslash is doubled to read back
+        # as itself.
+        if ($ConfigDir.EndsWith('\')) { $ConfigDir += '\' }
+        $argumentString += " -ConfigDir `"$ConfigDir`""
+    }
     $action = New-ScheduledTaskAction -Execute $psExe -Argument $argumentString
 
-    # New-ScheduledTaskTrigger -AtStartup takes no repetition parameters and the object offers no
-    # settable Repetition.Interval, so the repetition is built on a -Once trigger, which does, and
-    # that trigger's Repetition is assigned across. Only the repetition is used; the -Once
-    # trigger's own start time is discarded. A fire against a scan still running is ignored by the
-    # IgnoreNew setting below.
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $repeater = New-ScheduledTaskTrigger -Once -At (Get-Date) `
-        -RepetitionInterval $OrphanSweepInterval
-    $trigger.Repetition = $repeater.Repetition
+    # The one trigger is a one-time trigger starting at this moment, repeating every fifteen
+    # minutes with no duration, which the scheduler reads as no end. A repetition belongs to a
+    # trigger and begins only when that trigger fires, so the series starts at registration; a
+    # boot trigger registered after boot would not fire until the next boot. The first scheduled
+    # fire comes within one interval of registration, and -Start runs one at once. A fire against
+    # a scan still running is ignored by the IgnoreNew setting below.
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval $OrphanSweepInterval
     # The -Once repetition arrives with StopAtDurationEnd true, which would end the repetition at
     # the window's close; this one has no close.
     $trigger.Repetition.StopAtDurationEnd = $false
@@ -152,6 +180,7 @@ function Write-OrphanSweepTaskDefinition {
     Write-Output "task $($Definition.TaskName)"
     Write-Output "  action: $($Definition.Action.Execute) $($Definition.Action.Arguments)"
     Write-Output "  trigger: $($Definition.Trigger.CimClass.CimClassName)"
+    Write-Output "  startBoundary: $($Definition.Trigger.StartBoundary)"
     Write-Output "  repetitionInterval: $($Definition.Trigger.Repetition.Interval)"
     # An empty Duration is the Task Scheduler's indefinite repetition.
     $duration = $Definition.Trigger.Repetition.Duration
@@ -171,18 +200,74 @@ function Write-OrphanSweepTaskDefinition {
 
 <#
 .SYNOPSIS
+Throws when the task's action would name a file a plugin update replaces, and when -LauncherRoot
+names a folder the launcher could not be installed in.
+
+.DESCRIPTION
+With -LauncherRoot the action runs the launcher in that root, so the root itself is tested, and the
+launcher and the shared functions file it copies there must sit beside this script. Without it the
+action runs the sweeper, which is tested. Each path is compared in its canonical form, the root with
+a separator appended, against $PluginInstallFolderPattern, so a folder whose name merely starts with
+marketplaces or cache is no match.
+#>
+function Confirm-OrphanSweepActionOutsidePluginInstall {
+    param([string]$SweeperPath, [string]$LauncherRoot)
+    if ([string]::IsNullOrEmpty($SweeperPath) -and [string]::IsNullOrEmpty($LauncherRoot)) {
+        throw 'Register-OrphanSweepTask: name the action with -SweeperPath or -LauncherRoot.'
+    }
+    if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+        $launcherFull = [IO.Path]::GetFullPath($LauncherRoot).TrimEnd('\', '/') + '\'
+        if ($launcherFull -match $PluginInstallFolderPattern) {
+            throw "Register-OrphanSweepTask: -LauncherRoot '$LauncherRoot' sits under a plugins\marketplaces " +
+                "or plugins\cache folder, which a plugin update replaces. Name a folder outside both, " +
+                "such as one under the account's profile."
+        }
+        # A checkout or worktree can be removed, and a root at this script's own bin would copy each
+        # file onto itself, so the plugin folder is refused as Register-PersonaTasks.ps1 refuses it.
+        $pluginFull = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\', '/') + '\'
+        if ($launcherFull.StartsWith($pluginFull, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Register-OrphanSweepTask: -LauncherRoot '$LauncherRoot' sits inside the personas plugin folder " +
+                "'$pluginFull', which a checkout removal or a plugin update replaces. Name a folder outside it, " +
+                "such as one under the account's profile."
+        }
+        foreach ($name in @($OrphanSweepLauncherName, $InstalledPluginFunctionsName)) {
+            $source = Join-Path $PSScriptRoot $name
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                throw "Register-OrphanSweepTask: '$source' does not exist; run this script from a " +
+                    "personas plugin folder whose bin holds the files -LauncherRoot installs."
+            }
+        }
+        return
+    }
+    if ([IO.Path]::GetFullPath($SweeperPath) -match $PluginInstallFolderPattern) {
+        throw "Register-OrphanSweepTask: the sweeper '$SweeperPath' sits under a plugins\marketplaces " +
+            "or plugins\cache folder, which a plugin update replaces, so the task would run nothing " +
+            "after the next update. Pass -LauncherRoot naming a folder outside both, such as one " +
+            "under the account's profile, or run from a checkout."
+    }
+}
+
+<#
+.SYNOPSIS
 Registers, starts or removes the KitOrphanSweep task, or under -WhatIf prints what it would do.
 
 .DESCRIPTION
-Without -WhatIf the elevation check runs first, before any ScheduledTasks cmdlet, including the
-read that finds an existing task, so a refused run reads and writes nothing. $IsElevated is a
-parameter so a caller can drive the guard. Registration passes -Force, which replaces a task of
-the same name in place, so a second run updates the first. Every scheduler call carries
--TaskPath '\' explicitly, since Get-ScheduledTask with no path searches every folder.
+Unless -Remove is given, Confirm-OrphanSweepActionOutsidePluginInstall runs first, then the
+elevation check, both before any ScheduledTasks cmdlet, including the read that finds an existing
+task, and before any copy, so a refused run reads and writes nothing. -Remove needs neither path, so
+it skips the first. $IsElevated is a parameter so a caller can drive the guard. With -LauncherRoot
+the launcher and the shared functions file are copied into the root before the task is written, so
+no task names a launcher that is not there yet; the shared file goes first, so a launcher never
+lands without the file it reads, and each copy overwrites an older one, which is how a
+re-registration from a newer plugin version updates them. Registration passes -Force, which
+replaces a task of the same name in place, so a second run updates the first. Every scheduler call
+carries -TaskPath '\' explicitly, since Get-ScheduledTask with no path searches every folder.
 #>
 function Register-OrphanSweepTask {
     param(
-        [Parameter(Mandatory)][string]$SweeperPath,
+        # The sweeper the action runs; unused when -LauncherRoot is given.
+        [string]$SweeperPath,
+        [string]$LauncherRoot,
         [Parameter(Mandatory)][string]$FindingsPath,
         [Parameter(Mandatory)][string]$User,
         [switch]$Start,
@@ -190,6 +275,10 @@ function Register-OrphanSweepTask {
         [switch]$WhatIf,
         [bool]$IsElevated = (Test-IsElevated)
     )
+
+    if (-not $Remove) {
+        Confirm-OrphanSweepActionOutsidePluginInstall -SweeperPath $SweeperPath -LauncherRoot $LauncherRoot
+    }
 
     if (-not $WhatIf -and -not $IsElevated) {
         throw "Register-OrphanSweepTask: this must run from an elevated PowerShell session " +
@@ -213,12 +302,36 @@ function Register-OrphanSweepTask {
         return
     }
 
-    $definition = Get-OrphanSweepTaskDefinition -SweeperPath $SweeperPath -FindingsPath $FindingsPath -User $User
+    $scriptPath = $SweeperPath
+    $configDir = $null
+    if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+        $scriptPath = Join-Path $LauncherRoot $OrphanSweepLauncherName
+        $sharedTarget = Join-Path $LauncherRoot $InstalledPluginFunctionsName
+        # The config folder holding installed_plugins.json is resolved here, by the launcher's own
+        # rule, where the operator's profile is loaded, and passed in the action, since the S4U
+        # logon's environment at fire time is not relied on to resolve it.
+        $configDir = $env:CLAUDE_CONFIG_DIR
+        if ([string]::IsNullOrWhiteSpace($configDir)) { $configDir = Join-Path $env:USERPROFILE '.claude' }
+        $configDir = [IO.Path]::GetFullPath($configDir)
+    }
+    $definition = Get-OrphanSweepTaskDefinition -ScriptPath $scriptPath -FindingsPath $FindingsPath -User $User -ConfigDir $configDir
     if ($WhatIf) {
         Write-OrphanSweepTaskDefinition -Definition $definition
+        if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+            Write-Output "would install shared functions $sharedTarget"
+            Write-Output "would install launcher $scriptPath"
+        }
         Write-Output "would register $OrphanSweepTaskName"
         if ($Start) { Write-Output "would start $OrphanSweepTaskName" }
         return
+    }
+
+    if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+        [void][System.IO.Directory]::CreateDirectory($LauncherRoot)
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $InstalledPluginFunctionsName) -Destination $sharedTarget -Force -ErrorAction Stop
+        Write-Output "installed shared functions $sharedTarget"
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $OrphanSweepLauncherName) -Destination $scriptPath -Force -ErrorAction Stop
+        Write-Output "installed launcher $scriptPath"
     }
 
     Register-ScheduledTask -TaskName $definition.TaskName -TaskPath '\' -Action $definition.Action `
@@ -236,21 +349,35 @@ if ($MyInvocation.InvocationName -ne '.') {
     # `throw` above, so it reaches the catch and the exit 1 below.
     $ErrorActionPreference = 'Stop'
     try {
-        if ([string]::IsNullOrEmpty($SweeperPath)) {
-            $SweeperPath = Join-Path $PSScriptRoot 'orphan-sweep.ps1'
-        }
-        try {
-            $sweeperResolved = Resolve-AbsolutePath -Path $SweeperPath
-        } catch {
-            throw "Register-OrphanSweepTask: -SweeperPath '$SweeperPath' could not be resolved: $($_.Exception.Message)"
+        $sweeperResolved = $null
+        $launcherRootResolved = $null
+        if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+            if (-not [string]::IsNullOrEmpty($SweeperPath)) {
+                throw "Register-OrphanSweepTask: -SweeperPath and -LauncherRoot name different actions, " +
+                    "the sweeper itself or the launcher that runs the installed one; pass one of them."
+            }
+            try {
+                $launcherRootResolved = Resolve-AbsolutePath -Path $LauncherRoot
+            } catch {
+                throw "Register-OrphanSweepTask: -LauncherRoot '$LauncherRoot' could not be resolved: $($_.Exception.Message)"
+            }
+        } else {
+            if ([string]::IsNullOrEmpty($SweeperPath)) {
+                $SweeperPath = Join-Path $PSScriptRoot 'orphan-sweep.ps1'
+            }
+            try {
+                $sweeperResolved = Resolve-AbsolutePath -Path $SweeperPath
+            } catch {
+                throw "Register-OrphanSweepTask: -SweeperPath '$SweeperPath' could not be resolved: $($_.Exception.Message)"
+            }
         }
         try {
             $findingsResolved = Resolve-AbsolutePath -Path $FindingsPath
         } catch {
             throw "Register-OrphanSweepTask: -FindingsPath '$FindingsPath' could not be resolved: $($_.Exception.Message)"
         }
-        Register-OrphanSweepTask -SweeperPath $sweeperResolved -FindingsPath $findingsResolved `
-            -User $User -Start:$Start -Remove:$Remove -WhatIf:$WhatIf
+        Register-OrphanSweepTask -SweeperPath $sweeperResolved -LauncherRoot $launcherRootResolved `
+            -FindingsPath $findingsResolved -User $User -Start:$Start -Remove:$Remove -WhatIf:$WhatIf
     } catch {
         # Console.Error.WriteLine, not Write-Error: Write-Error under $ErrorActionPreference =
         # 'Stop' raises a terminating error of its own, which skips the exit 1 below. The message

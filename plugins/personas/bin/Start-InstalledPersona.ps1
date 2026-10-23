@@ -4,8 +4,10 @@
 #
 #   powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File <LauncherRoot>\Start-InstalledPersona.ps1 -Name <n> [-Roster <path>] [-EnvFile <path>]
 #
-# Registration copies this file into the launcher root, a folder outside the plugin cache, so the
-# task's action names one path that no plugin update moves. At each start the script reads the
+# Registration copies this file into the launcher root, a folder outside the plugin folder, the
+# marketplace and the plugin cache, so the task's action names one path that no plugin update
+# moves. It copies bin/installed-plugin-functions.ps1 beside it, which this script dot-sources for
+# the record lookup. At each start the script reads the
 # installed plugin's record from installed_plugins.json, copies that version's plugin folder into
 # <LauncherRoot>\runtime\<version> unless the snapshot is already there, and runs the snapshot's
 # bin\Start-Persona.ps1 with -Name, -Roster and -EnvFile, exiting with its exit code.
@@ -34,9 +36,10 @@
 # becomes a version's snapshot. A temporary copy left by a launcher that was killed mid-copy is
 # removed by a later start once it is an hour old, far longer than any copy takes.
 #
-# A refusal (an unreadable or missing record, a version that cannot name a folder, an install
-# folder with no keeper in it, an incomplete copy, a copy that fails) is one line in
-# <LauncherRoot>\launcher.log and exit 1, since a scheduled task gives stderr no console. The
+# A refusal (a missing shared functions file, an unreadable or missing record, a version that
+# cannot name a folder, an install folder with no keeper in it, an incomplete copy, a copy that
+# fails) is one line in <LauncherRoot>\launcher.log and exit 1, since a scheduled task gives
+# stderr no console. The
 # task's restart-on-failure setting retries a 1 every minute, up to its restart count.
 [CmdletBinding()]
 param(
@@ -96,48 +99,6 @@ function Stop-LauncherWithError {
     Write-LauncherLog "ERROR $Text"
     [Console]::Error.WriteLine("Start-InstalledPersona: $Text")
     exit 1
-}
-
-<#
-.SYNOPSIS
-Returns the install path and version installed_plugins.json records for one plugin id.
-
-.DESCRIPTION
-The file maps each plugin id to an array of install records, one per scope. The user-scope record
-is taken where there is one, since that is the scope a fleet machine installs the plugin at, and the
-first record otherwise. The caller logs which scope it took. The version becomes a folder name under
-the runtime root, so it must start with a letter, digit, underscore or hyphen, hold only those and
-dots after that, and not end in a dot, which Windows drops from a folder name. A reserved device
-name (CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to LPT9), with or without an extension, is refused too.
-#>
-function Get-InstalledPluginRecord {
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Id)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "installed plugin list '$Path' does not exist"
-    }
-    try {
-        $parsed = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    } catch {
-        throw "installed plugin list '$Path' could not be read: $($_.Exception.Message)"
-    }
-    $property = $null
-    if ($null -ne $parsed.plugins) { $property = $parsed.plugins.PSObject.Properties[$Id] }
-    if ($null -eq $property) {
-        throw "installed plugin list '$Path' has no record for '$Id'"
-    }
-    $records = @($property.Value)
-    $record = @($records | Where-Object { $_.scope -eq 'user' }) | Select-Object -First 1
-    if ($null -eq $record) { $record = $records | Select-Object -First 1 }
-    $installPath = [string]$record.installPath
-    $version = [string]$record.version
-    if ([string]::IsNullOrWhiteSpace($installPath)) {
-        throw "the '$Id' record in '$Path' carries no installPath"
-    }
-    if ($version -notmatch '\A[A-Za-z0-9_-][A-Za-z0-9._-]*\z' -or $version.EndsWith('.') -or
-        $version -match '\A(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?\z') {
-        throw "the '$Id' record in '$Path' carries version '$version', which cannot name a folder"
-    }
-    return @{ InstallPath = $installPath; Version = $version; Scope = [string]$record.scope }
 }
 
 <#
@@ -209,6 +170,13 @@ if ([string]::IsNullOrWhiteSpace($ConfigDir)) {
     if ([string]::IsNullOrWhiteSpace($ConfigDir)) { $ConfigDir = Join-Path $env:USERPROFILE '.claude' }
 }
 $listPath = Join-Path (Join-Path $ConfigDir 'plugins') 'installed_plugins.json'
+
+# Get-InstalledPluginRecord lives in the shared functions file registration copies beside this one.
+$sharedFunctions = Join-Path $PSScriptRoot 'installed-plugin-functions.ps1'
+if (-not (Test-Path -LiteralPath $sharedFunctions -PathType Leaf)) {
+    Stop-LauncherWithError "$Name`: the shared functions file '$sharedFunctions' is missing; re-run the registration to install it"
+}
+. "$sharedFunctions"
 
 try {
     $record = Get-InstalledPluginRecord -Path $listPath -Id $PluginId

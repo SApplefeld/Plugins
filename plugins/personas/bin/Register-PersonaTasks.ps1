@@ -30,14 +30,23 @@
 # path resolves against nothing reliable. Left unbound, it resolves in the script body, after the
 # param block runs, to the parent of this script's own directory. That default is right when the
 # operator runs this script from `<checkout>/plugins/personas` in the repository checkout and wrong from a worktree,
-# since a task pointed at a worktree breaks when that worktree is removed.
+# since a task pointed at a worktree breaks when that worktree is removed. A -RepoRoot under a
+# plugins\marketplaces or plugins\cache folder, given or defaulted, is refused unless -LauncherRoot
+# is given, before the password prompt, since a plugin update replaces both folders under a running
+# supervisor and a task pinned there breaks that update. The read of the existing tasks also reports,
+# printed under -WhatIf and on a real run alike, every AgentPersona-* task whose action's -File path
+# already sits under such a folder: an enabled entry's line says this run repoints it, since the
+# update in place replaces the action. A disabled entry's task and an orphan left in place keep their
+# action, so their lines say nothing repoints it, the orphan's beside its orphan line. An orphan
+# under -Prune gets no line, since the run unregisters it, or would under -WhatIf.
 #
 # -LauncherRoot runs the fleet from the installed personas plugin instead of a checkout. The script
-# copies bin/Start-InstalledPersona.ps1 into that folder and points each task's action at the copy,
-# which runs the installed plugin's current version from a snapshot under <LauncherRoot>\runtime
-# (the launcher's own header says how). It is the route for a machine that has the plugin and no
-# repository: run this script from the installed plugin's folder, whose bin holds both scripts. A
-# folder inside the plugin folder or the plugin cache is refused, since a plugin update replaces
+# copies bin/Start-InstalledPersona.ps1 and the shared bin/installed-plugin-functions.ps1 it
+# dot-sources into that folder and points each task's action at the launcher copy, which runs the
+# installed plugin's current version from a snapshot under <LauncherRoot>\runtime (the launcher's
+# own header says how). It is the route for a machine that has the plugin and no repository: run
+# this script from the installed plugin's folder, whose bin holds all three files. A
+# folder inside the plugin folder, the marketplace or the plugin cache is refused, since a plugin update replaces
 # both. -WhatIf prints the copy it would make and makes none.
 #
 # -StartupDelay holds every persona task back after its boot trigger fires, so the channel
@@ -102,6 +111,16 @@ $KeeperDefaultStartupDelay = 'PT2M'
 $KeeperDefaultStartupStagger = 'PT15S'
 $KeeperDefaultRetryInterval = 'PT5M'
 $KeeperDefaultRetryWindow = 'PT1H'
+
+# $PluginInstallFolderPattern, the folders a plugin update replaces, is written once in the shared
+# functions file beside this script, which a -LauncherRoot run also copies beside the launcher.
+# Confirm-RepoRootOutsidePluginInstall tests -RepoRoot against it, Get-PersonaTaskDefinitions tests
+# -LauncherRoot against it, and Get-PluginInstallActionFile tests an existing task's action path.
+if (-not (Test-Path -LiteralPath "$PSScriptRoot\installed-plugin-functions.ps1" -PathType Leaf)) {
+    throw "Register-PersonaTasks: '$PSScriptRoot\installed-plugin-functions.ps1' does not exist; " +
+        "it ships beside this script in the personas plugin's bin folder."
+}
+. "$PSScriptRoot\installed-plugin-functions.ps1"
 
 <#
 .SYNOPSIS
@@ -271,6 +290,54 @@ function Read-PersonaRoster {
 
 <#
 .SYNOPSIS
+Throws when -RepoRoot sits under a plugin marketplace or plugin cache folder and no -LauncherRoot
+is given.
+
+.DESCRIPTION
+A task action that names the plugin folder runs the keeper from a folder a plugin update replaces,
+so the update fails or pulls the supervisor's files from under it. With -LauncherRoot the action
+names the launcher and -RepoRoot is the installed plugin folder by design, so the test is skipped.
+The canonical path has a separator appended and is matched for a plugins\marketplaces\ or
+plugins\cache\ segment pair under either separator, so a folder whose name merely starts with
+marketplaces or cache is no match. This is the one place the test is written;
+Get-PersonaTaskDefinitions calls it for a direct caller and the script body calls it before the
+password prompt.
+#>
+function Confirm-RepoRootOutsidePluginInstall {
+    param([Parameter(Mandatory)][string]$RepoRoot, [string]$LauncherRoot)
+    if (-not [string]::IsNullOrEmpty($LauncherRoot)) { return }
+    $repoFull = [IO.Path]::GetFullPath($RepoRoot).TrimEnd('\', '/') + '\'
+    if ($repoFull -match $PluginInstallFolderPattern) {
+        throw "Confirm-RepoRootOutsidePluginInstall: -RepoRoot '$RepoRoot' sits under a plugins\marketplaces " +
+            "or plugins\cache folder, which a plugin update replaces under a running supervisor. Pass " +
+            "-LauncherRoot naming a folder outside both, such as one under the account's profile, or " +
+            "run from a checkout."
+    }
+}
+
+<#
+.SYNOPSIS
+Returns the -File path of a task action's argument string when it sits under a plugins\marketplaces
+or plugins\cache folder, and nothing otherwise.
+
+.DESCRIPTION
+The path is the quoted or bare token after -File, the form every action this script builds takes. A
+launcher under -LauncherRoot and a checkout's Start-Persona.ps1 are outside both folders, so a
+healthy fleet yields nothing. Every -File token is tested, and the first under either folder is
+returned. A null or empty argument string yields nothing.
+#>
+function Get-PluginInstallActionFile {
+    param([AllowNull()][AllowEmptyString()][string]$Arguments)
+    if ([string]::IsNullOrEmpty($Arguments)) { return }
+    foreach ($fileMatch in [regex]::Matches($Arguments, '(?i)-File\s+(?:"([^"]+)"|(\S+))')) {
+        $file = $fileMatch.Groups[1].Value
+        if ([string]::IsNullOrEmpty($file)) { $file = $fileMatch.Groups[2].Value }
+        if ($file -match $PluginInstallFolderPattern) { return $file }
+    }
+}
+
+<#
+.SYNOPSIS
 Builds one scheduled-task definition per enabled roster entry, touching no cmdlet that writes.
 
 .DESCRIPTION
@@ -294,7 +361,9 @@ carrying that string would pass the `if (-not $entry.enabled)` test below and bu
 a persona its own roster field disables. The target script and the env file must both exist: a missing Start-Persona.ps1
 means -RepoRoot points at a worktree or a wrong root, and a missing env file means the task would
 refuse to start at boot with nothing to say why until then. Neither check is skipped under -WhatIf,
-since -WhatIf's purpose is to show what a real run would do and a real run would fail here too. The
+since -WhatIf's purpose is to show what a real run would do and a real run would fail here too. A
+-RepoRoot under a plugin marketplace or cache folder is refused here as well when -LauncherRoot is
+empty, through Confirm-RepoRootOutsidePluginInstall. The
 action pins powershell.exe's own full path under System32 rather than the bare executable name, so
 the task engine resolves the exact binary at every boot instead of searching PATH for it.
 #>
@@ -374,21 +443,27 @@ function Get-PersonaTaskDefinitions {
                 "would escape the task action's closing quote and merge two arguments into one."
         }
     }
+    Confirm-RepoRootOutsidePluginInstall -RepoRoot $RepoRoot -LauncherRoot $LauncherRoot
     if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
         if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) {
             throw "Get-PersonaTaskDefinitions: '$sourceScript' does not exist; -RepoRoot must name " +
                 "a personas plugin folder whose bin holds the launcher -LauncherRoot installs."
         }
-        # The launcher root must outlive every plugin update, and the plugin folder and the plugin
-        # cache are exactly what an update replaces or cleans up. Each path is compared in its
+        $sharedSource = Join-Path (Join-Path $RepoRoot 'bin') 'installed-plugin-functions.ps1'
+        if (-not (Test-Path -LiteralPath $sharedSource -PathType Leaf)) {
+            throw "Get-PersonaTaskDefinitions: '$sharedSource' does not exist; -RepoRoot must name " +
+                "a personas plugin folder whose bin holds the shared functions file the launcher reads."
+        }
+        # The launcher root must outlive every plugin update, and the plugin folder, the marketplace
+        # and the plugin cache are exactly what an update replaces or cleans up. Each path is compared in its
         # canonical form with a separator appended, so a sibling sharing a name prefix is no match.
         $launcherFull = [IO.Path]::GetFullPath($LauncherRoot).TrimEnd('\', '/') + '\'
         $repoFull = [IO.Path]::GetFullPath($RepoRoot).TrimEnd('\', '/') + '\'
         if ($launcherFull.StartsWith($repoFull, [StringComparison]::OrdinalIgnoreCase) -or
-            $launcherFull -match '(?i)[\\/]plugins[\\/]cache[\\/]') {
+            $launcherFull -match $PluginInstallFolderPattern) {
             throw "Get-PersonaTaskDefinitions: -LauncherRoot '$LauncherRoot' sits inside the " +
-                "plugin folder or the plugin cache, which a plugin update replaces. Name a folder " +
-                "outside both, such as one under the account's profile."
+                "plugin folder, the marketplace or the plugin cache, which a plugin update replaces. Name a folder " +
+                "outside all three, such as one under the account's profile."
         }
     } elseif (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) {
         throw "Get-PersonaTaskDefinitions: '$sourceScript' does not exist; -RepoRoot must name " +
@@ -525,9 +600,10 @@ Builds every enabled entry's task definition, then registers, updates, disables,
 (only under -Prune) removes tasks to match the roster.
 
 .DESCRIPTION
-$IsElevated and $ExistingTaskNames exist so a test can drive the elevation guard and the disabled,
-absent and orphan branches with no scheduler read and no ScheduledTasks cmdlet that writes, the
-same reason the broker script's Register-BrokerScheduledTask takes $IsElevated as a parameter.
+$IsElevated, $ExistingTaskNames and $ExistingTaskArguments exist so a test can drive the elevation
+guard, the disabled, absent and orphan branches and the plugin-install report with no scheduler read
+and no ScheduledTasks cmdlet that writes, the same reason the broker script's
+Register-BrokerScheduledTask takes $IsElevated as a parameter.
 $WhatIf skips the elevation throw and prints each definition and each planned action instead of
 registering, disabling or unregistering anything; it is the unelevated inspection path. Without
 -WhatIf the elevation check runs before any ScheduledTasks cmdlet, including the read that lists
@@ -582,6 +658,9 @@ function Register-PersonaTasks {
         [switch]$WhatIf,
         [bool]$IsElevated = (Test-IsElevated),
         [string[]]$ExistingTaskNames,
+        # Task name to the task's action argument string, which the plugin-install report reads.
+        # Left unbound, a task named in $ExistingTaskNames has no action to report on.
+        [hashtable]$ExistingTaskArguments,
         [string]$StartupDelay = $KeeperDefaultStartupDelay,
         [string]$StartupStagger = $KeeperDefaultStartupStagger,
         [string]$RetryInterval = $KeeperDefaultRetryInterval,
@@ -638,21 +717,35 @@ function Register-PersonaTasks {
             $existingTasks = @()
         }
         $existing = @($existingTasks | ForEach-Object { $_.TaskName })
+        $existingArguments = @{}
+        foreach ($existingTask in $existingTasks) {
+            $existingArguments[[string]$existingTask.TaskName] =
+                (@($existingTask.Actions | ForEach-Object { $_.Arguments }) -join "`n")
+        }
     } else {
         $existing = @($ExistingTaskNames)
+        $existingArguments = $ExistingTaskArguments
+        if ($null -eq $existingArguments) { $existingArguments = @{} }
     }
 
-    # The launcher is copied after every check above and the read of the existing tasks, and before
-    # the first task is written, so a run refused before any write leaves the launcher root as it
-    # found it, and no task names a launcher that is not there yet. The copy overwrites an older
-    # launcher, which is how a re-registration from a newer plugin version updates it.
+    # The launcher and the shared functions file it dot-sources are copied after every check above
+    # and the read of the existing tasks, and before the first task is written, so a run refused
+    # before any write leaves the launcher root as it found it, and no task names a launcher that is
+    # not there yet. The shared file goes first, so a launcher never lands without the file it reads.
+    # Each copy overwrites an older one, which is how a re-registration from a newer plugin version
+    # updates them.
     if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
+        $sharedSource = Join-Path (Join-Path $RepoRoot 'bin') 'installed-plugin-functions.ps1'
+        $sharedTarget = Join-Path $LauncherRoot 'installed-plugin-functions.ps1'
         $launcherSource = Join-Path (Join-Path $RepoRoot 'bin') 'Start-InstalledPersona.ps1'
         $launcherTarget = Join-Path $LauncherRoot 'Start-InstalledPersona.ps1'
         if ($WhatIf) {
+            Write-Output "would install shared functions $sharedTarget"
             Write-Output "would install launcher $launcherTarget"
         } else {
             [void][System.IO.Directory]::CreateDirectory($LauncherRoot)
+            Copy-Item -LiteralPath $sharedSource -Destination $sharedTarget -Force -ErrorAction Stop
+            Write-Output "installed shared functions $sharedTarget"
             Copy-Item -LiteralPath $launcherSource -Destination $launcherTarget -Force -ErrorAction Stop
             Write-Output "installed launcher $launcherTarget"
         }
@@ -664,6 +757,14 @@ function Register-PersonaTasks {
         $taskName = "AgentPersona-$($entry.name)"
         if ($entry.enabled) {
             $definition = $definitionsByTaskName[$taskName]
+            # The update in place below replaces the action, so an existing task that already runs
+            # from a plugin install folder is repointed by this run. The line says so before this
+            # task's own write.
+            $installedFile = Get-PluginInstallActionFile -Arguments $existingArguments[$taskName]
+            if ($null -ne $installedFile) {
+                $repointVerb = if ($WhatIf) { 'would repoint' } else { 'repoints' }
+                Write-Output "$taskName`: action runs $installedFile, under a plugin install folder; this run $repointVerb it"
+            }
             if ($WhatIf) {
                 Write-PersonaTaskDefinition -Definition $definition
                 # The same $existing test the real branch below takes, so a dry run tells the
@@ -702,6 +803,11 @@ function Register-PersonaTasks {
             }
         } else {
             if ($existing -contains $taskName) {
+                # Disabling leaves the action as it is, so nothing repoints a disabled task.
+                $installedFile = Get-PluginInstallActionFile -Arguments $existingArguments[$taskName]
+                if ($null -ne $installedFile) {
+                    Write-Output "$taskName`: action runs $installedFile, under a plugin install folder; nothing repoints it"
+                }
                 if ($WhatIf) {
                     Write-Output "would disable $taskName"
                 } else {
@@ -730,6 +836,12 @@ function Register-PersonaTasks {
             Write-Output "unregistered $taskName"
         } else {
             Write-Output "orphan $taskName`: left in place; pass -Prune to unregister"
+        }
+        # An orphan under -Prune is unregistered, so a line about its action would describe a task
+        # that is gone.
+        $installedFile = if ($Prune) { $null } else { Get-PluginInstallActionFile -Arguments $existingArguments[$taskName] }
+        if ($null -ne $installedFile) {
+            Write-Output "orphan $taskName`: action runs $installedFile, under a plugin install folder; nothing repoints it"
         }
     }
 }
@@ -783,6 +895,11 @@ if ($MyInvocation.InvocationName -ne '.') {
                 throw "Register-PersonaTasks: -LauncherRoot '$LauncherRoot' could not be resolved: $($_.Exception.Message)"
             }
         }
+
+        # Before the roster is read and before Get-Credential, so a refused root never reaches a
+        # password prompt, and before Register-PersonaTasks's elevation refusal, so an unelevated
+        # run meets this refusal first.
+        Confirm-RepoRootOutsidePluginInstall -RepoRoot $repoRootResolved -LauncherRoot $launcherRootResolved
 
         $entries = Read-PersonaRoster -Path $rosterResolved
 
