@@ -29,16 +29,19 @@
 // here consults it for that.
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { inertBlock } from "../discord/render.ts";
+import { inertBlock, renderPageLine } from "../discord/render.ts";
+import type { CallOutcome } from "../discord/transport.ts";
 import { boundedAuthor, clean, withoutInvisible } from "../sanitize.ts";
 import { parseVerdict } from "../security/permission.ts";
 import type { PermissionDesk } from "../security/permission.ts";
 import { SNOWFLAKE } from "../security/senders.ts";
 import type { SenderClass, SenderGate } from "../security/senders.ts";
 import type { RestartAnswer } from "../index.ts";
+import { liveByLineage } from "../registry.ts";
 import type { Registry, SessionRecord } from "../registry.ts";
 import { reducedName } from "./attachments.ts";
 import type { AttachmentIntake, InboundAttachment, RefusalCause } from "./attachments.ts";
+import type { TalkFile, TalkTap } from "../web/talk.ts";
 import type { RelayEvent, RelayHub } from "./relays.ts";
 import {
   HELD_BUFFERS_FORMAT_VERSION,
@@ -125,9 +128,78 @@ export const MAX_INBOUND_TEXT_LENGTH = 4_000;
 export const MAX_INBOUND_PER_WINDOW = 20;
 const INBOUND_WINDOW_MS = 60_000;
 
+/**
+ * What a line typed on the operator's web page became. `delivered` is the pipe took it or the live
+ * response gate holds it; the rest name why nothing reached the session. `empty` is a text with no
+ * visible words once the invisible class is stripped and no file beside it, which the route refuses
+ * as a malformed body. `unknown-file` is a file id this broker does not hold from the page for the
+ * session the line would reach, as after that session was replaced or the broker restarted; the
+ * route answers it as a status, so the page sends its files again.
+ */
+export type WebDeliveryStatus =
+  | "delivered"
+  | "no-session"
+  | "ended"
+  | "no-thread"
+  | "no-channel"
+  | "rate"
+  | "empty"
+  | "unknown-file";
+
+/**
+ * What a typed answer from the page did. `answered` resolved the session's held question with the
+ * words; `no-question` found none the desk would answer with them, and delivered and posted nothing.
+ * `too-long` is a line past the inbound ceiling, which is never an answer, as a cut Discord message
+ * is not.
+ */
+export type WebAnswerStatus = "answered" | "no-session" | "ended" | "no-thread" | "empty" | "too-long" | "no-question";
+
+/**
+ * The id a web line's event carries where its Discord post failed, so the line still reaches the
+ * session under an id of its own. A line under one has no thread message, so the talk ring is given
+ * no receipt key for it and the tracker's stage for it is never read.
+ */
+export const UNPOSTED_WEB_ID_PREFIX = "web-";
+
+/**
+ * The sender id a page line carries: this prefix and the tailnet login the listener's gate
+ * admitted. No Discord account's id takes this shape, so a held line's origin is read off its id.
+ */
+export const WEB_SENDER_PREFIX = "web:";
+
+/** The name a web line is attributed to: the login's part before `@`, bounded as the gateway bounds a name. */
+export function webAuthorName(login: string): string {
+  const name = boundedAuthor(login.split("@")[0]);
+  return name === "" ? "operator" : name;
+}
+
+/** The label a web line's author rides under on its event and in the talk ring. */
+export function webAuthorLabel(login: string): string {
+  return `${webAuthorName(login)} (page)`;
+}
+
 /** Free of anything that can hide or reorder what it says, and trimmed, and never cut. */
 function visibleText(text: string): string {
   return withoutInvisible(text).trim();
+}
+
+/** A file the page sent, as a web line carries it: its id in the page's store and what it was saved as. */
+type WebUpload = { id: string; path: string; name: string; contentType: string };
+
+/**
+ * The thread posts a web line's copy takes, in order. The text is rendered by the machinery a voice
+ * line is rendered by. The messenger carries one file a post, so the first file rides the text's last
+ * post, as a reply's file does, and each other file, or the first where there is no text, rides a
+ * post of its own under the author label and the file's reduced name.
+ */
+function pagePosts(name: string, words: string, uploads: readonly WebUpload[]): Array<{ text: string; upload: WebUpload | null }> {
+  const posts: Array<{ text: string; upload: WebUpload | null }> = renderPageLine(name, words).map((part) => ({ text: part, upload: null }));
+  for (const [index, upload] of uploads.entries()) {
+    const last = posts[posts.length - 1];
+    if (index === 0 && last !== undefined) last.upload = upload;
+    else for (const part of renderPageLine(name, upload.name).slice(0, 1)) posts.push({ text: part, upload });
+  }
+  return posts;
 }
 
 /** A message the router built, carrying the paths saved from it, or no field where there are none. */
@@ -296,6 +368,44 @@ export type InboundRouterOptions = {
    */
   receipts?: { delivered: (threadId: string, messageId: string, at: number) => void };
   /**
+   * The talk page's transcript ring, present only while the web surface is on. Shown one `inbound`
+   * line for each message handed to a session, with the author and class the message carries, and
+   * one for each typed Discord answer or verdict the thread consumes, which no session is handed. A
+   * rate-dropped, refused or ended-session message never reaches it, and a throw out of it is caught
+   * and logged with the session and never the text.
+   */
+  talkTap?: TalkTap;
+  /**
+   * The thread messenger's post, for the copy of a web line that goes into the session's Discord
+   * thread as the bot. Absent, as on a broker with no web surface, `deliverWeb` posts nothing and
+   * every web line takes the unposted id.
+   */
+  page?: {
+    post: (input: {
+      threadId: string;
+      text: string;
+      file?: { name: string; data: Uint8Array; contentType: string };
+    }) => Promise<CallOutcome<{ messageId: string | null }>>;
+  };
+  /**
+   * The web page's files, present only while the web surface takes files. `upload` names the file
+   * the page sent under an id, `bytesOf` reads it back for its copy in the thread, and `linkFor`
+   * names the page's link to a file by the path it was saved at, for the line the talk ring is
+   * shown. Absent, a web line naming any file id is refused as `unknown-file`.
+   */
+  webFiles?: {
+    upload: (id: string) => { sessionId: string; path: string; name: string; contentType: string } | null;
+    bytesOf: (id: string) => Promise<Uint8Array | null>;
+    linkFor: (file: string) => TalkFile | null;
+  };
+  /**
+   * The web listener's login list, lower-cased, as the listener's gate admits against it. Read
+   * only where a page line held across a restart is restored: the line is the operator's again
+   * only where its login is still on this list. Absent, as on a broker with no web surface, no
+   * held page line is admitted.
+   */
+  webOperators?: readonly string[];
+  /**
    * The attachment intake, which fetches a delivered message's files and saves them under the
    * broker's state directory. Absent, a message's attachments are ignored, and a message with no
    * typed text is dropped as one with nothing to hand a session. Its folder is also the only place
@@ -318,6 +428,27 @@ export type InboundRouterOptions = {
 export type InboundRouter = {
   /** Routes one gateway message. Never throws: a failed notice is logged, not propagated. */
   deliver: (message: InboundMessage) => Promise<void>;
+  /**
+   * Hands a line the operator typed on the web page to the live session carrying `lineage`, as an
+   * operator's message. The caller has already established that `login` is an admitted operator:
+   * this is the one path a web request becomes the operator's word, and it trusts the gate in front
+   * of it as `deliver` trusts the sender gate. The line is posted into the session's thread as the
+   * bot first, under the author label, and that post's id is the id the event and the receipts
+   * carry; a failed post costs the line its receipts and nothing else. `fileIds` name files the
+   * page sent before the line, each of which must be one the web files store saved for the session
+   * the line reaches, else nothing is posted or delivered and the answer is `unknown-file`. The
+   * event carries their saved paths, and the thread's copy carries the files. Never throws.
+   */
+  deliverWeb: (lineage: string, login: string, text: string, fileIds: readonly string[]) => Promise<WebDeliveryStatus>;
+  /**
+   * Answers the question the live session carrying `lineage` is held on with a line the operator
+   * typed on the page, through the desk's `answerTyped`, the seam a typed Discord answer takes. The
+   * caller has established `login` is an admitted operator, as for `deliverWeb`. An answered line
+   * is then posted into the session's thread under the author label, as a page line is, and shown
+   * to the talk ring as an inbound line; it is never handed to the session as a message, since the
+   * answer is its tool result. A line the desk refuses posts nothing. Never throws.
+   */
+  answerWeb: (lineage: string, login: string, text: string) => Promise<WebAnswerStatus>;
   /**
    * Drops the held buffer, and its timer, of every thread whose session has ended or left the
    * registry, delivering nothing. Called with the full record set on every registry mutation, the
@@ -927,7 +1058,8 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     for (const { delivery, written } of outcomes) {
       if (!written) continue;
       for (const message of delivery.messages) {
-        options.receipts?.delivered(threadId, message.id, deliveredAt);
+        markDelivered(threadId, message.id, deliveredAt);
+        tapTalk(record, threadId, message);
       }
     }
     for (const { delivery, written } of outcomes) {
@@ -1061,13 +1193,21 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       : null;
 
   /**
-   * A restored line classed again through the roster as it stands now, or null for an account
-   * the roster no longer admits. The class in the file is the roster's answer at admission, and a
-   * roster change takes effect at a restart, so a line held across one is delivered under the
-   * class its account holds today and never under one it has lost: the same guard the inbound
-   * path applies, on the same id.
+   * A restored line classed again through the list that admitted it, as that list stands now, or
+   * null for a sender it no longer admits. The class in the file is the list's answer at
+   * admission, and a list change takes effect at a restart, so a line held across one is
+   * delivered under the class its sender holds today and never under one it has lost: the same
+   * guard the inbound path applies, on the same id. A Discord line is classed by the roster. A
+   * page line, whose sender is a tailnet login under `WEB_SENDER_PREFIX`, was admitted by the web
+   * listener's login list and is the operator's again only where that login is still on it. Its
+   * device is not checked again, since the held file carries no node: the line passed the device
+   * list and the host-node refusal when it was written.
    */
   function reclassed(message: BufferedMessage): BufferedMessage | null {
+    if (message.senderId.startsWith(WEB_SENDER_PREFIX)) {
+      const login = message.senderId.slice(WEB_SENDER_PREFIX.length).toLowerCase();
+      return options.webOperators?.includes(login) === true ? { ...message, senderClass: "operator" } : null;
+    }
     const senderClass = options.gate.classOf(message.senderId);
     return senderClass === null ? null : { ...message, senderClass };
   }
@@ -1115,12 +1255,27 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         );
         continue;
       }
-      const messages = entry.messages.map(reclassed).filter((message) => message !== null);
-      if (messages.length < entry.messages.length) {
+      // Each dropped line is counted under the list that stopped admitting it, so the log says
+      // which list changed. Neither count names a login, an account or any of the text.
+      const messages: BufferedMessage[] = [];
+      let fromRoster = 0;
+      let fromPage = 0;
+      for (const message of entry.messages) {
+        const classed = reclassed(message);
+        if (classed !== null) messages.push(classed);
+        else if (message.senderId.startsWith(WEB_SENDER_PREFIX)) fromPage += 1;
+        else fromRoster += 1;
+      }
+      if (fromRoster > 0) {
         log(
-          `routing: dropped ${String(entry.messages.length - messages.length)} of ${count} buffered ` +
-            `messages held for session ${entry.sessionId}, written from accounts the roster no ` +
-            "longer admits",
+          `routing: dropped ${String(fromRoster)} of ${count} buffered messages held for session ` +
+            `${entry.sessionId}, written from accounts the roster no longer admits`,
+        );
+      }
+      if (fromPage > 0) {
+        log(
+          `routing: dropped ${String(fromPage)} of ${count} buffered messages held for session ` +
+            `${entry.sessionId}, page lines whose login the web listener no longer admits`,
         );
       }
       if (messages.length > 0) kept.push({ entry: { ...entry, messages }, record });
@@ -1130,6 +1285,45 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       for (const { record } of kept) {
         if (options.relays.attached(record.processToken)) gate.deliverRestored(record.sessionId);
       }
+    }
+  }
+
+  /**
+   * Registers a written line with the receipt tracker, which paints its stages on the thread
+   * message the id names. A web line whose thread post failed carries an unposted id that names no
+   * message, so it is not registered: a stage queued on it would be a reaction on a message that
+   * does not exist.
+   */
+  function markDelivered(threadId: string, messageId: string, at: number): void {
+    if (messageId.startsWith(UNPOSTED_WEB_ID_PREFIX)) return;
+    options.receipts?.delivered(threadId, messageId, at);
+  }
+
+  /**
+   * Shows the talk ring one line a session is being handed. Nothing awaits it and a throw out of it
+   * changes nothing the delivery returns, posts or logs on its own paths; the line it logs carries
+   * the session and never the text. A session with no lineage is not shown.
+   */
+  function tapTalk(record: SessionRecord, threadId: string, buffered: BufferedMessage): void {
+    if (options.talkTap === undefined || record.lineage === null) return;
+    try {
+      options.talkTap.push(record.lineage, {
+        kind: "inbound",
+        author: buffered.author,
+        senderClass: buffered.senderClass,
+        text: buffered.text,
+        // A file the page sent carries its link; a file the Discord intake saved has none, since
+        // the page's store never held it.
+        files: (buffered.attachments ?? []).flatMap((file) => {
+          const link = options.webFiles?.linkFor(file) ?? null;
+          return link === null ? [] : [link];
+        }),
+        // The thread message the tracker stages this line under. A web line whose post failed has
+        // none, so its receipt reads null rather than the stage of a message that does not exist.
+        tracked: buffered.id.startsWith(UNPOSTED_WEB_ID_PREFIX) ? null : { threadId, messageId: buffered.id },
+      });
+    } catch {
+      log(`routing: the talk tap could not take a line for session ${record.sessionId}`);
     }
   }
 
@@ -1146,6 +1340,23 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     addressed: { mentionsBot: boolean; repliesToBot: boolean },
     refusals: readonly NoticeRefusal[],
   ): Promise<void> {
+    return deliverTakenWritten(record, message, buffered, addressed, refusals).then(() => undefined);
+  }
+
+  /**
+   * `deliverTaken`, resolving to whether the line reached the session. Off the gate that is the
+   * pipe write's own answer, read for the page, which is told `no-channel` where the pipe refused
+   * a line both reads of `attached` had passed. On the live gate the line joined its thread's
+   * buffer or went down with it, and the answer is true: a pipe refusing a released buffer is
+   * announced in the thread, as it is for a Discord line, and is not the page's to hear.
+   */
+  function deliverTakenWritten(
+    record: SessionRecord,
+    message: InboundMessage,
+    buffered: BufferedMessage,
+    addressed: { mentionsBot: boolean; repliesToBot: boolean },
+    refusals: readonly NoticeRefusal[],
+  ): Promise<boolean> {
     if (gate === null || simulated) {
       // Shadow: the message joins the simulated buffer here, before the delivery below awaits
       // anything, as it would join the live buffer. The gateway does not await one delivery
@@ -1161,12 +1372,15 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       // with the gate on or off.
       const written = handOver(record, message.threadId, bufferedEvent(message.threadId, [buffered]), 1);
       return (async () => {
-        if (await written) {
-          options.receipts?.delivered(message.threadId, message.messageId, deliveredAt);
+        const taken = await written;
+        if (taken) {
+          tapTalk(record, message.threadId, buffered);
+          markDelivered(message.threadId, message.messageId, deliveredAt);
           // Announced only here, after the truncated text reached a live session.
           if (buffered.truncated) await announceCut(message.threadId);
         }
         await announceRefusals(message.threadId, refusals);
+        return taken;
       })();
     }
 
@@ -1183,8 +1397,13 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     return (async () => {
       await written;
       await announceRefusals(message.threadId, refusals);
+      return true;
     })();
   }
+
+  // Numbers the unposted ids this process hands out, so two web lines whose thread posts failed in
+  // the same millisecond still carry distinct ids into the gate's buffer and the journal.
+  let unposted = 0;
 
   return {
     async deliver(message) {
@@ -1222,6 +1441,23 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       // on: what it carries is taken in below, once it is known to reach a session.
       if (text === "" && files.length === 0) return;
 
+      const record = sessionForThread(options.registry.list(), options.threadFor, message.threadId);
+
+      // The message as the gate holds it: the text as bounded above and the name as the gateway
+      // bounded it, so what a delivered line carries is exactly what a delivered message carries,
+      // and nothing is sanitized twice. Its files and any paste join it once they are taken in.
+      // Built here, ahead of the verdict and the typed answer, because a line either consumes is
+      // shown to the talk ring in this same shape: the page carries the operator's own Discord
+      // answer or verdict as it carries their steering.
+      const typed: BufferedMessage = {
+        id: message.messageId,
+        senderId: message.senderId,
+        author: message.author,
+        senderClass,
+        text,
+        truncated,
+      };
+
       // A verdict that names a request this thread has open is consumed as a verdict and nothing
       // else. Forwarding it as chat as well would hand the model a message the operator wrote for
       // the broker, in the middle of a turn parked on the very prompt it answers. The pattern is
@@ -1251,11 +1487,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       // button path's control over a tap on a message of any age.
       const verdict = text === "" || truncated || !operator ? null : parseVerdict(text);
       if (verdict !== null && options.permissions.resolve(message.threadId, verdict, null)) {
+        // Shown to the ring as the operator's line, so the page reads the verdict the thread read.
+        // A thread no session holds has no lineage to show it under.
+        if (record !== null) tapTalk(record, message.threadId, typed);
         await refuseConsumed(message.threadId, files);
         return;
       }
-
-      const record = sessionForThread(options.registry.list(), options.threadFor, message.threadId);
 
       // `voice on` and `voice off` from an operator in a session's thread are the voice module's
       // commands, consumed as a verdict is: the operator wrote them to the broker, not to the
@@ -1368,6 +1605,9 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         text !== "" &&
         options.questions.answerTyped(record.sessionId, text)
       ) {
+        // Shown to the ring as the operator's line, as a typed page answer is, so the page reads
+        // the answer the thread read.
+        tapTalk(record, message.threadId, typed);
         await refuseConsumed(message.threadId, files);
         return;
       }
@@ -1401,17 +1641,6 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         return;
       }
 
-      // The message as the gate holds it: the text as bounded above and the name as the gateway
-      // bounded it, so what a delivered line carries is exactly what a delivered message carries,
-      // and nothing is sanitized twice. Its files and any paste join it once they are taken in.
-      const typed: BufferedMessage = {
-        id: message.messageId,
-        senderId: message.senderId,
-        author: message.author,
-        senderClass,
-        text,
-        truncated,
-      };
       const addressed = { mentionsBot: message.mentionsBot, repliesToBot: message.repliesToBot };
       const intake = options.attachments;
 
@@ -1432,6 +1661,187 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         return { after: deliverTaken(record, message, buffered, addressed, refusals) };
       });
       await after;
+    },
+
+    async deliverWeb(lineage, login, text, fileIds) {
+      // The session is found by lineage, never by thread: the page names the persona it is open on,
+      // and the thread is read off the session that carries it. An ended newest record is told
+      // apart from a lineage no record carries, since the operator reads the two differently.
+      const records = options.registry.list();
+      const record = liveByLineage(records, lineage);
+      if (record === null) return records.some((held) => held.lineage === lineage) ? "ended" : "no-session";
+      const threadId = options.threadFor(record.sessionId);
+      if (threadId === null) return "no-thread";
+
+      // Bounded exactly as a Discord line is, and the same emptiness rule: nothing visible and no
+      // file is nothing to hand a session.
+      const { text: words, truncated } = bounded(text);
+      if (words === "" && fileIds.length === 0) return "empty";
+
+      // Each id must name a file the page sent for this very session: an id the store never handed
+      // out, and one saved for another session, deliver nothing, before anything is posted or spent.
+      const uploads: WebUpload[] = [];
+      for (const id of fileIds) {
+        const upload = options.webFiles?.upload(id) ?? null;
+        if (upload === null || upload.sessionId !== record.sessionId) return "unknown-file";
+        uploads.push({ id, path: upload.path, name: upload.name, contentType: upload.contentType });
+      }
+
+      // Read before anything is posted or spent: a line that would reach no pipe should neither
+      // appear in the thread as delivered nor spend the session's window. `relays.deliver` answers
+      // false for exactly this token state, so this is that answer read ahead of the write.
+      if (!options.relays.attached(record.processToken)) return "no-channel";
+
+      // The one window the session has, shared with its Discord lines, so a flood from the page and
+      // a flood from the thread are the same flood.
+      if (!withinRate(record.sessionId)) {
+        log(`routing: session ${record.sessionId} is over its inbound rate ceiling, dropping a web line`);
+        return "rate";
+      }
+
+      const name = webAuthorName(login);
+      const author = webAuthorLabel(login);
+      const senderId = `${WEB_SENDER_PREFIX}${login}`;
+
+      // In the thread's turn, as a Discord message is, so the session reads the page's line in the
+      // order it landed against the thread's own. The thread post comes first, inside the turn,
+      // because its id is the id the event and the receipts carry.
+      let channel = true;
+      // Whether the pipe took the line, read off the write itself: `attached` can answer true
+      // inside the turn and the pipe still refuse the write that follows the thread post.
+      let written = true;
+      const { after } = await inTurn(threadId, async () => {
+        // Read again here, since the turn can wait on an earlier message's download and the pipe
+        // can go while it does. A line read as deliverable above but with no pipe now is neither
+        // posted nor handed over, and the page is told no-channel, the same answer the early read
+        // gives. The window spent above stays spent, as it does for a Discord line the pipe refuses.
+        if (!options.relays.attached(record.processToken)) {
+          channel = false;
+          return { after: Promise.resolve() };
+        }
+        // The thread's copy, rendered by the machinery a voice line is rendered by, so a typed line
+        // cannot draw a chip or open a quoted block in the thread, and split where it is longer than
+        // one post. Only the first post is awaited before the hand-over: its id is the line's, the
+        // message the receipts are painted on. The posts after it follow the hand-over, outside the
+        // turn and outside the page's wait, so a slow file post neither holds the thread's turn nor
+        // runs the page's request past its timeout into a second Send of the same line.
+        const page = options.page;
+        const posts = page === undefined ? [] : pagePosts(name, words, uploads);
+        const post = async (part: { text: string; upload: WebUpload | null }): Promise<{ ok: boolean; messageId: string | null }> => {
+          if (page === undefined) return { ok: false, messageId: null };
+          let file: { name: string; data: Uint8Array; contentType: string } | undefined;
+          if (part.upload !== null) {
+            const data = (await options.webFiles?.bytesOf(part.upload.id)) ?? null;
+            // The session still gets the path; the thread's copy goes without the file.
+            if (data === null) log(`routing: a file of the web line for session ${record.sessionId} could not be read for its thread copy`);
+            else file = { name: part.upload.name, data, contentType: part.upload.contentType };
+          }
+          try {
+            const outcome = await page.post({ threadId, text: part.text, ...(file === undefined ? {} : { file }) });
+            if (outcome.status !== "ok") {
+              log(`routing: the thread refused the web line's post for session ${record.sessionId}: ${outcome.status}`);
+              return { ok: false, messageId: null };
+            }
+            return { ok: true, messageId: outcome.value.messageId };
+          } catch {
+            log(`routing: posting the web line for session ${record.sessionId} failed`);
+            return { ok: false, messageId: null };
+          }
+        };
+        const first = posts.length === 0 ? null : await post(posts[0]);
+        // An unposted id carries the time and this process's count, since one millisecond can
+        // hold two failed posts.
+        unposted += 1;
+        const id = first?.messageId ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
+        // The rest of the copy, in order and stopped at the first refusal as a refused first post
+        // stops them all. Nothing awaits it: each failure is logged inside `post`.
+        if (first?.ok === true && posts.length > 1) {
+          void (async () => {
+            for (const part of posts.slice(1)) {
+              if (!(await post(part)).ok) break;
+            }
+          })();
+        }
+        const buffered = withFiles(
+          { id, senderId, author, senderClass: "operator", text: words, truncated },
+          uploads.map((upload) => upload.path),
+        );
+        // The gateway's own shape with the flags a plain Discord line carries, so the response gate
+        // and the relay see this line as they see an operator's Discord line.
+        const message: InboundMessage = {
+          threadId,
+          messageId: id,
+          senderId,
+          author,
+          fromBot: false,
+          fromSelf: false,
+          mentionsBot: false,
+          repliesToBot: false,
+          text: words,
+          attachments: [],
+        };
+        const taken = deliverTakenWritten(record, message, buffered, { mentionsBot: false, repliesToBot: false }, []);
+        return {
+          after: taken.then((outcome) => {
+            written = outcome;
+          }),
+        };
+      });
+      await after;
+      return channel && written ? "delivered" : "no-channel";
+    },
+
+    async answerWeb(lineage, login, text) {
+      const records = options.registry.list();
+      const record = liveByLineage(records, lineage);
+      if (record === null) return records.some((held) => held.lineage === lineage) ? "ended" : "no-session";
+      const threadId = options.threadFor(record.sessionId);
+      if (threadId === null) return "no-thread";
+
+      // Bounded exactly as a Discord line is. A cut line is no answer on either surface: it would put
+      // words the operator did not finish into the session's tool result.
+      const { text: words, truncated } = bounded(text);
+      if (words === "") return "empty";
+      if (truncated) return "too-long";
+
+      const name = webAuthorName(login);
+      let answered = false;
+      // In the thread's turn, as a typed Discord answer is, so the answer and its thread copy land in
+      // order against the thread's own messages. No rate window is spent and no pipe is read: the
+      // answer goes to the held hook, never to the session's channel.
+      const { after } = await inTurn(threadId, async () => {
+        if (!options.questions.answerTyped(record.sessionId, words)) return { after: Promise.resolve() };
+        answered = true;
+        let messageId: string | null = null;
+        if (options.page !== undefined) {
+          for (const part of renderPageLine(name, words)) {
+            try {
+              const outcome = await options.page.post({ threadId, text: part });
+              if (outcome.status !== "ok") {
+                log(`routing: the thread refused the web answer's post for session ${record.sessionId}: ${outcome.status}`);
+                break;
+              }
+              if (messageId === null && outcome.value.messageId !== null) messageId = outcome.value.messageId;
+            } catch {
+              log(`routing: posting the web answer for session ${record.sessionId} failed`);
+              break;
+            }
+          }
+        }
+        unposted += 1;
+        const id = messageId ?? `${UNPOSTED_WEB_ID_PREFIX}${String(now())}-${String(unposted)}`;
+        tapTalk(record, threadId, {
+          id,
+          senderId: `${WEB_SENDER_PREFIX}${login}`,
+          author: webAuthorLabel(login),
+          senderClass: "operator",
+          text: words,
+          truncated: false,
+        });
+        return { after: Promise.resolve() };
+      });
+      await after;
+      return answered ? "answered" : "no-question";
     },
 
     reconcile(sessions) {

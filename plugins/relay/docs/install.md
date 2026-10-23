@@ -489,7 +489,8 @@ The two commands are whole-line and not case-sensitive, and only an operator's a
 
 ### The web surface (optional)
 
-The broker can serve its own status pages to your phone and desktop over Tailscale. It is off
+The broker can serve its own status pages to your phone and desktop over Tailscale, and a talk
+page from which you answer a session without opening Discord. It is off
 unless `CHANNEL_WEB_BIND` is set, and off means no second listener exists. Install Tailscale on
 this host and on each device, signed in under one login, then add to `broker.env`:
 
@@ -551,7 +552,8 @@ creating a second one. It refuses to run unelevated with a message saying so, ra
 with an access error further in.
 
 The task's script, `install/Start-Broker.ps1`, starts the broker again whenever it exits with code
-75, the broker's own request to be restarted, and re-reads `broker.env` before each start. Any other
+75, the broker's own request to be restarted. Before each start it re-reads
+`install/Install-Functions.ps1`, which holds the key allowlist, and then `broker.env`. Any other
 exit ends the script with the broker's code, so the loop never restarts a broker that crashed.
 This is what lets a session or the operator restart the broker without elevation, as
 [`operations.md`](operations.md) describes under "Restarting the broker". The script is read when

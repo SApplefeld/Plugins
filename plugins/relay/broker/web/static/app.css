@@ -875,3 +875,503 @@ a.plan-row:hover {
   gap: 12px;
   min-width: 0;
 }
+
+/* Talk page */
+button.chip {
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chip.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+}
+
+.chip.on:hover {
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.talk-about {
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.talk-earlier,
+.talk-empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.tall,
+.talk-earlier a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+  justify-content: center;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  max-width: 92%;
+  min-width: 0;
+}
+
+.msg.mine {
+  align-items: flex-end;
+  align-self: flex-end;
+}
+
+.msg-head {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.msg-head b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.bubble {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px 12px 12px 4px;
+  padding: 10px 12px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  min-width: 0;
+}
+
+.msg.mine .bubble {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+  border-radius: 12px 12px 4px 12px;
+}
+
+.composer {
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.compose-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+}
+
+.send {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.send:disabled,
+.compose-input:disabled {
+  border-color: var(--line-strong);
+  background: var(--track);
+  color: var(--muted);
+  cursor: default;
+}
+
+.send-status {
+  color: var(--ink);
+}
+
+.attach {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.attach:disabled {
+  background: var(--track);
+  color: var(--muted);
+  cursor: default;
+}
+
+.file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  max-width: 100%;
+  min-width: 0;
+  padding-left: 12px;
+  border-radius: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  font-size: 13px;
+}
+
+.file-chip-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.file-chip-remove {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.line-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.msg.mine .line-files {
+  align-items: flex-end;
+}
+
+.file-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* Talk page: what the session is held on */
+.waiting {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ask,
+.perm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.perm {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.waiting > .ask + .ask {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.ask-line {
+  overflow-wrap: anywhere;
+}
+
+.ask-tag {
+  font-family: var(--mono);
+  font-weight: 500;
+}
+
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ask-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.ask-option.on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.ask-option-desc {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ask-option.on .ask-option-desc {
+  color: #ffffff;
+}
+
+.ask-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ask-submit,
+.ask-typed,
+.ask-console,
+.perm-allow,
+.perm-deny {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ask-submit,
+.perm-allow {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.perm-deny {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.ask-option:disabled,
+.ask-submit:disabled,
+.ask-typed:disabled,
+.ask-console:disabled,
+.perm-allow:disabled,
+.perm-deny:disabled {
+  border-color: var(--line-strong);
+  background: var(--track);
+  color: var(--muted);
+  cursor: default;
+}
+
+.perm-what {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.perm-input {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* Needs-me page */
+.nm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.nm-count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.nm-sort {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nm-sort-button,
+.nm-agree,
+.nm-correct,
+.nm-batch-button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.nm-sort-button.on,
+.nm-agree,
+.nm-batch-button {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.nm-agree:disabled,
+.nm-batch-button:disabled {
+  border-color: var(--line-strong);
+  background: var(--track);
+  color: var(--muted);
+  cursor: default;
+}
+
+.nm-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.nm-item + .nm-item {
+  border-top: 1px solid var(--line);
+}
+
+.nm-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.nm-who {
+  font-weight: 600;
+}
+
+.nm-who .tag {
+  margin: 0 0 0 6px;
+}
+
+.nm-age {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.nm-text {
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.nm-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.nm-none {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.nm-batch {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--bg);
+}
+
+.nm-batch-button {
+  width: 100%;
+}
+
+/* The waiting block's reserved slot: its height never changes, so a card arriving behind it moves nothing. */
+.held-slot {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.held-more {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  border: 1px solid var(--amber);
+  background: var(--amber-tint);
+  color: var(--amber);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}

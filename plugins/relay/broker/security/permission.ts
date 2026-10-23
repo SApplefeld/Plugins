@@ -339,6 +339,27 @@ export type PermissionDesk = {
    * simply quiet.
    */
   waiting: () => ReadonlySet<string>;
+  /**
+   * The requests a session has open, oldest first, each with the nonce its prompt's buttons carry,
+   * for the operator's page to draw and answer. The nonce leaves this desk here as it leaves in a
+   * button's `custom_id`, and a verdict from the page carries it back through `resolve` on the same
+   * terms a press does.
+   */
+  pendingFor: (sessionId: string) => PendingPermission[];
+};
+
+/**
+ * One open request as the page reads it. `description` and `inputPreview` are the tool's own
+ * untrusted text, as Claude Code sent them; `at` is when the request was opened, in epoch
+ * milliseconds.
+ */
+export type PendingPermission = {
+  requestId: string;
+  toolName: string;
+  description: string;
+  inputPreview: string;
+  nonce: string;
+  at: number;
 };
 
 export type PermissionDeskOptions = {
@@ -366,6 +387,9 @@ type OpenRequest = {
   processToken: string;
   sessionId: string;
   toolName: string;
+  /** The request's two untrusted fields, kept for the page's read of what is open. */
+  description: string;
+  inputPreview: string;
   /** The two halves of this entry's own key, so a clear can address the prompt it drops. */
   threadId: string;
   requestId: string;
@@ -558,6 +582,20 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
       return sessions;
     },
 
+    pendingFor(sessionId) {
+      // The table is kept in insertion order, which is the order the requests were opened in.
+      return [...open.values()]
+        .filter((entry) => entry.sessionId === sessionId)
+        .map((entry) => ({
+          requestId: entry.requestId,
+          toolName: entry.toolName,
+          description: entry.description,
+          inputPreview: entry.inputPreview,
+          nonce: entry.nonce,
+          at: entry.openedAt,
+        }));
+    },
+
     async request(processToken, request) {
       if (!REQUEST_ID.test(request.requestId)) {
         // Posting it would ping the operator with a prompt no reply of theirs can answer. If Claude
@@ -614,6 +652,8 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
         processToken,
         sessionId: record.sessionId,
         toolName: request.toolName,
+        description: request.description,
+        inputPreview: request.inputPreview,
         threadId,
         requestId: request.requestId,
         openedAt: now(),

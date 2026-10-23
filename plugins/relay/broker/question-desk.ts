@@ -192,25 +192,72 @@ export type QuestionDesk = {
    * asks rather than a live entry. One-shot per ask, and it reports whether it found one. A session
    * still holding this ask answers false and is left standing: the console renders no picker under
    * a hold, so it cannot be the surface that answered.
+   *
+   * An ask that closed before its alert's notice came back answers true too, since that notice is
+   * the ask's alert and a second would post it again. An answered record is left for the notice to
+   * draw, and any other record takes the console's answer in place for the notice to draw instead.
+   * A record whose alert was lost is passed over, since no notice is on its way for it.
    */
   answeredAtConsole: (sessionId: string, digest: string) => boolean;
   /**
-   * Releases the session's held entry with `{}`, so the console picker renders normally.
+   * How an ask closed when it closed before its alert landed, read by the notice that alert posted.
    *
-   * With a digest, the release is checked against the entry's own and a different ask's entry is
-   * left standing. That check is what keeps the alert path's failure release honest: both
+   * The operator's page answers an entry from the moment it is held, so a submit or a release from
+   * there can end the hold inside the alert's own round trip, with no message on the entry for the
+   * close-out to rewrite. The notice then comes back saying a question is open, and the alert path,
+   * finding nothing held, reads here how the ask ended and where the notice is, and draws the
+   * closed line onto it. The newest such record for the session and ask, null where there is none.
+   *
+   * Read once. A record answered from the page or at the console is spent by the read; a record
+   * whose state leaves the question at the console keeps the notice's place, so the console's own
+   * answer flips that notice as it flips every other release.
+   */
+  closedBeforeAlert: (
+    sessionId: string,
+    digest: string,
+    alert: QuestionAlert,
+  ) => { state: QuestionTerminalState; detail: QuestionTerminalDetail } | null;
+  /**
+   * Releases whatever the session holds with `{}`, so the console picker renders normally: the
+   * operator's own release.
+   */
+  release: (sessionId: string) => boolean;
+  /**
+   * Reports that an ask's alert will never be a notice this desk can draw on: its post failed or
+   * threw, or came back with no message id. Releases the session's hold for that ask with `{}`.
+   * Then, of the ask's records whose notice had not come back, an answered one is kept and marked
+   * as waiting on no notice, and every other one, the one this release just wrote included, is
+   * dropped.
+   *
+   * The release is checked against the digest, and a different ask's entry is left standing. Both
    * question paths share one delivery closure, so a failed delivery names a session, and without
    * the digest an unrelated ask's failure would end a hold whose own alert is up and answerable.
-   * Without a digest it releases whatever that session holds, which is what shutdown and the
-   * operator's own release mean.
+   *
+   * The drop and the mark are what keep a record with no alert meaning that a notice is on its way.
+   * With no such record left, the console's resolution line finds nothing, `answeredAtConsole`
+   * answers false, and the tailer posts its fallback alert, which is then the ask's only message in
+   * the thread. A page answer kept here is what that fallback's notice reads, so the thread shows
+   * the ask answered.
+   *
+   * Answers true where the page answer it kept had already been found by the console's resolution
+   * line while it waited on this alert's notice. That line posted no fallback for it and is read
+   * once, so the caller posts the fallback alert itself, whose notice reads the kept answer. Answers
+   * false otherwise, and false again for a record already marked, so a failed fallback asks for no
+   * further one.
    */
-  release: (sessionId: string, digest?: string) => boolean;
+  alertLost: (sessionId: string, digest: string) => boolean;
   /**
    * The entry a session holds for one ask, or null when it holds none for that digest. The read
    * the alert path takes before it decides what to draw: the ask may have been replaced, released,
    * or refused while the notice was on its way to Discord.
    */
   held: (sessionId: string, digest: string) => QuestionEntryView | null;
+  /**
+   * What the session holds, whatever the ask: its one entry, or none. The operator's page reads it
+   * to draw the question, and reads it from the moment the hold is created, before any alert is
+   * noted, because the entry's id exists from then and every answering seam below takes it.
+   */
+  heldFor: (sessionId: string) => QuestionEntryView[];
   /**
    * Records where the alert for a session's held ask landed, and reports that entry's opaque id so
    * the caller can address its components. Null when the session holds no entry for that digest,
@@ -313,31 +360,56 @@ type HeldEntry = {
 export const MAX_REPEAT_KEYS = 64;
 
 /**
- * How many closed asks are remembered for the console-answer flip, oldest evicted.
+ * How many closed asks are remembered, for the console-answer flip and for the notice of an ask that
+ * closed before its alert landed, oldest evicted.
  *
- * A record outlives its entry only to name the message a later console answer rewrites, and the
- * window between a release and that answer is one operator walking to a keyboard. Small on purpose:
- * the record holds question text, which is content, so it is bounded the way every other content
- * this module touches is. Past the bound the oldest record is dropped, whose cost is a thread
- * message left reading "answer it at the console" for a question already answered, never a lost
- * question.
+ * A record outlives its entry only to name the message a later console answer rewrites, or to tell
+ * a notice still on its way how its ask ended. The first window is one operator walking to a
+ * keyboard and the second one Discord round trip. Small on purpose: the record holds question text,
+ * which is content, so it is bounded the way every other content this module touches is. Past the
+ * bound the oldest record is dropped, whose cost is a thread message left reading "answer it at the
+ * console" for a question already answered, or a notice left reading as open for one already
+ * closed, never a lost question.
  */
 export const MAX_CLOSED_ASKS = 8;
 
 /**
- * A hold that ended with its thread message telling the operator to answer at the console.
+ * A hold that ended with its thread message telling the operator to answer at the console, or that
+ * ended before its alert landed.
  *
  * The console answer arrives long after the entry is gone, and the message it has to rewrite is the
  * one the entry carried, so what the edit needs outlives the entry here: the ask's identity
- * (session and digest), the message, and the questions the edit renders. An answered hold records
- * nothing, because the thread already carries its answer and the console never rendered a picker.
+ * (session and digest), the message, and the questions the edit renders. An answered hold with a
+ * message records nothing, because the thread already carries its answer and the console never
+ * rendered a picker.
+ *
+ * A hold that ended with no message records its state and what it was answered with, and `alert`
+ * stays null until the notice its alert posted reads the record: that read is the only edit the
+ * notice gets. A console answer reported before that read rewrites such a record's state to
+ * `answered-at-console` in place, unless the record is already answered.
+ *
+ * An answered record whose alert was then lost is kept with `noticeLost` set: no notice is on its
+ * way, so the console's resolution line passes over it and the tailer posts its fallback alert,
+ * whose notice reads it. An orphan no fallback reads holds one slot until evicted, and a later
+ * identical ask from the same session, whose notice finds nothing held and no newer record, reads
+ * it in that ask's place.
  */
 type ClosedAsk = {
   sessionId: string;
   digest: string;
   entryId: string;
-  alert: QuestionAlert;
+  alert: QuestionAlert | null;
   questions: readonly AskedQuestion[];
+  state: QuestionTerminalState;
+  answers: QuestionAnswers | null;
+  /** The ask's alert failed after this record was written, so no notice is on its way for it. */
+  noticeLost: boolean;
+  /**
+   * The console's resolution line found this record waiting on its notice, and so posted no
+   * fallback alert for the ask. Read when the alert is then lost: that line comes once, so the
+   * fallback is posted by the loss instead.
+   */
+  consoleRead: boolean;
 };
 
 /**
@@ -401,14 +473,21 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
     // Every state that leaves the operator a question to answer at the console is remembered, so
     // the console's own answer can rewrite the message this state is about to write. An answered
     // hold leaves nothing to answer, and the console-answer flip itself is already the last word on
-    // that message.
-    if (state !== "answered" && state !== "answered-at-console" && detail.alert !== null) {
+    // that message. A hold that ended with no message is remembered whatever its state, because the
+    // notice its alert posted is still on its way and this record is how that notice learns it.
+    const remembered =
+      state !== "answered-at-console" && (detail.alert === null || state !== "answered");
+    if (remembered) {
       recentlyClosed.push({
         sessionId,
         digest,
         entryId: detail.entryId,
         alert: detail.alert,
         questions: detail.questions,
+        state,
+        answers: detail.answers,
+        noticeLost: false,
+        consoleRead: false,
       });
       if (recentlyClosed.length > MAX_CLOSED_ASKS) recentlyClosed.shift();
     }
@@ -682,8 +761,11 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       // closed: a session that asked one question twice has the first line reporting the first ask,
       // and the newest match would flip the second message while the answered one went on telling
       // the operator to walk to a console with nothing on it.
+      //
+      // An alerted record is matched before any record whose notice has not come back, because it
+      // closed earlier and the console answers its pickers in the order they rendered.
       for (const [at, closed] of recentlyClosed.entries()) {
-        if (closed.sessionId !== sessionId || closed.digest !== digest) continue;
+        if (closed.sessionId !== sessionId || closed.digest !== digest || closed.alert === null) continue;
         // Consumed as it is matched, so the flip happens exactly once however many times the ask's
         // resolution is reported.
         recentlyClosed.splice(at, 1);
@@ -695,6 +777,27 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
         });
         return true;
       }
+      // A record of this ask whose notice has not come back names no message to edit yet, and that
+      // notice is the ask's alert, on its way. So the report answers true, which stops the tailer
+      // posting a second alert beside it. An answered record stays as it is: the line is the
+      // resolution of that answer, and the notice draws it when it comes back. A record in any other
+      // state takes the console's answer in place, so the notice is drawn answered at the console
+      // rather than waiting there. A record whose alert was lost has no notice on its way, so it is
+      // passed over: the line answers false and the tailer's fallback notice is what reads it.
+      let pending = false;
+      for (const closed of recentlyClosed) {
+        if (closed.alert !== null || closed.sessionId !== sessionId || closed.digest !== digest) continue;
+        if (closed.noticeLost) continue;
+        pending = true;
+        // Remembered on the record, since this line comes once: should the alert it waits on then
+        // be lost, the fallback this line did not post is posted by the loss.
+        closed.consoleRead = true;
+        if (closed.state !== "answered") {
+          closed.state = "answered-at-console";
+          closed.answers = null;
+        }
+      }
+      if (pending) return true;
       const live = held.get(sessionId);
       if (live !== undefined && live.digest === digest) {
         // No closed instance of this ask is left, and the one the session holds is not what the line
@@ -709,9 +812,43 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       return false;
     },
 
+    closedBeforeAlert(sessionId, digest, alert) {
+      // Newest first: the notice reading this was posted for the ask's latest instance, and an
+      // older record of the same ask belongs to a notice that has already come back or never will.
+      for (let at = recentlyClosed.length - 1; at >= 0; at -= 1) {
+        const closed = recentlyClosed[at];
+        if (closed.alert !== null || closed.sessionId !== sessionId || closed.digest !== digest) {
+          continue;
+        }
+        // An answer, from the page or the console, is the notice's last word, so its record is
+        // spent. Any other state leaves the question at the console, so the record keeps the
+        // notice's place for the console's own answer to flip.
+        if (closed.state === "answered" || closed.state === "answered-at-console") {
+          recentlyClosed.splice(at, 1);
+        } else {
+          closed.alert = alert;
+        }
+        return {
+          state: closed.state,
+          detail: {
+            entryId: closed.entryId,
+            alert,
+            questions: closed.questions,
+            answers: closed.answers,
+          },
+        };
+      }
+      return null;
+    },
+
     held(sessionId, digest) {
       const entry = held.get(sessionId);
       return entry === undefined || entry.digest !== digest ? null : view(entry, sessionId);
+    },
+
+    heldFor(sessionId) {
+      const entry = held.get(sessionId);
+      return entry === undefined ? [] : [view(entry, sessionId)];
     },
 
     noteAlert(sessionId, digest, alert) {
@@ -792,7 +929,31 @@ export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
       return releaseHold(found.sessionId, found.entry.digest);
     },
 
-    release: releaseHold,
+    release: (sessionId) => releaseHold(sessionId),
+
+    alertLost(sessionId, digest) {
+      // Released only where the session holds this ask: a different ask's entry is left standing,
+      // and since no release was asked of it, none is logged as refused.
+      if (held.get(sessionId)?.digest === digest) releaseHold(sessionId, digest);
+      // Released first, because the release writes an alert-null record of its own, and the drop
+      // below is what takes it out again.
+      let fallback = false;
+      for (let at = recentlyClosed.length - 1; at >= 0; at -= 1) {
+        const closed = recentlyClosed[at];
+        if (closed.alert !== null || closed.sessionId !== sessionId || closed.digest !== digest) {
+          continue;
+        }
+        // The page's answer is kept for the fallback notice to draw; every other record would only
+        // have told a notice that is now never coming how its ask closed. Where the console's line
+        // already found the answer waiting here, no fallback is coming from the tailer either, so
+        // the caller is told to post it: once, since a record already marked is not marked again.
+        if (closed.state === "answered") {
+          if (closed.consoleRead && !closed.noticeLost) fallback = true;
+          closed.noticeLost = true;
+        } else recentlyClosed.splice(at, 1);
+      }
+      return fallback;
+    },
 
     async releaseAll() {
       // Collected before the settles, because settling empties the map: these are the responses

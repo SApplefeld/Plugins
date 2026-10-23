@@ -1,6 +1,8 @@
 // The one path a file attached to a Discord message takes to reach a session: fetched from
 // Discord's CDN, bounded, and either handed back as the words of a pasted message or written
-// under the broker's state directory for the session to open with its own tools.
+// under the broker's state directory for the session to open with its own tools. The web page's
+// files take the same folder and the same writer through `createWebFiles` at the foot: a file the
+// operator sends from the page, and the copy of a file a reply lands, kept for the page to fetch.
 //
 // This is the only code that fetches an attachment or writes one to disk, and nothing it reads out
 // of the attachment is trusted. The name decides a participant's kind, an operator's file is saved
@@ -15,8 +17,10 @@
 // nothing is dropped in silence. Nothing here logs, so no file name, URL or content can reach the
 // log from this module; the router records counts and causes from what it is returned.
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { withoutInvisible } from "../sanitize.ts";
 import type { SenderClass } from "../security/senders.ts";
 
@@ -295,7 +299,7 @@ async function readBounded(
  * Windows ignores those modes, and there the state folder's own access list is what holds. Throws
  * on failure with no temp file left behind.
  */
-async function writeWhole(file: string, bytes: Uint8Array, signal: AbortSignal): Promise<void> {
+export async function writeWhole(file: string, bytes: Uint8Array, signal: AbortSignal): Promise<void> {
   const temp = `${file}.${randomUUID()}.tmp`;
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   try {
@@ -347,9 +351,8 @@ export function createAttachmentIntake(options: AttachmentIntakeOptions): Attach
    * path sit under the root, and a path that does not is never written whatever the rule said.
    */
   function targetPath(sessionId: string, messageId: string, position: number, name: string): string | null {
-    if (!PATH_SEGMENT.test(sessionId) || !PATH_SEGMENT.test(messageId)) return null;
-    const target = path.resolve(root, sessionId, `${messageId}-${String(position)}-${name}`);
-    return target.startsWith(root + path.sep) ? target : null;
+    if (!PATH_SEGMENT.test(messageId)) return null;
+    return savedFilePath(root, sessionId, `${messageId}-${String(position)}-${name}`);
   }
 
   /** Writes the bytes, and reports a write that fails as a file that could not be brought down. */
@@ -447,6 +450,247 @@ export function createAttachmentIntake(options: AttachmentIntakeOptions): Attach
 /** The folder every saved attachment lives under, one folder per session, inside the state directory. */
 export function attachmentsRoot(stateDir: string): string {
   return path.resolve(stateDir, "attachments");
+}
+
+/**
+ * The path a file named `fileName` is written to in the session's folder under `root`, or null where
+ * the session id would not resolve to one segment or the joined path would sit anywhere but directly
+ * in that folder. The session id is held to `PATH_SEGMENT`, and the file name is one the caller
+ * composed from broker-made parts and a name through `reducedName`; the check after the join is what
+ * holds whatever either said.
+ */
+export function savedFilePath(root: string, sessionId: string, fileName: string): string | null {
+  if (!PATH_SEGMENT.test(sessionId)) return null;
+  const folder = path.resolve(root, sessionId);
+  const target = path.resolve(folder, fileName);
+  return target.startsWith(root + path.sep) && path.dirname(target) === folder ? target : null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The web page's files
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * One file the web page can name: a file the operator sent from the page (`upload`), saved for the
+ * session to open, or the copy of a file a reply landed (`reply`), kept for the page to fetch. `name`
+ * is the reduced name, the only form of the name the page and the thread are shown.
+ */
+export type WebFile = {
+  kind: "upload" | "reply";
+  sessionId: string;
+  path: string;
+  name: string;
+  size: number;
+  contentType: string;
+};
+
+/** A file as a talk line carries it: its name, its size and the page's link to it. */
+export type WebFileLink = { name: string; size: number; url: string };
+
+/** The page's link to a file the store holds under `id`. */
+export const WEB_FILE_URL_PREFIX = "/web/file/";
+
+/**
+ * The content type an uploaded file is kept and posted under. The page's file is the operator's,
+ * saved as sent with no kind list, so nothing about its kind is claimed from its name.
+ */
+const UPLOAD_CONTENT_TYPE = "application/octet-stream";
+
+export type WebFilesOptions = {
+  /** The folder holding the broker's state file. Files are written under its `attachments` child. */
+  stateDir: string;
+  /** The clock a file's name is stamped with. Injected so a test fixes it. */
+  now?: () => number;
+  /** Writes one file whole. Injectable so a test reaches a write that fails without a bad disk. */
+  writeFile?: AttachmentWrite;
+};
+
+export type WebFiles = {
+  /**
+   * Writes the bytes the page sent as `<root>/<sessionId>/web-<time>-<n>-<reducedName>`, whole and
+   * owner-only, and answers the id the page names it by in a later say post, or null where the path
+   * would not form or the write failed. A failed write leaves no file.
+   */
+  saveUpload: (sessionId: string, name: string, bytes: Uint8Array) => Promise<string | null>;
+  /** The upload held under `id`, or null for an id this store did not hand out for an upload. */
+  upload: (id: string) => WebFile | null;
+  /**
+   * Reserves the id of a copy of a reply's file at `<root>/<sessionId>/out-<time>-<n>-<name>` and
+   * answers the link a talk line carries with the write that lands it, or null where the path would
+   * not form. Nothing is written until `write` is called. The id serves nothing until the write has
+   * landed, and nothing ever where it fails: `write` resolves false then, and the id is forgotten.
+   */
+  reserveReply: (
+    sessionId: string,
+    file: { name: string; bytes: Uint8Array; contentType: string },
+  ) => { link: WebFileLink; write: () => Promise<boolean> } | null;
+  /**
+   * The file the page's link names by `id`, of either kind, or null for one this store does not hold
+   * or whose write has not landed.
+   */
+  served: (id: string) => WebFile | null;
+  /**
+   * The bytes of the file held under `id`, read from where this store wrote it, or null where the id
+   * is not served or the file is gone or cannot be read. A file found gone forgets its id.
+   */
+  bytesOf: (id: string) => Promise<Uint8Array | null>;
+  /**
+   * The file held under `id` opened for a download: what the store recorded of it, its size on disk
+   * as the open file reads it, and a stream of its bytes that closes the file at its end or on error.
+   * Null where the id is not served, or the file is gone, is not a regular file or cannot be opened.
+   * A file found gone forgets its id.
+   */
+  open: (id: string) => Promise<{ file: WebFile; size: number; stream: Readable } | null>;
+  /** The link to the file this store wrote at `file`, or null for a path it did not write. */
+  linkFor: (file: string) => WebFileLink | null;
+  /** Forgets every id, as a broker restart does: the files stay on disk for the prune to take. */
+  clear: () => void;
+};
+
+/**
+ * The most ids the web files store holds at once. Past it the oldest id is forgotten, its link
+ * answers 404, and its file stays on disk for the retention prune.
+ */
+export const WEB_FILES_HELD = 1000;
+
+/**
+ * The store of the web page's files. The ids are random and held in memory alone, so after a broker
+ * restart a line keeps its file's name and size and its link answers 404. At most `WEB_FILES_HELD`
+ * ids are held, the oldest forgotten first, and an id whose file is found gone when it is read is
+ * forgotten then. Each file is written through `writeWhole`, the writer a Discord attachment takes,
+ * under the session's folder that `savedFilePath` forms, so the retention prune sweeps these files
+ * with the rest. `n` counts the files this store has named since the broker started, so two files
+ * in one millisecond under one name are two files. Nothing here logs.
+ */
+export function createWebFiles(options: WebFilesOptions): WebFiles {
+  const root = attachmentsRoot(options.stateDir);
+  const now = options.now ?? Date.now;
+  const write = options.writeFile ?? writeWhole;
+  const byId = new Map<string, WebFile>();
+  const byPath = new Map<string, string>();
+  /** Ids reserved for a reply's copy whose write has not landed yet. */
+  const pending = new Set<string>();
+  let named = 0;
+
+  const linkOf = (id: string, file: WebFile): WebFileLink => ({ name: file.name, size: file.size, url: `${WEB_FILE_URL_PREFIX}${id}` });
+
+  /** The path the next file of `kind` takes in the session's folder, or null where it would not form. */
+  function nextPath(kind: WebFile["kind"], sessionId: string, name: string): string | null {
+    named += 1;
+    const prefix = kind === "upload" ? "web" : "out";
+    return savedFilePath(root, sessionId, `${prefix}-${String(now())}-${String(named)}-${name}`);
+  }
+
+  function forget(id: string): void {
+    const held = byId.get(id);
+    byId.delete(id);
+    pending.delete(id);
+    if (held !== undefined && byPath.get(held.path) === id) byPath.delete(held.path);
+  }
+
+  /** Holds `file` under a new id, forgetting the oldest ids past the bound, and answers the id. */
+  function hold(file: WebFile): string {
+    const id = randomUUID();
+    byId.set(id, file);
+    byPath.set(file.path, id);
+    for (const oldest of byId.keys()) {
+      if (byId.size <= WEB_FILES_HELD) break;
+      forget(oldest);
+    }
+    return id;
+  }
+
+  /** The id's file where its write has landed, or null. */
+  function servedFile(id: string): WebFile | null {
+    return pending.has(id) ? null : (byId.get(id) ?? null);
+  }
+
+  const isGone = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === "ENOENT";
+
+  return {
+    async saveUpload(sessionId, name, bytes) {
+      const reduced = reducedName(name);
+      const target = nextPath("upload", sessionId, reduced);
+      if (target === null) return null;
+      try {
+        await write(target, bytes, AbortSignal.timeout(INTAKE_LIMIT_MS));
+      } catch {
+        return null;
+      }
+      return hold({ kind: "upload", sessionId, path: target, name: reduced, size: bytes.byteLength, contentType: UPLOAD_CONTENT_TYPE });
+    },
+    upload(id) {
+      const file = servedFile(id);
+      return file !== null && file.kind === "upload" ? file : null;
+    },
+    reserveReply(sessionId, file) {
+      // The reply's name is already reduced by the reply file reader; reduced again here so a path
+      // this store forms never depends on what a caller did first.
+      const name = reducedName(file.name);
+      const target = nextPath("reply", sessionId, name);
+      if (target === null) return null;
+      const held: WebFile = { kind: "reply", sessionId, path: target, name, size: file.bytes.byteLength, contentType: file.contentType };
+      const id = hold(held);
+      pending.add(id);
+      return {
+        link: linkOf(id, held),
+        async write() {
+          try {
+            await write(target, file.bytes, AbortSignal.timeout(INTAKE_LIMIT_MS));
+          } catch {
+            forget(id);
+            return false;
+          }
+          // An id forgotten past the bound while the write ran stays forgotten; its file is the prune's.
+          pending.delete(id);
+          return true;
+        },
+      };
+    },
+    served: (id) => servedFile(id),
+    async bytesOf(id) {
+      const held = servedFile(id);
+      if (held === null) return null;
+      try {
+        return await readFile(held.path);
+      } catch (error) {
+        if (isGone(error)) forget(id);
+        return null;
+      }
+    },
+    async open(id) {
+      const held = servedFile(id);
+      if (held === null) return null;
+      let handle: FileHandle;
+      try {
+        handle = await open(held.path, "r");
+      } catch (error) {
+        if (isGone(error)) forget(id);
+        return null;
+      }
+      try {
+        const stats = await handle.stat();
+        if (!stats.isFile()) {
+          await handle.close();
+          return null;
+        }
+        return { file: held, size: stats.size, stream: handle.createReadStream() };
+      } catch {
+        await handle.close().catch(() => {});
+        return null;
+      }
+    },
+    linkFor(file) {
+      const id = byPath.get(file);
+      const held = id === undefined ? undefined : byId.get(id);
+      return id === undefined || held === undefined ? null : linkOf(id, held);
+    },
+    clear() {
+      byId.clear();
+      byPath.clear();
+      pending.clear();
+    },
+  };
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

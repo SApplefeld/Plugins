@@ -28,6 +28,7 @@ import { REPLY_FILE_REASONS, readReplyFile } from "./reply-file.ts";
 import type { ReplyFile, ReplyFileSystem } from "./reply-file.ts";
 import type { ThreadWriter } from "./writer.ts";
 import type { CallOutcome } from "../discord/transport.ts";
+import type { TalkFile, TalkInput, TalkTap } from "../web/talk.ts";
 
 /**
  * The ask tap: where a session's reply is shown once its text is on the session's thread, for a
@@ -145,6 +146,29 @@ export type OutboundRouterOptions = {
    * of one is caught and logged without the text.
    */
   askTap?: OutboundAskTap;
+  /**
+   * The talk page's transcript ring, present only while the web surface is on. Shown each line the
+   * thread receives from a session once the whole post has landed: a reply-tool post (`reply`), a
+   * Stop mirror's reply (`mirror`), a mirrored or transcript-read prompt (`prompt`), a peer message
+   * in either direction (`peer`) and a task notice (`notice`). Narration is never shown to it, and
+   * a reply mirror dropped as the reply tool's echo is not shown again. The lineage is read from
+   * the session's registry record at the call, and a session with none is not shown. The calls are
+   * synchronous and made after the post has settled, and a throw out of one is caught and logged
+   * with the session and never the text.
+   */
+  talkTap?: TalkTap;
+  /**
+   * Where the file a reply landed is copied for the talk page, present only beside the talk tap.
+   * `reserve` is handed the bytes the reply file reader read, so the session's file is never read a
+   * second time, and answers the link the reply's ring line carries with the write that lands the
+   * copy, or null where no copy can be kept. It is called once the reply's run has landed whole and
+   * only for a session with a lineage, since no ring line would name the copy otherwise. The line
+   * carries the link at once, and the write runs after every tap and the answered receipt, without
+   * being awaited, so a slow copy delays nothing the reply does. A reservation that fails or throws
+   * lands the line with no file; a write that fails leaves the link answering 404. Either is logged
+   * with the session alone.
+   */
+  talkFiles?: { reserve: (sessionId: string, file: ReplyFile) => { link: TalkFile; write: () => Promise<boolean> } | null };
   /**
    * The voice bridge, present only while the voice is on. Shown every reply the ask tap is shown,
    * beside the ask tap and never behind it, so a host with the ask tap off still speaks.
@@ -892,6 +916,57 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   }
 
   /**
+   * The talk ring's tap, called where a line has landed whole on the session's thread. Bounded as
+   * `tapReply` is: the post has settled, so a failure behind the tap, the registry read included,
+   * is logged with the session and never the text or the error.
+   */
+  function tapTalk(sessionId: string, line: TalkInput): void {
+    if (options.talkTap === undefined) return;
+    try {
+      const lineage = options.registry.list().find((record) => record.sessionId === sessionId)?.lineage ?? null;
+      if (lineage === null) return;
+      options.talkTap.push(lineage, line);
+    } catch {
+      log(`routing: the talk tap could not take a line from session ${sessionId}`);
+    }
+  }
+
+  /**
+   * The reservation of a landed reply's file for the talk page: its link and the write that lands it,
+   * or null where no talk tap is wired, the session has no lineage, or no copy can be kept. Bounded as
+   * the taps are: the reply has landed, so a failure here is logged with the session and never the
+   * path or the error.
+   */
+  function reserveForPage(sessionId: string, file: ReplyFile): { link: TalkFile; write: () => Promise<boolean> } | null {
+    if (options.talkTap === undefined || options.talkFiles === undefined) return null;
+    try {
+      const lineage = options.registry.list().find((record) => record.sessionId === sessionId)?.lineage ?? null;
+      if (lineage === null) return null;
+      const reserved = options.talkFiles.reserve(sessionId, file);
+      if (reserved !== null) return reserved;
+    } catch {
+      // Logged below, as a reservation that answered nothing is.
+    }
+    log(`routing: the file of a reply from session ${sessionId} could not be kept for the talk page`);
+    return null;
+  }
+
+  /**
+   * Starts the write of a reserved copy and returns at once: nothing the reply does waits on it. A
+   * write that fails or throws is logged with the session alone, and its link answers 404.
+   */
+  function writeForPage(sessionId: string, write: () => Promise<boolean>): void {
+    const failed = (): void => log(`routing: the file of a reply from session ${sessionId} could not be written for the talk page`);
+    try {
+      void write().then((landed) => {
+        if (!landed) failed();
+      }, failed);
+    } catch {
+      failed();
+    }
+  }
+
+  /**
    * The voice bridge's tap, called beside `tapReply` at each of its call sites and bounded the same
    * way: a throw behind it is logged with the session and never the text.
    */
@@ -987,7 +1062,11 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   ): Promise<ReplyResult> {
     const messages = [renderTaskNotice(text)];
     const run = await deliver(threadId, messages);
-    if (run.error === null) return { status: "sent" };
+    if (run.error === null) {
+      // The one-line notice the thread shows, never the injected report it stands in for.
+      tapTalk(sessionId, { kind: "notice", author: null, senderClass: null, text: messages[0] });
+      return { status: "sent" };
+    }
     log(
       `routing: the task notice for session ${sessionId} stopped after ` +
         `${run.landed} of ${messages.length} messages: ${run.error}`,
@@ -1024,6 +1103,20 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         return unreachable;
       }
     }
+  }
+
+  /**
+   * Shows the talk ring one peer message that landed whole, in full whatever `peerMessages` draws in
+   * the thread. An inbound message carries its sender's name as the author; an outbound one is this
+   * session's own words, so it has no author and its text opens with the recipient.
+   */
+  function tapPeer(sessionId: string, traffic: PeerTraffic): void {
+    tapTalk(
+      sessionId,
+      traffic.kind === "peer-in"
+        ? { kind: "peer", author: traffic.name, senderClass: null, text: traffic.body }
+        : { kind: "peer", author: null, senderClass: null, text: `to ${traffic.to}: ${traffic.message}` },
+    );
   }
 
   /** Which direction a peer message went, for the log lines that name a drop without its text. */
@@ -1116,6 +1209,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
     const run = await deliver(threadId, messages);
     if (run.error === null) {
       claim?.settle?.();
+      tapPeer(sessionId, traffic);
       return { status: "sent" };
     }
 
@@ -1148,6 +1242,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       );
       if (retry.error === null) {
         claim.settle?.();
+        tapPeer(sessionId, traffic);
         return { status: "sent" };
       }
       return { status: "failed", error: retry.error };
@@ -1219,9 +1314,14 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         // arriving seconds later says nothing the thread does not already show.
         options.echo?.noteAnswer(located.sessionId, text);
         tapReply(located.sessionId, text, arrivedAt, run.lastMessageId);
+        // The page's copy of the file is reserved here so the line carries its link, and written
+        // only after the taps and the receipt below, never awaited.
+        const copy = attachment === undefined ? null : reserveForPage(located.sessionId, attachment);
+        tapTalk(located.sessionId, { kind: "reply", author: null, senderClass: null, text, files: copy === null ? [] : [copy.link] });
         tapVoice(located.sessionId, text);
         tapGate(located.sessionId, text);
         options.receipts?.answered(located.threadId, arrivedAt);
+        if (copy !== null) writeForPage(located.sessionId, copy.write);
         return { status: "sent" };
       }
 
@@ -1343,6 +1443,9 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
           // reply the tailer narrated first would reach the thread and never the ask tap. No message
           // ID rides it, since the narration message is the tailer's and not this post's.
           tapReply(located.sessionId, text, arrivedAt, null);
+          // Shown to the talk ring here for the same reason: the page shows the landed reply, and
+          // the narration it was posted as is never in the ring.
+          tapTalk(located.sessionId, { kind: "mirror", author: null, senderClass: null, text });
           tapVoice(located.sessionId, text);
           tapGate(located.sessionId, text);
           // The tailer's narration already carries this reply on the thread, but nothing told the
@@ -1526,9 +1629,12 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       if (run.error === null) {
         if (kind === "reply") {
           tapReply(located.sessionId, text, arrivedAt, run.lastMessageId);
+          tapTalk(located.sessionId, { kind: "mirror", author: null, senderClass: null, text });
           tapVoice(located.sessionId, text);
           tapGate(located.sessionId, text);
           options.receipts?.answered(located.threadId, arrivedAt);
+        } else if (kind === "prompt") {
+          tapTalk(located.sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
         }
         return { status: "sent" };
       }
@@ -1552,9 +1658,12 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
           if (retry.error === null) {
             if (kind === "reply") {
               tapReply(located.sessionId, text, arrivedAt, retry.lastMessageId);
+              tapTalk(located.sessionId, { kind: "mirror", author: null, senderClass: null, text });
               tapVoice(located.sessionId, text);
               tapGate(located.sessionId, text);
               options.receipts?.answered(located.threadId, arrivedAt);
+            } else if (kind === "prompt") {
+              tapTalk(located.sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
             }
             return { status: "sent" };
           }
@@ -1929,6 +2038,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         // claim never settles, because its consumer is a poll pass that can legitimately run the
         // whole window late.
         if (claiming) options.echo?.settlePrompt(sessionId, text, "tailer");
+        tapTalk(sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
         return { status: "sent" };
       }
 
@@ -1956,6 +2066,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         if (retry.error === null) {
           // The retry's reclaimed record settles on the same rule as the first-run success above.
           options.echo?.settlePrompt(sessionId, text, "tailer");
+          tapTalk(sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
           return { status: "sent" };
         }
         return { status: "failed", error: retry.error };

@@ -10,12 +10,24 @@
 //      reaches this listener; the Host check is where that origin's name survives.
 //   2. the peer address is resolved through `WebIdentity` and must name a login in the operator
 //      list and, where a device list is set, a node on it, else 403.
-//   3. a POST must come from this origin and carry `Content-Type: application/json`, else 403.
+//   3. a request to the path of a route registered as carrying the operator's word, whatever its
+//      method, refuses a peer on the broker host's own tailnet node, whatever the device list says,
+//      else 403. The refusal runs ahead of the method and existence checks below, so a GET on such a
+//      path from the host's node answers 403 and never 405. The host's node is the identity's
+//      answer for the listener's bound address, and where that answer is missing the route is
+//      refused too. A process on the host, another account's included, reaches this listener as
+//      the host's node under the host's login and can set any header it likes, so the device list
+//      and the headers below cannot tell it from the operator's browser; its node can. A read-only
+//      route is not checked here, so the page still reads from the host.
+//   4. a POST must come from this origin and carry `Content-Type: application/json`, else 403.
 //      From this origin means `Sec-Fetch-Site: same-origin`, or, where that header is absent,
 //      `Origin` equal to `http://<bind>:<port>`. A browser sends Sec-Fetch-Site only to an HTTPS or
 //      localhost origin, and this listener is plain HTTP on a tailnet address, so its own pages
 //      arrive with Origin alone. A browser sets both headers itself, a page cannot forge either,
-//      and a form post cannot set the JSON type.
+//      and a form post cannot set the JSON type. The one exception is a route registered to take an
+//      octet-stream body, the page's file upload: it must come from this origin the same way, else
+//      403, and carry `Content-Type: application/octet-stream` and no other, else 415. A form post
+//      cannot set that type either, and a cross-origin fetch with it needs a preflight, as JSON does.
 //
 // A refused request answers with an empty body whatever the reason, so nothing about the lists
 // or the resolver leaks to whoever was refused. Nothing from a header reaches the log: a refusal
@@ -24,17 +36,48 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { MAX_ASKS_PER_LIST, MAX_ASK_FIELD_LENGTH } from "../decisions/ledger.ts";
 import type { Logger } from "../log.ts";
 import { foldRootName } from "./config.ts";
 import type { WebConfig } from "./config.ts";
-import type { WebIdentity } from "./identity.ts";
+import type { TailnetPeer, WebIdentity } from "./identity.ts";
 import { summaryView } from "./summary.ts";
-import { healthView, planView, repoView, rootName, standupView } from "./views.ts";
+import { lineageKnown, talkView } from "./talk.ts";
+import type { TalkRing, TalkViewInput } from "./talk.ts";
+import type { WebFiles } from "../routing/attachments.ts";
+import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
+import { liveByLineage } from "../registry.ts";
+import type { SessionRecord } from "../registry.ts";
+import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
+import { answerableFromThread } from "../discord/question-message.ts";
+import type { Verdict } from "../security/permission.ts";
+import { healthView, needsMeView, planView, repoView, rootName, standupView } from "./views.ts";
 import type { Readings } from "./views.ts";
 import type { WatermarkStore } from "./watermarks.ts";
 
-/** A `/web/<name>` handler, run after the gate; it owns its own body read and its own response. */
-export type WebRouteHandler = (request: IncomingMessage, response: ServerResponse) => void | Promise<void>;
+/**
+ * A `/web/<name>` handler, run after the gate; it owns its own body read and its own response. `peer`
+ * is the identity the gate admitted for this request, the only login a route may act for: a route
+ * that needs the operator's name reads it here and never from a header or the body.
+ */
+export type WebRouteHandler = (request: IncomingMessage, response: ServerResponse, peer: TailnetPeer) => void | Promise<void>;
+
+/**
+ * What a route is registered as. `operatorWord` is stated at every registration, so no route takes
+ * the host's node by leaving it out. A route carrying the operator's word, one that hands a line, an
+ * answer, a verdict or a file into a session as the operator's, is registered `true` and is refused
+ * to the broker host's own node by the gate's step 3 before it runs. A route registered `false` is
+ * read-only or writes a mark the host may set, and the gate does not check the node for it.
+ *
+ * `octetStream` is the route whose POST body is `application/octet-stream` instead of JSON, the one
+ * exception the gate's step 4 makes. `subpath` registers the name for `/web/<name>/<rest>` instead
+ * of `/web/<name>`, so one route serves a family of paths below a fixed word; the handler reads the
+ * rest from the request path. A name may be registered once each way.
+ */
+export type WebRouteOptions = { operatorWord: boolean; octetStream?: boolean; subpath?: boolean };
+
+type WebRoute = { handler: WebRouteHandler; operatorWord: boolean; octetStream: boolean };
 
 /** The shape a route name may take, so the table is a fixed set of words and never a path. */
 const ROUTE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
@@ -44,6 +87,8 @@ const PAGE_ROUTES: Readonly<Record<string, string>> = {
   "/": "index.html",
   "/plan": "plan.html",
   "/health": "health.html",
+  "/talk": "talk.html",
+  "/needs-me": "needs-me.html",
 };
 const REPO_PREFIX = "/repo/";
 const REPO_PAGE = "repo.html";
@@ -167,10 +212,12 @@ export type WebHandlerOptions = {
 export type WebHandler = {
   handle: (request: IncomingMessage, response: ServerResponse) => void;
   /**
-   * Adds `/web/<name>`. The name is a fixed word, checked against `ROUTE_NAME`, and a name
-   * registered twice is a programming error rather than a replacement.
+   * Adds `/web/<name>`, or `/web/<name>/<rest>` where registered with `subpath`. The name is a fixed
+   * word, checked against `ROUTE_NAME`, and a name registered twice the same way is a programming
+   * error rather than a replacement. A route registered with `operatorWord: true` is refused to the
+   * host's own node by the gate; one registered `false` is not.
    */
-  register: (name: string, handler: WebRouteHandler) => void;
+  register: (name: string, handler: WebRouteHandler, options: WebRouteOptions) => void;
 };
 
 /** The gate and the route table, apart from the socket so a test drives them on any listener. */
@@ -178,7 +225,8 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
   const { config, identity } = options;
   const now = options.now ?? Date.now;
   const refusals = createRefusalLog(options.log, now);
-  const routes = new Map<string, WebRouteHandler>();
+  const routes = new Map<string, WebRoute>();
+  const subpathRoutes = new Map<string, WebRoute>();
   const expectedHost = `${config.bind}:${String(config.port)}`.toLowerCase();
   const expectedOrigin = `http://${expectedHost}`;
   const staticRoot = path.resolve(config.staticRoot);
@@ -188,6 +236,36 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
     if (!config.operators.includes(login.toLowerCase())) return false;
     if (config.devices !== null && !config.devices.includes(node.toLowerCase())) return false;
     return true;
+  }
+
+  /**
+   * The registered route a request path names under `/web/`, or undefined for any other path. An
+   * exact name is looked up as it stands; a path with a further segment names the subpath route
+   * registered under its first word, if there is one, and nothing else.
+   */
+  function routeFor(pathname: string): WebRoute | undefined {
+    if (!pathname.startsWith(ROUTE_PREFIX)) return undefined;
+    const rest = pathname.slice(ROUTE_PREFIX.length);
+    const slash = rest.indexOf("/");
+    if (slash < 0) return routes.get(rest);
+    return slash === rest.length - 1 ? undefined : subpathRoutes.get(rest.slice(0, slash));
+  }
+
+  /**
+   * Whether `peer` is on the broker host's own tailnet node, or that cannot be told. The host's
+   * node is the identity's answer for the listener's bound address, which is the host's own
+   * tailnet address, and the identity caches that answer as it caches every address's. A resolver
+   * that answers nothing or throws leaves the host unknown, and unknown reads as the host's: an
+   * operator-word route runs only for a peer shown to be another node.
+   */
+  async function onHostNode(peer: TailnetPeer): Promise<boolean> {
+    let host: TailnetPeer | null = null;
+    try {
+      host = await identity.peerFor(config.bind);
+    } catch {
+      host = null;
+    }
+    return host === null || host.node.toLowerCase() === peer.node.toLowerCase();
   }
 
   async function serveFile(file: string, response: ServerResponse): Promise<void> {
@@ -209,23 +287,22 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
     response.end(body);
   }
 
-  async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  async function route(request: IncomingMessage, response: ServerResponse, peer: TailnetPeer): Promise<void> {
     const pathname = (request.url ?? "/").split("?")[0];
 
     // The JSON namespace, both methods: a name that is registered runs, and one that is not is a
     // 404 here rather than a fall-through to the static handler, so nothing under `/web/` is ever a
     // file.
     if (pathname.startsWith(ROUTE_PREFIX)) {
-      const name = pathname.slice(ROUTE_PREFIX.length);
-      const handler = routes.get(name);
+      const target = routeFor(pathname);
       // GET and POST alone, so the gate's POST guard is the whole of the write check and a handler
       // never meets a method it would have to refuse itself.
-      if (handler === undefined || (request.method !== "GET" && request.method !== "POST")) {
+      if (target === undefined || (request.method !== "GET" && request.method !== "POST")) {
         request.resume();
         empty(response, 404);
         return;
       }
-      await handler(request, response);
+      await target.handler(request, response, peer);
       return;
     }
 
@@ -290,6 +367,15 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
       return;
     }
 
+    // The route is looked up here only for what it was registered as; it runs below or not at all.
+    if (routeFor((request.url ?? "/").split("?")[0])?.operatorWord === true && (await onHostNode(peer))) {
+      // The address alone, as above: the host's node and login are the operator's own.
+      request.resume();
+      refusals.warn("operator-word route refused to the broker host's own node, or the host's node is unknown", address);
+      empty(response, 403);
+      return;
+    }
+
     if (request.method === "POST") {
       // Sec-Fetch-Site decides where it is sent; Origin is read only where it is absent, so a
       // cross-site POST is refused whatever Origin it names.
@@ -299,15 +385,26 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
         site === null ? origin?.toLowerCase() === expectedOrigin : site.toLowerCase() === "same-origin";
       const type = header(request, "content-type");
       const mediaType = type === null ? null : type.split(";")[0].trim().toLowerCase();
-      if (!fromThisOrigin || mediaType !== "application/json") {
+      const octetStream = routeFor((request.url ?? "/").split("?")[0])?.octetStream === true;
+      if (!fromThisOrigin || (!octetStream && mediaType !== "application/json")) {
         request.resume();
         refusals.warn("POST without the same-origin JSON headers", address);
         empty(response, 403);
         return;
       }
+      // The upload route takes its own body type and no other, multipart included; a wrong type
+      // there is a 415, so the page is told the body and not the origin was refused.
+      if (octetStream && mediaType !== "application/octet-stream") {
+        request.resume();
+        refusals.warn("POST to the upload route without the octet-stream type", address);
+        empty(response, 415);
+        return;
+      }
     }
 
-    await route(request, response);
+    // The peer handed down is the one `admitted` passed above and no other: the route runs for
+    // this login or not at all.
+    await route(request, response, peer);
   }
 
   return {
@@ -320,10 +417,15 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
         else response.end();
       });
     },
-    register(name, handler) {
+    register(name, handler, routeOptions) {
       if (!ROUTE_NAME.test(name)) throw new Error(`web route name ${JSON.stringify(name)} is not a fixed word`);
-      if (routes.has(name)) throw new Error(`web route ${name} is already registered`);
-      routes.set(name, handler);
+      const table = routeOptions.subpath === true ? subpathRoutes : routes;
+      if (table.has(name)) throw new Error(`web route ${name} is already registered`);
+      table.set(name, {
+        handler,
+        operatorWord: routeOptions.operatorWord,
+        octetStream: routeOptions.octetStream === true,
+      });
     },
   };
 }
@@ -461,7 +563,7 @@ function sendJson(response: ServerResponse, body: unknown): void {
 }
 
 /**
- * Registers `/web/standup`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`. Each answers a
+ * Registers `/web/standup`, `/web/needs-me`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`. Each answers a
  * GET from the readings `source` hands back, the pass's latest, and reads no file of its own. A
  * request string reaches no response and no log: it is compared with names the broker holds and dropped.
  *
@@ -479,12 +581,14 @@ export function registerViewHandlers(register: WebHandler["register"], source: (
         return;
       }
       answer(request, response);
-    });
+    }, { operatorWord: false });
   };
 
   get("standup", (_request, response) => sendJson(response, standupView(source())));
   get("health", (_request, response) => sendJson(response, healthView(source())));
   get("summary", (_request, response) => sendJson(response, summaryView(source())));
+  // The view carries the batch cap the Agree route enforces, so the page never holds its own copy.
+  get("needs-me", (_request, response) => sendJson(response, { ...needsMeView(source()), maxBatch: MAX_AGREE_BATCH }));
 
   get("repo", (request, response) => {
     const raw = single(queryOf(request.url ?? ""), "name");
@@ -511,6 +615,694 @@ export function registerViewHandlers(register: WebHandler["register"], source: (
 }
 
 // ---------------------------------------------------------------------------------------------
+// The talk page's transcript
+// ---------------------------------------------------------------------------------------------
+
+export type TalkHandlerOptions = {
+  /** The pass's latest readings, for the registry's records and the roster. */
+  source: () => Readings;
+  /** The thread bound to a session, as the Discord surface holds it. */
+  threadFor: (sessionId: string) => string | null;
+  /** The configured guild, for the link into a session's thread; null where none is. */
+  guildId: () => string | null;
+  /** The receipt tracker's stage for a line's thread message; absent, every line reads `receipt: null`. */
+  stageOf?: TalkViewInput["stageOf"];
+  /** The question desk's held entry for a session; absent, the view's `pending.questions` is empty. */
+  questionsFor?: TalkViewInput["questionsFor"];
+  /** The permission desk's open requests for a session; absent, the view's `pending.permissions` is empty. */
+  permissionsFor?: TalkViewInput["permissionsFor"];
+  /** The view's read time. Injected so a test fixes it. */
+  now?: () => number;
+};
+
+/** A `since` value is a count the ring handed out: digits only, and short enough to stay exact. */
+const SINCE_SHAPE = /^[0-9]{1,15}$/;
+
+/**
+ * Registers `GET /web/talk?lineage=<name>&since=<seq>`. It answers the lines of that lineage's ring
+ * newer than `since`, which omitted reads as the whole ring, with the live session that carries the
+ * lineage or null where none does. A missing or repeated `lineage`, one that is not valid percent
+ * encoding, a `since` that is not a plain count, and a lineage that no registry record carries and
+ * the roster, where one is read, does not name, each answer 400 with an empty body. A request string
+ * reaches no response and no log.
+ */
+export function registerTalkHandlers(register: WebHandler["register"], ring: TalkRing, options: TalkHandlerOptions): void {
+  const now = options.now ?? Date.now;
+  register("talk", (request, response) => {
+    request.resume();
+    if (request.method !== "GET") {
+      response.writeHead(405, { allow: "GET", "content-length": 0 });
+      response.end();
+      return;
+    }
+    const query = queryOf(request.url ?? "");
+    const rawLineage = single(query, "lineage");
+    const lineage = rawLineage === null ? null : decodeParam(rawLineage);
+    if (lineage === null || lineage === "") return empty(response, 400);
+    const rawSince = query.has("since") ? single(query, "since") : "0";
+    if (rawSince === null || !SINCE_SHAPE.test(rawSince)) return empty(response, 400);
+    const readings = options.source();
+    if (!lineageKnown(readings.records, readings.roster.value, lineage)) return empty(response, 400);
+    sendJson(
+      response,
+      talkView(ring, {
+        lineage,
+        since: Number(rawSince),
+        records: readings.records,
+        threadFor: options.threadFor,
+        guildId: options.guildId,
+        ...(options.stageOf === undefined ? {} : { stageOf: options.stageOf }),
+        ...(options.questionsFor === undefined ? {} : { questionsFor: options.questionsFor }),
+        ...(options.permissionsFor === undefined ? {} : { permissionsFor: options.permissionsFor }),
+        now: now(),
+      }),
+    );
+  }, { operatorWord: false });
+}
+
+// ---------------------------------------------------------------------------------------------
+// The composer: a line typed on the talk page
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A say post carries one lineage and one line, which the router cuts to 4,000 code points. The
+ * ceiling holds that line at JSON's widest encoding with the body around it: a client that escapes
+ * a character outside the Basic Multilingual Plane writes its surrogate pair, twelve bytes a code
+ * point, so 4,000 such code points are 48,000 bytes. A body past the ceiling was not typed in the
+ * composer.
+ */
+const MAX_SAY_BODY_BYTES = 64 * 1024;
+
+export type SayHandlerOptions = {
+  /**
+   * The inbound router's web seam: hands the line and the files its ids name to the live session
+   * carrying the lineage as the admitted login's word, and answers what became of it.
+   */
+  deliverWeb: (lineage: string, login: string, text: string, files: readonly string[]) => Promise<WebDeliveryStatus>;
+  /**
+   * The inbound router's typed-answer seam: answers the question the live session carrying the
+   * lineage is held on with the line, as the admitted login's word, and answers what became of it.
+   */
+  answerWeb: (lineage: string, login: string, text: string) => Promise<WebAnswerStatus>;
+  /**
+   * Where a typed answer's status goes, one line per answer the router judged. The line names the
+   * route and the status and never the text, the login or the request's lineage.
+   */
+  log?: Logger;
+};
+
+/** The most files one say post may name, the count one Discord message may carry. */
+export const MAX_SAY_FILES = 10;
+
+/** The shape of a file id the web files store hands out: a random UUID, lower-case as Node writes it. */
+export const WEB_FILE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * The file ids of a say body, or null where `files` is not a list of at most `MAX_SAY_FILES`
+ * distinct ids of the store's shape. Absent reads as none.
+ */
+function sayFiles(files: unknown): string[] | null {
+  if (files === undefined) return [];
+  if (!Array.isArray(files) || files.length > MAX_SAY_FILES) return null;
+  if (!files.every((id): id is string => typeof id === "string" && WEB_FILE_ID.test(id))) return null;
+  return new Set(files).size === files.length ? files : null;
+}
+
+/**
+ * Registers `POST /web/say` with `{lineage, text, files, answers}`. The route carries the operator's word, so
+ * the gate has already admitted the peer, refused the broker host's own node, required the
+ * same-origin JSON headers, and handed the peer here; the login this route acts for is that peer's
+ * and nothing in the body names one. `files` lists the ids `POST /web/file` answered, at most ten,
+ * and `text` may be empty where it names one. A body that is not the expected object, a `lineage`
+ * that is not a non-empty string, a `text` that is not a string or is empty with no file, a `files`
+ * that is not a list of at most ten distinct ids, and a text with no visible words and no file each
+ * answer 400 with an empty body and deliver nothing. Otherwise the answer is `{status}` with the
+ * router's word: `delivered`, `no-session`, `ended`, `no-thread`, `no-channel`, `rate`, or
+ * `unknown-file` where an id names no file the store holds for the lineage's live session, as after
+ * the session was replaced or the broker restarted, so the page sends its files again.
+ *
+ * With `answers: true` the line is the answer to the question the session is held on, and goes to
+ * the router's typed-answer seam instead: no file may ride it, and an empty or over-long line answers
+ * 400. Otherwise the answer is `{status}` with `answered`, `no-question` where the session holds
+ * no question a typed answer may take, so nothing was delivered or posted, `no-session`, `ended`
+ * or `no-thread`. An `answers` that is not a boolean answers 400. Nothing of the body reaches a log.
+ */
+export function registerSayHandler(register: WebHandler["register"], options: SayHandlerOptions): void {
+  register(
+    "say",
+    async (request, response, peer) => {
+    if (request.method !== "POST") {
+      request.resume();
+      response.writeHead(405, { allow: "POST", "content-length": 0 });
+      response.end();
+      return;
+    }
+    const body = await readJsonObject(request, MAX_SAY_BODY_BYTES);
+    if (body === null) return empty(response, 400);
+    const { lineage, text, answers } = body;
+    const files = sayFiles(body.files);
+    if (typeof lineage !== "string" || lineage === "" || typeof text !== "string" || files === null) return empty(response, 400);
+    if (answers !== undefined && typeof answers !== "boolean") return empty(response, 400);
+    if (answers === true) {
+      if (files.length > 0 || text === "") return empty(response, 400);
+      const answered = await options.answerWeb(lineage, peer.login, text);
+      if (answered === "empty" || answered === "too-long") return empty(response, 400);
+      options.log?.info(`web say: typed answer: ${answered}`);
+      sendJson(response, { status: answered });
+      return;
+    }
+    if (text === "" && files.length === 0) return empty(response, 400);
+    const status = await options.deliverWeb(lineage, peer.login, text, files);
+    if (status === "empty") return empty(response, 400);
+    sendJson(response, { status });
+    },
+    { operatorWord: true },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A held question and an open permission, answered from the talk page
+// ---------------------------------------------------------------------------------------------
+
+/** A question or permission post carries a lineage and a handful of ids and positions. */
+const MAX_PENDING_BODY_BYTES = 4 * 1024;
+
+/** The shape of an entry id the question desk mints: six random bytes in hex. */
+const QUESTION_ENTRY_ID = /^[0-9a-f]{12}$/;
+
+/** The shape of a permission request id, the one the relay's intake admits. */
+const PERMISSION_REQUEST_ID = /^[a-km-z]{5}$/;
+
+/** The shape of a permission prompt's nonce: hex, and never empty, so a verdict always names one. */
+const PERMISSION_NONCE = /^[0-9a-f]{1,64}$/;
+
+/** The most option positions one select may name; past it the body is not one the page drew. */
+const MAX_SELECT_OPTIONS = 64;
+
+/** The live session carrying a lineage, or why there is none, told apart as the say route's router tells them. */
+function pendingSession(records: readonly SessionRecord[], lineage: string): SessionRecord | "no-session" | "ended" {
+  const record = liveByLineage(records, lineage);
+  if (record !== null) return record;
+  return records.some((held) => held.lineage === lineage) ? "ended" : "no-session";
+}
+
+/** A POST handler for a pending route: 405 for any other method, 400 for a body that is not a JSON object. */
+function pendingPost(
+  answer: (body: Record<string, unknown>, response: ServerResponse) => void | Promise<void>,
+): WebRouteHandler {
+  return async (request, response) => {
+    if (request.method !== "POST") {
+      request.resume();
+      response.writeHead(405, { allow: "POST", "content-length": 0 });
+      response.end();
+      return;
+    }
+    const body = await readJsonObject(request, MAX_PENDING_BODY_BYTES);
+    if (body === null) return empty(response, 400);
+    await answer(body, response);
+  };
+}
+
+export type QuestionHandlerOptions = {
+  /** The registry's records, read fresh on every post. */
+  records: () => readonly SessionRecord[];
+  /** The question desk: the entry a post names, and the three verbs the thread's buttons take. */
+  desk: Pick<QuestionDesk, "entry" | "select" | "submit" | "releaseEntry">;
+  /**
+   * Redraws a held ask's Discord message after a pick from the page, as a pick in the thread does,
+   * so the thread's picker shows what the desk now holds. Called only for an entry whose alert has
+   * landed, after the page is answered; a throw out of it is logged and changes nothing else.
+   */
+  refresh?: (entry: QuestionEntryView) => Promise<void>;
+  log?: Logger;
+};
+
+/**
+ * Registers `POST /web/question` with `{lineage, entryId, action, questionIndex, optionIndexes}`.
+ * `action` is `select`, `submit` or `console`, mapped to the desk's `select`, `submit` and
+ * `releaseEntry`; `questionIndex` and `optionIndexes` are positions in the ask, read for a select
+ * alone, and the desk resolves them against its own copy, so this route never builds an answer.
+ * The route carries the operator's word, so the gate has already refused the broker host's own node
+ * and required the same-origin JSON headers. A body that is not the expected object answers 400.
+ * Otherwise `{status}`: `no-session` or `ended` where no live session carries the lineage; `closed`
+ * where the entry is not one the desk holds for that session; `unanswerable` for a select or submit
+ * on an ask `answerableFromThread` refuses, which the console release alone may end; `selected`;
+ * `answered`, or `incomplete` with the `questionNumber` still unanswered, which submits nothing;
+ * `released`. Each answer that names a live session is logged as one line naming the route, the
+ * session, the action and the status; nothing else of the body reaches a log.
+ */
+export function registerQuestionHandler(register: WebHandler["register"], options: QuestionHandlerOptions): void {
+  register(
+    "question",
+    pendingPost(async (body, response) => {
+      const { lineage, entryId, action, questionIndex, optionIndexes } = body;
+      if (typeof lineage !== "string" || lineage === "") return empty(response, 400);
+      if (typeof entryId !== "string" || !QUESTION_ENTRY_ID.test(entryId)) return empty(response, 400);
+      if (action !== "select" && action !== "submit" && action !== "console") return empty(response, 400);
+      let at = 0;
+      let picks: number[] = [];
+      if (action === "select") {
+        if (typeof questionIndex !== "number" || !Number.isSafeInteger(questionIndex) || questionIndex < 0) return empty(response, 400);
+        if (!Array.isArray(optionIndexes) || optionIndexes.length > MAX_SELECT_OPTIONS) return empty(response, 400);
+        if (!optionIndexes.every((index): index is number => typeof index === "number" && Number.isSafeInteger(index) && index >= 0)) {
+          return empty(response, 400);
+        }
+        at = questionIndex;
+        picks = optionIndexes;
+      }
+
+      const session = pendingSession(options.records(), lineage);
+      if (typeof session === "string") return sendJson(response, { status: session });
+      // Every answer from here on names a live session, so each is logged as one line.
+      const answer = (reply: { status: string; questionNumber?: number }): void => {
+        options.log?.info(`web question: ${action} for session ${session.sessionId}: ${reply.status}`);
+        sendJson(response, reply);
+      };
+      // The entry must be held for the session the page is open on: an id is opaque, but it is still
+      // a string that travels, and one held for another session answers as one nothing holds.
+      const entry = options.desk.entry(entryId);
+      if (entry === null || entry.sessionId !== session.sessionId) return answer({ status: "closed" });
+
+      if (action === "console") {
+        return answer({ status: options.desk.releaseEntry(entryId) ? "released" : "closed" });
+      }
+      // The thread's rule for drawing a picker at all: an ask it cannot answer whole is the console's.
+      if (!answerableFromThread(entry.questions, entry.questionsInput)) return answer({ status: "unanswerable" });
+
+      if (action === "submit") {
+        const submission = options.desk.submit(entryId);
+        if (submission.kind === "incomplete") {
+          return answer({ status: "incomplete", questionNumber: submission.questionNumber });
+        }
+        return answer({ status: submission.kind === "answered" ? "answered" : "closed" });
+      }
+
+      const updated = options.desk.select(entryId, at, picks);
+      if (updated === null) return answer({ status: "closed" });
+      answer({ status: "selected" });
+      if (updated.alert !== null && options.refresh !== undefined) {
+        try {
+          await options.refresh(updated);
+        } catch {
+          options.log?.warn(`web question: redrawing session ${updated.sessionId}'s question message threw`);
+        }
+      }
+    }),
+    { operatorWord: true },
+  );
+}
+
+export type PermissionHandlerOptions = {
+  /** The registry's records, read fresh on every post. */
+  records: () => readonly SessionRecord[];
+  /** The thread bound to a session, as the Discord surface holds it. */
+  threadFor: (sessionId: string) => string | null;
+  /**
+   * The permission desk's one verb a verdict reaches, with the request's own nonce, the seam a
+   * prompt's button takes: it writes nothing unless the nonce is that request's own.
+   */
+  resolve: (threadId: string, verdict: Verdict, nonce: string | null) => boolean;
+  log?: Logger;
+};
+
+/**
+ * Registers `POST /web/permission` with `{lineage, requestId, behavior, nonce}`. The verdict goes to
+ * the desk's `resolve` for the thread of the live session carrying the lineage, with the nonce the
+ * view carried, so a verdict answers only the request whose prompt it was drawn from, and the
+ * prompt in the thread takes its outcome edit through the desk's own close-out. The route carries
+ * the operator's word, so the gate has already refused the broker host's own node. A body that is
+ * not the expected object, a `behavior` that is not `allow` or `deny`, and a missing or malformed
+ * nonce each answer 400. Otherwise `{status}`: `resolved`; `closed` where the desk holds no such
+ * request in that thread under that nonce, and wrote nothing; `no-session`, `ended` or `no-thread`.
+ * A verdict that reaches the desk is logged as one line naming the route, the session, the verdict
+ * and the status; nothing else of the body reaches a log.
+ */
+export function registerPermissionHandler(register: WebHandler["register"], options: PermissionHandlerOptions): void {
+  register(
+    "permission",
+    pendingPost((body, response) => {
+      const { lineage, requestId, behavior, nonce } = body;
+      if (typeof lineage !== "string" || lineage === "") return empty(response, 400);
+      if (typeof requestId !== "string" || !PERMISSION_REQUEST_ID.test(requestId)) return empty(response, 400);
+      if (behavior !== "allow" && behavior !== "deny") return empty(response, 400);
+      // Never null: the desk skips its nonce check for a caller that states it has none, and this
+      // route always has the one the view carried.
+      if (typeof nonce !== "string" || !PERMISSION_NONCE.test(nonce)) return empty(response, 400);
+      const session = pendingSession(options.records(), lineage);
+      if (typeof session === "string") return sendJson(response, { status: session });
+      const threadId = options.threadFor(session.sessionId);
+      if (threadId === null) return sendJson(response, { status: "no-thread" });
+      const status = options.resolve(threadId, { requestId, behavior }, nonce) ? "resolved" : "closed";
+      options.log?.info(`web permission: ${behavior} for session ${session.sessionId}: ${status}`);
+      sendJson(response, { status });
+    }),
+    { operatorWord: true },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The Needs-me page's Agree and batch Agree
+// ---------------------------------------------------------------------------------------------
+
+/** The most items one batch Agree may carry: the ledger reader's own cap on a persona's open asks. */
+export const MAX_AGREE_BATCH = MAX_ASKS_PER_LIST;
+
+/** An ask id is the ledger's own string, cut there to this many code points; a longer one names no ask. */
+const MAX_ASK_ID_LENGTH = MAX_ASK_FIELD_LENGTH;
+
+/** A single Agree names an id and a lineage; the batch names up to `MAX_AGREE_BATCH` of them, ids at their widest. */
+const MAX_AGREE_BODY_BYTES = 8 * 1024;
+const MAX_AGREE_BATCH_BODY_BYTES = 512 * 1024;
+
+/**
+ * What an Agree became: the router's word for a line it was handed, or why none was handed. `closed`
+ * is an id the ledger does not hold open for the lineage; `already-agreed` an id this broker already
+ * sent an Agree for; `no-recommendation` an ask with no recommendation to agree to; `changed` an ask
+ * whose recommendation is no longer the text the page drew; `refused: blocking` a blocking ask in a
+ * batch.
+ */
+export type AgreeStatus =
+  | WebDeliveryStatus
+  | "closed"
+  | "already-agreed"
+  | "no-recommendation"
+  | "changed"
+  | "refused: blocking";
+
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/**
+ * The line an Agree sends: the recommendation quoted, with each control character and line break
+ * made a space, runs of space made one and each double quote made a single quote so the quotes stay
+ * one pair on one line, then the decision time
+ * in the broker host's local time, `YYYY-MM-DD HH:mm`, zero padded. The kit lifts a hold on any
+ * operator-class line whatever its words, and the worker reads these as the operator's answer.
+ */
+export function agreeLine(recommend: string, at: number): string {
+  const when = new Date(at);
+  const day = `${String(when.getFullYear())}-${pad2(when.getMonth() + 1)}-${pad2(when.getDate())}`;
+  const quoted = recommend
+    .replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/"/g, "'");
+  return `Agree: proceed on your recommendation, "${quoted}". Decided ${day} ${pad2(when.getHours())}:${pad2(when.getMinutes())} from the page.`;
+}
+
+export type AgreeHandlerOptions = {
+  /** The pass's latest readings: the ledger an Agree finds its ask in. */
+  source: () => Readings;
+  /** The inbound router's web seam, the one the say route calls. */
+  deliverWeb: SayHandlerOptions["deliverWeb"];
+  /** The decision time's clock. Injected so a test fixes it. */
+  now?: () => number;
+  log?: Logger;
+};
+
+type AgreeItem = { askId: string; repo: string; recommend: string | null };
+
+/**
+ * A body's item: an ask id, bounded in code points, the lineage it is open under, bounded by the
+ * body cap, and the recommendation the page drew, null where the body carries none or not a string.
+ * A missing recommendation is not a malformed body: it is an Agree to text the broker cannot match,
+ * which `agree` answers as `changed`.
+ */
+function agreeItem(value: unknown): AgreeItem | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const { askId, repo, recommend } = value as Record<string, unknown>;
+  if (typeof askId !== "string" || askId === "" || [...askId].length > MAX_ASK_ID_LENGTH) return null;
+  if (typeof repo !== "string" || repo === "") return null;
+  return { askId, repo, recommend: typeof recommend === "string" ? recommend : null };
+}
+
+/**
+ * Registers `POST /web/agree` with `{askId, repo, recommend}` and `POST /web/agree-batch` with
+ * `{items: [{askId, repo, recommend}]}`. Both carry the operator's word, so the gate has already
+ * refused the broker host's own node and required the same-origin JSON headers, and the login an
+ * Agree acts for is the peer's. The page sends an id, a lineage and the recommendation it drew, and
+ * nothing else: the broker finds the open ledger entry for that pair in the readings it holds, and
+ * composes the line from the entry's recommendation, so a page cannot name a lineage that holds no
+ * such ask nor put words in an Agree. The recommendation the page sends is compared, never used:
+ * the operator's tap is an agreement to the text they read, so an entry whose recommendation is no
+ * longer that text, byte for byte, delivers nothing and answers `changed`, and the page draws the new
+ * text for a second tap. An item with no recommendation field is `changed` too.
+ *
+ * The answer to `agree` is `{status}`: the router's word for the line, or `closed` where the ledger
+ * holds no such open ask, `already-agreed` where this broker already delivered an Agree for the pair
+ * since it started, `no-recommendation` where the ask has nothing to agree to, or `changed`; the last
+ * four send nothing. The already-agreed key is held while a delivery is out and kept only where the
+ * delivery answered `delivered`. The batch agrees each item in order through the same code, each
+ * item's recommendation judged on its own, refuses an item whose ask is blocking as `refused:
+ * blocking`, and answers `{results: [{askId, repo, status}]}` in request order. A body that is not
+ * the expected object, an item that is not an id and a lineage, and a batch that is empty or past
+ * `MAX_AGREE_BATCH` answer 400 with an empty body and agree nothing.
+ *
+ * An Agree for an ask the ledger holds is logged as one line naming the route, the ask, the lineage
+ * and the status; the ledger's own strings are written as JSON, and nothing of the body, the login
+ * or the recommendation reaches a log.
+ */
+export function registerAgreeHandlers(register: WebHandler["register"], options: AgreeHandlerOptions): void {
+  const now = options.now ?? Date.now;
+  const agreed = new Set<string>();
+
+  async function agree(login: string, { askId, repo, recommend }: AgreeItem, inBatch: boolean): Promise<AgreeStatus> {
+    const entry = options.source().ledger.value?.find((reading) => reading.name === repo)?.open.find((open) => open.id === askId);
+    if (entry === undefined) return "closed";
+    const settle = (status: AgreeStatus): AgreeStatus => {
+      options.log?.info(`web agree: ask ${JSON.stringify(entry.id)} for ${JSON.stringify(repo)}: ${status}`);
+      return status;
+    };
+    if (inBatch && entry.blocking === true) return settle("refused: blocking");
+    const key = JSON.stringify([repo, entry.id]);
+    if (agreed.has(key)) return settle("already-agreed");
+    if (entry.recommend === null || entry.recommend.trim() === "") return settle("no-recommendation");
+    // Byte for byte: a recommendation rewritten since the page's last poll is not what the operator
+    // agreed to, and the line it would compose was never on their screen.
+    if (recommend !== entry.recommend) return settle("changed");
+    // The key is held before the delivery is awaited, so a second Agree for the ask that arrives while
+    // the first is out answers `already-agreed`; any answer but `delivered` gives the key back.
+    agreed.add(key);
+    let status: AgreeStatus = "no-session";
+    try {
+      status = await options.deliverWeb(repo, login, agreeLine(entry.recommend, now()), []);
+    } finally {
+      if (status !== "delivered") agreed.delete(key);
+    }
+    return settle(status);
+  }
+
+  register(
+    "agree",
+    async (request, response, peer) => {
+      if (request.method !== "POST") {
+        request.resume();
+        response.writeHead(405, { allow: "POST", "content-length": 0 });
+        response.end();
+        return;
+      }
+      const body = await readJsonObject(request, MAX_AGREE_BODY_BYTES);
+      const item = body === null ? null : agreeItem(body);
+      if (item === null) return empty(response, 400);
+      sendJson(response, { status: await agree(peer.login, item, false) });
+    },
+    { operatorWord: true },
+  );
+
+  register(
+    "agree-batch",
+    async (request, response, peer) => {
+      if (request.method !== "POST") {
+        request.resume();
+        response.writeHead(405, { allow: "POST", "content-length": 0 });
+        response.end();
+        return;
+      }
+      const body = await readJsonObject(request, MAX_AGREE_BATCH_BODY_BYTES);
+      const listed = body === null ? null : body.items;
+      if (!Array.isArray(listed) || listed.length === 0 || listed.length > MAX_AGREE_BATCH) return empty(response, 400);
+      const items = listed.map(agreeItem);
+      if (!items.every((item): item is AgreeItem => item !== null)) return empty(response, 400);
+      // One at a time and in order, so each item sees the already-agreed set the one before it filled.
+      const results: Array<{ askId: string; repo: string; status: AgreeStatus }> = [];
+      for (const item of items) {
+        results.push({ askId: item.askId, repo: item.repo, status: await agree(peer.login, item, true) });
+      }
+      sendJson(response, { results });
+    },
+    { operatorWord: true },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The page's files: an upload in, and a reply's file out
+// ---------------------------------------------------------------------------------------------
+
+export type FileHandlerOptions = {
+  /** The web files store: where an upload is saved, and what a link names. */
+  files: Pick<WebFiles, "saveUpload" | "open">;
+  /** The live session carrying a lineage, as the say route's router finds it, or null where none does. */
+  sessionFor: (lineage: string) => string | null;
+  /** The most bytes one upload may carry, the cap one Discord attachment takes. */
+  maxBytes: number;
+  log?: Logger;
+};
+
+/**
+ * The body read whole, or `size` at the first byte past `maxBytes`, or null where the request failed
+ * or closed before its end. The count is of the bytes received and never a declared length, and the
+ * read stops at the cap: the request is paused and nothing more of it is kept, so an oversized
+ * upload costs at most the cap in memory.
+ */
+function readUpload(request: IncomingMessage, maxBytes: number): Promise<Buffer | "size" | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+    const settle = (outcome: Buffer | "size" | null): void => {
+      if (settled) return;
+      settled = true;
+      request.off("data", take);
+      resolve(outcome);
+    };
+    const take = (chunk: Buffer): void => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        chunks.length = 0;
+        request.pause();
+        settle("size");
+        return;
+      }
+      chunks.push(chunk);
+    };
+    request.on("data", take);
+    request.on("end", () => settle(Buffer.concat(chunks)));
+    request.on("error", () => settle(null));
+    request.on("close", () => settle(null));
+  });
+}
+
+/**
+ * A refusal of an upload whose body is unread or only part read: a status, no body, and the
+ * connection closed after it, so the rest of the body is never read or drained.
+ */
+function refuseUpload(response: ServerResponse, status: number): void {
+  response.writeHead(status, { "content-length": 0, connection: "close" });
+  response.end();
+}
+
+/**
+ * The `Content-Disposition` a download is sent with: always an attachment, so a file is saved and
+ * never drawn in this listener's origin, its name in both RFC 6266 forms. The name is a reduced
+ * one, which holds no character either form must escape; each form escapes anything else all the
+ * same, so the header holds whatever name reaches it.
+ */
+export function attachmentDisposition(name: string): string {
+  const plain = name.replace(/[^A-Za-z0-9._-]/g, "_");
+  const encoded = encodeURIComponent(name).replace(/['()*!]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${plain}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * The listener's policy with `sandbox` added, for a download: a file opened in a tab anyway gets an
+ * opaque origin and runs no script.
+ */
+export const DOWNLOAD_CONTENT_SECURITY_POLICY = `${CONTENT_SECURITY_POLICY}; sandbox`;
+
+/** Where a download's id starts in its request path. */
+const FILE_PATH_PREFIX = `${ROUTE_PREFIX}file/`;
+
+/**
+ * Registers `POST /web/file?lineage=<name>` and `GET /web/file/<id>`.
+ *
+ * The upload carries the operator's word, as a say post does, so the gate has refused the broker
+ * host's own node, and it is the one POST taking `application/octet-stream`, which the gate has
+ * required along with this origin. The file's name rides in `X-Web-File-Name`, percent-encoded so a
+ * name outside Latin-1 can cross a header; the store reduces it before it reaches a path. A missing
+ * or repeated `lineage`, a missing name, a name or lineage that is not valid percent encoding, and an
+ * empty body answer 400; a lineage no live session carries answers 404; a declared
+ * `Content-Length` past `maxBytes` answers 413 before any of the body is read, and a body sent
+ * without one answers 413 the moment the bytes received pass the cap; a write that fails answers
+ * 500. Each writes nothing.
+ * Otherwise the file is saved for the lineage's live session and the answer is `{id}`, the id a say
+ * post names it by. The operator's file is saved as sent, with no kind list.
+ *
+ * The download is a read route, so the host's node reads it as it reads the page. It streams the
+ * file the store holds under the id from disk, its length the open file's own, with the content type
+ * the store recorded, as an attachment, with the listener's own security headers, a sandboxing
+ * policy and a same-origin resource policy. An id of any other shape, one the store does not hold or
+ * whose write has not landed, and a file gone from disk answer 404. A read that fails once the
+ * headers are sent cuts the response short. Nothing of a body, a name or an id reaches a log.
+ */
+export function registerFileHandlers(register: WebHandler["register"], options: FileHandlerOptions): void {
+  register(
+    "file",
+    async (request, response) => {
+      if (request.method !== "POST") {
+        request.resume();
+        response.writeHead(405, { allow: "POST", "content-length": 0 });
+        response.end();
+        return;
+      }
+      const rawLineage = single(queryOf(request.url ?? ""), "lineage");
+      const lineage = rawLineage === null ? null : decodeParam(rawLineage);
+      const rawName = header(request, "x-web-file-name");
+      const name = rawName === null ? null : decodeParam(rawName);
+      if (lineage === null || lineage === "" || name === null || name === "") return refuseUpload(response, 400);
+      const sessionId = options.sessionFor(lineage);
+      if (sessionId === null) return refuseUpload(response, 404);
+      // A length declared past the cap is refused before any of the body is read. A chunked body,
+      // or one whose declared length is within the cap, is bounded by the read below.
+      const declared = header(request, "content-length");
+      if (declared !== null && /^[0-9]+$/.test(declared) && Number(declared) > options.maxBytes) return refuseUpload(response, 413);
+      const body = await readUpload(request, options.maxBytes);
+      if (body === "size") return refuseUpload(response, 413);
+      if (body === null || body.length === 0) return refuseUpload(response, 400);
+      const id = await options.files.saveUpload(sessionId, name, body);
+      if (id === null) {
+        options.log?.warn("web files: an upload could not be written");
+        return empty(response, 500);
+      }
+      sendJson(response, { id });
+    },
+    { operatorWord: true, octetStream: true },
+  );
+
+  register(
+    "file",
+    async (request, response) => {
+      request.resume();
+      if (request.method !== "GET") {
+        response.writeHead(405, { allow: "GET", "content-length": 0 });
+        response.end();
+        return;
+      }
+      const id = (request.url ?? "/").split("?")[0].slice(FILE_PATH_PREFIX.length);
+      if (!WEB_FILE_ID.test(id)) return empty(response, 404);
+      const opened = await options.files.open(id);
+      if (opened === null) return empty(response, 404);
+      response.writeHead(200, {
+        "content-type": opened.file.contentType,
+        "content-length": opened.size,
+        "content-disposition": attachmentDisposition(opened.file.name),
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": DOWNLOAD_CONTENT_SECURITY_POLICY,
+        "cross-origin-resource-policy": "same-origin",
+        "x-frame-options": "DENY",
+      });
+      try {
+        await pipeline(opened.stream, response);
+      } catch {
+        // The headers are out, so the only answer left is a response cut short: the pipeline has
+        // destroyed both ends, and the open file closes with its stream.
+        response.destroy();
+      }
+    },
+    { operatorWord: false, subpath: true },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
 // The two marks the operator sets
 // ---------------------------------------------------------------------------------------------
 
@@ -524,15 +1316,15 @@ const MARK_DRAIN_LIMIT_FACTOR = 4;
  * object. The read stops keeping bytes at the ceiling and the connection is destroyed at four times
  * it, so an oversized post costs at most the ceiling in memory. Nothing of the body reaches a log.
  */
-function readJsonObject(request: IncomingMessage): Promise<Record<string, unknown> | null> {
+function readJsonObject(request: IncomingMessage, ceiling = MAX_MARK_BODY_BYTES): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
     request.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_MARK_BODY_BYTES) {
+      if (size > ceiling) {
         chunks.length = 0;
-        if (size > MAX_MARK_BODY_BYTES * MARK_DRAIN_LIMIT_FACTOR) {
+        if (size > ceiling * MARK_DRAIN_LIMIT_FACTOR) {
           request.destroy();
           resolve(null);
         }
@@ -543,7 +1335,7 @@ function readJsonObject(request: IncomingMessage): Promise<Record<string, unknow
     request.on("error", () => resolve(null));
     request.on("close", () => resolve(null));
     request.on("end", () => {
-      if (size > MAX_MARK_BODY_BYTES) return resolve(null);
+      if (size > ceiling) return resolve(null);
       try {
         const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         resolve(typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null);
@@ -591,7 +1383,7 @@ export function registerWatermarkHandlers(
       const body = await readJsonObject(request);
       if (body === null) return empty(response, 400);
       answer(body, response);
-    });
+    }, { operatorWord: false });
   };
 
   /** Runs the write, and answers with its time; a throw is a 500 and the mark stays as it was. */

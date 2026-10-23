@@ -67,7 +67,7 @@ type Tracked = {
  * map without limit; the oldest is dropped, which leaves its last-painted reaction standing
  * forever rather than spending unbounded memory to keep advancing it.
  */
-const MAX_TRACKED_PER_THREAD = 50;
+export const MAX_TRACKED_PER_THREAD = 50;
 
 /** How long a run of reaction refusals is aggregated before its next log line. */
 const REFUSAL_WINDOW_MS = 5 * 60 * 1000;
@@ -154,7 +154,17 @@ export type ReceiptTracker = {
   restore: (threadId: string) => void;
   /** The thread's session ended or its thread was retired: drop its tracking. */
   forget: (threadId: string) => void;
+  /**
+   * The stage this tracker last recorded for a message, as the talk page names it, or null for a
+   * message it never tracked, one it forgot with its thread, or one past the per-thread memory.
+   * Read from the record and never from Discord, so it says what the tracker decided, not what the
+   * last reaction write managed to paint.
+   */
+  stageOf: (threadId: string, messageId: string) => ReceiptStage | null;
 };
+
+/** A message's stage as the talk page reads it; `picked-up` is the 👀 stage. */
+export type ReceiptStage = "delivered" | "picked-up" | "answered" | "warned";
 
 export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTracker {
   const describeError =
@@ -192,7 +202,26 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
   // `restore` or `forget`. A message delivered into one of these is painted ⚠️ straight away, since
   // a message queued during a long retry wait is the case the warning exists for.
   const episodes = new Set<string>();
+  // The stage last decided for each message, per thread and oldest first, for `stageOf`. Kept apart
+  // from `threads` because an answered message leaves tracking and this must still say it was
+  // answered. Bounded as the tracking is, by dropping the oldest, and dropped whole with `forget`.
+  const stages = new Map<string, Map<string, ReceiptStage>>();
   const repeats = createRepeatLog(RECEIPTS_REPEAT_LOG, options.log, options.now);
+
+  /** Records the stage a message has reached, so `stageOf` reads it back. */
+  function reached(threadId: string, messageId: string, stage: ReceiptStage): void {
+    let recorded = stages.get(threadId);
+    if (recorded === undefined) {
+      recorded = new Map();
+      stages.set(threadId, recorded);
+    }
+    recorded.delete(messageId);
+    recorded.set(messageId, stage);
+    if (recorded.size > MAX_TRACKED_PER_THREAD) {
+      const oldest = recorded.keys().next().value;
+      if (oldest !== undefined) recorded.delete(oldest);
+    }
+  }
 
   function reportRefusal(reason: string): void {
     repeats("refused", reason);
@@ -334,6 +363,7 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
       };
       list.push(entry);
       if (list.length > MAX_TRACKED_PER_THREAD) list.shift();
+      reached(threadId, messageId, warned ? "warned" : "delivered");
       enqueue(threadId, transition(threadId, entry, warned ? STAGE_EMOJI.warning : STAGE_EMOJI.delivered));
     },
 
@@ -353,13 +383,17 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
           // nothing will ever call `answered` for it again, so it goes straight to ✅ rather than
           // parking at 👀 forever. It leaves tracking here, so a refused ✅ add is not retried and
           // the message keeps whatever stage it already showed.
+          reached(threadId, entry.messageId, "answered");
           enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.answered));
           continue;
         }
         entry.pickedUpAt = at;
         remaining.push(entry);
         // A warned message keeps showing ⚠️ until its episode closes, and `restore` paints 👀 then.
-        if (!entry.warned) enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.pickedUp));
+        if (!entry.warned) {
+          reached(threadId, entry.messageId, "picked-up");
+          enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.pickedUp));
+        }
       }
       threads.set(threadId, remaining);
     },
@@ -383,6 +417,7 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
           remaining.push(entry);
           continue;
         }
+        reached(threadId, entry.messageId, "answered");
         enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.answered));
       }
       threads.set(threadId, remaining);
@@ -395,6 +430,7 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
       for (const entry of list) {
         if (entry.warned) continue;
         entry.warned = true;
+        reached(threadId, entry.messageId, "warned");
         enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.warning));
       }
     },
@@ -406,15 +442,21 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
       for (const entry of list) {
         if (!entry.warned) continue;
         entry.warned = false;
+        reached(threadId, entry.messageId, entry.pickedUpAt === null ? "delivered" : "picked-up");
         const stage = entry.pickedUpAt === null ? STAGE_EMOJI.delivered : STAGE_EMOJI.pickedUp;
         enqueue(threadId, transition(threadId, entry, stage));
       }
+    },
+
+    stageOf(threadId, messageId) {
+      return stages.get(threadId)?.get(messageId) ?? null;
     },
 
     forget(threadId) {
       threads.delete(threadId);
       lastAnsweredAt.delete(threadId);
       episodes.delete(threadId);
+      stages.delete(threadId);
       // The queue is left alone: a chain still running for this thread (a write already in flight
       // when the thread was retired) must keep the entry its own drain cleanup reads, or a later
       // write racing in under the same id would collide with a chain nothing here is tracking

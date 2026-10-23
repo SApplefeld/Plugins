@@ -1795,6 +1795,19 @@ export function renderVoiceLine(role: VoiceLineRole, name: string, text: string)
 }
 
 /**
+ * One line the operator typed on the web page, rendered as the ordered messages it takes to carry
+ * it whole: `<name> (page): <text>`, the author label the session reads on the same line's event.
+ *
+ * The voice line's treatment, for the voice line's reason: a person's words posted as the bot into
+ * the thread the operator answers permission prompts in. The attribution is composed after the
+ * escape and spent against every message's budget, so a typed line can neither open a quoted block
+ * nor draw a chip, and the name takes the escape and the bound a peer's name takes.
+ */
+export function renderPageLine(name: string, text: string): string[] {
+  return attributed(withoutInvisible(text).trim(), `${inertField(name, MAX_PEER_NAME_DRAWN)} (page): `);
+}
+
+/**
  * A message another session sent this one, rendered as the ordered messages it takes to carry it
  * whole.
  *

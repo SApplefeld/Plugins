@@ -680,6 +680,15 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_SENDERS'
 )
 
+# The four metadata keys the allowlist's description names: broker.env carries them, and they stay
+# off the allowlist. Start-Broker.ps1 logs a key in the file that is on neither list.
+$script:ChannelBrokerEnvFileMetadataKeys = @(
+    'CHANNEL_NODE_EXE',
+    'CHANNEL_TASK_USER',
+    'CHANNEL_HOOK_OWNER',
+    'CHANNEL_PLUGIN_MARKETPLACE'
+)
+
 <#
 .SYNOPSIS
 Sets every allowlisted key from an env file into the current process's environment.

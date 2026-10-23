@@ -83,8 +83,20 @@ import type { WebConfig } from "./web/config.ts";
 import { createTailscaleIdentity } from "./web/identity.ts";
 import { createWebPass, webPassSources } from "./web/pass.ts";
 import type { WebPass } from "./web/pass.ts";
-import { createWebServer, registerViewHandlers, registerWatermarkHandlers } from "./web/server.ts";
+import {
+  createWebServer,
+  registerAgreeHandlers,
+  registerFileHandlers,
+  registerPermissionHandler,
+  registerQuestionHandler,
+  registerSayHandler,
+  registerTalkHandlers,
+  registerViewHandlers,
+  registerWatermarkHandlers,
+} from "./web/server.ts";
 import type { WebServer } from "./web/server.ts";
+import { createTalkRing } from "./web/talk.ts";
+import type { TalkTap } from "./web/talk.ts";
 import { DEFAULT_THRESHOLDS } from "./web/views.ts";
 import { openWatermarks, watermarksFileFor } from "./web/watermarks.ts";
 import type {
@@ -103,7 +115,7 @@ import type { TranscriptTailer } from "./tail.ts";
 import { createStatusReader } from "./status-reader.ts";
 import type { StatusReader } from "./status-reader.ts";
 import { createRelayHub } from "./routing/relays.ts";
-import { attachmentsRoot, createAttachmentIntake, pruneAttachments } from "./routing/attachments.ts";
+import { attachmentsRoot, createAttachmentIntake, createWebFiles, pruneAttachments } from "./routing/attachments.ts";
 import { createInboundRouter, voiceWhenReady } from "./routing/inbound.ts";
 import type { InboundRouter } from "./routing/inbound.ts";
 import { createResponseGateJournal } from "./routing/response-gate.ts";
@@ -260,27 +272,83 @@ export function restartRefusal(state: {
  * a landed alert releases, a throw included, because the throw would otherwise reach the tailer's
  * catch with the hold still standing.
  *
- * The release is checked against this ask's own digest. Both question paths, the hook's
- * emission-time alert and the tailer's resolution-time yield, share one delivery closure, so a
- * failure carries only a session id; without the digest one ask's failed delivery would release a
- * different ask's live, properly alerted hold. A throw is rethrown after the release, so the
- * tailer's own catch still reports the dropped alert.
+ * The release goes through the desk's `alertLost`, checked against this ask's own digest. Both
+ * question paths, the hook's emission-time alert and the tailer's resolution-time yield, share one
+ * delivery closure, so a failure carries only a session id; without the digest one ask's failed
+ * delivery would release a different ask's live, properly alerted hold. Since this notice will never
+ * come back, `alertLost` also drops the ask's records that wait on it, and keeps a page answer marked
+ * as waiting on no notice. The console's resolution line then leaves the tailer's fallback alert
+ * armed, and that fallback's notice draws the page's answer. Where that line was polled before the
+ * alert failed, it found the page's answer waiting on this notice and posted no fallback, and the
+ * line is read once, so `alertLost` answers true and the fallback alert is posted here instead: the
+ * same delivery once more, whose notice finds nothing held and draws the kept answer. Nothing awaits
+ * it and the first outcome is still the caller's, so the tailer reports the dropped alert as it does.
+ * The fallback is posted at once and only once. So it covers a transient failure, and where the first
+ * alert failed on the question window or a blocked post budget the fallback meets the same refusal,
+ * is logged, and the page's answer stays out of the thread. A throw is rethrown after the release, so
+ * the tailer's own catch still reports the dropped alert.
  */
 export function questionDelivery(options: {
   deliver: (sessionId: string, questions: readonly AskedQuestion[]) => Promise<ReplyResult>;
-  desk: { release: (sessionId: string, digest?: string) => boolean };
+  desk: { alertLost: (sessionId: string, digest: string) => boolean };
+  log?: (line: string) => void;
 }): (sessionId: string, questions: readonly AskedQuestion[]) => Promise<ReplyResult> {
   return async (sessionId, questions) => {
     const digest = questionDigest(questions);
+    const lost = (): void => {
+      // The fallback is the unwrapped delivery, so its own failure never consults the desk again: it
+      // is logged once and not retried. The line names the session and never the question. The desk
+      // answers true once per record, so a later loss of the same ask posts no second fallback.
+      if (!options.desk.alertLost(sessionId, digest)) return;
+      const failed = (why: string): void =>
+        options.log?.(`question fallback alert for session ${sessionId} was not written: ${why}`);
+      void options.deliver(sessionId, questions).then(
+        (outcome) => {
+          if (outcome.status !== "sent") failed(outcome.status);
+        },
+        () => failed("threw"),
+      );
+    };
     try {
       const outcome = await options.deliver(sessionId, questions);
-      if (outcome.status !== "sent") options.desk.release(sessionId, digest);
+      if (outcome.status !== "sent") lost();
       return outcome;
     } catch (error) {
-      options.desk.release(sessionId, digest);
+      lost();
       throw error;
     }
   };
+}
+
+/**
+ * Hands the talk ring the question notice a landed alert carried, under the asking session's lineage.
+ * A session with no lineage, or a broker with no ring, taps nothing. A throw behind the tap is
+ * absorbed so a landed alert is never turned into a failure, and the log line names the session and
+ * never the question.
+ */
+export function tapQuestion(
+  options: {
+    talkTap: TalkTap | null;
+    lineageOf: (sessionId: string) => string | null;
+    log: (line: string) => void;
+  },
+  sessionId: string,
+  questions: readonly AskedQuestion[],
+): void {
+  try {
+    const lineage = options.lineageOf(sessionId);
+    if (options.talkTap === null || lineage === null) return;
+    options.talkTap.push(lineage, {
+      kind: "question",
+      author: null,
+      senderClass: null,
+      text: questions
+        .map((asked) => (asked.header === null ? asked.question : `${asked.header}: ${asked.question}`))
+        .join("\n"),
+    });
+  } catch {
+    options.log(`routing: the talk tap could not take a question from session ${sessionId}`);
+  }
 }
 
 /**
@@ -539,7 +607,16 @@ const ATTACHMENT_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
  * noted nothing on the entry and has nothing to undo, and the ask whose hold ended while its
  * continuations were posting or under the edit, where the close-out has already run.
  *
- * The two releases that follow a noted alert name the entry rather than the session and digest. The
+ * An ask the desk no longer holds because the operator's page answered or released it while this
+ * notice was on its way had no message for its close-out to rewrite. The desk keeps how it closed,
+ * and this notice is rewritten through the same close-out to the line that state draws, so the
+ * thread never shows open a question that has closed.
+ *
+ * The prompt is drawn from the selections the desk holds when the edit is issued, the way a
+ * tap-refresh draws them, because the page can pick before the notice comes back or while the
+ * continuations post.
+ *
+ * Every release that follows a noted alert names the entry rather than the session and digest. The
  * continuation posts are a window several round trips wide, and a session whose hold ends inside it
  * can re-post the same ask and be given a new entry carrying the same digest, which a release by
  * digest would end instead of this one.
@@ -547,11 +624,18 @@ const ATTACHMENT_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export function questionUpgrade(options: {
   desk: {
     held: (sessionId: string, digest: string) => QuestionEntryView | null;
-    release: (sessionId: string, digest?: string) => boolean;
+    alertLost: (sessionId: string, digest: string) => void;
     releaseEntry: (entryId: string) => boolean;
     noteAlert: (sessionId: string, digest: string, alert: QuestionAlert) => string | null;
     entry: (entryId: string) => QuestionEntryView | null;
+    closedBeforeAlert: (
+      sessionId: string,
+      digest: string,
+      alert: QuestionAlert,
+    ) => { state: QuestionTerminalState; detail: QuestionTerminalDetail } | null;
   };
+  /** The desk's terminal-state notifier, which draws a closed ask's notice in its closed line. */
+  closeOut: (sessionId: string, state: QuestionTerminalState, detail: QuestionTerminalDetail) => void;
   edit: (
     threadId: string,
     messageId: string,
@@ -578,14 +662,33 @@ export function questionUpgrade(options: {
   return async ({ sessionId, threadId, messageId, questions }) => {
     const digest = questionDigest(questions);
     const entry = options.desk.held(sessionId, digest);
-    // Nothing is held for this ask, so there is nothing to upgrade and nothing to release: the
-    // notice stands as the alert it is.
-    if (entry === null) return;
-    if (messageId === null || !answerableFromThread(entry.questions, entry.questionsInput)) {
-      // Released before the alert is noted on the entry, so the terminal state has no message to
-      // rewrite: the notice already in the thread carries the question whole and says it is
-      // waiting at the console, which is exactly what happened.
-      options.desk.release(sessionId, digest);
+    if (entry === null) {
+      // Nothing is held for this ask, so there is nothing to upgrade and nothing to release. With no
+      // message id, a record of the ask closing before its notice came back would wait for a notice
+      // that never comes, so each alert-null record of the ask is dropped, or kept marked as waiting
+      // on no notice where the page answered. Where the ask closed before this notice came back, the
+      // notice is drawn in that closed state; otherwise it stands as the alert it is.
+      if (messageId === null) {
+        options.desk.alertLost(sessionId, digest);
+        return;
+      }
+      const closed = options.desk.closedBeforeAlert(sessionId, digest, { threadId, messageId });
+      if (closed !== null) options.closeOut(sessionId, closed.state, closed.detail);
+      return;
+    }
+    if (messageId === null) {
+      // A post with no message id has nothing to draw on and no notice is coming, so the hold is
+      // released, and the ask's alert-null records are dropped, or kept marked as waiting on no
+      // notice where the page answered.
+      options.desk.alertLost(sessionId, digest);
+      return;
+    }
+    if (!answerableFromThread(entry.questions, entry.questionsInput)) {
+      // The alert is noted before the release, so the release is an alerted close: the close-out
+      // rewrites this notice to the line naming the console, and the console's own answer later
+      // flips that same message.
+      options.desk.noteAlert(sessionId, digest, { threadId, messageId });
+      options.desk.releaseEntry(entry.id);
       return;
     }
     // The entry is live here and carries no message yet, which is what makes the alert safe to note
@@ -594,6 +697,8 @@ export function questionUpgrade(options: {
     // desk has closed out is the re-read inside `draw`, not this read.
     const entryId = options.desk.noteAlert(sessionId, digest, { threadId, messageId });
     if (entryId === null) return;
+    // Only this render's continuations are posted. They are composed from the questions alone, so
+    // they are the texts the prompt drawn below names whatever the selections are by then.
     const prompt = renderQuestionPrompt({
       operatorIds: options.operatorIds,
       entryId,
@@ -637,7 +742,16 @@ export function questionUpgrade(options: {
       // components over a closed ask, which is a row of taps that report failures.
       const live = options.desk.entry(entryId);
       if (live === null || live.alert === null) return null;
-      return options.edit(threadId, messageId, prompt.content, prompt.components);
+      // Drawn from the entry's live selections, as a tap-refresh draws them: a pick made from the
+      // page before the notice came back, or while the continuations posted, is on the desk, and a
+      // prompt drawn from none would show empty menus over it.
+      const drawn = renderQuestionPrompt({
+        operatorIds: options.operatorIds,
+        entryId,
+        questions,
+        selections: live.selections,
+      });
+      return options.edit(threadId, messageId, drawn.content, drawn.components);
     });
     // The ask that ended mid-posting leaves nothing to release: its close-out has already run.
     if (upgraded === null || upgraded.status === "ok") return;
@@ -1132,6 +1246,10 @@ export async function startBroker(
   // block runs. A host with no Discord builds one nowhere, and every call through the closures
   // below is a no-op, which is what a broker with no reactions to paint has always done.
   let receipts: ReceiptTracker | null = null;
+  // The redraw of a held ask's Discord message, mutable for the reason `receipts` is: it needs the
+  // thread writer built inside the Discord block. A pick from the talk page calls it so the thread's
+  // picker shows what the desk holds; null on a host with no Discord, where there is no message.
+  let refreshQuestion: ((entry: QuestionEntryView) => Promise<void>) | null = null;
   // The one session-keyed pickup entry point, so the intake handler's `UserPromptSubmit` credit
   // and the tailer's own `notePickup` seam resolve a session to its thread and reach the tracker
   // through one path rather than two closures that could drift. Reads `threadFor` and `receipts`
@@ -1274,6 +1392,14 @@ export async function startBroker(
       }
     },
   };
+  // The talk page's transcript ring, memory only and present only while the web surface is on. The
+  // outbound and inbound routers and the question alert push into it; the web block below serves it.
+  const talkRing = web === null ? null : createTalkRing();
+  // The talk page's files, both ways, under the same folder and the same switch as a Discord
+  // attachment: present only beside the ring, and absent where attachments are off, so a host that
+  // takes no file from Discord takes none from the page and keeps no reply's file for it.
+  const webFiles =
+    talkRing === null || config.attachments === "off" ? null : createWebFiles({ stateDir: path.dirname(config.stateFile) });
   const outbound = createOutboundRouter({
     registry,
     threadFor: (sessionId) => threadFor(sessionId),
@@ -1291,6 +1417,8 @@ export async function startBroker(
     log: note,
     ...(echo === null ? {} : { echo }),
     ...(sightings === null ? {} : { askTap: sightings }),
+    ...(talkRing === null ? {} : { talkTap: talkRing }),
+    ...(webFiles === null ? {} : { talkFiles: { reserve: (sessionId, file) => webFiles.reserveReply(sessionId, file) } }),
     voice: { reply: (sessionId, text) => voiceBridge?.reply(sessionId, text) },
     // Read through the closure for the reason the registry's seam reads it: the inbound router,
     // which builds the response gate, exists only once Discord is configured below.
@@ -1362,15 +1490,18 @@ export async function startBroker(
   // response is already answered when this runs, and an edit that cannot be made costs a stale
   // message rather than a stuck session.
   const drawing = createPromptEdits();
+  // One close-out for both callers: the desk's own terminal states, and the alert path drawing the
+  // notice of an ask that closed before that notice came back.
+  const closeOutQuestion = questionCloseOut({
+    edit: (threadId, messageId, text, components) =>
+      steeringWriter.edit(threadId, messageId, text, components),
+    drawing,
+    log: note,
+  });
   const questionDesk = createQuestionDesk({
     holdMs: config.questionHoldMs,
     log: note,
-    onTerminal: questionCloseOut({
-      edit: (threadId, messageId, text, components) =>
-        steeringWriter.edit(threadId, messageId, text, components),
-      drawing,
-      log: note,
-    }),
+    onTerminal: closeOutQuestion,
   });
   // The transcript tailer exists only while both mirror switches are on. Off means not
   // constructed: no transcript is ever opened, no poll timer runs, and the intake gets no seam
@@ -1397,6 +1528,7 @@ export async function startBroker(
       deliverQuestion: questionDelivery({
         deliver: (sessionId, questions) => deliverQuestion(sessionId, questions),
         desk: questionDesk,
+        log: note,
       }),
       // The console-answer flip. A resolution line means the picker closed, and the desk holds the
       // one message that has been telling the operator to answer there; the digest is what names
@@ -1474,6 +1606,7 @@ export async function startBroker(
     reportUnknownVerdict: async () => {},
     settled: () => Promise.resolve(),
     waiting: () => new Set<string>(),
+    pendingFor: () => [],
   };
   const relayRoutes = createRelayRoutes({
     relays,
@@ -1944,6 +2077,7 @@ export async function startBroker(
     });
     const upgrade = questionUpgrade({
       desk: questionDesk,
+      closeOut: closeOutQuestion,
       edit: (threadId, messageId, text, components) =>
         steeringWriter.edit(threadId, messageId, text, components),
       // The overflow of an ask no single message can carry, posted plainly and paced by its own
@@ -1977,6 +2111,18 @@ export async function startBroker(
         mention,
       );
       if (posted.status !== "ok") return { status: "failed", error: "the alert was not written" };
+      // The ring takes the question as the alert landed it, once the whole alert has posted. A throw
+      // behind it must not turn a landed alert into a failure, and the log line names the session
+      // and never the question.
+      tapQuestion(
+        {
+          talkTap: talkRing,
+          lineageOf: (id) => registry.list().find((record) => record.sessionId === id)?.lineage ?? null,
+          log: note,
+        },
+        sessionId,
+        questions,
+      );
       await upgrade({ sessionId, threadId, messageId: posted.value.messageId, questions });
       return { status: "sent" };
     };
@@ -2003,19 +2149,21 @@ export async function startBroker(
       heldModelChange = null;
       announceModelChange(change);
     }
+    const redraw = questionRefresh({
+      desk: questionDesk,
+      edit: (threadId, messageId, text, components) =>
+        steeringWriter.edit(threadId, messageId, text, components),
+      drawing,
+      operatorIds: gate.operatorIds,
+      log: note,
+    });
+    refreshQuestion = redraw;
     const interactions = createInteractionRouter({
       gate,
       desk: questionDesk,
       permissions,
       responder: createInteractionResponder(request),
-      refresh: questionRefresh({
-        desk: questionDesk,
-        edit: (threadId, messageId, text, components) =>
-          steeringWriter.edit(threadId, messageId, text, components),
-        drawing,
-        operatorIds: gate.operatorIds,
-        log: note,
-      }),
+      refresh: redraw,
       now: Date.now,
       log: note,
     });
@@ -2071,7 +2219,17 @@ export async function startBroker(
       },
       now: Date.now,
       log: note,
+      // The web listener's login list, so a page line held across the restart is the operator's
+      // again only where its login is still admitted. With no web surface, none is.
+      ...(web === null ? {} : { webOperators: web.operators }),
       receipts: { delivered: (threadId, messageId, at) => receipts?.delivered(threadId, messageId, at) },
+      ...(talkRing === null ? {} : { talkTap: talkRing }),
+      // The web page's line goes into the thread as the bot through the conversation writer's reply,
+      // the budget-paced post the mirrored replies take, so a burst of page posts is metered with the
+      // rest of the conversation volume and a block it earns never refuses a permission prompt or a
+      // question alert, which spend the other writer's bucket.
+      page: { post: (input) => mirrorWriter.reply(input.threadId, input.text, input.file) },
+      ...(webFiles === null ? {} : { webFiles }),
       // Who may attach a file and how large one may be, as configured. Saved files sit under the
       // folder holding the state file, beside the buffers file and the journal, wherever
       // CHANNEL_BROKER_STATE put it, and never in a session's project directory.
@@ -2393,6 +2551,61 @@ export async function startBroker(
     const readings = () => ({ ...pass.readings(), marks: marks.marks() });
     registerViewHandlers(webServer.register, readings);
     registerWatermarkHandlers(webServer.register, readings, marks, { log: logger });
+    if (talkRing !== null) {
+      registerTalkHandlers(webServer.register, talkRing, {
+        source: readings,
+        threadFor: (sessionId) => threadFor(sessionId),
+        guildId: () => (gateway === null ? null : gateway.guildId()),
+        // Read through the closure for the reason `threadFor` is: the tracker is built inside the
+        // Discord block, and a broker with no tracker reads every line as having no receipt.
+        stageOf: (threadId, messageId) => receipts?.stageOf(threadId, messageId) ?? null,
+        questionsFor: (sessionId) => questionDesk.heldFor(sessionId),
+        // Through the binding, since the Discord block replaces the stand-in desk.
+        permissionsFor: (sessionId) => permissions.pendingFor(sessionId),
+      });
+      // The composer's seam. The inbound router exists only once Discord is configured, and with
+      // no router there is no session a line could reach, which `no-session` says.
+      registerSayHandler(webServer.register, {
+        deliverWeb: (lineage, login, text, files) =>
+          inbound === null ? Promise.resolve("no-session") : inbound.deliverWeb(lineage, login, text, files),
+        answerWeb: (lineage, login, text) =>
+          inbound === null ? Promise.resolve("no-session") : inbound.answerWeb(lineage, login, text),
+        log: logger,
+      });
+      // The Needs-me page's Agree and batch Agree. An Agree is a line to the asking persona's session
+      // through the same seam the composer's line takes, so it reaches a session as the operator's word.
+      registerAgreeHandlers(webServer.register, {
+        source: readings,
+        deliverWeb: (lineage, login, text, files) =>
+          inbound === null ? Promise.resolve("no-session") : inbound.deliverWeb(lineage, login, text, files),
+        log: logger,
+      });
+      // A held question and an open permission, answered from the page through the desks' own
+      // verbs, the ones the thread's buttons take, so the page builds no answer of its own.
+      registerQuestionHandler(webServer.register, {
+        records: () => registry.list(),
+        desk: questionDesk,
+        refresh: (entry) => (refreshQuestion === null ? Promise.resolve() : refreshQuestion(entry)),
+        log: logger,
+      });
+      registerPermissionHandler(webServer.register, {
+        records: () => registry.list(),
+        threadFor: (sessionId) => threadFor(sessionId),
+        resolve: (threadId, verdict, nonce) => permissions.resolve(threadId, verdict, nonce),
+        log: logger,
+      });
+      // The page's files, where attachments are on. An upload is saved for the live session the
+      // say route would reach, found the way the router finds it, so a say naming the id lands on
+      // the session the file was saved for or is refused.
+      if (webFiles !== null) {
+        registerFileHandlers(webServer.register, {
+          files: webFiles,
+          sessionFor: (lineage) => liveByLineage(registry.list(), lineage)?.sessionId ?? null,
+          maxBytes: config.attachmentMaxBytes,
+          log: logger,
+        });
+      }
+    }
     try {
       // The first pass runs before the listener opens, so no request waits on the cold read.
       pass.start();

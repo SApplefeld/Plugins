@@ -145,6 +145,18 @@ export type StandupView = {
   held: readonly SourceName[];
 };
 
+/**
+ * The Needs-me page's view: every item the standup view's `needsYou` holds, in three groups the
+ * page draws in this order. `rollout` is spec 3's group and stays null until that spec builds it.
+ */
+export type NeedsMeView = {
+  sandbox: string;
+  groups: { blocked: Item[]; ask: Item[]; hands: Item[] };
+  rollout: null;
+  asOf: AsOf;
+  held: readonly SourceName[];
+};
+
 export type RepoView = {
   name: string;
   heading: null;
@@ -810,6 +822,25 @@ export function standupView(readings: Readings): StandupView {
     })),
     shared: null,
     health: healthLine(readings, repos, items.filter((item) => item.kind === "hands").length),
+    asOf: asOf(readings),
+    held: readings.held,
+  };
+}
+
+/**
+ * The Needs-me page's view: the standup view's items, grouped by kind. Within a group the items keep
+ * the order `needsYou` gives them, so the page's sorts start from the same list the standup page shows.
+ */
+export function needsMeView(readings: Readings): NeedsMeView {
+  const items = needsYou(readings, fleet(readings));
+  return {
+    sandbox: readings.host,
+    groups: {
+      blocked: items.filter((item) => item.kind === "blocked"),
+      ask: items.filter((item) => item.kind === "ask"),
+      hands: items.filter((item) => item.kind === "hands"),
+    },
+    rollout: null,
     asOf: asOf(readings),
     held: readings.held,
   };
