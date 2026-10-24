@@ -47,6 +47,8 @@ import { lineageKnown, talkView } from "./talk.ts";
 import type { TalkRing, TalkViewInput } from "./talk.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
+import { CLIENT_PREFIX } from "./rollout.ts";
+import type { RolloutMark, RolloutReader } from "./rollout.ts";
 import { liveByLineage } from "../registry.ts";
 import type { SessionRecord } from "../registry.ts";
 import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
@@ -551,9 +553,9 @@ function single(query: Map<string, string[]>, key: string): string | null {
   return values !== undefined && values.length === 1 ? values[0] : null;
 }
 
-function sendJson(response: ServerResponse, body: unknown): void {
+function sendJson(response: ServerResponse, body: unknown, status = 200): void {
   const text = JSON.stringify(body);
-  response.writeHead(200, {
+  response.writeHead(status, {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(text),
     "cache-control": "no-store",
@@ -1128,6 +1130,89 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
         results.push({ askId: item.askId, repo: item.repo, status: await agree(peer.login, item, true) });
       }
       sendJson(response, { results });
+    },
+    { operatorWord: true },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Mark rolled out
+// ---------------------------------------------------------------------------------------------
+
+/** A rollout post carries one repository name and one branch name; past this it is not one. */
+const MAX_ROLLOUT_BODY_BYTES = 1024;
+
+export type RolloutHandlerOptions = {
+  /** The pass's own rollout reader, so a tap and the timed fetch take one lock per repository. */
+  reader: Pick<RolloutReader, "mark">;
+  /**
+   * Runs after a tag is pushed and before the answer: the pass's own run, whose rollout reading
+   * then takes the rows the reader recomputed, so the next view read counts from the new tag.
+   */
+  afterMark?: () => void;
+  /** Where each tap's one line goes: the tag, the sha and the login, an existing tag, a 404, or a failure's kind. */
+  log?: Logger;
+};
+
+/**
+ * Registers `POST /web/rollout` with `{repo, branch}`, Mark rolled out. The route carries the
+ * operator's word, so the gate has already refused the broker host's own node and required the
+ * same-origin JSON headers, and the login the tag's message names is the peer's. A body that is not
+ * the expected object, a `repo` that is not a non-empty string, and a `branch` that is not a string
+ * opening `clients/` with a name after it each answer 400 with an empty body and no fetch, and a
+ * `repo` the reader has not grouped or a `branch` the repository does not have answers 404, both
+ * before anything is tagged. The reader fetches the repository under its lock, so two taps run one
+ * after the other and the second finds the first one's tag and answers 409 `{tag}`. Otherwise the
+ * tag is made at the branch head and pushed, and the answer is `{tag, sha, undo}`, `undo` the one
+ * command that removes the tag from the remote. A fetch, a tag or a push that fails answers 502
+ * `{kind}` with the runner's kind, a push's local tag deleted first. Every tap past the 400s logs
+ * one line. Nothing of the body reaches a log, and nothing of git's stderr or the remote URL can,
+ * since the reader hands back only the tag it computed, the sha and a kind.
+ */
+export function registerRolloutHandler(register: WebHandler["register"], options: RolloutHandlerOptions): void {
+  register(
+    "rollout",
+    async (request, response, peer) => {
+      if (request.method !== "POST") {
+        request.resume();
+        response.writeHead(405, { allow: "POST", "content-length": 0 });
+        response.end();
+        return;
+      }
+      const body = await readJsonObject(request, MAX_ROLLOUT_BODY_BYTES);
+      if (body === null) return empty(response, 400);
+      const { repo, branch } = body;
+      if (typeof repo !== "string" || repo === "" || typeof branch !== "string" || !branch.startsWith(CLIENT_PREFIX) || branch === CLIENT_PREFIX) return empty(response, 400);
+      let marked: RolloutMark;
+      try {
+        marked = await options.reader.mark(repo, branch, peer.login);
+      } catch (error) {
+        // The fetch or a local git command failed: the runner's kind alone, which never quotes the remote.
+        const kind = error instanceof Error ? error.message : "unknown";
+        options.log?.warn(`web rollout: failed ${kind} before the push`);
+        sendJson(response, { kind }, 502);
+        return;
+      }
+      switch (marked.status) {
+        case "unknown-repo":
+        case "unknown-branch":
+          // Neither name is logged: both are the post's own text.
+          options.log?.info("web rollout: refused, unknown repository or branch");
+          empty(response, 404);
+          return;
+        case "exists":
+          options.log?.info(`web rollout: ${marked.tag} exists`);
+          sendJson(response, { tag: marked.tag }, 409);
+          return;
+        case "push-failed":
+          options.log?.warn(`web rollout: push failed ${marked.kind} for ${marked.tag}`);
+          sendJson(response, { kind: marked.kind }, 502);
+          return;
+        case "pushed":
+          options.log?.info(`web rollout: ${marked.tag} at ${marked.sha.slice(0, 7)} by ${peer.login}`);
+          sendJson(response, { tag: marked.tag, sha: marked.sha, undo: `git push origin :refs/tags/${marked.tag}` });
+          options.afterMark?.();
+      }
     },
     { operatorWord: true },
   );

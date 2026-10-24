@@ -666,11 +666,15 @@ export type HandlerOptions = {
  * that anything on this machine can read is not that surface. The open-turn stamp is withheld the
  * same way: it is held for the typing keeper alone, and no consumer of this route reads it. The
  * harness notice is withheld too: it is held for the card alone. The working directory is withheld
- * as well: it is an instruction to open a directory, held for the broker's own reads. The
+ * as well: it is an instruction to open a directory, held for the broker's own reads. The launch
+ * instant is withheld: it is held for the web kit card, and no consumer of this route reads it. The
  * title, unlike the goal, is published on purpose: it is session identity of the same class as
  * `name`, which this route already publishes, not operator prose held for one display surface.
  */
-export type PublicSessionRecord = Omit<SessionRecord, "processToken" | "goal" | "turnActiveAt" | "harnessNotice" | "workdir">;
+export type PublicSessionRecord = Omit<
+  SessionRecord,
+  "processToken" | "goal" | "turnActiveAt" | "harnessNotice" | "workdir" | "launchedAt"
+>;
 
 export function redact(record: SessionRecord): PublicSessionRecord {
   // Field by field rather than by deleting from a copy, so a field added to SessionRecord has to

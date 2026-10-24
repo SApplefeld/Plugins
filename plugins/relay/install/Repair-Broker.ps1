@@ -347,6 +347,9 @@ install holds the lock. The helper is the one owner of that
 rule, so this reads its verdict rather than repeating it. It runs under the node the task runs,
 because that is the node whose npm the task start will heal with.
 
+The check reads the same dependency store Start-Broker.ps1 heals into, so a node_modules linked to
+the store reads current, and the lock it looks for is the store's.
+
 A stale install is reported, never repaired here. Start-Broker.ps1 runs the same helper before every
 pass, so the task start that follows this check heals it. Any other result, including a node that
 cannot be launched, is a failure to check, reported as such rather than as a pass.
@@ -354,7 +357,8 @@ cannot be launched, is a failure to check, reported as such rather than as a pas
 function Get-ChannelDependencyState {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string]$NodeExe
+        [Parameter(Mandatory)][string]$NodeExe,
+        [Parameter(Mandatory)][string]$Store
     )
     $helper = Join-Path $PSScriptRoot 'ensure-dependencies.mjs'
     # Continue for the call: the helper writes to stderr on a bad argument, which under the runner's
@@ -363,7 +367,7 @@ function Get-ChannelDependencyState {
     $global:LASTEXITCODE = $null
     try {
         # Each stderr line arrives as an error record, and its string form is the line itself.
-        $output = (& $NodeExe $helper --check --root $RepoRoot 2>&1 | ForEach-Object { [string]$_ }) -join ' '
+        $output = (& $NodeExe $helper --check --root $RepoRoot --store $Store 2>&1 | ForEach-Object { [string]$_ }) -join ' '
     } catch {
         return [pscustomobject]@{ Ok = $false; Detail = "could not check: $($_.Exception.Message)" }
     }
@@ -373,8 +377,8 @@ function Get-ChannelDependencyState {
         return [pscustomobject]@{ Ok = $true; Detail = 'match package-lock.json' }
     }
     if ($code -eq 3) {
-        # A live install deletes node_modules before it rebuilds it, so the missing tree is that
-        # install's work rather than something to act on.
+        # A live install holds the store's lock while it builds the tree for this lockfile, so the
+        # missing link is that install's work rather than something to act on.
         return [pscustomobject]@{
             Ok     = $false
             Detail = "$reason An install is running now; the broker starts once it finishes."
@@ -382,10 +386,10 @@ function Get-ChannelDependencyState {
     }
     if ($code -eq 2) {
         $quote = { param($value) "'" + ($value -replace "'", "''") + "'" }
-        $helperCommand = "& $(& $quote $NodeExe) $(& $quote $helper) --root $(& $quote $RepoRoot)"
+        $helperCommand = "& $(& $quote $NodeExe) $(& $quote $helper) --root $(& $quote $RepoRoot) --store $(& $quote $Store)"
         return [pscustomobject]@{
             Ok     = $false
-            Detail = "$reason Starting the broker task reinstalls them; if it does not, run $helperCommand to install them and see any failure."
+            Detail = "$reason Starting the broker task restores them; if it does not, run $helperCommand to install them and see any failure."
         }
     }
     $what = if ($null -eq $code) { "node at '$NodeExe' could not be launched" } else { "the helper exited $code" }
@@ -444,12 +448,24 @@ function Get-ChannelHostHealth {
     $node = Get-Command $nodeExe -ErrorAction SilentlyContinue
     Write-ChannelCheck -Name 'node' -Ok ([bool]$node) -Detail $(if ($node) { $node.Source } else { $nodeExe })
 
+    # The store Start-Broker.ps1 derives from the same env file, beside it under the state root.
+    $store = Join-Path $stateRoot 'dependencies'
     if ($node) {
-        $dependencies = Get-ChannelDependencyState -RepoRoot $RepoRoot -NodeExe $node.Source
+        $dependencies = Get-ChannelDependencyState -RepoRoot $RepoRoot -NodeExe $node.Source -Store $store
     } else {
         $dependencies = [pscustomobject]@{ Ok = $false; Detail = "could not check: no node at '$nodeExe'" }
     }
-    Write-ChannelCheck -Name 'dependencies' -Ok $dependencies.Ok -Detail $dependencies.Detail
+    # Each lockfile the host has installed leaves a tree named by its hash, and none is removed
+    # automatically, so the count is how an operator reads the store's growth.
+    $trees = 0
+    if (Test-Path -LiteralPath $store) {
+        $trees = @(Get-ChildItem -LiteralPath $store -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -cmatch '^[0-9a-f]{64}$' }).Count
+    }
+    $noun = if ($trees -eq 1) { 'lockfile tree' } else { 'lockfile trees' }
+    $joint = if ($dependencies.Detail.EndsWith('.')) { ' The' } else { '; the' }
+    Write-ChannelCheck -Name 'dependencies' -Ok $dependencies.Ok `
+        -Detail "$($dependencies.Detail)$joint store '$store' holds $trees $noun."
 
     $head = Invoke-ChannelGit -RepoRoot $RepoRoot -Arguments @('rev-parse', 'HEAD')
     $commit = if ($head.ExitCode -eq 0) { $head.Output } else { 'unknown' }
@@ -514,6 +530,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
 
     if (-not $EnvFile) { $EnvFile = Join-Path (Get-ChannelStateRoot) 'broker.env' }
+    # A full path, so a bare file name still has a folder for the state root and the store beside it.
+    $EnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
     $brokerEntry = Join-Path $RepoRoot 'broker\index.ts'
     # The entry path is the primary proof, so a $RepoRoot that does not hold one is a repair that
     # matches no process at all and reports a clean run over an orphan still serving stale code.

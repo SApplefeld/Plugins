@@ -4,7 +4,7 @@
 # There is no build step (see the plan's Standing Brief Amendments): the broker is invoked as
 # `node --import <broker/startup-crash.mjs URL> broker/index.ts`, which is the command a developer
 # runs by hand plus a preload that records a loading failure in broker.log. Before each start,
-# install/ensure-dependencies.mjs reinstalls the dependencies when they no longer match the
+# install/ensure-dependencies.mjs restores the dependencies when they no longer match the
 # lockfile.
 #
 # The broker can ask to be restarted, by exiting with $RestartExitCode, and this script then starts
@@ -34,6 +34,8 @@ $RestartExitCode = 75
 if (-not $EnvFile) {
     $EnvFile = Join-Path (Get-ChannelStateRoot) 'broker.env'
 }
+# A full path, so a bare file name still has a folder for the dependency store beside it.
+$EnvFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($EnvFile)
 
 # The task's own environment before any pass ran, which does not change while the task runs. A
 # PowerShell hashtable, so a lookup ignores case as Windows variable names do.
@@ -159,13 +161,19 @@ while ($true) {
     }
 
     # A plugin update re-clones this folder without node_modules, so before every pass the helper
-    # reinstalls the dependencies when they no longer match package-lock.json. It runs under the
+    # restores the dependencies when they no longer match package-lock.json. It runs under the
     # same pinned node, and a tree with no lockfile has nothing to install, matching the helper's own
     # rule. The helper is this script's sibling and is pointed at $RepoRoot, so a -RepoRoot fixture
-    # is checked with the real helper. With a log file configured, the helper's outcome line lands
-    # in broker.log beside the broker's own.
+    # is checked with the real helper. The helper installs into the dependency store beside the env
+    # file, under the state root a plugin update does not replace, and links the checkout's
+    # node_modules to it. The store comes from -EnvFile rather than a fresh state root lookup, so a
+    # fixture's env file keeps its store inside the fixture. With a log file configured, the
+    # helper's outcome line lands in broker.log beside the broker's own.
     if (Test-Path -LiteralPath (Join-Path $RepoRoot 'package-lock.json')) {
-        $helperArgs = @((Join-Path $PSScriptRoot 'ensure-dependencies.mjs'), '--root', $RepoRoot)
+        $dependencyStore = Join-Path (Split-Path -Parent $EnvFile) 'dependencies'
+        $helperArgs = @(
+            (Join-Path $PSScriptRoot 'ensure-dependencies.mjs'), '--root', $RepoRoot, '--store', $dependencyStore
+        )
         $helperLog = "$env:CHANNEL_BROKER_LOG_FILE".Trim()
         if ($helperLog -ne '') {
             $helperArgs += @('--log', $helperLog)

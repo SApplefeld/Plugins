@@ -157,7 +157,8 @@ The host needs Node.js and the `claude` CLI on PATH first. The installer checks 
 present, not its version, though `package.json` declares Node 24 or later. It runs `npm ci` with the
 npm bundled beside that node, not an npm found on PATH, and it runs `claude plugin` commands. The
 run fails if `claude` is missing. It also fails if that npm is missing and the dependencies need
-installing. A checkout whose dependencies already match its lockfile needs no npm.
+installing. A checkout whose dependencies already match its lockfile needs no npm, and neither does
+one whose lockfile's tree is already in the dependency store.
 
 Steps 2 and 3, plus the plugin install, the managed-settings file, and the `cchat` launcher, in one
 unelevated invocation from the repository root:
@@ -239,8 +240,16 @@ The installer:
   install scripts off. That installs the reviewed lockfile rather than resolving newer dependencies,
   and fails the run on any download whose checksum differs from the lockfile's `integrity` hash. It
   records which lockfile it installed from, so the broker's first start does not install again. The
-  broker's start and the relay's launch run the same helper, so a plugin update that leaves the
-  dependencies missing heals at the next start.
+  tree goes into a dependency store under the state root,
+  `<state root>\dependencies\<lockfile sha256>\node_modules`, and the checkout's `node_modules`
+  becomes a junction to it. Running `npm ci` by hand in that checkout empties the stored tree
+  through the junction. The next start keeps whatever matching folder npm left in the checkout, and
+  the store's tree is installed again the next time a start links to it. The broker's start and the relay's launch run the same helper, so a
+  plugin update that replaces the checkout relinks it to the stored tree at the next start, with no
+  `npm ci` unless the update changed the lockfile. A host whose checkout is the marketplace clone
+  and that was installed with `-StateRoot` somewhere other than the default keeps two stores, since the relay's launch uses the one under
+  `%LOCALAPPDATA%\sapplefeld-channels`: each start relinks to its own store, and each store pays one
+  `npm ci` per lockfile.
 
 Directories are hardened as containers rather than file by file, because a hardened file in a
 directory that permits delete-child can be deleted and re-created with a clean access control list.
@@ -515,6 +524,14 @@ and `CHANNEL_WEB_STATIC_ROOT` (the pages' directory, an absolute path) rarely ne
 Every request is identified by `tailscale whois`, so there is no token and no password. All six
 keys are on the installer's allowlist, so a value set by hand survives the next install.
 
+The pages' rollout cards, which show what each `clients/*` branch has merged since its last
+deploy, need git 2.37 or later on the scheduled task account's `PATH`. The reader finds repositories
+through the `CHANNEL_BOARD_PROJECTS` roots and the roster personas' working directories, and fetches
+over https under the task account's stored git credential. Mark rolled out also needs a committer
+identity, `user.name` and `user.email`, in that account's git config. A host without git draws no
+rollout card, and every other page works as before. [`operations.md`](operations.md) names the tag
+convention and the undo command.
+
 On Windows, allow the web port inbound on the Tailscale interface. Windows Firewall can place that
 interface in a profile where Node has no inbound rule, and a device's request is then dropped
 before the broker sees it. From an elevated PowerShell, with the port matching `CHANNEL_WEB_PORT`:
@@ -562,9 +579,12 @@ it next starts. Its broker refuses a restart request with a reason that opens "n
 start the broker again". Restart the task once on such a host, with `.\install\Repair-Broker.ps1` from an
 elevated prompt or a reboot.
 
-Before each start the script also runs `install/ensure-dependencies.mjs`, which reinstalls the
-dependencies when they no longer match `package-lock.json`. A failed install ends the script with
-the helper's exit code, and the broker does not start on that pass.
+Before each start the script also runs `install/ensure-dependencies.mjs` against the dependency
+store in the `dependencies` folder beside `broker.env`. When the checkout's `node_modules` no longer
+links to the store's tree for `package-lock.json`, it links the tree already there, or installs it
+into the store first when the lockfile is new. A real `node_modules` that still matches the lockfile
+is left as it is. A failed install or link ends the script with the helper's exit code, and the
+broker does not start on that pass.
 
 ## 4. Launch a session
 
@@ -712,7 +732,11 @@ ships a shim instead, `plugins/relay/launch.mjs`. It reads
 `%LOCALAPPDATA%\sapplefeld-channels\relay-mcp.json`, the registration the wrapper rewrites on every
 launch, and runs the relay named there with the MCP conversation passed straight through. The relay
 serving the channel is therefore always the one in the checkout that launched the session, and a
-checkout that moves needs no reinstall. A missing or unreadable registration makes the shim exit
+checkout that moves needs no reinstall. Before it starts the relay, the shim heals that checkout's
+dependencies. It passes the dependency store only when the checkout sits inside the marketplace
+clone its own cache copy came from, mapping `<plugins>\cache\<marketplace>\relay\<version>\` to
+`<plugins>\marketplaces\<marketplace>\`, so a development checkout installs in place as before. A
+missing or unreadable registration makes the shim exit
 non-zero with one line on stderr naming the path it looked for, rather than registering a channel
 that is silently dead.
 

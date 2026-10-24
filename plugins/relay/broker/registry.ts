@@ -181,6 +181,14 @@ export type SessionRecord = {
   toolCount: number;
   turnCount: number;
   startedAt: number;
+  /**
+   * When this record's process launched: its own `startedAt` where it opened the first record under
+   * its token or announced a startup, else the earliest launch among the records under its token,
+   * carried across every /clear, compact and resume, records a closed relay pipe ended included. The
+   * web kit card reads it, since plugins load once per process and the record a process opened first
+   * is pruned a day after it ends.
+   */
+  launchedAt: number;
   /** Timestamp of the most recent hook event for this session. */
   lastHookAt: number;
   /**
@@ -604,6 +612,22 @@ export function createRegistry(options: RegistryOptions): Registry {
     return previous.sessionId !== intake.sessionId;
   }
 
+  // The launch a new record under this token carries: the earliest launch among the records the
+  // token holds, ended ones included. The wrapper mints a token per launch and every process the
+  // session spawns inherits it, so the earliest launch is the wrapper's process for as long as one
+  // record carrying it is held, whichever of them ended or was superseded by a child. A startup is
+  // the exception: under a held token it is a `claude` the session spawned, which loaded its plugins
+  // when it started. Undefined where the token holds nothing.
+  function launchOf(intake: HookIntake): number | undefined {
+    if (intake.source === "startup") return undefined;
+    let earliest: number | undefined;
+    for (const record of sessions.values()) {
+      if (record.processToken !== intake.processToken) continue;
+      if (earliest === undefined || record.launchedAt < earliest) earliest = record.launchedAt;
+    }
+    return earliest;
+  }
+
   function start(intake: HookIntake, sessionId: string): SessionRecord | null {
     if (impostor(intake, sessionId)) return null;
 
@@ -653,6 +677,9 @@ export function createRegistry(options: RegistryOptions): Registry {
       return null;
     }
 
+    // Read before the previous record is ended or a tombstone under this ID is replaced.
+    const launchedAt = launchOf(intake) ?? now();
+
     if (previous) {
       // Supersession keys on a changed session ID for every source but "startup", not on
       // source === "clear". A /clear mints a new session ID, and so does every other replacement,
@@ -678,6 +705,7 @@ export function createRegistry(options: RegistryOptions): Registry {
       toolCount: 0,
       turnCount: 0,
       startedAt: now(),
+      launchedAt,
       lastHookAt: now(),
       lastEngagementAt: now(),
       lastRelayAt: null,

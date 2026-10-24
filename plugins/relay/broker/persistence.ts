@@ -176,6 +176,7 @@ function isSessionRecord(value: unknown): value is SessionRecord {
     isFiniteNumber(value.toolCount) &&
     isFiniteNumber(value.turnCount) &&
     isFiniteNumber(value.startedAt) &&
+    absentOrNumber(value.launchedAt) &&
     isFiniteNumber(value.lastHookAt) &&
     absentOrNumber(value.lastEngagementAt) &&
     optionalNumber(value.lastRelayAt) &&
@@ -216,6 +217,9 @@ function cleanRecord(record: SessionRecord): SessionRecord {
   // Widened for the same reason: a snapshot written before the working directory was recorded
   // carries no key for it.
   const workdir: string | null | undefined = record.workdir;
+  // Widened for the same reason, and defaulted to the record's own start, which is its process's
+  // launch wherever no earlier record under its token was open when it started.
+  const launchedAt: number | null | undefined = record.launchedAt;
   return {
     ...record,
     sessionId: clean(record.sessionId),
@@ -233,6 +237,7 @@ function cleanRecord(record: SessionRecord): SessionRecord {
       lastEngagementAt === undefined || lastEngagementAt === null
         ? record.lastHookAt
         : lastEngagementAt,
+    launchedAt: launchedAt === undefined || launchedAt === null ? record.startedAt : launchedAt,
     // Dropped rather than restored: the context size is a live figure, and one written hours ago
     // would render as the size the session is running at right now. The next transcript line
     // reports the real one, and until it does the card carries the model without a figure beside it.
@@ -351,6 +356,7 @@ function persisted(record: SessionRecord): PersistedRecord {
     toolCount: record.toolCount,
     turnCount: record.turnCount,
     startedAt: record.startedAt,
+    launchedAt: record.launchedAt,
     lastHookAt: record.lastHookAt,
     lastEngagementAt: record.lastEngagementAt,
     lastRelayAt: record.lastRelayAt,

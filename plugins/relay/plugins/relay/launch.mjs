@@ -14,13 +14,14 @@
 // Before it starts the relay, the shim runs the checkout's install/ensure-dependencies.mjs when the
 // registration points at a checkout that has one. A plugin update can leave the checkout without its
 // node_modules, and a relay that fails to start is skipped by Claude Code for 15 minutes across every
-// session on the machine. Reinstalling before the relay starts is worth the wait. An install that
+// session on the machine. Restoring them before the relay starts is worth the wait. An install that
 // outlasts Claude Code's MCP startup timeout fails that one start, and one cut off there leaves no
 // stamp and a lock whose holder is gone, so the next start takes the lock over and installs again.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** The key the wrapper registers the relay under, matching this plugin's .mcp.json and plugin.json. */
 const SERVER_KEY = "channel-relay";
@@ -67,6 +68,9 @@ if (!entry || typeof entry.command !== "string" || !Array.isArray(entry.args)) {
   fail(`the relay registration at '${source}' carries no usable '${SERVER_KEY}' command.`);
 }
 
+/** A path or name as Windows compares it, case-insensitively; unchanged elsewhere. */
+const fold = (value) => (process.platform === "win32" ? value.toLowerCase() : value);
+
 /**
  * The checkout root a registration points at, or undefined for any other shape. The wrapper registers
  * a single argument ending in relay/index.ts, with either separator, and the root is the directory
@@ -79,20 +83,49 @@ function checkoutRoot(args) {
   }
   // Split on either separator, so the folder must be exactly `relay`, not a name ending in it.
   const parts = first.split(/[\\/]/);
-  const fold = (value) => (process.platform === "win32" ? value.toLowerCase() : value);
   if (parts.length < 3 || fold(parts.at(-1)) !== "index.ts" || fold(parts.at(-2)) !== "relay") {
     return undefined;
   }
   return path.dirname(path.dirname(first));
 }
 
+/**
+ * Whether `root` resolves inside the marketplace clone this shim's cache copy came from. Claude Code
+ * runs the shim from <plugins>/cache/<marketplace>/relay/<version>/launch.mjs and copies it from the
+ * clone at <plugins>/marketplaces/<marketplace>, so a checkout inside that clone carries a helper no
+ * older than this shim. Any other shape, a missing clone, or a path that cannot be resolved is false,
+ * and never fails the launch.
+ */
+function insideOwnClone(root) {
+  const version = path.dirname(fileURLToPath(import.meta.url));
+  const plugin = path.dirname(version);
+  const marketplace = path.dirname(plugin);
+  const cache = path.dirname(marketplace);
+  if (fold(path.basename(plugin)) !== "relay" || fold(path.basename(cache)) !== "cache") {
+    return false;
+  }
+  try {
+    const clone = fold(realpathSync.native(path.join(path.dirname(cache), "marketplaces", path.basename(marketplace))));
+    const checkout = fold(realpathSync.native(root));
+    // On a separator boundary, so a clone named with this one's name as a prefix is not inside it.
+    return checkout === clone || checkout.startsWith(clone.endsWith(path.sep) ? clone : clone + path.sep);
+  } catch {
+    return false;
+  }
+}
+
 // The helper's stdout and stderr both go to this process's stderr: a byte on stdout would corrupt the
 // MCP conversation that the relay carries on it. No shell, for the same reason as the spawn below.
+// The helper installs into the dependency store beside the registration, under the state root a
+// plugin update does not replace, and links the checkout's node_modules to it. The store is passed
+// only for a checkout inside this shim's own marketplace clone: a helper that predates the flag
+// refuses an unknown option and would stop the relay, and a development checkout heals in place.
 const root = checkoutRoot(entry.args);
 if (root !== undefined) {
   const helper = path.join(root, "install", "ensure-dependencies.mjs");
   if (existsSync(helper)) {
-    const result = spawnSync(process.execPath, [helper, "--root", root], {
+    const storeArgs = insideOwnClone(root) ? ["--store", path.join(path.dirname(source), "dependencies")] : [];
+    const result = spawnSync(process.execPath, [helper, "--root", root, ...storeArgs], {
       stdio: ["ignore", 2, 2],
       shell: false,
       windowsHide: true,

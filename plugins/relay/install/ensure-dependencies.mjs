@@ -1,18 +1,22 @@
-// Keeps a checkout's installed dependencies matching its lockfile, and reinstalls them when they do
+// Keeps a checkout's installed dependencies matching its lockfile, and restores them when they do
 // not.
 //
 // A plugin update re-clones the folder the broker and the relay run from, and node_modules is not
 // part of the clone, so the next start of either dies loading its first package. The broker's start
 // script and the relay's launch shim run this file before they start node. It decides whether
-// <root>/node_modules matches <root>/package-lock.json, and when it does not, it runs `npm ci` under
-// a per-folder lock and records what it installed.
+// <root>/node_modules matches <root>/package-lock.json, and when it does not, it restores it under
+// its locks, by linking a stored tree or running `npm ci`, and records what it installed.
 //
 // Plain JavaScript, and nothing outside Node's own builtins: this runs exactly when node_modules is
 // missing, so it cannot depend on anything installed there.
 //
-// Usage: node install/ensure-dependencies.mjs --root <dir> [--check] [--log <file>]
+// Usage: node install/ensure-dependencies.mjs --root <dir> [--store <dir>] [--check] [--log <file>]
 //   default  heals when needed. Exit 0 when current or healed, 1 on failure or a root that is not a
 //            folder.
+//   --store  installs into <store>/<SHA-256 of package-lock.json>/node_modules instead of the root,
+//            and makes <root>/node_modules a junction to that tree. The tree outlives a plugin
+//            update that replaces the root, so the next start links it again without npm. The heal
+//            takes the root's lock, then the store's. Without it, everything happens in the root.
 //   --check  never installs. Exit 0 when current, 2 when not (the reason on stdout), 3 when not and
 //            a live install holds the lock, 1 on bad arguments or a root that is not a folder.
 //   --log    also appends the helper's own one-line outcomes, never npm's output, to a file, in the
@@ -23,11 +27,18 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -44,7 +55,12 @@ const TOOL = "ensure-dependencies";
  */
 export const STAMP_NAME = ".channels-lockfile-sha256";
 
-/** The per-folder lock, beside node_modules, because the folder being installed is its scope. */
+/**
+ * The per-folder lock, beside node_modules, because the folder being installed is its scope. With a
+ * store, the heal takes the root's lock, since the root's node_modules is what a heal with a store
+ * and one without could both rewrite, and then the store's, since the store is what two starts could
+ * install at once. Root first means a heal waiting on a root holds no store lock meanwhile.
+ */
 export const LOCK_NAME = ".channels-dependencies.lock";
 
 /**
@@ -90,8 +106,13 @@ function sha256(file) {
  * of it agrees with the lockfile package by package (see unstampedTreeMatches); the result then
  * carries `adopt: true`, and the heal writes the stamp without reinstalling. The two files are never
  * compared whole, because their shapes differ.
+ *
+ * With `store`, node_modules is also current when it is a junction to the store's tree for the
+ * lockfile's hash and that tree's stamp holds the hash (see checkLinkedTree). A real node_modules is
+ * still judged by the rule above, so a host installed before the store reads current until its next
+ * update.
  */
-export function checkDependencies(root) {
+export function checkDependencies(root, { store } = {}) {
   // A root that is not a folder is a caller's mistake, never "nothing to install": reporting it
   // current would start node into the very failure this helper exists to prevent.
   let isFolder = false;
@@ -106,6 +127,11 @@ export function checkDependencies(root) {
     return { current: true, reason: `no package-lock.json in '${root}', so there is nothing to install.` };
   }
   const modules = path.join(root, "node_modules");
+  return store === undefined ? checkTree(lockfile, modules) : checkLinkedTree(lockfile, modules, store);
+}
+
+/** Whether a real node_modules matches the lockfile: the rule checkDependencies states first. */
+function checkTree(lockfile, modules) {
   if (!existsSync(modules)) {
     return { current: false, reason: `'${modules}' is missing.` };
   }
@@ -127,18 +153,71 @@ export function checkDependencies(root) {
     };
   }
   const expected = sha256(lockfile);
-  if (recorded !== expected) {
+  if (recorded !== expected) return { current: false, reason: stampMismatch(stamp, recorded, expected) };
+  return { current: true, reason: `'${modules}' matches package-lock.json.` };
+}
+
+/**
+ * Why a stamp that disagrees with the lockfile is stale. The stamp's own text is shown only when it
+ * has the shape this helper writes, so a file planted there cannot carry arbitrary text into
+ * broker.log.
+ */
+function stampMismatch(stamp, recorded, expected) {
+  return (
+    `the stamp '${stamp}' does not match package-lock.json (stamp ` +
+    `${SHA256_HEX.test(recorded) ? recorded : "not a SHA-256"}, ` +
+    `lockfile ${expected}), so the installed dependencies are from another lockfile.`
+  );
+}
+
+/** The two paths name the same file, after resolving, and ignoring case on Windows. */
+function samePath(a, b) {
+  const [left, right] = [path.resolve(a), path.resolve(b)];
+  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
+/**
+ * Whether the store's tree for a lockfile hash is a finished install of it: its stamp holds the
+ * hash. A store tree with no stamp is an install that died partway, never a tree to adopt.
+ */
+function checkStoreTree(tree, hash) {
+  const stamp = path.join(tree, STAMP_NAME);
+  let recorded;
+  try {
+    recorded = readFileSync(stamp, "utf8").trim();
+  } catch {
+    return { current: false, reason: `the store tree '${tree}' has no stamp '${stamp}', so no install there finished.` };
+  }
+  if (recorded !== hash) return { current: false, reason: stampMismatch(stamp, recorded, hash) };
+  return { current: true, reason: `the store tree '${tree}' matches package-lock.json.` };
+}
+
+/**
+ * The store mode's rule. node_modules is current when it is a junction to <store>/<hash>/node_modules
+ * and that tree is current, or when it is a real directory current by checkTree's rule. Missing, a
+ * junction anywhere else, or a store tree whose stamp differs is stale.
+ */
+function checkLinkedTree(lockfile, modules, store) {
+  let entry;
+  try {
+    entry = lstatSync(modules);
+  } catch (error) {
+    if (error.code === "ENOENT") return { current: false, reason: `'${modules}' is missing.` };
+    throw error;
+  }
+  if (!entry.isSymbolicLink()) return checkTree(lockfile, modules);
+  const hash = sha256(lockfile);
+  const tree = path.join(store, hash, "node_modules");
+  const target = path.resolve(path.dirname(modules), readlinkSync(modules));
+  if (!samePath(target, tree)) {
     return {
       current: false,
-      reason:
-        // The stamp's own text is shown only when it has the shape this helper writes, so a file
-        // planted there cannot carry arbitrary text into broker.log.
-        `the stamp '${stamp}' does not match package-lock.json (stamp ` +
-        `${SHA256_HEX.test(recorded) ? recorded : "not a SHA-256"}, ` +
-        `lockfile ${expected}), so the installed dependencies are from another lockfile.`,
+      reason: `'${modules}' links to '${target}', not to the store tree '${tree}' for package-lock.json.`,
     };
   }
-  return { current: true, reason: `'${modules}' matches package-lock.json.` };
+  const state = checkStoreTree(tree, hash);
+  if (!state.current) return state;
+  return { current: true, reason: `'${modules}' links to the store tree '${tree}', which matches package-lock.json.` };
 }
 
 /**
@@ -244,8 +323,9 @@ function staleReason(content, file, now, pollMs, staleMs) {
 }
 
 /**
- * True when <root>'s lock is held by a live install, by the same rule acquireLock uses to decide
- * whether to wait or take over. A lock left by a killed install reads false.
+ * True when the lock in <root>, which is the store in the store mode, is held by a live install, by
+ * the same rule acquireLock uses to decide whether to wait or take over. A lock left by a killed
+ * install reads false.
  */
 export function installRunning(root) {
   const file = path.join(root, LOCK_NAME);
@@ -259,7 +339,8 @@ export function installRunning(root) {
 }
 
 /**
- * Takes <root>'s lock, waiting for a live holder and removing a stale one.
+ * Takes the lock in <root>, the checkout root or the store, waiting for a live holder and removing
+ * a stale one.
  *
  * Returns the lock's handle, which releaseLock takes, or null when the lock was not obtained before
  * waitMs ran out. The timings are parameters so tests can run the wait in milliseconds; callers use
@@ -373,70 +454,293 @@ function psQuote(value) {
 }
 
 /**
- * Makes <root>'s dependencies current, installing them when they are not.
- *
- * Returns { code, message }: code 0 when current or healed, 1 on failure, and message the one-line
- * outcome. `runNpm(args, cwd)` runs npm and returns its exit code; tests pass a stand-in. The stamp
- * is written only after npm exits 0, and never on any failure path, since a stamp on a failed
- * install would make the next check call it current. node_modules is never deleted here: npm ci
- * deletes it itself.
+ * The outcome for a root already current. Adopting an unstamped tree writes the stamp a fresh
+ * install would have, so the next check is the plain one.
  */
-export function healDependencies(root, { runNpm = createNpmRunner(), notify = () => {}, lockOptions = {} } = {}) {
-  const before = checkDependencies(root);
-  if (before.current) {
-    if (!before.adopt) return { code: 0, message: `dependencies current: ${before.reason}` };
-    // Adopting writes the stamp a fresh install would have, so the next check is the plain one.
-    try {
-      writeFileSync(path.join(root, "node_modules", STAMP_NAME), `${sha256(path.join(root, "package-lock.json"))}\n`, "utf8");
-    } catch (error) {
-      return { code: 0, message: `dependencies current, but the stamp could not be written (${error.message}): ${before.reason}` };
-    }
-    return { code: 0, message: `dependencies current, stamp written: ${before.reason}` };
+function currentOutcome(root, state) {
+  if (!state.adopt) return { code: 0, message: `dependencies current: ${state.reason}` };
+  try {
+    writeFileSync(path.join(root, "node_modules", STAMP_NAME), `${sha256(path.join(root, "package-lock.json"))}\n`, "utf8");
+  } catch (error) {
+    return { code: 0, message: `dependencies current, but the stamp could not be written (${error.message}): ${state.reason}` };
   }
+  return { code: 0, message: `dependencies current, stamp written: ${state.reason}` };
+}
 
-  const lock = acquireLock(root, { ...lockOptions, notify });
-  if (!lock) {
+/** The outcome when the lock in `folder` was not obtained before the wait ran out. */
+function lockTimeout(folder) {
+  return {
+    code: 1,
+    message:
+      `gave up waiting for the lock '${path.join(folder, LOCK_NAME)}'. Another install is still ` +
+      "running or hung; let it finish, or remove the lock file once no npm runs in that folder.",
+  };
+}
+
+/**
+ * Runs npm ci in `folder` and stamps the node_modules it leaves with `hash`. Returns null on
+ * success, or the failure's outcome, whose way out is the pasteable `rerun` command. The stamp is
+ * written only after npm exits 0, and never on any failure path, since a stamp on a failed install
+ * would make the next check call it current.
+ */
+function installTree(folder, hash, runNpm, rerun) {
+  let status;
+  try {
+    status = runNpm([...NPM_CI_ARGS], folder);
+  } catch (error) {
+    return { code: 1, message: `dependency install failed in '${folder}': ${error.message}` };
+  }
+  if (status !== 0) {
     return {
       code: 1,
       message:
-        `gave up waiting for the lock '${path.join(root, LOCK_NAME)}'. Another install is still ` +
-        "running or hung; let it finish, or remove the lock file once no npm runs in that folder.",
+        `dependency install failed in '${folder}': npm ci exited ${status}. Its output went to stderr; ` +
+        `run ${rerun} in PowerShell to install again and see it.`,
     };
   }
+  try {
+    // A lockfile with no packages leaves npm ci no folder to create.
+    mkdirSync(path.join(folder, "node_modules"), { recursive: true });
+    writeFileSync(path.join(folder, "node_modules", STAMP_NAME), `${hash}\n`, "utf8");
+  } catch (error) {
+    return { code: 1, message: `npm ci succeeded in '${folder}' but the stamp could not be written (${error.message}).` };
+  }
+  return null;
+}
+
+/**
+ * The PowerShell command that runs this helper again the way it ran, naming this node and this file
+ * by full path, so an operator never reaches for a bare npm ci, which would install without the lock.
+ */
+function rerunCommand(root, store) {
+  const storeArgument = store === undefined ? "" : ` --store ${psQuote(store)}`;
+  return `& ${psQuote(process.execPath)} ${psQuote(fileURLToPath(import.meta.url))} --root ${psQuote(root)}${storeArgument}`;
+}
+
+/**
+ * Makes <root>'s dependencies current, installing them when they are not.
+ *
+ * Returns { code, message }: code 0 when current or healed, 1 on failure, and message the one-line
+ * outcome. `runNpm(args, cwd)` runs npm and returns its exit code; tests pass a stand-in. Without
+ * `store`, a real node_modules is never deleted here: npm ci deletes it itself, and a node_modules
+ * that is a link is removed as a link before npm runs. With it, see healIntoStore.
+ */
+export function healDependencies(
+  root,
+  { runNpm = createNpmRunner(), notify = () => {}, lockOptions = {}, store = undefined } = {},
+) {
+  if (store !== undefined) return healIntoStore(root, store, { runNpm, notify, lockOptions });
+  const before = checkDependencies(root);
+  if (before.current) return currentOutcome(root, before);
+
+  const lock = acquireLock(root, { ...lockOptions, notify });
+  if (!lock) return lockTimeout(root);
   try {
     // Another holder may have installed while this one waited.
     const after = checkDependencies(root);
     if (after.current) return { code: 0, message: `dependencies current after waiting: ${after.reason}` };
 
+    // A node_modules that is a link, such as a junction a store heal made, is removed as a link
+    // first: npm ci empties node_modules in place, and through the link it would empty the tree it
+    // points at, which a running broker may still load modules from.
+    const modules = path.join(root, "node_modules");
+    try {
+      if (lstatSync(modules).isSymbolicLink()) rmdirSync(modules);
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        return {
+          code: 1,
+          message: `could not remove the link '${modules}' before installing in place (${error.message}), so npm ci did not run.`,
+        };
+      }
+    }
+
     notify(`installing dependencies in '${root}': ${after.reason}`);
     // Hashed before the install, so a lockfile edited mid-install leaves a stamp that disagrees with
     // it and the next check reinstalls.
     const hash = sha256(path.join(root, "package-lock.json"));
-    let status;
-    try {
-      status = runNpm([...NPM_CI_ARGS], root);
-    } catch (error) {
-      return { code: 1, message: `dependency install failed in '${root}': ${error.message}` };
-    }
-    if (status !== 0) {
-      return {
-        code: 1,
-        message:
-          `dependency install failed in '${root}': npm ci exited ${status}. Its output went to stderr; ` +
-          `run & ${psQuote(process.execPath)} ${psQuote(fileURLToPath(import.meta.url))} --root ${psQuote(root)} ` +
-          "in PowerShell to install again and see it.",
-      };
-    }
-    try {
-      // A lockfile with no packages leaves npm ci no folder to create.
-      mkdirSync(path.join(root, "node_modules"), { recursive: true });
-      writeFileSync(path.join(root, "node_modules", STAMP_NAME), `${hash}\n`, "utf8");
-    } catch (error) {
-      return { code: 1, message: `npm ci succeeded in '${root}' but the stamp could not be written (${error.message}).` };
-    }
+    const failure = installTree(root, hash, runNpm, rerunCommand(root));
+    if (failure) return failure;
     return { code: 0, message: `dependencies installed in '${root}' from package-lock.json ${hash}.` };
   } finally {
     releaseLock(lock);
+  }
+}
+
+/**
+ * The heal with a store: the cheapest step that makes the store mode's check pass, under the
+ * root's lock and then the store's. The root's is what this heal and a heal without a store, which
+ * both rewrite <root>/node_modules, wait on, and the store's is what two starts installing one store
+ * at once wait on. Taking the root's first means a heal waiting on a root that an in-place npm ci
+ * holds does not hold the store's lock, which every other root's heal needs, while it waits.
+ *
+ * A store tree already current for the lockfile is only linked. Otherwise npm ci runs in
+ * <store>/<hash> over copies of the root's package.json and package-lock.json, the tree is stamped,
+ * and then the root is linked. Every other hash folder in the store is left in place: nothing on the
+ * host tells a tree a running broker or relay still loads modules from apart from one nothing uses.
+ * A real node_modules in the root is replaced only once the store tree is current, so a failed
+ * install leaves it standing.
+ */
+function healIntoStore(root, store, { runNpm, notify, lockOptions }) {
+  const before = checkDependencies(root, { store });
+  if (before.current) return currentOutcome(root, before);
+
+  try {
+    mkdirSync(store, { recursive: true });
+  } catch (error) {
+    return { code: 1, message: `could not create the dependency store '${store}' (${error.message}).` };
+  }
+  const rootLock = acquireLock(root, { ...lockOptions, notify });
+  if (!rootLock) return lockTimeout(root);
+  let lock = null;
+  try {
+    lock = acquireLock(store, { ...lockOptions, notify });
+    if (!lock) return lockTimeout(store);
+    // Another holder may have installed or linked while this one waited.
+    const after = checkDependencies(root, { store });
+    if (after.current) return { code: 0, message: `dependencies current after waiting: ${after.reason}` };
+
+    // Read once, so the folder's name is the hash of exactly the bytes copied into it.
+    const lockBytes = readFileSync(path.join(root, "package-lock.json"));
+    const hash = createHash("sha256").update(lockBytes).digest("hex");
+    const folder = path.join(store, hash);
+    const tree = path.join(folder, "node_modules");
+    const modules = path.join(root, "node_modules");
+    const treeState = checkStoreTree(tree, hash);
+    if (!treeState.current) {
+      notify(`installing dependencies in '${folder}': ${treeState.reason}`);
+      try {
+        mkdirSync(folder, { recursive: true });
+        copyFileSync(path.join(root, "package.json"), path.join(folder, "package.json"));
+        writeFileSync(path.join(folder, "package-lock.json"), lockBytes);
+      } catch (error) {
+        return {
+          code: 1,
+          message: `could not copy package.json and package-lock.json from '${root}' into '${folder}' (${error.message}).`,
+        };
+      }
+      const failure = installTree(folder, hash, runNpm, rerunCommand(root, store));
+      if (failure) return failure;
+    }
+    try {
+      linkToTree(root, modules, tree, notify);
+    } catch (error) {
+      return { code: 1, message: `could not link '${modules}' to '${tree}' (${error.message}).` };
+    }
+    const link = `'${modules}' -> '${tree}'`;
+    if (treeState.current) return { code: 0, message: `dependencies linked: ${link}` };
+    return { code: 0, message: `dependencies installed in '${folder}' from package-lock.json ${hash}, and linked: ${link}` };
+  } finally {
+    if (lock) releaseLock(lock);
+    releaseLock(rootLock);
+  }
+}
+
+/** The sibling in the root a real node_modules is moved to before the junction takes its name. */
+const ASIDE_NAME = "node_modules.old";
+
+/**
+ * Makes <root>/node_modules a junction to `tree`, replacing whatever is there.
+ *
+ * A junction is removed with rmdirSync, which removes the link itself: a recursive delete would
+ * follow it and empty the tree it points at. A real directory is renamed aside to node_modules.old
+ * in the root rather than deleted where it stands. A running broker can hold a file in it open, and
+ * a recursive delete stops at that file after removing whatever came first, the stamp among them,
+ * while a refused rename leaves the directory whole and throws. A leftover node_modules.old from an
+ * earlier pass is removed first, and a node_modules.old is removed once the junction stands on every
+ * pass, both best effort and named through `notify` when they fail. A junction that cannot be created
+ * renames the moved-aside folder back, best effort, before the error goes up. A junction needs no
+ * privilege on Windows, unlike a symlink.
+ */
+function linkToTree(root, modules, tree, notify) {
+  let entry;
+  try {
+    entry = lstatSync(modules);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  let aside;
+  if (entry?.isSymbolicLink()) {
+    rmdirSync(modules);
+  } else if (entry) {
+    assertOwnFolder(root, modules);
+    aside = path.join(root, ASIDE_NAME);
+    removeFromRoot(root, aside, notify);
+    if (entryExists(aside)) {
+      throw new Error(
+        `'${modules}' could not be moved aside, because '${aside}' from an earlier pass could not be ` +
+          "removed, so it is left in place",
+      );
+    }
+    try {
+      renameSync(modules, aside);
+    } catch (error) {
+      throw new Error(
+        `'${modules}' could not be moved aside to '${aside}', so it is left in place: a running broker or ` +
+          `relay holds it, and it heals at its next start (${error.message})`,
+      );
+    }
+  }
+  try {
+    symlinkSync(tree, modules, "junction");
+  } catch (error) {
+    // The stale tree takes its name back, so the root keeps a node_modules until the next pass.
+    if (aside !== undefined) {
+      try {
+        renameSync(aside, modules);
+      } catch {
+        // Best effort: the next pass that makes a junction removes it under the moved-aside name.
+      }
+    }
+    throw error;
+  }
+  // On every pass, so a moved-aside folder an earlier pass could not remove goes once a junction stands.
+  removeFromRoot(root, path.join(root, ASIDE_NAME), notify);
+}
+
+/**
+ * Throws unless `folder`'s real path is its own place in the root, so a reparse point Node does not
+ * report as a link is never deleted or moved through.
+ */
+function assertOwnFolder(root, folder) {
+  const own = path.join(realpathSync.native(root), path.basename(folder));
+  if (!samePath(realpathSync.native(folder), own)) {
+    throw new Error(`'${folder}' resolves to another folder, so it is neither moved nor deleted`);
+  }
+}
+
+/** Whether anything, a link to a missing folder included, stands at `file`. */
+function entryExists(file) {
+  try {
+    lstatSync(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Removes `folder`, an entry directly in the root, where it exists. A link is removed with
+ * rmdirSync and never followed, and anything else is deleted whole only after assertOwnFolder. A
+ * failure is named through `notify` and never fails the heal, since the junction no longer needs it.
+ */
+function removeFromRoot(root, folder, notify) {
+  try {
+    let entry;
+    try {
+      entry = lstatSync(folder);
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    if (entry.isSymbolicLink()) {
+      rmdirSync(folder);
+      return;
+    }
+    assertOwnFolder(root, folder);
+    rmSync(folder, { recursive: true, force: true });
+  } catch (error) {
+    notify(`could not remove '${folder}' (${error.message}); it is left in place.`);
   }
 }
 
@@ -480,18 +784,29 @@ function main() {
   let values;
   try {
     ({ values } = parseArgs({
-      options: { root: { type: "string" }, check: { type: "boolean" }, log: { type: "string" } },
+      options: {
+        root: { type: "string" },
+        store: { type: "string" },
+        check: { type: "boolean" },
+        log: { type: "string" },
+      },
       strict: true,
       allowPositionals: false,
     }));
     if (!values.root) throw new Error("--root <dir> is required.");
+    if (values.store === "") throw new Error("--store needs a folder.");
+    if (values.store !== undefined && samePath(values.store, values.root)) {
+      throw new Error("--store must name a folder other than --root.");
+    }
   } catch (error) {
     process.stderr.write(
-      `${TOOL}: ${error.message}\nusage: node install/ensure-dependencies.mjs --root <dir> [--check] [--log <file>]\n`,
+      `${TOOL}: ${error.message}\n` +
+        "usage: node install/ensure-dependencies.mjs --root <dir> [--store <dir>] [--check] [--log <file>]\n",
     );
     return 1;
   }
   const root = path.resolve(values.root);
+  const store = values.store === undefined ? undefined : path.resolve(values.store);
   const log = values.log ? path.resolve(values.log) : null;
   const say = (level, message) => {
     process.stderr.write(`${TOOL}: ${message}\n`);
@@ -501,19 +816,19 @@ function main() {
   if (values.check) {
     let state;
     try {
-      state = checkDependencies(root);
+      state = checkDependencies(root, { store });
     } catch (error) {
       process.stderr.write(`${TOOL}: dependency check failed in '${root}': ${error.message}\n`);
       return 1;
     }
     if (state.current) return 0;
     process.stdout.write(`${state.reason}\n`);
-    return installRunning(root) ? 3 : 2;
+    return installRunning(store ?? root) ? 3 : 2;
   }
 
   let outcome;
   try {
-    outcome = healDependencies(root, { notify: (message) => say("info", message) });
+    outcome = healDependencies(root, { store, notify: (message) => say("info", message) });
   } catch (error) {
     outcome = { code: 1, message: `dependency check failed in '${root}': ${error.message}` };
   }

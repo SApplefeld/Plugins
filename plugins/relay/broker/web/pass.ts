@@ -39,8 +39,12 @@ import type { SessionRecord } from "../registry.ts";
 import { readUsage } from "../usage/cache.ts";
 import type { UsageAccount, UsageReading } from "../usage/cache.ts";
 import type { BrokerConfig } from "../config.ts";
+import { installedPluginsPath, readInstalledPlugins } from "./plugins.ts";
+import type { InstalledRelease } from "./plugins.ts";
+import { createRolloutReader } from "./rollout.ts";
+import type { RolloutReader, RolloutState } from "./rollout.ts";
 import { SOURCES, blockedKeys, planIndex } from "./views.ts";
-import type { PlansReading, QueueReading, Reading, Readings, SourceName } from "./views.ts";
+import type { PlansReading, QueueReading, Reading, Readings, RolloutReading, SourceName } from "./views.ts";
 
 /** What a read returns when it got no usable reading and threw nothing, so the source is held. */
 export const UNREADABLE = Symbol("unreadable");
@@ -53,8 +57,15 @@ export type PassSources = {
   plans: () => PlansReading;
   events: (previous: EventReaderState, roots: readonly string[]) => ReadEventsResult;
   usage: () => UsageReading;
+  /** The relay plugin's release from the harness's install record, or `UNREADABLE` where it gave none. */
+  plugins: () => InstalledRelease | typeof UNREADABLE;
   /** Modification time of a persona's heartbeat file, null where there is none. */
   heartbeatAt: (workdir: string) => number | null;
+  /**
+   * The rollout reader, whose `read` runs its git calls off the tick and hands back the last
+   * computed rows. The reader itself, not its read alone, so a route can re-fetch one repository.
+   */
+  rollout: RolloutReader;
 };
 
 export type WebPassConfig = Pick<
@@ -66,6 +77,7 @@ export type WebPassConfig = Pick<
   | "boardRosterPath"
   | "boardEventsPath"
   | "usageCacheRoot"
+  | "stateFile"
 >;
 
 export type WebPassOptions = {
@@ -183,7 +195,10 @@ export function webPassSources(config: WebPassConfig, log: (message: string) => 
     plans: () => ({ live: live(config.boardProjects), archived: archived(config.boardProjects) }),
     events: (previous, roots) => readEvents(previous, roots, { path: config.boardEventsPath }),
     usage: () => readUsage(config.usageCacheRoot === null ? {} : { root: config.usageCacheRoot }),
+    plugins: () => readInstalledPlugins(installedPluginsPath()),
     heartbeatAt: (workdir) => statPlanFile(path.join(workdir, HEARTBEAT_FILE_NAME), true)?.mtimeMs ?? null,
+    // The bare repositories the reader fetches into live under the state root, beside the state file.
+    rollout: createRolloutReader({ log, stateRoot: path.dirname(config.stateFile) }),
   };
 }
 
@@ -204,6 +219,8 @@ export function createWebPass(options: WebPassOptions): WebPass {
   const ledger: Reading<readonly LedgerReading[]> = { value: null, at: null };
   const events: Reading<EventReaderState> = { value: null, at: null };
   const usage: Reading<readonly UsageAccount[]> = { value: null, at: null };
+  const plugins: Reading<InstalledRelease> = { value: null, at: null };
+  const rollout: Reading<RolloutReading> = { value: null, at: null };
   // Every source is held until it first reads well. The registry is read in-process at each request
   // and is never held.
   const held = new Set<SourceName>(SOURCES.filter((name) => name !== "registry"));
@@ -272,6 +289,34 @@ export function createWebPass(options: WebPassOptions): WebPass {
       );
       attempt("ledger", ledger, at, () => sources.ledger(personas));
     }
+    // The reader's git calls run off this tick: the read starts a cycle where none is running and
+    // hands back the last one's rows. Until a first cycle has completed, and while the source has
+    // never read well, it is left unread and unheld, so no host draws a rollout marker before a
+    // cycle has found one; a completed cycle that failed, or failed for any one repository, holds
+    // it and keeps the last good rows. A host where no git is on the PATH (`spawn ENOENT` on every
+    // origin read) and the source has never read well is likewise left unread and unheld, since it
+    // has no rollout to read. Any other failure, a timeout, a signal kill, `spawn EACCES` or an
+    // `exit <n>`, is git answering, so a host whose git hangs reads as held. A host that loses git
+    // after a good read stays held with its rows.
+    let rolloutState: RolloutState | null = null;
+    try {
+      rolloutState = sources.rollout.read([...config.boardProjects, ...(personas ?? []).map((persona) => persona.workdir)]);
+    } catch {
+      // A reader that throws is a failed read: held below, with the error dropped unread.
+    }
+    const noGit = rolloutState !== null && rolloutState.attempted && !rolloutState.reachedGit && rollout.at === null;
+    const unstarted = rolloutState !== null && !rolloutState.attempted && rollout.at === null;
+    // The source starts held, so a source with no cycle yet or no git is released without a reading.
+    if (noGit || unstarted) {
+      held.delete("rollout");
+      loggedHeld.delete("rollout");
+    }
+    if (rolloutState === null || (rolloutState.attempted && !noGit)) {
+      const state = rolloutState;
+      attempt("rollout", rollout, at, () =>
+        state === null || state.held ? UNREADABLE : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, readAt: state.readAt },
+      );
+    }
     attempt("plans", plans, at, () => sources.plans());
     if (plans.value !== null) planIndex(plans.value);
     if (personas !== null) attempt("events", events, at, () => readEventStream(personas));
@@ -279,6 +324,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
       const reading = sources.usage();
       return reading.available ? reading.accounts : UNREADABLE;
     });
+    attempt("plugins", plugins, at, () => sources.plugins());
     // Also the one run of the status rule over the queues: the views read its result for this reading.
     const blocked = new Set(blockedKeys(queues.value ?? [], events.value, at));
     for (const key of blocked) if (!blockedSince.has(key)) blockedSince.set(key, at);
@@ -312,6 +358,8 @@ export function createWebPass(options: WebPassOptions): WebPass {
         ledger: { ...ledger },
         events: { ...events },
         usage: { ...usage },
+        plugins: { ...plugins },
+        rollout: { ...rollout },
         held: SOURCES.filter((name) => held.has(name)),
       };
     },

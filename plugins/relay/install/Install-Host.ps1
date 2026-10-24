@@ -459,9 +459,11 @@ if (-not $SkipNpmCi) {
     # reviewed lockfile rather than whatever a dependency's newer compatible version happens to be
     # on install day. It runs under the node pinned above, takes npm from beside that node, and
     # records which lockfile it installed from, so the broker's first start finds the dependencies
-    # current rather than installing them again. A tree already current is left as it is.
+    # current rather than installing them again. A tree already current is left as it is. The tree
+    # goes into the dependency store under the state root, which a plugin update does not replace,
+    # and the checkout's node_modules becomes a junction to it.
     $global:LASTEXITCODE = $null
-    & $nodePath (Join-Path $PSScriptRoot 'ensure-dependencies.mjs') --root $RepoRoot
+    & $nodePath (Join-Path $PSScriptRoot 'ensure-dependencies.mjs') --root $RepoRoot --store (Join-Path $StateRoot 'dependencies')
     if ($LASTEXITCODE -ne 0) {
         $code = if ($null -eq $LASTEXITCODE) { 'none, as node could not be launched' } else { $LASTEXITCODE }
         throw "Install-Host: installing the dependencies with install\ensure-dependencies.mjs failed " +

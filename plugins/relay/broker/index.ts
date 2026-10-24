@@ -89,6 +89,7 @@ import {
   registerFileHandlers,
   registerPermissionHandler,
   registerQuestionHandler,
+  registerRolloutHandler,
   registerSayHandler,
   registerTalkHandlers,
   registerViewHandlers,
@@ -2530,10 +2531,12 @@ export async function startBroker(
       log: logger,
     });
     // The views read from this pass and never from a file of their own. It is built beside the
-    // listener and not inside the Discord block, so it runs with Discord absent.
+    // listener and not inside the Discord block, so it runs with Discord absent. The sources are
+    // built once, so the rollout route below shares the pass's reader and its per-repository locks.
+    const sources = webPassSources(config, note);
     const pass = createWebPass({
       config,
-      sources: webPassSources(config, note),
+      sources,
       thresholds:
         discord === null
           ? DEFAULT_THRESHOLDS
@@ -2551,6 +2554,10 @@ export async function startBroker(
     const readings = () => ({ ...pass.readings(), marks: marks.marks() });
     registerViewHandlers(webServer.register, readings);
     registerWatermarkHandlers(webServer.register, readings, marks, { log: logger });
+    // Mark rolled out, outside the Discord block: the tag goes to the repository's remote, never to
+    // a session. After a push the pass runs once, so its rollout reading takes the rows the reader
+    // recomputed and the next view read counts from the new tag.
+    registerRolloutHandler(webServer.register, { reader: sources.rollout, afterMark: () => pass.run(), log: logger });
     if (talkRing !== null) {
       registerTalkHandlers(webServer.register, talkRing, {
         source: readings,

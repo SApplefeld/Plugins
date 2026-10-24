@@ -27,13 +27,15 @@ import type { StateThresholds, SurfaceState, ViewSignals } from "../discord/stat
 import { liveByLineage } from "../registry.ts";
 import type { SessionRecord } from "../registry.ts";
 import type { UsageAccount } from "../usage/cache.ts";
-import { PACE_PERIOD_MS } from "../usage/card.ts";
+import { PACE_PERIOD_MS, aheadOfPace, measuredAt, projectExhaustion, rolledWeekly } from "../usage/pace.ts";
 import { foldRootName } from "./config.ts";
+import type { InstalledRelease } from "./plugins.ts";
+import { SHARED_ROW_CAP } from "./rollout.ts";
 import { EMPTY_MARKS, planMarkKey } from "./watermarks.ts";
 import type { Marks } from "./watermarks.ts";
 
 /** The sources a view draws from, in the order `asOf` and `held` list them. */
-export const SOURCES = ["registry", "roster", "queues", "plans", "ledger", "events", "usage"] as const;
+export const SOURCES = ["registry", "roster", "queues", "plans", "ledger", "events", "usage", "rollout", "plugins"] as const;
 export type SourceName = (typeof SOURCES)[number];
 
 /** One source's last good value and when it was read; both null until a read has succeeded. */
@@ -44,6 +46,77 @@ export type QueueReading = { queue: PersonaQueue; heartbeatAt: number | null };
 
 /** The plans swept under the configured roots: the live ones, and those filed in the archive. */
 export type PlansReading = { live: readonly PlanReading[]; archived: readonly PlanReading[] };
+
+/** One first-parent commit a client branch carries past its last rollout tag. */
+export type RolloutCommit = {
+  sha: string;
+  title: string;
+  /** The committer date. */
+  at: string;
+  /** Whether the default branch also contains the commit. */
+  fromDefault: boolean;
+};
+
+/**
+ * One client branch of one repository: its last rollout tag and what has merged since. `lastTag`
+ * and `lastTagDate` are null on a branch with no tag, whose commits count from its merge base with
+ * the default branch. `commits` holds at most `ROLLOUT_COMMIT_CAP` of them; `toRollOut` is the count.
+ */
+export type RolloutRow = {
+  repo: string;
+  branch: string;
+  /** The branch name after `clients/`, the segment the tag convention uses. */
+  client: string;
+  lastTag: string | null;
+  /** The tag's date segment, `YYYY-MM-DD`. */
+  lastTagDate: string | null;
+  toRollOut: number;
+  oldestAt: string | null;
+  newestAt: string | null;
+  commits: RolloutCommit[];
+  /** When the repository's refs were read for this row. */
+  readAt: string;
+};
+
+/**
+ * One first-parent commit on a repository's default branch from the shared window, with how far it
+ * has fanned out: `fannedOut` client branches contain it and `atClients` have a latest rollout tag
+ * that does, each by ancestry. `clients` is the number of client branches the repository has, a
+ * sandbox sibling counting as one. `at` is the committer date.
+ */
+export type SharedRow = {
+  repo: string;
+  sha: string;
+  title: string;
+  at: string;
+  fannedOut: number;
+  atClients: number;
+  clients: number;
+};
+
+/** Which branch a root has checked out, for the repo page's row; null where HEAD is detached. */
+export type RolloutCheckout = { root: string; repo: string; branch: string | null };
+
+/** The rollout reader's last good computation: every repository's rows and every root's checkout. */
+export type RolloutReading = {
+  rows: readonly RolloutRow[];
+  checkouts: readonly RolloutCheckout[];
+  /** Every repository's shared rows, in the order its rows come. */
+  shared: readonly SharedRow[];
+  /** The latest time any repository's refs were read, null where none has been. */
+  readAt: string | null;
+};
+
+/** The standup page's rollout card: every row, with the counts the card's heading draws. */
+export type RolloutSummary = {
+  rows: RolloutRow[];
+  /** Rows with something to roll out. */
+  waiting: number;
+  /** The sum of `toRollOut` over the rows. */
+  changes: number;
+  oldestAt: string | null;
+  readAt: string | null;
+};
 
 export type Readings = {
   /** The request's clock. Every age in a view is taken against it. */
@@ -73,6 +146,8 @@ export type Readings = {
   ledger: Reading<readonly LedgerReading[]>;
   events: Reading<EventReaderState>;
   usage: Reading<readonly UsageAccount[]>;
+  rollout: Reading<RolloutReading>;
+  plugins: Reading<InstalledRelease>;
   /** The sources whose latest read failed, in `SOURCES` order. */
   held: readonly SourceName[];
 };
@@ -137,9 +212,10 @@ export type StandupView = {
   sandbox: string;
   heading: null;
   needsYou: Item[];
-  rollout: null;
+  rollout: RolloutSummary | null;
   repos: RepoRow[];
-  shared: null;
+  /** The default branches' recent commits, null while the rollout source is unread or no repository has any. */
+  shared: { rows: SharedRow[]; readAt: string | null } | null;
   health: HealthLine;
   asOf: AsOf;
   held: readonly SourceName[];
@@ -147,12 +223,12 @@ export type StandupView = {
 
 /**
  * The Needs-me page's view: every item the standup view's `needsYou` holds, in three groups the
- * page draws in this order. `rollout` is spec 3's group and stays null until that spec builds it.
+ * page draws in this order, and `rollout`, the client branches with something to roll out.
  */
 export type NeedsMeView = {
   sandbox: string;
   groups: { blocked: Item[]; ask: Item[]; hands: Item[] };
-  rollout: null;
+  rollout: RolloutRow[] | null;
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -160,7 +236,8 @@ export type NeedsMeView = {
 export type RepoView = {
   name: string;
   heading: null;
-  rollout: null;
+  /** The row of the client branch the persona's checkout is on; null off a client branch. */
+  rollout: RolloutRow | null;
   changed: PlanRow[] | null;
   upNext: PlanRow[];
   worker: Worker;
@@ -212,6 +289,62 @@ export type AccountLine = {
   binding: (WindowLine & { name: string }) | null;
   /** The share of the binding window already elapsed, from its reset time and its length. */
   elapsedPct: number | null;
+  /** The card's seven-day pace marker, read as the card reads it, whichever window binds. */
+  aheadOfPace: boolean;
+  /** The instant the binding window reaches 100 percent at its average rate, read at `fetchedAt`. */
+  projectedExhaustionAt: string | null;
+  /** Whether that instant falls at or after the binding window's reset; null with no projection. */
+  lastsToReset: boolean | null;
+};
+
+/**
+ * Whether this week's remaining budget across the counted accounts covers the plans queued, with the
+ * figures behind the word. Budget and spend are in account-weeks, the cost per plan in account-weeks
+ * a plan, and every figure is rounded to one decimal. `unknown` carries its reason and no cost, plans
+ * left, margin or lever; the week's figures are null only where no account counts. The reasons, the
+ * first that holds winning: `no-accounts` where no account counts, `no-completed-plans` where no plan
+ * finished in the window, and `no-queue` where the roster or the queues source has never read, so
+ * the queue is unknown rather than empty.
+ */
+export type Verdict = {
+  word: "underused" | "balanced" | "overcommitted" | "unknown";
+  reason: "no-accounts" | "no-completed-plans" | "no-queue" | null;
+  /** The accounts whose reading carries a seven-day window, whatever their active flag or failing state. */
+  accounts: number;
+  budgetWeeks: number | null;
+  spentWeeks: number | null;
+  /** The Complete plans, live or archived, whose file changed in the 7 days before the request. */
+  completedPlans: number;
+  /** Spent over completed; 0 where plans finished and nothing was spent, beside a null plans left and margin. */
+  costPerPlan: number | null;
+  /**
+   * Null on every unknown verdict, and where nothing was spent on the plans completed, which leaves no
+   * cost to divide by.
+   */
+  plansLeft: number | null;
+  /** The queue entries across the roster whose status word is `up next` or `queued`. */
+  queued: number;
+  /** One third of plans left: the excess over queued beyond which the week reads underused. */
+  marginPlans: number | null;
+  lever: string | null;
+  estimate: true;
+};
+
+/**
+ * The plugin release and which live sessions run in a process started before it. Plugins load once
+ * per process, so a session is behind when its record's `launchedAt`, the launch the registry carries
+ * across every /clear, compact and resume, is before the release's update instant; a harness that
+ * reloaded plugins without a restart would make this over-report. The page never claims to have read
+ * a session's own version. `sessions` is the live records the health view lists, in the same order,
+ * and each one's `startedAt` is its own record's.
+ */
+export type Kit = {
+  /** The release commit's first 12 characters. */
+  sha: string;
+  updatedAt: string;
+  sessions: { name: string; lineage: string | null; startedAt: string; behind: boolean }[];
+  behind: number;
+  total: number;
 };
 
 export type HealthView = {
@@ -219,9 +352,9 @@ export type HealthView = {
   reporting: number | null;
   holes: Hole[];
   sessions: SessionLine[];
-  kit: null;
+  kit: Kit | null;
   capacity: AccountLine[];
-  verdict: null;
+  verdict: Verdict;
   hands: Item[];
   asOf: AsOf;
   held: readonly SourceName[];
@@ -248,6 +381,17 @@ export const DEFAULT_THRESHOLDS: StateThresholds = {
 /** The sentence a blocked item carries where its source gave no reason. */
 export const BLOCKED_FALLBACK_TEXT = "Run stopped needing a person";
 
+/** A Complete plan whose file changed inside this window before the request counts as completed. */
+export const COMPLETED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The share of plans left the queue may fall short by and still read balanced rather than underused. */
+export const UNDERUSED_MARGIN = 1 / 3;
+
+/** The lever sentence each verdict word carries, page copy held here so the page and the view agree. */
+export const UNDERUSED_LEVER = "Queue more plans, or run fewer accounts";
+export const OVERCOMMITTED_LEVER = "Hold the queue or add an account before the week runs out";
+export const BALANCED_LEVER = "Nothing to change this week";
+
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const FABLE_WINDOW = "Fable";
 
@@ -269,6 +413,8 @@ export function asOf(readings: Readings): AsOf {
     ledger: iso(readings.ledger.at),
     events: iso(readings.events.at),
     usage: iso(readings.usage.at),
+    rollout: iso(readings.rollout.at),
+    plugins: iso(readings.plugins.at),
   };
 }
 
@@ -699,6 +845,10 @@ function accountLine(account: UsageAccount, now: number): AccountLine {
     const elapsed = ((binding.length - (binding.resetsAt - now)) / binding.length) * 100;
     elapsedPct = Math.round(Math.min(Math.max(elapsed, 0), 100) * 10) / 10;
   }
+  // The fetch time as the card believes it, so a future-stamped one dates nothing on either surface.
+  const fetchedAt = measuredAt(account, now);
+  const projection =
+    binding === null ? null : projectExhaustion(binding.pct, binding.resetsAt, fetchedAt, binding.length, now);
   return {
     number: account.number,
     email: account.email,
@@ -714,6 +864,10 @@ function accountLine(account: UsageAccount, now: number): AccountLine {
     backoffUntil: iso(account.backoffUntil),
     binding: binding === null ? null : { name: binding.name, ...windowLine(binding) },
     elapsedPct,
+    aheadOfPace:
+      account.sevenDay !== null && aheadOfPace(rolledWeekly(account.sevenDay, fetchedAt, now), fetchedAt),
+    projectedExhaustionAt: projection === null ? null : iso(projection.exhaustionAt),
+    lastsToReset: projection === null ? null : projection.lastsToReset,
   };
 }
 
@@ -725,6 +879,181 @@ function sessionLine(readings: Readings, record: SessionRecord): SessionLine {
     surfaceState: deriveSurfaceState(view, readings.now, readings.thresholds),
     idleFor: Math.max(0, readings.now - view.lastHookAt),
   };
+}
+
+/**
+ * The plugin release with each live session marked behind or current, or null while the source is held,
+ * since a last good release kept after a failed read may predate the update the record now holds.
+ * Each session carries the name its line in `sessions` carries, so the two lists agree.
+ */
+function kitOf(readings: Readings, lines: readonly SessionLine[]): Kit | null {
+  const release = readings.plugins.value;
+  if (release === null || readings.held.includes("plugins")) return null;
+  const sessions = readings.records.flatMap((record, index) =>
+    record.state !== "live"
+      ? []
+      : [
+          {
+            name: lines[index]?.name ?? record.sessionId,
+            lineage: record.lineage,
+            startedAt: iso(record.startedAt) ?? "",
+            behind: record.launchedAt < release.updatedAt,
+          },
+        ],
+  );
+  return {
+    sha: release.sha.slice(0, 12),
+    updatedAt: iso(release.updatedAt) ?? "",
+    sessions,
+    behind: sessions.filter((session) => session.behind).length,
+    total: sessions.length,
+  };
+}
+
+function oneDecimal(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/** The Complete plans of both sweeps whose file changed in the window before the request, its edge included. */
+function completedInWindow(readings: Readings): number {
+  const plans = readings.plans.value;
+  if (plans === null) return 0;
+  return [...plans.live, ...plans.archived].filter(
+    (plan) => plan.terminal && readings.now - plan.mtimeMs <= COMPLETED_WINDOW_MS,
+  ).length;
+}
+
+/**
+ * The sandbox's verdict on this week. Each counted account's weekly percentage is read through the
+ * card's roll and fetch-time guard, as the account rows read it, so a week whose reset has passed
+ * since the fetch counts as wholly remaining; it is held to 0..100, so an account over its limit
+ * adds no budget and one week spent. Plans left is budget over the cost per plan, taken as budget
+ * times completed over spent, the same quotient with one rounding fewer, and every comparison runs
+ * on the unrounded figures. Where plans finished and nothing was spent there is no cost to divide by,
+ * and the untouched budget reads underused with no plans-left figure, so no division reaches the
+ * wire, where JSON would write Infinity or NaN as null without a word. It takes the roster's repos
+ * as the health view already built them, so it builds them once.
+ */
+function verdictOver(readings: Readings, repos: readonly Repo[]): Verdict {
+  let accounts = 0;
+  let budget = 0;
+  let spent = 0;
+  for (const account of readings.usage.value ?? []) {
+    if (account.sevenDay === null) continue;
+    const week = rolledWeekly(account.sevenDay, measuredAt(account, readings.now), readings.now);
+    const share = Math.min(Math.max(week.pct, 0), 100) / 100;
+    accounts += 1;
+    budget += 1 - share;
+    spent += share;
+  }
+  const completedPlans = completedInWindow(readings);
+  const queued = repos.reduce((sum, repo) => sum + queueDepth(repo), 0);
+  const counted = {
+    accounts,
+    budgetWeeks: accounts === 0 ? null : oneDecimal(budget),
+    spentWeeks: accounts === 0 ? null : oneDecimal(spent),
+    completedPlans,
+  };
+  const unknown = (reason: NonNullable<Verdict["reason"]>): Verdict => ({
+    word: "unknown",
+    reason,
+    ...counted,
+    costPerPlan: null,
+    plansLeft: null,
+    queued,
+    marginPlans: null,
+    lever: null,
+    estimate: true,
+  });
+  if (accounts === 0) return unknown("no-accounts");
+  if (completedPlans === 0) return unknown("no-completed-plans");
+  // The roster builder reads a never-read roster as no repos and a never-read queues source as no
+  // entries, so either would count zero queued; a source keeps its last value once it has read.
+  if (readings.roster.value === null || readings.queues.value === null) return unknown("no-queue");
+  if (spent === 0) {
+    return {
+      word: "underused",
+      reason: null,
+      ...counted,
+      costPerPlan: 0,
+      plansLeft: null,
+      queued,
+      marginPlans: null,
+      lever: UNDERUSED_LEVER,
+      estimate: true,
+    };
+  }
+  const plansLeft = (budget * completedPlans) / spent;
+  const margin = plansLeft * UNDERUSED_MARGIN;
+  let word: "underused" | "balanced" | "overcommitted" = "balanced";
+  if (plansLeft < queued) word = "overcommitted";
+  else if (plansLeft - queued > margin) word = "underused";
+  const levers = { underused: UNDERUSED_LEVER, balanced: BALANCED_LEVER, overcommitted: OVERCOMMITTED_LEVER };
+  return {
+    word,
+    reason: null,
+    ...counted,
+    costPerPlan: oneDecimal(spent / completedPlans),
+    plansLeft: oneDecimal(plansLeft),
+    queued,
+    marginPlans: oneDecimal(margin),
+    lever: levers[word],
+    estimate: true,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rollout
+// ---------------------------------------------------------------------------------------------
+
+/** The standup card over every row the reader holds, or null while the source has never read. */
+function rolloutSummary(readings: Readings): RolloutSummary | null {
+  const reading = readings.rollout.value;
+  if (reading === null) return null;
+  let oldest: number | null = null;
+  let changes = 0;
+  let waiting = 0;
+  for (const row of reading.rows) {
+    changes += row.toRollOut;
+    if (row.toRollOut > 0) waiting += 1;
+    if (row.oldestAt === null) continue;
+    const at = Date.parse(row.oldestAt);
+    if (Number.isFinite(at) && (oldest === null || at < oldest)) oldest = at;
+  }
+  return { rows: [...reading.rows], waiting, changes, oldestAt: iso(oldest), readAt: reading.readAt };
+}
+
+/**
+ * The standup page's shared card: every repository's shared rows merged newest first by committer
+ * date and capped at `SHARED_ROW_CAP` overall, each row naming its repository. The card is null
+ * while the source has never read well, or no repository has a default branch commit in the window.
+ */
+function sharedOf(readings: Readings): StandupView["shared"] {
+  const reading = readings.rollout.value;
+  if (reading === null || reading.shared.length === 0) return null;
+  const rows = [...reading.shared].sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
+  return { rows: rows.slice(0, SHARED_ROW_CAP), readAt: reading.readAt };
+}
+
+/** The rows with something to roll out, the Needs-me page's group, or null while the source has never read. */
+function rolloutWaiting(readings: Readings): RolloutRow[] | null {
+  const reading = readings.rollout.value;
+  if (reading === null) return null;
+  return reading.rows.filter((row) => row.toRollOut > 0);
+}
+
+/**
+ * The row of the client branch a persona's checkout is on, or null: where the source has never
+ * read, where the checkout was not read, where its HEAD is detached, or where its branch is not a
+ * client branch, so a worker on the default branch draws no card.
+ */
+function rolloutOf(readings: Readings, workdir: string): RolloutRow | null {
+  const reading = readings.rollout.value;
+  if (reading === null) return null;
+  const checkout = reading.checkouts.find((candidate) => sameFolder(candidate.root, workdir));
+  if (checkout === undefined || checkout.branch === null) return null;
+  const { branch } = checkout;
+  return reading.rows.find((row) => row.repo === checkout.repo && row.branch === branch) ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -808,7 +1137,7 @@ export function standupView(readings: Readings): StandupView {
     sandbox: readings.host,
     heading: null,
     needsYou: items,
-    rollout: null,
+    rollout: rolloutSummary(readings),
     repos: repos.map((repo) => ({
       name: repo.persona.name,
       state: repo.state,
@@ -820,7 +1149,7 @@ export function standupView(readings: Readings): StandupView {
       asOf: asOf(readings),
       held: readings.held,
     })),
-    shared: null,
+    shared: sharedOf(readings),
     health: healthLine(readings, repos, items.filter((item) => item.kind === "hands").length),
     asOf: asOf(readings),
     held: readings.held,
@@ -840,7 +1169,7 @@ export function needsMeView(readings: Readings): NeedsMeView {
       ask: items.filter((item) => item.kind === "ask"),
       hands: items.filter((item) => item.kind === "hands"),
     },
-    rollout: null,
+    rollout: rolloutWaiting(readings),
     asOf: asOf(readings),
     held: readings.held,
   };
@@ -877,7 +1206,7 @@ export function repoView(readings: Readings, name: string): RepoView | null {
   return {
     name: repo.persona.name,
     heading: null,
-    rollout: null,
+    rollout: rolloutOf(readings, workdir),
     changed,
     upNext,
     worker: workerOf(readings, repo),
@@ -921,14 +1250,15 @@ export function planView(readings: Readings, root: string, relativePath: string)
 
 export function healthView(readings: Readings): HealthView {
   const repos = fleet(readings);
+  const sessions = readings.records.map((record) => sessionLine(readings, record));
   return {
     expected: readings.roster.value === null ? null : repos.length,
     reporting: readings.roster.value === null ? null : repos.length - holesOf(readings, repos).length,
     holes: holesOf(readings, repos),
-    sessions: readings.records.map((record) => sessionLine(readings, record)),
-    kit: null,
+    sessions,
+    kit: kitOf(readings, sessions),
     capacity: (readings.usage.value ?? []).map((account) => accountLine(account, readings.now)),
-    verdict: null,
+    verdict: verdictOver(readings, repos),
     hands: handsItems(readings, repos),
     asOf: asOf(readings),
     held: readings.held,

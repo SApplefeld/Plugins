@@ -144,7 +144,8 @@
   /** The line of per-source read times that ends a page. */
   function sources(view, names) {
     const asOf = view && view.asOf ? view.asOf : {};
-    const parts = names.map((name) => {
+    // A rollout source neither read nor held draws nothing: a host with no git renders as it did before the source.
+    const parts = names.filter((name) => name !== "rollout" || parse(asOf[name]) !== null || list(view && view.held).includes(name)).map((name) => {
       const at = parse(asOf[name]);
       return name + (at === null ? " no reading yet" : " read " + clock(at));
     });
@@ -179,6 +180,316 @@
     fill.style.setProperty("width", Math.min(100, Math.max(0, pct)) + "%");
     track.append(fill);
     return track;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Rollout
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * How long Mark rolled out may take at the broker: 15 minutes. The worst case waits on the repository's lock behind a pass's
+   * ls-remote and first fetch (60 s plus 10 min), then runs the tap's own ls-remote, fetch and push at 60 s each, 14 minutes in all.
+   */
+  const ROLLOUT_POST_MS = 900000;
+
+  /** The rows whose Mark rolled out is out, so a redraw keeps their buttons disabled until the answer. */
+  const rolloutBusy = new Set();
+
+  function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function objects(value) {
+    return list(value).filter(isObject);
+  }
+
+  function plural(n, one, many) {
+    return n + " " + (n === 1 ? one : many);
+  }
+
+  /** A day in the mockups' short form: today, the weekday within the last week, else month and day. */
+  function dayWord(ms, now) {
+    const day = new Date(ms);
+    if (day.toDateString() === new Date(now).toDateString()) return "today";
+    if (ms <= now && now - ms < 6 * 86400000) return day.toLocaleDateString(undefined, { weekday: "short" });
+    return day.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  function dayOf(iso, now) {
+    const ms = parse(iso);
+    return ms === null ? null : dayWord(ms, now);
+  }
+
+  /** A tag's `YYYY-MM-DD` date segment as month and day; a value of any other shape is shown as it came. */
+  function tagDay(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(txt(value));
+    if (match === null) return txt(value);
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const date = Number(match[3]);
+    const day = new Date(year, month - 1, date);
+    if (day.getFullYear() !== year || day.getMonth() !== month - 1 || day.getDate() !== date) return txt(value);
+    return day.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  function rolloutHeld(view) {
+    return list(view.held).indexOf("rollout") >= 0;
+  }
+
+  /** A row the button can act on: it names its repository and its branch. */
+  function rolloutRowOf(value) {
+    return isObject(value) && txt(value.repo) !== "" && txt(value.branch) !== "";
+  }
+
+  function rolloutKey(row) {
+    return JSON.stringify([row.repo, row.branch]);
+  }
+
+  function rolloutClient(row) {
+    return txt(row.client) || txt(row.branch);
+  }
+
+  /**
+   * The one toast the pages share: a line, and an optional command the operator can select and copy. Its live region is in the
+   * page empty before the first message, so a screen reader announces that message. Focus moves to Dismiss where the tapped
+   * button is disabled or gone, and returns to a rollout button when the toast is dismissed.
+   */
+  const toastBox = h("div", "toast");
+  toastBox.setAttribute("role", "status");
+  if (["standup", "repo", "needs-me"].indexOf(document.body.dataset.page) >= 0) document.body.append(toastBox);
+
+  function showToast(words, command) {
+    const body = h("div", "toast-body");
+    body.append(h("span", null, words));
+    if (command) body.append(h("code", "toast-code", command));
+    const close = h("button", "toast-close", "Dismiss");
+    close.type = "button";
+    close.addEventListener("click", () => {
+      const held = toastBox.contains(document.activeElement);
+      toastBox.replaceChildren();
+      if (held) {
+        const next = document.querySelector("#app button.ro-button:not(:disabled)");
+        if (next !== null) next.focus();
+      }
+    });
+    toastBox.replaceChildren(body, close);
+    const active = document.activeElement;
+    if (active === null || active === document.body || active.disabled === true || !active.isConnected) close.focus();
+  }
+
+  /** Posts Mark rolled out for a row and shows the broker's answer in the toast; nothing is thrown. */
+  async function postRollout(row) {
+    let response;
+    try {
+      response = await fetch("/web/rollout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: row.repo, branch: row.branch }),
+        signal: AbortSignal.timeout(ROLLOUT_POST_MS),
+      });
+    } catch (error) {
+      const again = " Tapping again answers \"Already tagged\" if the tag landed.";
+      if (error instanceof Error && error.name === "TimeoutError") showToast("The broker did not answer in 15 minutes, so the tag is not confirmed." + again);
+      else showToast("The broker could not be reached, so the tag is not confirmed." + again);
+      return;
+    }
+    let answer = null;
+    let readable = true;
+    try {
+      answer = await response.json();
+    } catch (error) {
+      readable = false;
+    }
+    const body = isObject(answer) ? answer : {};
+    if (response.status === 200) {
+      if (!readable) showToast("The broker's answer was not JSON, so the tag is not confirmed.");
+      else if (txt(body.tag) === "") showToast("The broker's answer named no tag, so the tag is not confirmed.");
+      else if (txt(body.undo) === "") showToast("Tagged " + txt(body.tag) + ".");
+      else showToast("Tagged " + txt(body.tag) + ". To undo it, run:", txt(body.undo));
+    } else if (response.status === 409) {
+      showToast(txt(body.tag) === "" ? "Already tagged." : "Already tagged: " + txt(body.tag));
+    } else if (response.status === 502) {
+      showToast("push failed" + (txt(body.kind) === "" ? "" : " (" + txt(body.kind) + ")"));
+    } else {
+      showToast("Mark rolled out failed: the broker answered HTTP " + response.status + ".");
+    }
+  }
+
+  /** Marks one row rolled out. The button stays disabled until the answer, and the page reads its view again after it. */
+  async function sendRollout(row) {
+    const key = rolloutKey(row);
+    if (rolloutBusy.has(key)) return;
+    rolloutBusy.add(key);
+    redrawNeeds();
+    try {
+      await postRollout(row);
+    } finally {
+      rolloutBusy.delete(key);
+      await refreshView();
+    }
+  }
+
+  function rolloutButton(row, cls) {
+    const button = h("button", "ro-button " + cls, "Mark rolled out");
+    button.type = "button";
+    button.setAttribute("aria-label", "Mark rolled out, " + rolloutClient(row));
+    button.disabled = rolloutBusy.has(rolloutKey(row));
+    button.dataset.focusKey = "rollout|" + rolloutKey(row);
+    button.addEventListener("click", () => sendRollout(row));
+    return button;
+  }
+
+  /** The footer line of a card: what the counts are, and when the tags were read. */
+  function rolloutFooter(words, readAt) {
+    const at = parse(readAt);
+    return h("div", "ro-foot", words + (at === null ? "" : " · tags " + clock(at)));
+  }
+
+  /** The sandbox page's card over every client branch, or nothing where the slot is null. A held source draws `tags unread` in place of the rows. */
+  function rolloutCard(view) {
+    const summary = view.rollout;
+    if (!isObject(summary)) return null;
+    const now = nowOf(view);
+    const card = h("section", "card ro-card");
+    card.setAttribute("aria-labelledby", "rollout-heading");
+    const rows = objects(summary.rows);
+    const waiting = rows.filter((row) => num(row.toRollOut) > 0);
+    const held = rolloutHeld(view);
+
+    const head = h("div", "ro-head");
+    const heading = label(held ? "Rollout" : "Rollout · " + plural(num(summary.waiting) ?? waiting.length, "client", "clients") + " waiting");
+    heading.id = "rollout-heading";
+    head.append(heading);
+    const oldest = dayOf(summary.oldestAt, now);
+    if (held) head.append(h("div", "ro-sub held", "tags unread"));
+    else head.append(h("div", "ro-sub", plural(num(summary.changes) ?? 0, "change", "changes") + (oldest === null ? "" : ", oldest " + oldest)));
+    card.append(head);
+    if (held) {
+      card.append(rolloutFooter("the rows from the last read are not shown", summary.readAt));
+      return card;
+    }
+
+    const shared = isObject(view.shared) ? objects(view.shared.rows) : [];
+    if (waiting.length === 0 && shared.length === 0) return null;
+    const full = h("div", "ro-full");
+    for (const row of waiting) {
+      const line = h("div", "ro-line");
+      const text = h("span");
+      const since = tagDay(row.lastTagDate) === "" ? ", no rollout tag yet" : " since " + tagDay(row.lastTagDate);
+      text.append(h("b", null, rolloutClient(row)), " · " + num(row.toRollOut) + " merged" + since);
+      line.append(text, h("span", "ro-day", dayOf(row.oldestAt, now) ?? ""));
+      full.append(line);
+    }
+    for (const one of shared) {
+      const line = h("div", "ro-line");
+      const clients = num(one.clients) ?? 0;
+      const at = num(one.atClients) ?? 0;
+      const text = h("span", "muted");
+      const merged = num(one.fannedOut) ?? 0;
+      text.append(h("b", null, "Shared"), " · " + txt(one.title) + " merged to " + merged + ", at " + at + " of " + plural(clients, "client", "clients"));
+      line.append(text, h("span", "ro-day", Math.max(0, clients - at) + " left"));
+      full.append(line);
+    }
+    card.append(full);
+
+    // The desktop layout draws the same rows as two lines, per the condensed mockup.
+    const condensed = h("div", "ro-condensed");
+    if (waiting.length > 0) {
+      const line = h("div", "ro-flow");
+      waiting.forEach((row, at) => {
+        if (at > 0) line.append(" · ");
+        const since = tagDay(row.lastTagDate) === "" ? ", no tag yet" : " since " + tagDay(row.lastTagDate);
+        line.append(h("b", null, rolloutClient(row)), " ", h("span", "muted", "· " + num(row.toRollOut) + since));
+      });
+      condensed.append(line);
+    }
+    for (const one of shared) {
+      const line = h("div", "ro-flow");
+      const clients = num(one.clients) ?? 0;
+      const at = num(one.atClients) ?? 0;
+      const merged = num(one.fannedOut) ?? 0;
+      line.append("Shared: " + txt(one.title) + " ", h("span", "muted", "· merged to " + merged + ", at " + at + " of " + clients + ", " + Math.max(0, clients - at) + " pending"));
+      condensed.append(line);
+    }
+    card.append(condensed);
+    card.append(rolloutFooter("commits on each branch past its last rollout tag", summary.readAt));
+    return card;
+  }
+
+  /** The repo page's card for the client branch the persona's checkout is on, or nothing where the slot is null. */
+  function rolloutRepoCard(view) {
+    const row = view.rollout;
+    if (!isObject(row)) return null;
+    const now = nowOf(view);
+    const card = h("section", "card pad attn ro-repo");
+    card.setAttribute("aria-labelledby", "rollout-heading");
+    const head = h("div", "ro-head");
+    const heading = label("Rollout");
+    heading.id = "rollout-heading";
+    head.append(heading);
+    const held = rolloutHeld(view);
+    if (held) head.append(h("div", "ro-sub held", "tags unread"));
+    else head.append(h("div", "ro-tag", txt(row.lastTag) === "" ? "no rollout tag yet" : txt(row.lastTag)));
+    card.append(head);
+    if (held) {
+      card.append(rolloutFooter("the rows from the last read are not shown", row.readAt));
+      return card;
+    }
+
+    const toRollOut = num(row.toRollOut) ?? 0;
+    card.append(h("div", "ro-lead", plural(toRollOut, "change", "changes") + " merged since " + rolloutClient(row) + " last got a deploy" + (toRollOut > 0 ? ":" : ".")));
+    const commits = objects(row.commits);
+    if (commits.length > 0) {
+      const grid = h("div", "ro-commits");
+      for (const commit of commits) {
+        const mark = h("span", "ro-check", "✓");
+        mark.setAttribute("aria-hidden", "true");
+        grid.append(mark, h("span", null, txt(commit.title) + (commit.fromDefault === true ? ", from main" : "")), h("span", "ro-day", dayOf(commit.at, now) ?? ""));
+      }
+      card.append(grid);
+    }
+    if (toRollOut > commits.length) card.append(h("div", "ro-more", "and " + (toRollOut - commits.length) + " more"));
+    if (rolloutRowOf(row)) {
+      const action = h("div", "ro-action");
+      action.append(rolloutButton(row, "ro-button-repo"));
+      card.append(action);
+    }
+    card.append(rolloutFooter("records a tag at the branch head; the deploy itself is yours", null));
+    return card;
+  }
+
+  /** The Needs-me page's Roll out group, one row and one button per client branch with something waiting, or nothing where the slot is null. */
+  function rolloutGroup(view) {
+    if (!Array.isArray(view.rollout)) return null;
+    const now = nowOf(view);
+    const rows = objects(view.rollout);
+    const held = rolloutHeld(view);
+    if (!held && rows.length === 0) return null;
+    const section = h("section", "section");
+    section.setAttribute("aria-label", "Roll out");
+    const head = h("div", "section-head");
+    head.append(label("Roll out · " + (held ? "tags unread" : plural(rows.length, "client", "clients")), "h2"));
+    section.append(head);
+    const card = h("div", "card");
+    if (held) card.append(h("div", "nm-none", "tags unread"));
+    else {
+      for (const row of rows) {
+        const line = h("div", "ro-need");
+        const text = h("div");
+        text.append(h("b", null, rolloutClient(row)), " · " + (num(row.toRollOut) ?? 0) + " merged ");
+        const parts = [];
+        const oldest = dayOf(row.oldestAt, now);
+        if (oldest !== null) parts.push("oldest " + oldest);
+        parts.push(tagDay(row.lastTagDate) === "" ? "no rollout tag yet" : "last deploy " + tagDay(row.lastTagDate));
+        if (txt(row.repo) !== "") parts.push(txt(row.repo));
+        text.append(h("span", "muted", "· " + parts.join(" · ")));
+        line.append(text);
+        if (rolloutRowOf(row)) line.append(rolloutButton(row, "ro-button-need"));
+        card.append(line);
+      }
+    }
+    section.append(card);
+    return section;
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -306,6 +617,8 @@
       band.append(rows);
     }
     out.append(band);
+    const rolloutBand = rolloutCard(view);
+    if (rolloutBand !== null) out.append(rolloutBand);
 
     const counts = h("div", "rollup");
     for (const state of ["asking", "blocked", "stalled", "working", "idle", "dormant"]) {
@@ -365,7 +678,7 @@
       if (num(health.held) > 0) line.append(" · " + health.held + (health.held === 1 ? " source held" : " sources held"));
     }
     band2.append(bandHead, line);
-    out.append(band2, sources(view, ["roster", "queues", "plans", "ledger", "events", "registry", "usage"]));
+    out.append(band2, sources(view, ["roster", "queues", "plans", "ledger", "events", "registry", "usage", "rollout"]));
     return out;
   }
 
@@ -434,6 +747,8 @@
 
     const cols = h("div", "repo-cols");
     const left = h("div", "stack");
+    const rolloutBox = rolloutRepoCard(view);
+    if (rolloutBox !== null) left.append(rolloutBox);
 
     const changed = list(view.changed);
     const changedSection = h("section", "section");
@@ -476,7 +791,7 @@
     }
 
     cols.append(left, box);
-    out.append(cols, sources(view, ["plans", "queues", "ledger", "events", "roster"]));
+    out.append(cols, sources(view, ["plans", "queues", "ledger", "events", "roster", "rollout"]));
     return out;
   }
 
@@ -589,6 +904,12 @@
 
   const WINDOW_NAMES = { five_hour: "5 Hr", seven_day: "7 Day" };
   const HOLE_WORDS = { "no-heartbeat": "no heartbeat", "stale-heartbeat": "heartbeat stale" };
+  const VERDICT_TITLES = { underused: "Underused this week", balanced: "Balanced this week", overcommitted: "Overcommitted this week" };
+  const UNKNOWN_REASONS = {
+    "no-accounts": "no account reporting a weekly window",
+    "no-completed-plans": "no plan finished in the last 7 days",
+    "no-queue": "the queue has not been read yet",
+  };
   const SESSION_ORDER = { "needs you": 0, blocked: 0, exited: 1, idle: 2, working: 3 };
   const SESSIONS_SHOWN = 8;
   let sessionsExpanded = false;
@@ -654,6 +975,8 @@
     }
     card.append(sources(view, ["roster", "queues", "registry"]));
     box.append(card);
+    const kit = kitCard(view, nowOf(view));
+    if (kit) box.append(kit);
     return box;
   }
 
@@ -673,16 +996,23 @@
     head.append(who);
     let bound = "";
     let elapsed = "";
+    let projection = "";
     if (account.binding && num(account.binding.pct) > 0) {
       const name = Object.prototype.hasOwnProperty.call(WINDOW_NAMES, account.binding.name) ? WINDOW_NAMES[account.binding.name] : txt(account.binding.name);
       bound = "bound by " + name;
+      if (account.lastsToReset === false) bound += " · dry before reset";
+      else if (account.lastsToReset === true) projection = " · lasts to reset";
       if (num(account.elapsedPct) !== null) elapsed = Math.round(account.elapsedPct) + "% of the window elapsed";
     }
     if (account.failing) {
       const failing = "sign-in failing · " + account.consecutiveFailures + (account.consecutiveFailures === 1 ? " try" : " tries");
       bound = bound ? failing + " · " + bound : failing;
     }
-    if (bound) head.append(h("span", "bound", bound));
+    if (bound) {
+      const boundCell = h("span", "bound", bound);
+      if (projection) boundCell.append(h("span", "muted", projection));
+      head.append(boundCell);
+    }
     box.append(head);
     if (elapsed) box.append(h("div", "meta", elapsed));
     if (account.organizationName) box.append(h("div", "meta", txt(account.organizationName)));
@@ -709,6 +1039,63 @@
     return box;
   }
 
+  /** The sandbox's verdict: the word, the budget against the queue, the lever, and the formula's footer. A view without one draws nothing. */
+  function verdictCard(view) {
+    const verdict = view.verdict;
+    if (!isObject(verdict)) return null;
+    const card = h("div", "card verdict");
+    const head = h("div", "verdict-head");
+    const left = num(verdict.plansLeft);
+    const queued = num(verdict.queued);
+    if (verdict.word === "unknown") {
+      head.append(h("div", "verdict-title", "No estimate yet"));
+      card.append(head);
+      if (Object.prototype.hasOwnProperty.call(UNKNOWN_REASONS, verdict.reason)) card.append(h("div", "meta", UNKNOWN_REASONS[verdict.reason]));
+      return card;
+    }
+    head.append(h("div", "verdict-title", Object.prototype.hasOwnProperty.call(VERDICT_TITLES, verdict.word) ? VERDICT_TITLES[verdict.word] : txt(verdict.word)));
+    if (queued !== null && (left !== null || verdict.word === "underused")) {
+      // The word is chosen on unrounded figures, where overcommitted is always below the queue and underused always above it,
+      // so those two take their mark from the word; rounding cannot pull a balanced figure below the queue.
+      const mark = verdict.word === "overcommitted" ? "<" : verdict.word === "underused" ? ">" : left > queued ? ">" : "=";
+      const tone = { underused: "blue", balanced: "green" };
+      head.append(h("span", "badge " + (Object.prototype.hasOwnProperty.call(tone, verdict.word) ? tone[verdict.word] : ""), "budget " + mark + " queue"));
+    }
+    card.append(head);
+    const rows = h("div", "verdict-rows");
+    const spent = num(verdict.spentWeeks);
+    const budget = spent === null ? "" : spent + " of " + plural(num(verdict.accounts) ?? 0, "account-week", "account-weeks") + " used";
+    const plansLeft = left === null ? "" : "about " + plural(left, "plan", "plans") + " left";
+    rows.append(h("div", "muted", "Budget"), h("div", null, [budget, plansLeft].filter(Boolean).join(" · ")));
+    rows.append(h("div", "muted", "Queue"), h("div", null, plural(queued ?? 0, "plan", "plans") + " queued · " + (num(verdict.completedPlans) ?? 0) + " finished in the last 7 days"));
+    card.append(rows);
+    if (verdict.lever) card.append(h("div", "verdict-lever", txt(verdict.lever)));
+    card.append(h("div", "verdict-foot", "cost per plan: estimate, account-weeks spent ÷ plans completed, last 7d"));
+    return card;
+  }
+
+  /** The plugin release and the live sessions whose process started before it; a view without a kit draws nothing. */
+  function kitCard(view, now) {
+    const kit = view.kit;
+    if (!isObject(kit)) return null;
+    const total = num(kit.total) ?? 0;
+    const behind = objects(kit.sessions).filter((session) => session.behind === true);
+    const card = h("div", "card pad kit");
+    const head = h("div", "section-head");
+    head.append(h("h3", "label muted", "Kit version"));
+    const count = h("div");
+    count.append(h("b", null, String(Math.max(0, total - (num(kit.behind) ?? behind.length)))), " of " + total + " on current");
+    head.append(count);
+    card.append(head);
+    const published = parse(kit.updatedAt);
+    const line = h("div", "kit-line", published === null ? "Release time unknown." : "Published " + span(now - published) + " ago");
+    if (kit.sha) line.append(" ", h("span", "muted mono", txt(kit.sha)));
+    card.append(line);
+    if (behind.length === 0) card.append(h("div", "meta", "all on current"));
+    else card.append(h("div", "meta", (behind.length === 1 ? "A session whose process" : "Sessions whose process") + " started before the update: " + behind.map((session) => txt(session.name)).join(", ")));
+    return card;
+  }
+
   function capacitySection(view, now) {
     const box = h("section", "section");
     const accounts = list(view.capacity);
@@ -717,6 +1104,8 @@
     const read = parse(view.asOf ? view.asOf.usage : null);
     head.append(h("div", "stamp", read === null ? "swap: no reading yet" : "swap read " + span(now - read) + " ago"));
     box.append(head);
+    const verdict = verdictCard(view);
+    if (verdict) box.append(verdict);
     const card = h("div", "card");
     if (accounts.length === 0) card.append(h("div", "pad muted", view.asOf && view.asOf.usage === null ? "No reading yet." : "No accounts reporting."));
     for (const account of accounts) card.append(accountRow(account, now));
@@ -1628,10 +2017,10 @@
   }
 
   /**
-   * Fetches the reading again and draws it, so an ask whose recommendation changed shows the new
+   * Fetches the reading again and draws it, so an ask whose recommendation changed, or a rollout just marked, shows the new
    * text now rather than on the next poll; a fetch that fails draws the last reading instead.
    */
-  async function refreshNeeds() {
+  async function refreshView() {
     try {
       const view = await fetchView(page.url());
       lastView = view;
@@ -1669,7 +2058,7 @@
       needsMe.statuses.set(key, unconfirmed(error));
     } finally {
       needsMe.acting = false;
-      if (changed) await refreshNeeds();
+      if (changed) await refreshView();
       else redrawNeeds();
     }
   }
@@ -1698,7 +2087,7 @@
       for (const item of sent) needsMe.statuses.set(needsKey(item), unconfirmed(error));
     } finally {
       needsMe.acting = false;
-      if (changed) await refreshNeeds();
+      if (changed) await refreshView();
       else redrawNeeds();
     }
   }
@@ -1798,11 +2187,13 @@
     }
     out.append(sorts);
 
+    const rolloutNeeds = rolloutGroup(view);
     out.append(
       needsGroup(view, "blocked", "Blocked on you", null, now, true),
       needsGroup(view, "ask", "Asks", "each proceeds on its recommendation", now, false),
+      ...(rolloutNeeds === null ? [] : [rolloutNeeds]),
       needsGroup(view, "hands", "Your hands", null, now, false),
-      sources(view, ["roster", "queues", "ledger", "events", "registry", "usage"]),
+      sources(view, ["roster", "queues", "ledger", "events", "registry", "usage", "rollout"]),
     );
 
     // The batch is over the asks in the order drawn that the operator has not touched.

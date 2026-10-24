@@ -1,9 +1,10 @@
-// The summary the web listener serves at `GET /web/summary`: four counts, the sandbox name and the
-// oldest source time. It names no session, repo, plan or person, and no path or ask text, so what
-// it gives a reader is the fleet's size and state. The counts come from the standup and health views
-// of the same reading, so they agree with the pages a reader opens next.
+// The summary the web listener serves at `GET /web/summary`: four counts, the capacity verdict's word
+// with the number of accounts behind it, the sandbox name and the oldest source time. It names no
+// session, repo, plan or person, and no path or ask text, so what it gives a reader is the fleet's
+// size and state. The counts and the word come from the standup and health views of the same
+// reading, so they agree with the pages a reader opens next.
 import { asOf, healthView, standupView } from "./views.ts";
-import type { AsOf, Readings } from "./views.ts";
+import type { AsOf, Readings, Verdict } from "./views.ts";
 
 /** The longest sandbox name the summary carries; a longer `CHANNEL_HOST_NAME` is cut to this. */
 const SANDBOX_MAX = 32;
@@ -14,7 +15,8 @@ export type SummaryView = {
   yourHands: number;
   expected: number | null;
   reporting: number | null;
-  capacity: null;
+  /** The health view's verdict word and the accounts it counted, and none of its figures. */
+  capacity: { verdict: Verdict["word"]; accounts: number };
   asOf: string | null;
 };
 
@@ -27,7 +29,7 @@ export function summaryView(readings: Readings): SummaryView {
     yourHands: standup.needsYou.filter((item) => item.kind === "hands").length,
     expected: health.expected,
     reporting: health.reporting,
-    capacity: null,
+    capacity: { verdict: health.verdict.word, accounts: health.verdict.accounts },
     asOf: oldestOf(asOf(readings)),
   };
 }
