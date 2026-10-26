@@ -9,8 +9,9 @@
 #
 # The broker can ask to be restarted, by exiting with $RestartExitCode, and this script then starts
 # it again onto whatever code and configuration are on disk now. Every other exit code ends the
-# script with that code, so a broker that crashes or fails to start still fails the task visibly
-# rather than being relaunched into the same failure. A node that cannot be launched at all, or a
+# script with that code, so a broker that crashes or fails to start fails the task visibly rather
+# than being relaunched at once into the same failure. The task's two-minute trigger, not this
+# script, starts it again. A node that cannot be launched at all, or a
 # functions file that cannot be loaded, ends the script with 1, on any pass.
 
 param(

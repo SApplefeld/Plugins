@@ -153,6 +153,12 @@ export type BrokerConfig = {
    */
   boardRosterPath: string;
   /**
+   * Absolute path to the machine's direction ledger, the operator's standing word that the web
+   * surface's heading card draws. Empty, the default, means none is configured: the machine ledger
+   * is not read and the heading card is not drawn. The file need not exist yet.
+   */
+  directionLedgerPath: string;
+  /**
    * The file the Jev key is read from, or null when none is named. The response gate and the
    * voice's ranking share it; null with the gate on refuses the start, and with the voice alone it
    * leaves every spoken turn to the persona's session. The key itself is never a setting: a
@@ -297,7 +303,7 @@ export type BrokerConfig = {
    * which leaves the surface off: no second server is created and the broker is its loopback
    * listener alone. Read here as written, an IPv4 literal or the word `tailscale`; the tailnet
    * range check and the literal's resolution are `loadWebConfig`'s in broker/web/config.ts, which
-   * takes these six values rather than the environment.
+   * takes these seven values rather than the environment.
    */
   webBind: string | null;
   /** The web surface's port. */
@@ -309,10 +315,23 @@ export type BrokerConfig = {
    * empty, which leaves the node unchecked.
    */
   webDevices: readonly string[] | null;
+  /**
+   * The tailnet node names the web surface admits to `GET /web/summary` alone, the sibling
+   * sandboxes' nodes, as `CHANNEL_WEB_SUMMARY_PEERS` names them, split on commas and trimmed; empty
+   * when unset. A node here is refused every page and every other route unless it is also on
+   * `webDevices`. With `webDevices` null the node is not checked, so the list adds nothing.
+   */
+  webSummaryPeers: readonly string[];
   /** The Tailscale CLI the web surface resolves peers with: a path, or a name found on PATH. */
   webTailscale: string;
   /** Absolute path to the directory the web surface's pages are served from. */
   webStaticRoot: string;
+  /**
+   * The sibling sandboxes the web surface polls for its rail, as the `Name=address:port` entries
+   * of `CHANNEL_WEB_SIBLINGS`, split on commas and trimmed; empty when unset. Each entry's shape
+   * is `loadWebConfig`'s to check, since the list means nothing while `CHANNEL_WEB_BIND` is unset.
+   */
+  webSiblings: readonly string[];
 };
 
 /**
@@ -469,11 +488,12 @@ const DEFAULT_RESPONSE_GATE_THRESHOLD = 0.65;
 // path carries a drive letter and a colon with it, and a comma is a legal character in a directory
 // name.
 const PROJECT_SEPARATOR = ";";
-// Ten megabytes a file: room for a screenshot or a document, and a bound on what one message can
-// make the broker hold, since each file is read whole into memory under the cap before it is
-// written. A floor and no ceiling, as the hook body cap has: the files reach a session the operator
-// steers, and a host that wants larger ones says so.
-const DEFAULT_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+// Twenty megabytes a file, Discord's own default limit per uploaded file: room for a short screen
+// recording, and a bound on what one message can make the broker hold, since each file is read
+// whole into memory under the cap before it is written. A floor and no ceiling, as the hook body cap
+// has: the files reach a session the operator steers, and a host whose server's boost tier takes
+// larger ones says so.
+const DEFAULT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 // Two weeks: long enough that a session resumed after a weekend still finds what it was told to
 // open, short enough that the store does not become an archive of every file ever attached.
 const DEFAULT_ATTACHMENT_RETAIN_DAYS = 14;
@@ -572,6 +592,12 @@ const DEFAULT_LOG_MAX_FILES = 5;
 // One above the loopback port, so a host reading its own process list tells the two apart at a
 // glance. A bare `tailscale` is found on PATH, which is where the installer puts the CLI.
 const DEFAULT_WEB_PORT = 8788;
+/**
+ * How often the web surface tries its bind again while its address is not available yet, as at
+ * boot before Tailscale is up. Thirty seconds because it is the relay reconnect ceiling,
+ * `RELAY_MAX_RECONNECT_DELAY_MS`, so a session's pipe and the surface come up on the same clock.
+ */
+export const WEB_BIND_RETRY_MS = RELAY_MAX_RECONNECT_DELAY_MS;
 const DEFAULT_WEB_TAILSCALE = "tailscale";
 const WEB_LIST_SEPARATOR = ",";
 
@@ -851,6 +877,25 @@ function rosterPath(env: NodeJS.ProcessEnv): string {
   return configured;
 }
 
+/**
+ * The machine direction ledger's path, or empty when none is configured.
+ *
+ * Held to the rule the roster path is: a relative or drive-relative path resolves against whatever
+ * directory or drive the broker was launched from, which under a scheduled task is neither of the
+ * operator's choosing.
+ *
+ * The refusal never echoes the value: the path typically embeds the operator's OS username, and
+ * this message reaches the log file.
+ */
+function directionLedgerPath(env: NodeJS.ProcessEnv): string {
+  const configured = env.CHANNEL_DIRECTION_LEDGER?.trim();
+  if (configured === undefined || configured === "") return "";
+  if (!namesOneDirectory(configured)) {
+    throw new Error("CHANNEL_DIRECTION_LEDGER expects an absolute path, the value names no fixed file");
+  }
+  return configured;
+}
+
 /** The Flux voice: a lowercase slug, since it rides the socket URL, starting with `flux-`. */
 function speechVoice(raw: string | undefined): string {
   const value = raw?.trim();
@@ -891,7 +936,7 @@ function defaultStateFile(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * A comma-separated list as the web surface's two allowlists are written: each entry trimmed,
+ * A comma-separated list as the web surface's three allowlists and sibling list are written: each entry trimmed,
  * empty entries dropped, and null for an unset or empty value, which is how the device list says
  * "unchecked". Whether an empty operator list is an error is `loadWebConfig`'s call, since the
  * lists mean nothing while `CHANNEL_WEB_BIND` is unset.
@@ -998,6 +1043,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     // Read here for the same reason: the roster is opened in broker/board/roster.ts, and the
     // allowlist pin only sees a knob this file names itself.
     boardRosterPath: rosterPath(env),
+    // Read here for the same reason: the ledger is opened in broker/web/direction.ts.
+    directionLedgerPath: directionLedgerPath(env),
     // The paths alone. The file is read where the gate or the voice is built, by `readJevKey`, so a
     // broker with both off never opens it. The new name wins where both are set.
     jevKeyFile: env.CHANNEL_JEV_KEY_FILE?.trim() || env.CHANNEL_INBOX_JUDGE_KEY_FILE?.trim() || null,
@@ -1143,7 +1190,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MAX_VOICE_HOLD_SECOND_MS,
       DEFAULT_VOICE_HOLD_SECOND_MS,
     ),
-    // The web surface's six, read here and only here so the installer's env allowlist pin sees
+    // The web surface's eight, read here and only here so the installer's env allowlist pin sees
     // them, and validated in broker/web/config.ts, where the surface is: the bind is kept as
     // written because the tailnet range check and the `tailscale` literal belong to that module.
     // Unset by default, and unset is the absence of the machinery: no second listener is created.
@@ -1151,8 +1198,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     webPort: integerAtLeast(env.CHANNEL_WEB_PORT, 1, DEFAULT_WEB_PORT),
     webOperators: webList(env.CHANNEL_WEB_OPERATORS) ?? [],
     webDevices: webList(env.CHANNEL_WEB_DEVICES),
+    webSummaryPeers: webList(env.CHANNEL_WEB_SUMMARY_PEERS) ?? [],
     webTailscale: env.CHANNEL_WEB_TAILSCALE?.trim() || DEFAULT_WEB_TAILSCALE,
     webStaticRoot: env.CHANNEL_WEB_STATIC_ROOT?.trim() || defaultWebStaticRoot(),
+    webSiblings: webList(env.CHANNEL_WEB_SIBLINGS) ?? [],
   };
   // Flux refuses an eager threshold above the end-of-turn threshold, so the pair is refused here
   // rather than at the socket. With eager off the eager threshold is never sent, and the pair is

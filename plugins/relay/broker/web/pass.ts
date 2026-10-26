@@ -39,6 +39,10 @@ import type { SessionRecord } from "../registry.ts";
 import { readUsage } from "../usage/cache.ts";
 import type { UsageAccount, UsageReading } from "../usage/cache.ts";
 import type { BrokerConfig } from "../config.ts";
+import { readBriefFile } from "./brief.ts";
+import type { Brief, BriefHold } from "./brief.ts";
+import { readDirection } from "./direction.ts";
+import type { DirectionReading } from "./direction.ts";
 import { installedPluginsPath, readInstalledPlugins } from "./plugins.ts";
 import type { InstalledRelease } from "./plugins.ts";
 import { createRolloutReader } from "./rollout.ts";
@@ -59,6 +63,11 @@ export type PassSources = {
   usage: () => UsageReading;
   /** The relay plugin's release from the harness's install record, or `UNREADABLE` where it gave none. */
   plugins: () => InstalledRelease | typeof UNREADABLE;
+  /**
+   * The direction ledgers, or `UNREADABLE` where a file that exists could not be used. An absent
+   * file is a reading with no items, not a failure.
+   */
+  direction: () => DirectionReading | typeof UNREADABLE;
   /** Modification time of a persona's heartbeat file, null where there is none. */
   heartbeatAt: (workdir: string) => number | null;
   /**
@@ -75,13 +84,14 @@ export type WebPassConfig = Pick<
   | "boardProjects"
   | "boardCardRefreshMs"
   | "boardRosterPath"
+  | "directionLedgerPath"
   | "boardEventsPath"
   | "usageCacheRoot"
   | "stateFile"
 >;
 
 export type WebPassOptions = {
-  config: Pick<WebPassConfig, "host" | "staleAfterMs" | "boardProjects" | "boardCardRefreshMs">;
+  config: Pick<WebPassConfig, "host" | "staleAfterMs" | "boardProjects" | "boardCardRefreshMs" | "directionLedgerPath">;
   sources: PassSources;
   thresholds: StateThresholds;
   /** The registry's records, read in-process on each request. */
@@ -179,6 +189,33 @@ function heldSweep(
   };
 }
 
+/**
+ * The briefs beside one sweep's plans, under `docs/<folder>/<plan stem>.md` in each plan's root. A
+ * brief file is held at the modification time and size it was read at, so an unchanged one costs a
+ * stat. A plan with no brief, an unreadable or oversized file and a text that is no brief are all
+ * absent from the result, and none of them, nor a read that throws, touches the plans source.
+ */
+function heldBriefs(folder: readonly string[]): (plans: readonly PlanReading[]) => Map<string, Brief> {
+  let holds = new Map<string, BriefHold>();
+  return (plans) => {
+    const kept = new Map<string, BriefHold>();
+    const briefs = new Map<string, Brief>();
+    for (const plan of plans) {
+      try {
+        const file = path.join(plan.root, "docs", ...folder, `${plan.stem}.md`);
+        const hold = readBriefFile(file, holds.get(file));
+        if (hold === null) continue;
+        kept.set(file, hold);
+        if (hold.brief !== null) briefs.set(plan.path, hold.brief);
+      } catch {
+        // A brief that cannot be read is no brief; the error is dropped unread.
+      }
+    }
+    holds = kept;
+    return briefs;
+  };
+}
+
 /** The production reads, over the same readers and files the Discord board card reads. */
 export function webPassSources(config: WebPassConfig, log: (message: string) => void): PassSources {
   // Unset roster path reads nothing, as the board card's default does.
@@ -188,14 +225,25 @@ export function webPassSources(config: WebPassConfig, log: (message: string) => 
   const ledger = createLedgerReader({ log });
   const live = heldSweep(sweepPlans);
   const archived = heldSweep(sweepArchivedPlans);
+  const liveBriefs = heldBriefs(["briefs"]);
+  const archivedBriefs = heldBriefs(["archive", "briefs"]);
   return {
     roster: () => (roster === null ? [] : roster.read()),
     queues: (personas) => queues.read(personas),
     ledger: (personas) => ledger.read(personas),
-    plans: () => ({ live: live(config.boardProjects), archived: archived(config.boardProjects) }),
+    plans: () => {
+      const liveReadings = live(config.boardProjects);
+      const archivedReadings = archived(config.boardProjects);
+      return {
+        live: liveReadings,
+        archived: archivedReadings,
+        briefs: new Map([...liveBriefs(liveReadings), ...archivedBriefs(archivedReadings)]),
+      };
+    },
     events: (previous, roots) => readEvents(previous, roots, { path: config.boardEventsPath }),
     usage: () => readUsage(config.usageCacheRoot === null ? {} : { root: config.usageCacheRoot }),
     plugins: () => readInstalledPlugins(installedPluginsPath()),
+    direction: () => readDirection(config.directionLedgerPath, config.boardProjects) ?? UNREADABLE,
     heartbeatAt: (workdir) => statPlanFile(path.join(workdir, HEARTBEAT_FILE_NAME), true)?.mtimeMs ?? null,
     // The bare repositories the reader fetches into live under the state root, beside the state file.
     rollout: createRolloutReader({ log, stateRoot: path.dirname(config.stateFile) }),
@@ -221,6 +269,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
   const usage: Reading<readonly UsageAccount[]> = { value: null, at: null };
   const plugins: Reading<InstalledRelease> = { value: null, at: null };
   const rollout: Reading<RolloutReading> = { value: null, at: null };
+  const direction: Reading<DirectionReading> = { value: null, at: null };
   // Every source is held until it first reads well. The registry is read in-process at each request
   // and is never held.
   const held = new Set<SourceName>(SOURCES.filter((name) => name !== "registry"));
@@ -325,6 +374,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
       return reading.available ? reading.accounts : UNREADABLE;
     });
     attempt("plugins", plugins, at, () => sources.plugins());
+    attempt("direction", direction, at, () => sources.direction());
     // Also the one run of the status rule over the queues: the views read its result for this reading.
     const blocked = new Set(blockedKeys(queues.value ?? [], events.value, at));
     for (const key of blocked) if (!blockedSince.has(key)) blockedSince.set(key, at);
@@ -349,6 +399,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
         staleAfterMs: config.staleAfterMs,
         thresholds: options.thresholds,
         roots: config.boardProjects,
+        directionConfigured: config.directionLedgerPath !== "",
         records: options.records(),
         signals: options.signals,
         blockedSince: new Map(blockedSince),
@@ -360,6 +411,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
         usage: { ...usage },
         plugins: { ...plugins },
         rollout: { ...rollout },
+        direction: { ...direction },
         held: SOURCES.filter((name) => held.has(name)),
       };
     },

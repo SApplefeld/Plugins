@@ -7,7 +7,7 @@ import { asOf, healthView, standupView } from "./views.ts";
 import type { AsOf, Readings, Verdict } from "./views.ts";
 
 /** The longest sandbox name the summary carries; a longer `CHANNEL_HOST_NAME` is cut to this. */
-const SANDBOX_MAX = 32;
+export const SANDBOX_MAX = 32;
 
 export type SummaryView = {
   sandbox: string;

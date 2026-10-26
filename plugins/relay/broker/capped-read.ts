@@ -13,6 +13,9 @@ import { closeSync, openSync, readSync } from "node:fs";
 /** What one capped read yields: the file's text, or why there is none. */
 export type CappedRead = { text: string } | { failed: "unreadable" | "oversized" };
 
+/** What one capped byte read yields: the file's bytes, undecoded, or why there are none. */
+export type CappedBytes = { bytes: Buffer } | { failed: "unreadable" | "oversized" };
+
 /** The shape of `readSync`'s own parameters and return, so a test can inject a reader that
  * delivers a file across more than one call without touching the read loop itself. */
 export type CappedReader = (
@@ -26,8 +29,9 @@ export type CappedReader = (
 /**
  * One read of at most `maxBytes`, into a buffer one byte larger so an oversized file is recognized
  * by the read itself rather than by a stat the file could have outgrown in between. The buffer is
- * uninitialized because only the bytes the read actually returned are ever decoded, so nothing
- * beyond them can escape.
+ * uninitialized because only the bytes the read actually returned are copied out, into a buffer
+ * `Buffer.alloc` gives its own memory rather than a slice of the shared pool, so nothing beyond them
+ * can escape, not even through the result's backing `ArrayBuffer`.
  *
  * The read repeats until the buffer fills or a read returns nothing, because one `readSync` is
  * allowed to return fewer bytes than asked for and a network filesystem does. Stopping at the
@@ -42,11 +46,24 @@ export type CappedReader = (
  * replaces whatever the read produced, so a healthy read would surface as a failure and a failed
  * one would surface with the wrong reason.
  */
-export function readCappedFile(
+export function readCappedBytes(
   file: string,
   maxBytes: number,
   read: CappedReader = readSync,
-): CappedRead {
+): CappedBytes {
+  const capped = readCapped(file, maxBytes, read);
+  if ("failed" in capped) return capped;
+  const bytes = Buffer.alloc(capped.filled);
+  capped.buffer.copy(bytes, 0, 0, capped.filled);
+  return { bytes };
+}
+
+/** The shared read: the oversized buffer and how much of it the file filled, or why there is none. */
+function readCapped(
+  file: string,
+  maxBytes: number,
+  read: CappedReader,
+): { buffer: Buffer; filled: number } | { failed: "unreadable" | "oversized" } {
   let handle: number;
   try {
     handle = openSync(file, "r");
@@ -62,7 +79,7 @@ export function readCappedFile(
       filled += got;
     }
     if (filled > maxBytes) return { failed: "oversized" };
-    return { text: buffer.subarray(0, filled).toString("utf8") };
+    return { buffer, filled };
   } catch {
     return { failed: "unreadable" };
   } finally {
@@ -73,4 +90,17 @@ export function readCappedFile(
       // reading in hand, good or bad, is already decided.
     }
   }
+}
+
+/**
+ * The capped read decoded as UTF-8, a byte sequence that is not UTF-8 decoding to U+FFFD. A caller
+ * that must refuse such bytes rather than read them reads through `readCappedBytes`.
+ */
+export function readCappedFile(
+  file: string,
+  maxBytes: number,
+  read: CappedReader = readSync,
+): CappedRead {
+  const capped = readCapped(file, maxBytes, read);
+  return "failed" in capped ? capped : { text: capped.buffer.toString("utf8", 0, capped.filled) };
 }

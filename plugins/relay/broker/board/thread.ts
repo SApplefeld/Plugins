@@ -545,6 +545,7 @@ export function createBoardCard(options: BoardCardOptions): BoardCard | null {
         completed: reading.completed,
         next: reading.next,
         goal: reading.goal,
+        serves: reading.serves,
         sectionList: reading.sectionList,
         chapterList: reading.chapterList,
       };

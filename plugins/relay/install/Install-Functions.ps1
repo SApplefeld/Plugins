@@ -619,6 +619,7 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_BOARD_CARD_REFRESH_MS',
     'CHANNEL_BOARD_EVENTS_PATH',
     'CHANNEL_BOARD_ROSTER',
+    'CHANNEL_DIRECTION_LEDGER',
     # The path of the file the Jev key is read from, never the key: the key has no knob here. The
     # second name is the earlier one, still read for the same file.
     'CHANNEL_JEV_KEY_FILE',
@@ -657,15 +658,17 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_VOICE_TURN_HOLD',
     'CHANNEL_VOICE_TURN_HOLD_MS',
     'CHANNEL_VOICE_COMPLETE_THRESHOLD',
-    # The web surface's six. The bind is an address or the word tailscale, the two lists are tailnet
-    # logins and node names, and the CLI entry is a path: none is a credential, and the surface has
-    # no token to carry here.
+    # The web surface's eight. The bind is an address or the word tailscale, the three lists are
+    # tailnet logins and node names, the CLI entry is a path, and the siblings are names with tailnet
+    # addresses: none is a credential, and the surface has no token to carry here.
     'CHANNEL_WEB_BIND',
     'CHANNEL_WEB_PORT',
     'CHANNEL_WEB_OPERATORS',
     'CHANNEL_WEB_DEVICES',
+    'CHANNEL_WEB_SUMMARY_PEERS',
     'CHANNEL_WEB_TAILSCALE',
     'CHANNEL_WEB_STATIC_ROOT',
+    'CHANNEL_WEB_SIBLINGS',
     'CHANNEL_BROKER_LOG_FILE',
     'CHANNEL_BROKER_LOG_MAX_BYTES',
     'CHANNEL_BROKER_LOG_MAX_FILES',
@@ -856,7 +859,7 @@ check accepts.
 Run this against hooks/, wrapper/, install/, broker/, the bot token file, and the token file's
 parent directory. The D: root grants Authenticated Users: Modify by inheritance on at least one
 host, and the hook script runs under -ExecutionPolicy Bypass at every session start, and the broker
-itself is what a scheduled task executes at every logon, so write access under any of those trees is
+itself is what a scheduled task executes at every start of the task, so write access under any of those trees is
 code execution in the operator's context.
 #>
 function Protect-ChannelPath {

@@ -251,7 +251,7 @@ function isPaste(attachment: InboundAttachment): boolean {
  * observe the signal, but the limit is a promise this module makes about the message, so it is
  * held here rather than trusted to every reader down the line.
  */
-function withinLimit<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+export function withinLimit<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = (): void => reject(signal.reason);
     // Settled before the aborted check, so a `work` that rejects after the limit has fired still
@@ -270,7 +270,7 @@ function withinLimit<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
  * bytes received and never a declared length, and a read past it cancels the stream so no more of
  * the body is pulled.
  */
-async function readBounded(
+export async function readBounded(
   body: ReadableStream<Uint8Array>,
   maxBytes: number,
 ): Promise<Uint8Array | "size"> {

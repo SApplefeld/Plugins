@@ -29,13 +29,16 @@ import type { SessionRecord } from "../registry.ts";
 import type { UsageAccount } from "../usage/cache.ts";
 import { PACE_PERIOD_MS, aheadOfPace, measuredAt, projectExhaustion, rolledWeekly } from "../usage/pace.ts";
 import { foldRootName } from "./config.ts";
+import type { Brief } from "./brief.ts";
+import { headingOf } from "./direction.ts";
+import type { DirectionReading, Heading } from "./direction.ts";
 import type { InstalledRelease } from "./plugins.ts";
 import { SHARED_ROW_CAP } from "./rollout.ts";
 import { EMPTY_MARKS, planMarkKey } from "./watermarks.ts";
 import type { Marks } from "./watermarks.ts";
 
 /** The sources a view draws from, in the order `asOf` and `held` list them. */
-export const SOURCES = ["registry", "roster", "queues", "plans", "ledger", "events", "usage", "rollout", "plugins"] as const;
+export const SOURCES = ["registry", "roster", "queues", "plans", "ledger", "events", "usage", "rollout", "plugins", "direction"] as const;
 export type SourceName = (typeof SOURCES)[number];
 
 /** One source's last good value and when it was read; both null until a read has succeeded. */
@@ -45,7 +48,12 @@ export type Reading<T> = { value: T | null; at: number | null };
 export type QueueReading = { queue: PersonaQueue; heartbeatAt: number | null };
 
 /** The plans swept under the configured roots: the live ones, and those filed in the archive. */
-export type PlansReading = { live: readonly PlanReading[]; archived: readonly PlanReading[] };
+export type PlansReading = {
+  live: readonly PlanReading[];
+  archived: readonly PlanReading[];
+  /** The brief each swept plan has, by the plan file's path; a plan with no usable brief has no entry. */
+  briefs?: ReadonlyMap<string, Brief>;
+};
 
 /** One first-parent commit a client branch carries past its last rollout tag. */
 export type RolloutCommit = {
@@ -128,6 +136,8 @@ export type Readings = {
   thresholds: StateThresholds;
   /** `CHANNEL_BOARD_PROJECTS`, as configured. */
   roots: readonly string[];
+  /** Whether `CHANNEL_DIRECTION_LEDGER` is set: the standup heading is null only where it is not. */
+  directionConfigured: boolean;
   /** The registry's records, read in-process for this request. */
   records: readonly SessionRecord[];
   /** The signals no record carries, per record, as the Discord surfaces take them. */
@@ -148,6 +158,7 @@ export type Readings = {
   usage: Reading<readonly UsageAccount[]>;
   rollout: Reading<RolloutReading>;
   plugins: Reading<InstalledRelease>;
+  direction: Reading<DirectionReading>;
   /** The sources whose latest read failed, in `SOURCES` order. */
   held: readonly SourceName[];
 };
@@ -182,6 +193,8 @@ export type RepoRow = {
   unseen: number;
   lastDoneAt: string | null;
   oldestOpenAt: string | null;
+  /** The step of the newest live plan under the repository's folder that reads In Progress; null where none does. */
+  step: RepoStep | null;
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -197,8 +210,12 @@ export type PlanRow = {
   next: string | null;
   changedAt: string | null;
   prState: null;
-  serves: null;
+  /** The direction item the plan serves, as its `Serves:` line reads, or `none`; null where no line reads or no swept plan backs the row. */
+  serves: string | null;
 };
+
+/** Where a repository's current plan stands: the Chapters closed, the sections it has, and its `Next:` line. */
+export type RepoStep = { section: number; sectionCount: number; next: string | null };
 
 export type HealthLine = {
   expected: number | null;
@@ -210,7 +227,8 @@ export type HealthLine = {
 
 export type StandupView = {
   sandbox: string;
-  heading: null;
+  /** The machine direction ledger's newest item; null only where no ledger path is configured. */
+  heading: Heading | null;
   needsYou: Item[];
   rollout: RolloutSummary | null;
   repos: RepoRow[];
@@ -235,7 +253,8 @@ export type NeedsMeView = {
 
 export type RepoView = {
   name: string;
-  heading: null;
+  /** The newest item of the repository's own `docs/direction.md`; null where the folder is no configured root or has none. */
+  heading: Heading | null;
   /** The row of the client branch the persona's checkout is on; null off a client branch. */
   rollout: RolloutRow | null;
   changed: PlanRow[] | null;
@@ -252,7 +271,10 @@ export type PlanView = {
   title: string;
   status: string;
   goal: string | null;
-  brief: null;
+  /** The same value `PlanRow.serves` carries for this plan. */
+  serves: string | null;
+  /** The plan's brief, null where it has none, or its file cannot be used. */
+  brief: Brief | null;
   sections: { number: number; name: string; done: boolean }[];
   chapters: { number: number; completed: string | null; next: string | null }[];
   next: string | null;
@@ -415,6 +437,7 @@ export function asOf(readings: Readings): AsOf {
     usage: iso(readings.usage.at),
     rollout: iso(readings.rollout.at),
     plugins: iso(readings.plugins.at),
+    direction: iso(readings.direction.at),
   };
 }
 
@@ -634,6 +657,24 @@ function plansOf(readings: Readings, workdir: string): readonly FoundPlan[] {
   return indexOf(readings).byRoot.get(folderKey(workdir)) ?? [];
 }
 
+/**
+ * The machine ledger's heading, null only where no path is configured. Before the source's first
+ * good read it is the heading of no items, so a held source still draws the card.
+ */
+function machineHeading(readings: Readings): Heading | null {
+  if (!readings.directionConfigured) return null;
+  return headingOf(readings.direction.value?.machine ?? null);
+}
+
+/** The heading of the ledger under a folder that is a configured root, null where it has none. */
+function repoHeading(readings: Readings, workdir: string): Heading | null {
+  const reading = readings.direction.value;
+  if (reading === null || !rootMatches(readings, workdir)) return null;
+  const key = folderKey(workdir);
+  const found = reading.repos.find((repo) => folderKey(repo.root) === key);
+  return found === undefined ? null : headingOf(found.ledger);
+}
+
 function planRow(plan: FoundPlan): PlanRow {
   const { reading } = plan;
   return {
@@ -646,7 +687,7 @@ function planRow(plan: FoundPlan): PlanRow {
     next: reading.next,
     changedAt: iso(reading.mtimeMs),
     prState: null,
-    serves: null,
+    serves: reading.serves ?? null,
   };
 }
 
@@ -1082,6 +1123,22 @@ function oldestOpen(items: readonly Item[], repo: string): string | null {
   return iso(oldest);
 }
 
+/**
+ * A repository's current step, from the live swept plan under its folder whose whole status reads
+ * In Progress, case-insensitive as `terminal` compares, and which changed last. A repository works
+ * one plan at a time by the queue's own rule, so the newest is the one in hand. The section is the
+ * Chapter count, the number the plan page and the repo page's plan row draw.
+ */
+function stepOf(readings: Readings, workdir: string): RepoStep | null {
+  let current: PlanReading | null = null;
+  for (const plan of plansOf(readings, workdir)) {
+    if (plan.dir === ARCHIVE_DIR || plan.reading.status.toLowerCase() !== "in progress") continue;
+    if (current === null || plan.reading.mtimeMs > current.mtimeMs) current = plan.reading;
+  }
+  if (current === null) return null;
+  return { section: current.chapterList.length, sectionCount: current.sections, next: current.next };
+}
+
 function lastDone(readings: Readings, workdir: string): string | null {
   let latest: number | null = null;
   for (const plan of plansOf(readings, workdir)) {
@@ -1135,7 +1192,7 @@ export function standupView(readings: Readings): StandupView {
   const items = needsYou(readings, repos);
   return {
     sandbox: readings.host,
-    heading: null,
+    heading: machineHeading(readings),
     needsYou: items,
     rollout: rolloutSummary(readings),
     repos: repos.map((repo) => ({
@@ -1146,6 +1203,7 @@ export function standupView(readings: Readings): StandupView {
       unseen: unseenOf(readings, repo),
       lastDoneAt: lastDone(readings, repo.persona.workdir),
       oldestOpenAt: oldestOpen(items, repo.persona.name),
+      step: stepOf(readings, repo.persona.workdir),
       asOf: asOf(readings),
       held: readings.held,
     })),
@@ -1205,7 +1263,7 @@ export function repoView(readings: Readings, name: string): RepoView | null {
 
   return {
     name: repo.persona.name,
-    heading: null,
+    heading: repoHeading(readings, workdir),
     rollout: rolloutOf(readings, workdir),
     changed,
     upNext,
@@ -1238,7 +1296,8 @@ export function planView(readings: Readings, root: string, relativePath: string)
     title: reading.stem,
     status: reading.status,
     goal: reading.goal,
-    brief: null,
+    serves: reading.serves ?? null,
+    brief: readings.plans.value?.briefs?.get(reading.path) ?? null,
     sections: [...reading.sectionList],
     chapters: [...reading.chapterList],
     next: reading.next,

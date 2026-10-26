@@ -25,6 +25,15 @@
 # the attempt number and the failure class. A line never carries the process token or any byte of the
 # request body. The append is best effort and cannot change the announcement or the exit code.
 #
+# An announcement no attempt delivered is spooled: written to announce\<hash>.announce under the same
+# state folder, where <hash> is the SHA-256 hex of the process token, so neither the name nor the
+# content carries the token. The broker takes the file in when this session's relay pipe attaches
+# under the token (broker/announce-spool.ts), through the same parse and refusals a posted
+# SessionStart takes, so a session that started while the broker was down is registered, lineage
+# intact, once the broker is back. A `startup` announcement never replaces a file already under
+# its token, since a second startup under one token is a subprocess the broker would decline; any
+# other source replaces it. The spool is best effort on the same terms as the log line.
+#
 # CHANNEL_PROCESS_TOKEN and CHANNEL_SESSION come from this process's own environment, inherited from
 # the launch wrapper (wrapper/Enter-ClaudeSession.ps1), not from the hook payload.
 #
@@ -82,6 +91,89 @@ function Write-AnnounceLog([string]$sessionLabel, [string]$detail) {
     } catch { }
 }
 
+# The `source` the hook payload carries, or $null where the body is not a JSON object holding a
+# string under that exact key. The bytes are decoded only to read this one field; the announcement
+# is still the bytes themselves. ConvertFrom-Json under Windows PowerShell 5.1 throws on a body
+# that is not JSON and returns an array or a scalar for a body that is not an object, so the parse
+# sits in its own try and the result is type-checked before a property is read. The key is matched
+# case-sensitively, as the broker reads it.
+function Get-AnnounceSource([byte[]]$body) {
+    try {
+        $parsed = [System.Text.Encoding]::UTF8.GetString($body) | ConvertFrom-Json
+        if (-not ($parsed -is [System.Management.Automation.PSCustomObject])) { return $null }
+        foreach ($property in $parsed.PSObject.Properties) {
+            if ($property.Name -ceq 'source' -and $property.Value -is [string]) { return $property.Value }
+        }
+        return $null
+    } catch {
+        return $null
+    }
+}
+
+# Writes the announcement the loop below could not deliver, for the broker to take in at the relay
+# pipe's attach. The file holds the identity headers the broker reads from a SessionStart, minus
+# the process token, each line ending in a line feed, then one empty line, then the stdin bytes
+# verbatim; the content-type header is transport and is not written. The write lands in <hash>.tmp
+# and is renamed over <hash>.announce, so a reader never sees a partial file. The folder is created
+# only under a state root that already exists, inheriting the root's hardened ACL, so this never
+# creates a root the installer has not hardened.
+#
+# An existing <hash>.announce is kept, and nothing is written, when this announcement's `source` is
+# `startup`. The token is minted per launch, so a second startup under one token is a `claude`
+# subprocess that inherited it, and the broker's live route declines such a start so the parent
+# stays registered (subprocessStart in broker/registry.ts); the spool keeps the parent's file the
+# same way, since the broker takes in one file per token. Any other source, such as a resume, and a
+# body whose source cannot be read, replace the file, as a non-startup announcement supersedes the
+# record on the live route. The decision is made before the temporary file is written, so a kept
+# file leaves no .tmp beside it.
+#
+# Returns 'spooled' when this announcement is in place, 'kept' when an earlier startup's file was
+# left in place, and $null, with nothing written, on any other path. Its own try with an empty
+# catch, on the log line's terms: a missing root, a locked file or a full disk changes nothing about
+# the exit code or stdout.
+function Write-AnnounceSpool([hashtable]$headers, [byte[]]$body) {
+    try {
+        $stateRoot = Join-Path $env:LOCALAPPDATA 'sapplefeld-channels'
+        if (-not (Test-Path -LiteralPath $stateRoot -PathType Container)) { return $null }
+        $folder = Join-Path $stateRoot 'announce'
+        if (-not (Test-Path -LiteralPath $folder -PathType Container)) {
+            New-Item -ItemType Directory -Path $folder | Out-Null
+        }
+        # The hash is over the token's UTF-8 bytes, lowercase hex, which is how the broker derives
+        # the name it reads (crypto.createHash("sha256") over the same string).
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($env:CHANNEL_PROCESS_TOKEN))
+        } finally {
+            $sha.Dispose()
+        }
+        $hash = [System.BitConverter]::ToString($digest).Replace('-', '').ToLowerInvariant()
+        $announce = Join-Path $folder "$hash.announce"
+        if ((Get-AnnounceSource $body) -eq 'startup' -and (Test-Path -LiteralPath $announce -PathType Leaf)) {
+            return 'kept'
+        }
+        # The header block, in a fixed order and ASCII, since every value passed the ASCII gate.
+        $block = "X-Channel-Hook-Event: $($headers['X-Channel-Hook-Event'])`n"
+        if ($headers.ContainsKey('X-Channel-Session-Name')) {
+            $block += "X-Channel-Session-Name: $($headers['X-Channel-Session-Name'])`n"
+        }
+        if ($headers.ContainsKey('X-Channel-Lineage')) {
+            $block += "X-Channel-Lineage: $($headers['X-Channel-Lineage'])`n"
+        }
+        $block += "`n"
+        $head = [System.Text.Encoding]::ASCII.GetBytes($block)
+        $bytes = New-Object byte[] ($head.Length + $body.Length)
+        [Array]::Copy($head, 0, $bytes, 0, $head.Length)
+        [Array]::Copy($body, 0, $bytes, $head.Length, $body.Length)
+        $temporary = Join-Path $folder "$hash.tmp"
+        [System.IO.File]::WriteAllBytes($temporary, $bytes)
+        Move-Item -LiteralPath $temporary -Destination $announce -Force
+        return 'spooled'
+    } catch {
+        return $null
+    }
+}
+
 try {
     if ([string]::IsNullOrWhiteSpace($env:CHANNEL_PROCESS_TOKEN)) { exit 0 }
 
@@ -123,6 +215,7 @@ try {
         $headers['X-Channel-Lineage'] = $env:CHANNEL_LINEAGE
     }
 
+    $announced = $false
     for ($attempt = 1; $attempt -le 2; $attempt++) {
         $timeoutSec = if ($attempt -eq 1) { $firstAttemptTimeoutSec } else { $retryAttemptTimeoutSec }
         try {
@@ -133,6 +226,7 @@ try {
                 -ContentType 'application/json; charset=utf-8' `
                 -Body $body `
                 -TimeoutSec $timeoutSec | Out-Null
+            $announced = $true
             if ($attempt -gt 1) { Write-AnnounceLog $sessionLabel "announced on attempt $attempt" }
             break
         } catch {
@@ -149,6 +243,19 @@ try {
             }
             Write-AnnounceLog $sessionLabel "attempt $attempt $class"
             if ($class -ne 'timeout') { break }
+        }
+    }
+    # Every class but a timeout ends the loop after one attempt, and a timeout ends it after two,
+    # so the loop ending with nothing announced is exactly the refused, non-2xx, errored and
+    # twice-timed-out cases: the ones the broker never heard. The spool is the one place that
+    # announcement survives, and the log line says it is there, or that an earlier startup's
+    # announcement under this token was kept instead, so this run was a subprocess.
+    if (-not $announced) {
+        $spooled = Write-AnnounceSpool $headers $body
+        if ($spooled -eq 'spooled') {
+            Write-AnnounceLog $sessionLabel 'announcement spooled'
+        } elseif ($spooled -eq 'kept') {
+            Write-AnnounceLog $sessionLabel 'earlier announcement kept'
         }
     }
 } catch {

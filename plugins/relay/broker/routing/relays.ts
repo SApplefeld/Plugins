@@ -142,10 +142,24 @@ export type RelayHubOptions = {
   now?: () => number;
   log?: (message: string) => void;
   /**
+   * The spooled announcement's take-in: told a process token, it registers the session whose
+   * SessionStart the hook left on disk while the broker was down, where that token holds no
+   * current record and a spool is there to read. Told the token at each attach that held, before
+   * `onAttach`, because the pipe is the broker's first proof a live session holds the token. Told
+   * again on every heartbeat while the token holds no record and has not been warned, because the
+   * hook renames its spool into place only after its last failed post, and a pipe that attaches
+   * inside that gap finds nothing at the attach. The retry stops when a record lands under the
+   * token, whatever wrote it, or when `warnUnannounced` says the hook never reached the broker.
+   * A throw out of it is logged, undoes no attach and stops no heartbeat.
+   */
+  takeIn?: (processToken: string) => void;
+  /**
    * Told the process token after each attach that held: the pipe registered and the hello
    * landed on it, so a listener that writes into the pipe finds it ready. Not told of a refused
    * attach or a pipe that dropped the hello. A throw out of it is logged and never undoes the
-   * attach. The inbound router listens, to deliver a buffer restored across a broker restart.
+   * attach. The inbound router listens, to deliver a buffer restored across a broker restart,
+   * and it is told after `takeIn` has run, so a record the take-in creates is in place when the
+   * router looks the token's session up.
    */
   onAttach?: (processToken: string) => void;
 };
@@ -210,14 +224,40 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
   }
 
   /**
+   * Runs the spooled announcement's take-in for a token, where one is wired. Its failure is its
+   * own: logged, and neither the attach it rode on nor the heartbeat walk it sits in is undone.
+   */
+  function takeIn(processToken: string): void {
+    if (options.takeIn === undefined) return;
+    try {
+      options.takeIn(processToken);
+      // A record the take-in just created has no relay liveness yet: the pipe holds the token, so
+      // it is stamped here, for the attach and the heartbeat retry alike.
+      options.registry.relaySeen(processToken);
+    } catch (error) {
+      log(`relay: the spool take-in failed for a pipe: ${String(error)}`);
+    }
+  }
+
+  /**
    * Says once, for each pipe that has held its token past the window with no session announced
    * under it, that the SessionStart hook did not reach the broker. The line names no token, reply
    * key or session: the hub holds no session for an unannounced pipe, and the token is a secret.
+   * Before the window is checked, each unannounced pipe gets the take-in run again, so a spool
+   * that landed after the attach registers its session on the next heartbeat, and the line goes
+   * out only for a pipe the take-in still found nothing for when the window closed. The walk costs
+   * each unwarned pipe one registry lookup per heartbeat, an unannounced one also the take-in's
+   * file check, and nothing for a pipe whose line was written.
    */
   function warnUnannounced(): void {
     const at = now();
     for (const [processToken, attachment] of connections) {
-      if (attachment.warned || at - attachment.attachedAt < UNANNOUNCED_WARN_MS) continue;
+      if (attachment.warned) continue;
+      if (options.registry.current(processToken) !== null) continue;
+      takeIn(processToken);
+      if (at - attachment.attachedAt < UNANNOUNCED_WARN_MS) continue;
+      // The take-in just ran, so a record under the token now is the spool's, and the line is
+      // not owed.
       if (options.registry.current(processToken) !== null) continue;
       attachment.warned = true;
       log(
@@ -254,6 +294,8 @@ export function createRelayHub(options: RelayHubOptions): RelayHub {
         connections.delete(processToken);
         return { attached: false, reason: "already attached" };
       }
+      // The take-in before the listener, so a record it creates is there for the listener's lookup.
+      takeIn(processToken);
       if (options.onAttach !== undefined) {
         try {
           options.onAttach(processToken);

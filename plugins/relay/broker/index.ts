@@ -8,12 +8,14 @@ import {
   RELAY_READ_TIMEOUT_MS,
   RELAY_RESTART_GRACE_MS,
   REPLY_HEARTBEAT_MS,
+  WEB_BIND_RETRY_MS,
   loadConfig,
   readJevKey,
   readVoiceFastKey,
   readVoiceSttKey,
 } from "./config.ts";
 import type { BrokerConfig } from "./config.ts";
+import { createAnnounceSpool } from "./announce-spool.ts";
 import { createHandler } from "./intake.ts";
 import { createLogger } from "./log.ts";
 import type { Logger } from "./log.ts";
@@ -44,10 +46,10 @@ import { createBlockedDesk } from "./discord/blocked.ts";
 import type { BlockedDesk } from "./discord/blocked.ts";
 import { loadBindings, saveBindings } from "./discord/bindings.ts";
 import { createUsageCard } from "./usage/thread.ts";
-import type { UsageCardChannel, UsageCardOptions } from "./usage/thread.ts";
+import type { UsageCard, UsageCardChannel, UsageCardOptions } from "./usage/thread.ts";
 import { loadUsageBinding, saveUsageBinding } from "./usage/binding.ts";
 import { createBoardCard } from "./board/thread.ts";
-import type { BoardCardOptions } from "./board/thread.ts";
+import type { BoardCard, BoardCardOptions } from "./board/thread.ts";
 import { loadBoardBinding, saveBoardBinding } from "./board/binding.ts";
 import { createRosterReader } from "./board/roster.ts";
 import { createLedgerReader } from "./decisions/ledger.ts";
@@ -78,9 +80,9 @@ import {
 import type { PermissionDesk } from "./security/permission.ts";
 import { loadSenderGate } from "./security/senders.ts";
 import { createQuestionDesk } from "./question-desk.ts";
-import { loadWebConfig } from "./web/config.ts";
-import type { WebConfig } from "./web/config.ts";
-import { createTailscaleIdentity } from "./web/identity.ts";
+import { RESOLVE_LITERAL, loadWebConfig, resolveWebBind, webBindLabel } from "./web/config.ts";
+import type { WebConfig, WebConfigContext } from "./web/config.ts";
+import { createTailscaleIdentity, tailnetAddressAsync } from "./web/identity.ts";
 import { createWebPass, webPassSources } from "./web/pass.ts";
 import type { WebPass } from "./web/pass.ts";
 import {
@@ -91,11 +93,15 @@ import {
   registerQuestionHandler,
   registerRolloutHandler,
   registerSayHandler,
+  registerSiblingsHandler,
+  registerSteerHandler,
   registerTalkHandlers,
   registerViewHandlers,
   registerWatermarkHandlers,
 } from "./web/server.ts";
 import type { WebServer } from "./web/server.ts";
+import { createSiblingPoller } from "./web/siblings.ts";
+import type { SiblingPoller } from "./web/siblings.ts";
 import { createTalkRing } from "./web/talk.ts";
 import type { TalkTap } from "./web/talk.ts";
 import { DEFAULT_THRESHOLDS } from "./web/views.ts";
@@ -138,7 +144,10 @@ export type Broker = {
   registry: Registry;
   /** The port actually bound, which differs from the configured one when that port is 0. */
   port: number;
-  /** The web surface's bound port, or null when `CHANNEL_WEB_BIND` is unset and none was opened. */
+  /**
+   * The web surface's bound port, or null when `CHANNEL_WEB_BIND` is unset and none was opened, or
+   * while the surface waits for its address, or after a retry failed and left it off.
+   */
   webPort: number | null;
   /** The rotating-file logger this broker started with, so the caller can log a line beside it. */
   logger: Logger;
@@ -1095,6 +1104,36 @@ export function readJudgeKey(
   throw new Error(`the response gate is ${config.responseGate} and needs the Jev key, but ${cause}`);
 }
 
+/**
+ * What the broker says once the web surface is listening: one line every start writes, with the
+ * login, device and summary peer counts, and a warning beside it where the peer list is set with no
+ * device list. With no device list every node under an admitted login is already admitted to every
+ * route, so the peer list adds nothing, and an operator who set it to bound a sibling sandbox learns
+ * the gate is wider than they meant. Apart from `startBroker` so a test reads the counts without a
+ * tailnet address to bind.
+ */
+export function webSurfaceStartLines(web: WebConfig, port: number): { note: string; warning: string | null } {
+  const devices = web.devices === null ? " on any device" : ` on ${String(web.devices.length)} device(s)`;
+  const note =
+    `broker: web surface on http://${webBindLabel(web)}:${String(port)}, admitting ${String(web.operators.length)} login(s)` +
+    `${devices} and ${String(web.summaryPeers.length)} summary peer(s)`;
+  const warning =
+    web.devices === null && web.summaryPeers.length > 0
+      ? "broker: CHANNEL_WEB_DEVICES is unset, so every node under an admitted login is admitted to every " +
+        "route and CHANNEL_WEB_SUMMARY_PEERS adds nothing"
+      : null;
+  return { note, warning };
+}
+
+/**
+ * Whether a bind failed because the host does not hold the address yet, the one bind failure the
+ * web surface waits out. Every other code is final: `EADDRINUSE` is a second broker or a foreign
+ * process on the port, and no retry frees it.
+ */
+function addressNotAvailable(error: unknown): boolean {
+  return error instanceof Error && (error as NodeJS.ErrnoException).code === "EADDRNOTAVAIL";
+}
+
 export async function startBroker(
   config: BrokerConfig,
   options: {
@@ -1110,6 +1149,19 @@ export async function startBroker(
      * CHANNEL_BROKER_SUPERVISED to 1. Read from the environment once, at start, when not given.
      */
     supervised?: boolean;
+    /**
+     * The web surface's bind seams, so a test reaches each bind outcome without a tailnet address
+     * and runs a retry without waiting for it. `tailnetAddress` resolves the literal `tailscale` at
+     * configuration load, as `loadWebConfig`'s context does, and `tailnetAddressAsync` resolves it
+     * at each retry without blocking the listeners already serving. `listen` stands in for one bind
+     * attempt and is handed the real one; `retry` arms the next attempt and returns its cancel.
+     * Each is the real one when not given.
+     */
+    web?: WebConfigContext & {
+      tailnetAddressAsync?: (cli: string) => Promise<string | null>;
+      listen?: (bind: string, listen: (bind: string) => Promise<number>) => Promise<number>;
+      retry?: (attempt: () => void, ms: number) => () => void;
+    };
   } = {},
 ): Promise<Broker> {
   const exit = options.exit ?? ((code: number): void => process.exit(code));
@@ -1150,16 +1202,17 @@ export async function startBroker(
   let sttKey: string | null;
   // And the fast tier's Anthropic key, under the same rule.
   let fastKey: string | null;
-  // The web surface's configuration, on the same terms: null is the surface off, and a bind
-  // outside the tailnet or an empty operator list refuses the start here, before any listener
-  // exists, with the key named on disk.
+  // The web surface's configuration, on the same terms: null is the surface off, and a written
+  // bind outside the tailnet or an empty operator list refuses the start here, before any listener
+  // exists, with the key named on disk. The word `tailscale` where the CLI gives no address, or
+  // one outside the range, loads pending instead, and the surface waits for its address.
   let web: WebConfig | null;
   try {
     judgeKey = readJudgeKey(config, warn);
     const stateRoot = path.dirname(config.stateFile);
     sttKey = config.voice ? readVoiceSttKey(config.voiceSttKeyFile, stateRoot) : null;
     fastKey = config.voice ? readVoiceFastKey(config.voiceFastKeyFile, stateRoot) : null;
-    web = loadWebConfig(config);
+    web = loadWebConfig(config, options.web);
   } catch (error) {
     const message = `broker: refusing to start: ${String(error)}`;
     console.error(message);
@@ -1225,6 +1278,24 @@ export async function startBroker(
     logger.info(message);
   };
 
+  // The announcements the SessionStart hook spooled while no broker was listening, read beside
+  // the state file under the /hook route's own body cap. The folder is named at start because the
+  // hook writes under %LOCALAPPDATA%\sapplefeld-channels whatever the state file's directory is,
+  // and on a host where the two differ the spool is inert, which this line makes visible.
+  const announceSpool = createAnnounceSpool({
+    stateFile: config.stateFile,
+    registry,
+    maxBodyBytes: Math.max(config.maxBodyBytes, config.mirrorMaxBytes),
+    log: logger,
+    // An accepted spool teaches the tailer and the status reader its transcript, the two learn
+    // seams the /hook route is handed. Both are built below, after this, so each is reached
+    // through a closure, and a host where one is never built learns nothing on that seam, as the
+    // route there is handed none.
+    tail: { learn: (sessionId, file) => tail?.learn(sessionId, file) },
+    status: { learn: (sessionId, file) => status?.learn(sessionId, file) },
+  });
+  note(`broker: spooled announcements are read from ${announceSpool.folder}`);
+
   // The Discord half of message routing is only wired when Discord is configured, but the relay
   // half is not: a session's relay attaches, holds its session out of the staleness sweep, and
   // marks it ended when its stdio closes, with or without a bot token. Until a transport is
@@ -1235,11 +1306,20 @@ export async function startBroker(
     // is a reconnect and not a death, and `ended` is terminal: calling it the instant a socket went
     // would strand a working session as exited with no way back.
     graceMs: config.relayHeartbeatMs,
+    // The same clock the restart cooldown reads, so a test drives the hub's windows, the
+    // unannounced-pipe warning among them, without waiting them out.
+    now,
     log: note,
-    // A pipe attaching is what delivers a buffer the response gate restored across a restart.
-    // Reached through the closure for the reason the mutate seam is: the router is built inside
-    // the Discord block below, and a host with no Discord has no router and no buffer to deliver.
-    onAttach: (processToken) => inbound?.relayAttached(processToken),
+    // A pipe attaching is the broker's first proof a live session holds the token, so the hub runs
+    // the take-in of an announcement the hook spooled while the broker was down at each attach,
+    // and again on each heartbeat while the token has no session and no warning. The attach then
+    // delivers a buffer the response gate restored across a restart. The router is reached through
+    // the closure for the reason the mutate seam is: it is built inside the Discord block below,
+    // and a host with no Discord has no router and no buffer to deliver.
+    takeIn: announceSpool.takeIn,
+    onAttach: (processToken) => {
+      inbound?.relayAttached(processToken);
+    },
   });
   let threadFor: (sessionId: string) => string | null = () => null;
   // The receipt tracker, mutable for the reason `threadFor` is: it needs the Discord transport,
@@ -1712,6 +1792,8 @@ export async function startBroker(
     // unfloored knob, since no relay body grows with a turn.
     maxBodyBytes: Math.max(config.maxBodyBytes, config.mirrorMaxBytes),
     log: logger,
+    // A SessionStart that lands live makes any spool under its token stale.
+    announceSpool,
     // The question seam rides beside the other three: both question paths, this hook-fed one and
     // the tailer's own transcript yield, end in the one deliverQuestion closure below, so they
     // share one rendering, one alert tier, and one volume window, and a double path cannot
@@ -1850,8 +1932,20 @@ export async function startBroker(
   // The web surface's own listener, opened after the loopback one binds and only where `web` is
   // configured. Declared here, with the other optional surfaces, because the teardown closes it.
   let webServer: WebServer | null = null;
+  // While the web surface waits for its address: the armed retry's cancel, and the attempt in
+  // flight. Both are null otherwise; the teardown cancels the one and awaits the other.
+  let webRetry: (() => void) | null = null;
+  let webAttempt: Promise<void> | null = null;
+  // The three cards, built after the web block. Declared here because the web bind's refusal stops
+  // the broker before they are built, and the teardown must read them as absent rather than reach
+  // a binding not yet initialized.
+  let usageCard: UsageCard | null = null;
+  let boardCard: BoardCard | null = null;
+  let decisionsCard: DecisionsCard | null = null;
   // The timer that runs the readers the web views draw on; absent with the listener.
   let webPass: WebPass | null = null;
+  // The timer that polls the sibling sandboxes' summaries for the rail; absent with the listener.
+  let siblingPoller: SiblingPoller | null = null;
   // The voice module, built after the gateway starts and only where `CHANNEL_VOICE` is on. The
   // inbound router's command seam reaches it through this closure, since the router is built
   // before the gateway it needs.
@@ -2019,7 +2113,7 @@ export async function startBroker(
     //
     // The reason is written to the log file before the throw leaves this function. Under the
     // scheduled task there is no console for it to reach, so an unlogged refusal is a broker that
-    // fails at every logon and leaves a zero-byte log saying nothing about why.
+    // fails at every start of its task and leaves a zero-byte log saying nothing about why.
     let gate;
     try {
       gate = loadSenderGate(process.env);
@@ -2519,10 +2613,11 @@ export async function startBroker(
 
   // The web surface is a sibling of the Discord surfaces: with `CHANNEL_WEB_BIND` unset there is
   // no second server at all, and the broker's listening sockets are what they were. It binds after
-  // the loopback listener so a tailnet address that is not up fails through the ordinary stop,
-  // which clears every timer and closes the loopback socket, rather than through a second copy of
-  // the bind-failure path above. Sections 2, 4 and 5 register their `/web/<name>` handlers on it
-  // inside this block.
+  // the loopback listener so a bind that fails fails through the ordinary stop, which clears every
+  // timer and closes the loopback socket, rather than through a second copy of the bind-failure
+  // path above. The one failure it waits out instead is an address the host does not hold yet, as
+  // at boot before Tailscale is up: the surface retries its bind while the rest of the broker runs.
+  // Sections 2, 4 and 5 register their `/web/<name>` handlers on it inside this block.
   let webPort: number | null = null;
   if (web !== null) {
     webServer = createWebServer({
@@ -2553,11 +2648,25 @@ export async function startBroker(
     const marks = openWatermarks(watermarksFileFor(config.stateFile), note);
     const readings = () => ({ ...pass.readings(), marks: marks.marks() });
     registerViewHandlers(webServer.register, readings);
+    // The sibling sandboxes' summaries, polled on the pass's cadence and never on a request, so a
+    // page's poll of this origin costs the siblings nothing. The route serves the last poll's state.
+    const siblings = createSiblingPoller({
+      siblings: web.siblings,
+      host: config.host,
+      refreshMs: config.boardCardRefreshMs,
+      log: note,
+    });
+    siblingPoller = siblings;
+    registerSiblingsHandler(webServer.register, siblings.view);
     registerWatermarkHandlers(webServer.register, readings, marks, { log: logger });
     // Mark rolled out, outside the Discord block: the tag goes to the repository's remote, never to
     // a session. After a push the pass runs once, so its rollout reading takes the rows the reader
     // recomputed and the next view read counts from the new tag.
     registerRolloutHandler(webServer.register, { reader: sources.rollout, afterMark: () => pass.run(), log: logger });
+    // Steer, outside the Discord block: the line goes to the machine's direction ledger, the file the
+    // kit's sessions read as the operator's standing word, never to a session. After a write the pass
+    // runs once, so its direction reading takes the new item and the next view read draws it.
+    registerSteerHandler(webServer.register, { ledgerPath: config.directionLedgerPath, afterWrite: () => pass.run(), log: logger });
     if (talkRing !== null) {
       registerTalkHandlers(webServer.register, talkRing, {
         source: readings,
@@ -2613,30 +2722,120 @@ export async function startBroker(
         });
       }
     }
-    try {
-      // The first pass runs before the listener opens, so no request waits on the cold read.
-      pass.start();
-      webPort = await webServer.listen();
-    } catch (error) {
-      // Stopped here as well as in stop(), so a failure further into the teardown leaves no timer.
-      pass.stop();
-      const message = `broker: failed to start the web surface on ${web.bind}:${String(web.port)}: ${String(error)}`;
+    const surface = web;
+    const listener = webServer;
+    // One bind attempt at the address resolved for it, through a test's stand-in where one is given.
+    const listenOn = (bind: string): Promise<number> =>
+      options.web?.listen === undefined ? listener.listen(bind) : options.web.listen(bind, listener.listen);
+    const armRetry =
+      options.web?.retry ??
+      ((attempt: () => void, ms: number): (() => void) => {
+        const timer = setTimeout(attempt, ms);
+        return () => clearTimeout(timer);
+      });
+    const failedToStart = (bind: string, error: unknown): void => {
+      const message = `broker: failed to start the web surface on ${bind}:${String(surface.port)}: ${String(error)}`;
       console.error(message);
       logger.error(message);
-      await stop();
-      throw error;
+    };
+    const opened = (bind: string, bound: number): void => {
+      webPort = bound;
+      const lines = webSurfaceStartLines({ ...surface, bind }, bound);
+      note(lines.note);
+      if (lines.warning !== null) warn(lines.warning);
+    };
+    const waitForAddress = (): void => {
+      // A stop under way has cancelled the retry, and none is armed after it.
+      if (stopping !== null) return;
+      webRetry = armRetry(() => {
+        webRetry = null;
+        webAttempt = retryBind();
+      }, WEB_BIND_RETRY_MS);
+    };
+    const resolveLater = options.web?.tailnetAddressAsync ?? tailnetAddressAsync;
+    // A retry runs inside a timer with no caller to throw to, so it ends bound, waiting again, or
+    // with one failure line and the surface off for the broker's life, and never in a throw. The
+    // literal `tailscale` is resolved again at each retry, through the CLI run without blocking, and
+    // a CLI answer that is missing or outside the tailnet range is no address yet, so the surface
+    // waits again. The range rule's throw is that last failure only for an injected resolver whose
+    // answer lies outside it. A failure that ends the surface stops the pass and the sibling poller,
+    // which have no page left to keep warm. An attempt that settles after the stop has begun does
+    // nothing more: the teardown waits for it and closes the listener, so a stop landing during a
+    // retry's CLI call waits for that call, up to the CLI's 5-second timeout.
+    async function retryBind(): Promise<void> {
+      let bind: string | null = null;
+      let bound: number;
+      try {
+        const answer = surface.configuredBind === RESOLVE_LITERAL ? await resolveLater(surface.tailscale) : null;
+        if (stopping !== null) return;
+        bind = resolveWebBind(surface.configuredBind, surface.tailscale, { tailnetAddress: () => answer });
+        if (bind === null) {
+          waitForAddress();
+          return;
+        }
+        bound = await listenOn(bind);
+      } catch (error) {
+        if (stopping !== null) return;
+        if (addressNotAvailable(error)) {
+          waitForAddress();
+          return;
+        }
+        pass.stop();
+        siblings.stop();
+        failedToStart(bind ?? surface.configuredBind, error);
+        return;
+      }
+      // Outside the try, so a throw from the start lines is never read as a failed bind.
+      if (stopping === null) opened(bind, bound);
     }
-    note(
-      `broker: web surface on http://${web.bind}:${String(webPort)}, admitting ${String(web.operators.length)} login(s)` +
-        (web.devices === null ? " on any device" : ` on ${String(web.devices.length)} device(s)`),
-    );
+
+    // The first pass runs before the listener opens, so no request waits on the cold read. Both
+    // timers keep running while the surface waits, so the first page after a late bind is warm,
+    // and a retry that fails for good stops them both.
+    pass.start();
+    siblings.start();
+    const firstBind = surface.bind;
+    let firstPort: number | null = null;
+    if (firstBind !== null) {
+      const first = listenOn(firstBind);
+      // Tracked as the retries are, so a stop landing during this bind waits for it before closing
+      // the listener. Settled either way here, since the teardown awaits it and must not throw.
+      webAttempt = first.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        firstPort = await first;
+      } catch (error) {
+        if (!addressNotAvailable(error)) {
+          // Stopped here as well as in stop(), so a failure further into the teardown leaves no timer.
+          pass.stop();
+          siblings.stop();
+          failedToStart(firstBind, error);
+          await stop();
+          throw error;
+        }
+      }
+    }
+    // A stop under way has closed or will close the listener, so the surface neither opens nor waits.
+    if (stopping === null) {
+      if (firstBind !== null && firstPort !== null) {
+        opened(firstBind, firstPort);
+      } else {
+        warn(
+          `broker: web surface waiting for ${webBindLabel(surface)}:${String(surface.port)}, the address is not ` +
+            `available yet; retrying every ${String(WEB_BIND_RETRY_MS / 1000)} seconds`,
+        );
+        waitForAddress();
+      }
+    }
   }
 
   // The fleet card, under both of its conditions: the knob and a configured channel. Off either
   // way means the machinery is absent rather than idle, so nothing opens a thread, nothing runs on
   // a timer, and this card reads none of claude-swap's files; the web pass reads them on its own
   // timer while CHANNEL_WEB_BIND is set.
-  const usageCard = createUsageCard(
+  usageCard = createUsageCard(
     usageCardWiring({
       config,
       channel: usageChannel,
@@ -2655,12 +2854,13 @@ export async function startBroker(
     }),
   );
   if (usageCard !== null) {
+    const started = usageCard;
     // The one card the channel keeps pinned permanently. Read through the card rather than from the
     // binding file, so a card Discord reported gone stops being pinned until it is rebuilt.
-    fleetCard = () => usageCard.cardMessage();
+    fleetCard = () => started.cardMessage();
     // Started after the listener is bound, so a broker that never bound leaves no timer editing a
     // Discord thread on behalf of a process that is about to throw.
-    usageCard.start();
+    started.start();
     note(`broker: the fleet usage card refreshes every ${config.usageCardRefreshMs}ms`);
   }
 
@@ -2669,7 +2869,7 @@ export async function startBroker(
   // absent rather than idle, so nothing opens a thread, nothing runs on a timer, and this card reads
   // no plan doc, store file or event stream; the web pass reads them on its own timer while
   // CHANNEL_WEB_BIND is set.
-  const boardCard = createBoardCard(
+  boardCard = createBoardCard(
     boardCardWiring({
       config,
       transport: cardTransport,
@@ -2681,12 +2881,13 @@ export async function startBroker(
     }),
   );
   if (boardCard !== null) {
+    const started = boardCard;
     // The second card the channel keeps pinned permanently. Read through the card rather than from
     // the binding file, so a card Discord reported gone stops being pinned until it is rebuilt.
-    boardCardMessage = () => boardCard.cardMessage();
+    boardCardMessage = () => started.cardMessage();
     // Started after the listener is bound, for the reason the usage card is: a broker that never
     // bound leaves no timer editing a Discord thread on behalf of a process that is about to throw.
-    boardCard.start();
+    started.start();
     note(
       `broker: the fleet board card sweeps ${config.boardProjects.length} project(s) every ` +
         `${config.boardCardRefreshMs}ms`,
@@ -2700,7 +2901,6 @@ export async function startBroker(
   // on its own: each card reads the file under the one capped, last-good-reading read.
   const decisionsCardBindingFile = path.join(path.dirname(config.stateFile), "decisions-card.json");
   const decisionsAsksFile = path.join(path.dirname(config.stateFile), "decisions-asks.json");
-  let decisionsCard: DecisionsCard | null = null;
   if (sightings !== null && cardTransport !== null) {
     const held = sightings;
     const roster = createRosterReader(config.boardRosterPath, { log: note });
@@ -2771,6 +2971,11 @@ export async function startBroker(
   }
 
   async function tearDown(): Promise<void> {
+    // The web bind's retry is cancelled before the first await below, so no attempt starts during
+    // the teardown; one already in flight is awaited before its listener is closed, which for a
+    // retry still in its CLI call is a wait of up to the CLI's 5-second timeout.
+    webRetry?.();
+    webRetry = null;
     clearInterval(sweep);
     clearInterval(retention);
     clearInterval(heartbeat);
@@ -2828,6 +3033,9 @@ export async function startBroker(
     // The web listener goes down with the loopback one; it holds nothing a held question waits on.
     // The pass is synchronous, so clearing its timer leaves nothing running to wait for.
     webPass?.stop();
+    // A poll in flight settles into memory nobody reads again; its timer is what must not outlive the stop.
+    siblingPoller?.stop();
+    await webAttempt;
     if (webServer !== null) await webServer.close();
     // Keep-alive sockets would otherwise hold close() open until they time out.
     server.closeAllConnections();
@@ -2896,7 +3104,10 @@ export async function startBroker(
     server,
     registry,
     port,
-    webPort,
+    // Read through, since a surface waiting for its address binds after this object is returned.
+    get webPort() {
+      return webPort;
+    },
     logger,
     stop,
     restart,

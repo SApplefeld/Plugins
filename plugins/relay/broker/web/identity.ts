@@ -87,7 +87,8 @@ function runCli(cli: string, args: readonly string[]): Promise<string> {
  *
  * The answer is Tailscale's `WhoIsResponse`: `UserProfile.LoginName` is the login the node is
  * signed in under, and `Node.ComputedName` is the node's short MagicDNS name, the one the admin
- * console lists and the operator writes into `CHANNEL_WEB_DEVICES`. `Node.Name` carries the same
+ * console lists and the operator writes into `CHANNEL_WEB_DEVICES` and, for a sibling sandbox's
+ * node, into `CHANNEL_WEB_SUMMARY_PEERS`. `Node.Name` carries the same
  * name as a fully qualified, dot-terminated hostname, so where a CLI answers without
  * `ComputedName` its first label is read instead. A missing or empty login or node is null: an
  * answer this cannot read names nobody.
@@ -170,15 +171,31 @@ export function createTailscaleIdentity(options: TailscaleIdentityOptions): WebI
   };
 }
 
+/** The arguments that ask the CLI for the host's own tailnet IPv4 addresses. */
+const IP_ARGS = ["ip", "-4"] as const;
+
+/**
+ * The first line of a `tailscale ip -4` answer, or null where that line is missing or outside the
+ * range. Shared by the two forms below, so the CLI's answer is read one way whichever ran it.
+ */
+function parseTailnetIp(output: string): string | null {
+  const first = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line !== "");
+  if (first === undefined || !isTailnetAddress(first)) return null;
+  return first;
+}
+
 /**
  * The host's own first tailnet IPv4, from `tailscale ip -4`, or null where the CLI is missing,
- * fails, or prints nothing inside the range. Synchronous and run once, at configuration load, for
- * the literal `tailscale` in `CHANNEL_WEB_BIND` alone.
+ * fails, or prints nothing inside the range. Synchronous, and run for the literal `tailscale` in
+ * `CHANNEL_WEB_BIND` at configuration load, before any listener is open for it to hold up.
  */
 export function tailnetAddress(cli: string): string | null {
   let output: string;
   try {
-    output = execFileSync(cli, ["ip", "-4"], {
+    output = execFileSync(cli, IP_ARGS, {
       encoding: "utf8",
       timeout: CLI_TIMEOUT_MS,
       maxBuffer: CLI_MAX_OUTPUT_BYTES,
@@ -188,10 +205,14 @@ export function tailnetAddress(cli: string): string | null {
   } catch {
     return null;
   }
-  const first = output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line !== "");
-  if (first === undefined || !isTailnetAddress(first)) return null;
-  return first;
+  return parseTailnetIp(output);
+}
+
+/**
+ * The same answer as `tailnetAddress`, read without blocking: run at each bind attempt while the
+ * web surface waits for its address, when the loopback listener is already serving and a CLI that
+ * hangs to its timeout must not hold it up. Resolves null on every failure and never rejects.
+ */
+export function tailnetAddressAsync(cli: string): Promise<string | null> {
+  return runCli(cli, IP_ARGS).then(parseTailnetIp, () => null);
 }

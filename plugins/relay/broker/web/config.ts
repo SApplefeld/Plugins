@@ -4,7 +4,7 @@
 //
 // Where this departs from broker/discord/config.ts: the values arrive already read from the
 // environment by broker/config.ts, never as the environment itself, so the installer's env
-// allowlist pin, which scans that one file for the knobs it must carry, sees all six.
+// allowlist pin, which scans that one file for the knobs it must carry, sees all eight.
 import path from "node:path";
 import { namesOneDirectory } from "../config.ts";
 import type { BrokerConfig } from "../config.ts";
@@ -15,22 +15,45 @@ export function foldRootName(name: string): string {
   return name.toLowerCase();
 }
 
+/** One sibling sandbox the broker polls: the name the rail draws, and where its web listener is. */
+export type Sibling = {
+  /** The configured name, 1 to 32 characters, drawn on every page as written here. */
+  name: string;
+  /** The sibling's tailnet IPv4 address, inside 100.64.0.0/10. */
+  address: string;
+  port: number;
+};
+
 export type WebConfig = {
-  /** The IPv4 address the listener binds, always inside 100.64.0.0/10, the literal resolved. */
-  bind: string;
+  /** What `CHANNEL_WEB_BIND` says: an IPv4 address, or the literal `tailscale`. */
+  configuredBind: string;
+  /**
+   * The IPv4 address the listener binds, always inside 100.64.0.0/10, the literal resolved; null
+   * while the literal is pending, where the CLI reported no address yet. The broker resolves it
+   * again at each bind attempt.
+   */
+  bind: string | null;
   port: number;
   /** Tailnet logins admitted, lower-cased, at least one. */
   operators: readonly string[];
   /** Tailnet node names admitted, lower-cased, or null when the node is not checked. */
   devices: readonly string[] | null;
+  /**
+   * Tailnet node names admitted to `GET /web/summary` alone, lower-cased; empty where none is set.
+   * The listener's gate reads it only beside a device list, since with none every node under an
+   * admitted login is admitted everywhere already.
+   */
+  summaryPeers: readonly string[];
   /** The Tailscale CLI, a path or a name on PATH. */
   tailscale: string;
   /** Absolute path of the directory pages are served from. */
   staticRoot: string;
+  /** The sibling sandboxes polled for the rail, in the configured order; empty where none is set. */
+  siblings: readonly Sibling[];
 };
 
 /**
- * The values `loadConfig` reads for this surface: its six knobs, and the project root list, which
+ * The values `loadConfig` reads for this surface: its eight knobs, and the project root list, which
  * the page addresses by last folder name.
  */
 export type WebConfigValues = Pick<
@@ -39,10 +62,65 @@ export type WebConfigValues = Pick<
   | "webPort"
   | "webOperators"
   | "webDevices"
+  | "webSummaryPeers"
   | "webTailscale"
   | "webStaticRoot"
+  | "webSiblings"
   | "boardProjects"
 >;
+
+/** The most siblings one broker polls; the program names three sandboxes. */
+export const MAX_SIBLINGS = 8;
+/** The longest sibling name, the summary's own bound on a sandbox name. */
+const SIBLING_NAME_MAX = 32;
+/** A control character in a name: C0, DEL and C1. The sibling poll holds a sibling's own name to it too. */
+export const CONTROL_CHAR = /[\u0000-\u001f\u007f-\u009f]/;
+const PORT_SHAPE = /^[0-9]{1,5}$/;
+
+/**
+ * The `Name=address:port` entries of `CHANNEL_WEB_SIBLINGS`, one `Sibling` each, or a thrown
+ * refusal naming the key, the entry's position and the rule, never the entry: a name or an address
+ * off the shape is still an operator's text and stays out of the log. The address is held to the
+ * tailnet range by the same check the bind takes, since the poller sends a request to each address
+ * and an address outside the range would send it anywhere.
+ */
+function parseSiblings(entries: readonly string[]): Sibling[] {
+  const refuse = (position: number, rule: string): never => {
+    throw new Error(`CHANNEL_WEB_SIBLINGS entry ${String(position)} ${rule}`);
+  };
+  if (entries.length > MAX_SIBLINGS) {
+    refuse(MAX_SIBLINGS + 1, `is one too many: at most ${String(MAX_SIBLINGS)} siblings are polled`);
+  }
+  const siblings: Sibling[] = [];
+  const seen = new Map<string, number>();
+  entries.forEach((entry, index) => {
+    const position = index + 1;
+    const equals = entry.indexOf("=");
+    if (equals < 0) refuse(position, "is not of the form Name=address:port");
+    if (entry.includes("=", equals + 1)) refuse(position, "holds more than one equals sign");
+    const name = entry.slice(0, equals).trim();
+    const where = entry.slice(equals + 1).trim();
+    if (name.length === 0 || name.length > SIBLING_NAME_MAX) {
+      refuse(position, `has a name outside 1 to ${String(SIBLING_NAME_MAX)} characters`);
+    }
+    if (name.includes(",") || CONTROL_CHAR.test(name)) {
+      refuse(position, "has a name holding a comma or a control character");
+    }
+    const colon = where.lastIndexOf(":");
+    if (colon < 0) refuse(position, "has no port after the address");
+    const address = where.slice(0, colon).trim();
+    const port = where.slice(colon + 1);
+    if (!isTailnetAddress(address)) refuse(position, "has an address outside 100.64.0.0/10");
+    if (!PORT_SHAPE.test(port) || Number(port) < 1 || Number(port) > 65_535) {
+      refuse(position, "has a port outside 1 to 65535");
+    }
+    const earlier = seen.get(foldRootName(name));
+    if (earlier !== undefined) refuse(position, `repeats the name of entry ${String(earlier)}`);
+    seen.set(foldRootName(name), position);
+    siblings.push({ name, address, port: Number(port) });
+  });
+  return siblings;
+}
 
 export type WebConfigContext = {
   /**
@@ -54,27 +132,24 @@ export type WebConfigContext = {
 };
 
 /** The one spelling of the bind that is resolved rather than taken as an address. */
-const RESOLVE_LITERAL = "tailscale";
+export const RESOLVE_LITERAL = "tailscale";
 
-/** Returns null when `CHANNEL_WEB_BIND` is unset, which turns the surface off. */
-export function loadWebConfig(
-  values: WebConfigValues,
-  context: WebConfigContext = {},
-): WebConfig | null {
-  if (values.webBind === null) return null;
-
-  // Resolved before it is checked, so the literal and a written address are held to the same
-  // range rule: a CLI answering with something outside the block is refused like a typo would be.
-  let bind = values.webBind;
+/**
+ * The address a configured bind names now: a written address as it stands, or the literal
+ * `tailscale` resolved through `context.tailnetAddress`, null where it reports no address yet. The
+ * default resolver reads a CLI answer outside the tailnet range as no address, so the literal stays
+ * pending rather than refused. A written address outside the range or malformed throws, naming the
+ * key, and so does a resolver's answer outside it. Run at configuration load and again at each bind
+ * attempt, so a host whose tailnet comes up after the broker binds once it does.
+ */
+export function resolveWebBind(configured: string, cli: string, context: WebConfigContext = {}): string | null {
+  // Resolved before it is checked, so a resolver's answer is held to the same range rule a written
+  // address is, whichever resolver gave it.
+  let bind = configured;
   if (bind === RESOLVE_LITERAL) {
     const resolve = context.tailnetAddress ?? tailnetAddress;
-    const resolved = resolve(values.webTailscale);
-    if (resolved === null) {
-      throw new Error(
-        `CHANNEL_WEB_BIND is "${RESOLVE_LITERAL}" but the CLI at ${values.webTailscale} reported no ` +
-          "tailnet IPv4 address; is Tailscale installed and up on this host?",
-      );
-    }
+    const resolved = resolve(cli);
+    if (resolved === null) return null;
     bind = resolved;
   }
   // The range is the whole of the guarantee that the surface is reachable from the tailnet alone:
@@ -86,6 +161,24 @@ export function loadWebConfig(
         `"${RESOLVE_LITERAL}", got ${JSON.stringify(bind)}`,
     );
   }
+  return bind;
+}
+
+/** The bind a log line names: the resolved address, or the configured word while it is pending. */
+export function webBindLabel(web: Pick<WebConfig, "bind" | "configuredBind">): string {
+  return web.bind ?? web.configuredBind;
+}
+
+/** Returns null when `CHANNEL_WEB_BIND` is unset, which turns the surface off. */
+export function loadWebConfig(
+  values: WebConfigValues,
+  context: WebConfigContext = {},
+): WebConfig | null {
+  if (values.webBind === null) return null;
+
+  // A literal the CLI cannot resolve yet loads as a pending bind rather than a refusal: Tailscale
+  // may come up after the broker at boot, and the broker binds once it does.
+  const bind = resolveWebBind(values.webBind, values.webTailscale, context);
 
   // Lower-cased once here, and the peer's values once at the check, so a login written with the
   // provider's capitals still matches what `tailscale whois` reports.
@@ -97,6 +190,7 @@ export function loadWebConfig(
     );
   }
   const devices = values.webDevices === null ? null : values.webDevices.map((node) => node.toLowerCase());
+  const summaryPeers = values.webSummaryPeers.map((node) => node.toLowerCase());
 
   // Refused here rather than at the bind, which runs after the broker has logged in to Discord.
   if (values.webPort > 65_535) {
@@ -127,12 +221,17 @@ export function loadWebConfig(
     named.set(name, root);
   }
 
+  const siblings = parseSiblings(values.webSiblings);
+
   return {
+    configuredBind: values.webBind,
     bind,
     port: values.webPort,
     operators,
     devices,
+    summaryPeers,
     tailscale: values.webTailscale,
     staticRoot: values.webStaticRoot,
+    siblings,
   };
 }

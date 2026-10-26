@@ -148,7 +148,7 @@ function capped(value: string, limit = 200): string {
   return value.length > limit ? `${value.slice(0, limit)}…` : value;
 }
 
-type RefusalLog = { warn: (reason: string, detail: string) => void };
+export type RefusalLog = { warn: (reason: string, detail: string) => void };
 
 /**
  * Rate-limits refusal logging by reason, so a local process cannot flood the log with its own
@@ -157,8 +157,11 @@ type RefusalLog = { warn: (reason: string, detail: string) => void };
  * of logged, and the count is flushed as one summary line the next time that reason's window has
  * closed. No timer: the flush is lazy, on the next call, which keeps this free of anything to
  * clear on shutdown and keeps it drivable by an injected clock in a test.
+ *
+ * Exported for the spooled announcement's take-in (announce-spool.ts), which refuses under the
+ * same reasons this route does and writes them through a writer of this same shape.
  */
-function createRefusalLog(log: Logger | undefined, now: () => number): RefusalLog {
+export function createRefusalLog(log: Logger | undefined, now: () => number): RefusalLog {
   const state = new Map<string, { windowStart: number; suppressed: number }>();
   return {
     warn(reason, detail) {
@@ -181,12 +184,32 @@ function createRefusalLog(log: Logger | undefined, now: () => number): RefusalLo
   };
 }
 
-function header(request: IncomingMessage, name: string): string | null {
-  const value = request.headers[name];
-  const raw = Array.isArray(value) ? value[0] : value;
+/**
+ * Where an intake's headers come from: a function answering a lower-case header name with its raw
+ * value, or undefined where there is none. The route answers from the request, and the spooled
+ * announcement answers from the lines of its file with the process token supplied from the relay
+ * pipe. Every value goes through one cleaning below, whichever source answered, so the two cannot
+ * read the same header differently.
+ */
+export type HeaderLookup = (name: string) => string | undefined;
+
+/** The request's headers as a lookup, taking the first value where node kept several. */
+export function requestHeaders(request: IncomingMessage): HeaderLookup {
+  return (name) => {
+    const value = request.headers[name];
+    return Array.isArray(value) ? value[0] : value;
+  };
+}
+
+function headerFrom(headers: HeaderLookup, name: string): string | null {
+  const raw = headers(name);
   if (typeof raw !== "string") return null;
   const cleaned = clean(raw);
   return cleaned === "" ? null : cleaned;
+}
+
+function header(request: IncomingMessage, name: string): string | null {
+  return headerFrom(requestHeaders(request), name);
 }
 
 /** Reads a payload string field, tolerating absence and rejecting anything that is not a string. */
@@ -356,23 +379,33 @@ function rawQuestions(input: unknown): readonly unknown[] | null {
 
 export type IntakeFailure = { status: number; message: string };
 
-export function parseIntake(
-  request: IncomingMessage,
-  body: string,
-):
+export type ParsedIntake =
   | {
       intake: HookIntake;
       questions: readonly AskedQuestion[] | null;
       questionsInput: readonly unknown[] | null;
     }
   | { failure: IntakeFailure }
-  | { unwatched: true } {
-  const event = header(request, "x-channel-hook-event");
+  | { unwatched: true };
+
+/** The route's parse: the request's own headers, through the one parse below. */
+export function parseIntake(request: IncomingMessage, body: string): ParsedIntake {
+  return parseIntakeHeaders(requestHeaders(request), body);
+}
+
+/**
+ * The one parse of a hook post into an intake, from wherever its headers came. The route hands it
+ * the request's headers; the spooled announcement hands it the file's header lines with the token
+ * from the relay pipe. Both produce the same `HookIntake` for the same announcement, which is what
+ * keeps the spool from becoming a second route with its own reading of the headers.
+ */
+export function parseIntakeHeaders(headers: HeaderLookup, body: string): ParsedIntake {
+  const event = headerFrom(headers, "x-channel-hook-event");
   if (event === null || !HOOK_EVENTS.includes(event as HookEvent)) {
     return { failure: { status: 400, message: "unknown or missing X-Channel-Hook-Event" } };
   }
 
-  const processToken = header(request, "x-channel-process-token");
+  const processToken = headerFrom(headers, "x-channel-process-token");
   if (processToken === null) {
     // The installed hooks fire in every session on the machine, and a session started without the
     // launch wrapper carries no process token. That is unwatched traffic, not malformed traffic:
@@ -420,10 +453,10 @@ export function parseIntake(
     intake: {
       event: event as HookEvent,
       processToken,
-      sessionName: header(request, "x-channel-session-name"),
+      sessionName: headerFrom(headers, "x-channel-session-name"),
       // Opt-in only: absent for every launch that never set CHANNEL_LINEAGE, which the registry
       // reads as "behaves exactly as today" (this plan's item 1 proof).
-      lineage: header(request, "x-channel-lineage"),
+      lineage: headerFrom(headers, "x-channel-lineage"),
       sessionId,
       // Recorded verbatim rather than checked against the known trigger names, so a value Claude
       // Code adds later lands in the registry instead of being refused.
@@ -453,6 +486,93 @@ export function parseIntake(
       fromSubagent: fields["agent_id"] !== undefined && fields["agent_id"] !== null,
     },
   };
+}
+
+/**
+ * Applies an intake to the registry and, where the registry declined it, writes the one refusal
+ * line that names why. The route and the spooled announcement's take-in both decide here, so
+ * which outcome logs which line is one reading rather than two copies that could drift, and the
+ * one-route rule docs/security-model.md states holds for the spool because this is the route's
+ * own decision applied to it. The record on acceptance, null on every refusal; the caller answers
+ * the request, or deletes the file, on that alone.
+ *
+ * Each refusal carries its own reason string, which is its own bucket in the rate limiter, so a
+ * run of the ordinary drops cannot be what turns a rarer line into a suppressed count. The process
+ * token is logged on no path: it is the key a hook post is authenticated by, and a refused takeover
+ * is exactly the traffic a stolen one produces.
+ */
+export function applyIntake(
+  registry: Registry,
+  intake: HookIntake,
+  refusals: RefusalLog,
+): SessionRecord | null {
+  const record = registry.apply(intake);
+  if (record !== null) return record;
+  if (registry.impostorStart(intake)) {
+    // A SessionStart carrying a session ID another process token still holds: the takeover
+    // docs/security-model.md names, refused by the registry rather than merged. The session named
+    // is the one the post tried to claim, which is a record the broker already holds and
+    // publishes.
+    refusals.warn(
+      "SessionStart naming a session another process token holds",
+      `session=${intake.sessionId ?? "none"} name=${intake.sessionName ?? "none"} ` +
+        "(the takeover is refused; the session stays with the token that announced it)",
+    );
+    return null;
+  }
+  if (registry.subprocessStart(intake)) {
+    // A `claude` running as a subprocess of a wrapped session: it inherits CHANNEL_PROCESS_TOKEN
+    // and announces a session of its own under it, and the registry declines to register it so
+    // the parent keeps the token. Expected traffic rather than a fault, and it gets its own line
+    // because the drop below names two causes that are both untrue of it, which would read as a
+    // session mysteriously failing to register. The session named is unregistered and appears on
+    // no other surface, which is why it is logged: it is the only handle anything has on this
+    // drop.
+    refusals.warn(
+      "SessionStart from a subprocess",
+      `session=${intake.sessionId ?? "none"} not registered; the session already ` +
+        "holding this process token keeps it and goes on being mirrored",
+    );
+    return null;
+  }
+  // A tool or stop event from a process token with no announced session, or one whose session ID
+  // and process token disagree (registry.route's session keying). Accepted off the wire and
+  // dropped, so a replayed or misrouted post cannot conjure or corrupt a session. Two very
+  // different things land here: a forged or replayed post, and the ordinary tool and turn traffic
+  // of a subprocess whose SessionStart was declined above, which names a session no record holds
+  // for as long as that subprocess runs. So the line reports the cause and calls what it caught
+  // neither.
+  refusals.warn(
+    "hook dropped",
+    `event=${intake.event} session=${intake.sessionId ?? "none"} ` +
+      `name=${intake.sessionName ?? "none"} (no session holds this process token, or ` +
+      "the session id and process token disagree)",
+  );
+  return null;
+}
+
+/** The two seams a credited post teaches its transcript path to, as `HandlerOptions` names them. */
+export type TranscriptSeams = {
+  tail?: { learn: (sessionId: string, path: string) => void };
+  status?: { learn: (sessionId: string, path: string) => void };
+};
+
+/**
+ * Teaches the tailer and the status reader where a credited session's transcript lives. The route
+ * calls it after every post the registry credited, and the spooled announcement's take-in after an
+ * accepted spool, so a session registered from its spool is tailed and status-read as one
+ * registered live is.
+ *
+ * Called only with a record the registry credited: an unwatched, forged, or unroutable post must
+ * not aim the tailer at a file of its choosing under a session it does not hold. Every credited
+ * event carries the path, so a broker restarted mid-session re-learns it from the very next hook
+ * post. The status reader learns on the same credited-post bar, and on its own seam, so a host with
+ * no tailer still reads harness error lines and mid-turn pickups.
+ */
+export function learnTranscript(seams: TranscriptSeams, sessionId: string, transcriptPath: string | null): void {
+  if (transcriptPath === null) return;
+  seams.tail?.learn(sessionId, transcriptPath);
+  seams.status?.learn(sessionId, transcriptPath);
 }
 
 function send(response: ServerResponse, status: number, body: unknown): void {
@@ -548,6 +668,12 @@ async function creditedSessionId(
 export type HandlerOptions = {
   registry: Registry;
   maxBodyBytes: number;
+  /**
+   * The spooled announcements (announce-spool.ts), told the token of every SessionStart this route
+   * accepts, so a spool the hook left for a session that then announced itself live is dropped
+   * unread rather than taken in behind it. Optional on the terms the logger is.
+   */
+  announceSpool?: { discard: (processToken: string) => void };
   /**
    * Where a refused, malformed, or silently-dropped hook post becomes visible. Optional so every
    * existing caller and test that does not pass one keeps working; a request is still served with
@@ -1065,58 +1191,16 @@ export function createHandler(
         return;
       }
 
-      const record = options.registry.apply(parsed.intake);
-      if (record === null && options.registry.impostorStart(parsed.intake)) {
-        // A SessionStart carrying a session ID another process token still holds: the takeover
-        // docs/security-model.md names, refused by the registry rather than merged. Its own reason
-        // string, which is its own bucket in the rate limiter below, so a run of the ordinary drops
-        // cannot be what turns this line into a suppressed count. The session named is the one the
-        // post tried to claim, which is a record the broker already holds and publishes; the
-        // process token is not logged, here or anywhere, because it is the key a hook post is
-        // authenticated by, and a refused takeover is exactly the traffic a stolen one produces.
-        refusals.warn(
-          "SessionStart naming a session another process token holds",
-          `session=${parsed.intake.sessionId ?? "none"} name=${parsed.intake.sessionName ?? "none"} ` +
-            "(the takeover is refused; the session stays with the token that announced it)",
-        );
-        send(response, 202, { ignored: true });
-        return;
-      }
-      if (record === null && options.registry.subprocessStart(parsed.intake)) {
-        // A `claude` running as a subprocess of a wrapped session: it inherits CHANNEL_PROCESS_TOKEN
-        // and announces a session of its own under it, and the registry declines to register it so
-        // the parent keeps the token. Expected traffic rather than a fault, and it gets its own
-        // line because the drop below names two causes that are both untrue of it, which would
-        // read as a session mysteriously failing to register. The session named is unregistered and
-        // appears on no other surface, which is why it is logged: it is the only handle anything
-        // has on this drop. The process token is not logged, here or anywhere, because it is the
-        // key a hook post is authenticated by.
-        refusals.warn(
-          "SessionStart from a subprocess",
-          `session=${parsed.intake.sessionId ?? "none"} not registered; the session already ` +
-            "holding this process token keeps it and goes on being mirrored",
-        );
-        send(response, 202, { ignored: true });
-        return;
-      }
+      const record = applyIntake(options.registry, parsed.intake, refusals);
       if (record === null) {
-        // A tool or stop event from a process token with no announced session, or one whose session
-        // ID and process token disagree (registry.route's session keying). Accepted off the wire and
-        // dropped, so a replayed or misrouted post cannot conjure or corrupt a session. The process
-        // token itself is never logged; it is the forgery key a hook post is authenticated by. Two
-        // very different things land here: a forged or replayed post, and the ordinary tool and turn
-        // traffic of a subprocess whose SessionStart was declined above, which names a session no
-        // record holds for as long as that subprocess runs. So the line reports the cause and calls
-        // what it caught neither.
-        refusals.warn(
-          "hook dropped",
-          `event=${parsed.intake.event} session=${parsed.intake.sessionId ?? "none"} ` +
-            `name=${parsed.intake.sessionName ?? "none"} (no session holds this process token, or ` +
-            "the session id and process token disagree)",
-        );
+        // Every refusal is answered with the same quiet 2xx: the line naming why is already
+        // written, and a non-2xx would surface inside the session as a visible error.
         send(response, 202, { ignored: true });
         return;
       }
+      // The session announced itself live, so a spool its hook left from an earlier failed
+      // attempt under this token is stale: dropped unread, never taken in behind this one.
+      if (parsed.intake.event === "SessionStart") options.announceSpool?.discard(parsed.intake.processToken);
       // A turn that ended is a session no longer parked on a permission prompt, so every request it
       // had open has been resolved, and Claude Code reports a prompt answered at its own console
       // nowhere else. Behind the same gate the question seam's allow is behind, a credited post
@@ -1134,18 +1218,7 @@ export function createHandler(
         options.permissions?.turnEnded(record.sessionId, arrivedAt);
         if (parsed.intake.fromSubagent !== true) options.turns?.closed(record.sessionId);
       }
-      // Learned only from a post the registry credited to a record: an unwatched, forged, or
-      // unroutable post must not aim the tailer at a file of its choosing under a session it does
-      // not hold. Every credited event carries the path, so a broker restarted mid-session
-      // re-learns it from the very next hook post.
-      if (options.tail !== undefined && parsed.intake.transcriptPath !== null) {
-        options.tail.learn(record.sessionId, parsed.intake.transcriptPath);
-      }
-      // The status reader learns on the same credited-post bar, and on its own seam, so a host with
-      // no tailer still reads harness error lines and mid-turn pickups.
-      if (options.status !== undefined && parsed.intake.transcriptPath !== null) {
-        options.status.learn(record.sessionId, parsed.intake.transcriptPath);
-      }
+      learnTranscript(options, record.sessionId, parsed.intake.transcriptPath);
       // The emission-time question alert, from a credited PreToolUse post alone. The question
       // hook carries the per-session mirror switch because its payload is conversation text, and
       // both halves of the header are read as /mirror reads the same header. The off half: a

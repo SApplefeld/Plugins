@@ -52,7 +52,30 @@ param(
     # runs from was already installed through, so none is registered. Forwarded to Install-Host.ps1
     # only when given, which refuses a name that disagrees with the recorded one.
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*\z')]
-    [string]$Marketplace
+    [string]$Marketplace,
+
+    # The web surface's keys, forwarded to Install-Host.ps1 only when given, which writes each to
+    # broker.env and leaves an omitted one as the file has it. -WebPort also goes to the elevated
+    # step, which opens that port on the Tailscale interface. Install-Host.ps1 documents the six.
+    # Refused at binding when a value holds a line break or NUL, which would add a line to broker.env,
+    # or when the port is not a TCP port.
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebBind,
+
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$WebPort,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebOperators,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebDevices,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebSummaryPeers,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebSiblings
 )
 
 . (Join-Path $PSScriptRoot 'Install-Functions.ps1')
@@ -122,6 +145,7 @@ ACLs Install-Host.ps1 just laid down; the elevated session's own identity may di
 leak into the task principal.
 
 -Marketplace is passed to the child only when given, so the private route's launch is unchanged.
+-WebPort is passed the same way, and the child opens that port for the web surface only when it has it.
 
 -Launcher exists so a test can capture the launch instead of raising a real UAC prompt.
 #>
@@ -131,6 +155,7 @@ function Invoke-ChannelElevatedInstall {
         [Parameter(Mandatory)][string]$EnvFile,
         [Parameter(Mandatory)][string]$RepoRoot,
         [string]$Marketplace,
+        [ValidateRange(1, 65535)][Nullable[int]]$WebPort,
         [scriptblock]$Launcher
     )
 
@@ -147,6 +172,9 @@ function Invoke-ChannelElevatedInstall {
         '-RepoRoot', (& $quote $RepoRoot)
     )
     if ($Marketplace) { $arguments += @('-Marketplace', (& $quote $Marketplace)) }
+    if ($null -ne $WebPort) {
+        $arguments += @('-WebPort', (& $quote $WebPort.ToString([cultureinfo]::InvariantCulture)))
+    }
     if (-not $Launcher) {
         $Launcher = {
             param($ArgumentList)
@@ -167,6 +195,7 @@ function Invoke-ChannelElevatedInstall {
     if ($exitCode -ne 0) {
         $remedy = "install\Install-Elevated.ps1 -User '$User' -EnvFile '$EnvFile'"
         if ($Marketplace) { $remedy += " -Marketplace '$Marketplace'" }
+        if ($null -ne $WebPort) { $remedy += " -WebPort '$WebPort'" }
         throw "Install-All: the elevated install step exited $exitCode. Re-run it alone from an " +
             "elevated session: $remedy."
     }
@@ -428,6 +457,8 @@ which is what lets the owner the last install recorded in broker.env govern the 
 validated here: the runner's own parameter and Install-Host.ps1's both carry the set, and an
 unbound one arrives as the empty string, which a set would refuse.
 
+The six web keys are passed on the same rule, each only when it is non-empty.
+
 -ExistingTokenFile exists so a test can point the token reuse at a temp path rather than this
 host's state root.
 #>
@@ -439,6 +470,12 @@ function Get-ChannelHostArguments {
         [string]$BotTokenFile,
         [string]$HookOwner,
         [string]$Marketplace,
+        [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebBind,
+        [Nullable[int]]$WebPort,
+        [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebOperators,
+        [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebDevices,
+        [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebSummaryPeers,
+        [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebSiblings,
         [string]$ExistingTokenFile = (Join-Path (Get-ChannelStateRoot) 'discord-token.txt')
     )
 
@@ -463,6 +500,13 @@ function Get-ChannelHostArguments {
     if ($null -ne $Identity.Port) { $hostArgs.Port = $Identity.Port }
     if ($HookOwner) { $hostArgs.HookOwner = $HookOwner }
     if ($Marketplace) { $hostArgs.Marketplace = $Marketplace }
+    # Each web key is passed only when set, so Install-Host.ps1 leaves an omitted key as the file has it.
+    if ($WebBind) { $hostArgs.WebBind = $WebBind }
+    if ($null -ne $WebPort) { $hostArgs.WebPort = $WebPort }
+    if ($WebOperators) { $hostArgs.WebOperators = $WebOperators }
+    if ($WebDevices) { $hostArgs.WebDevices = $WebDevices }
+    if ($WebSummaryPeers) { $hostArgs.WebSummaryPeers = $WebSummaryPeers }
+    if ($WebSiblings) { $hostArgs.WebSiblings = $WebSiblings }
     return $hostArgs
 }
 
@@ -478,7 +522,9 @@ if ($MyInvocation.InvocationName -ne '.') {
     $effectiveMarketplace = Resolve-ChannelMarketplace -Marketplace $Marketplace
 
     $hostArgs = Get-ChannelHostArguments -Identity $identity -RepoRoot $RepoRoot `
-        -BotToken $BotToken -BotTokenFile $BotTokenFile -HookOwner $HookOwner -Marketplace $Marketplace
+        -BotToken $BotToken -BotTokenFile $BotTokenFile -HookOwner $HookOwner -Marketplace $Marketplace `
+        -WebBind $WebBind -WebPort $WebPort -WebOperators $WebOperators -WebDevices $WebDevices `
+        -WebSummaryPeers $WebSummaryPeers -WebSiblings $WebSiblings
     & (Join-Path $PSScriptRoot 'Install-Host.ps1') @hostArgs
 
     Install-ChannelPlugin -RepoRoot $RepoRoot -Marketplace $effectiveMarketplace
@@ -487,6 +533,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     $envFile = Join-Path (Get-ChannelStateRoot) 'broker.env'
     $elevatedArgs = @{ User = $user; EnvFile = $envFile; RepoRoot = $RepoRoot }
     if ($effectiveMarketplace -cne 'sapplefeld-channels') { $elevatedArgs.Marketplace = $effectiveMarketplace }
+    if ($null -ne $WebPort) { $elevatedArgs.WebPort = $WebPort }
     Invoke-ChannelElevatedInstall @elevatedArgs
 
     $brokerPort = if ($null -ne $identity.Port) { $identity.Port } else { 8787 }

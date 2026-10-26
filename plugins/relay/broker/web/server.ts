@@ -9,7 +9,10 @@
 //      identity is the network's, so the cross-site risk left is a page on another origin that
 //      reaches this listener; the Host check is where that origin's name survives.
 //   2. the peer address is resolved through `WebIdentity` and must name a login in the operator
-//      list and, where a device list is set, a node on it, else 403.
+//      list and, where a device list is set, a node on it, else 403. The one path with a wider node
+//      rule is `/web/summary`, which also admits a node on the summary peer list, the sibling
+//      sandboxes' nodes: a node admitted by that list alone is refused every page, every file and
+//      every other route, so a sibling broker polls the summary and reaches nothing else.
 //   3. a request to the path of a route registered as carrying the operator's word, whatever its
 //      method, refuses a peer on the broker host's own tailnet node, whatever the device list says,
 //      else 403. The refusal runs ahead of the method and existence checks below, so a GET on such a
@@ -43,12 +46,15 @@ import { foldRootName } from "./config.ts";
 import type { WebConfig } from "./config.ts";
 import type { TailnetPeer, WebIdentity } from "./identity.ts";
 import { summaryView } from "./summary.ts";
+import type { SiblingsView } from "./siblings.ts";
 import { lineageKnown, talkView } from "./talk.ts";
 import type { TalkRing, TalkViewInput } from "./talk.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
 import { CLIENT_PREFIX } from "./rollout.ts";
 import type { RolloutMark, RolloutReader } from "./rollout.ts";
+import { appendDirection, calendarDate, steerText } from "./direction.ts";
+import type { SteerOutcome } from "./direction.ts";
 import { liveByLineage } from "../registry.ts";
 import type { SessionRecord } from "../registry.ts";
 import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
@@ -95,6 +101,8 @@ const PAGE_ROUTES: Readonly<Record<string, string>> = {
 const REPO_PREFIX = "/repo/";
 const REPO_PAGE = "repo.html";
 const ROUTE_PREFIX = "/web/";
+/** The one path the summary peer list admits a node to, the summary `registerViewHandlers` serves. */
+const SUMMARY_PATH = `${ROUTE_PREFIX}summary`;
 
 /** The file kinds the static handler serves, by extension, and what each is sent as. */
 const STATIC_TYPES: Readonly<Record<string, string>> = {
@@ -220,6 +228,11 @@ export type WebHandler = {
    * host's own node by the gate; one registered `false` is not.
    */
   register: (name: string, handler: WebRouteHandler, options: WebRouteOptions) => void;
+  /**
+   * Sets the address the listener is bound to, which the Host and Origin checks and the host's
+   * node read from then on. The configuration's bind stands until it is called.
+   */
+  bound: (address: string) => void;
 };
 
 /** The gate and the route table, apart from the socket so a test drives them on any listener. */
@@ -229,15 +242,26 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
   const refusals = createRefusalLog(options.log, now);
   const routes = new Map<string, WebRoute>();
   const subpathRoutes = new Map<string, WebRoute>();
-  const expectedHost = `${config.bind}:${String(config.port)}`.toLowerCase();
-  const expectedOrigin = `http://${expectedHost}`;
+  // The address this listener answers for, read at each request rather than once here: a bind the
+  // broker resolved after the handler was built is set by `bound`, and while it is null no Host
+  // matches and the host's node is unknown.
+  let bind = config.bind;
   const staticRoot = path.resolve(config.staticRoot);
 
-  /** The login and node check against the two lists, lower-cased to match the lists' own form. */
-  function admitted(login: string, node: string): boolean {
+  /**
+   * The login and node check against the lists, lower-cased to match the lists' own form. The login
+   * rule is the same on every path. The node rule takes the path: the summary route admits a node on
+   * the device list or on the summary peer list, and every other path, pages and files included,
+   * admits a node on the device list alone, so a sibling sandbox's node reads the summary and
+   * nothing else. With no device list the node is not checked anywhere, and the peer list adds
+   * nothing.
+   */
+  function admitted(login: string, node: string, pathname: string): boolean {
     if (!config.operators.includes(login.toLowerCase())) return false;
-    if (config.devices !== null && !config.devices.includes(node.toLowerCase())) return false;
-    return true;
+    if (config.devices === null) return true;
+    const named = node.toLowerCase();
+    if (config.devices.includes(named)) return true;
+    return pathname === SUMMARY_PATH && config.summaryPeers.includes(named);
   }
 
   /**
@@ -256,14 +280,17 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
   /**
    * Whether `peer` is on the broker host's own tailnet node, or that cannot be told. The host's
    * node is the identity's answer for the listener's bound address, which is the host's own
-   * tailnet address, and the identity caches that answer as it caches every address's. A resolver
-   * that answers nothing or throws leaves the host unknown, and unknown reads as the host's: an
+   * tailnet address, and the identity caches that answer as it caches every address's. A bind not
+   * yet resolved, or a resolver that answers nothing or throws, leaves the host unknown, and unknown
+   * reads as the host's: an
    * operator-word route runs only for a peer shown to be another node.
    */
   async function onHostNode(peer: TailnetPeer): Promise<boolean> {
+    const address = bind;
+    if (address === null) return true;
     let host: TailnetPeer | null = null;
     try {
-      host = await identity.peerFor(config.bind);
+      host = await identity.peerFor(address);
     } catch {
       host = null;
     }
@@ -336,8 +363,9 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
 
     // Exact, port included: this listener answers to one name, and a page that reached it under
     // any other was not served by it.
+    const expectedHost = bind === null ? null : `${bind}:${String(config.port)}`.toLowerCase();
     const host = header(request, "host");
-    if (host === null || host.toLowerCase() !== expectedHost) {
+    if (host === null || expectedHost === null || host.toLowerCase() !== expectedHost) {
       request.resume();
       refusals.warn("Host header is not this listener's", address);
       empty(response, 400);
@@ -359,10 +387,12 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
       empty(response, 403);
       return;
     }
-    if (!admitted(peer.login, peer.node)) {
+    const pathname = (request.url ?? "/").split("?")[0];
+    if (!admitted(peer.login, peer.node, pathname)) {
       // The login and the node are the peer's own identifiers and stay out of the line: the
       // address is enough to find the node in the admin console, and a line the operator reads
-      // should not become a list of who tried.
+      // should not become a list of who tried. One reason covers the device list and the peer list,
+      // since a summary peer refused a page is a node the page's list does not admit.
       request.resume();
       refusals.warn("peer is not an admitted operator on an admitted device", address);
       empty(response, 403);
@@ -370,7 +400,7 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
     }
 
     // The route is looked up here only for what it was registered as; it runs below or not at all.
-    if (routeFor((request.url ?? "/").split("?")[0])?.operatorWord === true && (await onHostNode(peer))) {
+    if (routeFor(pathname)?.operatorWord === true && (await onHostNode(peer))) {
       // The address alone, as above: the host's node and login are the operator's own.
       request.resume();
       refusals.warn("operator-word route refused to the broker host's own node, or the host's node is unknown", address);
@@ -384,7 +414,7 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
       const site = header(request, "sec-fetch-site");
       const origin = header(request, "origin");
       const fromThisOrigin =
-        site === null ? origin?.toLowerCase() === expectedOrigin : site.toLowerCase() === "same-origin";
+        site === null ? origin?.toLowerCase() === `http://${expectedHost}` : site.toLowerCase() === "same-origin";
       const type = header(request, "content-type");
       const mediaType = type === null ? null : type.split(";")[0].trim().toLowerCase();
       const octetStream = routeFor((request.url ?? "/").split("?")[0])?.octetStream === true;
@@ -429,14 +459,22 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
         octetStream: routeOptions.octetStream === true,
       });
     },
+    bound(address) {
+      bind = address;
+    },
   };
 }
 
 export type WebServer = {
   server: Server;
   register: WebHandler["register"];
-  /** Binds `<bind>:<port>` and resolves with the port bound; rejects as the socket does. */
-  listen: () => Promise<number>;
+  /**
+   * Binds `<bind>:<port>` and resolves with the port bound; rejects as the socket does. The bind is
+   * the caller's, resolved at this attempt, and the handler answers for it once the socket listens.
+   * A rejected attempt leaves the server unbound, and a later call may try again.
+   */
+  listen: (bind: string) => Promise<number>;
+  /** Closes the listener; a server that never listened closes the same way, without a throw. */
   close: () => Promise<void>;
 };
 
@@ -444,21 +482,37 @@ export type WebServer = {
 export function createWebServer(options: WebHandlerOptions): WebServer {
   const handler = createWebHandler(options);
   const server = createServer(handler.handle);
+  // True from a bind attempt's start until it settles. The error that ends an attempt is its
+  // caller's rejection, so it is not logged here a second time; every other error is.
+  let binding = false;
+  // Attached once, for the server's life, and before any attempt's own listener, so it reads the
+  // flag before that listener clears it.
+  server.on("error", (error) => {
+    if (!binding) options.log?.error(`broker: web server error: ${String(error)}`);
+  });
   return {
     server,
     register: handler.register,
-    listen: () =>
+    listen: (bind) =>
       new Promise<number>((resolve, reject) => {
-        const failedToBind = (error: Error): void => reject(error);
-        server.once("error", failedToBind);
-        server.listen(options.config.port, options.config.bind, () => {
+        // Each attempt removes both listeners it adds, whichever way it ends, so a run of refused
+        // attempts leaves none behind to fire when a later attempt binds.
+        const failedToBind = (error: Error): void => {
+          binding = false;
+          server.removeListener("listening", boundHere);
+          reject(error);
+        };
+        const boundHere = (): void => {
+          binding = false;
           server.removeListener("error", failedToBind);
-          server.on("error", (error) => {
-            options.log?.error(`broker: web server error: ${String(error)}`);
-          });
+          handler.bound(bind);
           const address = server.address();
           resolve(typeof address === "object" && address !== null ? address.port : options.config.port);
-        });
+        };
+        binding = true;
+        server.once("error", failedToBind);
+        server.once("listening", boundHere);
+        server.listen(options.config.port, bind);
       }),
     close: () => {
       // Keep-alive sockets would otherwise hold close() open until they time out.
@@ -614,6 +668,24 @@ export function registerViewHandlers(register: WebHandler["register"], source: (
     if (view === null) return empty(response, 404);
     sendJson(response, view);
   });
+}
+
+/**
+ * Registers `GET /web/siblings`: the sibling poller's last reading, which the pages' rail draws.
+ * Read-only and carrying no operator's word, so it takes the gate every view takes and no more. It
+ * runs no poll of its own: the poller runs on the web pass's cadence, and a request reads what the
+ * last pass left. With no sibling configured the view holds an empty list.
+ */
+export function registerSiblingsHandler(register: WebHandler["register"], view: () => SiblingsView): void {
+  register("siblings", (request, response) => {
+    request.resume();
+    if (request.method !== "GET") {
+      response.writeHead(405, { allow: "GET", "content-length": 0 });
+      response.end();
+      return;
+    }
+    sendJson(response, view());
+  }, { operatorWord: false });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1212,6 +1284,101 @@ export function registerRolloutHandler(register: WebHandler["register"], options
           options.log?.info(`web rollout: ${marked.tag} at ${marked.sha.slice(0, 7)} by ${peer.login}`);
           sendJson(response, { tag: marked.tag, sha: marked.sha, undo: `git push origin :refs/tags/${marked.tag}` });
           options.afterMark?.();
+      }
+    },
+    { operatorWord: true },
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Steer
+// ---------------------------------------------------------------------------------------------
+
+/** A steer post carries one line of at most 200 code points; past this it is not one. */
+const MAX_STEER_BODY_BYTES = 1024;
+
+export type SteerHandlerOptions = {
+  /** The machine direction ledger's path, `CHANNEL_DIRECTION_LEDGER`; empty where unset, and the route answers 404. */
+  ledgerPath: string;
+  /**
+   * Runs once an item is written and its answer sent: the pass's own run, whose direction reading
+   * then takes the new item, so the next view read draws the new heading.
+   */
+  afterWrite?: () => void;
+  /** Where each tap's one line goes: the item and the login, a 409's reason, or a 500's static word. */
+  log?: Logger;
+  /** The clock the item's date is read from, in the host's own time zone. Injected so a test fixes it. */
+  now?: () => number;
+  /** The whole-file write, `writeSnapshot` by default. Injected so a test fails it. */
+  write?: (file: string, text: string) => void;
+};
+
+/**
+ * Registers `POST /web/steer` with `{text}`, Steer. The route carries the operator's word, so the gate
+ * has already refused the broker host's own node and required the same-origin JSON headers, and the
+ * login the log line names is the peer's. The ledger the item lands in is read by every kit session
+ * on this host as the operator's own standing word, which is why nothing but that gate's peer can
+ * reach this write. After the gate, in order: a method other than POST answers 405; with no ledger
+ * path configured the route answers 404; a body over the ceiling or not a JSON object, and a `text`
+ * the steer rule refuses, each answer 400 with an empty body. Each writes nothing and logs nothing.
+ * The append runs under one in-process lock, so two taps land as two consecutive items. A file whose
+ * first line is not `# Direction` answers 409 `{reason: "not-a-ledger"}`, and one that is oversized or
+ * unreadable answers 409 `{reason: "unreadable"}`, nothing written. Otherwise the answer is 200
+ * `{item, date, line}`, `line` the exact line written, and the pass runs once. A write that throws
+ * answers 500. Every tap past the 400s logs one line. Nothing of the body reaches a log, and no path
+ * does: the 409 and 500 lines are static words.
+ */
+export function registerSteerHandler(register: WebHandler["register"], options: SteerHandlerOptions): void {
+  const now = options.now ?? Date.now;
+  // The lock: each append runs once the one before it has settled, written or thrown.
+  let last: Promise<unknown> = Promise.resolve();
+  const locked = (work: () => SteerOutcome): Promise<SteerOutcome> => {
+    const next = last.then(work, work);
+    last = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+  register(
+    "steer",
+    async (request, response, peer) => {
+      if (request.method !== "POST") {
+        request.resume();
+        response.writeHead(405, { allow: "POST", "content-length": 0 });
+        response.end();
+        return;
+      }
+      if (options.ledgerPath === "") {
+        request.resume();
+        return empty(response, 404);
+      }
+      const body = await readJsonObject(request, MAX_STEER_BODY_BYTES);
+      if (body === null) return empty(response, 400);
+      const text = steerText(body.text);
+      if (text === null) return empty(response, 400);
+      let outcome: SteerOutcome;
+      try {
+        outcome = await locked(() => appendDirection(options.ledgerPath, text, calendarDate(now()), options.write));
+      } catch {
+        // The error is discarded unread: a write error names the path, and the path embeds the
+        // operator's OS account name.
+        options.log?.warn("web steer: the ledger could not be written");
+        return empty(response, 500);
+      }
+      switch (outcome.status) {
+        case "not-a-ledger":
+          options.log?.info("web steer: refused, not a ledger");
+          sendJson(response, { reason: "not-a-ledger" }, 409);
+          return;
+        case "unreadable":
+          options.log?.info("web steer: refused, unreadable");
+          sendJson(response, { reason: "unreadable" }, 409);
+          return;
+        case "written":
+          options.log?.info(`web steer: ${outcome.item} by ${peer.login}`);
+          sendJson(response, { item: outcome.item, date: outcome.date, line: outcome.line });
+          options.afterWrite?.();
       }
     },
     { operatorWord: true },

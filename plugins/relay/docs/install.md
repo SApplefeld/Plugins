@@ -96,9 +96,10 @@ paste that Discord turned into `message.txt` arrives as the words of the message
 fits the relay's pipe. "Attachments" in `operations.md` gives that limit. Three settings in
 `broker.env` bound it. `CHANNEL_ATTACHMENTS` decides who may send a file: `operator`, the default,
 `all` to admit participants too, or `off`, which also stops a session attaching a file to its
-reply. `CHANNEL_ATTACHMENT_MAX_BYTES` caps one file in either direction, 10,485,760 bytes (10 MiB)
-by default. `CHANNEL_ATTACHMENT_RETAIN_DAYS` decides how long a saved file is kept,
-14 days by default. Like every setting there, each takes effect when the broker restarts. Saved
+reply. `CHANNEL_ATTACHMENT_MAX_BYTES` caps one file in either direction, 20,971,520 bytes (20 MiB)
+by default, Discord's own default limit per uploaded file. `CHANNEL_ATTACHMENT_RETAIN_DAYS`
+decides how long a saved file is kept, 14 days by default. Like every setting there, each takes
+effect when the broker restarts. Saved
 files sit in an `attachments` folder beside the broker's state file, never in a project. An
 interactive session asks permission to read one, and that prompt reaches Discord like any other.
 `operations.md` lists what is accepted and what each refusal means, and
@@ -501,7 +502,8 @@ The two commands are whole-line and not case-sensitive, and only an operator's a
 The broker can serve its own status pages to your phone and desktop over Tailscale, and a talk
 page from which you answer a session without opening Discord. It is off
 unless `CHANNEL_WEB_BIND` is set, and off means no second listener exists. Install Tailscale on
-this host and on each device, signed in under one login, then add to `broker.env`:
+this host and on each device, signed in under one login. Then pass the web parameters to the
+installer, as "A new sandbox" below shows, or add to `broker.env` by hand:
 
 ```
 CHANNEL_WEB_BIND=tailscale
@@ -510,8 +512,10 @@ CHANNEL_WEB_DEVICES=your-phone,your-desktop
 ```
 
 `CHANNEL_WEB_BIND` is this host's tailnet IPv4 address, or the word `tailscale`, which reads it
-from `tailscale ip -4` at start. Any address outside 100.64.0.0/10 refuses the start, so the pages
-can never be served on loopback, a LAN or a public interface. `CHANNEL_WEB_OPERATORS` is the
+from `tailscale ip -4` at each bind attempt. A broker that starts before Tailscale has an address
+waits for it and binds the pages within 30 seconds of the address appearing. A written address outside 100.64.0.0/10 refuses the start, and a
+`tailscale` answer outside it counts as no address, so the pages can never be served on loopback,
+a LAN or a public interface. `CHANNEL_WEB_OPERATORS` is the
 comma-separated list of tailnet logins admitted, at least one. `CHANNEL_WEB_DEVICES` is optional.
 When it is set, a device must be on it by its tailnet node name as well as signed in under an
 admitted login, since a fleet machine signed in under your login would otherwise be admitted too.
@@ -520,9 +524,20 @@ as this host's node, so a list without the host refuses it (T5 in `docs/security
 browser on this host is refused too, so open the pages from the phone or another desktop.
 `CHANNEL_WEB_PORT` (default 8788), `CHANNEL_WEB_TAILSCALE` (the CLI, default `tailscale` on PATH)
 and `CHANNEL_WEB_STATIC_ROOT` (the pages' directory, an absolute path) rarely need setting.
+`CHANNEL_WEB_SIBLINGS` names the other sandboxes as comma-separated `Name=address:port` entries,
+each address a tailnet IPv4. With it set, every page shows a rail of their needs-you counts, and a
+tap lands on the sibling's page. Each sibling's listener must admit this host's node and login.
+`CHANNEL_WEB_SUMMARY_PEERS` names the sibling nodes admitted to the summary route alone, as "Three
+sandboxes on one tailnet" below sets out.
+`CHANNEL_DIRECTION_LEDGER` is the absolute path of this machine's direction ledger, the
+`direction.md` file under the kit's coordinator directory. With it set, the standup page draws
+the ledger's newest item as the sandbox's heading. Unset, the page draws no sandbox heading.
 
-Every request is identified by `tailscale whois`, so there is no token and no password. All six
-keys are on the installer's allowlist, so a value set by hand survives the next install.
+Every request is identified by `tailscale whois`, so there is no token and no password. All nine
+keys are on the installer's allowlist, so a value set by hand survives the next install. The
+installer writes six of them from its `-Web` parameters, and a run that omits a parameter leaves
+that key's value as it is. `CHANNEL_WEB_TAILSCALE`, `CHANNEL_WEB_STATIC_ROOT` and
+`CHANNEL_DIRECTION_LEDGER` stay hand-set.
 
 The pages' rollout cards, which show what each `clients/*` branch has merged since its last
 deploy, need git 2.37 or later on the scheduled task account's `PATH`. The reader finds repositories
@@ -534,17 +549,229 @@ convention and the undo command.
 
 On Windows, allow the web port inbound on the Tailscale interface. Windows Firewall can place that
 interface in a profile where Node has no inbound rule, and a device's request is then dropped
-before the broker sees it. From an elevated PowerShell, with the port matching `CHANNEL_WEB_PORT`:
+before the broker sees it. An install run given `-WebPort` adds this rule in its elevated step, and
+leaves a rule of that name already present as it is, whatever port it names. So after changing
+the port, edit the rule's port by hand or remove it and re-run. To add it by hand, from an elevated
+PowerShell, with the port matching `CHANNEL_WEB_PORT`:
 
 ```
 New-NetFirewallRule -DisplayName 'Channels web surface' -Direction Inbound -Protocol TCP -LocalPort 8788 -InterfaceAlias 'Tailscale' -Action Allow
 ```
 
 The rule admits that one port on that one interface, and
-`Remove-NetFirewallRule -DisplayName 'Channels web surface'` takes it out. Restart the broker. Its
-log then reads `broker: web surface on http://<address>:<port>, admitting N login(s) on M device(s)`.
+`Remove-NetFirewallRule -DisplayName 'Channels web surface'` takes it out. Restart the broker. Where
+Tailscale is not up yet, its log first reads `broker: web surface waiting for <address>:<port>, the
+address is not available yet; retrying every 30 seconds`, and nothing more is needed. Its log then
+reads `broker: web surface on http://<address>:<port>, admitting N login(s) on M device(s)
+and P summary peer(s)`, with `on any device` in place of the device count where the list is unset.
 Open that exact address from an admitted device, since any other spelling of it answers 400.
 [`operations.md`](operations.md) describes the pages under "The web surface".
+
+The pages outlive a logoff only where Tailscale runs in unattended mode. By default Tailscale on
+Windows runs for the signed-in user and stops carrying traffic when that user logs off, so the
+broker keeps running in its scheduled task and no device can reach its pages. Turn unattended mode
+on with the Tailscale client's "Run unattended" menu item, or with `tailscale set --unattended`.
+Either sets the `ForceDaemon` preference, which `tailscale debug prefs` shows as `true`. A host with
+unattended mode on can still lose the pages after a logoff, with the tunnel up and carrying traffic
+one way only. "When something is wrong" in [`operations.md`](operations.md) names that fault, the
+readings that identify it and its remedy.
+
+#### Three sandboxes on one tailnet
+
+Three sandboxes on one tailnet each serve their own pages and read each other's counts for the
+rail. Two settings make that work. The tailnet policy lets the right devices reach each web port,
+and each broker admits its siblings to the summary route alone.
+
+On each sandbox, set two keys in `broker.env` beside the web keys above. `CHANNEL_WEB_SIBLINGS`
+names the other two sandboxes. `CHANNEL_WEB_SUMMARY_PEERS` names their tailnet node names. A node on
+the peer list is admitted to `GET /web/summary` and answered 403 on every page and every other
+route. Its login must still be on `CHANNEL_WEB_OPERATORS`, so sign every sandbox in to Tailscale
+under a login on that list. Leave the sandboxes off `CHANNEL_WEB_DEVICES`. On the first sandbox,
+with the addresses the fragment below uses:
+
+```
+CHANNEL_WEB_SIBLINGS=sandbox-b=100.100.0.2:8788,sandbox-c=100.100.0.3:8788
+CHANNEL_WEB_SUMMARY_PEERS=sandbox-b,sandbox-c
+```
+
+The peer list takes each sibling's node name as the admin console's Machines page lists it,
+whatever alias the policy below gives that host. It works only beside a device list. With
+`CHANNEL_WEB_DEVICES` unset, every node under an admitted login reaches every route. Every sibling
+VM then reaches this sandbox's pages and the routes that carry your word, and the peer list adds
+nothing. The broker's start-up log says so in a line of its own.
+
+Then merge this fragment into the tailnet's policy file in the Tailscale admin console. The names
+are placeholders. Replace each address under `hosts` with that device's tailnet address, the two
+operator entries with your own phone and desktop, and `other-device` with a device that should
+reach no sandbox. On a tailnet holding only your own devices and the sandboxes, delete
+`other-device` from `hosts` and remove its test. Replace 8788 wherever `CHANNEL_WEB_PORT` differs.
+The fragment is strict JSON. The policy file accepts it, since its format, HuJSON, is JSON that
+also allows comments and trailing commas.
+
+```json
+{
+  "hosts": {
+    "sandbox-a": "100.100.0.1",
+    "sandbox-b": "100.100.0.2",
+    "sandbox-c": "100.100.0.3",
+    "operator-phone": "100.100.0.4",
+    "operator-desktop": "100.100.0.5",
+    "other-device": "100.100.0.6"
+  },
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["operator-phone", "operator-desktop"],
+      "dst": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788"]
+    },
+    {
+      "action": "accept",
+      "src": ["sandbox-a", "sandbox-b", "sandbox-c"],
+      "dst": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788"]
+    }
+  ],
+  "tests": [
+    {
+      "src": "operator-phone",
+      "accept": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788"]
+    },
+    {
+      "src": "sandbox-a",
+      "accept": ["sandbox-b:8788", "sandbox-c:8788"],
+      "deny": [
+        "sandbox-b:8787",
+        "sandbox-b:22",
+        "sandbox-b:3389",
+        "sandbox-b:445",
+        "sandbox-b:5985",
+        "sandbox-c:8787",
+        "sandbox-c:22",
+        "sandbox-c:3389",
+        "sandbox-c:445",
+        "sandbox-c:5985",
+        "operator-phone:22",
+        "operator-phone:3389",
+        "operator-phone:445",
+        "operator-phone:5985",
+        "operator-desktop:22",
+        "operator-desktop:3389",
+        "operator-desktop:445",
+        "operator-desktop:5985"
+      ]
+    },
+    {
+      "src": "sandbox-b",
+      "accept": ["sandbox-a:8788", "sandbox-c:8788"],
+      "deny": [
+        "sandbox-a:8787",
+        "sandbox-a:22",
+        "sandbox-a:3389",
+        "sandbox-a:445",
+        "sandbox-a:5985",
+        "sandbox-c:8787",
+        "sandbox-c:22",
+        "sandbox-c:3389",
+        "sandbox-c:445",
+        "sandbox-c:5985",
+        "operator-phone:22",
+        "operator-phone:3389",
+        "operator-phone:445",
+        "operator-phone:5985",
+        "operator-desktop:22",
+        "operator-desktop:3389",
+        "operator-desktop:445",
+        "operator-desktop:5985"
+      ]
+    },
+    {
+      "src": "sandbox-c",
+      "accept": ["sandbox-a:8788", "sandbox-b:8788"],
+      "deny": [
+        "sandbox-a:8787",
+        "sandbox-a:22",
+        "sandbox-a:3389",
+        "sandbox-a:445",
+        "sandbox-a:5985",
+        "sandbox-b:8787",
+        "sandbox-b:22",
+        "sandbox-b:3389",
+        "sandbox-b:445",
+        "sandbox-b:5985",
+        "operator-phone:22",
+        "operator-phone:3389",
+        "operator-phone:445",
+        "operator-phone:5985",
+        "operator-desktop:22",
+        "operator-desktop:3389",
+        "operator-desktop:445",
+        "operator-desktop:5985"
+      ]
+    },
+    {
+      "src": "other-device",
+      "deny": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788"]
+    }
+  ]
+}
+```
+
+The first rule lets your phone and desktop reach every sandbox's web port. The second lets each
+sandbox reach its siblings' web port, and lists every sandbox for brevity, so each is also granted
+its own port, which changes nothing it can reach. A policy grants by port, never by path, so it
+cannot narrow a sibling to the summary route. That bound is the broker's peer list.
+
+The console runs the `tests` on every save and refuses a policy whose tests fail. They assert that
+each sandbox reaches its siblings' web port. They assert that it reaches none of their ports 8787
+(the broker's loopback port), 22 (SSH), 3389 (Remote Desktop), 445 (file sharing) or 5985
+(PowerShell remoting), and none of those but 8787 on your phone and desktop. They also assert that
+`other-device` reaches no sandbox's web port. A test names one port at a time, so the tests sample
+the ports that lead to a machine's account rather than prove every other port closed. They catch
+the rules that open everything: the starting rule that lets every device reach every port, and a
+rule that lets your own devices reach each other, by your login or by `autogroup:self`, Tailscale's
+name for all of one login's devices. Since
+every sandbox signs in under your login, such a rule lets each sandbox reach your desktop too.
+Narrow it to the devices you name before you merge, or the save fails.
+
+To undo, remove the fragment's hosts, rules and tests from the policy, clear the two keys on each
+sandbox, and restart its broker.
+
+#### A new sandbox
+
+A new sandbox has its pages, its rail and its sibling admission on first start when it is built
+from the checkout and the installer. That pair is the base image this repository defines. No disk
+image or template exists. In order:
+
+1. Install Tailscale on the new VM and sign it in under a login you will name in `-WebOperators`.
+2. Run the one-command install from the repository root with the web parameters. In
+   `-WebSiblings`, give each sibling the name it was installed with, its `-HostName`, which the
+   installer writes as `CHANNEL_HOST_NAME`, so a sandbox is called one thing on every page. For
+   the first sandbox of the fragment above:
+
+   ```powershell
+   install\Install-All.ps1 -HostName sandbox-a -ChannelId <channel id> -AllowedUserId <your user id> -WebBind tailscale -WebPort 8788 -WebOperators 'you@example.com' -WebDevices 'operator-phone,operator-desktop' -WebSiblings 'sandbox-b=100.100.0.2:8788,sandbox-c=100.100.0.3:8788' -WebSummaryPeers 'sandbox-b,sandbox-c'
+   ```
+
+   The command reuses the fragment's names for brevity. Give `-WebDevices` and `-WebSummaryPeers`
+   the node names the admin console's Machines page lists, which may differ from the aliases.
+   Each parameter writes one key:
+
+   - `-WebBind`, this VM's tailnet address or the word `tailscale`, writes `CHANNEL_WEB_BIND`.
+   - `-WebPort`, the web port, writes `CHANNEL_WEB_PORT` and adds the firewall rule above.
+   - `-WebOperators`, the tailnet logins admitted, writes `CHANNEL_WEB_OPERATORS`.
+   - `-WebDevices`, your phone's and desktop's node names, writes `CHANNEL_WEB_DEVICES`.
+   - `-WebSiblings`, the other sandboxes' names and addresses, writes `CHANNEL_WEB_SIBLINGS`.
+   - `-WebSummaryPeers`, the other sandboxes' node names, writes `CHANNEL_WEB_SUMMARY_PEERS`.
+
+   Keep each list in single quotes, since PowerShell reads an unquoted `a,b` as two values. The
+   installer refuses a port outside 1 to 65535 and any value holding a line break or a NUL
+   character, before it writes anything.
+3. Add the new sandbox's host, rules and tests to the policy fragment above, apply it in the
+   Tailscale admin console, and let its tests pass on save. Add the new sandbox to each sibling's
+   `CHANNEL_WEB_SIBLINGS` and `CHANNEL_WEB_SUMMARY_PEERS` too.
+4. Restart the broker on each sibling whose keys changed. The installer has already restarted the
+   new sandbox's broker with its keys written.
+5. Check the new sandbox's log for the start-up line, which counts one summary peer per sibling,
+   and open any page from your phone. The rail shows one pill per sibling.
 
 ## 3. Install the service
 
@@ -559,12 +786,14 @@ the ACLs from step 2 grant the account that ran it, so a task registered under a
 starts a broker that cannot read its own token file. It also scopes the logon trigger, since an
 unscoped one fires on any account's logon and a second broker cannot bind the port the first holds.
 
-The task starts the broker at system startup, thirty seconds in, and restarts it every minute on
-failure, up to 999 times, with no execution time limit. Starting at boot rather than at logon is what
-keeps a reboot from leaving the relay down until somebody signs in; the delay keeps the broker from
-racing the network stack, since it awaits its Discord login as part of starting and exits when that
-fails. A second trigger at the operator's logon is kept behind it, so a broker that died with its
-restart budget spent comes back without waiting for the next reboot. Running the script again updates the existing task in place rather than
+The task starts the broker at system startup, thirty seconds in, at the operator's logon, and every
+two minutes while the task is not running, with no execution time limit. Starting at boot rather
+than at logon is what keeps a reboot from leaving the relay down until somebody signs in. The delay
+keeps the broker from racing the network stack, since it awaits its Discord login as part of starting
+and exits when that fails. The two-minute trigger is what brings back a broker that exited, for that
+reason or any other. A trigger firing while the broker runs starts nothing, since the task ignores a
+second start while one is running. The task's restart settings, every minute up to 999 times, cover
+the other failure: a task whose script could not be launched at all. Running the script again updates the existing task in place rather than
 creating a second one. It refuses to run unelevated with a message saying so, rather than failing
 with an access error further in.
 

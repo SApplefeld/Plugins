@@ -777,6 +777,9 @@ export function createRegistry(options: RegistryOptions): Registry {
   function apply(intake: HookIntake): SessionRecord | null {
     if (intake.event === "SessionStart") {
       // An unknown process token is the normal case here: SessionStart is the first announce.
+      // It is also the only event that creates a record, whether it was posted to /hook or taken
+      // in from the file the hook spooled while the broker was down (announce-spool.ts): the spool
+      // is that same announcement applied late through this function, under the same checks.
       if (intake.sessionId === null) return null;
       const record = start(intake, intake.sessionId);
       if (record === null) return null;

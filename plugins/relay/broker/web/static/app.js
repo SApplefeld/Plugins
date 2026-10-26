@@ -1,6 +1,6 @@
-// The web surface's pages: one script for all five. Each page names itself in `<body data-page>`,
-// fetches its view from the broker every five seconds and draws it again. The page holds no state the
-// broker does not, apart from which session list is expanded.
+// The web surface's pages: one script for all six. Each page names itself in `<body data-page>`,
+// fetches its view and the siblings reading from the broker every five seconds and draws them again.
+// The page holds no state the broker does not, apart from which session list is expanded.
 //
 // Render rule: every string in a view was written by a session or a person and is hostile to the
 // page. View text goes in through `textContent` or `append` of a string, never as markup, and a link
@@ -230,6 +230,157 @@
     const day = new Date(year, month - 1, date);
     if (day.getFullYear() !== year || day.getMonth() !== month - 1 || day.getDate() !== date) return txt(value);
     return day.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  /**
+   * The Steer composer's state, kept across redraws: whether it is open, the line being typed, whether
+   * a post is out, and the one line the last answer left on the card.
+   */
+  const steer = { open: false, draft: "", sending: false, status: null };
+
+  /** Opens or closes the composer. Closing drops the draft and the status line; opening puts the caret in the line. */
+  function toggleSteer() {
+    steer.open = !steer.open;
+    if (!steer.open) {
+      steer.draft = "";
+      steer.status = null;
+    }
+    redrawNeeds();
+    if (steer.open) {
+      const input = document.getElementById("steer-text");
+      if (input !== null) input.focus();
+    }
+  }
+
+  /**
+   * Posts the typed line as the ledger's next item. One post at a time: the line and Send are disabled
+   * while it is out. On 200 the composer closes and the page reads its view again, so the card draws
+   * the new heading now rather than on the next poll; any other answer, or none, leaves the line in
+   * place with one status line under it naming what the broker said.
+   */
+  async function sendSteer() {
+    if (steer.sending) return;
+    const text = steer.draft.trim();
+    if (text === "") {
+      steer.status = "Type a line first.";
+      redrawNeeds();
+      return;
+    }
+    // Read before the redraw below disables the line, since a disabled line drops the focus it held.
+    const held = document.getElementById("steer-composer") !== null && document.getElementById("steer-composer").contains(document.activeElement);
+    steer.sending = true;
+    steer.status = null;
+    redrawNeeds();
+    let response = null;
+    try {
+      response = await fetch("/web/steer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (error) {
+      steer.status = "The broker could not be reached, so the line is not confirmed.";
+    }
+    steer.sending = false;
+    const sent = response !== null && response.status === 200;
+    if (sent) {
+      steer.open = false;
+      steer.draft = "";
+      steer.status = null;
+    } else if (response !== null) {
+      steer.status = response.status === 400
+        ? "Steer refused the line: keep it to 200 characters, with no tab or line break."
+        : "Steer failed: the broker answered HTTP " + response.status + ".";
+    }
+    redrawNeeds();
+    if (sent) {
+      // The composer is gone with the focus it held, so focus returns to the button that opened it.
+      const button = held ? app.querySelector('[data-focus-key="steer"]') : null;
+      if (button !== null) button.focus();
+      await refreshView();
+    } else if (held) {
+      // The line was kept with the broker's answer under it, so focus returns to it for another try.
+      const input = document.getElementById("steer-text");
+      if (input !== null) input.focus();
+    }
+  }
+
+  /** The one-line composer the Steer button opens: a labelled line, Send, and the status line where there is one. */
+  function steerComposer() {
+    const box = h("div", "steer-composer");
+    box.id = "steer-composer";
+    const row = h("div", "steer-row");
+    const caption = h("label", "sr", "Your direction, one line");
+    caption.htmlFor = "steer-text";
+    const input = h("input", "compose-input");
+    input.type = "text";
+    input.id = "steer-text";
+    // The broker's 400 status enforces the 200 code-point rule; this cap, two code units per code point, only stops runaway typing.
+    input.maxLength = 400;
+    input.autocomplete = "off";
+    input.enterKeyHint = "send";
+    input.placeholder = "One line of direction";
+    input.value = steer.draft;
+    input.disabled = steer.sending;
+    input.dataset.focusKey = "steer-text";
+    input.addEventListener("input", () => {
+      steer.draft = input.value;
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        sendSteer();
+      }
+    });
+    const send = h("button", "send", "Send");
+    send.type = "button";
+    send.disabled = steer.sending;
+    send.dataset.focusKey = "steer-send";
+    send.addEventListener("click", () => sendSteer());
+    row.append(caption, input, send);
+    box.append(row);
+    if (steer.status !== null) {
+      const status = h("div", "meta send-status", steer.status);
+      status.setAttribute("role", "status");
+      box.append(status);
+    }
+    return box;
+  }
+
+  /**
+   * The direction ledger's heading card: the standup page's carries the Steer button and, once it is
+   * tapped, the composer; the repo page's carries who set it. The words are the operator's own and go
+   * in as text. The ledger's date has no time of day, so it is drawn as the month and day `tagDay` draws.
+   */
+  function headingCard(view, onRepo) {
+    const heading = view.heading;
+    if (!isObject(heading)) return null;
+    const card = h("section", "card pad heading-card");
+    card.setAttribute("aria-labelledby", "direction-heading");
+    const head = h("div", "heading-head");
+    const title = label("Heading · " + txt(onRepo ? view.name : view.sandbox));
+    title.id = "direction-heading";
+    head.append(title);
+    const date = txt(heading.date) === "" ? null : tagDay(heading.date);
+    if (onRepo) {
+      if (date !== null) head.append(h("div", "heading-by", "set by you · " + date));
+    } else {
+      const button = h("button", "steer", steer.open ? "Cancel" : "Steer");
+      button.type = "button";
+      button.disabled = steer.sending;
+      button.setAttribute("aria-expanded", steer.open ? "true" : "false");
+      if (steer.open) button.setAttribute("aria-controls", "steer-composer");
+      button.dataset.focusKey = "steer";
+      button.addEventListener("click", toggleSteer);
+      head.append(button);
+    }
+    card.append(head);
+    const words = txt(heading.text);
+    card.append(h("p", "heading-text", words === "" ? "No direction yet." : words));
+    if (!onRepo && date !== null) card.append(h("div", "meta", "your words · " + date));
+    if (!onRepo && steer.open) card.append(steerComposer());
+    return card;
   }
 
   function rolloutHeld(view) {
@@ -576,9 +727,15 @@
     name.append(dot(repo.state === "working" ? "blue" : "hollow"), txt(repo.name));
     row.append(name);
     const turn = parse(repo.worker ? repo.worker.lastTurnAt : null);
-    const meta = h("div", "meta", "queue " + (num(repo.queueDepth) ?? 0) + (turn === null ? "" : " · last turn " + span(now - turn) + " ago"));
+    const step = repo.step && num(repo.step.section) !== null && num(repo.step.sectionCount) !== null ? repo.step : null;
+    const meta = h(
+      "div",
+      "meta",
+      "queue " + (num(repo.queueDepth) ?? 0) + (step === null ? "" : " · section " + step.section + " of " + step.sectionCount) + (turn === null ? "" : " · last turn " + span(now - turn) + " ago"),
+    );
     if (num(repo.unseen) > 0) meta.append(" · ", h("span", "alert", repo.unseen + " unseen"));
     row.append(meta);
+    if (step !== null && txt(step.next) !== "") row.append(h("div", "meta next", "Next: " + step.next));
     return row;
   }
 
@@ -617,6 +774,8 @@
       band.append(rows);
     }
     out.append(band);
+    const headingBand = headingCard(view, false);
+    if (headingBand !== null) out.append(headingBand);
     const rolloutBand = rolloutCard(view);
     if (rolloutBand !== null) out.append(rolloutBand);
 
@@ -717,7 +876,15 @@
     if (num(plan.section) !== null && num(plan.sectionCount) !== null) meta.push("section " + plan.section + " of " + plan.sectionCount);
     const changed = parse(plan.changedAt);
     if (changed !== null) meta.push("changed " + dayClock(changed, now));
-    if (meta.length > 0) body.append(h("div", "meta", meta.join(" · ")));
+    const serves = txt(plan.serves);
+    if (meta.length > 0 || serves !== "") {
+      const line = h("div", "meta", meta.join(" · "));
+      if (serves !== "") {
+        if (meta.length > 0) line.append(" · ");
+        line.append(h("span", serves.toLowerCase() === "none" ? "alert" : null, "serves " + serves));
+      }
+      body.append(line);
+    }
     if (plan.next && !finished) body.append(h("div", "next", "Next: " + plan.next));
     row.append(state, body);
     if (plan.root && plan.path) row.append(chevron());
@@ -747,6 +914,8 @@
 
     const cols = h("div", "repo-cols");
     const left = h("div", "stack");
+    const headingBox = headingCard(view, true);
+    if (headingBox !== null) left.append(headingBox);
     const rolloutBox = rolloutRepoCard(view);
     if (rolloutBox !== null) left.append(rolloutBox);
 
@@ -817,6 +986,33 @@
     return m;
   }
 
+  /** The brief part the page draws in amber and opens below a rule, as the kit names it. */
+  const ASSUMES_LABEL = "It assumes";
+
+  /** One grid of label and text rows; the assumptions label draws in the page's amber. */
+  function briefGrid(parts) {
+    const grid = h("div", "brief-grid");
+    for (const part of parts) {
+      grid.append(h("div", "brief-label" + (part.label === ASSUMES_LABEL ? " assumes" : ""), part.label), h("div", "brief-text", part.text));
+    }
+    return grid;
+  }
+
+  /**
+   * The brief card, or null where the view carries no usable brief. Parts keep file order, and the
+   * ones from `It assumes` on draw below a rule, as the mockup does. Every value is set as text.
+   */
+  function briefCard(brief) {
+    const parts = brief && typeof brief === "object" ? list(brief.parts).filter((part) => part && txt(part.label) !== "" && txt(part.text) !== "") : [];
+    if (parts.length === 0) return null;
+    const card = h("section", "card pad section brief");
+    card.setAttribute("aria-label", "Brief");
+    const split = parts.findIndex((part) => part.label === ASSUMES_LABEL);
+    if (split <= 0) card.append(briefGrid(parts));
+    else card.append(briefGrid(parts.slice(0, split)), h("div", "brief-rule"), briefGrid(parts.slice(split)));
+    return card;
+  }
+
   function renderPlan(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
@@ -832,14 +1028,20 @@
     const chips = h("div", "chips-row");
     chips.append(
       h("span", finished ? "badge green" : "badge blue", txt(view.status) + (sections.length > 0 ? " · section " + chapters.length + " of " + sections.length : "")),
-      h("span", "meta mono", txt(view.path)),
     );
+    const serves = txt(view.serves);
+    if (serves !== "") chips.append(h("span", serves.toLowerCase() === "none" ? "badge serves" : "badge plain serves", "serves " + serves));
+    chips.append(h("span", "meta mono", txt(view.path)));
     top.append(chips);
     out.append(top);
 
-    const goal = h("section", "card pad section");
-    goal.append(label("Goal"), h("p", "goal", view.goal ? view.goal : "This plan has no Goal section."));
-    out.append(goal);
+    const brief = briefCard(view.brief);
+    if (brief !== null) out.append(brief);
+    else {
+      const goal = h("section", "card pad section");
+      goal.append(label("Goal"), h("p", "goal", view.goal ? view.goal : "This plan has no Goal section."));
+      out.append(goal);
+    }
 
     const asks = list(view.openAsks);
     if (asks.length > 0) {
@@ -1140,6 +1342,109 @@
     return box;
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // Sibling sandboxes: the rail on every page and the health page's card
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * The path a sibling pill opens on the sibling, by this page's name: the pages that name no object
+   * of this sandbox open the same page there, and the others open the sibling's standup. The href is
+   * the sibling's origin, from this broker's own configuration, plus one of these fixed paths.
+   */
+  const RAIL_PATHS = { standup: "/", "needs-me": "/needs-me", health: "/health" };
+
+  /**
+   * The one shape an origin may take to be drawn as a link: plain HTTP to a tailnet address and port.
+   * Each of the last two octets is 0 to 255 with no leading zero, as the server's isTailnetAddress reads one.
+   */
+  const SIBLING_ORIGIN = /^http:\/\/100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]):[0-9]{1,5}$/;
+
+  /** The broker's last poll of the siblings, or null before one is read; drawn beside every view. */
+  let siblingsView = null;
+
+  /** The time the siblings reading is read against: the broker's pass time, else the browser's clock. */
+  function siblingsNow(view) {
+    const at = parse(view.asOf);
+    return at === null ? Date.now() : at;
+  }
+
+  /**
+   * `Name · <count>`, `Name · unreachable since <time>`, or `Name · not polled yet` before the
+   * broker's first poll of that sibling settles, as text nodes, with the count's tone.
+   */
+  function siblingWords(pill, sibling, now) {
+    pill.append(txt(sibling.name), " · ");
+    if (isObject(sibling.summary)) {
+      const count = num(sibling.summary.needsYou) ?? 0;
+      pill.append(h("span", "count" + (count > 0 ? " amber" : ""), String(count)));
+      return;
+    }
+    const since = parse(sibling.unreachableSince);
+    pill.append(h("span", "count down", since === null ? "not polled yet" : "unreachable since " + dayClock(since, now)));
+  }
+
+  /**
+   * One pill per sibling after this sandbox's own, or null with no sibling configured. A pill is a
+   * link only where the origin has the one shape the broker builds, and every word on it is the
+   * configured name or a value the broker's parse admitted.
+   */
+  function sandboxRail(view) {
+    if (!isObject(view)) return null;
+    const siblings = list(view.siblings);
+    if (siblings.length === 0) return null;
+    const now = siblingsNow(view);
+    const rail = h("nav", "rail");
+    rail.setAttribute("aria-label", "Sandboxes");
+    rail.append(h("span", "pill active", txt(view.sandbox)));
+    const path = Object.prototype.hasOwnProperty.call(RAIL_PATHS, document.body.dataset.page) ? RAIL_PATHS[document.body.dataset.page] : "";
+    for (const sibling of siblings) {
+      if (!isObject(sibling)) continue;
+      const origin = txt(sibling.origin);
+      const pill = SIBLING_ORIGIN.test(origin) ? link("pill", origin + path, null) : h("span", "pill");
+      siblingWords(pill, sibling, now);
+      rail.append(pill);
+    }
+    return rail;
+  }
+
+  /** The health page's "Other sandboxes" card: every count the summary carries, one row per sibling. */
+  function otherSandboxes(view) {
+    if (!isObject(view)) return null;
+    const siblings = list(view.siblings);
+    if (siblings.length === 0) return null;
+    const now = siblingsNow(view);
+    const box = h("div", "others");
+    box.append(label("Other sandboxes"));
+    const card = h("div", "card");
+    for (const sibling of siblings) {
+      if (!isObject(sibling)) continue;
+      const row = h("div", "row");
+      row.append(h("span", "name", txt(sibling.name)));
+      const words = h("span", "meta");
+      const summary = sibling.summary;
+      if (isObject(summary)) {
+        const expected = num(summary.expected);
+        const reporting = num(summary.reporting);
+        const needs = num(summary.needsYou) ?? 0;
+        words.append(
+          (expected === null || reporting === null ? "no roster yet" : reporting + " of " + expected) +
+            " · " + plural(num(summary.capacity && summary.capacity.accounts) ?? 0, "account", "accounts") + " · ",
+          h("span", needs > 0 ? "alert" : "", needs + " needs you"),
+          " · " + (num(summary.yourHands) ?? 0) + " in your hands",
+        );
+      } else {
+        const since = parse(sibling.unreachableSince);
+        words.append(since === null ? "not polled yet" : "unreachable since " + dayClock(since, now));
+      }
+      row.append(words);
+      card.append(row);
+    }
+    const read = parse(view.asOf);
+    card.append(h("div", "note", "counts only, polled over the tailnet · " + (read === null ? "no poll yet" : "as of " + dayClock(read, now))));
+    box.append(card);
+    return box;
+  }
+
   function renderHealth(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
@@ -1150,7 +1455,11 @@
     top.append(row);
     out.append(top);
     const cols = h("div", "health-cols");
-    cols.append(sessionsSection(view), capacitySection(view, now), handsSection(view, now));
+    const hands = handsSection(view, now);
+    // Under the hands, where the mockup places it: the other sandboxes are the operator's, not a session's.
+    const others = otherSandboxes(siblingsView);
+    if (others !== null) hands.append(others);
+    cols.append(sessionsSection(view), capacitySection(view, now), hands);
     out.append(cols);
     return out;
   }
@@ -2243,6 +2552,9 @@
     // A page that follows its newest content stays at the foot when the reader was there, and starts there.
     const follow = page.follow === true && (lastView === null || window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80);
     const drawn = page.render(view);
+    // The sibling rail sits above every page's own top bar, from the broker's last poll of the siblings.
+    const rail = sandboxRail(siblingsView);
+    if (rail !== null) drawn.prepend(rail);
     // Each link and button carries a key built from its href, counted per repeat, so a redraw puts focus back.
     const seen = new Map();
     for (const control of drawn.querySelectorAll("a[href], button")) {
@@ -2266,10 +2578,10 @@
     return selection !== null && !selection.isCollapsed && selection.containsNode(app, true) ? selection : null;
   }
 
-  /** A line being typed in the composer: a redraw would move the caret to its end mid-word. */
+  /** A line being typed in the talk or the Steer composer: a redraw would move the caret to its end mid-word. */
   function composing() {
     const active = document.activeElement;
-    return active !== null && active.id === "talk-compose" && active.value !== "";
+    return active !== null && (active.id === "talk-compose" || active.id === "steer-text") && active.value !== "";
   }
 
   async function fetchView(url) {
@@ -2348,10 +2660,22 @@
     }
   }
 
+  /**
+   * The siblings reading beside the page's own, once per pass. A failure here is not the page's:
+   * the last reading stays drawn, and the page's own fetch decides what the notice says.
+   */
+  async function fetchSiblings() {
+    try {
+      siblingsView = await fetchView("/web/siblings");
+    } catch (error) {
+      // Kept as it was: a rail that cannot refresh shows the last poll rather than vanishing.
+    }
+  }
+
   async function poll() {
     let failure = null;
     try {
-      const view = await fetchView(page.url());
+      const [view] = await Promise.all([fetchView(page.url()), fetchSiblings()]);
       try {
         const selection = selected();
         let shown = view;

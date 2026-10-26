@@ -78,6 +78,9 @@ export const MAX_INTAKE_NEXT_LENGTH = 400;
 export const MAX_INTAKE_GOAL_LENGTH = 2_000;
 export const MAX_OUTLINE_ENTRIES = 500;
 
+/** The longest `Serves:` value a parse keeps, in code points: one direction item's words, named on a row. */
+export const MAX_INTAKE_SERVES_LENGTH = 120;
+
 /** The parsed contract values of one plan doc, with no knowledge of where the text came from. */
 export type PlanParse = {
   /**
@@ -104,6 +107,14 @@ export type PlanParse = {
    * `PlanParse` built by hand may omit it, which the board card does, since it never draws it.
    */
   goal: string | null;
+  /**
+   * The value of the `Serves:` line, which is the first non-blank line of the `## Intent` block
+   * and nowhere else: `D<n> <the item's words>` or `none`, whitespace-collapsed and held to
+   * `MAX_INTAKE_SERVES_LENGTH`. Null when the doc has no Intent block, the first line is not a
+   * `Serves:` line or its value is empty. Set by `parsePlan` on every parse. A `PlanParse` built by
+   * hand may omit it, which the board card and the queue's stand-in do, since neither draws it.
+   */
+  serves?: string | null;
   /**
    * The `### N.` headings inside the Sections of Work block, each with whether a Chapter registers
    * it as completed under the same three forms `completed` counts. Set by `parsePlan` on every
@@ -240,6 +251,10 @@ const STATUS = /^Status:(.*)$/;
 const SECTIONS_HEADING = /^##\s+Sections of Work\s*$/;
 const CHAPTERS_HEADING = /^##\s+Chapters\s*$/;
 const GOAL_HEADING = /^##\s+Goal\s*$/;
+const INTENT_HEADING = /^##\s+Intent\s*$/;
+// `.` refuses CR, U+2028 and U+2029, the same terminators the patterns above exclude, so a line
+// holding one in its middle is not a Serves line, as it is not a Next line.
+const SERVES = /^Serves:(.*)$/;
 // Written in the same linear form as BLOCK_HEADING below, with the title in group 2 or group 3
 // according to which branch matched. The terminators are escapes, never live characters.
 export const SECTION = /^###\s+(\d+)\.(?:\s([^\r\u2028\u2029]*)|\s*[\r\u2028\u2029]([^\r\u2028\u2029]*))$/;
@@ -426,6 +441,7 @@ export function parsePlan(text: string): PlanParse | null {
         ? null
         : bounded(latest.next, MAX_INTAKE_NEXT_LENGTH),
     goal: goalText(lines),
+    serves: servesValue(lines),
     sectionList: sections.slice(0, MAX_OUTLINE_ENTRIES).map((section) => ({
       number: Number(section.number),
       name: bounded(section.title, MAX_INTAKE_STATUS_LENGTH),
@@ -449,6 +465,21 @@ function goalText(lines: string[]): string | null {
   const text = blockLines(lines, GOAL_HEADING).join("\n").trim();
   if (text === "") return null;
   return [...text.slice(0, MAX_INTAKE_GOAL_LENGTH * 2)].slice(0, MAX_INTAKE_GOAL_LENGTH).join("");
+}
+
+/**
+ * The value of the `Serves:` line that opens the `## Intent` block: the block's first non-blank
+ * line, anchored at its start. A `Serves:` line on any later line, or outside the block, is not
+ * read, because the kit pins the line to the block's first and a looser read would disagree with
+ * the kit about which line counts. Null for no block, another first line, or an empty value.
+ */
+function servesValue(lines: string[]): string | null {
+  const first = blockLines(lines, INTENT_HEADING).find((line) => line.trim() !== "");
+  if (first === undefined) return null;
+  const match = SERVES.exec(first);
+  if (match === null) return null;
+  const value = bounded(match[1], MAX_INTAKE_SERVES_LENGTH);
+  return value === "" ? null : value;
 }
 
 /**

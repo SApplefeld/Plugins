@@ -20,6 +20,14 @@ account fails the install rather than being reported as provisioned.
 Does not register the scheduled task; run Register-BrokerTask.ps1 separately, from an elevated
 session, once this has completed.
 
+The six web keys are each written only when given and non-empty, as the text the broker reads, so a
+run that omits one leaves the value already in the file, and a run that omits all six changes no web
+setting. The port is checked here as a TCP port. The other five are refused only if they hold a line
+break or a NUL, since a line break would write a second key the broker cannot see as part of this
+one. Everything else the broker checks on its own start, and a pattern here that was narrower than
+its parse would refuse a value it accepts. CHANNEL_WEB_TAILSCALE and CHANNEL_WEB_STATIC_ROOT are not
+parameters; they rarely need setting and are edited by hand.
+
 .PARAMETER HostName
 The label this host's sessions carry on every surface. Any name is valid: the launch wrapper does
 not read it, and picks its channel flag from the machine's CHANNEL_LAUNCH_FLAG variable instead.
@@ -102,6 +110,27 @@ that omits this parameter takes the recorded value. Install-All.ps1 forwards the
 was given, and this script resolves the rest. A run that names a different marketplace than the
 recorded one fails rather than overwriting it, since the wrapper would then load a plugin the
 host's allowlist and install never covered.
+
+.PARAMETER WebBind
+The web surface's bind address, written as CHANNEL_WEB_BIND.
+
+.PARAMETER WebPort
+The web surface's TCP port, 1 to 65535, written as CHANNEL_WEB_PORT in plain decimal.
+
+.PARAMETER WebOperators
+The tailnet logins the web surface admits, written as CHANNEL_WEB_OPERATORS.
+
+.PARAMETER WebDevices
+The tailnet node names of the operator's devices the web surface admits, written as
+CHANNEL_WEB_DEVICES.
+
+.PARAMETER WebSummaryPeers
+The sibling sandboxes' tailnet node names, admitted to GET /web/summary alone, written as
+CHANNEL_WEB_SUMMARY_PEERS.
+
+.PARAMETER WebSiblings
+The sibling sandboxes this host polls for the rail, as Name=address:port entries, written as
+CHANNEL_WEB_SIBLINGS.
 #>
 param(
     [Parameter(Mandatory)]
@@ -143,7 +172,26 @@ param(
     [string]$HookOwner,
 
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*\z')]
-    [string]$Marketplace
+    [string]$Marketplace,
+
+    # No line break or NUL: each value is written as one "KEY=value" line of broker.env.
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebBind,
+
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$WebPort,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebOperators,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebDevices,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebSummaryPeers,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$WebSiblings
 )
 
 . (Join-Path $PSScriptRoot 'Install-Functions.ps1')
@@ -170,6 +218,14 @@ if ($SkipAcl -and ($BotToken -or $BotTokenFile)) {
 if (-not $StateRoot) { $StateRoot = Get-ChannelStateRoot }
 if (-not (Test-Path -LiteralPath $StateRoot)) {
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
+}
+# The announce folder, where hooks/session-start.ps1 spools an announcement no broker was listening
+# for and broker/announce-spool.ts reads it back at the session's relay attach. Created here, under
+# the root Protect-ChannelPath hardens below, so it inherits the root's grant from the first install
+# on; the hook creates it too where a root installed earlier lacks it, inheriting the same grant.
+$announceDir = Join-Path $StateRoot 'announce'
+if (-not (Test-Path -LiteralPath $announceDir)) {
+    New-Item -ItemType Directory -Path $announceDir -Force | Out-Null
 }
 
 # The hook owner: -HookOwner where given, else the value the last install recorded, else 'settings'.
@@ -329,7 +385,7 @@ $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if (-not $nodeCommand) {
     throw "Install-Host: no 'node' found on PATH. install/Start-Broker.ps1 needs an absolute path " +
         "pinned at install time, rather than resolving 'node' from PATH itself under " +
-        "-ExecutionPolicy Bypass at every logon."
+        "-ExecutionPolicy Bypass at every start of the task."
 }
 $nodePath = $nodeCommand.Source
 
@@ -356,7 +412,7 @@ if (-not $SkipAcl) {
     # runs at every broker start. This script's last line prints success and an operator acts on it,
     # so a path left open here is an execution surface the whole install reported as closed: hooks/
     # is run under -ExecutionPolicy Bypass at the start of every session on the machine, and
-    # install/ and broker/ are what a scheduled task executes at every logon.
+    # install/ and broker/ are what a scheduled task executes at every start of the task.
     #
     # Every file and subdirectory under each hardened tree, not one file standing in for its tree.
     # Protect-ChannelPath grants a directory an inheritable list, which reaches a child only while
@@ -364,7 +420,7 @@ if (-not $SkipAcl) {
     # entries it carries, gains nothing from the parent's grant, and is exactly what a check of one
     # representative per tree would miss. The files that matter are the ordinary ones, not the
     # representatives, since Start-Broker.ps1 and Install-Functions.ps1 are what the scheduled task
-    # executes at every logon and settings-fragment.json is merged into machine-wide settings.
+    # executes at every start of the task and settings-fragment.json is merged into machine-wide settings.
     #
     # Passed from inside each tree rather than as the tree root. The check reads a path and the
     # directory holding it, so each entry covers its own parent, and every tree root is covered by
@@ -428,7 +484,7 @@ $envValues = [ordered]@{
     CHANNEL_BROKER_LOG_FILE    = (Join-Path $StateRoot 'broker.log')
     CHANNEL_BROKER_STATE       = (Join-Path $StateRoot 'broker-state.json')
     # Pinned rather than left to Start-Broker.ps1 to resolve from PATH under -ExecutionPolicy
-    # Bypass at every logon, where PATH is whatever the triggering logon happened to carry.
+    # Bypass at every start of the task, where PATH is whatever the task's account happened to carry.
     CHANNEL_NODE_EXE           = $nodePath
     # The account Register-BrokerTask.ps1 is told to run the scheduled task as. Recorded here, not
     # only passed at registration time, so a mismatch between the account that installed (and so
@@ -448,6 +504,22 @@ $envValues = [ordered]@{
 # install wrote survives the merge instead of being blanked by a run that only passed the other one.
 foreach ($key in @('CHANNEL_ALLOWED_USER_ID', 'CHANNEL_SENDERS')) {
     if (-not $envValues[$key]) { $envValues.Remove($key) }
+}
+# The web keys follow the same rule from the other side: a parameter that was not given adds no key,
+# so the value already in the file survives the merge.
+# The port is written as the integer's plain decimal text.
+$webPortText = $null
+if ($null -ne $WebPort) { $webPortText = $WebPort.ToString([cultureinfo]::InvariantCulture) }
+$webValues = [ordered]@{
+    CHANNEL_WEB_BIND          = $WebBind
+    CHANNEL_WEB_PORT          = $webPortText
+    CHANNEL_WEB_OPERATORS     = $WebOperators
+    CHANNEL_WEB_DEVICES       = $WebDevices
+    CHANNEL_WEB_SUMMARY_PEERS = $WebSummaryPeers
+    CHANNEL_WEB_SIBLINGS      = $WebSiblings
+}
+foreach ($key in $webValues.Keys) {
+    if ($webValues[$key]) { $envValues[$key] = $webValues[$key] }
 }
 Set-ChannelEnvFile -Path $envFile -Values $envValues
 

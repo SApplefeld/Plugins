@@ -23,7 +23,12 @@ param(
     # The marketplace name the managed-settings allowlist entry is written under. The default is the
     # private marketplace; Install-All.ps1 passes the public one for a host installed from it.
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*\z')]
-    [string]$Marketplace = 'sapplefeld-channels'
+    [string]$Marketplace = 'sapplefeld-channels',
+
+    # The web surface's TCP port, typed as the broker's own $Port is. Given, the inbound rule that
+    # admits it on the Tailscale interface is ensured; absent, no rule is touched.
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$WebPort
 )
 
 . (Join-Path $PSScriptRoot 'Install-Functions.ps1')
@@ -134,8 +139,8 @@ function Install-ChannelProfileBlock {
 Bounces the broker so it runs the code and config this install just wrote.
 
 .DESCRIPTION
-Nothing else restarts a running broker: the scheduled task only fires at boot and at logon, so
-without this a
+Nothing else restarts a running broker: the scheduled task fires at boot, at logon and every two
+minutes, and each of those starts nothing while the task is already running, so without this a
 re-install leaves the old broker serving from memory indefinitely. Stops the task, then clears a
 broker that is still holding the port anyway (one started by hand rather than by the task; only a
 node.exe listener is killed, anything else on the port fails the install for a human to look at),
@@ -189,6 +194,44 @@ function Restart-ChannelBroker {
 
 <#
 .SYNOPSIS
+Ensures the one inbound firewall rule that admits the web surface's port on the Tailscale interface.
+
+.DESCRIPTION
+With no -Port nothing is read or written. With one, the rule named 'Channels web surface' is looked
+up: an existing rule is left exactly as it is, even if it names another port, since the operator
+may have edited it, and a missing one is created for that TCP port on the 'Tailscale' interface
+alias, the rule docs/install.md shows. Only the cmdlet's own "no such rule" answer reads as missing;
+any other failure of the lookup, and any failure of the create, propagates.
+
+The seams exist so a test can drive the three cases without touching this machine's firewall.
+#>
+function Install-ChannelWebFirewallRule {
+    param(
+        [Nullable[int]]$Port,
+        [string]$DisplayName = 'Channels web surface',
+        [scriptblock]$GetRule = {
+            param($Name)
+            try {
+                Get-NetFirewallRule -DisplayName $Name -ErrorAction Stop | Select-Object -First 1
+            } catch {
+                if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') { return $null }
+                throw
+            }
+        },
+        [scriptblock]$NewRule = {
+            param($Name, $LocalPort)
+            New-NetFirewallRule -DisplayName $Name -Direction Inbound -Protocol TCP -LocalPort $LocalPort `
+                -InterfaceAlias 'Tailscale' -Action Allow -ErrorAction Stop | Out-Null
+        }
+    )
+
+    if ($null -eq $Port) { return }
+    if (& $GetRule $DisplayName) { return }
+    & $NewRule $DisplayName $Port
+}
+
+<#
+.SYNOPSIS
 Throws unless this process is elevated. The seam exists so a test can drive both directions.
 #>
 function Assert-ChannelInstallElevated {
@@ -222,6 +265,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     if (Test-Path -LiteralPath (Join-Path $pwshProfileDir 'pwsh.exe')) {
         Install-ChannelProfileBlock -RepoRoot $RepoRoot -ProfilePath (Join-Path $pwshProfileDir 'profile.ps1')
     }
+    Install-ChannelWebFirewallRule -Port $WebPort
     Restart-ChannelBroker
     Write-Host "Managed settings written, cchat launcher installed, broker restarted under the task."
 }
