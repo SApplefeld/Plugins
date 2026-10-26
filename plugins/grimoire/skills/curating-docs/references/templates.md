@@ -11,12 +11,14 @@ Seed a new or retrofitted `docs/` library from these skeletons. Replace `<projec
 
 - **Root (`docs/`)** holds this index and stable solution documents.
 - **`plans/`** holds active plans only. See `plans/README.md`.
-- **`archive/`** holds finished and abandoned plans and backlog snapshots. See `archive/README.md`.
+- **`briefs/`** holds the plan brief of each active plan that has one, named after its plan, and each moves to `archive/briefs/` with its plan.
+- **`archive/`** holds finished and abandoned plans, their briefs and backlog snapshots. See `archive/README.md`.
 
 ## Living documents
 
 - **`backlog.md`** is the living handoff and next-steps doc.
 - **`verification.md`** is the instrument catalog.
+- **`direction.md`**, where it exists, is the operator's direction ledger, in the operator's own words. Sessions read it and never write it.
 
 ## Active plans
 
@@ -52,6 +54,7 @@ Each plan in this folder carries its state in its `Status:` header.
 ## Contents
 
 - **Completed and abandoned plans**.
+- **Plan briefs** (`briefs/`), each moved here with its plan.
 - **Backlog snapshots** (`backlog-YYYY-QN.md`).
 
 ## Rules

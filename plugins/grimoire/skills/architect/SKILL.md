@@ -61,7 +61,7 @@ The seat merges no pull request, and reporting a draft's number to the operator 
 
 ## Report
 
-The seat reports each plan to the coordinator persona and to the operator, naming the branch, the filename and the pull request number. Attaching the plan document over the channel, and the re-send saying the file did not post, are the plan-travel bullet's. The record to the coordinator persona goes once the report has posted and says whether the file posted. Where no channel is attached, that record is the whole report. Answering Records below says why it is never skipped.
+The seat reports each plan to the coordinator persona and to the operator, naming the branch, the filename and the pull request number. It names the direction item the plan serves, or that it serves none, as the plan's `Serves:` line reads. A plan with no `Serves:` line is reported as serving none. Attaching the plan document over the channel, and the re-send saying the file did not post, are the plan-travel bullet's. The record to the coordinator persona goes once the report has posted and says whether the file posted. Where no channel is attached, that record is the whole report. Answering Records below says why it is never skipped.
 
 Before ending a turn with an ask still open, the seat reports where it got to, to the coordinator persona and the operator, naming the branch and what is left. The controller starts a turn on nothing but an active entry. An ask with no entry waits for nothing.
 

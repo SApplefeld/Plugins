@@ -1,5 +1,6 @@
 # Runs one persona's supervisor under the process keeper's exit-code policy. This is the script
-# each AgentPersona-<name> scheduled task launches at boot, under Windows PowerShell 5.1:
+# the fleet supervisor, bin/Start-Fleet.ps1, starts once per enabled roster entry and starts again
+# when it finds no keeper live for the entry, under Windows PowerShell 5.1:
 #
 #   powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File bin\Start-Persona.ps1 -Name <n> [-Roster <path>] [-EnvFile <path>] [-Release]
 #
@@ -16,11 +17,11 @@
 # keeper.hold (present while the persona is held; -Release removes it), keeper.park (present
 # while the persona is parked; a start of a later boot removes it, logs UNPARK and launches, and
 # -Release removes it too) and keeper.boot (the machine's boot time at the moment the policy parked
-# the persona or the supervisor was signalled out; -Release removes it too). The boot task fires
-# again through its retry window, so a start that finds keeper.boot within a minute of the
+# the persona or the supervisor was signalled out; -Release removes it too). The fleet supervisor
+# starts an exited keeper again on its next tick, so a start that finds keeper.boot within a minute of the
 # current boot time logs BOOTED and launches nothing, which leaves a persona stopped by policy this
 # boot down until the next boot or an operator's -Release. A launch, a relaunch and a fault write no
-# keeper.boot, so a repeated fire after a wrapper that was killed finds a supervisor to ADOPT. A hold
+# keeper.boot, so a repeated start after a wrapper that was killed finds a supervisor to ADOPT. A hold
 # marker outranks both: a start that finds a hold logs HOLD, leaves every marker in place and
 # launches nothing. A refusal that happens before the roster has named a run directory goes to
 # keeper-refused.log beside the roster file, the only place known at that point, because a
@@ -29,8 +30,8 @@
 # Exit codes of the wrapper itself: 0 when the policy said hold, park or exit, or when -Release
 # ran, or when a hold marker was already present, or when the boot marker already named this boot
 # (BOOTED); 1 on a fault of the wrapper's own (an unknown flag, a roster or env file that cannot
-# be read, a supervisor that cannot be launched). Task Scheduler's restart-on-failure setting is
-# the backstop for the 1s.
+# be read, a supervisor that cannot be launched). The fleet supervisor's quick-exit backoff is the
+# backstop for the 1s.
 #
 # [CmdletBinding()] is what makes an unknown switch a binding error (exit 1) rather than a value
 # that lands in $args while the body runs anyway.
@@ -131,23 +132,6 @@ function Stop-KeeperWithError {
     Write-KeeperLog "ERROR $Text"
     [Console]::Error.WriteLine("Start-Persona: $Text")
     exit 1
-}
-
-<#
-.SYNOPSIS
-Quotes one argument for a native command line the way CreateProcess parsing expects.
-
-.DESCRIPTION
-A process is started from one command line rather than an argument array, so an argument carrying a
-space (a workdir under a path with spaces) would arrive as two unless it is quoted here. An
-argument with no space, tab or quote is passed as written.
-#>
-function ConvertTo-NativeArgument {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
-    if ($Text.Length -gt 0 -and $Text -notmatch '[\s"]') { return $Text }
-    $escaped = $Text -replace '(\\*)"', '$1$1\"'
-    $escaped = $escaped -replace '(\\+)$', '$1$1'
-    return '"' + $escaped + '"'
 }
 
 <#
@@ -329,7 +313,8 @@ function Invoke-Supervisor {
     Remove-KeeperCaptureLeftovers -OutputPath $OutputPath
     $stdoutPath = "$OutputPath.$script:CaptureId.$Launch.stdout"
     $stderrPath = "$OutputPath.$script:CaptureId.$Launch.stderr"
-    # One command line, each argument quoted the way CreateProcess parsing expects.
+    # One command line, each argument quoted the way CreateProcess parsing expects
+    # (ConvertTo-NativeArgument in bin/keeper-functions.ps1).
     $native = @($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ })
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
@@ -375,8 +360,8 @@ function Invoke-Supervisor {
 Looks for a supervisor already running for this persona and opens a handle to it, or returns nothing.
 
 .DESCRIPTION
-A supervisor outlives the keeper that launched it when that keeper ends first, and the scheduler's
-next start of the task would otherwise launch a second one beside it, which the pre-launch gate
+A supervisor outlives the keeper that launched it when that keeper ends first, and the fleet
+supervisor's next start of the keeper would otherwise launch a second one beside it, which the pre-launch gate
 refuses for as long as the first one lives. The machine's process list is read and handed to
 Find-KeeperLiveSupervisor (bin/keeper-functions.ps1) with the bash and the arguments this wrapper
 would launch with. The match's start time is read off its process record before anything waits on
@@ -660,16 +645,16 @@ if (Test-Path -LiteralPath $holdPath -PathType Leaf) {
     exit 0
 }
 
-# The boot task fires again every few minutes for an hour. The boot marker is written when the policy
+# The fleet supervisor starts an exited keeper again on its next tick. The boot marker is written when the policy
 # parks the persona or the supervisor is signalled out, so a marker holding this boot's time means
-# the persona was stopped on purpose this boot, and the repeated fire leaves that stop alone. The
+# the persona was stopped on purpose this boot, and the repeated start leaves that stop alone. The
 # check sits after the hold check, so a hold outranks it, and before the park check, so the repeated
 # fire leaves a park marker in place. The system's boot time moves by seconds when the clock is
 # stepped after boot, so the two times are the same boot when they are within a minute. A marker that
 # is empty, unreadable or unparseable is another boot. A boot time that cannot be read, or that takes
-# more than 30 seconds to read, launches without reading or writing the marker: a repeated fire that
-# launches is the goal, and a duplicate launch is already stopped by the task's IgnoreNew and by
-# ADOPT. That launch does not protect a park during that fire.
+# more than 30 seconds to read, launches without reading or writing the marker: a repeated start that
+# launches is the goal, and a duplicate launch is already stopped by the fleet supervisor's live-keeper
+# match and by ADOPT. That launch does not protect a park during that fire.
 $bootTime = $null
 try {
     $bootTime = (Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 30 -ErrorAction Stop).LastBootUpTime.ToUniversalTime()
@@ -739,7 +724,7 @@ $supervisorPath = ConvertTo-BashPath (Join-Path $repoRoot 'bin/supervise.sh')
 $arguments = @($supervisorPath) + $invocation.Arguments
 
 # Records that the persona was stopped by policy this boot. A marker that cannot be written is logged
-# and the wrapper still exits 0, as for the park marker: without it a repeated fire launches the
+# and the wrapper still exits 0, as for the park marker: without it a repeated start launches the
 # persona again, which a park or a signal exit must not allow. A boot time never read writes
 # nothing.
 function Write-KeeperBootMarker {
@@ -817,11 +802,9 @@ while ($true) {
             try {
                 [System.IO.File]::WriteAllLines($holdPath, $lines, $script:Utf8NoBom)
             } catch {
-                # Exit 0 even though the marker is missing: the task carries RestartCount 999 at a
-                # one-minute interval, so exiting 1 here would have the scheduler relaunch a persona
-                # the policy just said to stop, within the minute. That restart is for the wrapper
-                # faulting, not for a supervisor that said stop. The ERROR line is the record, and
-                # without the marker the next start launches again.
+                # Exit 0 even though the marker is missing, as for every stop the policy asked for.
+                # The ERROR line is the record, and without the marker the fleet supervisor's next
+                # start launches again.
                 Write-KeeperLog "ERROR hold marker '$holdPath' could not be written: $($_.Exception.Message)"
                 [Console]::Error.WriteLine("Start-Persona: hold marker '$holdPath' could not be written: $($_.Exception.Message)")
             }
@@ -844,7 +827,7 @@ while ($true) {
             exit 0
         }
         'exit' {
-            # A signal exit stays down until the next boot, so a repeated fire of this boot's task
+            # A signal exit stays down until the next boot, so a repeated start later this boot
             # must not bring the persona back.
             Write-KeeperBootMarker
             exit 0

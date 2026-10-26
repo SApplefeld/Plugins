@@ -165,8 +165,22 @@ jev_live_to_csv() {
   printf '%s' "$out"
 }
 
+# --- EMIT_SETTINGS_OWNED_KEYS ---
+# Every plugin option key emit_settings_json can write, whether or not a given
+# launch writes it. A rewrite that carries options over from the file it
+# replaces keeps only the keys outside this list, so an owned key the launch
+# environment leaves unset is dropped rather than kept at a stale value. A key
+# the emitter gains joins this list in the same change;
+# test-personas/settings-plugin-key-test.sh pins the list against the
+# emitter's source and against what it writes with every optional field set.
+EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs heartbeatMs staleAfterMs
+  memoryGateDiscardPercent selfReviewEveryTurns costSummaryEveryNTicks costMaxNudgesPerHour
+  costMaxPluginCallsPerHour costBackoffAfterTicks costBackoffMaxMs jevMode jevLive guards restartRecap
+  persona arming coordinatorPersona architectPersona liaisonPersona fleetRoster supervisorMailbox
+  heartbeatPath supervisorHeartbeatPath)
+
 # --- emit_settings_json ---
-# Usage: emit_settings_json <output-file>
+# Usage: emit_settings_json <output-file> [carry_dev_mode: 0|1]
 # Emits the settings.json JSON for the --settings flag.
 # Carries: controllerTickMs, nudgeIdleMs, nudgeFloorMs, gitProbeMs, heartbeatMs,
 #          staleAfterMs, memoryGateDiscardPercent (default 90),
@@ -183,6 +197,19 @@ jev_live_to_csv() {
 #          way and refused outside that pair); and,
 #          outside the plugin options, the harness's own autoContinue, always
 #          false.
+# The file is written under a temporary name beside <output-file> and renamed
+# into place, as the ensure_settings_* helpers write, so a present file is
+# replaced whole rather than truncated in place, and a refused value leaves it
+# untouched. Where carry_dev_mode is given and <output-file> exists, each
+# plugin option the replaced file holds under the id that mode loads (1 the
+# --plugin-dir id, 0 the installed id, as read_settings_coordinator_persona
+# reads it) and EMIT_SETTINGS_OWNED_KEYS does not name is added to the new
+# file under both ids with its existing value, between the write and the
+# rename. Nothing outside those options carries over. A replaced file that is
+# not JSON, or whose options under that id are not an object, carries nothing,
+# with a WARN line on stderr. One holding no options under that id carries
+# nothing with no line, as does one whose top level, pluginConfigs or entry
+# under that id is not an object.
 # Exports COORDINATOR_PERSONA, ARCHITECT_PERSONA and LIAISON_PERSONA to the
 # values it wrote, so a caller can compare its own persona against the same
 # names without parsing the settings file. This is the emit branch's half of
@@ -190,7 +217,7 @@ jev_live_to_csv() {
 # read_settings_coordinator_persona, read_settings_architect_persona and
 # read_settings_liaison_persona.
 emit_settings_json() {
-  local out="$1"
+  local out="$1" carry_dev_mode="${2:-}"
   local self_review_opts=""
   if [ -n "${SELF_REVIEW_EVERY_TURNS:-}" ]; then
     self_review_opts=",\"selfReviewEveryTurns\":$SELF_REVIEW_EVERY_TURNS"
@@ -435,9 +462,57 @@ emit_settings_json() {
   # sits idle rather than parking until the limit resets, and the supervisor's
   # liveness verdict reads that child alive for as long as the limit is its
   # newest word. Interactive sessions never read this file.
-  cat > "$out" <<EOF
+  local tmp="$out.tmp-$$"
+  if ! cat > "$tmp" <<EOF
 {"autoContinue":false,"pluginConfigs":{"$AGENTIC_PLUGIN_DEV_ID":{"options":$options},"$AGENTIC_PLUGIN_INSTALLED_ID":{"options":$options}}}
 EOF
+  then
+    rm -f "$tmp"
+    echo "ERROR: emit_settings_json: could not write $tmp" >&2
+    return 1
+  fi
+  if [ -n "$carry_dev_mode" ] && [ -f "$out" ]; then
+    local carry_id="$AGENTIC_PLUGIN_INSTALLED_ID"
+    if [ "$carry_dev_mode" = "1" ]; then
+      carry_id="$AGENTIC_PLUGIN_DEV_ID"
+    fi
+    if ! node -e '
+const fs = require("fs");
+const [prev, tmp, id, devId, installedId, ...owned] = process.argv.slice(1);
+const plain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+let opts = null;
+try {
+  const s = JSON.parse(fs.readFileSync(prev, "utf8").replace(/^\uFEFF/, ""));
+  const pc = plain(s) ? s.pluginConfigs : undefined;
+  const entry = plain(pc) ? pc[id] : undefined;
+  if (!plain(entry)) process.exit(0);
+  if (entry.options === undefined) process.exit(0);
+  if (!plain(entry.options)) throw new Error("its " + id + " options are not an object");
+  opts = entry.options;
+} catch (e) {
+  console.error("WARN: emit_settings_json: no plugin option carried over from " + prev + ": " + e.message);
+  process.exit(0);
+}
+const carried = Object.keys(opts).filter((k) => !owned.includes(k));
+if (carried.length === 0) process.exit(0);
+try {
+  const s = JSON.parse(fs.readFileSync(tmp, "utf8"));
+  for (const to of [devId, installedId]) for (const k of carried) s.pluginConfigs[to].options[k] = opts[k];
+  fs.writeFileSync(tmp, JSON.stringify(s) + "\n");
+} catch (e) {
+  console.error("ERROR: emit_settings_json: could not carry plugin options over into " + tmp + ": " + e.message);
+  process.exit(1);
+}
+' "$out" "$tmp" "$carry_id" "$AGENTIC_PLUGIN_DEV_ID" "$AGENTIC_PLUGIN_INSTALLED_ID" "${EMIT_SETTINGS_OWNED_KEYS[@]}"; then
+      rm -f "$tmp"
+      return 1
+    fi
+  fi
+  if ! mv -f "$tmp" "$out"; then
+    rm -f "$tmp"
+    echo "ERROR: emit_settings_json: could not rename $tmp to $out" >&2
+    return 1
+  fi
 }
 
 # --- ensure_settings_plugin_ids ---

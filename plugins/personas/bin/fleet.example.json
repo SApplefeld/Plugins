@@ -40,6 +40,8 @@
     "name": "dev",
     "workdir": "D:/agent_persona",
     "permissionMode": "bypassPermissions",
+    "rundir": "D:/personas/dev/run",
+    "repo": "https://github.com/example/agent_persona.git",
     "model": "opus",
     "coordinatorPersona": "steward",
     "architectPersona": "architect",

@@ -80,8 +80,8 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 - source: plugins/grimoire/skills/prose-register/references/voice-scott.md:10
 - provenance: f8c0649 2026-06-10, the initial import of the skill; reworded at 0918893 2026-06-28 to replace two real first names with "[Name]".
 - verdict: keep
-- reason: The owner of the email exception; contradictions item 2 restated it and retires (A001), so this line is the only carrier.
-- passage: **In an email reply, open with a one-line acknowledgement before the frame-setter.** `"Thanks [Name]!"` is one form.
+- reason: The owner of the email exception; contradictions item 2 restated it and retires (A001), so this line is the only carrier. Repointed on 2026-10-24 by the `E` amendment, which gathers every email rule into the Email section; this line now points there.
+- passage: **An email opens by the Email section instead.**
 
 ### C008
 - key: Keep the email acknowledgement to one line.
@@ -89,8 +89,8 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 - source: plugins/grimoire/skills/prose-register/references/voice-scott.md:10
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
-- reason: No finding. The bound on C007; nothing else states it.
-- passage: **In an email reply, open with a one-line acknowledgement before the frame-setter.**
+- reason: No finding. The bound on C007; nothing else states it. Repointed on 2026-10-24 by the `E` amendment, which gathers every email rule into the Email section; this line now points there.
+- passage: **An email opens by the Email section instead.**
 
 ### C009
 - key: After the opener, deliver context or definition before any verdict.
@@ -492,16 +492,16 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 - provenance: f8c0649 2026-06-10, the initial import of the skill; reworded at 0918893 2026-06-28 to genericize a specimen.
 - verdict: rewrite
 - landed: f02aa85 section 36
-- reason: Absorbs contradictions item 4's bound ("I" runs freely only in a direct one-to-one email; a company deliverable uses it only for subjective framing) and drops two of three quoted specimens. C068's "you" ban is a different pronoun and stays separate. Lands at line 83 (section 36's close) as "Default to "we" (`"We create a new role with restricted permissions."`). Use "I" for subjective framing (`"In my opinion…"`), and freely only in a direct one-to-one email.", one specimen kept per case; contradictions item 4 (C078) is gone.
+- reason: Absorbs contradictions item 4's bound ("I" runs freely only in a direct one-to-one email; a company deliverable uses it only for subjective framing) and drops two of three quoted specimens. C068's "you" ban is a different pronoun and stays separate. Lands at line 83 (section 36's close) as "Default to "we" (`"We create a new role with restricted permissions."`). Use "I" for subjective framing (`"In my opinion…"`), and freely only in a direct one-to-one email.", one specimen kept per case; contradictions item 4 (C078) is gone. Repointed on 2026-10-24 by the `E` amendment, which gathers every email rule into the Email section; this line now points there.
 - proposed: (via A063) Line 87 becomes: default to "we" in technical and proposal writing; use "I" for subjective framing ("In my opinion") and freely only in a direct one-to-one email; then delete contradictions item 4.
 - baseline-test: yes
 - passage: **Default to "we" in technical and proposal writing.**
-- passage: **Use "I" for subjective framing, and freely only in a one-to-one email.**
+- passage: **Use "I" for subjective framing.** An email follows the Email section's pronoun rule.
 
 ### C050
 - key: Close with a restatement of the end state or net result, not a gut punch, a rhetorical question, or a rallying cry.
 - class: rule
-- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:39
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:40
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
 - reason: The owner of the close; line 143 (C082) was a copy and retires, and ai-tells:87 and :141 name Section 7 as the rule they build on.
@@ -511,7 +511,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 ### C051
 - key: Label the final section END RESULT, Aftermath, or Resolution, or let it function as a summary without an explicit header.
 - class: mechanic
-- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:40
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:41
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
 - reason: Stated once here; the recap line's "END RESULT-style" was its copy and retires.
@@ -520,7 +520,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 ### C052
 - key: Structure the close as 2 to 4 short sentences telling the reader what they now have, in past tense or present-indicative, not future-promise.
 - class: mechanic
-- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:39
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:40
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
 - reason: No finding. Stated once.
@@ -529,7 +529,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 ### C053
 - key: Model the close on patterns such as "The ultimate result of this design is that we have..." or "This creates a model where...".
 - class: rationale-example
-- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:39
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:40
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: rewrite
 - landed: f02aa85 section 36
@@ -542,16 +542,16 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 ### C054
 - key: Close an email with an invitation to respond plus a signoff, and place a call to action nowhere else.
 - class: rule
-- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:41
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:42
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
-- reason: No finding. The email close, stated once.
-- passage: **In an email, close with an invitation to respond and a signoff.** A call to action appears nowhere else.
+- reason: No finding. The email close, stated once. Repointed on 2026-10-24 by the `E` amendment, which gathers every email rule into the Email section; this line now points there.
+- passage: **An email closes by the Email section instead.**
 
 ### C055
 - key: Do not write motivational closes.
 - class: rule
-- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:39
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:40
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
 - reason: Line 96 already carries one sentence per prohibition; the proposed compression reworded it without shortening it, which is taste.
@@ -564,8 +564,8 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 - source: plugins/grimoire/skills/prose-register/references/voice-scott.md:35
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
-- reason: As C055; the email-signoff exception stays with it.
-- passage: **No exclamation marks in a document body.** An email signoff may carry one.
+- reason: As C055; the email-signoff exception stays with it. Repointed on 2026-10-24 by the `E` amendment, which gathers every email rule into the Email section; this line now points there.
+- passage: **No exclamation marks in a document body.** An email places them by the Email section.
 - flag: weak-reason
 
 ### C057
@@ -682,8 +682,8 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.SKILL.md`). 
 - source: plugins/grimoire/skills/prose-register/references/voice-scott.md:33
 - provenance: f8c0649 2026-06-10, the initial import of the skill, its rules drawn from samples of the operator's own writing; no incident narrated.
 - verdict: keep
-- reason: No finding. Stated once, with its email carve-out.
-- passage: **No contractions in technical documentation.** Emails may use them.
+- reason: No finding. Stated once, with its email carve-out. Repointed on 2026-10-24 by the `E` amendment, which gathers every email rule into the Email section; this line now points there.
+- passage: **No contractions in technical documentation.** An email follows the Email section.
 
 ### C070
 - key: Pick an Oxford-comma convention and apply it consistently throughout a document.
@@ -1585,7 +1585,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 
 This document is the `prose-register` skill body: the recipe for applying the doctrine's structure bullets and checking them, the scaling that decides how much of the register a piece takes, the routing of a `Voice:` value to its reference, and the pointer at the tells catalog. It owns the moments of writing or reviewing any prose for a reader beyond a single passage and of any piece that names a voice, and it keeps out the rule (the doctrine's), the sentence bars (writing-skills') and the review procedure (the prose-reviewer charter's). Load class: named-trigger, per its description.
 
-Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec_v1.md` (`P` entries below). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `41e70e7b` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags.
+Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec_v1.md` (`P` entries below). Redrafted on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `41e70e7b` with its fix round at `5288cfb5`, so every live entry's `passage:` line quotes the text at `5288cfb5` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 3 on 2026-10-25, which added the Plan Brief section: P001 rewritten to its passage as it now reads, and DB001 to DB004 added under the plan's letters DB for the brief as a projection with its seven parts, its register and bound, its path and the steps that write and refresh it, and the sentence separating it from the other briefs. Its round 1 fix added DB005, for a part whose source is empty, and moved DB002 to DB004 to the line the Plan Brief paragraph now sits on.
 
 ### P001
 - key: Hold the recipe, the scaling, the voice references and the tells catalog in this skill, and keep out the rule, the sentence bars and the review procedure, each owned elsewhere.
@@ -1594,7 +1594,7 @@ Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec
 - provenance: docs/plans/claude-kit_prose-register_spec_v1.md section 2, on the operator's decision of 2026-09-18 recorded in that plan's Approach: the register supersedes the operator's voice skill, its voice rules moving into a reference, its structure rules replaced by the register, and its prohibitions that are machine-prose tells moving into the catalog.
 - verdict: keep
 - reason: The scope statement is a gating definition written against its exclusions, so a sentence that states a rule, a bar or a review step is routable to its owner on sight. Without the exclusions the skill would drift into restating the doctrine, which is the one-owner defect the plan's Approach names.
-- passage: This skill holds the recipe, the scaling, the voice layer and the tells catalog. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
+- passage: This skill holds the recipe, the scaling, the voice layer, the tells catalog and the plan brief. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
 
 ### P002
 - key: Apply the answer-first bullet by moving each unit's arrived-at point to its front, check it by reading first sentences alone, and take the marketing override only from a declaration on the piece, withholding that bullet alone.
@@ -1690,11 +1690,57 @@ Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec
 - reason: The writer's and reviewer's duties toward the catalog, stated in the skill the catalog now sits in. Both duties are voice-independent, which the superseded skill's pointer was not.
 - passage: A writer reads `references/ai-tells.md`, the catalog of machine-written patterns the other rules leave standing, before finishing a draft. A reviewer hunts them by name and quotes the passage, whatever the voice. The catalog states each pattern's licensed form, or points at the licence's owner.
 
+### DB001
+- key: Write a plan brief as a projection of the plan document into seven labelled parts in a fixed order, each a bold label ending in a period and one or two sentences drawn from a named plan section, never as a fresh composition.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:41
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25, the kit half of spec 4 of the standup program in the Channels repository, whose sketch has "every plan carry a seven-line brief" the operator's page shows in place of the plan document; the plan's Intent refuses a brief composed fresh, "because the plan's Intent, Goal and Assumptions already hold five of its seven parts, and a second composition drifts from the first".
+- verdict: keep
+- reason: The brief is read where the plan document cannot be opened, so it must say what the plan says, and a projection with a named source per part is checkable against the plan while a composition is not. The parts are listed with their sources so a writer fills slots rather than summarizes, the positive-recipe form writing-skills gives a wrong-shaped output. The label-and-period shape is the program mockup's, which renders each part as a label with sentences, so the broker's rendering and the file agree. The order ends on `Serves` because the page shows that part as the plan's direction and a plan serving none reads `None.` there, flagged and never blocked.
+- passage: A plan brief is a projection of its plan document into seven labelled parts, never a fresh composition. The plan's Intent, Goal and Assumptions already hold what the brief says, and a second composition drifts from the first. Each part is a bold label ending in a period, then one or two sentences. The parts, in order, with the plan section each is drawn from:
+- passage: - **Serves.** The `Serves:` line, the item's words or `None.`
+
+### DB002
+- key: Open the brief with `# Brief: <plan title>`, write it in the doctrine's client-briefing register addressed to the operator with no `Voice:` layer and every internal identifier resolved, and bound it to about 1,500 bytes by `wc -c`.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:53
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25; the register and the bound are defaults that plan's Assumptions record, the register because the voice layer is for a piece carrying the operator's name and this one is written to the operator, the bound because the program mockup renders each part as a label with sentences rather than seven lines.
+- verdict: keep
+- reason: The reader is the operator on a phone with no session context, which is the client-briefing register's reader, and the doctrine owns that register so the skill names it rather than restating it. No `Voice:` layer because P010's admission keeps voice rules to a piece under the operator's name, and the brief is addressed to the operator, not signed by them. The bound is what fits the page's brief field and a phone screen, and `wc -c` is the same instrument brainstorming's step 9 bounds the Intent record by. The title line gives the broker and a reader one anchor naming the plan.
+- passage: The first line is `# Brief: <plan title>`. The brief takes the doctrine's client-briefing register, addressed to the operator, with no `Voice:` layer, so every internal identifier is resolved to what it does. It is bounded to about 1,500 bytes by `wc -c`, since the operator reads it on a phone in place of the plan document.
+
+### DB003
+- key: Keep the brief at `docs/briefs/<plan stem>.md`, moving to `docs/archive/briefs/` with its plan, written by brainstorming step 9 at plan open and refreshed by finishing-work step 6 from the closed plan.
+- class: mechanic
+- source: plugins/grimoire/skills/prose-register/SKILL.md:53
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25; the folder is a default that plan's Assumptions record, chosen over the sketched `docs/plans/briefs/` because the em-dash write guard exempts every file under `docs/plans/` and the brief is operator-facing.
+- verdict: keep
+- reason: The folder sits outside `docs/plans/` so every plan sweep in the kit and the broker is untouched, the plan-path pattern never admits a brief as a plan, and the em-dash guard and the whole-tree sweep both reach it. The stem ties the brief to its plan by name with no index. The two steps are named here because this section states the artifact and the owning map routes the write and the refresh to those skills, and a writer reading only this section learns when the file is touched. The refresh is finishing-work's because the Chapters and their `Assumptions:` lines change during the run, and that pass is where every record is finalized before the pull request goes ready.
+- passage: It lives at `docs/briefs/<plan stem>.md`, the stem being the plan file's name without `.md`, and moves to `docs/archive/briefs/` with its plan, as `curating-docs` states. `brainstorming` step 9 writes it at plan open, and `finishing-work` step 6 refreshes it from the closed plan.
+
+### DB004
+- key: Treat the decision brief, the dispatch brief and the kaizen brief as artifacts distinct from the plan brief.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:53
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25; the plan's scout sweep searched every existing use of the word brief in the tree and found these three.
+- verdict: keep
+- reason: The kit already uses "brief" for three other things, so a reader meeting the word in a dispatch or a kaizen note would otherwise look here for its form. One sentence naming each by what it is keeps the four apart without this section owning any of the other three.
+- passage: The decision brief, the dispatch brief and the kaizen brief are different artifacts: a question put to the operator, a subagent's instructions and the kaizen skill's note, none of them a plan brief.
+
+### DB005
+- key: Where a brief part's source section is empty or absent, say so in that part's own sentence rather than filling it from another part's source.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/SKILL.md:51
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 round 1 2026-10-25, from a review Minor that the parts name one source each and say nothing where that source holds nothing, as a plan with no `## Assumptions` or a Goal-only Intent does.
+- verdict: keep
+- reason: A writer facing an empty slot borrows from the nearest full one, and the brief then says one thing twice while hiding that the plan never stated the other, which is the gap the operator most needs to see. Saying so in the part keeps every part a projection of its own source and makes the absence visible on the page.
+- passage: A part whose source is empty or absent says so in its own sentence rather than borrowing from another part's source.
+
 ## plugins/grimoire/skills/prose-register/references/voice-scott.md
 
 This document is the operator's voice reference, named by `Voice: scott` on a piece: the opener, the pronouns, the moves inside the reasoning, the header case, the page mechanics and the close, drawn from a half-dozen samples of his own writing, plus a closing section naming the owner of each structure concern the voice once carried. It owns the moment of writing or reviewing a piece in the operator's voice, under an admission of voice rules only. Load class: named-trigger, loaded when a piece carries `Voice: scott`. The entries for its voice rules sit under the superseded `scott-writing-style/SKILL.md` heading above, each carrying its source line in this file; the entries below are the claims this file adds.
 
-Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec_v1.md` (`P` entries below). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `f0069692` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. The `A` entry below is that section's, landing plan items 9 and 10 on heading case.
+Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec_v1.md` (`P` entries below). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `f0069692` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. The `A` entry below is that section's, landing plan items 9 and 10 on heading case. Amended on 2026-10-23 and 2026-10-24 on the operator's channel asks, the `E` entries below. The first folded the edits the operator made to a Claude-drafted client email into the rules they bear on. The second gathered every email rule into an Email section from a pattern analysis of the operator's outbound emails another session made and the operator relayed, and repointed four lines at it. Two items of that analysis were not admitted, since the doctrine owns them: the answer or status in the first sentence, and paragraphs of one to four sentences.
 
 ### P001
 - key: Admit to this reference only a voice rule, meaning what changes with whose name is on the piece, and keep out a structure rule, a sentence rule and a tell whatever voice they are written for.
@@ -1717,7 +1763,7 @@ Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec
 ### P003
 - key: Read the owner of a structure concern from the closing section rather than expecting a rule for it here.
 - class: pointer
-- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:45
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:46
 - provenance: docs/plans/claude-kit_prose-register_spec_v1.md section 2, on the operator's decision of 2026-09-18 recorded in that plan's Approach: the register supersedes the operator's voice skill, its voice rules moving into a reference, its structure rules replaced by the register, and its prohibitions that are machine-prose tells moving into the catalog.
 - verdict: retire
 - reason: row 1091 (Pointer map to other layers) shrinks the section to one sentence. The act is still carried by the landed sentence "Structure, sentence shape and em dashes are not voice rules, so the doctrine's Directness and Register and Style sections and this skill's `SKILL.md` recipe own them.".
@@ -1732,3 +1778,130 @@ Written on 2026-09-22 by section 2 of `docs/plans/claude-kit_prose-register_spec
 - reason: The operator's own rewrite of an internal pull request's headings was Title Case, and their ruling names why: rendered markdown needs no uppercase to mark a heading, while raw text has nothing else to mark one. Repository markdown already carries the `##` marker when read raw, so it takes Title Case and reads one way rendered and raw (plan item 10). It supersedes the case-by-formality rule (C023 and C075 under the retired skill heading above). Case is a display preference secondary to the doctrine heading bullet's naming traits, so a deviation rates Minor at most.
 - passage: **Case follows where the text is read.** Title Case where it displays as formatted markdown, repository markdown included, and ALL CAPS where it is read raw, such as plain text or a code comment no house style skill owns.
 - passage: A heading inside C# or SQL follows that language's house style skill.
+
+
+### E001
+- key: Open an email reply with a one-line thanks to the person, on its own line, no comma after Thanks.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:48
+- provenance: the operator's channel asks of 2026-10-23 and 2026-10-24: the edits the operator made to a Claude-drafted client email, and the pattern analysis of the operator's outbound emails another session made and the operator relayed.
+- verdict: keep
+- reason: Both sources open a reply the same way: the reply acknowledgement of C007 kept, now with the operator's own punctuation. The name is a placeholder because the skill is public.
+- passage: - **Open a reply with a one-line thanks to the person, on its own line.** `"Thanks [Name]!"` is one form, and no comma follows "Thanks".
+
+### E002
+- key: Open a new email thread with a time-of-day greeting to one named person, even where others are copied.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:49
+- provenance: the operator's channel asks of 2026-10-23 and 2026-10-24: the edits the operator made to a Claude-drafted client email, and the pattern analysis of the operator's outbound emails another session made and the operator relayed.
+- verdict: keep
+- reason: The operator greeted the one person addressed where the draft greeted everyone on the thread, and the outbound analysis found the time-of-day form across threads. Warm, one name, placeholder in the skill.
+- passage: - **Open a new thread with a time-of-day greeting to one named person, even where others are copied.** `"Good morning [Name],"` is one form.
+
+### E003
+- key: Say what was checked before giving the finding.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:50
+- provenance: the operator's channel ask of 2026-10-24: a pattern analysis of the operator's outbound emails another session made, relayed on the channel with its proposed Email section.
+- verdict: keep
+- reason: An ordering habit of the operator's replies, distinct from the doctrine's rule that a claim names its evidence: the check comes first, as its own sentence, then the finding.
+- passage: - **Say what was checked before giving the finding.**
+
+### E004
+- key: In an email, "I" is what the operator did, saw or thinks and "we" is what the operator's company does, whatever the number of recipients.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:51
+- provenance: the operator's channel ask of 2026-10-24: a pattern analysis of the operator's outbound emails another session made, relayed on the channel with its proposed Email section.
+- verdict: keep
+- reason: Supersedes the one-to-one carve-out of the older "I" rule, which the analysis found did not hold: the split is by subject, not by recipient count. The company is named by role because the skill is public.
+- passage: - **Use "I" for what the operator did, saw or thinks, and "we" for what the operator's company does or will do, whatever the number of recipients.**
+
+### E005
+- key: Mark one honest uncertainty where it applies, once, with asterisks for emphasis in plain text.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:52
+- provenance: the operator's channel ask of 2026-10-24: a pattern analysis of the operator's outbound emails another session made, relayed on the channel with its proposed Email section.
+- verdict: keep
+- reason: The analysis found one marked uncertainty per email where one existed, never a stack of hedges, which the tells catalog bans whatever the voice.
+- passage: - **Mark one honest uncertainty where it applies, once.** In plain text, emphasis takes asterisks.
+
+### E006
+- key: Credit Claude plainly wherever Claude did work the reader relies on, and set carried Claude text between horizontal rules.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:53
+- provenance: the operator's channel asks of 2026-10-23 and 2026-10-24: the edits the operator made to a Claude-drafted client email, and the pattern analysis of the operator's outbound emails another session made and the operator relayed.
+- verdict: keep
+- reason: The operator opened the client email with a disclosure and fenced the drafted summary between horizontal rules, and the analysis found the credit across emails. Honest accounting that changes with whose name is on the piece, so a draft never drops it.
+- passage: - **Credit Claude plainly wherever Claude did work the reader relies on.** Where Claude's own text is carried, it sits between horizontal rules as a summary it prepared. The credit is honest accounting, so a draft never drops it.
+
+### E007
+- key: Soften the opening line's verb and use no contraction there; elsewhere an email may use contractions.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:54
+- provenance: the operator's channel ask of 2026-10-23: the edits the operator made to a client email Claude drafted, keeping every fact and question and changing only the voice and layout.
+- verdict: keep
+- reason: The operator rewrote "We're adding" as "We are working on adding". The contraction allowance for emails stands, with the opening line as its exception, carried here from Page Mechanics.
+- passage: - **Soften the opening line's verb and use no contraction there.** `"We are working on adding"` over `"We're adding"`. Elsewhere an email may use contractions.
+
+### E008
+- key: Group a long technical email reply under bold Title Case labels with a list beneath each, numbered where the reader will answer by item.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:55
+- provenance: the operator's channel asks of 2026-10-23 and 2026-10-24: the edits the operator made to a Claude-drafted client email, and the pattern analysis of the operator's outbound emails another session made and the operator relayed.
+- verdict: keep
+- reason: The operator replaced sentence-case lines with bold Title Case headings and turned the questions into a numbered list, and the analysis found the labels-with-bullets shape across long replies. A001 sets the case for displayed text; this entry adds the bold, the brevity and which lists are numbered.
+- passage: - **Group a long technical reply under bold Title Case labels, with a list beneath each, after the thanks and the frame.** A list the reader will answer is numbered, so the reader answers by number, and any other list takes bullets.
+
+### E009
+- key: Short lead-ins such as "That said…" and "Full disclosure…" belong to this voice, and an ellipsis may mark the pause.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:56
+- provenance: the operator's channel ask of 2026-10-24: a pattern analysis of the operator's outbound emails another session made, relayed on the channel with its proposed Email section.
+- verdict: keep
+- reason: A recurring opener shape in the operator's replies. It is a voice rule because the kit's own prose takes no such lead-in and no ellipsis.
+- passage: - **Short lead-ins such as `"That said…"` and `"Full disclosure…"` belong to this voice, and an ellipsis may mark the pause.**
+
+### E010
+- key: Close an email with a thanks and a well-wish, a "Let me know if…" line before it only where a reply is needed.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:57
+- provenance: the operator's channel asks of 2026-10-23 and 2026-10-24: the edits the operator made to a Claude-drafted client email, and the pattern analysis of the operator's outbound emails another session made and the operator relayed.
+- verdict: keep
+- reason: The operator replaced a bare name signoff with "Thanks, and have a great day!", and the analysis found the thanks-plus-well-wish close across emails. The invitation-to-respond rule stands, now conditional on a reply being needed.
+- passage: - **Close with a thanks and a well-wish.** `"Thanks again [Name].  Have a great day!"` is one form. A `"Let me know if…"` line comes before it only where a reply is needed, and a call to action appears nowhere else.
+
+### E011
+- key: Exclamation marks go on the greeting, the thanks and the well-wish, never on a technical sentence.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:58
+- provenance: the operator's channel asks of 2026-10-23 and 2026-10-24: the edits the operator made to a Claude-drafted client email, and the pattern analysis of the operator's outbound emails another session made and the operator relayed.
+- verdict: keep
+- reason: The operator's greeting and signoff carry one; the analysis found none on a technical sentence. Widens the older signoff-only allowance and bounds it.
+- passage: - **Exclamation marks go on the greeting, the thanks and the well-wish.** A technical sentence never carries one.
+
+### E012
+- key: Two spaces follow every period in every piece in this voice, a document and an email draft alike.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:36
+- provenance: the operator's channel asks of 2026-10-23 and 2026-10-24: the edits the operator made to a Claude-drafted client email, and the pattern analysis of the operator's outbound emails another session made and the operator relayed; widened from drafts to all documentation in the operator's voice by the operator's channel ruling of 2026-10-25.
+- verdict: keep
+- reason: The operator names it the steadiest habit of their hand. The analysis scoped it to drafts and the operator widened it to every document in their voice, so it sits under Page Mechanics rather than Email. The kit's own prose takes one space, so it is a voice rule.
+- passage: - **Two spaces follow every period.** A document, a repository markdown page and an email draft alike take them, and the kit's own prose takes one.
+
+### E013
+- key: Leave relationship warmth, honorifics and praise, out of a draft for the operator to add by hand.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:59
+- provenance: the operator's channel ask of 2026-10-24: a pattern analysis of the operator's outbound emails another session made, relayed on the channel with its proposed Email section.
+- verdict: keep
+- reason: The analysis found warmth that turns on the relationship, which a drafter cannot judge; leaving it out keeps a draft honest and lets the operator add what the relationship earns.
+- passage: - **Leave relationship warmth out of a draft.** An honorific or praise turns on the relationship, so the operator adds it by hand.
+
+### E014
+- key: Leave out an internal decision the reader never asked about.
+- class: rule
+- source: plugins/grimoire/skills/prose-register/references/voice-scott.md:25
+- provenance: the operator's channel ask of 2026-10-23: the edits the operator made to a client email Claude drafted, keeping every fact and question and changing only the voice and layout.
+- verdict: keep
+- reason: The operator deleted a sentence telling the client what we had decided not to ask of them, since the client had never asked. A general reasoning move, not email-only, so it stays under Reasoning Moves.
+- passage: - **Leave out an internal decision the reader never asked about.** It explains us to a reader who wrote about their own matter.

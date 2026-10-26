@@ -482,18 +482,36 @@ NUDGE_FLOOR_MS="${nudgeFloorMs:-300000}"
 GIT_PROBE_MS="${gitProbeMs:-30000}"
 # The controller tick is emitted for the plugin and is the probe window's
 # fallback below, so it takes the same check the settings the script reads
-# for itself take. The emitter's own rule is skipped whenever the rundir
-# already holds a settings file.
+# for itself take. The emitter's own rule is skipped whenever the provided-file
+# branch below is taken.
 if ! positive_number "$TICK_MS"; then
   echo "ERROR: controllerTickMs '$TICK_MS' is not a whole number of milliseconds greater than zero (digits only, no leading zero, at most 9 digits)" >&2
   exit 1
 fi
 
-# --- Emit settings JSON (only if not already provided) ---
-# A provided file keeps its options, and gains whichever plugin id it lacks,
-# so a rundir written for one load mode still reaches the plugin in the other.
-if [ ! -f "$SETTINGS_FILE" ]; then
-  if ! emit_settings_json "$SETTINGS_FILE" 2>>"$LOG"; then
+# --- Emit settings JSON (from the roster, or only if not already provided) ---
+# A keeper-launched supervisor carries SETTINGS_FROM_ROSTER=1, since its run
+# directory belongs to the roster: the file is written fresh from this
+# launch's environment at every start, replacing any file present, so a roster
+# edit reaches the child at its next start and the provided-file branch below
+# is not taken. The new file keeps each plugin option the replaced file holds
+# under the id this launch loads that the emitter never writes, such as one an
+# operator set by hand, and nothing else from it. Only the exact value 1 is
+# the flag; any other value reads as unset. The flag is unset once read, so
+# neither the child nor any process under it inherits it. Without the flag,
+# the file is written only where none exists, and a provided file keeps its
+# options and gains whichever plugin id it lacks, so a rundir written for one
+# load mode still reaches the plugin in the other and a run directory seeded
+# by hand keeps what it was seeded with.
+SETTINGS_REWRITE=0
+if [ "${SETTINGS_FROM_ROSTER:-}" = "1" ]; then
+  SETTINGS_REWRITE=1
+fi
+unset SETTINGS_FROM_ROSTER
+if [ "$SETTINGS_REWRITE" -eq 1 ] || [ ! -f "$SETTINGS_FILE" ]; then
+  # DEV_MODE names the plugin id whose options a replaced file carries over.
+  # Where no file exists the emitter has nothing to carry.
+  if ! emit_settings_json "$SETTINGS_FILE" "$DEV_MODE" 2>>"$LOG"; then
     echo "ERROR: could not write $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
     exit 1
   fi

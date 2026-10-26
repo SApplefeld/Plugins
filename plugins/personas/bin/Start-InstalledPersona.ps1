@@ -1,46 +1,49 @@
 # Runs one persona's keeper from the installed personas plugin rather than from a repository
-# checkout. This is the script an AgentPersona-<name> task launches when bin/Register-PersonaTasks.ps1
-# was run with -LauncherRoot, under Windows PowerShell 5.1:
+# checkout. This is the script the fleet supervisor starts per enabled roster entry when the
+# AgentFleet task runs bin/Start-InstalledFleet.ps1, which bin/Register-PersonaTasks.ps1 points it
+# at when run with -LauncherRoot, under Windows PowerShell 5.1:
 #
 #   powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File <LauncherRoot>\Start-InstalledPersona.ps1 -Name <n> [-Roster <path>] [-EnvFile <path>]
 #
 # Registration copies this file into the launcher root, a folder outside the plugin folder, the
-# marketplace and the plugin cache, so the task's action names one path that no plugin update
+# marketplace and the plugin cache, so the path the fleet supervisor starts is one no plugin update
 # moves. It copies bin/installed-plugin-functions.ps1 beside it, which this script dot-sources for
-# the record lookup. At each start the script reads the
+# the record lookup and the snapshot. At each start the script reads the
 # installed plugin's record from installed_plugins.json, copies that version's plugin folder into
 # <LauncherRoot>\runtime\<version> unless the snapshot is already there, and runs the snapshot's
 # bin\Start-Persona.ps1 with -Name, -Roster and -EnvFile, exiting with its exit code.
 #
 # The keeper runs from the snapshot rather than from the cache folder for two reasons. The cache
-# folder is named for one version, so a task pointed at it keeps that version after an update. And
-# Claude Code's cache cleanup may remove a folder no longer installed, while bash reads a running
+# folder is named for one version, so a keeper started from it keeps that version after an update.
+# And Claude Code's cache cleanup may remove a folder no longer installed, while bash reads a running
 # supervise.sh from disk as it goes. Nothing removes a snapshot. Each version's snapshot is its own
 # folder, so the supervisor path in the
 # keeper's command line names the version, and a keeper never adopts a supervisor of another one
 # (Open-KeeperLiveSupervisor in bin/Start-Persona.ps1 matches on the full command line).
 #
-# A new plugin version reaches a persona at its task's next start, a reboot included, and never
-# mid-run: the keeper's relaunch loop keeps the supervisor path it started with. Where the task
+# A new plugin version reaches a persona at its keeper's next start, a reboot included, and never
+# mid-run: the keeper's relaunch loop keeps the supervisor path it started with. Where the keeper
 # restarts while an older version's supervisor is still alive, the new supervisor waits at its
 # pre-launch gate, exits 2 on GATE TIMEOUT, and the keeper relaunches it after the base delay
 # (keeper-functions.ps1, the exit-2 row) until the old supervisor has ended. Stop the old one the
 # way the README's stop procedure says to move the persona over at once.
 #
-# Every persona task starts at boot, so several copies of this script can build one snapshot at the
-# same moment. Each copies into a temporary folder of its own and renames it into place. The rename
-# is atomic on one volume, so one copy wins and the others discard theirs and use the winner.
+# The fleet supervisor starts every enabled entry's keeper in one tick, and bin/Start-InstalledFleet.ps1
+# takes its own snapshot under the same runtime root, so several launchers can build one snapshot at
+# the same moment. Install-PluginSnapshot (bin/installed-plugin-functions.ps1) copies into a
+# temporary folder per process and renames it into place, so one copy wins and the others use it.
 #
-# A copy is renamed into place only when it holds every file the keeper and the supervisor need
-# (the $script:RequiredFiles list), so an install folder Claude Code has not finished writing never
-# becomes a version's snapshot. A temporary copy left by a launcher that was killed mid-copy is
-# removed by a later start once it is an hour old, far longer than any copy takes.
+# A copy is renamed into place only when it holds every file the fleet supervisor, the keeper and
+# the supervisor need ($InstalledPluginRequiredFiles in the shared functions file), so an install
+# folder Claude Code has not finished writing never becomes a version's snapshot. A temporary copy
+# left by a launcher that was killed mid-copy is removed by a later start once it is an hour old,
+# far longer than any copy takes.
 #
 # A refusal (a missing shared functions file, an unreadable or missing record, a version that
 # cannot name a folder, an install folder with no keeper in it, an incomplete copy, a copy that
-# fails) is one line in <LauncherRoot>\launcher.log and exit 1, since a scheduled task gives
-# stderr no console. The
-# task's restart-on-failure setting retries a 1 every minute, up to its restart count.
+# fails) is one line in <LauncherRoot>\launcher.log and exit 1, since a keeper the fleet supervisor
+# starts has no console. The fleet supervisor reads an exit inside 60 seconds of the start as a
+# quick exit and starts the keeper again after its backoff delay (bin/Start-Fleet.ps1).
 [CmdletBinding()]
 param(
     # Required. Checked in the body rather than marked Mandatory, for the reason
@@ -59,26 +62,13 @@ param(
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:LogPath = Join-Path $PSScriptRoot 'launcher.log'
 
-# What a copy must hold before it becomes a snapshot: the keeper, its functions, the supervisor,
-# the supervisor's shared helpers and the plugin manifest.
-$script:RequiredFiles = @(
-    'bin\Start-Persona.ps1',
-    'bin\keeper-functions.ps1',
-    'bin\supervise.sh',
-    'bin\agentic-common.sh',
-    '.claude-plugin\plugin.json'
-)
-
-# How old a leftover temporary copy must be before a start removes it.
-$script:StaleTempAge = [TimeSpan]::FromHours(1)
-
 <#
 .SYNOPSIS
 Appends one timestamped line to launcher.log as UTF-8 without a byte-order mark.
 
 .DESCRIPTION
 A failed append goes to stderr, the only other channel the launcher has. The log is not rotated: it
-takes one line per task start, so it grows by a few lines per boot.
+takes one line per keeper start, so it grows by a few lines per boot.
 #>
 function Write-LauncherLog {
     param([Parameter(Mandatory)][string]$Text)
@@ -101,67 +91,6 @@ function Stop-LauncherWithError {
     exit 1
 }
 
-<#
-.SYNOPSIS
-Returns the snapshot folder for one plugin version, copying it from the install folder first where
-it is not there yet.
-
-.DESCRIPTION
-The copy goes to a temporary folder named for this process and is renamed into place, so a reader
-never sees a half-copied snapshot. A rename that loses to another launcher's finds the snapshot
-present, discards its own copy and returns the winner's. A snapshot already present is used as it
-stands, since an install folder is written once per version and never changed afterward.
-#>
-function Install-PluginSnapshot {
-    param(
-        [Parameter(Mandatory)][string]$InstallPath,
-        [Parameter(Mandatory)][string]$Version,
-        [Parameter(Mandatory)][string]$RuntimeRoot
-    )
-    $snapshot = Join-Path $RuntimeRoot $Version
-    if (Test-Path -LiteralPath $snapshot -PathType Container) { return $snapshot }
-    [void][System.IO.Directory]::CreateDirectory($RuntimeRoot)
-    $temp = Join-Path $RuntimeRoot ".$Version.$PID.tmp"
-    try {
-        if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction Stop }
-        Copy-Item -LiteralPath $InstallPath -Destination $temp -Recurse -Force -ErrorAction Stop
-        $missing = @($script:RequiredFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $temp $_) -PathType Leaf) })
-        if ($missing.Count -gt 0) {
-            throw "the install folder is incomplete, missing $($missing -join ', ')"
-        }
-        try {
-            [System.IO.Directory]::Move($temp, $snapshot)
-        } catch {
-            if (-not (Test-Path -LiteralPath $snapshot -PathType Container)) { throw }
-            Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    } catch {
-        Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
-        throw
-    }
-    return $snapshot
-}
-
-<#
-.SYNOPSIS
-Removes temporary copies under the runtime root that are older than $script:StaleTempAge.
-
-.DESCRIPTION
-Only folders named the way Install-PluginSnapshot names its temporary copies are touched, and only
-once they are old enough that no live copy can still be writing them. A removal that fails is left
-for a later start.
-#>
-function Remove-StaleTempCopies {
-    param([Parameter(Mandatory)][string]$RuntimeRoot)
-    if (-not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)) { return }
-    $cutoff = [DateTime]::UtcNow - $script:StaleTempAge
-    foreach ($dir in @(Get-ChildItem -LiteralPath $RuntimeRoot -Directory -Force -ErrorAction SilentlyContinue)) {
-        if ($dir.Name -like '.*.tmp' -and $dir.LastWriteTimeUtc -lt $cutoff) {
-            Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
 if ([string]::IsNullOrWhiteSpace($Name)) {
     Stop-LauncherWithError '-Name is required.'
 }
@@ -171,7 +100,8 @@ if ([string]::IsNullOrWhiteSpace($ConfigDir)) {
 }
 $listPath = Join-Path (Join-Path $ConfigDir 'plugins') 'installed_plugins.json'
 
-# Get-InstalledPluginRecord lives in the shared functions file registration copies beside this one.
+# Get-InstalledPluginRecord, Install-PluginSnapshot and Remove-StaleTempCopies live in the shared
+# functions file registration copies beside this one.
 $sharedFunctions = Join-Path $PSScriptRoot 'installed-plugin-functions.ps1'
 if (-not (Test-Path -LiteralPath $sharedFunctions -PathType Leaf)) {
     Stop-LauncherWithError "$Name`: the shared functions file '$sharedFunctions' is missing; re-run the registration to install it"

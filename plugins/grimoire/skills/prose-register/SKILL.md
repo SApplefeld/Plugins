@@ -5,7 +5,7 @@ description: "The register every piece of prose takes, with its scaling by piece
 
 # Prose Register
 
-This skill holds the recipe, the scaling, the voice layer and the tells catalog. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
+This skill holds the recipe, the scaling, the voice layer, the tells catalog and the plan brief. The rule is the doctrine's, the sentence bars are `writing-skills`' "What a Sentence Must Earn" section, and the review procedure is the `prose-reviewer` charter's.
 
 ## Recipe
 
@@ -35,3 +35,19 @@ The readings are made per piece and again per passage. The voice layer rides on 
 ## Tells Catalog
 
 A writer reads `references/ai-tells.md`, the catalog of machine-written patterns the other rules leave standing, before finishing a draft. A reviewer hunts them by name and quotes the passage, whatever the voice. The catalog states each pattern's licensed form, or points at the licence's owner.
+
+## Plan Brief
+
+A plan brief is a projection of its plan document into seven labelled parts, never a fresh composition. The plan's Intent, Goal and Assumptions already hold what the brief says, and a second composition drifts from the first. Each part is a bold label ending in a period, then one or two sentences. The parts, in order, with the plan section each is drawn from:
+
+- **Why it opened.** The frame in `## Intent`.
+- **The pain.** The constraint the why chain in `## Intent` ends on.
+- **Approach.** The first point of `## Approach`.
+- **Solution.** The `## Goal` paragraph.
+- **Good enough.** What `## Intent` says done does and does not need.
+- **It assumes.** `## Assumptions` and the Chapters' `Assumptions:` lines.
+- **Serves.** The `Serves:` line, the item's words or `None.`
+
+A part whose source is empty or absent says so in its own sentence rather than borrowing from another part's source.
+
+The first line is `# Brief: <plan title>`. The brief takes the doctrine's client-briefing register, addressed to the operator, with no `Voice:` layer, so every internal identifier is resolved to what it does. It is bounded to about 1,500 bytes by `wc -c`, since the operator reads it on a phone in place of the plan document. It lives at `docs/briefs/<plan stem>.md`, the stem being the plan file's name without `.md`, and moves to `docs/archive/briefs/` with its plan, as `curating-docs` states. `brainstorming` step 9 writes it at plan open, and `finishing-work` step 6 refreshes it from the closed plan. The decision brief, the dispatch brief and the kaizen brief are different artifacts: a question put to the operator, a subagent's instructions and the kaizen skill's note, none of them a plan brief.

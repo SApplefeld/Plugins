@@ -1,13 +1,15 @@
 # Pure functions shared by the process keeper's scripts. Dot-sourced by bin/Start-Persona.ps1 (the
-# wrapper the scheduled task runs) and bin/keeper-probe.ps1 (the recorder that measures what a
-# task delivers), so the allowlist, the env file reader, the roster reader, the supervisor
-# invocation builder, the live supervisor match and the exit-code policy each exist once.
+# wrapper the fleet supervisor starts per enabled entry), bin/Start-Fleet.ps1 (the fleet supervisor
+# the scheduled task runs) and bin/keeper-probe.ps1 (the recorder that measures what a task
+# delivers), so the allowlist, the env file reader, the roster readers, the supervisor invocation
+# builder, the native argument quoting, the live supervisor and live keeper matches, the repo URL
+# check, the exit-code policy and the fleet decision each exist once.
 #
 #   . (Join-Path $PSScriptRoot 'keeper-functions.ps1')
 #
 # Nothing here writes a file, sets an environment variable or launches a process. A function that
 # cannot produce its answer throws, and the error names the path it was reading, so the caller
-# logs it and decides what to do. Both callers run under Windows PowerShell 5.1.
+# logs it and decides what to do. Every caller runs under Windows PowerShell 5.1.
 
 # Every environment variable the keeper is willing to take from the env file. Named explicitly so
 # that no key outside this list reaches the process that launches the supervisor. KEEPER_BASH_EXE
@@ -34,6 +36,18 @@ $script:KeeperMaxDelaySeconds = 14400
 $script:KeeperResetUptimeSeconds = 3600
 $script:KeeperExit1HoldCount = 3
 $script:KeeperExit1ShortUptimeSeconds = 60
+
+# The fleet supervisor's constants. A keeper that ends inside the quick-exit uptime on a route no
+# marker explains waits the ladder's value before its next start, and the ladder doubles from the
+# base to the cap on each such exit; a clone of an entry's repository that fails waits and doubles
+# the same ladder, so a bad URL costs one git call per delay. A keeper that lived the keeper's own
+# reset uptime ($script:KeeperResetUptimeSeconds) puts the ladder back at the base. The launcher names are the
+# two scripts a keeper's command line can carry, the checkout's and the installed route's, so a
+# fleet supervisor on either route finds a keeper started on the other.
+$script:FleetBaseDelaySeconds = 60
+$script:FleetMaxDelaySeconds = 1800
+$script:FleetQuickExitSeconds = 60
+$script:FleetKeeperLauncherNames = @('Start-Persona.ps1', 'Start-InstalledPersona.ps1')
 
 <#
 .SYNOPSIS
@@ -221,15 +235,16 @@ memoryGateDiscardPercent, channelLogRetentionDays, journalRetentionDays, coordin
 architectPersona, liaisonPersona, fleetRoster and jevMode become the MODEL, EFFORT, controllerTickMs,
 nudgeFloorMs, nudgeIdleMs, memoryGateDiscardPercent, channelLogRetentionDays, journalRetentionDays,
 COORDINATOR_PERSONA, ARCHITECT_PERSONA, LIAISON_PERSONA, FLEET_ROSTER and JEV_MODE environment
-variables, each present only where the entry carries the field. jevLive is an
-array of question-set ids rather than a scalar, so it does not ride that same field map: a
-non-empty array becomes JEV_LIVE as its members joined with a comma, since the shell halves that
-read JEV_LIVE split on commas, and PowerShell's own [string] cast on an array joins with $OFS
+variables, each present only where the entry carries the field. SETTINGS_FROM_ROSTER is set to 1
+on every invocation, so the supervisor rewrites its settings file from the roster at each start.
+jevLive is an array of question-set ids rather than a scalar, so it does not ride that same field
+map: a non-empty array becomes JEV_LIVE as its members joined with a comma, since the shell halves
+that read JEV_LIVE split on commas, and PowerShell's own [string] cast on an array joins with $OFS
 (a space by default) instead. A jevLive field present and not a JSON array is thrown rather than
 read as empty, naming the roster path, the persona and the field, the same rule Read-KeeperRoster
-holds 'enabled' to. A missing required field, or an args element that is --prompt or
-starts with --prompt=, is a thrown error naming the roster path, because the roster launches every
-persona passive and a prompt is not a thing a boot-time relaunch may carry.
+holds 'enabled' to. A missing required field, or an args element that is --prompt or starts with
+--prompt=, is a thrown error naming the roster path, because the roster launches every persona
+passive and a prompt is not a thing a boot-time relaunch may carry.
 
 Returns a hashtable: Arguments is a string array; Environment is an ordered hashtable.
 #>
@@ -302,7 +317,30 @@ function Build-SupervisorInvocation {
     if ($Entry.jevLive -is [System.Array] -and $Entry.jevLive.Count -gt 0) {
         $environment['JEV_LIVE'] = ($Entry.jevLive | ForEach-Object { [string]$_ }) -join ','
     }
+    # Every keeper-launched supervisor's run directory belongs to the roster,
+    # so bin/supervise.sh is told to write settings.json fresh from this
+    # environment at each start rather than keep a file an earlier start left.
+    $environment['SETTINGS_FROM_ROSTER'] = '1'
     return @{ Arguments = $arguments.ToArray(); Environment = $environment }
+}
+
+<#
+.SYNOPSIS
+Quotes one argument for a native command line the way CreateProcess parsing expects.
+
+.DESCRIPTION
+A process is started from one command line rather than an argument array, so an argument carrying a
+space (a workdir under a path with spaces) would arrive as two unless it is quoted here. An
+argument with no space, tab or quote is passed as written. Every launch in this plugin that builds
+a child's command line quotes through this one function, and Split-KeeperCommandLine below undoes
+exactly what it writes, so a reader of the process list gets each argument back as it was given.
+#>
+function ConvertTo-NativeArgument {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    if ($Text.Length -gt 0 -and $Text -notmatch '[\s"]') { return $Text }
+    $escaped = $Text -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
 }
 
 <#
@@ -314,7 +352,7 @@ A command line is one string that the process which started another wrote, and t
 undo its quoting. The executable is read as CreateProcess reads it: up to the closing quote when it
 opens with one, otherwise up to the first space or tab, with no backslash handling, since a path
 such as "C:\Program Files\Git\bin\bash.exe" carries backslashes that escape nothing. Every later
-token follows the Microsoft C runtime rules that ConvertTo-NativeArgument in bin/Start-Persona.ps1
+token follows the Microsoft C runtime rules that ConvertTo-NativeArgument above
 writes to: a space or tab outside quotes ends a token, a quote toggles quoting, a doubled quote
 inside quotes is one literal quote, 2n backslashes before a quote are n backslashes and the quote
 toggles, 2n+1 backslashes before a quote are n backslashes and a literal quote, and backslashes
@@ -440,6 +478,43 @@ function Find-KeeperLiveSupervisor {
     return $null
 }
 
+# The two shapes a roster repo may take, the same two hooks/roster.ts's HTTPS_REPO_RE and
+# SSH_REPO_RE admit: https://<host>/<path> with no userinfo, port, query or fragment, and
+# git@<host>:<path>. A host is dot-separated labels of letters, digits and hyphens, neither
+# starting nor ending with a hyphen. A path is slash-separated segments of letters, digits,
+# underscore, hyphen and dot, each starting with something other than a dot, so no segment is .
+# or .., with one trailing slash allowed. Anchored with \A and \z rather than ^ and $, since the
+# .NET $ also matches before a trailing newline and the JavaScript $ does not.
+$script:FleetRepoHostPattern = '[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*'
+$script:FleetRepoSegmentPattern = '[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*'
+$script:FleetRepoPathPattern = "$($script:FleetRepoSegmentPattern)(?:/$($script:FleetRepoSegmentPattern))*/?"
+$script:FleetRepoHttpsPattern = "\Ahttps://(?:$($script:FleetRepoHostPattern))/(?:$($script:FleetRepoPathPattern))\z"
+$script:FleetRepoSshPattern = "\Agit@(?:$($script:FleetRepoHostPattern)):(?:$($script:FleetRepoPathPattern))\z"
+
+<#
+.SYNOPSIS
+Judges a roster repo value against the two shapes git may be handed, returning the refusal or nothing.
+
+.DESCRIPTION
+The fleet supervisor runs git clone on the value under the task account, so the value is checked
+here, in the process that runs git, against the same two shapes the roster validator in
+hooks/roster.ts admits: a roster hand-edited past that validator still cannot pass git an option
+such as --upload-pack=x or a local path such as C:/anything. Neither shape can start with a
+hyphen or name a local path. The host is unrestricted beyond its label shape, so a localhost or
+an IP literal passes. The match is case-sensitive, as the validator's is, so the scheme and the
+user are lower case; the host and the path may carry either case.
+
+Returns $null for a value in one of the two shapes, else one line naming the rule, the same
+sentence the validator's refusal carries.
+#>
+function Test-FleetRepoUrl {
+    param([AllowNull()][AllowEmptyString()][string]$Url)
+    $text = [string]$Url
+    $options = [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+    if ([regex]::IsMatch($text, $script:FleetRepoHttpsPattern, $options) -or [regex]::IsMatch($text, $script:FleetRepoSshPattern, $options)) { return $null }
+    return 'must be https://<host>/<path> with no userinfo, port, query or fragment, or git@<host>:<path>'
+}
+
 <#
 .SYNOPSIS
 Reads a KEY=value env file into an ordered hashtable.
@@ -484,4 +559,313 @@ function Read-KeeperEnvFile {
         $result[$key] = $value
     }
     return @{ Values = $result; Duplicates = $duplicates; Unquoted = $unquoted }
+}
+
+<#
+.SYNOPSIS
+Reads the roster file and returns every entry, enabled or not.
+
+.DESCRIPTION
+The fleet supervisor's reader: where Read-KeeperRoster answers for one name, this returns the whole
+array, since the fleet supervisor decides for every entry and for every keeper whose entry is gone.
+The file is read as UTF-8. A file that cannot be read or parsed, and one whose JSON is not an array,
+are each a thrown error naming the roster path, so the caller logs the fault and leaves every live
+keeper alone until the next tick. No entry is validated here: an entry's name, enabled field and
+directories are judged per entry by the caller, so one bad entry costs that entry alone.
+
+Returns an array of entry objects, empty for an empty array.
+#>
+function Read-FleetRoster {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop
+        $parsed = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
+    } catch {
+        throw "roster '$Path' could not be read: $($_.Exception.Message)"
+    }
+    if ($parsed -isnot [System.Array]) {
+        throw "roster '$Path' reads as not an array: write a JSON array of entry objects"
+    }
+    # Windows PowerShell 5.1 returns a JSON array as one object[] rather than enumerating it, so it
+    # is piped through ForEach-Object, which enumerates, before it is wrapped as a list.
+    return , @($parsed | ForEach-Object { $_ })
+}
+
+<#
+.SYNOPSIS
+Returns the text that identifies what a keeper was started on: every field of the entry except enabled.
+
+.DESCRIPTION
+The fields are written as compact JSON in ordinal name order, so two entries carrying the same
+values in another order fingerprint the same. enabled is left out because a flip of it is decided
+as a retire or a start before any fingerprint is compared, so it reads as one action rather than a
+retire followed by a restart on the new values.
+#>
+function Get-FleetEntryFingerprint {
+    param([Parameter(Mandatory)][object]$Entry)
+    $names = @($Entry.PSObject.Properties | ForEach-Object { $_.Name } | Where-Object { $_ -ne 'enabled' })
+    [Array]::Sort($names, [System.StringComparer]::Ordinal)
+    $ordered = [ordered]@{}
+    foreach ($name in $names) { $ordered[$name] = $Entry.$name }
+    return ConvertTo-Json -InputObject $ordered -Compress -Depth 10
+}
+
+<#
+.SYNOPSIS
+Reads the persona name a keeper's command line names, or returns nothing for a line that is no keeper's.
+
+.DESCRIPTION
+A keeper is a process whose command line carries one of LauncherNames as the file name of some
+token, the path as the scheduler or the fleet supervisor wrote it, and a -Name token followed by a
+value. The line is tokenized with Split-KeeperCommandLine, so a quoted path with spaces is one token
+and the value comes back as it was given. The file name is the token's text after its last \ or /,
+compared whole and ignoring case, so a token that merely contains a launcher's name inside a longer
+file name is not it. -Name is compared ignoring case, as PowerShell binds it. A -Name with no value
+after it, or one whose next token opens with a hyphen, names nothing. The fleet supervisor's own
+line carries a launcher path after -KeeperLauncher and no -Name, so it names nothing either. A line
+carrying -Release is the launcher's one-shot marker release, which exits without keeping anything,
+so it names nothing.
+
+Returns the -Name value, or $null.
+#>
+function Get-FleetKeeperName {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CommandLine,
+        [Parameter(Mandatory)][string[]]$LauncherNames
+    )
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $null }
+    $ignoreCase = [System.StringComparison]::OrdinalIgnoreCase
+    $carries = $false
+    foreach ($launcher in $LauncherNames) {
+        if ($CommandLine.IndexOf($launcher, $ignoreCase) -ge 0) { $carries = $true; break }
+    }
+    if (-not $carries) { return $null }
+    $tokens = Split-KeeperCommandLine -CommandLine $CommandLine
+    $launched = $false
+    foreach ($token in $tokens) {
+        $leaf = $token.Substring($token.LastIndexOfAny([char[]]@('\', '/')) + 1)
+        foreach ($launcher in $LauncherNames) {
+            if ([string]::Equals($leaf, $launcher, $ignoreCase)) { $launched = $true; break }
+        }
+        if ($launched) { break }
+    }
+    if (-not $launched) { return $null }
+    foreach ($token in $tokens) {
+        if ([string]::Equals($token, '-Release', $ignoreCase)) { return $null }
+    }
+    for ($k = 0; $k -lt $tokens.Count - 1; $k++) {
+        if ([string]::Equals($tokens[$k], '-Name', $ignoreCase)) {
+            $value = $tokens[$k + 1]
+            if ($value.Length -eq 0 -or $value.StartsWith('-')) { return $null }
+            return $value
+        }
+    }
+    return $null
+}
+
+<#
+.SYNOPSIS
+Finds the live keeper for one persona in a list of process records, or returns nothing.
+
+.DESCRIPTION
+Processes is a list of records carrying ProcessId, ParentProcessId and CommandLine, the shape
+Get-CimInstance Win32_Process returns; a record with no command line is skipped. A record matches
+when Get-FleetKeeperName reads Name off its command line, compared whole and ignoring case as the
+roster lookup compares, so alpha never matches alpha2. Find-KeeperLiveSupervisor is not reused here
+because it compares the three tokens after the executable, and a keeper's line opens with the
+PowerShell switches before the script path.
+
+Among the matches, the record returned is the first whose parent is not itself a match, so a
+keeper started through a shell wrapper yields the outer process.
+
+Returns the matching record, or $null.
+#>
+function Find-FleetLiveKeeper {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Processes,
+        [Parameter(Mandatory)][string[]]$LauncherNames,
+        [Parameter(Mandatory)][string]$Name
+    )
+    $matched = New-Object System.Collections.Generic.List[object]
+    foreach ($record in $Processes) {
+        if ($null -eq $record) { continue }
+        $found = Get-FleetKeeperName -CommandLine ([string]$record.CommandLine) -LauncherNames $LauncherNames
+        if ($null -ne $found -and [string]::Equals($found, $Name, [System.StringComparison]::OrdinalIgnoreCase)) { $matched.Add($record) }
+    }
+    $matchedIds = @($matched | ForEach-Object { [string]$_.ProcessId })
+    foreach ($record in $matched) {
+        if ($matchedIds -notcontains [string]$record.ParentProcessId) { return $record }
+    }
+    return $null
+}
+
+<#
+.SYNOPSIS
+Decides what the fleet supervisor does for one persona this tick, from the roster, the state record, the live keeper and the markers.
+
+.DESCRIPTION
+Present and Enabled are the roster's reading of the entry; Fingerprint is Get-FleetEntryFingerprint
+of the entry where present. Record is the entry's fleet-state.json record or $null, read for its
+action, pid, fingerprint, nextDelaySeconds, notBefore and retireRequestedAt. LiveProcessId is the
+live keeper's id or $null. HoldPresent, RetiredPresent, RequestPresent and BootCurrent say whether
+the run directory holds keeper.hold, the fleet supervisor's own fleet.retired sidecar, a
+shutdown.request, and a keeper.boot naming the current boot. UptimeSeconds is how long the keeper
+the record names lived where it has exited, and -1 where no such keeper is known.
+
+The rows, in the order they are tried. A live keeper the record is already retiring is left alone
+until RetireBoundSeconds have passed since the request, which is recorded once as retire-timeout
+and then left alone again; an entry absent or disabled with any other live keeper is retired, and
+a live keeper the record does not name is adopted, clearing a sidecar no shutdown.request is still
+in flight beside; a live keeper whose entry's fingerprint differs from the one it started on is
+retired, so the next ticks restart it on the new values. With no
+live keeper: a retire in flight has completed, which is retired; an entry not wanted is retired
+with nothing written where its record says otherwise, and is otherwise nothing; a run directory
+holding the sidecar is released and started, since the fleet supervisor wrote that sidecar when
+it asked the keeper to stop; a hold with no sidecar, the keeper's own policy hold or the operator's,
+is held; a boot marker
+naming this boot is parked; a keeper that exited inside the quick-exit uptime waits the ladder's
+delay and doubles it up to the cap, one that lived the reset uptime puts the ladder back at the
+base, and any other exit starts at once; a backoff, or a clone-failed, whose time has not come
+is nothing; and everything else starts. A clone-failed record is the fleet supervisor's own, written
+where an entry's repository could not be cloned before its first start, and it waits out its
+notBefore as a backoff does, carrying the same ladder. held, parked and retired are recorded once,
+so a second tick in the same state is nothing. Only the sidecar and the request count with a live
+keeper, since a live keeper is the truth about the rest of its own run directory.
+
+Returns a hashtable: Action is one of none, start, adopted, retire, retire-timeout, retired, held,
+parked and backoff; Reason is one line of text fit for the log; Release says a start removes
+shutdown.request, keeper.hold and fleet.retired first; ClearRetired says an adoption removes a
+stale sidecar; DelaySeconds is a backoff's wait; NextDelaySeconds is the ladder value to carry,
+which a start after a failed clone reads as the delay the next failure waits.
+#>
+function Get-FleetDecision {
+    param(
+        [Parameter(Mandatory)][bool]$Present,
+        [Parameter(Mandatory)][bool]$Enabled,
+        [AllowNull()][AllowEmptyString()][string]$Fingerprint,
+        [AllowNull()][object]$Record,
+        [AllowNull()][object]$LiveProcessId,
+        [Parameter(Mandatory)][bool]$HoldPresent,
+        [Parameter(Mandatory)][bool]$RetiredPresent,
+        [Parameter(Mandatory)][bool]$RequestPresent,
+        [Parameter(Mandatory)][bool]$BootCurrent,
+        [Parameter(Mandatory)][int]$UptimeSeconds,
+        [Parameter(Mandatory)][DateTime]$Now,
+        [Parameter(Mandatory)][int]$RetireBoundSeconds
+    )
+    $wanted = $Present -and $Enabled
+    $ladder = $script:FleetBaseDelaySeconds
+    $recordAction = ''
+    $recordPid = -1
+    $recordFingerprint = $null
+    if ($null -ne $Record) {
+        $recordAction = [string]$Record.action
+        if ($null -ne $Record.pid -and [string]$Record.pid -ne '') { $recordPid = [int]$Record.pid }
+        if ($null -ne $Record.nextDelaySeconds -and [string]$Record.nextDelaySeconds -ne '') { $ladder = [int]$Record.nextDelaySeconds }
+        if ($null -ne $Record.fingerprint) { $recordFingerprint = [string]$Record.fingerprint }
+    }
+    if ($ladder -lt $script:FleetBaseDelaySeconds) { $ladder = $script:FleetBaseDelaySeconds }
+    $retireInFlight = $recordAction -eq 'retiring' -or $recordAction -eq 'retire-timeout'
+    $notWantedReason = if (-not $Present) { 'the entry has left the roster' } else { 'the entry reads enabled false' }
+    $result = @{ Action = 'none'; Reason = ''; Release = $false; ClearRetired = $false; DelaySeconds = 0; NextDelaySeconds = $ladder }
+
+    if ($null -ne $LiveProcessId) {
+        $samePid = $recordPid -eq [int]$LiveProcessId
+        if ($retireInFlight -and $samePid) {
+            if ($recordAction -eq 'retiring') {
+                $requested = ConvertTo-FleetUtcTime $Record.retireRequestedAt
+                if ($null -ne $requested -and ($Now - $requested).TotalSeconds -ge $RetireBoundSeconds) {
+                    $result.Action = 'retire-timeout'
+                    $result.Reason = "still live $RetireBoundSeconds s after the shutdown request, left alone until it exits"
+                }
+            }
+            return $result
+        }
+        if (-not $wanted) {
+            $result.Action = 'retire'; $result.Reason = $notWantedReason
+            return $result
+        }
+        if (-not $samePid) {
+            $result.Action = 'adopted'; $result.ClearRetired = $RetiredPresent -and -not $RequestPresent
+            $result.Reason = 'a live keeper the state did not name'
+            return $result
+        }
+        if ($Fingerprint -ne $recordFingerprint) {
+            $result.Action = 'retire'; $result.Reason = 'the entry changed since its keeper started'
+            return $result
+        }
+        return $result
+    }
+
+    if ($retireInFlight) {
+        $result.Action = 'retired'; $result.Reason = 'the keeper exited after the shutdown request'
+        return $result
+    }
+    if (-not $wanted) {
+        if ($null -ne $Record -and $recordAction -ne 'retired') {
+            $result.Action = 'retired'; $result.Reason = "$notWantedReason and no keeper is live, nothing written"
+        }
+        return $result
+    }
+    if ($RetiredPresent) {
+        $result.Action = 'start'; $result.Release = $true
+        $result.Reason = 'released: fleet.retired marks the hold as this fleet supervisor''s own'
+        return $result
+    }
+    if ($HoldPresent) {
+        if ($recordAction -ne 'held') { $result.Action = 'held'; $result.Reason = 'keeper.hold with no fleet.retired beside it, the keeper''s own policy hold or the operator''s' }
+        return $result
+    }
+    if ($BootCurrent) {
+        if ($recordAction -ne 'parked') { $result.Action = 'parked'; $result.Reason = 'keeper.boot names the current boot' }
+        return $result
+    }
+    if ($recordAction -eq 'started' -or $recordAction -eq 'adopted') {
+        if ($UptimeSeconds -ge 0 -and $UptimeSeconds -lt $script:FleetQuickExitSeconds) {
+            $next = $ladder * 2
+            if ($next -gt $script:FleetMaxDelaySeconds) { $next = $script:FleetMaxDelaySeconds }
+            $result.Action = 'backoff'; $result.DelaySeconds = $ladder; $result.NextDelaySeconds = $next
+            $result.Reason = "the keeper exited after $UptimeSeconds s on no marker, next start in $ladder s"
+            return $result
+        }
+        $result.Action = 'start'
+        if ($UptimeSeconds -ge $script:KeeperResetUptimeSeconds) {
+            $result.NextDelaySeconds = $script:FleetBaseDelaySeconds
+            $result.Reason = "the keeper exited after $UptimeSeconds s, ladder reset"
+        } else {
+            $result.Reason = "the keeper exited after $UptimeSeconds s"
+        }
+        return $result
+    }
+    if ($recordAction -eq 'backoff' -or $recordAction -eq 'clone-failed') {
+        $notBefore = ConvertTo-FleetUtcTime $Record.notBefore
+        if ($null -ne $notBefore -and $Now -lt $notBefore) { return $result }
+        $result.Action = 'start'
+        $result.Reason = if ($recordAction -eq 'backoff') { 'the backoff delay has passed' } else { 'the clone retry delay has passed' }
+        return $result
+    }
+    $result.Action = 'start'
+    $result.Reason = if ($null -eq $Record) { 'no keeper is live and no state record names one' } else { "no keeper is live after $recordAction" }
+    return $result
+}
+
+<#
+.SYNOPSIS
+Reads a time the fleet state carries as UTC, or returns nothing for an absent or unreadable one.
+
+.DESCRIPTION
+The state file writes every time as an ISO 8601 round-trip string, and ConvertFrom-Json under
+Windows PowerShell 5.1 hands such a string back as a local DateTime, so a value may arrive as
+either. A string is parsed with the invariant culture keeping its offset, and both forms are
+returned as UTC.
+#>
+function ConvertTo-FleetUtcTime {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [DateTime]) { return $Value.ToUniversalTime() }
+    $parsed = [DateTime]::MinValue
+    if ([DateTime]::TryParse([string]$Value, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$parsed)) {
+        return $parsed.ToUniversalTime()
+    }
+    return $null
 }

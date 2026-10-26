@@ -47,6 +47,7 @@ import { isPlanEntry, planLeftOpenText, planStatusText, reactivateAskedEntry } f
 import type { recognitionAsk as recognitionAskFromModule, settleRecognitionOutcomes as settleRecognitionOutcomesFromModule } from "./recall";
 import { memqGetsOf, memqTouchesOf } from "./recall-text";
 import { shellCommandOf } from "./recognition";
+import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validateRosterEntry, writeRoster } from "./roster";
 import type { addGoalEntry as addGoalEntryFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, promoteOpenRecord as promoteOpenRecordFromModule } from "./records";
 import { skillPickTool } from "./skill-pick";
 import { GOAL_HISTORY_FILENAME, parsePersonaStore, stateNotLoadedText } from "./store-files";
@@ -2321,6 +2322,210 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return refuse(`the request file '${requestPath}' could not be written: ${boundedText(safeErrorText(err))}`);
     }
     return { result: `Interrupt requested for '${shown}': where its supervisor is running, it relays the request to the child's holder at its next poll, and the holder relays the interrupt to the child at its own next poll, up to about 12 seconds after this call at the plugin's default poll intervals. The turn ends keeping the conversation. Where no turn begun at or before this call is running, the supervisor records the request served without relaying it instead. A message sent with agentic_say afterwards arrives as that persona's next prompt.` };
+  }
+
+  // Serve fleet_add (the coordinator adds a persona to the roster). The
+  // ground is fleet_restart's, the coordinator ground alone, and it fences
+  // the tool and not the file for the reason that handler's comment gives.
+  // The refusals are a closed set, checked in this order, and each one
+  // writes nothing: the ground, the setting, the roster read, a name an
+  // entry already carries, the caller's own persona, the entry's own fields
+  // through validateRosterEntry, and for an entry carrying repo, the
+  // repository an enabled entry already carries, a working directory that
+  // exists and cannot be listed as a directory or is a directory with
+  // anything in it, and a run directory that is missing or inside the
+  // working directory. The entries already in the roster are read for the
+  // cross-entry rules and never re-validated, so a legacy entry a hand edit
+  // left loose blocks no add. The write is
+  // writeRoster's backup and then the roster, and a failure there is a
+  // refusal after the fact that says whether the backup was written.
+  if ((e as any).tool === "mcp__personas__fleet_add") {
+    const now = Date.now();
+    // The entry's fields are the call's arguments: the tool takes no key of
+    // its own beyond the roster field list.
+    const input = toolCallInputOf(e);
+    const refuse = (why: string) => {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `fleet_add refused: ${why}` };
+    };
+    const entries = await readAllEntries(commonsStore());
+    const ground = deliveryGroundIn(liveClaimsOf(entries, sess.staleAfterMs, now), coordinatorPersona, sess.mySessionId, coordinatorPersona, { persona: architectPersona, records: [] });
+    if (!("ground" in ground) || ground.ground !== COORDINATOR_GROUND) {
+      const standing = "ground" in ground ? `the ground '${ground.ground}'` : "no ground on that persona at all";
+      return refuse(`only the session holding the '${coordinatorPersona}' persona may add a persona to the roster, and this session holds ${standing}.`);
+    }
+    if (fleetRoster === "") {
+      return refuse("the plugin's fleetRoster setting names no roster file, so there is no roster to add to.");
+    }
+    // The text is read once, and writeRoster writes this same text as the
+    // backup, so the backup holds the roster these checks ran over.
+    let currentText: string;
+    let roster: unknown;
+    try {
+      currentText = String(await host().readFile(fleetRoster));
+      roster = JSON.parse(stripBom(currentText));
+    } catch (err) {
+      return refuse(`the roster '${fleetRoster}' could not be read or parsed: ${boundedText(safeErrorText(err))}`);
+    }
+    if (!Array.isArray(roster)) {
+      return refuse(`the roster '${fleetRoster}' does not hold a JSON array of persona entries.`);
+    }
+    const existing = roster as unknown[];
+    // The two name checks read the name as given, ahead of the field rules,
+    // so a name that is not a string reaches validateRosterEntry's refusal.
+    // Those two refusals echo the name bracket-safed and bounded. The
+    // validator's refusal is echoed bounded and not bracket-safed, so an
+    // unknown key's name reaches the caller as given. The own-persona compare
+    // takes rosterNameTaken's ASCII case fold.
+    const givenName = typeof input.name === "string" ? input.name : null;
+    const shown = givenName === null ? "" : boundedText(bracketSafeText(givenName));
+    if (givenName !== null && rosterNameTaken(existing, givenName)) {
+      return refuse(`the roster '${fleetRoster}' already carries an entry named '${shown}', enabled or not, compared ignoring letter case as the task registration reads names.`);
+    }
+    if (givenName !== null && asciiLower(givenName) === asciiLower(sess.persona)) {
+      return refuse(`'${shown}' is this session's own persona.`);
+    }
+    const validated = validateRosterEntry(input, fleetRoster, existing);
+    if (!validated.ok) {
+      return refuse(`the entry breaks a roster rule: ${boundedText(validated.refusal)}.`);
+    }
+    const entry = validated.entry;
+    // Every value echoed from here on has passed the validator's text rule,
+    // so it carries no control character and no double quote. The glob rule
+    // refuses only `*`, `?` and `[`, so a `]` passes, and model, which that
+    // rule skips, keeps its `[..]` suffix. The success result echoes
+    // JSON.stringify(entry) with no bracket-safing.
+    if (entry.repo !== undefined) {
+      if (rosterRepoTaken(existing, entry.repo)) {
+        return refuse(`an enabled entry in the roster already carries the repository '${entry.repo}', and the fleet runs one worker per repository.`);
+      }
+      // A path that exists is refused where its listing rejects or answers
+      // anything but an array, since it then cannot be listed as a
+      // directory, and where its listing names anything at all.
+      let present: boolean;
+      try {
+        present = await host().fileExists(entry.workdir);
+      } catch {
+        return refuse(`the workdir '${entry.workdir}' could not be checked, and the workdir of an entry carrying repo must be absent or an empty directory.`);
+      }
+      if (present) {
+        let listed: unknown;
+        try {
+          listed = await host().listDir(entry.workdir);
+        } catch {
+          listed = null;
+        }
+        if (!Array.isArray(listed)) {
+          return refuse(`the workdir '${entry.workdir}' exists and cannot be listed as a directory, and the workdir of an entry carrying repo must be absent or an empty directory.`);
+        }
+        if (listed.length > 0) {
+          return refuse(`the workdir '${entry.workdir}' is a directory that is not empty, and the workdir of an entry carrying repo must be absent or an empty directory.`);
+        }
+      }
+      // The run directory would otherwise default to <workdir>/run, inside
+      // the repository's working tree.
+      if (entry.rundir === undefined) {
+        return refuse("an entry carrying repo must name a rundir outside its workdir, and this one names none.");
+      }
+      if (rosterPathWithin(entry.rundir, entry.workdir)) {
+        return refuse(`the rundir '${entry.rundir}' is inside the workdir '${entry.workdir}', and an entry carrying repo keeps its run directory outside the repository's working tree.`);
+      }
+    }
+    const written = await writeRoster(host(), fleetRoster, [...existing, entry], currentText);
+    if (!written.ok) {
+      return refuse(`${boundedText(written.problem)}.`);
+    }
+    return { result: `Added '${entry.name}' to the roster '${fleetRoster}', with the roster's previous text in '${written.backupPath}'. The entry as written: ${JSON.stringify(entry)}. Where a fleet supervisor runs, it starts the persona within one tick, though for an entry carrying repo that tick first clones the repository, which can take up to the supervisor's clone limit, 30 minutes by default; where none runs, nothing starts until one does.` };
+  }
+
+  // Serve fleet_retire (the coordinator takes a persona out of service). The
+  // ground is fleet_restart's, the roster is parsed as readRosterFile parses
+  // it from a text read once and handed to writeRoster as the backup, and
+  // the entry is found the way fleet_restart finds it, the first whose
+  // trimmed name is the argument exactly. The refusals are a closed set,
+  // checked in this order, and each one writes nothing: the ground, the
+  // setting, the roster read, no such entry, an entry not enabled, the
+  // caller's own persona, and a persona another enabled entry names in a
+  // role field. The write is the whole array through writeRoster with that
+  // one entry's enabled set to false in place, every other key and entry
+  // carried through as parsed. The reason goes into the result alone, since
+  // the roster carries no reason field.
+  if ((e as any).tool === "mcp__personas__fleet_retire") {
+    const now = Date.now();
+    const target = String((e as any).persona || "").trim();
+    const reason = String((e as any).reason || "").trim().slice(0, FLEET_RESTART_REASON_MAX);
+    const shown = boundedText(bracketSafeText(target));
+    const refuse = (why: string) => {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `fleet_retire refused: ${why}` };
+    };
+    const entries = await readAllEntries(commonsStore());
+    const ground = deliveryGroundIn(liveClaimsOf(entries, sess.staleAfterMs, now), coordinatorPersona, sess.mySessionId, coordinatorPersona, { persona: architectPersona, records: [] });
+    if (!("ground" in ground) || ground.ground !== COORDINATOR_GROUND) {
+      const standing = "ground" in ground ? `the ground '${ground.ground}'` : "no ground on that persona at all";
+      return refuse(`only the session holding the '${coordinatorPersona}' persona may retire a persona, and this session holds ${standing}.`);
+    }
+    if (fleetRoster === "") {
+      return refuse("the plugin's fleetRoster setting names no roster file, so there is no persona to retire.");
+    }
+    let currentText: string;
+    let roster: unknown;
+    try {
+      currentText = String(await host().readFile(fleetRoster));
+      roster = JSON.parse(stripBom(currentText));
+    } catch (err) {
+      return refuse(`the roster '${fleetRoster}' could not be read or parsed: ${boundedText(safeErrorText(err))}`);
+    }
+    if (!Array.isArray(roster)) {
+      return refuse(`the roster '${fleetRoster}' does not hold a JSON array of persona entries.`);
+    }
+    const existing = roster as unknown[];
+    const entry = existing.find((candidate) => {
+      const name = ((candidate ?? {}) as RosterEntry).name;
+      return typeof name === "string" && name.trim() === target;
+    }) as RosterEntry | undefined;
+    if (entry === undefined) {
+      return refuse(`the roster '${fleetRoster}' carries no entry named '${shown}'.`);
+    }
+    if (entry.enabled !== true) {
+      return refuse(`the roster entry for '${shown}' is not enabled, so there is nothing to retire.`);
+    }
+    // The own-persona compare takes rosterNameTaken's ASCII case fold.
+    if (asciiLower(target) === asciiLower(sess.persona)) {
+      return refuse(`'${shown}' is this session's own persona, whose lever is supervisor_shutdown.`);
+    }
+    // Each role field is read the way the keeper hands it to the launch.
+    // Build-SupervisorInvocation (bin/keeper-functions.ps1:300-301) skips a
+    // value that is null or whitespace-only and passes any other value as
+    // its string, untrimmed. bin/agentic-common.sh emit_settings_json then
+    // reads an unset COORDINATOR_PERSONA as coordinator (:336), so a blank
+    // coordinatorPersona names coordinator here. architectPersona and
+    // liaisonPersona take no default there, so a blank one names no persona.
+    // The shell compares the role names with `=`, exact and case-sensitive,
+    // so the compare here is too.
+    for (const other of existing) {
+      if (other === entry || typeof other !== "object" || other === null) continue;
+      const fields = other as Record<string, unknown>;
+      if (fields.enabled !== true) continue;
+      for (const field of ["coordinatorPersona", "architectPersona", "liaisonPersona"]) {
+        const value = fields[field];
+        const blank = value === null || value === undefined || String(value).trim() === "";
+        const omitted = blank && field === "coordinatorPersona";
+        if (blank && !omitted) continue;
+        const named = omitted ? "coordinator" : String(value);
+        if (named !== target) continue;
+        const otherName = typeof fields.name === "string" ? boundedText(bracketSafeText(fields.name)) : "(no name)";
+        const how = omitted ? " by leaving the field out or blank, which the launch reads as 'coordinator'" : "";
+        return refuse(`the enabled entry '${otherName}' names '${shown}' as its ${field}${how}, so retiring it would leave that entry naming a seat no enabled persona holds.`);
+      }
+    }
+    const updated = existing.map((candidate) => (candidate === entry ? { ...(candidate as Record<string, unknown>), enabled: false } : candidate));
+    const written = await writeRoster(host(), fleetRoster, updated, currentText);
+    if (!written.ok) {
+      return refuse(`${boundedText(written.problem)}.`);
+    }
+    const because = reason === "" ? "" : ` The reason given: ${bracketSafeText(reason)}.`;
+    return { result: `Retired '${shown}': its entry in the roster '${fleetRoster}' now reads enabled false, with the roster's previous text in '${written.backupPath}'. Where a fleet supervisor runs, it takes the persona down within one tick plus the supervisor's patient-stop cap. The entry stays in the roster disabled, so fleet_status keeps its row, and this tool touches no run directory, store or goal tree.${because}` };
   }
 
   // Section 12: serve agentic_resolve (the owner marks a record's work

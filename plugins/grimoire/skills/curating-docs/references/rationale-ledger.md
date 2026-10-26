@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's rulebook for keeping a project's `docs/` folder a curated library rather than an attic of finished plans. It owns four moments: archiving a plan that has reached Complete or abandoned (the close path), registering and cross-referencing a newly written plan (the create path), pruning and age-checking `docs/backlog.md`, and retrofitting an existing `docs/` tree into the three-zone taxonomy. It also owns the frozen v1 plan-doc header contract, stating the exact line shapes and value rules an external parser reads, and the placement rules for the `## Intent`, `## Assumptions` and `## Dispatch Authorization` headings. Its load class is `named-trigger`: its own description says to use it during finishing-work when a plan reaches Complete, when a new plan is written that should be indexed, or when someone asks to tidy, retrofit, or reorganize a project's `docs/` folder.
 
-Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 and F002 added under the plan's letter F for the catalog seed and the `Verify:` line's contract standing. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C015, C022, C027 and C030 rewritten to their passages as they now read, and C032 given a second passage for its blocker-set sentence. They point `docs-curator` at the finishing-work step that dispatches it, the session-start block at its hook and the blocker set at its file, register a new plan in both indexes the close path refreshes, and cut the knob sentence's alignment clause to pay. Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 6 on 2026-10-19: the skill entries C018 and C022 retired with the close path's index step and the create path's list sentence, and the template entries C015 and C028 rewritten to the pointer sentences that replace the seeded plan lists. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which widened the trace to the architect seat's authorship and routed a gap the plan leaves by the doctrine's intake bullet: J002 and J004 rewritten to their passages as they now read. Its fix round 1 on the same day repointed C032's second passage at the blocker-set member as it now reads. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the create path's Failure by Area seed, and C056 rewritten to its passage as it now reads.
+Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C066 to C068 below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `27f3d471` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C064 rewritten to its passage as it now reads, and the reasons of C032 and C037 reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the kit-goal ledger's C029, C030, C031 and C038 moved with the section's definition). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 and F002 added under the plan's letter F for the catalog seed and the `Verify:` line's contract standing. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C015, C022, C027 and C030 rewritten to their passages as they now read, and C032 given a second passage for its blocker-set sentence. They point `docs-curator` at the finishing-work step that dispatches it, the session-start block at its hook and the blocker set at its file, register a new plan in both indexes the close path refreshes, and cut the knob sentence's alignment clause to pay. Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 6 on 2026-10-19: the skill entries C018 and C022 retired with the close path's index step and the create path's list sentence, and the template entries C015 and C028 rewritten to the pointer sentences that replace the seeded plan lists. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which widened the trace to the architect seat's authorship and routed a gap the plan leaves by the doctrine's intake bullet: J002 and J004 rewritten to their passages as they now read. Its fix round 1 on the same day repointed C032's second passage at the blocker-set member as it now reads. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the create path's Failure by Area seed, and C056 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 1 on 2026-10-24: DB001 added under the plan's letters DB for the taxonomy's direction ledger row and the intro sentence that names it. Amended by that plan's section 3 on 2026-10-25, which added the plan brief's folder: C004, C010 and DB001 rewritten to their passages as they now read, and DB002 to DB004 added under the same letters for the taxonomy's `docs/briefs/` row, the close path's brief move and the create path's brief check. Its round 1 fix made the brief move conditional on a brief existing and create the archive's `briefs/` folder first: C010 and DB003 rewritten to their passages as they now read.
 
 ### C001
 - key: Treat a plan as finished only once it is archived, the backlog is pruned, and related plans link each other.
@@ -47,11 +47,11 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 ### C004
 - key: Put finished and abandoned plans with Chapters intact and dated backlog snapshots in `docs/archive/`, and treat it as immutable history.
 - class: rule
-- source: plugins/grimoire/skills/curating-docs/SKILL.md:18
-- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's taxonomy.
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:19
+- provenance: b49a47b 2026-06-19, the docs-lifecycle plan's taxonomy. Amended by docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25, which names the archived briefs under `briefs/` among what the archive holds.
 - verdict: keep
-- reason: Immutability is the property the archived-plan carve-out (C016) and the no-edit rule (C060) rest on, and it is what settled the create-path contention (C023) in the archive's favour. Nothing mechanical guards the archive.
-- passage: | `docs/archive/` | Finished and abandoned plans (Chapters intact) and dated backlog snapshots | Immutable history; nothing here is live |
+- reason: Immutability is the property the archived-plan carve-out (C016) and the no-edit rule (C060) rest on, and it is what settled the create-path contention (C023) in the archive's favour. Nothing mechanical guards the archive. An archived brief is history as its plan is, which is why the em-dash sweep in `test/em-dash-sweep.test.js` leaves `docs/archive/briefs/` unwalked.
+- passage: | `docs/archive/` | Finished and abandoned plans (Chapters intact), their briefs under `briefs/`, and dated backlog snapshots | Immutable history; nothing here is live |
 
 ### C005
 - key: Keep `docs/backlog.md` to active items only, moving completed items out to a dated snapshot as they finish.
@@ -109,11 +109,11 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 ### C010
 - key: Move the plan with `git mv docs/plans/<file> docs/archive/<file>` in a git-tracked repo, or a plain move otherwise.
 - class: mechanic
-- source: plugins/grimoire/skills/curating-docs/SKILL.md:30
-- provenance: b49a47b 2026-06-19 (the docs-lifecycle plan's "git mv, history preserved"), reworded by aeffbb2 2026-08-09.
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:28
+- provenance: b49a47b 2026-06-19 (the docs-lifecycle plan's "git mv, history preserved"), reworded by aeffbb2 2026-08-09. Amended by docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25, which moves the plan's brief in the same step (DB003).
 - verdict: keep
 - reason: The owner's mechanic with its non-git fallback; finishing-work and the templates skeleton restate the `git mv` only. A kaizen note of 2026-09-04 records a project whose archive is nested (`docs/archive/plans/`), which the flat path here does not describe; that is a gap for the rewrite plan to weigh, not a reason to drop the step.
-- passage: Move the file with `git mv docs/plans/<file> docs/archive/<file>`, or a plain move outside git. The Chapters travel untouched.
+- passage: Move the file with `git mv docs/plans/<file> docs/archive/<file>`, and its brief, where one exists, with `git mv docs/briefs/<file> docs/archive/briefs/<file>`, creating `docs/archive/briefs/` first where it is missing, since `git mv` creates no folder. Outside git, move them plainly. A plan written before briefs existed may have none to move. The Chapters travel untouched.
 
 ### C011
 - key: Re-run `git add` on the moved file whenever it carries unstaged edits, so the finalized content is what commits.
@@ -782,11 +782,49 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - reason: Rows are each repository's own, so no skill can carry them, and the create path is the one step that runs when a spec is written. Seeding by the areas the spec touches grows the table where a reviewer will next read it, rather than all at once.
 - passage: Seed the Failure by Area table, and a row per top-level area the spec's Files in scope touch, where either is missing.
 
+### DB001
+- key: List `docs/direction.md` in the taxonomy as the operator's direction ledger for the repository, operator-owned, read by sessions and never written by them.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:20
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 1 2026-10-24, the kit half of spec 4 of the standup program in the Channels repository.
+- verdict: keep
+- reason: The role skill owns the ledger's line shape and writer rule (its DB001 and DB002), and the taxonomy names the repository form so a curation pass meeting `docs/direction.md` knows it is the operator's file rather than a stray root document to tidy or archive. The intro sentence names it beside the backlog because both are living root files outside the three zones.
+- passage: | `docs/direction.md` | The operator's direction ledger for this repository, in the operator's own words, in the line shape the role skill's coordinator-directory contract states | Operator-owned: sessions read it and never write it |
+- passage: Three zones, each with one job, plus the briefs folder, the living backlog and the operator's direction ledger.
+
+### DB002
+- key: List `docs/briefs/` in the taxonomy as the plan brief of each active plan that has one, named `<plan stem>.md` after its plan in the prose-register skill's Plan Brief form, moving to `docs/archive/briefs/` with its plan at the close path.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:18
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25, the kit half of spec 4 of the standup program in the Channels repository; the folder is a default that plan's Assumptions record, chosen over the sketched `docs/plans/briefs/` because the em-dash write guard exempts every file under `docs/plans/` and the brief is operator-facing.
+- verdict: keep
+- reason: The taxonomy is where a curation pass learns what each folder holds and when a file leaves it, so a brief meeting a tidy or retrofit pass is read as its plan's companion rather than as a stray. The row names the brief's form by pointer because prose-register owns it (its DB001 to DB004), and names the move because the brief's lifecycle is its plan's: it exists while the plan is active and archives with it. The intro sentence names the folder beside the backlog and the ledger because it sits outside the three zones.
+- passage: | `docs/briefs/` | The plan brief of each active plan that has one, named `<plan stem>.md` after its plan, in the form the `prose-register` skill's Plan Brief section states. A plan written before briefs gains one at its finishing pass | Moves to `docs/archive/briefs/` with its plan at the close path |
+
+### DB003
+- key: At the close path's move step, move the plan's brief, where one exists, with `git mv docs/briefs/<file> docs/archive/briefs/<file>` beside the plan's own move, creating `docs/archive/briefs/` first where it is missing, and re-add each moved file that carries unstaged edits.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:28
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25.
+- verdict: keep
+- reason: The brief shares its plan's file name, so the same step with the same verb moves it, and a brief left behind would show on the operator's page as an active plan after its plan archived. finishing-work's step 6 refreshes the brief just before this path runs (its DB001), so the moved brief is the refreshed one, and the re-add sentence covers it as it covers the plan, since `git mv` stages the index content and not the worktree. The move is conditional on the brief because the plans already open when briefs began carry none, and an unconditional `git mv` would fail closing or abandoning one. The folder is created first because `git mv` renames and never creates a missing destination folder, and `docs/archive/briefs/` exists nowhere until the first brief arrives.
+- passage: and its brief, where one exists, with `git mv docs/briefs/<file> docs/archive/briefs/<file>`, creating `docs/archive/briefs/` first where it is missing, since `git mv` creates no folder. Outside git, move them plainly. A plan written before briefs existed may have none to move.
+- passage: Then `git add` each moved file again if it carries unstaged edits.
+
+### DB004
+- key: At the create path's first step, check that `docs/briefs/<plan stem>.md` exists for the new plan, and send a plan with none back to brainstorming step 9 before the path continues.
+- class: rule
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:39
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25.
+- verdict: keep
+- reason: The create path is the one step that runs when a spec is written and before executing-work takes it, so it is where a missing brief is cheapest to catch: the design conversation is still in the window and the author who wrote the Intent can project it. The check is the first step because the later steps seed and cross-reference files the brief does not depend on, and a plan with no brief should not reach them as if complete. The form is pointed at rather than restated, since prose-register owns it and brainstorming's DB005 owns the write.
+- passage: Check that `docs/briefs/<plan stem>.md` exists for the new plan, the brief `brainstorming` step 9 writes in the form the `prose-register` skill's Plan Brief section states. A plan with no brief goes back to that step before the path continues.
+
 ## plugins/grimoire/skills/curating-docs/references/templates.md
 
 This document is a set of copy-ready skeletons for a project's `docs/` library: the index README, the active-plans README, the archive README, the living backlog, and the dated quarterly backlog snapshot. It owns the moment when a session seeds a new `docs/` library or retrofits an existing one, deciding what files exist, what headings and placeholder text each carries, where a plan or a backlog item lives at each point in its life, and how each is named. It also fixes the naming shapes (`<project>_<content-type>_v<n>.md`, `backlog-YYYY-QN.md`), the dated backlog item form, and the archive-on-close rule that the skeletons state to their own readers. A session loads it as a `plan-run` reference: it carries no frontmatter and no statement of when it loads, but its content is only usable at the specific act of creating or reorganizing the docs tree, which sits inside a plan run, so it is read immediately before that act rather than at session start.
 
-Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templates.md`). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `2bef94c9` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 to F003 added under the plan's letter F for the catalog's index line and skeleton. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the Failure by Area table.
+Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templates.md`). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `2bef94c9` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 to F003 added under the plan's letter F for the catalog's index line and skeleton. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the Failure by Area table. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 1 on 2026-10-24: DB001 added under the plan's letters DB for the index template's direction ledger line. Amended by that plan's section 3 on 2026-10-25, which added the plan brief's folder: C010 rewritten to its passage as it now reads, and DB002 and DB003 added under the same letters for the index template's `briefs/` line and the archive template's plan briefs line.
 
 ### C001
 - key: Build a new or retrofitted `docs/` library from the skeletons in this document.
@@ -880,8 +918,8 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templat
 - source: plugins/grimoire/skills/curating-docs/references/templates.md:18
 - provenance: b49a47b 2026-06-19.
 - verdict: keep
-- reason: as C008: shipped index text whose reader has no kit on the shelf. Its relation to C032 and C037 is one rule and, in two other generated files, the move that satisfies it and the act that violates it.
-- passage: - **`archive/`** holds finished and abandoned plans and backlog snapshots.
+- reason: as C008: shipped index text whose reader has no kit on the shelf. Its relation to C032 and C037 is one rule and, in two other generated files, the move that satisfies it and the act that violates it. Amended by docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25 to name the archived briefs, since the seeded index says what the folder holds and a brief archives with its plan (the SKILL.md heading's DB003).
+- passage: - **`archive/`** holds finished and abandoned plans, their briefs and backlog snapshots.
 
 ### C011
 - key: Read `archive/README.md` for the archive folder's own rules.
@@ -1293,3 +1331,30 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.references.templat
 - verdict: keep
 - reason: The instrument table says how one check fails, and a reviewer reading a diff asks how the area it touches fails, which in this kit is often silent: a plugin absent with the engine still answering, a suite at exit 0 with no summary. The table lives in the catalog rather than a second file, since the catalog already answers what failure looks like here. Skip names context a reviewer need not read, never a changed file, since a skip read as a pass would turn review off on the files a diff changed. Area names path prefixes, so a dispatch can match a changed file against it.
 - passage: | Area | What failure looks like here | What sees it | Skip |
+
+### DB001
+- key: List `direction.md` among the index template's living documents, where it exists, as the operator's direction ledger that sessions read and never write.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/references/templates.md:20
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 1 2026-10-24, the kit half of spec 4 of the standup program in the Channels repository.
+- verdict: keep
+- reason: The seeded index names every living root document, and the ledger is one wherever the operator keeps it. "Where it exists" keeps the seed from implying a file the operator has not written.
+- passage: - **`direction.md`**, where it exists, is the operator's direction ledger, in the operator's own words. Sessions read it and never write it.
+
+### DB002
+- key: List `briefs/` in the index template's folder map as the plan brief of each active plan that has one, named after its plan and moving to `archive/briefs/` with it.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/references/templates.md:14
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25, the kit half of spec 4 of the standup program in the Channels repository.
+- verdict: keep
+- reason: The seeded index is the folder map a reader with no kit on the shelf opens (C008), so a folder the taxonomy adds (the SKILL.md heading's DB002) appears here or the seeded tree hides it. The line names the plan-name tie and the move, which are the two facts a reader of the index needs, and leaves the brief's form to the skill that owns it.
+- passage: - **`briefs/`** holds the plan brief of each active plan that has one, named after its plan, and each moves to `archive/briefs/` with its plan.
+
+### DB003
+- key: List plan briefs under `briefs/` in the archive template's Contents, each moved there with its plan.
+- class: mechanic
+- source: plugins/grimoire/skills/curating-docs/references/templates.md:57
+- provenance: docs/plans/claude-kit_direction-and-brief_spec_v1.md section 3 2026-10-25.
+- verdict: keep
+- reason: A contents section that omits a kind of file the folder holds is not a contents section (C032), and the close path moves a brief into `archive/briefs/` with every archived plan (the SKILL.md heading's DB003). The line says the brief arrives with its plan, so a reader does not take a lone brief as live.
+- passage: - **Plan briefs** (`briefs/`), each moved here with its plan.

@@ -1,19 +1,35 @@
-# The installed-plugin pieces both launchers and both registration scripts share. Each of the four
-# dot-sources this file from its own folder:
+# The installed-plugin pieces the three launchers and both registration scripts share. Each of the
+# five dot-sources this file from its own folder:
 #
 #   . "$PSScriptRoot\installed-plugin-functions.ps1"
 #
 # bin/Register-PersonaTasks.ps1 and bin/Register-OrphanSweepTask.ps1 read it from the plugin's bin
-# folder, and with -LauncherRoot each copies it into the launcher root beside its launcher, where
-# bin/Start-InstalledPersona.ps1 and bin/Start-InstalledOrphanSweep.ps1 read it at every task start.
-# It is written to Windows PowerShell 5.1, since every task action runs the System32 powershell.exe.
-# It defines a variable and a function and runs nothing else.
+# folder, and with -LauncherRoot each copies it into the launcher root beside its launchers, where
+# bin/Start-InstalledFleet.ps1, bin/Start-InstalledPersona.ps1 and bin/Start-InstalledOrphanSweep.ps1
+# read it at every start. It is written to Windows PowerShell 5.1, since every task action runs the
+# System32 powershell.exe. It defines variables and functions and runs nothing else.
 
 # The folders a plugin update replaces, written once: a plugins\marketplaces or plugins\cache
 # segment pair under either separator, matched in a path that carries a segment after it, so a
 # folder whose name merely starts with marketplaces or cache is no match. The registration scripts
 # test the paths a task action would name against it.
 $PluginInstallFolderPattern = '(?i)[\\/]plugins[\\/](marketplaces|cache)[\\/]'
+
+# What a copy must hold before it becomes a snapshot: the fleet supervisor, the keeper, their
+# functions, the supervisor, the supervisor's shared helpers and the plugin manifest. The fleet
+# launcher and the persona launcher build their snapshots under one runtime root, one folder per
+# version, so a copy either of them makes must hold what both run from it.
+$InstalledPluginRequiredFiles = @(
+    'bin\Start-Fleet.ps1',
+    'bin\Start-Persona.ps1',
+    'bin\keeper-functions.ps1',
+    'bin\supervise.sh',
+    'bin\agentic-common.sh',
+    '.claude-plugin\plugin.json'
+)
+
+# How old a leftover temporary copy must be before a start removes it.
+$InstalledPluginStaleTempAge = [TimeSpan]::FromHours(1)
 
 <#
 .SYNOPSIS
@@ -23,7 +39,7 @@ Returns the install path and version installed_plugins.json records for one plug
 The file maps each plugin id to an array of install records, one per scope. The user-scope record
 is taken where there is one, since that is the scope a fleet machine installs the plugin at, and the
 first record otherwise. The version becomes a folder name under
-the persona launcher's runtime root, so it must start with a letter, digit, underscore or hyphen,
+the launchers' runtime root, so it must start with a letter, digit, underscore or hyphen,
 hold only those and dots after that, and not end in a dot, which Windows drops from a folder name. A
 reserved device name (CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to LPT9), with or without an extension,
 is refused too. Every refusal is a throw, which each launcher catches, logs and exits 1 on.
@@ -56,4 +72,70 @@ function Get-InstalledPluginRecord {
         throw "the '$Id' record in '$Path' carries version '$version', which cannot name a folder"
     }
     return @{ InstallPath = $installPath; Version = $version; Scope = [string]$record.scope }
+}
+
+<#
+.SYNOPSIS
+Returns the snapshot folder for one plugin version, copying it from the install folder first where
+it is not there yet.
+
+.DESCRIPTION
+The copy goes to a temporary folder named for this process and is renamed into place, so a reader
+never sees a half-copied snapshot. The rename is atomic on one volume, so where several launchers
+build one snapshot at the same moment, one copy wins, and a rename that loses finds the snapshot
+present, discards its own copy and returns the winner's. A copy missing a file
+$InstalledPluginRequiredFiles names is discarded and refused as incomplete, so an install folder
+Claude Code has not finished writing never becomes a version's snapshot. A snapshot already present
+is used as it stands, since an install folder is written once per version and never changed
+afterward.
+#>
+function Install-PluginSnapshot {
+    param(
+        [Parameter(Mandatory)][string]$InstallPath,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$RuntimeRoot
+    )
+    $snapshot = Join-Path $RuntimeRoot $Version
+    if (Test-Path -LiteralPath $snapshot -PathType Container) { return $snapshot }
+    [void][System.IO.Directory]::CreateDirectory($RuntimeRoot)
+    $temp = Join-Path $RuntimeRoot ".$Version.$PID.tmp"
+    try {
+        if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction Stop }
+        Copy-Item -LiteralPath $InstallPath -Destination $temp -Recurse -Force -ErrorAction Stop
+        $missing = @($InstalledPluginRequiredFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $temp $_) -PathType Leaf) })
+        if ($missing.Count -gt 0) {
+            throw "the install folder is incomplete, missing $($missing -join ', ')"
+        }
+        try {
+            [System.IO.Directory]::Move($temp, $snapshot)
+        } catch {
+            if (-not (Test-Path -LiteralPath $snapshot -PathType Container)) { throw }
+            Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+        throw
+    }
+    return $snapshot
+}
+
+<#
+.SYNOPSIS
+Removes temporary copies under the runtime root that are older than $InstalledPluginStaleTempAge.
+
+.DESCRIPTION
+A launcher killed mid-copy leaves its temporary copy behind. Only folders named the way
+Install-PluginSnapshot names its temporary copies are touched, and only once they are old enough,
+far longer than any copy takes, that no live copy can still be writing them. A removal that fails
+is left for a later start.
+#>
+function Remove-StaleTempCopies {
+    param([Parameter(Mandatory)][string]$RuntimeRoot)
+    if (-not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)) { return }
+    $cutoff = [DateTime]::UtcNow - $InstalledPluginStaleTempAge
+    foreach ($dir in @(Get-ChildItem -LiteralPath $RuntimeRoot -Directory -Force -ErrorAction SilentlyContinue)) {
+        if ($dir.Name -like '.*.tmp' -and $dir.LastWriteTimeUtc -lt $cutoff) {
+            Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }

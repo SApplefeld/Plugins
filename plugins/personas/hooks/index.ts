@@ -4953,6 +4953,88 @@ export const register: Register = async (on, options) => {
         required: ["persona", "reason"],
       },
     }));
+
+    // The coordinator's two roster writers. They register under the owner
+    // tier beside the levers above, and their handlers gate on the same
+    // coordinator ground. Neither starts or stops a process: each writes the
+    // roster through hooks/roster.ts, and the fleet supervisor acts on the
+    // edit at its next tick. fleet_add's schema properties are the fields of
+    // ROSTER_FIELDS in that module, in its order, with the three the keeper's
+    // invocation builder needs required and enabled absent, since the tool
+    // writes it; test-personas/fleet-roster-tools-unit-test.mjs pins the two
+    // lists equal.
+    await registerTool("fleet_add", () => $.tool.register({
+      name: "fleet_add",
+      description:
+        "Add a persona to the fleet: writes one entry, with enabled set true, into the roster the plugin's fleetRoster " +
+        "setting names. The arguments are the entry's fields, and name, workdir and permissionMode are required. The entry " +
+        "is held to the strictest rule any reader of the roster applies and to the launch checks the supervisor runs, and a " +
+        "refusal names the first rule it breaks. The roster's current text is written beside it as <roster>.prev before the " +
+        "roster itself, so the previous roster can be put back from that file. The result names the roster, the backup and " +
+        "the entry as written. Where a fleet supervisor runs it starts the persona within one tick, and where none runs " +
+        "nothing starts until one does. Refused when this session does not hold the coordinator persona, when no roster is " +
+        "set, when the roster cannot be read or is not an array, when an entry already carries the name in any letter case, " +
+        "when the name is this session's own persona, when a field breaks a rule, when an enabled entry already carries the " +
+        "same repo, when a repo entry's workdir is a file or a directory that is not empty, and when a repo entry names no " +
+        "rundir or a rundir inside its workdir. A refusal writes nothing. Callable only from the session that holds the " +
+        "coordinator persona.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The persona name: letters, digits, underscore and hyphen, not starting with a hyphen." },
+          workdir: { type: "string", description: "The working directory the persona runs in." },
+          permissionMode: { type: "string", description: "The permission mode the persona's session runs under, not blank." },
+          rundir: { type: "string", description: "The run directory its keeper and supervisor use, <workdir>/run where omitted. Required beside repo, and then outside workdir." },
+          channelName: { type: "string", description: "The channelName, the relay thread name its supervisor attaches under." },
+          model: { type: "string", description: "The model name, such as opus or opus[1m]." },
+          effort: { type: "string", description: "The effort, one of low, medium, high, xhigh or max." },
+          controllerTickMs: { type: "integer", description: "The controllerTickMs setting in milliseconds, at least 1." },
+          nudgeFloorMs: { type: "integer", description: "The nudgeFloorMs setting in milliseconds, at least 1." },
+          nudgeIdleMs: { type: "integer", description: "The nudgeIdleMs setting in milliseconds, at least 1." },
+          memoryGateDiscardPercent: { type: "integer", description: "The memoryGateDiscardPercent setting, the memory gate's discard percent, from 50 to 100." },
+          channelLogRetentionDays: { type: "integer", description: "The channelLogRetentionDays setting, days its channel log is kept, at least 1." },
+          journalRetentionDays: { type: "integer", description: "The journalRetentionDays setting, days its decision journal is kept, at least 1." },
+          coordinatorPersona: { type: "string", description: "The coordinatorPersona, the coordinator seat's persona, coordinator where omitted." },
+          architectPersona: { type: "string", description: "The architectPersona, the architect seat's persona, never the coordinator's." },
+          liaisonPersona: { type: "string", description: "The liaisonPersona, the liaison seat's persona, which needs architectPersona and differs from both seats." },
+          fleetRoster: { type: "string", description: "The roster its plugin watches, which must be this same roster." },
+          jevMode: { type: "string", description: "The jevMode setting, off or shadow." },
+          jevLive: { type: "array", description: "The jevLive ids, from the promotable set: turn-open, turn-disposition, memory-kind, turn-score, controller-decision, step-effort.", items: { type: "string" } },
+          args: { type: "array", description: "The args list of extra supervisor flags, --dev and --no-channel only.", items: { type: "string" } },
+          repo: { type: "string", description: "A plain repository URL, https://<host>/<path> or git@<host>:<path>, for the repository the persona works in. One enabled entry per repository." },
+        },
+        required: ["name", "workdir", "permissionMode"],
+        additionalProperties: false,
+      },
+    }));
+
+    await registerTool("fleet_retire", () => $.tool.register({
+      name: "fleet_retire",
+      description:
+        "Retire a persona from the fleet: sets enabled to false on its entry in the roster the plugin's fleetRoster setting " +
+        "names, keeping every other field and every other entry. The entry stays in the roster, so fleet_status still " +
+        "reports a row for it. The roster's current text goes to <roster>.prev beside it first. Where a fleet supervisor " +
+        "runs it takes the persona down within one tick plus the supervisor's patient-stop cap, and the persona's run " +
+        "directory, store and goal tree stay. Refused when this session does not hold the coordinator persona, when no " +
+        "roster is set, when the roster cannot be read or is not an array, when no entry carries the name, when the entry " +
+        "is already disabled, when the persona is this session's own (supervisor_shutdown stops that one), and when another " +
+        "enabled entry names the persona as its coordinatorPersona, architectPersona or liaisonPersona. Nothing is written " +
+        "on a refusal. The one caller it serves is the session holding the coordinator persona.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          persona: {
+            type: "string",
+            description: "The roster name of the persona to retire.",
+          },
+          reason: {
+            type: "string",
+            description: "Why the persona is retired, echoed in the result and written nowhere else, since the roster carries no reason. Trimmed and cut at 200 characters.",
+          },
+        },
+        required: ["persona", "reason"],
+      },
+    }));
     }
 
     // Section 12 registers agentic_resolve under arming "owner" only: a

@@ -220,9 +220,10 @@ export const STORE_WRITERS: readonly (readonly [string, string])[] = [
 
 // The tools outside the restore set whose input is refused where it carries
 // a raw secret: the persona MCP tools whose free-text fields reach the goal
-// store the coordinator and the fleet cards read, the relay's reply tool,
-// and the four engine tools that hand their input to another model or the
-// network. Every other non-restore tool passes its input as written.
+// store the coordinator and the fleet cards read or the roster every persona
+// launches from, the relay's reply tool, and the four engine tools that hand
+// their input to another model or the network. Every other non-restore tool
+// passes its input as written.
 export const REFUSED_TOOLS: ReadonlySet<string> = new Set([
   "mcp__personas__agentic_say",
   "mcp__personas__memory_add",
@@ -235,6 +236,8 @@ export const REFUSED_TOOLS: ReadonlySet<string> = new Set([
   "mcp__personas__ask_open",
   "mcp__personas__ask_close",
   "mcp__personas__agentic_resolve",
+  "mcp__personas__fleet_add",
+  "mcp__personas__fleet_retire",
   "mcp__plugin_relay_channel-relay__reply",
   "Agent",
   "SendMessage",

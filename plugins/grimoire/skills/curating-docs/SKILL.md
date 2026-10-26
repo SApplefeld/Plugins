@@ -9,21 +9,23 @@ A plan is finished when it has moved to the archive, the backlog is pruned, and 
 
 ## Docs Taxonomy
 
-Three zones, each with one job, plus the living backlog.
+Three zones, each with one job, plus the briefs folder, the living backlog and the operator's direction ledger.
 
 | Location | Holds | Discipline |
 |---|---|---|
 | `docs/` root | Stable about-the-solution docs (architecture, security model) and the README, the index of the stable documents rather than of plans | Updated in place as the solution changes |
 | `docs/plans/` | Active plans only (open or in progress) | A plan leaves the moment it is Complete or abandoned |
-| `docs/archive/` | Finished and abandoned plans (Chapters intact) and dated backlog snapshots | Immutable history; nothing here is live |
+| `docs/briefs/` | The plan brief of each active plan that has one, named `<plan stem>.md` after its plan, in the form the `prose-register` skill's Plan Brief section states. A plan written before briefs gains one at its finishing pass | Moves to `docs/archive/briefs/` with its plan at the close path |
+| `docs/archive/` | Finished and abandoned plans (Chapters intact), their briefs under `briefs/`, and dated backlog snapshots | Immutable history; nothing here is live |
 | `docs/backlog.md` | The handoff doc for cross-effort next-steps, active items only | Pruned-live: completed items move to a dated snapshot |
+| `docs/direction.md` | The operator's direction ledger for this repository, in the operator's own words, in the line shape the role skill's coordinator-directory contract states | Operator-owned: sessions read it and never write it |
 
 ## Archiving a Completed Plan
 
 Run this close path at close-out, in order:
 
 1. Confirm `Status: Complete` (or abandoned) and a final Chapter. If the plan is not done, stop.
-2. Move the file with `git mv docs/plans/<file> docs/archive/<file>`, or a plain move outside git. The Chapters travel untouched. Then `git add` the moved file again if it carries unstaged edits. `git mv` stages the index content, not the worktree, so those edits miss the commit unless re-added. An `RM` pair in `git status --short` is the tell.
+2. Move the file with `git mv docs/plans/<file> docs/archive/<file>`, and its brief, where one exists, with `git mv docs/briefs/<file> docs/archive/briefs/<file>`, creating `docs/archive/briefs/` first where it is missing, since `git mv` creates no folder. Outside git, move them plainly. A plan written before briefs existed may have none to move. The Chapters travel untouched. Then `git add` each moved file again if it carries unstaged edits. `git mv` stages the index content, not the worktree, so those edits miss the commit unless re-added. An `RM` pair in `git status --short` is the tell.
 3. Repoint the plan's own relative links, before or right after the move. A sibling linked as `../archive/<file>` becomes `<file>` once the plan is itself in `archive/`. Grep the moved file for `../archive/` and fix every hit.
 4. Cross-reference. If the plan built on or superseded another, link both through a `## Related` section and mark a superseded plan in its header. Act on any cross-reference gap `docs-curator` flagged at `skills/finishing-work/SKILL.md`'s Documentation curation step. If the other plan is already archived, only the moving plan gets the `## Related` section.
 5. Prune the backlog, per Backlog Pruning below.
@@ -34,9 +36,10 @@ Archive in the same close-out that finished the work, never later or in a batch.
 
 This is the create path. Run it when `brainstorming` writes a new spec, before `executing-work` takes it:
 
-1. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks. Seed the Failure by Area table, and a row per top-level area the spec's Files in scope touch, where either is missing.
-2. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
-3. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
+1. Check that `docs/briefs/<plan stem>.md` exists for the new plan, the brief `brainstorming` step 9 writes in the form the `prose-register` skill's Plan Brief section states. A plan with no brief goes back to that step before the path continues.
+2. Seed a missing `docs/verification.md` from the templates, and add a row per instrument the spec's `Verify:` lines name that it lacks. Seed the Failure by Area table, and a row per top-level area the spec's Files in scope touch, where either is missing.
+3. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
+4. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
 
 ## Backlog Pruning
 
