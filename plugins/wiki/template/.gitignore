@@ -1,0 +1,15 @@
+# Local Claude Code permission overrides. Personal to this machine.
+.claude/settings.local.json
+
+# Scratch capture from the automation verification checklist.
+run-stderr.txt
+
+# Windows and editor cruft.
+Thumbs.db
+desktop.ini
+*.swp
+.vscode/
+.idea/
+
+# inbox/ is deliberately NOT ignored: an unprocessed drop must stay visible
+# in `git status` until the ingest skill moves it into sources/.

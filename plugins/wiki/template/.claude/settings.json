@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read", "Glob", "Skill", "TodoWrite",
+      "Write(./wiki/**)", "Edit(./wiki/**)",
+      "Write(./index.md)", "Edit(./index.md)",
+      "Write(./log.md)", "Edit(./log.md)",
+      "Bash(pwsh -NoProfile -File ./.claude/kb-move.ps1:*)",
+      "Bash(pwsh -NoProfile -File .claude/kb-move.ps1:*)",
+      "Bash(pwsh -NoProfile -File ./.claude/kb-commit.ps1:*)",
+      "Bash(pwsh -NoProfile -File .claude/kb-commit.ps1:*)",
+      "Bash(pwsh -NoProfile -File ./.claude/kb-status.ps1:*)",
+      "Bash(pwsh -NoProfile -File .claude/kb-status.ps1:*)"
+    ],
+    "deny": [
+      "Grep",
+      "Read(**/.credentials.json)", "Glob(**/.credentials.json)",
+      "Read(**/.claude.json)",
+      "Read(**/.git-credentials)",
+      "Read(**/.ssh/**)",
+      "Read(**/.aws/**)",
+      "Read(**/*.pem)", "Read(**/*.pfx)", "Read(**/*.key)",
+      "Read(**/id_rsa)", "Read(**/id_ed25519)",
+      "Read(**/.npmrc)", "Read(**/.pypirc)",
+      "Read(**/.docker/config.json)", "Read(**/.kube/config)",
+      "Read(**/.config/gh/**)", "Read(**/GitHub CLI/**)",
+      "Read(**/.netrc)", "Read(**/_netrc)",
+      "Read(**/.claude/*.json)",
+      "Write(./sources/**)", "Edit(./sources/**)",
+      "Write(./inbox/**)", "Edit(./inbox/**)",
+      "Write(./.git/**)", "Edit(./.git/**)",
+      "Write(./.claude/**)", "Edit(./.claude/**)",
+      "Bash(git:*)",
+      "Bash(mv:*)", "Bash(rm:*)", "Bash(cp:*)",
+      "Bash(curl:*)", "Bash(wget:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}

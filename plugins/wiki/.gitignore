@@ -1,0 +1,12 @@
+# Scratch working area for subagent artifacts. Never committed.
+.kit/
+
+# Local Claude Code permission overrides. Personal to this machine.
+.claude/settings.local.json
+
+# Windows and editor cruft.
+Thumbs.db
+desktop.ini
+*.swp
+.vscode/
+.idea/

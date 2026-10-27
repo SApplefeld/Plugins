@@ -1,0 +1,4 @@
+{
+  "name": "wiki",
+  "description": "Instantiate and run an LLM-maintained markdown knowledge base from a tested template."
+}
