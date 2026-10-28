@@ -560,6 +560,14 @@ else
     echo "ERROR: could not complete $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
     exit 1
   fi
+  # Same reasoning for a goal persona's goalFile and lifetime: the keeper
+  # rewrites goal.json and sets GOAL_FILE and LIFETIME at every start, and a
+  # provided settings file would otherwise keep the values an earlier start
+  # wrote, or none.
+  if ! ensure_settings_goal "$SETTINGS_FILE" 2>>"$LOG"; then
+    echo "ERROR: could not complete $SETTINGS_FILE; see $LOG" | tee -a "$LOG" >&2
+    exit 1
+  fi
   # The emit branch above exports COORDINATOR_PERSONA from the value it
   # writes. This branch writes nothing, so the name is read back from the
   # provided file under the plugin's own rule, and the coordinator-role
@@ -4924,10 +4932,12 @@ while true; do
     # never share a poll, so two PowerShell misses never spawn on one poll.
     CHILD_TICKS_RETRY_NEXT=1; CHILD_TICKS_RETRY_GAP=1; SELF_TICKS_RETRY_NEXT=6; SELF_TICKS_RETRY_GAP=1; HOLDER_TICKS_RETRY_NEXT=11; HOLDER_TICKS_RETRY_GAP=1
     # The child stage is child_wrapper, so a TERM to `$!` reaches `claude` and
-    # the marker records the child's real exit code.
+    # the marker records the child's real exit code. GOAL_FILE goes beside the
+    # seat names, since the holder builds a goal persona's priming on whether
+    # it is set.
     PERSONA="$PERSONA" NO_CHANNEL="$NO_CHANNEL" \
     COORDINATOR_PERSONA="${COORDINATOR_PERSONA:-}" ARCHITECT_PERSONA="${ARCHITECT_PERSONA:-}" \
-    LIAISON_PERSONA="${LIAISON_PERSONA:-}" \
+    LIAISON_PERSONA="${LIAISON_PERSONA:-}" GOAL_FILE="${GOAL_FILE:-}" \
     CHILD_INDEX="$CHILD_INDEX" SUPERVISOR_HOLDER_POLL_S="${SUPERVISOR_HOLDER_POLL_S:-2}" \
       bash "$PLUGIN_DIR/bin/supervise-holder.sh" \
         "$HOLDER_PID_FILE" "$OUT" "$CHILD_PID_FILE" "$ASK_REQUEST_FILE" "${PROMPT_FILE:-}" "$INTERRUPT_REQUEST_FILE" \

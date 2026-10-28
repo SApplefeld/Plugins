@@ -7,7 +7,8 @@
 #           ensure_settings_plugin_ids, ensure_settings_arming,
 #           ensure_settings_jev_mode, ensure_settings_jev_live,
 #           ensure_settings_memory_gate_discard_percent,
-#           ensure_settings_cadences, read_settings_controller_tick,
+#           ensure_settings_cadences, ensure_settings_goal,
+#           read_settings_controller_tick,
 #           jev_live_to_csv, settings_path_json,
 #           read_settings_coordinator_persona,
 #           read_settings_architect_persona,
@@ -177,7 +178,7 @@ EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs h
   memoryGateDiscardPercent selfReviewEveryTurns costSummaryEveryNTicks costMaxNudgesPerHour
   costMaxPluginCallsPerHour costBackoffAfterTicks costBackoffMaxMs jevMode jevLive guards restartRecap
   persona arming coordinatorPersona architectPersona liaisonPersona fleetRoster supervisorMailbox
-  heartbeatPath supervisorHeartbeatPath)
+  heartbeatPath supervisorHeartbeatPath goalFile lifetime)
 
 # --- emit_settings_json ---
 # Usage: emit_settings_json <output-file> [carry_dev_mode: 0|1]
@@ -194,7 +195,9 @@ EMIT_SETTINGS_OWNED_KEYS=(controllerTickMs nudgeIdleMs nudgeFloorMs gitProbeMs h
 #          and supervisorHeartbeatPath (from SUPERVISOR_MAILBOX, HEARTBEAT_PATH
 #          and SUPERVISOR_HEARTBEAT_PATH, each omitted the same way), and
 #          restartRecap (from RESTART_RECAP, auto or skill, omitted the same
-#          way and refused outside that pair); and,
+#          way and refused outside that pair), and goalFile and lifetime
+#          (from GOAL_FILE, a path, and LIFETIME, standing or goal and refused
+#          outside that pair, each omitted the same way); and,
 #          outside the plugin options, the harness's own autoContinue, always
 #          false.
 # The file is written under a temporary name beside <output-file> and renamed
@@ -451,12 +454,32 @@ emit_settings_json() {
     path_json=$(settings_path_json SUPERVISOR_HEARTBEAT_PATH "$SUPERVISOR_HEARTBEAT_PATH") || return 1
     supervisor_opts="$supervisor_opts,\"supervisorHeartbeatPath\":\"$path_json\""
   fi
+  # A goal persona's two keys. GOAL_FILE is the goal.json path the keeper
+  # wrote into the run directory, held to the same path rule as the roster
+  # path; LIFETIME says whether the persona retires once its goal completes,
+  # standing or goal, refused outside that pair the way JEV_MODE is. Each is
+  # omitted where its variable is unset or empty.
+  local goal_opts=""
+  if [ -n "${GOAL_FILE:-}" ]; then
+    path_json=$(settings_path_json GOAL_FILE "$GOAL_FILE") || return 1
+    goal_opts=",\"goalFile\":\"$path_json\""
+  fi
+  if [ -n "${LIFETIME:-}" ]; then
+    case "$LIFETIME" in
+      standing|goal) ;;
+      *)
+        echo "ERROR: emit_settings_json: LIFETIME '$LIFETIME' must be 'standing' or 'goal'" >&2
+        return 1
+        ;;
+    esac
+    goal_opts="$goal_opts,\"lifetime\":\"$LIFETIME\""
+  fi
   # pluginConfigs is keyed by plugin id: the manifest name under --plugin-dir,
   # and "<name>@<marketplace>" for the installed copy. The installed form is
   # absent from the engine's type file, and options under the other id are
   # ignored without an error, so the same options are written under both.
   # test-personas/settings-plugin-key-test.sh pins both ids against the two manifests.
-  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$guards_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roster_opt$supervisor_opts}"
+  local options="{\"controllerTickMs\":$TICK_MS,\"nudgeIdleMs\":$NUDGE_IDLE_MS,\"nudgeFloorMs\":${NUDGE_FLOOR_MS:-300000},\"gitProbeMs\":$GIT_PROBE_MS,\"heartbeatMs\":${HEARTBEAT_MS:-30000},\"staleAfterMs\":${STALE_AFTER_MS:-90000},\"memoryGateDiscardPercent\":${MEMORY_GATE_DISCARD_PERCENT:-90}$self_review_opts$cost_opts$jev_opts$guards_opts$recap_opts$persona_opt,\"arming\":\"owner\",\"coordinatorPersona\":\"$coordinator_persona\"$architect_opt$liaison_opt$roster_opt$supervisor_opts$goal_opts}"
   # autoContinue is the harness's own setting, at the top level rather than
   # under a plugin id. Off, a child that trips a usage limit ends its turn and
   # sits idle rather than parking until the limit resets, and the supervisor's
@@ -712,6 +735,66 @@ try {
   fail("could not be rewritten: " + e.message);
 }
 ' "$1" "$AGENTIC_PLUGIN_DEV_ID" "$AGENTIC_PLUGIN_INSTALLED_ID" "$JEV_MODE"
+}
+
+# --- ensure_settings_goal ---
+# Usage: ensure_settings_goal <settings-file>
+# For a settings file the caller already provided: where GOAL_FILE or LIFETIME
+# is set, each set one is written under both plugin ids, overwriting whatever
+# the file held, so the provided file names the roster's goal and lifetime at
+# each start the way ensure_settings_jev_mode carries jevMode. A LIFETIME set
+# with GOAL_FILE unset or empty is a launch with no goal, so a goalFile an
+# earlier start left is removed under both ids. With both unset the file is
+# not touched. LIFETIME is refused outside standing and goal before node runs, on
+# the rule emit_settings_json holds it to. GOAL_FILE is written as given: node
+# serializes it, so a backslash or a quote reaches the file as JSON carries it.
+# The file is replaced by rename, so an interrupted write never leaves it
+# truncated.
+ensure_settings_goal() {
+  if [ -z "${GOAL_FILE:-}" ] && [ -z "${LIFETIME:-}" ]; then
+    return 0
+  fi
+  if [ -n "${LIFETIME:-}" ]; then
+    case "$LIFETIME" in
+      standing|goal) ;;
+      *)
+        echo "ERROR: ensure_settings_goal: LIFETIME $LIFETIME must be standing or goal" >&2
+        return 1
+        ;;
+    esac
+  fi
+  node -e '
+const fs = require("fs");
+const [file, devId, installedId, goalFile, lifetime] = process.argv.slice(1);
+const fail = (msg) => { console.error("ERROR: ensure_settings_goal: " + file + " " + msg); process.exit(1); };
+const plain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+let s;
+try { s = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch (e) { fail("is not valid JSON: " + e.message); }
+if (!plain(s)) fail("is not a JSON object");
+let changed = false;
+if (s.pluginConfigs === undefined) { s.pluginConfigs = {}; changed = true; }
+const pc = s.pluginConfigs;
+if (!plain(pc)) fail("has a pluginConfigs value that is not an object");
+for (const id of [devId, installedId]) {
+  if (pc[id] === undefined) { pc[id] = {}; changed = true; }
+  if (!plain(pc[id])) fail("has a " + id + " entry that is not an object");
+  if (pc[id].options === undefined) { pc[id].options = {}; changed = true; }
+  const opts = pc[id].options;
+  if (!plain(opts)) fail("has " + id + " options that are not an object");
+  if (goalFile !== "" && opts.goalFile !== goalFile) { opts.goalFile = goalFile; changed = true; }
+  if (goalFile === "" && lifetime !== "" && opts.goalFile !== undefined) { delete opts.goalFile; changed = true; }
+  if (lifetime !== "" && opts.lifetime !== lifetime) { opts.lifetime = lifetime; changed = true; }
+}
+if (!changed) process.exit(0);
+const tmp = file + ".tmp-" + process.pid;
+try {
+  fs.writeFileSync(tmp, JSON.stringify(s));
+  fs.renameSync(tmp, file);
+} catch (e) {
+  try { fs.unlinkSync(tmp); } catch (_) {}
+  fail("could not be rewritten: " + e.message);
+}
+' "$1" "$AGENTIC_PLUGIN_DEV_ID" "$AGENTIC_PLUGIN_INSTALLED_ID" "${GOAL_FILE:-}" "${LIFETIME:-}"
 }
 
 # --- ensure_settings_jev_live ---

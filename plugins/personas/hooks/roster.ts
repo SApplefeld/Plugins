@@ -14,7 +14,7 @@
 // hooks/index.ts builds over `$` with hostOf, as hooks/fleet.ts does.
 
 import type { PluginHost } from "./host";
-import { safeErrorText } from "./text";
+import { FREE_TEXT_MAX, safeErrorText } from "./text";
 
 // What the roster tools need from the host: the writes the roster write
 // makes, and the two directory reads the add tool's working-directory checks
@@ -52,6 +52,8 @@ export const ROSTER_FIELDS = [
   "jevLive",
   "args",
   "repo",
+  "goal",
+  "lifetime",
 ] as const;
 
 export type RosterField = (typeof ROSTER_FIELDS)[number];
@@ -85,6 +87,8 @@ export type WrittenRosterEntry = {
   jevLive?: string[];
   args?: string[];
   repo?: string;
+  goal?: { objective: string; done: string[]; turns?: number };
+  lifetime?: string;
   enabled: true;
 };
 
@@ -166,7 +170,8 @@ const GLOB_CHECKED_FIELDS: readonly string[] = [
   "args",
 ];
 
-// The text rule every string field and array element takes: no control
+// The text rule every string field and array element outside the goal block
+// takes, since the goal reaches no command line or shell: no control
 // character and no double quote, since the keeper's ConvertTo-NativeArgument
 // quotes a token with a quote in it for a command line a quote can break out
 // of, and the shell halves read each value unescaped. The glob rule is for
@@ -334,9 +339,66 @@ function arrayProblem(field: string, value: unknown): string | null {
   return null;
 }
 
+// The lifetime values: Build-SupervisorInvocation's lifetime check and
+// agentic-common.sh emit_settings_json's LIFETIME case, each compared
+// byte-exact, so a value is matched as written and never trimmed or folded.
+const LIFETIMES: readonly string[] = ["standing", "goal"];
+
+// The goal block's three keys. The process keeper writes the block to
+// goal.json as the roster holds it and checks none of its shape, so this is
+// the shape's one check on the tool's write.
+const GOAL_KEYS: readonly string[] = ["objective", "done", "turns"];
+
+// The most done statements a goal carries, since every statement is rendered
+// into the goal persona's context on every turn.
+export const GOAL_DONE_MAX = 20;
+
+// One goal text: a string, not blank, and under FREE_TEXT_MAX, the bound the
+// plugin holds every free text it stores to.
+function goalTextProblem(value: unknown): string | null {
+  if (typeof value !== "string") return "must be a string";
+  if (value.trim() === "") return "must not be blank";
+  if (value.length >= FREE_TEXT_MAX) return `must be under ${FREE_TEXT_MAX} characters`;
+  return null;
+}
+
+// The goal block: an object of objective and done, and turns where given, and
+// no other key. done may be empty, and holds at most GOAL_DONE_MAX. turns is
+// a whole number of at least 1 and at most the largest integer a JSON number
+// carries exactly.
+export function goalProblem(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return "must be an object of objective, done and an optional turns";
+  }
+  const goal = value as Record<string, unknown>;
+  for (const key of Object.keys(goal)) {
+    if (!GOAL_KEYS.includes(key)) return `key '${key}' is not one of ${GOAL_KEYS.join(", ")}`;
+  }
+  if (!("objective" in goal)) return "must carry objective";
+  if (!("done" in goal)) return "must carry done";
+  const objective = goalTextProblem(goal.objective);
+  if (objective) return `objective ${objective}`;
+  if (!Array.isArray(goal.done)) return "done must be an array of strings";
+  if (goal.done.length > GOAL_DONE_MAX) return `done must hold at most ${GOAL_DONE_MAX} statements`;
+  for (let i = 0; i < goal.done.length; i++) {
+    const element = goalTextProblem(goal.done[i]);
+    if (element) return `done element ${i} ${element}`;
+  }
+  if ("turns" in goal) {
+    const turns = goal.turns;
+    if (typeof turns !== "number" || !Number.isSafeInteger(turns) || turns < 1) return "turns must be a whole number of at least 1";
+  }
+  return null;
+}
+
 function fieldProblem(field: RosterField, value: unknown, rosterPath: string): string | null {
   if (field in NUMBER_BOUNDS) return numberProblem(field, value);
   if (field === "jevLive" || field === "args") return arrayProblem(field, value);
+  if (field === "goal") return goalProblem(value);
+  if (field === "lifetime") {
+    if (typeof value !== "string" || !LIFETIMES.includes(value)) return `must be one of ${LIFETIMES.join(", ")}`;
+    return null;
+  }
   return stringProblem(field, value, rosterPath);
 }
 

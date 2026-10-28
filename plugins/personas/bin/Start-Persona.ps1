@@ -705,7 +705,7 @@ if ([string]::IsNullOrWhiteSpace($bashExe)) {
 }
 
 try {
-    $invocation = Build-SupervisorInvocation -Entry $entry -RosterPath $Roster
+    $invocation = Build-SupervisorInvocation -Entry $entry -RosterPath $Roster -RunDirectory $runDir
 } catch {
     Stop-KeeperWithError $_.Exception.Message
 }

@@ -135,7 +135,7 @@ An expired figure is re-measured and the fresh reading used, or stated as expire
 
 The operator tier holds facts true of the operator or of a machine rather than of one project or platform. It completes the routing ladder: journal, project, type, operator, doctrine.
 
-**The routing test: would this fact be true in a project you have not opened yet, on any of your machines?** Yes is the operator tier. True of every project of a type but not beyond it is the type tier. About this codebase is the project tier. A fact true of one machine only still lives here, with a `machine:` field naming the box.
+**The routing test: would this fact be true in a project you have not opened yet, on any of your machines?** Yes is the operator tier. True of every project of a type but not beyond it is the type tier. About this codebase is the project tier. A fact true of one machine only still lives here, with a `machine:` field naming the box. A repository's test layer map is a project-tier fact beside its lane commands, held as `layers` in its committed lane map where it has one.
 
 Author only through `memq add-operator`, since the tier is a database tier with no file to write. Read the neighbours block the verb prints before the write lands. A `likely overlap` there is the store saying the fact may already be recorded, and the four-remedies paragraph below chooses the remedy. `add-operator` refuses an existing name and a description over the 120-character cap, never truncating it. See "Shared-Tier Repair and Removal" below.
 

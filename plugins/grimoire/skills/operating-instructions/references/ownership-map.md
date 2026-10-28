@@ -50,7 +50,8 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Consult triggers and mechanics | `consult` |
 | Weighing a review finding or operator correction before acting | `responding-to-review` |
 | Root-causing a failure | `systematic-debugging` |
-| Whether a change earns a test, which tests retire, test shape and cost, lane mechanics, the red protocol | `testing-discipline` |
+| Whether a change earns a test, which tests retire, test shape and cost at authoring | `testing-discipline` |
+| Lane mechanics, the red protocol, the clock and fixture time, the layer map, the mutation audit | `test-gates` |
 | Which lane each gate moment takes, and the delta against its baseline | doctrine (After each step, run the lane) |
 | Starting a heavy process on a shared machine | doctrine (One heavy process at a time is a per-machine budget) |
 | Hunting one thing in a large file | doctrine (When you are hunting for something in a large file) |
@@ -96,6 +97,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | A repeating watch over a live system: tick order, ledger, wake prompt | `standing-watch` |
 | The liaison seat's conduct in a shared client thread | `liaison` |
 | The Architect seat's conduct: a design ask, the plan written for a worker and never run, the clone, branch and report rules | `architect` |
+| A goal persona's conduct: reading its seeded root, design asks to the architect, plan reports, the turn budget and completing the root | `goal-holder` |
 | Parking a session at its next safe point on request | `executing-work` (the `WAITING:` stop shape) |
 | How a plan run is approved, and what holds it to completion | `executing-work` (the goal template) |
 | Dispatching this session's own subagents | doctrine (Dispatch is requested standing) |

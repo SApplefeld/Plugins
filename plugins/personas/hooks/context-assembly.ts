@@ -18,8 +18,9 @@
 // which contextSourcesOf in hooks/index.ts builds.
 
 import type { AgentState, AutonomyLevel, GoalNode, TaskItem } from "./agent-state";
-import { bracketSafeText, envNotable, hasStartableWork, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
+import { TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
 import { TURN_END_SOURCE } from "./follow-ups";
+import { DONE_HOLD_REASON, goalContextText } from "./goal-persona";
 import { STRETCH_SOURCE } from "./stretch-distillation";
 
 // The marker opening a follow-up line, by the entry's source. A
@@ -154,6 +155,9 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
   const activeNode = state.activeGoalId
     ? state.goals.find((g) => g.id === state.activeGoalId)
     : null;
+  // The tree's root, whose seeded done statements and turn count each goal
+  // block below carries; undefined where the tree is empty.
+  const root = state.goals.find((g) => g.parentId === null);
   if (activeNode && activeNode.status === "active") {
     // Build the [GOAL TREE] block: Active, Path, Pending siblings, Last note.
     const parent = activeNode.parentId
@@ -209,10 +213,14 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
     const openAsksPart = openAsks.length > 0
       ? `Open asks:\n` + openAskLines + openAskCountLine
       : "";
+    // The seeded root's done statements and turn count, spliced after the
+    // path, and empty for a root goal_create made.
+    const goalPart = goalContextText(root);
     const goalBlock =
       `[GOAL TREE]\n` +
       `Active: ${activeNode.kind} ${activeNode.id}${roundText} | ${oneLine(activeNode.objective)}\n` +
       `Path: ${path}\n` +
+      `${goalPart}` +
       planLine +
       siblingLine +
       lastNote +
@@ -249,15 +257,59 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
           .map((g) => `- ${g.status} ${g.kind} ${g.id} | ${oneLine(g.title).slice(0, 40)}${g.blockedReason ? ` | ${oneLine(g.blockedReason).slice(0, 60)}` : ""}\n`)
           .join("") +
         (open.length > listed.length ? `...and ${open.length - listed.length} more open ${open.length - listed.length === 1 ? "entry" : "entries"}.\n` : "");
-      const queueClose = hasStartableWork(state)
-        ? `The next pending entry starts on the controller's next tick; do not start it by hand.`
-        : `Nothing here starts by itself: every open entry is paused, blocked or out of the controller's reach. Ask the operator or the coordinator which to release. On the operator's or the coordinator's word, resume a paused one, or release one blocked with Max rounds reached, with goal_resume by its id, or drop one with goal_edit.`;
+      // A root the turn budget blocks holds every entry, and goal_resume
+      // refuses each one, so the closing line names the root's release
+      // instead of the per-entry one.
+      const queueClose = root?.status === "blocked" && root.blockedReason === TURN_BUDGET_REASON
+        ? `The turn budget holds every entry here, and goal_resume refuses each one until goal_resume naming ${root.id}, in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, restarts the budget.`
+        : hasStartableWork(state)
+          ? `The next pending entry starts on the controller's next tick; do not start it by hand.`
+          : `Nothing here starts by itself: every open entry is paused, blocked or out of the controller's reach. Ask the operator or the coordinator which to release. On the operator's or the coordinator's word, resume a paused one, or release one blocked with Max rounds reached, with goal_resume by its id, or drop one with goal_edit.`;
+      // A root the controller held for its done statements waits on
+      // goal_done whatever the entries do, so the queue says so above its
+      // closing line.
+      const queueHold = root?.blockedReason === DONE_HOLD_REASON
+        ? `The goal itself waits on its done statements. Once every entry here is complete or dropped and every done statement holds, complete it with goal_done naming ${root.id}, in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started.\n`
+        : "";
+      // The seeded root's done statements and turn count, as in the [GOAL
+      // TREE] block, so a persona whose root the budget blocked reads the
+      // count beside the queue.
+      const goalPart = goalContextText(root);
       const queueBlock =
         `[GOAL QUEUE]\n` +
+        `${goalPart}` +
         queueLines +
+        queueHold +
         queueClose;
       contextBlocks.push(queueBlock);
       try { log(`Agentic: [GOAL QUEUE] injected with ${open.length} open entries`); } catch { /* non-fatal */ }
+    } else if (root && root.status !== "complete" && root.status !== "abandoned") {
+      // With an open root and no entry open under it, the [GOAL ROOT] block
+      // names the root and its objective, with the seeded root's done
+      // statements and turn count. This is the whole tree a goal persona's
+      // first launch seeds, so the persona reads its goal from the first
+      // prompt on, before the planner's first entries exist. The objective is
+      // folded and bracket-safe like every other field a goal block splices.
+      // The closing line says what moves next: the controller's next tick on
+      // a pending root, goal_done on one the controller held for its done
+      // statements, goal_resume on one the turn budget blocks, and on one
+      // held for any other reason, such as a failing planner or the planning
+      // cap, the two calls that still end it, since no tool lifts that hold.
+      const rootClose = root.status === "pending"
+        ? `No entry is open under this goal. On its next tick the controller plans entries for a goal its planner owns, and completes a finished goal or holds it for goal_done where it carries done statements. A goal whose entries were all dropped stays idle until goal_add adds work under it.`
+        : root.blockedReason === DONE_HOLD_REASON
+          ? `This goal waits on its done statements, which the controller does not judge. Once every done statement holds, complete it with goal_done naming ${root.id}, in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started. goal_done needs one complete entry under the goal, so where none is, add and finish the work with goal_add first.`
+          : root.blockedReason === TURN_BUDGET_REASON
+            ? `This goal's turn budget is spent and nothing under it starts. goal_resume naming ${root.id} grants the same budget again, in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started.`
+            : `This goal is held, and no tool lifts the hold. goal_done naming ${root.id} completes it once an entry under it is complete, in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, and goal_create with replace: true replaces it. Ask the operator or the coordinator which to do.`;
+      const goalPart = goalContextText(root);
+      const rootBlock =
+        `[GOAL ROOT]\n` +
+        `Goal: ${root.status} ${root.kind} ${root.id} | ${bracketSafeText(oneLine(root.objective))}\n` +
+        `${goalPart}` +
+        rootClose;
+      contextBlocks.push(rootBlock);
+      try { log(`Agentic: [GOAL ROOT] injected for ${root.id}`); } catch { /* non-fatal */ }
     } else if (state.goals.length === 0) {
       // With no goal at all (never created, or the root already completed),
       // this block says what a goal is now for, and on the turns that opened

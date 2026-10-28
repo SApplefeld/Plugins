@@ -93,6 +93,7 @@ import {
 } from "./commons";
 import type { CommonsStore } from "./commons";
 import type { InboxRecord } from "./operator";
+import { DONE_HOLD_REASON, holdsForGoalDone, readGoalFile, retireRecordText, seedDecision, seedRootFrom } from "./goal-persona";
 import {
   claimReaderRole,
   mayReachPersona,
@@ -633,6 +634,20 @@ export function guardsOptionOf(value: unknown): { option: GuardsOption; invalid:
   return { option: "live", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
 }
 
+// The lifetime option's two values: standing keeps a persona after its goal
+// completes, goal marks one the roster holds for its one goal. Any other
+// value reads as standing, the value a persona with no goal runs under.
+type LifetimeOption = "standing" | "goal";
+
+// The option as the configuration spells it: one of the two, compared
+// byte-exact as the roster validator compares it, or standing with the value
+// that was refused, so session.start can log it once.
+export function lifetimeOptionOf(value: unknown): { option: LifetimeOption; invalid: string | null } {
+  if (value === undefined) return { option: "standing", invalid: null };
+  if (value === "standing" || value === "goal") return { option: value, invalid: null };
+  return { option: "standing", invalid: typeof value === "string" ? value : JSON.stringify(value) ?? String(value) };
+}
+
 /**
  * Adapter: the `$` nouns a guard reaches, built over a hook-bound `$` at the
  * call site for hostOf's reason. `run` is bounded by its timeoutMs, and the
@@ -962,6 +977,11 @@ function moduleAfterHooks(dp: any, modelMade: boolean, askRecognition?: () => Pr
 
 // plugin.json's `redactor` switch, read at register; off, no hook here scrubs.
 let redactorOn = true;
+
+// Where a completed root sends the [RETIRE] record, set at register for a
+// session whose lifetime option reads goal and null for a standing one,
+// which sends nothing. completeRoot sits at module level and reads it here.
+let goalRetireTo: { coordinatorPersona: string; architectPersona: string } | null = null;
 
 // next(e) for a tool call with the redactor around it: placeholders restored
 // on the way down, the answer scrubbed before this module reads it. A step
@@ -3153,11 +3173,117 @@ const noteCompletionShape = (site: string, value: unknown): void => {
   });
 };
 
+// Reads goalFile, the goal.json path the goalFile option names, and seeds
+// the root where seedDecision says so, logging
+// goal_seeded or goal_seed_skipped with the decision's reason. A reseed on
+// a finished tree copies the tree to the history file first, as
+// goal_create does, and a copy that cannot be written refuses the seed
+// and leaves the tree standing; its open asks close as superseded, the
+// way goal_create closes them.
+const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean): Promise<void> => {
+  const read = await readGoalFile(hostOf(dp), goalFile);
+  const now = Date.now();
+  if (read.block === null) {
+    sess.state.decisions.push({
+      timestamp: now,
+      loop: "goal",
+      action: "goal_seed_skipped",
+      detail: `${goalFile}: ${bracketSafeText(oneLine(read.problem)).slice(0, 150)}`,
+    });
+    return;
+  }
+  const decision = seedDecision(sess.state, read.block, firstLaunch);
+  if (decision !== "seed" && decision !== "reseed-complete") {
+    sess.state.decisions.push({
+      timestamp: now,
+      loop: "goal",
+      action: "goal_seed_skipped",
+      detail: `${goalFile}: ${decision}`,
+    });
+    return;
+  }
+  if (sess.state.goals.some((g) => g.parentId !== null)) {
+    const line = JSON.stringify({ timestamp: now, persona: sess.persona, reason: "goal_create", goals: sess.state.goals });
+    try {
+      await appendLines(dp, workdirPathOf(GOAL_HISTORY_FILENAME), [line]);
+    } catch (err) {
+      sess.state.decisions.push({
+        timestamp: now,
+        loop: "goal",
+        action: "goal_seed_skipped",
+        detail: `${goalFile}: ${decision} refused, the history copy in ${GOAL_HISTORY_FILENAME} could not be written: ${bracketSafeText(oneLine(safeErrorText(err))).slice(0, 150)}`,
+      });
+      return;
+    }
+  }
+  const store = commonsStoreOf(dp);
+  for (const entry of openAskEntries(sess.state)) {
+    const askRecord = await readAskRecord(store, sess.persona, entry.id);
+    if (askRecord && askRecord.status === "open") {
+      askRecord.status = "superseded";
+      await store.set(askKey(sess.persona, entry.id), askRecord);
+    }
+    closeAsk(sess.state, entry.id, "superseded", "goal_create", "tree replaced", now);
+    sess.state.decisions.push({
+      timestamp: now,
+      loop: "monitor",
+      action: "ask_answered",
+      detail: `ask ${entry.id} closed by the goal seed (status: superseded)`,
+    });
+  }
+  const root = seedRootFrom(read.block, now);
+  sess.state.goals = [root];
+  sess.state.activeGoalId = null;
+  sess.state.updatedAt = now;
+  sess.state.decisions.push({
+    timestamp: now,
+    loop: "goal",
+    action: "goal_seeded",
+    detail: `${decision}: root ${root.id} "${bracketSafeText(oneLine(root.objective)).slice(0, 80)}" seeded from ${goalFile}${root.turnBudget !== undefined ? ` (budget ${root.turnBudget} turns)` : ""}`,
+  });
+};
+
+// The [RETIRE] record a goal-lifetime persona's completed root sends the
+// coordinator persona, by the write the idle proposal and the findings use.
+// It is sent once, from the status flip in completeRoot, so a second call
+// on a root already complete sends nothing. The default persona has no road
+// to a coordinator, and the reach rule refuses a write the commons does not
+// admit; each refusal is a decision and never a throw out of the completion.
+const sendRetireRecord = async (dp: any, root: GoalNode, to: { coordinatorPersona: string; architectPersona: string }): Promise<void> => {
+  const now = Date.now();
+  let problem: string;
+  try {
+    if (sess.persona === "default") {
+      problem = "the session is on the default persona, which has no road to a coordinator persona";
+    } else if (!await mayReachPersona(commonsStoreOf(dp), to.coordinatorPersona, sess.mySessionId, to.coordinatorPersona, to.architectPersona, sess.staleAfterMs)) {
+      problem = `the reach rule refuses this session's write to '${to.coordinatorPersona}'`;
+    } else {
+      const sent = await sendPluginRecord(commonsStoreOf(dp), to.coordinatorPersona, sess.mySessionId, retireRecordText(sess.persona, root));
+      sess.state.decisions.push({
+        timestamp: now,
+        loop: "monitor",
+        action: "retire_sent",
+        detail: `[RETIRE]: record ${sent.id} to '${to.coordinatorPersona}' for root ${root.id}`,
+      });
+      return;
+    }
+  } catch (err) {
+    problem = `the write to '${to.coordinatorPersona}' failed: ${safeErrorText(err)}`;
+  }
+  sess.state.decisions.push({
+    timestamp: now,
+    loop: "monitor",
+    action: "retire_unroutable",
+    detail: `[RETIRE] for root ${root.id} not sent: ${problem}`,
+  });
+};
+
 const completeRoot = async (dp: any, rootId: string, detail: string): Promise<void> => {
   const rootNow = sess.state.goals.find((g) => g.id === rootId);
   if (rootNow && rootNow.status !== "complete" && rootNow.status !== "abandoned") {
     rootNow.status = "complete";
     rootNow.updatedAt = Date.now();
+    if (goalRetireTo !== null) await sendRetireRecord(dp, rootNow, goalRetireTo);
   }
   sess.state.decisions.push({
     timestamp: Date.now(),
@@ -3170,6 +3296,33 @@ const completeRoot = async (dp: any, rootId: string, detail: string): Promise<vo
   sess.nudgeCapRefusedFor = null;
   sess.lastNudgeAt = 0;
   try { dp.ui.status(""); } catch { /* non-fatal */ }
+};
+
+// The controller's own completion paths, step 3a's unplanned one and the
+// planner's zero-plan reply, call this before completeRoot. A root with done
+// statements is held instead: blocked with DONE_HOLD_REASON, which both
+// paths read as not finished, so goal_done naming the root is what completes
+// it. A root with done statements that is already blocked, whatever its
+// reason, is left as it stands, so a hold never replaces another block. The
+// planner's zero-plan path checks the turn budget block itself before this
+// call, and step 3a never reaches a blocked root, so this guard is the
+// second line for any other block. Returns true for every root with done
+// statements, held or left, and false leaves the completion to the caller.
+const holdRootForGoalDone = (rootId: string, path: string): boolean => {
+  const rootNow = sess.state.goals.find((g) => g.id === rootId);
+  if (!rootNow || rootNow.status === "complete" || rootNow.status === "abandoned" || !holdsForGoalDone(rootNow)) return false;
+  if (rootNow.status === "blocked") return true;
+  const now = Date.now();
+  rootNow.status = "blocked";
+  rootNow.blockedReason = DONE_HOLD_REASON;
+  rootNow.updatedAt = now;
+  sess.state.decisions.push({
+    timestamp: now,
+    loop: "goal",
+    action: "root_held_for_goal_done",
+    detail: `Root ${rootId} held for goal_done on the ${path} path`,
+  });
+  return true;
 };
 
 // Closes every open ledger entry, blocking or not, on each node `nodeIds`
@@ -3953,6 +4106,17 @@ export const register: Register = async (on, options) => {
   // entries. An unset or blank setting leaves the tool with no fleet to read,
   // which it reports in place of rows, and leaves the watcher silent.
   const fleetRoster = typeof cfg.fleetRoster === "string" ? cfg.fleetRoster.trim() : "";
+  // A goal persona's goal file: the goal.json the process keeper writes into
+  // the run directory from the roster entry's goal block, read the way
+  // fleetRoster is and "" where unset, which is a persona with no roster goal.
+  const goalFile = typeof cfg.goalFile === "string" ? cfg.goalFile.trim() : "";
+  // The persona's lifetime, standing or goal, and standing where the
+  // configuration carries none. Any other value reads as standing, and
+  // session.start logs the refused value once.
+  const lifetimeRead = lifetimeOptionOf(cfg.lifetime);
+  const lifetimeOption: LifetimeOption = lifetimeRead.option;
+  let lifetimeInvalid: string | null = lifetimeRead.invalid;
+  goalRetireTo = lifetimeOption === "goal" ? { coordinatorPersona, architectPersona } : null;
   // The three paths a supervised child is handed by the launcher that reads
   // them, each read the way fleetRoster is and "" where unset. An interactive
   // session carries none of them, so its heartbeat stays the anchored sidecar,
@@ -5002,6 +5166,8 @@ export const register: Register = async (on, options) => {
           jevLive: { type: "array", description: "The jevLive ids, from the promotable set: turn-open, turn-disposition, memory-kind, turn-score, controller-decision, step-effort.", items: { type: "string" } },
           args: { type: "array", description: "The args list of extra supervisor flags, --dev and --no-channel only.", items: { type: "string" } },
           repo: { type: "string", description: "A plain repository URL, https://<host>/<path> or git@<host>:<path>, for the repository the persona works in. One enabled entry per repository." },
+          goal: { type: "object", description: "A goal persona's goal: objective, a non-blank text; done, an array of the statements that must hold for it to be done, which may be empty; and turns, an optional turn budget of at least 1. No other key." },
+          lifetime: { type: "string", description: "The persona's lifetime, standing or goal, standing where omitted." },
         },
         required: ["name", "workdir", "permissionMode"],
         additionalProperties: false,
@@ -5102,6 +5268,10 @@ export const register: Register = async (on, options) => {
       try { $.ui.log(`Agentic: the persona store could not be read at session start; '${sess.persona}' is coming up on a default state`); } catch { /* non-fatal */ }
     }
     const existingPersona = existing[sess.persona] as AgentState | undefined;
+    // True on the one branch that plants a fresh state as owner, where the
+    // goal file seeds the root. Every other branch starts from a stored
+    // state, or joins as a reader, and seeds nothing fresh.
+    let firstLaunch = false;
 
     if (arming === "reader") {
       // Section 6: a reader session never takes ownership at start, whether
@@ -5211,6 +5381,7 @@ export const register: Register = async (on, options) => {
       } else {
         sess.isOwner = true;
         sess.myEpoch = sess.state.epoch;
+        firstLaunch = true;
         sess.state.decisions.push({
           timestamp: Date.now(),
           loop: "monitor",
@@ -5296,6 +5467,18 @@ export const register: Register = async (on, options) => {
       guardsInvalid = null;
     }
 
+    // The lifetime option, read at registration too, is logged and cleared on
+    // the same pattern.
+    if (lifetimeInvalid !== null) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "monitor",
+        action: "setting_clamped",
+        detail: `lifetime ${bracketSafeText(oneLine(lifetimeInvalid)).slice(0, 50)} is not standing or goal; using standing`,
+      });
+      lifetimeInvalid = null;
+    }
+
     if (startPersonaProblem !== null) {
       sess.state.decisions.push({
         timestamp: Date.now(),
@@ -5304,6 +5487,40 @@ export const register: Register = async (on, options) => {
         detail: `configured persona ${startPersonaProblem}; running as '${sess.persona}'`,
       });
       startPersonaProblem = null;
+    }
+
+    // The goal persona's seed. The owner reads goal.json at every start and
+    // seedDecision says what the read does: a root planted at the
+    // first-launch branch above, a finished tree replaced as goal_create
+    // replaces one, or nothing, with the reason logged: skip-same, skip-live,
+    // or skip-no-root for a later start whose stored state holds no root.
+    // A reader never seeds, a file that cannot be read or that goalProblem
+    // refuses seeds nothing, and no throw here reaches the start. The seed
+    // opens no turn: a seeded root with no entries is a planner's root,
+    // which the next tick plans.
+    // A store that did not read leaves the session on a default state
+    // through the first-launch branch, which is no first launch, since the
+    // persona's own tree may sit in the file the read failed on, so the
+    // seed plants nothing there and names the store cause. The start after
+    // the store heals reads the rootless state it saved as skip-no-root.
+    if (sess.isOwner && goalFile !== "" && sess.stateNotLoaded !== null) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "goal",
+        action: "goal_seed_skipped",
+        detail: `${goalFile}: store-not-loaded: ${bracketSafeText(oneLine(sess.stateNotLoaded)).slice(0, 150)}`,
+      });
+    } else if (sess.isOwner && goalFile !== "") {
+      try {
+        await seedGoalFromFile($, goalFile, firstLaunch);
+      } catch (err) {
+        sess.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "goal",
+          action: "goal_seed_skipped",
+          detail: `${goalFile}: the seed threw: ${bracketSafeText(oneLine(safeErrorText(err))).slice(0, 150)}`,
+        });
+      }
     }
 
     for (const refused of refusedRegistrations) {
@@ -5507,9 +5724,11 @@ export const register: Register = async (on, options) => {
       completeLeafReturningClosed: (id, note) => completeLeafReturningClosed($, id, note),
       migrateLegacyMemories: () => migrateLegacyMemories($),
       completeRootUnplanned: async (rootId) => {
+        if (holdRootForGoalDone(rootId, "unplanned")) return;
         await completeRoot($, rootId, "every descendant complete or abandoned, no planner call");
       },
       completeRootZeroPlans: async (rootId) => {
+        if (holdRootForGoalDone(rootId, "zero-plan")) return;
         await completeRoot($, rootId, `Root ${rootId} marked complete`);
       },
       answerBlocksOf: async (answer, answerFollowUps) => {
@@ -7064,6 +7283,7 @@ export const register: Register = async (on, options) => {
         setCurrentTurnIsChannelOrigin: (value) => { currentTurnIsChannelOrigin = value; },
         currentTurnIsReprompt: () => currentTurnIsReprompt,
         setCurrentTurnIsReprompt: (value) => { currentTurnIsReprompt = value; },
+        currentTurnIsPriming: () => currentTurnIsPriming,
         setCurrentTurnIsPriming: (value) => { currentTurnIsPriming = value; },
         setCurrentTurnSenderClass: (value) => { currentTurnSenderClass = value; },
         setCurrentTurnOriginKind: (value) => { currentTurnOriginKind = value; },
@@ -7078,6 +7298,8 @@ export const register: Register = async (on, options) => {
         setPendingCompactionBank: (value) => { pendingCompactionBank = value; },
         memoryGateDiscardPercent: () => memoryGateDiscardPercent,
         drainInboxNow: () => drainInboxNow,
+        openLedgerAsk: (state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now) => openLedgerAsk($, state, persona, ownerSessionId, nodeId, question, recommend, opener, blocking, now),
+        withdrawLiftedAskBy: (state, persona, opener, nodeId, now) => withdrawLiftedAskBy($, state, persona, opener, nodeId, now),
         sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta,
         planningInFlight: () => planningInFlight,
         arming: () => arming,

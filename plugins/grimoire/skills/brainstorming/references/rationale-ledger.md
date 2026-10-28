@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's brainstorming skill: it governs the collaborative design conversation that precedes any new feature, project, or non-trivial change, and it ends by producing a written spec in `docs/plans/` that the executing-work skill runs on. It owns these moments: the pre-design memory and backlog recall, the scope check that splits an oversized request into sub-project specs, the one-question-at-a-time design dialog, the offer of the design council at a hard fork, the contract-surface scout sweep that derives files in scope, the plan sketch, the spec write and its indexing, the spec self-review with its blind read and plan review, the choice of commit model, the per-section model tier and locus assignment, the `Tests:` and document-review lines, the Fable-usage rules, and the frozen spec format and header contract. A session loads it as a `named-trigger`: the frontmatter says to use it when the operator wants to think through a problem before building, or on any substantial new effort without an existing spec, with phrases like "let's think through", "help me design", or "spec this out".
 
-Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: C151 rewritten to its passage as it now reads, C152's key reworded, and F001 to F005 added under the plan's letter F for the `Verify:` line, the write-time run and the catalog check. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C024, C034, C045, C046, C055, C072, C095, C097, C104, C164 and C180 rewritten to their passages as they now read. They point the intake routes at the doctrine bullet that letters them, the capacity reading, the Workflow route and the external engine at the files that hold them, and the scout band at the file now holding it, state when `## Operator Verification` is owed, and cut restatements to pay. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19, which put the altitude interview into the authoring loop: C177 and C181 rewritten to their passages as they now read, and AB001 to AB005 added under the plan's letter AB for the interview, its three sources, step 3's first question, step 12's `Method:` sentence and the template's `Method:` line. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 3 on 2026-10-19, which held step 5's option costs to the doctrine's measured figures (AB006 below). Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 2 on 2026-10-24, which has step 1 read the direction ledgers and step 9 write the `Serves:` line: C177 and C181 rewritten to their passages as they now read, and DB001 to DB004 added under the plan's letters DB for the ledger read, the line's form, the plan serving none and the template's line. Its review round 1 on 2026-10-25 rewrote DB001 and DB004 to their passages as they now read, the directory's path left to the role skill and the template defaulting to `Serves: none`, rewrote C181 to match, and corrected the source lines of C177 and C181. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 3 on 2026-10-25, which has step 9 write the plan brief after `## Intent`: DB005 added under the plan's letters DB for that write.
+Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: C151 rewritten to its passage as it now reads, C152's key reworded, and F001 to F005 added under the plan's letter F for the `Verify:` line, the write-time run and the catalog check. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C024, C034, C045, C046, C055, C072, C095, C097, C104, C164 and C180 rewritten to their passages as they now read. They point the intake routes at the doctrine bullet that letters them, the capacity reading, the Workflow route and the external engine at the files that hold them, and the scout band at the file now holding it, state when `## Operator Verification` is owed, and cut restatements to pay. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19, which put the altitude interview into the authoring loop: C177 and C181 rewritten to their passages as they now read, and AB001 to AB005 added under the plan's letter AB for the interview, its three sources, step 3's first question, step 12's `Method:` sentence and the template's `Method:` line. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 3 on 2026-10-19, which held step 5's option costs to the doctrine's measured figures (AB006 below). Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 2 on 2026-10-24, which has step 1 read the direction ledgers and step 9 write the `Serves:` line: C177 and C181 rewritten to their passages as they now read, and DB001 to DB004 added under the plan's letters DB for the ledger read, the line's form, the plan serving none and the template's line. Its review round 1 on 2026-10-25 rewrote DB001 and DB004 to their passages as they now read, the directory's path left to the role skill and the template defaulting to `Serves: none`, rewrote C181 to match, and corrected the source lines of C177 and C181. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 3 on 2026-10-25, which has step 9 write the plan brief after `## Intent`: DB005 added under the plan's letters DB for that write. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
 
 ### C001
 - key: Explore the problem space in conversation with the operator, then capture the agreement as a spec for executing-work to run.
@@ -1345,16 +1345,16 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - provenance: da1a895 2026-07-14, extracted from the BMAD Test Architect idea after adjudicating its confinement risk; 4247725 2026-08-27 pointed it at testing-discipline and pinned the pointer.
 - verdict: keep
 - reason: The line's three constraints are its boundary against confining the implementer, and the pointer phrase is pinned at test/doctrine-parity.test.js:3871 (A059). The test/doctrine-parity.test.js:3871 cite sits at the test named `the five pointers to testing-discipline outside the doctrine copies are still present` at the landing (its assertion near line 3863); prefer the test name over the line.
-- passage: Where a section carries real behavioral risk, give it a `Tests:` line naming the behaviors that earn one per the testing-discipline skill's litmus (`skills/testing-discipline/SKILL.md` under the kit plugin root), and the risk driving each, in both directions where a guard or flag is involved.
+- passage: Where a section carries real behavioral risk, give it a `Tests:` line naming the behaviors that earn one per the testing-discipline skill's Triage (`skills/testing-discipline/SKILL.md` under the kit plugin root), and the risk driving each, in both directions where a guard or flag is involved.
 
 ### C133
-- key: Take the behaviors that earn a test from the testing-discipline skill's litmus at `skills/testing-discipline/SKILL.md` under the kit plugin root.
+- key: Take the behaviors that earn a test from the testing-discipline skill's Triage at `skills/testing-discipline/SKILL.md` under the kit plugin root.
 - class: pointer
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:48
 - provenance: 4247725 2026-08-27, four surfaces stopped restating the litmus and the pointers earned a presence pin.
 - verdict: keep
 - reason: no finding. The pin exists because a pointer fails by going quiet; deleting this clause reds test/doctrine-parity.test.js:3871. The test/doctrine-parity.test.js:3871 cite sits at the test named `the five pointers to testing-discipline outside the doctrine copies are still present` at the landing (its assertion near line 3863); prefer the test name over the line.
-- passage: the behaviors that earn one per the testing-discipline skill's litmus (`skills/testing-discipline/SKILL.md` under the kit plugin root)
+- passage: the behaviors that earn one per the testing-discipline skill's Triage (`skills/testing-discipline/SKILL.md` under the kit plugin root)
 
 ### C134
 - key: State intent in the `Tests:` line, never design: no fixtures, seams, or structure, which are implementation knowledge the plan does not have.
@@ -1370,8 +1370,9 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:48
 - provenance: da1a895 2026-07-14, the second constraint; d2e2f37 2026-09-05 split the ceiling into its two axes.
-- verdict: keep
-- reason: Ruled with C132 (A059); the two-axis ceiling is what keeps testing-discipline's shape bar in force past the line.
+- verdict: retire
+- superseded-by: AG001
+- reason: Ruled with C132 (A059); the two-axis ceiling is what keeps testing-discipline's shape bar in force past the line. Superseded on 2026-10-27 by AG001 (the line is now a ceiling at the section's allocation, with the plan's reserve as the route past it; the verdict before it was keep).
 - passage: It is a floor over the named contracts and a ceiling on nothing.
 
 ### C136
@@ -2022,3 +2023,56 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - verdict: keep
 - reason: The brief projects `## Intent`, `## Goal`, `## Approach` and `## Assumptions`, so it is written once the Intent record exists and the design conversation is still in the window, the same anchor C177 gives the Intent write. The form is pointed at rather than restated because prose-register owns the artifact (its DB001 to DB004). It precedes the create path because that path's first step checks the brief exists, so a plan with none is caught before executing-work takes it. The reason is stated as the operator's page, since the author who would otherwise skip the file is the one reading this step.
 - passage: After `## Intent` is written, write the plan brief to `docs/briefs/<plan stem>.md` as the `prose-register` skill's Plan Brief section states it, a projection of the spec into seven parts, since my Channels page shows the brief in place of the plan document.
+
+### AG001
+- key: Treat the `Tests:` line as a floor over the named contracts and a ceiling at the section's allocation, and send a candidate past the allocation to the orchestrator for the plan's reserve.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:58
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling".
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The old clause "a ceiling on nothing" is where over-testing was licensed in writing, and the plan's Goal makes the line a ceiling as well as a floor. The testing-discipline skill's floor-and-ceiling bullet states the rule, this paragraph sets the allocation and names the reserve header, and executing-work's findings reference points here for the fix round. Supersedes C135.
+- passage: It is a floor over the named contracts and a ceiling at the section's allocation, stated on the line as a count of tests or of test lines by layer.
+- passage: A candidate past the allocation goes to the orchestrator for the plan's reserve, which the spec header names as `Test Reserve: <n> tests` or `<n> lines`, in the unit the plan's allocations use.
+
+### AG002
+- key: Name the plan's test reserve on a `Test Reserve:` header line, in the unit the plan's allocations use.
+- class: mechanic
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:75
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the same Approach bullet, which makes the reserve a plan header the orchestrator draws from.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The paragraph names the header line, so the Spec Format block carries it beside the commit model, where the orchestrator reads the plan's other run-wide settings.
+- passage: Test Reserve: <n> tests | <n> lines
+
+### AG003
+- key: State each section's test allocation on its `Tests:` template line as a count of tests or of test lines by layer.
+- class: mechanic
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:96
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the same Approach bullet.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The ceiling is only a ceiling where the line states a number, so the template slot the architect fills carries the allocation.
+- passage: with the allocation as a count of tests or of test lines by layer.
+
+### AG004
+- key: State the reserve in tests when a plan mixes tests and lines across sections.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:58
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling".
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The reserve is drawn by every section, and a count in one unit cannot be spent against an allocation in the other. Tests are the unit that converts without a guess about line length.
+- passage: A plan mixing tests and lines across sections states its reserve in tests.
+
+### AG005
+- key: Grant a request from the reserve or decline it with a reason, decline once the reserve is spent, record each draw and the reserve left on the Chapter's `Gate:` line, and read a plan with no reserve header as a floor alone.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:58
+- provenance: finishing pass of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-28, whose adversarial review found these rules only in executing-work's `implementing.md:145` while the plan's Approach names brainstorming step 12 as the reserve's one owner; moved here from that line.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` finishing pass
+- reason: The reserve is a cap only where a draw past it is refused and every draw is visible, and the plan names one owner so the rule cannot drift between copies. A plan written before the header has no reserve to draw on, so its line stays a floor.
+- passage: The orchestrator grants a request from the reserve or declines it with a reason, and a spent reserve declines.
+- passage: The Chapter's `Gate:` line records each draw and the reserve left.
+- passage: A plan whose header names no `Test Reserve:`, every plan written before the header, reads each `Tests:` line as a floor alone.

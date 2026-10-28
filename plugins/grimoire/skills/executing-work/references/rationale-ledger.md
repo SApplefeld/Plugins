@@ -6159,7 +6159,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 0, 1 and 2 of the section loop and the rules for delegating to subagents. It owns closing the previous boundary, confirming a section's approach, the Dispatch Brief template and tier routing, the capacity reading, the implementer status and escalation ladder, awaiting a dispatched agent and stopping one before replacing it, the evidence check of step 2 and its promises check, and the orchestrator's delegation rules, the disjoint-files rule and scout banding among them. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 0 to 2 tell a session to read it before a section opens and before any implementer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: c3.C001 and c3.C002 rewritten to their passages as they now read, and F001 to F005 added under the plan's letter F for the inline start-of-work statement, the brief's `Verify:` field and step 2's instrument run. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: R007, c2.C095, B002, R009, T166 and Z001 rewritten to their passages as they now read, defining the stall raise, naming the four statuses, pointing the self-surfacing gate at its definition, naming the files that hold step 3's roster, step 4 and the dispatch table, and making the promise check field required.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: c3.C001 and c3.C002 rewritten to their passages as they now read, and F001 to F005 added under the plan's letter F for the inline start-of-work statement, the brief's `Verify:` field and step 2's instrument run. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: R007, c2.C095, B002, R009, T166 and Z001 rewritten to their passages as they now read, defining the stall raise, naming the four statuses, pointing the self-surfacing gate at its definition, naming the files that hold step 3's roster, step 4 and the dispatch table, and making the promise check field required. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
 
 ### I019
 - key: Title the reference file carrying steps 0, 1 and 2 of the section loop and the rules for delegating to subagents `Implementing a Section`.
@@ -6392,13 +6392,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - flag: weak-reason
 
 ### c2.C027
-- key: Where the spec has no `Tests:` line, put the test-worthiness call per the testing-discipline skill's litmus, its absolute path, and what a test should lock into the brief.
+- key: Where the spec has no `Tests:` line, put the test-worthiness call per the testing-discipline skill's Triage, its absolute path, and what a test should lock into the brief.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/implementing.md:33
 - provenance: da1a895 2026-07-14 (fallback to dispatch-time judgment); 4247725 2026-08-27 made the surfaces point at the litmus instead of restating it.
 - verdict: keep
 - reason: Already a pointer at the owner, pinned (A039).
-- passage: else the test-worthiness call per the testing-discipline skill's litmus, its absolute path resolved by the same ladder as the Style-skill file paths bullet below, and what a test should lock
+- passage: test-worthiness call per the testing-discipline skill's Triage, its
+- passage: absolute path resolved by the same ladder as the Style-skill file paths
+- passage: bullet below, and what a test should lock
 
 ### c2.C028
 - key: Name the sibling pattern to mirror and require mirrored failure-mode breadth (catch scope, regex generality).
@@ -7142,13 +7144,13 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Report every gate number with the state of the tree it was measured on, such as a clean worktree at sha X or the main checkout with N foreign dirty files.
 
 ### c3.C004
-- key: Read the moment-pin bullet of skills/testing-discipline/SKILL.md under the kit plugin root for the form a gate figure's moment takes.
+- key: Read the moment-pin bullet of skills/test-gates/SKILL.md under the kit plugin root for the form a gate figure's moment takes.
 - class: pointer
 - source: plugins/grimoire/skills/executing-work/references/implementing.md:158
 - provenance: 7ef71e3 2026-09-01, the instruments-not-prose plan, after five restated copies of the convention drifted in committed bytes.
 - verdict: keep
-- reason: One owning site and pointers everywhere else is the shape that commit built and pinned with a structural sweep; this is one of the pinned pointer sites.
-- passage: A gate number in a journal-layer artifact carries its moment in the form the moment-pin bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root states.
+- reason: One owning site and pointers everywhere else is the shape that commit built and pinned with a structural sweep; this is one of the pinned pointer sites. Section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` repointed the passage's path at `test-gates` on 2026-10-27, when the moment it names moved there from `testing-discipline`.
+- passage: A gate number in a journal-layer artifact carries its moment in the form the moment-pin bullet of `skills/test-gates/SKILL.md` under the kit plugin root states.
 
 ### c3.C005
 - key: For delegated work read the implementer's diff with `git diff` and spot-check the reported evidence instead of re-running everything, re-running anything that looks off.
@@ -7814,13 +7816,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: A wake without a completion, from a peer message, an operator redirect or a timer, takes the reading it allows, answers what woke you, and ends the turn again on `WAITING:` naming the ids still pending. Never hold the turn open for a window to close, since that queues the next message behind it.
 
 ### W020
-- key: Treat the `Tests:` line as a floor over the named contracts: extend it with what implementation reveals, amend it on contact with the code where a named contract proves to be a choice, and flag either delta in the report so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- key: Amend the `Tests:` line on contact with the code where a named contract proves to be a choice, and flag the amendment in the report so the Chapter carries it and the adversarial reviewer checks it against the plan.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:32
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:30
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20; the field said the line was never reduced while `skills/brainstorming/SKILL.md` said it was amendable on contact with the code, and testing-discipline's requirement question is what decides which holds.
 - verdict: keep
 - reason: Supersedes c2.C026. A floor that can only grow obliges an implementer to write a pin the testing-discipline skill says is not written, once a named contract turns out to be a choice. The floor stays over the contracts that are requirements. The reduction is flagged exactly as an extension is, and the adversarial reviewer reads it against the plan, so the amendment is a recorded delta rather than a quiet drop. The four implementer charters carry the same duty as one marked text, held identical by `test/doctrine-parity.test.js` ("the implementer charters carry one byte-identical Tests duty between their markers"); this field states it in the template's list form and sits outside that pin.
-- passage: amendable on contact with the code where a named contract proves to be a choice, with either delta flagged in your report
+- passage: and amendable on contact with the code where a named contract proves to
+- passage: be a choice, with the amendment flagged in your report; else the
 
 ### Z001
 - key: Before any dispatch that passes a `fable` model override, run capacity-read.js and act on its line: dispatch and ladder-governs proceed unchanged, a downgrade sends an implementer site straight to the stall raise, a reviewer or judge site to the compensation row, a consultant site to its stand-in row, and the plan review to its wait, and the reading is taken per dispatch, never reused across a section or a session.
@@ -7910,6 +7913,28 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: keep
 - reason: A reviewer dispatched over a failing instrument spends its round on what the instrument already reported, so the fix comes first, as for any failing gate.
 - passage: A failing instrument is fixed before step 3.
+
+### AG001
+- key: Brief the Tests field as a floor over the named contracts and a ceiling at the section's allocation, with a candidate past it a request to the orchestrator.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:27
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names this template as one of the three places that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: A brief that says the floor is extended with what implementation reveals hands the implementer the decision of what else to pin. The sentence is the template's copy of the charters' duty text, and `test/doctrine-parity.test.js` holds both free of the old phrase.
+- passage: over the named contracts and a ceiling at its allocation, a candidate
+- passage: past it a request to the orchestrator and never a test written first,
+
+### AG002
+- key: Answer a request past a section's `Tests:` allocation from the plan's `Test Reserve:` under brainstorming step 12, and put a granted test in the section's fix round.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:145
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", whose held Major found no executing-work text that handled a request past the allocation or a plan with no reserve; narrowed to a pointer in the plan's finishing pass, whose adversarial review found the draw rules living only here while the plan names brainstorming step 12 as the reserve's one owner.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 and finishing pass
+- reason: The charters tell an implementer to send a candidate past its allocation to the orchestrator as a request, so the orchestrator's step names where the answer is read. The grant, the decline, the Gate-line record and the no-header reading live in brainstorming step 12 (its AG005), since a rule held in two places drifts, and the fix-round placement stays here because it is the orchestrator's act.
+- passage: is answered from the plan's `Test Reserve:` under brainstorming step 12, which owns the reserve.
+- passage: A granted test joins the section's fix round.
 
 ## plugins/grimoire/skills/executing-work/references/review.md
 
@@ -8855,7 +8880,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries step 4 of the section loop. It owns addressing a review's findings: the Minor list and close pass, the advisory disposition, the claim-class region, provenance and the held-finding judge, the add-decision line and the design stop, the review-round backstop, the loop's end condition, the recurrence and adoption triggers, the fix-delta bar, the close gate and the out-of-scope route. Load class: `plan-run` - the main file's contents table and its skeleton line for step 4 tell a session to read it when a review returns and before any fix.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
 
 ### I023
 - key: Title the reference file carrying step 4 of the section loop `Addressing Review Findings`.
@@ -10842,6 +10867,17 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: An overrule restores the self-confirmation the verifier exists to remove, the session asked to fix a finding again ruling it true. The spec's Intent refuses it, and AC004's re-raise is the one route back.
 - passage: The orchestrator never overrules a `REFUTED` by its own read.
 
+### AG001
+- key: Let only a test past the section's allocation draw from the plan's reserve in a fix round, let the regression test for a defect that happened draw without asking, and state that exception in the fix writer's brief.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/findings.md:75
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which gives the reserve rule one owner and has the fix round point at it.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: A fix round is where an unbudgeted test is most likely to arrive, and a defect that happened is the one case where the test's value is already shown. The fix writer's charter says a candidate past the allocation is never a test written first, so the brief states the exception, or the writer meets a rule the round cannot satisfy. Brainstorming step 12 owns the reserve and testing-discipline states the rule.
+- passage: Brainstorming step 12 owns the reserve.
+- passage: The regression test for a defect that happened draws without asking, and the fix round's brief states that exception to its fix writer, so the writer does not meet the charter's "never a test written first".
+
 ## plugins/grimoire/skills/executing-work/references/closing.md
 
 This document is the reference file of the executing-work skill that carries steps 5 to 8 of the section loop and the Chapter format. It owns closing a section: the plan doc update, the applied-stamp adjudication and the Chapter, the commit model's application, the compaction boundary declaration, the compaction deferral in a session no `/goal` or `/loop` drives, the interim boundary a closure drought earns, and the Chapter template and its machine contract. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 5 to 8 tell a session to read it at a section's close and at an interim boundary.
@@ -11397,8 +11433,8 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - source: plugins/grimoire/skills/executing-work/references/closing.md:34
 - provenance: 83b81ac 2026-08-19, Section 1 of the boundary-cadence plan; the moment-pin clause came with the instruments-not-prose plan (7ef71e3 2026-09-01).
 - verdict: keep
-- reason: The content list's owner; park copies it for its own entry and the review bracket reads the live dispatches off it, both pointing here (A116, A117, A118).
-- passage: It carries, in order: each in-flight section's stage, the live dispatches and what each was asked, the current gate baseline pinned per the moment-pin bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root, the rulings adopted since the last boundary, and the next action per section.
+- reason: The content list's owner; park copies it for its own entry and the review bracket reads the live dispatches off it, both pointing here (A116, A117, A118). Section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` repointed the passage's path at `test-gates` on 2026-10-27, when the moment it names moved there from `testing-discipline`.
+- passage: It carries, in order: each in-flight section's stage, the live dispatches and what each was asked, the current gate baseline pinned per the moment-pin bullet of `skills/test-gates/SKILL.md` under the kit plugin root, the rulings adopted since the last boundary, and the next action per section.
 
 ### c4.C067
 - key: Under Review-Only, write and stage the interim entry and still declare the boundary.
@@ -11904,13 +11940,13 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: On a shared checkout the reading includes other sessions' uncommitted edits, so read the row list, not only the totals.
 
 ### S147
-- key: Carry a moment on every measured figure a Chapter records, in the form testing-discipline's moment-pin bullet states.
+- key: Carry a moment on every measured figure a Chapter records, in the form test-gates' moment-pin bullet states.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/closing.md:65
 - provenance: 7ef71e3 2026-09-01, instruments-not-prose; line touched by 55c5abc 2026-09-09.
 - verdict: keep
-- reason: A pointer site the instruments-not-prose parity test counts, so a rewrite into a restatement or a deletion reddens the suite.
-- passage: Every measured figure a Chapter records carries its moment in the form the moment-pin bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root states.
+- reason: A pointer site the instruments-not-prose parity test counts, so a rewrite into a restatement or a deletion reddens the suite. Section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` repointed the passage's path at `test-gates` on 2026-10-27, when the moment it names moved there from `testing-discipline`.
+- passage: Every measured figure a Chapter records carries its moment in the form the moment-pin bullet of `skills/test-gates/SKILL.md` under the kit plugin root states.
 
 ### S148
 - key: Cite the analysis behind a figure rather than restating its deep evidence in the Chapter.
@@ -12033,6 +12069,27 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: keep
 - reason: Step 4 records a refuted finding here (AC003 under the findings.md heading), so a reader of the Chapter sees which findings went unfixed and on what ground.
 - passage: refuted: <finding>, ground <ground>;
+
+### AG001
+- key: Carry on the Chapter's `Gate:` line the section's test ledger and run cost, tests added and retired, test lines over production lines, the slowest files and the fixture time, the first two as `scripts/gate-ledger.js` prints them and any figure with nothing to read it from as `unmeasured`.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/closing.md:49
+- provenance: section 3 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The Chapter's gate line gains four figures", which names these four as what lets the operator see whether the suite is getting better.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 3
+- reason: A session sees the test it writes and never the runs it will cost, so the Chapter reports the delta's test count, its test-line share and the suite's slowest files and fixture time for the reviewer to read against the section's `Tests:` allocation. test-gates' clock-and-box bullets own the figures and state that nothing enforces them. The script computes the first two from the diff so the counts are not hand-made, and `unmeasured` stands where a project has no runner log or fixture timer, since a guessed figure reads as a measured one.
+- passage: The section's test ledger and run cost as `tests +<added> -<retired>`, `test/prod lines <ratio>`, `slowest: <file> <s>, ...` and `fixtures: <s>`: the first two as `scripts/gate-ledger.js <base>` under the kit plugin root prints them over the section's base, the last two from the project's runner log and fixture timer.
+- passage: A figure with nothing to read it from is written `unmeasured`.
+
+### AG002
+- key: Carry on the Chapter's `Gate:` line each draw on the plan's `Test Reserve:` and the reserve left.
+- class: pointer
+- source: plugins/grimoire/skills/executing-work/references/closing.md:49
+- provenance: finishing pass of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-28, whose adversarial review found the reserve's Gate-line record with no slot in this template.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` finishing pass
+- reason: Brainstorming step 12 says the `Gate:` line records each draw, and this template owns that line's fields, so the slot sits here and the rule stays there (brainstorming AG005).
+- passage: Each draw on the plan's `Test Reserve:` and the reserve left, per brainstorming step 12.
 
 ## plugins/grimoire/agents/prose-reviewer.md
 
@@ -12666,13 +12723,13 @@ Extracted at `6bc07fb`: whole document (`agents.prose-reviewer.md`). Amended by 
 - passage: and does any curated passage carry dated-evidence annotation?
 
 ### C066
-- key: Read the moment-pin bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root for the pin's form and the journal layer's boundary.
+- key: Read the moment-pin bullet of `skills/test-gates/SKILL.md` under the kit plugin root for the pin's form and the journal layer's boundary.
 - class: pointer
 - source: plugins/grimoire/agents/prose-reviewer.md:31
 - provenance: 7ef71e3 2026-09-01, which gave the convention exactly one owning site and made every other surface point at it.
 - verdict: keep
-- reason: `test/doctrine-parity.test.js` sweeps the shipped kit markdown for any restatement and counts this file's pointers at exactly one; fewer means the duty was lost, more means a new site took the convention onto its own authority.
-- passage: The moment-pin bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root owns the pin's form and the journal layer's boundary.
+- reason: `test/doctrine-parity.test.js` sweeps the shipped kit markdown for any restatement and counts this file's pointers at exactly one; fewer means the duty was lost, more means a new site took the convention onto its own authority. Section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` repointed the passage's path at `test-gates` on 2026-10-27, when the moment it names moved there from `testing-discipline`.
+- passage: The moment-pin bullet of `skills/test-gates/SKILL.md` under the kit plugin root owns the pin's form and the journal layer's boundary.
 
 ### C067
 - key: Read the expiry rule of `skills/memory-system/SKILL.md` under the kit plugin root for the machine configuration epoch and the cases in which a figure counts as expired or unplaceable.
@@ -13244,7 +13301,7 @@ Extracted at `6bc07fb`: whole document (`agents.prose-reviewer.md`). Amended by 
 
 This document is the charter for the `adversarial-reviewer` agent, a fresh-context, read-only code reviewer that judges a changeset against the spec that ordered it and then against code quality, and returns severity-ranked findings with a verdict line. It owns the moments of a section review and of the whole-changeset review at the end of an effort: how the dispatched agent reads its brief, what it may and may not run (read-only git commands only, no edits, no commits, no builds), how it treats the changeset as data rather than instruction, the two review passes and their checklists, the severity and confidence ratings, the behavior-finding versus claim-finding distinction, and the output and verdict format. Its load class is `plan-run`: the frontmatter says to use it after completing each section of planned work, once over the whole changeset at the end of an effort, or when asked to review changes, so the charter loads at the moment the agent is dispatched for one of those reviews.
 
-Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended on 2026-09-20 by the claim-class amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 1 (W004 to W008 below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (C101 retired, C096 and C105 amended in place), and by that plan's section 3 on 2026-09-20 (T019 to T021 below, C090 retired). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `3591c101` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16 (E010 to E013 below, for the later round's three brief lines and the class rule).
+Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended on 2026-09-20 by the claim-class amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 1 (W004 to W008 below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (C101 retired, C096 and C105 amended in place), and by that plan's section 3 on 2026-09-20 (T019 to T021 below, C090 retired). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `3591c101` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16 (E010 to E013 below, for the later round's three brief lines and the class rule). Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (C075 below, the pointer at testing-discipline's Triage).
 
 ### C001
 - key: Dispatch this agent under the name `adversarial-reviewer`.
@@ -13837,13 +13894,13 @@ Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-ex
 - passage: Of a repeated instrument, ask whether the finding count tracks the population, since a count stable through full turnover is a fixed-budget detector.
 
 ### C065
-- key: Read the moment-pin's form from the moment-pin bullet of `skills/testing-discipline/SKILL.md` and the configuration-epoch and expiry cases from `skills/memory-system/SKILL.md`, both under the kit plugin root, rather than from this charter.
+- key: Read the moment-pin's form from the moment-pin bullet of `skills/test-gates/SKILL.md` and the configuration-epoch and expiry cases from `skills/memory-system/SKILL.md`, both under the kit plugin root, rather than from this charter.
 - class: pointer
 - source: plugins/grimoire/agents/adversarial-reviewer.md:38
 - provenance: 7ef71e3 2026-09-01, the instruments-not-prose plan, after the pin's form had been restated at five places and drifted.
 - verdict: keep
-- reason: All three surfaces are pointers at the same owner, which is the one-owner shape, and test/doctrine-parity.test.js:5597 counts exactly one pointer here and asserts no restatement exists under the plugin root.
-- passage: read the pin's form from the moment-pin bullet of `skills/testing-discipline/SKILL.md` under the kit plugin root, and the configuration epoch and expiry cases from the expiry rule of `skills/memory-system/SKILL.md` under the same root.
+- reason: All three surfaces are pointers at the same owner, which is the one-owner shape, and test/doctrine-parity.test.js:5597 counts exactly one pointer here and asserts no restatement exists under the plugin root. Section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` repointed the passage's path at `test-gates` on 2026-10-27, when the moment it names moved there from `testing-discipline`.
+- passage: read the pin's form from the moment-pin bullet of `skills/test-gates/SKILL.md` under the kit plugin root, and the configuration epoch and expiry cases from the expiry rule of `skills/memory-system/SKILL.md` under the same root.
 
 ### C066
 - key: Reach for each of those two files on its own, and where one is unreadable say so in your findings and check only what this bullet states outright for the directions that file owns.
@@ -13927,13 +13984,13 @@ Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-ex
 - passage: - **Tests:** where the change earned regression cover, check for a durable test asserting real behavior.
 
 ### C075
-- key: Read the litmus for what earns cover from disk at `skills/testing-discipline/SKILL.md` under the kit plugin root.
+- key: Read the Triage for what earns cover from disk at `skills/testing-discipline/SKILL.md` under the kit plugin root.
 - class: pointer
 - source: plugins/grimoire/agents/adversarial-reviewer.md:40
 - provenance: d959655 2026-08-27, after the charter's own copy of the litmus went stale against the skill.
 - verdict: keep
 - reason: Two pointers at one owner from two different seats, which is the one-owner shape, and the pin holds the pointer in place so the copy cannot come back.
-- passage: What earns cover is the testing-discipline skill's litmus, read from disk at `skills/testing-discipline/SKILL.md` under the kit plugin root.
+- passage: What earns cover is the testing-discipline skill's Triage, read from disk at `skills/testing-discipline/SKILL.md` under the kit plugin root.
 
 ### C076
 - key: If the testing-discipline skill is unreadable, state that in your findings and skip both the test-worthiness judgment and the retire-class duty.
@@ -21315,7 +21372,7 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 
 This document is the charter for a dispatched implementation agent named implementer-fable, the top model tier of the kit's scoped implementer family. It governs the moment a single Section of Work from an already-approved spec is built by a subagent: how the agent reads its brief, what it must read before writing, how far its edits may reach, what evidence proves the work done, whether it may stage or commit, and which of four terminal statuses it must end its report with. It owns the execution-quality moments inside one section and explicitly does not own design, the dispatch brief's field list, or the commit model. The load class is `plan-run`: the charter is loaded by the dispatched agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template.
 
-Extracted at `6bc07fb`: whole document (`agents.implementer-fable.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C064 and C065 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A004 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `401772a0` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below).
+Extracted at `6bc07fb`: whole document (`agents.implementer-fable.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C064 and C065 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A004 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `401772a0` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
 
 ### C001
 - key: Dispatch this agent under the name implementer-fable.
@@ -21976,7 +22033,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-fable.md`). Amended 
 - passage: Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
-- key: Treat the section's `Tests:` line as a floor over the named contracts, extend it with what implementation reveals, and amend it on contact with the code where a named contract proves to be a choice as the testing-discipline skill defines one.
+- key: Amend the section's `Tests:` line on contact with the code where a named contract proves to be a choice, as the testing-discipline skill defines one.
 - class: rule
 - source: plugins/grimoire/agents/implementer-fable.md:15
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20; the charters said the line was never reduced, which contradicted the testing-discipline rule that a pin on a choice is not written.
@@ -21985,13 +22042,13 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-fable.md`). Amended 
 - passage: It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one.
 
 ### W002
-- key: Flag in your report either delta to the section's `Tests:` line, an extension or an amendment, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- key: Flag in your report the amendment to the section's `Tests:` line, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 - class: rule
 - source: plugins/grimoire/agents/implementer-fable.md:15
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
-- reason: Supersedes C012. The report stays the only channel the duty can travel on, since the agent cannot write the Chapter. A reduction is flagged as an extension is, which is what makes the amendment a recorded delta the reviewer can read against the plan. Part of the marked region W001 describes.
-- passage: Flag either delta in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- reason: Supersedes C012. The report stays the only channel the duty can travel on, since the agent cannot write the Chapter. Flagging the amendment is what makes it a recorded delta the reviewer can read against the plan. Part of the marked region W001 describes.
+- passage: Flag the amendment in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 
 ### A004
 - key: Before reporting BLOCKED, sort the failure by systematic-debugging's classify step, and never change working code to route around an environment problem.
@@ -22021,11 +22078,31 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-fable.md`). Amended 
 - reason: The charter is what a dispatched agent reads whatever brief it is handed, so the rule rides here as the class and a pointer, while the dispatch brief's directive stays the one full copy and the role skill owns the class.
 - passage: You are working class per the role skill: end no process you did not start, never one by image name, perform no git operation past your own files, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
 
+### AG001
+- key: Hold the section's `Tests:` line as a floor over the named contracts and a ceiling at its allocation, and send a candidate past it to the orchestrator as a request.
+- class: rule
+- source: plugins/grimoire/agents/implementer-fable.md:15
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The old sentence let an implementer extend the floor with whatever implementation revealed, which is the licence the plan removes. A test written first and justified after is the failure the request route prevents. Supersedes the floor half of W001, and the four copies stay one text between the `KIT-TESTS-DUTY` markers, held by `test/doctrine-parity.test.js`.
+- passage: The section's `Tests:` line is a floor over the named contracts and a ceiling at its allocation; a candidate past it is a request to the orchestrator, never a test written first.
+
+### AG002
+- key: Pin what the line names, in the shape it names, and leave the choice of what else to pin to the orchestrator.
+- class: rule
+- source: plugins/grimoire/agents/implementer-fable.md:15
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The architect states the pins as intent, so an implementer without the conversation has no ground for deciding what else deserves one. The sentence says so in the charter, where a dispatched implementer reads it whatever its brief says.
+- passage: Pin what the line names, in the shape it names; do not decide what else to pin.
+
 ## plugins/grimoire/agents/implementer-opus.md
 
 This document is the charter for a scoped implementation agent at the Opus tier, dispatched to build exactly one Section of Work from an already-approved spec. It owns the moments that follow that dispatch: how the agent treats the brief it was handed, what it reads before writing (the spec section, the named style skills, the in-scope files and their siblings, with an outlining discipline for large and generated files), how narrowly it may change code and how it comments it, how it proves the work with a build and targeted tests run to completion inside its own turn without backgrounding through the tool parameter that would end that turn, the prohibition on committing or staging, and the single closing status it must report (DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED) with what each one carries. It does not own design decisions, which stay with the spec, nor the commit model, which stays with the orchestrator. Load class: plan-run - the charter loads for the dispatched agent at the moment the orchestrator dispatches it, per the description's instruction to dispatch with a brief built from the executing-work skill's Dispatch Brief template.
 
-Extracted at `6bc07fb`: whole document (`agents.implementer-opus.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C062 and C063 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A005 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `f0dbdc8e` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below).
+Extracted at `6bc07fb`: whole document (`agents.implementer-opus.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C062 and C063 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A005 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `f0dbdc8e` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
 
 ### C001
 - key: Dispatch this agent under the name implementer-opus.
@@ -22642,22 +22719,22 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-opus.md`). Amended b
 - passage: Where the work needs a unit of behavior that runs and the section text does not name it, your report carries its add-decision line: what it changes, the Goal sentence, Intent clause or acceptance bullet it serves, whether it adds a mechanism, its size as a number, and what not building it costs. Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
-- key: Treat the section's `Tests:` line as a floor over the named contracts, extend it with what implementation reveals, and amend it on contact with the code where a named contract proves to be a choice as the testing-discipline skill defines one.
+- key: Amend the section's `Tests:` line on contact with the code where a named contract proves to be a choice, as the testing-discipline skill defines one.
 - class: rule
 - source: plugins/grimoire/agents/implementer-opus.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
 - reason: Supersedes C012. Designed copy of the marked region in the implementer-fable charter, W001 under that heading; held byte-identical by `test/doctrine-parity.test.js`.
-- passage: The section's `Tests:` line is a floor over the named contracts, extended with what implementation reveals. It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one.
+- passage: It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one.
 
 ### W002
-- key: Flag in your report either delta to the section's `Tests:` line, an extension or an amendment, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- key: Flag in your report the amendment to the section's `Tests:` line, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 - class: rule
 - source: plugins/grimoire/agents/implementer-opus.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
 - reason: Supersedes C013. Designed copy of the marked region in the implementer-fable charter, W002 under that heading.
-- passage: Flag either delta in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- passage: Flag the amendment in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 
 ### A005
 - key: Before reporting BLOCKED, sort the failure by systematic-debugging's classify step, and never change working code to route around an environment problem.
@@ -22687,11 +22764,31 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-opus.md`). Amended b
 - reason: The charter is what a dispatched agent reads whatever brief it is handed, so the rule rides here as the class and a pointer, while the dispatch brief's directive stays the one full copy and the role skill owns the class.
 - passage: You are working class per the role skill: end no process you did not start, never one by image name, perform no git operation past your own files, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
 
+### AG001
+- key: Hold the section's `Tests:` line as a floor over the named contracts and a ceiling at its allocation, and send a candidate past it to the orchestrator as a request.
+- class: rule
+- source: plugins/grimoire/agents/implementer-opus.md:16
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The old sentence let an implementer extend the floor with whatever implementation revealed, which is the licence the plan removes. A test written first and justified after is the failure the request route prevents. Supersedes the floor half of W001, and the four copies stay one text between the `KIT-TESTS-DUTY` markers, held by `test/doctrine-parity.test.js`.
+- passage: The section's `Tests:` line is a floor over the named contracts and a ceiling at its allocation; a candidate past it is a request to the orchestrator, never a test written first.
+
+### AG002
+- key: Pin what the line names, in the shape it names, and leave the choice of what else to pin to the orchestrator.
+- class: rule
+- source: plugins/grimoire/agents/implementer-opus.md:16
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The architect states the pins as intent, so an implementer without the conversation has no ground for deciding what else deserves one. The sentence says so in the charter, where a dispatched implementer reads it whatever its brief says.
+- passage: Pin what the line names, in the shape it names; do not decide what else to pin.
+
 ## plugins/grimoire/agents/implementer-sonnet.md
 
 This document is the charter for the Sonnet-tier scoped implementation agent: it tells a dispatched agent how to build exactly one Section of Work from an approved spec that is mechanical or well-bounded (clear contract, low integration risk) and leaves its sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call. It owns the moments between that agent's dispatch and its final report: reading and validating the dispatch brief, reading the spec section and the named style skills, reading in-scope files and their siblings (including when to outline versus read whole), implementing surgically within section scope, writing comments that state current state, verifying with a real build and targeted tests run to completion inside the turn, leaving all changes unstaged, and choosing and shaping exactly one of the four end-of-report statuses (DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, BLOCKED). Load class: `plan-run` - the charter is loaded by the agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template.
 
-Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C059 and C060 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A006 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `397071e7` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below).
+Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C059 and C060 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A006 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `397071e7` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
 
 ### C001
 - key: Answer to the agent name `implementer-sonnet` when dispatched.
@@ -23275,23 +23372,22 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended
 - passage: Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
-- key: Treat the section's `Tests:` line as a floor over the named contracts, extend it with what implementation reveals, and amend it on contact with the code where a named contract proves to be a choice as the testing-discipline skill defines one.
+- key: Amend the section's `Tests:` line on contact with the code where a named contract proves to be a choice, as the testing-discipline skill defines one.
 - class: rule
 - source: plugins/grimoire/agents/implementer-sonnet.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
 - reason: Supersedes C010. Designed copy of the marked region in the implementer-fable charter, W001 under that heading; held byte-identical by `test/doctrine-parity.test.js`.
-- passage: The section's `Tests:` line is a floor over the named contracts, extended with what implementation reveals.
 - passage: It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one.
 
 ### W002
-- key: Flag in your report either delta to the section's `Tests:` line, an extension or an amendment, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- key: Flag in your report the amendment to the section's `Tests:` line, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 - class: rule
 - source: plugins/grimoire/agents/implementer-sonnet.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
 - reason: Supersedes C011. Designed copy of the marked region in the implementer-fable charter, W002 under that heading.
-- passage: Flag either delta in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- passage: Flag the amendment in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 
 ### A006
 - key: Before reporting BLOCKED, sort the failure by systematic-debugging's classify step, and never change working code to route around an environment problem.
@@ -23321,11 +23417,31 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-sonnet.md`). Amended
 - reason: The charter is what a dispatched agent reads whatever brief it is handed, so the rule rides here as the class and a pointer, while the dispatch brief's directive stays the one full copy and the role skill owns the class.
 - passage: You are working class per the role skill: end no process you did not start, never one by image name, perform no git operation past your own files, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
 
+### AG001
+- key: Hold the section's `Tests:` line as a floor over the named contracts and a ceiling at its allocation, and send a candidate past it to the orchestrator as a request.
+- class: rule
+- source: plugins/grimoire/agents/implementer-sonnet.md:16
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The old sentence let an implementer extend the floor with whatever implementation revealed, which is the licence the plan removes. A test written first and justified after is the failure the request route prevents. Supersedes the floor half of W001, and the four copies stay one text between the `KIT-TESTS-DUTY` markers, held by `test/doctrine-parity.test.js`.
+- passage: The section's `Tests:` line is a floor over the named contracts and a ceiling at its allocation; a candidate past it is a request to the orchestrator, never a test written first.
+
+### AG002
+- key: Pin what the line names, in the shape it names, and leave the choice of what else to pin to the orchestrator.
+- class: rule
+- source: plugins/grimoire/agents/implementer-sonnet.md:16
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The architect states the pins as intent, so an implementer without the conversation has no ground for deciding what else deserves one. The sentence says so in the charter, where a dispatched implementer reads it whatever its brief says.
+- passage: Pin what the line names, in the shape it names; do not decide what else to pin.
+
 ## plugins/grimoire/agents/implementer-haiku.md
 
 This document is the agent charter for `implementer-haiku`, a scoped Haiku-tier implementation agent that builds exactly one well-bounded Section of Work from an approved spec on the shape of a sibling file its brief names. It owns the moments in which that dispatched agent reads its brief, the spec's Approach and the named style skills, follows the sibling's pattern, confines its edits to the section, runs the self-surfacing gate commands to completion inside its own turn, leaves its work unstaged, and closes with exactly one of the four statuses DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT or BLOCKED. It governs escalation over guessing: any judgment call, missing brief field, or oversized or mismatched sibling is reported rather than resolved. Load class: `plan-run` - the charter is loaded by the dispatched agent itself at the moment the orchestrating session dispatches it with a brief built from the executing-work skill's Dispatch Brief template with its haiku-only fields filled.
 
-Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C056 and C057 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A007 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c9128f85`, so every live entry's `passage:` line quotes the text at `c9128f85` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C002, C007, C008, C011, C016, C019, C020, C026, C029, C049 and C055 below, amended in place for the widened band, with C026 and C029 each taking the sentence step 3 or step 4 gained). Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below).
+Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 3 on 2026-09-19 (C056 and C057 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended on 2026-09-26 by section 9 of `docs/plans/claude-kit_corpus-compression_spec_v1.md` at `d0d590ec` (A007 below, the BLOCKED bullet's pointer at systematic-debugging's classify step). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `c9128f85`, so every live entry's `passage:` line quotes the text at `c9128f85` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C002, C007, C008, C011, C016, C019, C020, C026, C029, C049 and C055 below, amended in place for the widened band, with C026 and C029 each taking the sentence step 3 or step 4 gained). Amended by `docs/plans/claude-kit_implementer-data-rule_spec_v1.md` section 1 on 2026-10-11 (X001 below, the files-are-data rule between the `KIT-FILES-ARE-DATA` markers). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
 
 ### C001
 - key: Dispatch this agent under the name `implementer-haiku`.
@@ -23888,7 +24004,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: Where none of those three names it, return `NEEDS_CONTEXT` instead of building it.
 
 ### W001
-- key: Treat the section's `Tests:` line as a floor over the named contracts, extend it with what implementation reveals, and amend it on contact with the code where a named contract proves to be a choice as the testing-discipline skill defines one.
+- key: Amend the section's `Tests:` line on contact with the code where a named contract proves to be a choice, as the testing-discipline skill defines one.
 - class: rule
 - source: plugins/grimoire/agents/implementer-haiku.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
@@ -23897,13 +24013,13 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - passage: It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one.
 
 ### W002
-- key: Flag in your report either delta to the section's `Tests:` line, an extension or an amendment, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- key: Flag in your report the amendment to the section's `Tests:` line, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 - class: rule
 - source: plugins/grimoire/agents/implementer-haiku.md:16
 - provenance: docs/plans/claude-kit_test-requirement-axis_spec_v1.md section 2 2026-09-20.
 - verdict: keep
 - reason: Supersedes C013. Designed copy of the marked region in the implementer-fable charter, W002 under that heading.
-- passage: Flag either delta in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+- passage: Flag the amendment in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 
 ### A007
 - key: Before reporting BLOCKED, sort the failure by systematic-debugging's classify step, and never change working code to route around an environment problem.
@@ -23932,6 +24048,26 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-haiku.md`). Amended 
 - verdict: keep
 - reason: The charter is what a dispatched agent reads whatever brief it is handed, so the rule rides here as the class and a pointer, while the dispatch brief's directive stays the one full copy and the role skill owns the class.
 - passage: You are working class per the role skill: end no process you did not start, never one by image name, perform no git operation past your own files, and delete or overwrite no other party's files. Report such a need as `BLOCKED`.
+
+### AG001
+- key: Hold the section's `Tests:` line as a floor over the named contracts and a ceiling at its allocation, and send a candidate past it to the orchestrator as a request.
+- class: rule
+- source: plugins/grimoire/agents/implementer-haiku.md:16
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The old sentence let an implementer extend the floor with whatever implementation revealed, which is the licence the plan removes. A test written first and justified after is the failure the request route prevents. Supersedes the floor half of W001, and the four copies stay one text between the `KIT-TESTS-DUTY` markers, held by `test/doctrine-parity.test.js`.
+- passage: The section's `Tests:` line is a floor over the named contracts and a ceiling at its allocation; a candidate past it is a request to the orchestrator, never a test written first.
+
+### AG002
+- key: Pin what the line names, in the shape it names, and leave the choice of what else to pin to the orchestrator.
+- class: rule
+- source: plugins/grimoire/agents/implementer-haiku.md:16
+- provenance: section 2 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, the plan's Approach bullet "The `Tests:` line becomes floor and ceiling", which names the four charters' floor sentence as a place that licensed over-testing.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2
+- reason: The architect states the pins as intent, so an implementer without the conversation has no ground for deciding what else deserves one. The sentence says so in the charter, where a dispatched implementer reads it whatever its brief says.
+- passage: Pin what the line names, in the shape it names; do not decide what else to pin.
 
 ## plugins/grimoire/agents/qa-verifier.md
 

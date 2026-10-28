@@ -118,6 +118,18 @@
       "title": "Fleet roster path",
       "description": "The roster file the fleet reading uses: a JSON array of persona entries, each naming a persona, its working directory, optionally its run directory, and whether the fleet runs it. The fleet_status tool reads it on demand, and the coordinator persona's controller tick reads it every tick to watch each roster persona's health class. Left unset, fleet_status reports that it has no roster to read and the tick's watcher stays silent."
     },
+    "goalFile": {
+      "type": "string",
+      "default": "",
+      "title": "Goal file path",
+      "description": "The goal.json file the process keeper writes into a goal persona's run directory at every start from the roster entry's goal block: the objective, the statements that must hold for it to be done, and an optional turn budget. Left unset, the persona has no roster goal."
+    },
+    "lifetime": {
+      "type": "string",
+      "default": "standing",
+      "title": "Persona lifetime",
+      "description": "standing or goal, and standing is the default. standing keeps the persona in the fleet after its goal completes. goal marks a persona the roster holds for its one goal, retired through the coordinator persona once its goal-tree root completes: the plugin sends the coordinator a [RETIRE] record, whose fleet_retire disables the entry in the roster. The supervisor refuses any other value rather than writing it, and the plugin reads any other value as standing and logs the decision."
+    },
     "jevMode": {
       "type": "string",
       "default": "shadow",

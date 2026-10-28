@@ -6523,3 +6523,12 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: keep
 - reason: The persona plugin drafts a disposition for each listed pair from a warm fork, so a session meets drafts in the transcript with no rule naming them. The drafts are the fork's reading of each body cut to 600 code points, and the block's own head calls them data, so a session that applied one without reading both records would write from a cut. The sentence carries no read rule of its own, since N003's read of every listed pair before the first verdict covers the block's pairs, so the rule stays in one place. The block is named in the skill and not in `finishing-work` because the memory-system skill owns the hygiene step's routing.
 - passage: A later tool result's `[PAIR DRAFTS]` block carries the persona plugin's draft per pair, with any command, a reading of two cut bodies.
+
+### N011
+- key: Keep a repository's test layer map in its project-tier memory, beside its lane commands.
+- class: rule
+- source: plugins/grimoire/skills/memory-system/SKILL.md:138
+- provenance: docs/plans/claude-kit_test-budget-and-gates_spec_v1.md section 4 2026-10-27; the test-gates skill's Layer Map paragraph names the map a per-repo memory fact beside the lane commands.
+- verdict: keep
+- reason: The test-gates skill says the map is recorded in the project's memory tier, and this skill owns where each tier's facts go, so the routing sentence sits here and the map's shape stays in test-gates. The map is about one codebase's tests and holds on no other project, so the routing test in the same paragraph sends it to the project tier and not to the type or operator tier. A rung's clock figure carries a moment-pin and so expires against the machine configuration epoch like any other measurement, while its test count is a property of the tree and does not.
+- passage: A repository's test layer map is a project-tier fact beside its lane commands, held as `layers` in its committed lane map where it has one.

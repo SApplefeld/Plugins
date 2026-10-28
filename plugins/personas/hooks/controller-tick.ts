@@ -27,7 +27,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, holdOf, isPlanningDue, isRootFinished, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, shouldYield, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
+import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, holdOf, isPlanningDue, isRootFinished, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
@@ -39,6 +39,7 @@ import { splitOf } from "./decision-journal";
 import type { drainOrphanSweep as drainOrphanSweepFromModule, drainSupervisorMailbox as drainSupervisorMailboxFromModule } from "./drains";
 import { fleetReadingOf, readFleetRows, type FleetLine, type fleetPromptText } from "./fleet";
 import type { PluginHost } from "./host";
+import { shownDoneStatement } from "./goal-persona";
 import type { HookBudget, LiveAskResult } from "./jev-live";
 import { SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
@@ -2104,9 +2105,19 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         historyLines.push(`Abandoned: ${ap.title}`);
       }
       const historyBlock = historyLines.length > 0 ? `\n${historyLines.join("\n")}\n\n` : "";
+      // A seeded root's done statements, one "Done when:" line each, so the
+      // plan aims at what done means and not at the objective alone. Each is
+      // roster text, shown as every goal print shows it: one line,
+      // bracket-safe and cut to its shown length. Empty for a root with none, which is every root goal_create
+      // makes.
+      const doneWhenLines = (Array.isArray(root!.doneWhen) ? root!.doneWhen : [])
+        .map((statement) => `Done when: ${shownDoneStatement(statement)}\n`)
+        .join("");
+      const doneWhenBlock = doneWhenLines === "" ? "" : `${doneWhenLines}\n`;
       const planPrompt =
         `You are the planner for an agentic plugin. ` +
         `The operator's objective is: "${root!.objective}".\n\n` +
+        doneWhenBlock +
         (roadmapText
           ? `Roadmap file content:\n${roadmapText}\n\n`
           : "") +
@@ -2189,8 +2200,16 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         return;
       }
 
+      // The turn budget can block the root while the call is out, and the
+      // re-read above lets a blocked root through. Under that block the
+      // reply changes no status: zero plans complete and hold nothing, and
+      // new plans land pending with none started. Once goal_resume on the
+      // root lifts the block, the next tick's activateNext starts a pending
+      // plan, the one road that starts work under the root.
+      const budgetBlockedAfterCall = rootBudgetBlocked(sess.state);
       if (plans.length === 0) {
-        // Objective met or nothing to plan: complete the root.
+        // Objective met or nothing to plan: complete the root, unless the
+        // turn budget blocks it.
         const rootNow = sess.state.goals.find((g) => g.id === root!.id);
         // M13: a successful planning round clears the failure streak.
         if (rootNow) rootNow.consecutivePlanningFailures = 0;
@@ -2199,9 +2218,11 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: Date.now(),
           loop: "goal",
           action: "planning_complete",
-          detail: `Planner returned 0 plans`,
+          detail: budgetBlockedAfterCall
+            ? `Planner returned 0 plans; root ${root!.id} stays blocked (${TURN_BUDGET_REASON}), so nothing completes`
+            : `Planner returned 0 plans`,
         });
-        await ctx.completeRootZeroPlans(root!.id);
+        if (!budgetBlockedAfterCall) await ctx.completeRootZeroPlans(root!.id);
       } else {
         // Create plan nodes under the root.
         // L9: per-plan maxRounds from the planner, defaulting to root.maxRounds.
@@ -2241,7 +2262,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: Date.now(),
           loop: "goal",
           action: "planning_created",
-          detail: `${plans.length} plans under root ${root!.id}: ${plans.map((p) => p.title.slice(0, 30)).join("; ")}`,
+          detail: `${plans.length} plans under root ${root!.id}: ${plans.map((p) => p.title.slice(0, 30)).join("; ")}${budgetBlockedAfterCall ? `; none started, the root is blocked (${TURN_BUDGET_REASON})` : ""}`,
         });
 
         // BM2: Check planner variance (flag, not trim)
@@ -2259,8 +2280,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           }
         }
 
-        // Activate the first plan.
-        const firstPlan = sess.state.goals.find((g) => g.parentId === root!.id && g.status === "pending");
+        // Activate the first plan, unless the turn budget blocks the root.
+        const firstPlan = budgetBlockedAfterCall ? undefined : sess.state.goals.find((g) => g.parentId === root!.id && g.status === "pending");
         if (firstPlan) {
           firstPlan.status = "active";
           firstPlan.updatedAt = Date.now();

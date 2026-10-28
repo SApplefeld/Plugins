@@ -14,12 +14,25 @@
 //                                     targeted only, where a row names suites,
 //                                     each as its path under test-personas/
 //
+// Where the map holds `layers`, one line per layer follows the verdict line, in
+// the map's order, so the verdict stays the first line printed:
+//
+//   layer <rung>: <name>, <n> tests, clock <seconds>s|cost: unmeasured, pinned <pin>
+//
 // The map holds `rows`, a list of `{ paths, tests, suites }`; `always`, the
 // test files every targeted lane runs, each with a reason; and `whole`, the
 // paths whose change takes the whole gate, each with a reason. An optional
 // `unread` list names the files other than prose that may sit in a row naming
 // no test. An entry ending in a slash is a folder and any other entry is one
 // file, so a match is by path segment: `docs/` holds docs/a.md and never docs-old/a.md.
+// An optional `layers` list records the repository's tests by what they cost to
+// run, each entry `{ name, rung, tests, clock, pinned }`: `rung` one of
+// in-process, database, process and end-to-end, `tests` a whole number, `clock`
+// seconds or the word unmeasured, and `pinned` the moment-pin that says what
+// produced the figures, when, on which machine and under what contention. The
+// layers size no lane. A map with none prints as it always did. A layer with a
+// field missing or of the wrong kind makes the map unreadable, and a rung
+// outside the four does too, the reason then naming the rung.
 //
 // The lane gate's own inputs, the map, this script and the map's pin test, are
 // whole whatever the map says, ahead of its `whole` list, so no edit to the map
@@ -95,6 +108,10 @@ const MAX_RUNS_BYTES = 16 * 1024 * 1024;
 // A test or suite the lane prints: a path under its folder in a plain alphabet,
 // so a printed command names exactly the file the map named.
 const LANE_NAME = { tests: /^test\/[A-Za-z0-9._/-]+$/, suites: /^test-personas\/[A-Za-z0-9._/-]+$/ };
+// The four rungs of a layer map, cheapest to dearest, and the clock of a rung
+// nobody has timed.
+const RUNGS = ['in-process', 'database', 'process', 'end-to-end'];
+const UNMEASURED = 'unmeasured';
 // The files that decide every lane, held whole ahead of the map they would size.
 const SELF = ['test/gate-lanes.json', 'plugins/grimoire/scripts/gate-lane.js', 'test/gate-lanes.test.js'];
 
@@ -166,6 +183,7 @@ function placePath(map, relPath) {
 // repo-relative file is on disk.
 function classify({ map, mapProblem, changes, recordText, now, exists }) {
     if (map === null) return { lane: 'whole', reason: mapProblem || 'no map', places: [], tests: [], suites: [] };
+    const layerList = map.layers || [];
     const places = changes.map((p) => ({ path: p, place: placePath(map, p) }));
     const reasons = [];
     const record = recordProblem(recordText, now);
@@ -177,7 +195,7 @@ function classify({ map, mapProblem, changes, recordText, now, exists }) {
     }
     const whole = () => {
         const more = reasons.length > 1 ? ', and ' + (reasons.length - 1) + ' more' : '';
-        return { lane: 'whole', reason: reasons[0] + more, places, tests: [], suites: [] };
+        return { lane: 'whole', reason: reasons[0] + more, places, tests: [], suites: [], layers: layerList };
     };
     if (reasons.length > 0) return whole();
     const tests = new Set(map.always.map((a) => a.test));
@@ -208,7 +226,7 @@ function classify({ map, mapProblem, changes, recordText, now, exists }) {
     }
     if (reasons.length > 0) return whole();
     const present = (list) => [...list].filter((f) => exists(f)).sort();
-    return { lane: 'targeted', places, tests: present(tests), suites: present(suites) };
+    return { lane: 'targeted', places, tests: present(tests), suites: present(suites), layers: layerList };
 }
 
 // The printed report, one string per line. Every repository-supplied value
@@ -216,6 +234,13 @@ function classify({ map, mapProblem, changes, recordText, now, exists }) {
 // except the test and suite paths, which classify has held to LANE_NAME.
 function render(result) {
     const lines = [result.lane === 'whole' ? 'lane: whole (' + safePath(result.reason) + ')' : 'lane: targeted'];
+    // The layers follow the verdict line, which the finishing pass reads first.
+    // The rung and the free text are screened. The count and the clock are held
+    // to their shapes by `layers`, so they print as they stand.
+    for (const l of result.layers || []) {
+        const cost = l.clock === UNMEASURED ? 'cost: ' + UNMEASURED : 'clock ' + l.clock + 's';
+        lines.push('layer ' + safePath(l.rung) + ': ' + safePath(l.name) + ', ' + l.tests + ' tests, ' + cost + ', pinned ' + safePath(l.pinned));
+    }
     for (const { path: p, place } of result.places) {
         if (place.kind === 'row') lines.push(safePath(p) + ': row ' + safePath(place.entry));
         else if (place.kind === 'whole') lines.push(safePath(p) + ': whole ' + safePath(place.entry) + ' (' + safePath(place.reason) + ')');
@@ -272,6 +297,13 @@ const strings = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string')
 const records = (v, keys) => Array.isArray(v)
     && v.every((e) => e !== null && typeof e === 'object' && keys.every((k) => typeof e[k] === 'string'));
 
+// One layer: { name, rung, tests, clock, pinned }, the name, rung and pin
+// strings, the count a whole number, the clock seconds or the word unmeasured.
+// Whether the rung is one of the four is the next rule's, in readMap.
+const layers = (v) => records(v, ['name', 'rung', 'pinned'])
+    && v.every((l) => Number.isInteger(l.tests) && l.tests >= 0
+        && (l.clock === UNMEASURED || (typeof l.clock === 'number' && Number.isFinite(l.clock) && l.clock >= 0)));
+
 // Whether a parsed map holds every shape classify and placePath read.
 function validMap(m) {
     return m !== null && typeof m === 'object'
@@ -279,7 +311,8 @@ function validMap(m) {
         && m.rows.every((r) => r !== null && typeof r === 'object' && strings(r.paths) && strings(r.tests) && strings(r.suites))
         && records(m.always, ['test', 'reason'])
         && records(m.whole, ['path', 'reason'])
-        && (m.unread === undefined || records(m.unread, ['path', 'reason']));
+        && (m.unread === undefined || records(m.unread, ['path', 'reason']))
+        && (m.layers === undefined || layers(m.layers));
 }
 
 // The map at <repo>/test/gate-lanes.json as { map, mapProblem }, map null where
@@ -289,7 +322,12 @@ function readMap(repo) {
     if (text === ABSENT) return { map: null, mapProblem: 'no map' };
     let parsed = null;
     try { parsed = text === null ? null : JSON.parse(text); } catch { parsed = null; }
-    return validMap(parsed) ? { map: parsed, mapProblem: null } : { map: null, mapProblem: 'map unreadable' };
+    if (!validMap(parsed)) return { map: null, mapProblem: 'map unreadable' };
+    // A well-shaped layer on a rung outside the four is refused with the rung
+    // named. The reason is screened where it is printed, as every map string is.
+    const stray = (parsed.layers || []).find((l) => !RUNGS.includes(l.rung));
+    if (stray) return { map: null, mapProblem: 'map unreadable: layer rung ' + JSON.stringify(stray.rung) + ' is not one of ' + RUNGS.join(', ') };
+    return { map: parsed, mapProblem: null };
 }
 
 function main(argv) {
@@ -325,7 +363,7 @@ function main(argv) {
         runs = readContained(mainCheckout, RUNS_FILE, MAX_RUNS_BYTES);
     } catch (err) {
         const reason = stage + ': ' + String(err && err.message ? err.message : err);
-        process.stdout.write(render({ lane: 'whole', reason, places: [], tests: [], suites: [] }).join('\n') + '\n');
+        process.stdout.write(render({ lane: 'whole', reason, places: [], tests: [], suites: [], layers: map.layers }).join('\n') + '\n');
         return 0;
     }
 

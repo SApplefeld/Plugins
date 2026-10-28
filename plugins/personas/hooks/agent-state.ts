@@ -100,12 +100,18 @@ export interface GoalNode {
   title: string;
   objective: string;
   status: "pending" | "active" | "paused" | "complete" | "abandoned" | "blocked";
-  source: "operator" | "controller" | "worker";
+  source: "operator" | "controller" | "worker" | "roster"; // roster: seeded from the roster entry's goal block
   maxRounds: number; // 0 for the root
   completedRounds: number;
   scores: Array<{ round: number; result: string }>;
   notes: string[];
   roadmapPath?: string; // root only: the roadmap file path
+  doneWhen?: string[]; // root only: the statements that must hold for the
+                       // goal to be done, from the roster entry's goal block
+  turnBudget?: number; // root only: the completed turns the goal may spend
+                       // before the root blocks with "Turn budget reached"
+  turnsSpent?: number; // root only: the completed turns counted against
+                       // turnBudget since the seed or the last goal_resume
   askedBy?: string; // root only: the author the channel envelope named on the
                     // turn goal_create ran in. Absent where the root came from
                     // any other turn or the envelope named no author. The
@@ -761,9 +767,10 @@ export interface ForkUsage {
   cacheReadInputTokens: number;
 }
 
-// Who opened an ask: the worker's own ASK: line, or one of the three asks the
-// controller opens when the work cannot go on as it stands.
-export const ASK_OPENERS = ["worker", "error-streak", "nudge-cap", "cost-cap"] as const;
+// Who opened an ask: the worker's own ASK: line, one of the three asks the
+// controller opens when the work cannot go on as it stands, or the turn
+// budget's ask at the turn end that spent the root's last turn.
+export const ASK_OPENERS = ["worker", "error-streak", "nudge-cap", "cost-cap", "turn-budget"] as const;
 export type AskOpener = (typeof ASK_OPENERS)[number];
 
 // How a ledger entry stands. "open" is the one live status. "answered",
@@ -1101,7 +1108,7 @@ function fillAsks(state: AgentState, now: number): void {
 }
 
 export interface AgentState {
-  version: 10;
+  version: 11;
   persona: string;
   activeSessionId: string;
   epoch: number;
@@ -1285,7 +1292,7 @@ export function previousSessionsText(state: AgentState): string {
 export function createDefaultState(persona: string, sessionId: string): AgentState {
   const now = Date.now();
   return {
-    version: 10,
+    version: 11,
     persona,
     activeSessionId: sessionId,
     epoch: 1,
@@ -1753,7 +1760,7 @@ export function parseState(json: string): AgentState {
     }
 
     const state: AgentState = {
-      version: 10,
+      version: 11,
       persona: old.persona,
       activeSessionId: old.activeSessionId,
       epoch: old.epoch,
@@ -1810,7 +1817,7 @@ export function parseState(json: string): AgentState {
         errors: { consecutiveErrorTurns: 0, toolErrorsLastTurn: 0 },
       };
     }
-    state.version = 10;
+    state.version = 11;
     if (!state.nudge) {
       state.nudge = { lastNudgeAt: 0, consecutiveNudgesWithoutOnGoal: 0 };
     }
@@ -1878,7 +1885,15 @@ export function parseState(json: string): AgentState {
     parsed.version = 10;
   }
 
-  if (parsed.version !== 10) {
+  // v10 to v11: the root gains doneWhen, turnBudget and turnsSpent, each
+  // optional and absent on a stored root, which the load check below reads
+  // as a root with no statements and no budget. Nothing is defaulted, since
+  // a budget of zero would block the root at its first turn end.
+  if (parsed.version === 10) {
+    parsed.version = 11;
+  }
+
+  if (parsed.version !== 11) {
     throw new Error(`Unsupported AgentState version: ${parsed.version}`);
   }
 
@@ -2089,6 +2104,18 @@ function enforceInvariants(state: AgentState): void {
   for (const g of state.goals) {
     const folded = (g as { foldedChildren?: unknown }).foldedChildren;
     if (folded !== undefined && !(Number.isInteger(folded) && (folded as number) > 0)) delete g.foldedChildren;
+  }
+
+  // The seeded root's three fields, each kept only in the shape the seed
+  // writes: doneWhen an array of strings, turnBudget a positive integer,
+  // turnsSpent a whole number. A value of another shape is dropped rather
+  // than defaulted, so a root never gains a budget that counts from a value
+  // the seed did not write.
+  for (const g of state.goals) {
+    const raw = g as { doneWhen?: unknown; turnBudget?: unknown; turnsSpent?: unknown };
+    if (raw.doneWhen !== undefined && !(Array.isArray(raw.doneWhen) && raw.doneWhen.every((s) => typeof s === "string"))) delete g.doneWhen;
+    if (raw.turnBudget !== undefined && !(Number.isInteger(raw.turnBudget) && (raw.turnBudget as number) > 0)) delete g.turnBudget;
+    if (raw.turnsSpent !== undefined && !(Number.isInteger(raw.turnsSpent) && (raw.turnsSpent as number) >= 0)) delete g.turnsSpent;
   }
 
   // The load-time backstop for the task reap; persist runs the same reap on
@@ -2338,6 +2365,18 @@ export function clearSettledAwaiting(state: AgentState): void {
   }
 }
 
+// The blocked reason a spent turn budget writes on the root. While the root
+// carries it no leaf starts, whatever its own status and however its ask
+// stands, since the root's own status is otherwise exempt from the
+// activation rule below and a lapsed ask hold would let work run unbudgeted.
+// goal_resume on the root is the one release: while the root carries it,
+// goal_resume refuses every other entry, the call naming none included.
+export const TURN_BUDGET_REASON = "Turn budget reached";
+
+export function rootBudgetBlocked(state: AgentState): boolean {
+  return state.goals.some((g) => g.parentId === null && g.status === "blocked" && g.blockedReason === TURN_BUDGET_REASON);
+}
+
 // Section 10 fix round: whether a single node is eligible to become the
 // active leaf. A node is eligible when its own status is "pending", it has
 // no children (the leaf invariant), and every ancestor between it and the
@@ -2347,6 +2386,7 @@ export function clearSettledAwaiting(state: AgentState): void {
 // the same rule rather than reimplementing it by hand.
 export function isActivationEligible(state: AgentState, node: GoalNode): boolean {
   if (node.status !== "pending") return false;
+  if (rootBudgetBlocked(state)) return false;
   if (state.goals.some((g) => g.parentId === node.id)) return false;
   // The walk is bounded by the node count. A parentId cycle, which the
   // tree's shape rules do not permit but nothing here re-checks, exhausts the
@@ -2454,6 +2494,7 @@ export function hasStartableWork(state: AgentState): boolean {
 // Prefers the completed node's siblings, then nextStartableLeaf's walk from
 // the root. Only activates nodes that have no children (leaf invariant).
 export function activateNext(state: AgentState, completedId?: string): string | null {
+  if (rootBudgetBlocked(state)) return null;
   const hasChildren = (id: string): boolean =>
     state.goals.some((g) => g.parentId === id);
 

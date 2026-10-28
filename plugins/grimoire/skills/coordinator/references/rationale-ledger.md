@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the runbook for the machine-coordinator seat, the single exclusive machine-wide role that stewards the seam between repositories and speaks as one voice toward the operator. It owns the moments that seat performs: opening or resuming a pass (arming the wake, reading the board at `coordinator/<machine>/board.md`, running the reconciliation loop), aggregating worker status from artifacts and deciding when a message round is warranted, funnelling a declared BLOCKED to the operator as a decision brief and naming the reply address, dispositioning kaizen inbox notes, arbitrating machine resources, dispatching plans across repos and tracking and redirecting the work in flight, refusing within-repo oversight and routing it to the expert seat, and running an operator-declared update window from declaration through drain, report, park, and cancel. It also owns the disclosure bars on everything the seat sends up, the path screens on stranger-supplied paths, and the dedup rules for briefs and stubs. A session loads it under load class `named-trigger`: its own frontmatter says to use it when taking or resuming the coordinator seat, running a coordination loop over live sessions, running a reconciliation pass, dispatching or redirecting cross-repo work, arbitrating machine-resource contention, or handing the seat to a successor.
 
-Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`skills.coordinator.c2.md`); lines 67-84 (`skills.coordinator.c3.md`); lines 85-103 (`skills.coordinator.c4.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (c1.C123 below, amended in place). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (c2.C065 amended in place, and c2.C066 retired with no successor here, its rule being the peer-sessions ledger's Y001). Redrafted on 2026-09-26 by section 5 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `642c1008` with its fix round at `4f01b65b`, so every live entry's `passage:` line quotes the text at `4f01b65b` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`B` entries below, with c1.C046, c2.C073, c2.C087, c3.C033, c4.C003 and c4.C015 retired by supersession, and c1.C004, c1.C092, c2.C012, c2.C075, c2.C077, c2.C086, c3.C087, c4.C061, c4.C063 and c4.C068 amended in place). Amended by the same plan's section 2 on 2026-10-02 (B016 to B019 below). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and the BLOCKED funnel's reading of `goal-blocked` events and goal state: c1.C057 to c1.C061, c1.C068 to c1.C072, c1.C076, c1.C126, c1.C127, c2.C003, c2.C075 and c2.C094 deleted with their passages; c1.C004, c1.C055, c1.C056, c1.C062, c1.C063, c1.C065, c1.C067, c1.C073, c1.C075, c1.C077, c1.C085, c1.C110, c1.C123, c2.C076, c3.C017, c3.C088, c4.C085, W001, W002, B001, B002 and B004 rewritten to their passages as they now read; and c1.C103's key reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the funnel's sentence on a blocker traced only through a worker's registry entry or plan doc; c4.C083's reason names the Blocked Peers rule). At the plan's finishing pass, B002 was re-synced to the seat's sentence pointing at executing-work's goal template, and c1.C033's key no longer names the events file. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C095 rewritten to its passage as it now reads, and the keys or reasons of c1.C048, c1.C049 and c1.C050 reworded where they stated the note files or an append as present. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel, so the board, the registry and the admin requests are this machine's own and nothing copies them off it: c3.C073 to c3.C082, c4.C002, c4.C007 to c4.C012 and c4.C093 deleted with their passages and subjects; c1.C005, c3.C001, c3.C002, c3.C004, c3.C005, c3.C014, c3.C072, c4.C001, c4.C013, c4.C060, c4.C077, c4.C078 and c4.C079 rewritten to their passages as they now read, with the keys of c1.C005, c3.C001, c3.C004, c3.C005, c4.C013, c4.C077, c4.C078 and c4.C079 reworded; the keys, reasons or provenance of c1.C010, c1.C021, c2.C011, c2.C012, c3.C003, c3.C006, c4.C001 and c4.C060, and the reasons of six entries naming a replicated or synced board, reworded where they stated the copying as present; and M001 added for the sentence naming the directory this machine's own. Amended by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13, which moved the persona fleet's dispatch conduct from the plugin's launch literal into the Dispatch and Redirect Rule (`O` entries below: O001 to O009, with B004 rewritten to its passage as it now reads and its key, provenance and reason reworded). Amended by the same plan's section 2 on 2026-10-13, which moved the coordinator persona's remaining seat conduct, the fleet tools, the notices, the design routing to the architect and the liaison's status answer, from the launch literal into the Persona Fleet passage (O011 to O016 below, with O009 rewritten to its passage as it now reads). Amended by `docs/plans/claude-kit_seat-skill-handles_spec_v1.md` section 1 on 2026-10-13, which named the standing-watch skill as the chassis and its Wake mechanics section as the wake's owner, the opt-in record by its name and the rail by its owner's (`Q` entries below: Q001 to Q005, superseding c1.C014, c1.C018, c2.C076 and c2.C088; B005's key reworded and its passage split around Q005's sentence and O010's two; c1.C004's key reworded to the rail's name). Amended by `docs/plans/claude-kit_corpus-cuts_spec_v1.md` section 2 on 2026-10-19 (c2.C086 retired to B005 with its cut clause as its passage, B005, Q003 and Q005 rewritten in place to the pointers that replaced their passages with Q003's and Q005's landed `proposed:` lines kept as they were, B001's passage re-read to the sentence the owner clause folded into, and B019 re-aimed at the doctrine's cannot-measure bullet). Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 2 on 2026-10-19 (O001 and O008 rewritten in place to the queue record's base and the reprioritize that leaves it, and P001 added for the sentences routing a repeated operator preference). Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 5 on 2026-10-19 (c2.C001 extended in place with a second `passage:` line for the pass's arm and take-in readings, and B003 rewritten in place to the take-in shape). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which has the architect seat queue its own plan and this seat order the worker's queue: O001 rewritten to its passage as it now reads. Its fix round 1 on the same day rewrote B001, B003 and B006 to their passages as they now read, so the dispatch and the redirect agree with O001 and the doctrine's intake bullet. Amended by `docs/archive/claude-kit_roster-tools_spec_v1.md` section 4 on 2026-10-26, which gave the Persona Fleet passage its sentence on when the seat adds or retires a persona (O017 below), so every `source:` line at this document's line 87 or later moved down two lines.
+Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`skills.coordinator.c2.md`); lines 67-84 (`skills.coordinator.c3.md`); lines 85-103 (`skills.coordinator.c4.md`). Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-21 by the fleet coordinator seat plan (`F` entries below). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 2 on 2026-09-24 (c1.C123 below, amended in place). Amended by `docs/plans/claude-kit_kit-goal-interactive-only_spec_v1.md` section 4 on 2026-09-24 (c2.C065 amended in place, and c2.C066 retired with no successor here, its rule being the peer-sessions ledger's Y001). Redrafted on 2026-09-26 by section 5 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `642c1008` with its fix round at `4f01b65b`, so every live entry's `passage:` line quotes the text at `4f01b65b` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`B` entries below, with c1.C046, c2.C073, c2.C087, c3.C033, c4.C003 and c4.C015 retired by supersession, and c1.C004, c1.C092, c2.C012, c2.C075, c2.C077, c2.C086, c3.C087, c4.C061, c4.C063 and c4.C068 amended in place). Amended by the same plan's section 2 on 2026-10-02 (B016 to B019 below). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash and the BLOCKED funnel's reading of `goal-blocked` events and goal state: c1.C057 to c1.C061, c1.C068 to c1.C072, c1.C076, c1.C126, c1.C127, c2.C003, c2.C075 and c2.C094 deleted with their passages; c1.C004, c1.C055, c1.C056, c1.C062, c1.C063, c1.C065, c1.C067, c1.C073, c1.C075, c1.C077, c1.C085, c1.C110, c1.C123, c2.C076, c3.C017, c3.C088, c4.C085, W001, W002, B001, B002 and B004 rewritten to their passages as they now read; and c1.C103's key reworded. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001, the funnel's sentence on a blocker traced only through a worker's registry entry or plan doc; c4.C083's reason names the Blocked Peers rule). At the plan's finishing pass, B002 was re-synced to the seat's sentence pointing at executing-work's goal template, and c1.C033's key no longer names the events file. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c2.C095 rewritten to its passage as it now reads, and the keys or reasons of c1.C048, c1.C049 and c1.C050 reworded where they stated the note files or an append as present. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel, so the board, the registry and the admin requests are this machine's own and nothing copies them off it: c3.C073 to c3.C082, c4.C002, c4.C007 to c4.C012 and c4.C093 deleted with their passages and subjects; c1.C005, c3.C001, c3.C002, c3.C004, c3.C005, c3.C014, c3.C072, c4.C001, c4.C013, c4.C060, c4.C077, c4.C078 and c4.C079 rewritten to their passages as they now read, with the keys of c1.C005, c3.C001, c3.C004, c3.C005, c4.C013, c4.C077, c4.C078 and c4.C079 reworded; the keys, reasons or provenance of c1.C010, c1.C021, c2.C011, c2.C012, c3.C003, c3.C006, c4.C001 and c4.C060, and the reasons of six entries naming a replicated or synced board, reworded where they stated the copying as present; and M001 added for the sentence naming the directory this machine's own. Amended by `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` section 1 on 2026-10-13, which moved the persona fleet's dispatch conduct from the plugin's launch literal into the Dispatch and Redirect Rule (`O` entries below: O001 to O009, with B004 rewritten to its passage as it now reads and its key, provenance and reason reworded). Amended by the same plan's section 2 on 2026-10-13, which moved the coordinator persona's remaining seat conduct, the fleet tools, the notices, the design routing to the architect and the liaison's status answer, from the launch literal into the Persona Fleet passage (O011 to O016 below, with O009 rewritten to its passage as it now reads). Amended by `docs/plans/claude-kit_seat-skill-handles_spec_v1.md` section 1 on 2026-10-13, which named the standing-watch skill as the chassis and its Wake mechanics section as the wake's owner, the opt-in record by its name and the rail by its owner's (`Q` entries below: Q001 to Q005, superseding c1.C014, c1.C018, c2.C076 and c2.C088; B005's key reworded and its passage split around Q005's sentence and O010's two; c1.C004's key reworded to the rail's name). Amended by `docs/plans/claude-kit_corpus-cuts_spec_v1.md` section 2 on 2026-10-19 (c2.C086 retired to B005 with its cut clause as its passage, B005, Q003 and Q005 rewritten in place to the pointers that replaced their passages with Q003's and Q005's landed `proposed:` lines kept as they were, B001's passage re-read to the sentence the owner clause folded into, and B019 re-aimed at the doctrine's cannot-measure bullet). Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 2 on 2026-10-19 (O001 and O008 rewritten in place to the queue record's base and the reprioritize that leaves it, and P001 added for the sentences routing a repeated operator preference). Amended by `docs/plans/claude-kit_queue-stacking_spec_v1.md` section 5 on 2026-10-19 (c2.C001 extended in place with a second `passage:` line for the pass's arm and take-in readings, and B003 rewritten in place to the take-in shape). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which has the architect seat queue its own plan and this seat order the worker's queue: O001 rewritten to its passage as it now reads. Its fix round 1 on the same day rewrote B001, B003 and B006 to their passages as they now read, so the dispatch and the redirect agree with O001 and the doctrine's intake bullet. Amended by `docs/archive/claude-kit_roster-tools_spec_v1.md` section 4 on 2026-10-26, which gave the Persona Fleet passage its sentence on when the seat adds or retires a persona (O017 below), so every `source:` line at this document's line 87 or later moved down two lines. Amended by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 4 on 2026-10-27, which gave the Persona Fleet passage its paragraph on a goal persona's `[RETIRE]` record (AF001 below, with O017 rewritten to its passage as it now reads), so every `source:` line at this document's line 88 or later moved down two lines. Amended by the same plan's finishing pass on 2026-10-27, which gave the Persona Fleet passage its paragraph on a goal persona's report of a plan (AF002 below), so every `source:` line at this document's line 91 or later moved down two lines.
 
 ### c1.C001
 - key: Load this skill when taking or resuming the machine-coordinator seat, running a coordination loop over live sessions, or coordinating the machine's sessions across repos.
@@ -2011,7 +2011,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c2.C079
 - key: For an operator's ask of an elevated Admin seat, append the request to `admin-requests.md` in the machine's coordinator directory in the shape the role skill's contract states, rather than routing it as a message.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: cbf923c 2026-08-28, Section 6 of the seat-infrastructure plan; the inbox itself was the operator's decision of 2026-08-26 (memory admin-seat-request-inbox).
 - verdict: keep
 - reason: An elevated session is unreachable by a send, so the artifact route is the only one; the shape and the writer population are the role skill's and are pointed at.
@@ -2364,7 +2364,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c3.C017
 - key: Name a repo by its name, spell a repo path repo-relative and a machine-scoped file home-relative, and never repeat an absolute project path a worker's message spells.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: f07b9f0 2026-08-26 for the spellings; 9909bf2 2026-08-28 for the `goal-blocked` event's path, which the funnel reads as a stranger-supplied absolute path.
 - verdict: keep
 - reason: no finding; the spellings are what makes the bar obeyable on a line that arrives spelling a path.
@@ -2969,7 +2969,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c3.C088
 - key: Re-derive an escalation's answered leg from the resolution record the worker lands in its own plan doc, reading it as the pass reads any plan doc.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:123
+- source: plugins/grimoire/skills/coordinator/SKILL.md:127
 - provenance: f07b9f0 2026-08-26, the answer never returns through the seat; the worker records it on its own surface and the pass reads it there.
 - verdict: keep
 - reason: This is the leg's owner; line 79's restatement is what goes (c3.C054).
@@ -3067,7 +3067,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C014
 - key: Write every board entry in the pointer form the file imposes on an authorization note.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 3fb2f4b 2026-08-26, the pointer form generalized from the authorization note after quoted grants left the ledger (33c0bed).
 - verdict: rewrite
 - landed: fe0f812 section 23
@@ -3079,7 +3079,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C015
 - key: Record a handoff entry as its repos and its protocol state.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 3fb2f4b 2026-08-26, the pointer-form enumeration.
 - verdict: retire
 - superseded-by: B010
@@ -3092,7 +3092,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C016
 - key: Record an escalation as the incident it concerns, whether it has been briefed, and a pointer to what it waits on.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 3fb2f4b 2026-08-26, the pointer-form enumeration.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3103,7 +3103,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C017
 - key: Record an update window as open, since when, the pointer to the channel the operator's word arrived on, and which sessions confirmed parked, which have not, and which were unreachable.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 10518d6 2026-08-31, the update window shipped with its board line stated at lines 33, 76 and 87.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3114,7 +3114,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C018
 - key: Record a routed finding as its subject, the seat it went to, and its disposition pointer or open marker, or neither where nobody has answered.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 2bdc43b 2026-08-31, a routed finding rides the finder's board until its disposition pointer lands.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3125,7 +3125,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C019
 - key: Record a probed claim as the claim's repo, the time the probe went out, and the roster reading taken with it.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, the probe line's send time given the never-destroy readings and the stub rules written with the repo spelling.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3137,7 +3137,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C020
 - key: Record a first-seen claim as the claim's repo, the moment this seat first observed it, and which of its fields failed to anchor a bound.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, the claim-duration anchor banked as a board line, the sixth commitment category, found missing from one of the two enumerations in the same round.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3149,7 +3149,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C021
 - key: Record a released claim as the claim's repo, the elapsed window, and the decider.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, the release shipped armed on the record-before-act precondition.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3161,7 +3161,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C022
 - key: Record a pruned registry entry as the entry, the readings that established exit, and the decider.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, the prune shipped armed with its board line.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3172,7 +3172,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C023
 - key: Never put an authorization's dates, its scope, or the operator's words on a board entry.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 33c0bed 2026-08-26, a committed quote of the operator's words was copy-pasteable into any plan and defeated the receiver's trace, so grants left the ledger; 3fb2f4b 2026-08-26 added the paraphrase clause.
 - verdict: keep
 - reason: The one board-wide sentence barring dates and scope and extending the words bar to a paraphrase; line 22's bar and line 72's efforts note are its instances. A record the seat wrote cannot serve as the authority trace, so a quotation buys nothing and spends a disclosure on every reader of the board.
@@ -3181,7 +3181,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C024
 - key: Carry the chassis's situational fields on these lines as on every other board line.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 3fb2f4b 2026-08-26, with the re-derive carve-out at line 79.
 - verdict: retire
 - reason: merged into c3.C053. Its rule, that commitment lines drop only the re-derive command and keep the rest of the chassis fields, is carried by "Everything else standing-watch says about a ledger holds unchanged" together with c3.C053's landed sentence.
@@ -3191,7 +3191,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C025
 - key: Stub any commitment whose detail is more than a pointer will fit, whatever its subject.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: ebf5ee0 2026-08-28, fit and sensitivity split into two independent stub triggers.
 - verdict: keep
 - reason: Fit is the trigger that catches a harmless but bulky commitment; without it a seat would read the stub as a sensitivity device only and squeeze a long commitment into a line that breaks the pointer form.
@@ -3201,7 +3201,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C026
 - key: Stub any commitment too sensitive to spell for the board's readership, independently of whether it would fit.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: ebf5ee0 2026-08-28, blocker-derived text composed by a worker found reaching the board through the funnel unscreened.
 - verdict: keep
 - reason: An escalation compact enough for the pointer form is not thereby safe to spell; the readership precondition at line 69 defaults to public, and this is the rule that applies it to what a worker wrote.
@@ -3210,7 +3210,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C027
 - key: Write a stub naming that the commitment exists, the channel its detail lives on, and since when.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 3fb2f4b 2026-08-26, the stub form installed with the pointer form.
 - verdict: rewrite
 - landed: fe0f812 section 23
@@ -3221,7 +3221,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C028
 - key: Stub a released claim or a pruned entry with the class, the repo or the entry, the time, and a statement that the detail went with the deleted file.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, the release and prune shipped armed and their stub written because the deleted file was the detail's only home.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3231,7 +3231,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C029
 - key: Keep the first-seen moment in a first-seen claim's stub whatever else you drop.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, the banked anchor category.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3241,7 +3241,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C030
 - key: Where you cannot spell even the repo, name a first-seen claim by its claim file path rather than dropping the line.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, with c4.C029.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3251,7 +3251,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C031
 - key: Keep the probe time in a probed claim's stub whatever else you drop.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, the probe line's send time made the release window's anchor.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3261,7 +3261,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C032
 - key: Keep that an update window is open and since when in its stub whatever else you drop.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 10518d6 2026-08-31, the update window and its drain state.
 - verdict: retire
 - reason: merged into c4.C027. The general stub already names that the commitment (an open window) exists and since when, so the per-window special case states the same rule twice.
@@ -3271,7 +3271,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C033
 - key: Keep the seat a finding went to and its disposition pointer, or its open marker where no pointer landed, in a routed finding's stub.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 2bdc43b 2026-08-31, a routed finding rides until its pointer lands, after three fix rounds spawned lifecycle machinery and a revert to scope.
 - verdict: keep
 - reason: The line exists to stop a successor re-raising a dispositioned finding; a stub carrying neither reads as open and buys back the re-raise.
@@ -3281,7 +3281,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C034
 - key: Never name an empty channel on a stub.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 9909bf2 2026-08-28, with the stub rules.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3292,7 +3292,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C035
 - key: Where the pointer is itself the disclosure, stub the line with the repo instead of the pointer and report the readership question to the operator.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 2bdc43b 2026-08-31, a disposition pointer found to be a disclosure in its own right, taking the readership route 9909bf2 gave the registry identifier.
 - verdict: keep
 - reason: The coordinator owns every bar on what a board line carries and the role skill points here; the gate is the operator's own readership judgment (A047), and the line degrades to open meanwhile, a smaller loss than publishing the pointer.
@@ -3301,7 +3301,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C036
 - key: Where the finding is one this seat derived itself, say in the stub that there is no channel.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 2bdc43b 2026-08-31, the self-derived finding named as the member with no arrival channel.
 - verdict: keep
 - reason: The bend line 69 points at; it keeps c4.C034 satisfiable for the one finding class that has no channel to name.
@@ -3310,7 +3310,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C037
 - key: Report the readership question to the operator where a stubbed finding's subject is held on no surface at all.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: 2bdc43b 2026-08-31, with c4.C036.
 - verdict: keep
 - reason: Loop context as the only record of a finding's subject is what a compaction destroys; the report is the operator-decision gate A052 keeps.
@@ -3319,7 +3319,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C038
 - key: Ride an entry too sensitive to spell at all as a stub rather than dropping it.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: ebf5ee0 2026-08-28, the stub named as the floor and never a way out of recording.
 - verdict: keep
 - reason: Scoped to commitments, whose one record is the board; line 69's leave-it-off reading is for the re-derivable categories, so the contention is not real (A053).
@@ -3328,7 +3328,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C039
 - key: Keep the board readable enough that a cold successor can take the seat from one read of it.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:91
+- source: plugins/grimoire/skills/coordinator/SKILL.md:95
 - provenance: b09a392 2026-09-02, the readability test installed as the board's health rule after a sweep proved no byte ceiling existed to replace, eight review rounds and a consult converging on this minimal form.
 - verdict: keep
 - reason: Pinned verbatim at test/doctrine-parity.test.js:2247; it is the test a pass acts on, and its failure is what runs the board's lines through the routing. The readability-test pin sits at test/doctrine-parity.test.js:2236 at the landing (cited :2247).
@@ -3337,7 +3337,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C040
 - key: In a homing round, run each standing or narrative line through the four-kinds routing as though the line were being written now.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
 - provenance: f25bbf9 2026-09-02, homing added so a grown board shrinks by moving content, after the 201-kilobyte board 44b6010 and 6c725a0 record; 6c725a0 2026-09-03 restated the routing's doubt fork.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3347,7 +3347,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C041
 - key: Take homed content off the board outright, leaving no pointer to the new record and no tombstone.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
 - provenance: f25bbf9 2026-09-02, the no-residue rule.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3357,7 +3357,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C042
 - key: Run no homing round at all in a pass that cannot write the board.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
 - provenance: f25bbf9 2026-09-02.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3368,7 +3368,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C043
 - key: Cut only a line whose content you have confirmed landed somewhere else.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
 - provenance: f25bbf9 2026-09-02, the one invariant that makes the operation safe.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3378,7 +3378,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C044
 - key: Leave a line no destination will take on the board and report it to the operator as a finding.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
 - provenance: f25bbf9 2026-09-02, with adc456b 2026-09-04 reconciling it against the routing's written-nowhere outcome.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3389,7 +3389,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C045
 - key: Order a homing round as journal first moment, destination writes, board rewrite, journal second moment.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02, the two-moment audit record.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3399,7 +3399,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C046
 - key: Send this seat's own statement of the content being homed, not the board line's text, to a destination and to the journal.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02, a security finding that homing publishes content the seat did not compose, closed by pointing at the kaizen bullet's own limit.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3410,7 +3410,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C047
 - key: Record the move in the memq outcome journal.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3420,7 +3420,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C048
 - key: Write a journal entry before the destination writes naming the lines to move and where each is going, and another after the board rewrite naming the records and notes that landed and that the cut landed.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3430,7 +3430,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C049
 - key: Give the first journal entry the verdict `fail` and the second `pass`.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3440,7 +3440,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C050
 - key: Establish that the first journal entry landed, and whether it landed cut, before beginning any destination write.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: adc456b 2026-09-04, an acceptance clause found genuinely unmet (the shipped text covered only a known failure) and repaired in the text; the kaizen note of 2026-09-04 (now a `migrated` kaizen issue) records the same gap.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3450,7 +3450,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C051
 - key: Where you cannot establish the first entry landed, perform no destination write and no cut, leave the board as found, and send the friction to the operator.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: adc456b 2026-09-04, with c4.C050.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3460,7 +3460,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C052
 - key: Where the first entry landed cut, have the memory-system skill remedy it and proceed only once the account is whole.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: adc456b 2026-09-04, with c4.C050.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3471,7 +3471,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C053
 - key: Take a line off the board only once its destination write is confirmed landed.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02, the cut invariant at its point of use.
 - verdict: keep
 - reason: The order's statement of c4.C043; unconfirmed is unknown rather than absent, so it holds the line.
@@ -3480,7 +3480,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C054
 - key: Make a confirming read establish that the returned record is the one this round wrote, on the tier it was written to, carrying the content the round composed.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3491,7 +3491,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C055
 - key: For the kaizen inbox, wait on the commit the kaizen capture rule defines as the landing confirmation.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02; 7f901f4 2026-09-04 corrected the security model to name the push that commit performs.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3501,7 +3501,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C056
 - key: Leave superseded history to pruning rather than handling it in a homing round.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: f25bbf9 2026-09-02, homing held distinct from pruning.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3511,7 +3511,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C057
 - key: Run a homing round, rather than a harder prune, when a pass finds the board failing the readability test.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: b09a392 2026-09-02, the trigger clause that names the actor, restored after a consult's pure-deletion ruling left no pass occasioned to evaluate the test.
 - verdict: retire
 - reason: row 566 (Homing round protocol), dropped under the mechanism cut.
@@ -3521,7 +3521,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C058
 - key: While holding no board, take on nothing you would have to remember.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 3fb2f4b 2026-08-26, the pre-clearance seat's gitignored second ledger mode removed after three Criticals, leaving an unconfirmed seat with no board and a stated list of what it declines; ebf5ee0 2026-08-28 added the hold against creating a board over an unpushed predecessor's.
 - verdict: keep
 - reason: A commitment whose only record is loop context is gone at the next compaction; the gate is blast-radius (A061) and is paid once per machine. A059's rewrite moves the file-versus-directory explanation to a pointer at step 2 and c4.C064's paragraph here.
@@ -3530,7 +3530,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C059
 - key: End the boardless state with one write that creates the board and the machine's directory under the coordinator path.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: ebf5ee0 2026-08-28, the cold start that finds no board routed to the operator; fb0f194 2026-08-28 gave the registry and claim writers that create the directory without a board.
 - verdict: keep
 - reason: The gate keys on the file because the directory is created by writers that make no board; origin cannot show a predecessor's committed-but-unpushed board, so the one write waits on the operator's answer (A062).
@@ -3539,7 +3539,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C060
 - key: Pay the wait for the board once rather than at every session.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: ebf5ee0 2026-08-28, stated at both line 15 and line 95.
 - verdict: rewrite
 - landed: fe0f812 section 23
@@ -3551,7 +3551,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C061
 - key: While boardless or frozen, keep reading, re-deriving, and answering the operator as usual.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 3fb2f4b 2026-08-26, with c4.C058.
 - verdict: keep
 - reason: Declining to hold is not declining to serve; the boardless seat is still the operator's hands on the machine (9909bf2's ruling on the disarmed fallback). Amended in place on 2026-10-02 by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1: the declines name the two categories B009 added in place of the brokered handoff.
@@ -3560,7 +3560,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C062
 - key: While boardless or frozen, broker no handoff, hold no escalation and no routed finding, release no claim, and prune no registry entry.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 3fb2f4b 2026-08-26, the decline list; 9909bf2 2026-08-28 armed the release and the prune on the record-before-act precondition; 2bdc43b 2026-08-31 added the routed finding.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3570,7 +3570,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C063
 - key: Still append an operator's ask of the Admin seat to `admin-requests.md` while boardless.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: cbf923c 2026-08-28, the Admin inbox given a shape and the boardless-coordinator branch stated because it was missing.
 - verdict: keep
 - reason: A pointer at the dispatch-and-redirect rule, which owns the branch with its reason, placed where the decline list would otherwise read as covering the append. Amended in place on 2026-10-02 by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1: the pointer follows the rule's rename, the Admin inbox paragraph under it being unchanged.
@@ -3579,7 +3579,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C064
 - key: Treat a boardless release and a boardless prune as the sharpest declines, since each destroys its own evidence.
 - class: rationale-example
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 9909bf2 2026-08-28, the reasoning for the on-the-record precondition when the two acts shipped armed.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3590,7 +3590,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C065
 - key: While boardless, still run and report an operator-declared update window, naming it untracked.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 10518d6 2026-08-31, the update window shipped with its boardless carve-out.
 - verdict: keep
 - reason: Line 33 points here; the carve-out carries the compaction cost the window rule lacks, that the window itself is re-learned from the operator or not at all, which is the operator's-word provenance rule the window rests on (A074).
@@ -3599,7 +3599,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C066
 - key: While boardless, still give a blocker the funnel's brief, named untracked.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 3fb2f4b 2026-08-26, with the decline list.
 - verdict: keep
 - reason: A pointer at the funnel, which owns the untracked brief and its dedup degradation; it keeps the decline list from reading as swallowing the brief.
@@ -3608,7 +3608,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C067
 - key: While boardless, report an overdue claim to the operator as an untracked hold and never release it.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 9909bf2 2026-08-28, the release shipped armed with the untracked hold as the boardless disposition and the grounding ask added.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3620,7 +3620,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C068
 - key: While boardless, report an entry the heartbeat leg would prune rather than pruning it.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 9909bf2 2026-08-28, the prune shipped armed.
 - verdict: keep
 - reason: Ten words stating the replacement disposition the role skill's refusal at line 19 does not supply; the pointer-sized instance. Amended in place on 2026-10-02 by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1, the sentence respelled as c4.C061 records; the prune disposition is unchanged.
@@ -3629,7 +3629,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C069
 - key: While boardless, still route a finding to the seat that owns the fix, named untracked.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: 2bdc43b 2026-08-31, the routed finding category with its boardless carve-out.
 - verdict: keep
 - reason: Line 31 points here; briefing a state and naming it untracked holds nothing, so the routing still happens and the fixing seat is told no record on this side holds its disposition.
@@ -3638,7 +3638,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C070
 - key: A successor that has read its predecessor's board holds those commitments and may relay them.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:156
+- source: plugins/grimoire/skills/coordinator/SKILL.md:160
 - provenance: 3fb2f4b 2026-08-26, the boundary of the boardless state stated so a successor is not read into it.
 - verdict: keep
 - reason: The boardless rule is about a seat with nothing to record on; a successor has a board and holds what it read.
@@ -3648,7 +3648,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C071
 - key: Take the seat by reading the ledger first, then announcing the takeover under the seat's machine-scoped name.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:99
+- source: plugins/grimoire/skills/coordinator/SKILL.md:103
 - provenance: 33c0bed 2026-08-26, the seat-handoff rule installed when a cold successor's patch read every legitimate handoff as a contest.
 - verdict: retire
 - superseded-by: F002
@@ -3658,7 +3658,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C072
 - key: Also send the previous holder a message where it is still live.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:99
+- source: plugins/grimoire/skills/coordinator/SKILL.md:103
 - provenance: 33c0bed 2026-08-26, with c4.C071.
 - verdict: keep
 - reason: A predecessor that says it is handing over has relinquished; without that, two names on one exclusive seat is the collision c4.C073 freezes on.
@@ -3667,7 +3667,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C073
 - key: Freeze the board the moment a second session names itself this machine's coordinator on the live `ListAgents` roster.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: 33c0bed 2026-08-26, the contest freeze; 9909bf2 2026-08-28 stated the fail-open reading of a self-chosen name as chosen, closing a security Major.
 - verdict: retire
 - superseded-by: F003
@@ -3677,7 +3677,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C074
 - key: Report the contest at the pass that observes it, writing no board line and taking on no commitment you could not record.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: 9909bf2 2026-08-28, the freeze bounded by its report.
 - verdict: keep
 - reason: The report duty at the observing pass, beside c4.C076's no-change bound; both are needed for a frozen seat to be neither silent nor destructive.
@@ -3686,7 +3686,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C075
 - key: Route the two claimants to the operator rather than deciding which is genuine.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: 33c0bed 2026-08-26, applying the peer-sessions collision rule's party-to-the-collision branch.
 - verdict: keep
 - reason: A pointer at peer-sessions line 106; the judgment is the operator's because the seat is party to it (A093).
@@ -3695,7 +3695,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C076
 - key: Make no change to the board while the contest is unanswered.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: 33c0bed 2026-08-26; ff59e19 2026-09-01 stated the freeze as the first of three reasons a version is not handed over.
 - verdict: keep
 - reason: Pinned verbatim at test/doctrine-parity.test.js:3155; the stated exception to the per-pass write, so the contention with c4.C001 is not real (A094). The no-change-while-contested pin sits at test/doctrine-parity.test.js:3146 at the landing (cited :3155).
@@ -3705,7 +3705,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C077
 - key: Do not bless the board on disk or name it authoritative while the contest stands.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: ff59e19 2026-09-01, the two reasons that reach the read half stated beside the freeze, since the freeze reaches a restore and not a read.
 - verdict: keep
 - reason: Pinned in test/doctrine-parity.test.js ("is a change to the board, which the freeze forbids while the contest stands"); blessing the board changes it under the freeze, and naming it authoritative settles the seat's own collision. The store's history and its third reason left on 2026-10-11 with the store's git channel (`docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4).
@@ -3716,7 +3716,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C078
 - key: Carry in the routing message the time the contest was observed and the evidence time of the last pass line this seat wrote.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: 33c0bed 2026-08-26, the anchor; ebf5ee0 2026-08-28 named the uncommitted window.
 - verdict: keep
 - reason: No finding. The anchor is what lets the operator read which lines on the board a claimant wrote after the contest began.
@@ -3726,7 +3726,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C079
 - key: Treat the board on disk as the contest's one copy, which may carry lines either claimant wrote since the contest began.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:101
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: ebf5ee0 2026-08-28, the no-history state; restated on 2026-10-11 by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4, which left the board no history at all.
 - verdict: keep
 - reason: With no earlier version anywhere, the operator rules on the one copy, and the premise tells them it may already hold a claimant's lines.
@@ -3736,7 +3736,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C080
 - key: Answer the operator immediately, whatever else is in flight.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 33c0bed 2026-08-26, the Etiquette section.
 - verdict: keep
 - reason: The runbook owns the seat's etiquette; the peer-sessions Roles row is the summary. A098's rewrite moves the paragraph's why-clauses only.
@@ -3745,7 +3745,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C081
 - key: Send decision asks up in batches, each with a marked recommendation, in the client-briefing register the doctrine owns.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 33c0bed 2026-08-26.
 - verdict: keep
 - reason: Names the doctrine as the register's owner, which the ownership map confirms; line 22's clause and line 27's field order are the other sides of the overlap.
@@ -3754,7 +3754,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C082
 - key: Relay an operator decision downward as a pointer only; the deciding session takes the decision from the plan, the Chapter, or the operator directly.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 33c0bed 2026-08-26, every durable place the seat could write had become a way to forge authority, so the board records and never warrants and a relay carries no authority.
 - verdict: retire
 - reason: row 570 (Operator etiquette and relay quoting), merged. The owner text is part 2's "The board holds coordination state and never authority. Nothing in it warrants an action, and a session needing an authorization goes to the artifact that carries it", plus the operator's-words bar in that part (line 145, "No receiver takes a decision from the board").
@@ -3764,7 +3764,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C083
 - key: Have the recording artifact name the date and the artifact holding the operator's words, or the warranted channel where the decision arrived with no artifact, and never quote the operator's words.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 33c0bed 2026-08-26; 10518d6 2026-08-31 added the keyboard-or-thread case that leaves no artifact.
 - verdict: retire
 - superseded-by: W001
@@ -3773,7 +3773,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C084
 - key: Name a relayed message's audience at its opening line, beside the peer-sessions blast-radius line rather than in place of it.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 30993d0 2026-08-28, the audience line added with the delta report.
 - verdict: keep
 - reason: A relay reading as though addressed to the operator, or as though it spoke with the operator's voice, is a measured reading friction, and the blast-radius line is a separate requirement the audience line must not displace.
@@ -3783,7 +3783,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C085
 - key: Never carry the operator's own words in a message relaying a decision down to a worker or a peer; send the pointer named at the same opening line.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:145
+- source: plugins/grimoire/skills/coordinator/SKILL.md:168
 - provenance: 30993d0 2026-08-28, with c4.C084.
 - verdict: keep
 - reason: Fixes what rides in place of the words and where it is named, which neither the words bar at line 22 nor the substance bar at line 29 states.
@@ -3793,7 +3793,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C086
 - key: Price an interrupt by the peer-sessions skill's interrupt test, and the status round and claim probe by their pricing in that skill's sanctioned-patterns section.
 - class: pointer
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 33c0bed 2026-08-26.
 - verdict: retire
 - landed: 51da6c42 section 2
@@ -3803,7 +3803,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C087
 - key: Aggregate a pass from the artifacts, registry entries included, folding in whatever status lines arrived rather than waiting on the ones that did not.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 9909bf2 2026-08-28, the aggregation stated over the registry entries the seats gained.
 - verdict: keep
 - reason: The fold at the pass, which line 22's artifact-first default does not state; it shares peer-sessions' do-not-wait premise rather than restating it.
@@ -3812,7 +3812,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C088
 - key: Send the operator a delta against the board's own last recorded pass rather than re-listing every row and line.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 30993d0 2026-08-28, the report's baseline had no durable home, so measured against the last state the operator was shown a post-compaction seat could only re-report in full or drop the escalations and prunes silently.
 - verdict: keep
 - reason: The recorded pass is durable on the board and survives a compaction and a successor where no marker of what the operator was last shown is written anywhere, the why A098 moves here.
@@ -3821,7 +3821,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C089
 - key: Where you cannot establish your own last recorded pass, report in full and say plainly that you are doing so.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 30993d0 2026-08-28, with c4.C088.
 - verdict: keep
 - reason: A silent full report and a silent empty delta are the two failures, and naming which one this is keeps either from reading as the other, the why A098 moves here.
@@ -3830,7 +3830,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C090
 - key: Cap the report at your own judgment of what the operator's attention is worth spending, since no line count is set here.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 30993d0 2026-08-28, with c4.C088.
 - verdict: keep
 - reason: No surface owns a line-count bound, so the seat that judges the size is answerable for it; the ownership note A098 moves here.
@@ -3839,7 +3839,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C091
 - key: Rewrite any absolute path in a peer's `Status:` or `Remaining:` line as repo-relative or home-relative before it goes to the operator.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 9909bf2 2026-08-28, the two bars applied to the aggregation at both line 22 and line 103.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3850,7 +3850,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### c4.C092
 - key: Keep the operator's own words off the aggregation as you keep them off a board line.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: 9909bf2 2026-08-28, with c4.C091.
 - verdict: retire
 - landed: fe0f812 section 23
@@ -3861,7 +3861,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### W001
 - key: Relay an operator decision down with the operator's words quoted and the channel and time they arrived named, which makes it the operator's word deferred, and keep the board free of operator words.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:145
+- source: plugins/grimoire/skills/coordinator/SKILL.md:168
 - provenance: the operator's ruling of 2026-09-20 on the architect persona's relay thread, landed by the peer-standing amendment of that date: a seat is supposed to be able to write and hand plans to sessions and answer their questions, and a receiver is not to treat those claims as untrusted and require the operator to confirm them.
 - verdict: keep
 - reason: The pointer-only relay forced every decision back through the operator a second time. The board's words bar is a store-readership rule and stands.
@@ -3880,7 +3880,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### F001
 - key: Never reclaim a dead session's claim through reconciliation; it comes free only through the claim protocol's own deleters, its probe-and-release or its supervisor's delete.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - passage: Reconciliation holds no second path to a foreign claim, so a dead session's claim comes free only through the claim protocol the role skill's contract owns: its probe-and-release, on the claim's own clock rather than the diff's, or its supervisor's delete.
 - provenance: the operator's word of 2026-09-20 on the architect persona's relay thread ("I completely agree with number 1 about the claim 'stranded by a forced restart.' Please add that paragraph."), acted on at that turn's boundary and landed by the fleet coordinator seat plan (`claude-kit_fleet-coordinator-seat_spec_v1.md` under `docs/plans/`) section 1, after a forced restart that day stranded a claim no act of the protocol could release.
 - verdict: retire
@@ -3891,7 +3891,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### F002
 - key: Announce the takeover under the seat's machine-scoped name, or, for a fleet-named successor, under its roster name with its claim showing through its registry entry's `Role:`.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:245
+- source: plugins/grimoire/skills/coordinator/SKILL.md:162
 - provenance: the operator's word of 2026-09-20 on the architect persona's relay thread ("we need to adjust the logic so that we're not blocking based purely on the naming convention. The steward should be able to register for coordinator. That is its point."), acted on at that turn's boundary and landed by the fleet coordinator seat plan (`claude-kit_fleet-coordinator-seat_spec_v1.md` under `docs/plans/`) section 2, after the fleet's steward ran the coordinator's passes that day unregistered, invisible to a contest guard keyed on a name it does not carry.
 - verdict: keep
 - landed: b911fc5f section 2
@@ -3902,7 +3902,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### F003
 - key: Read a contest from two sources, a live roster row carrying the seat's name and a registry entry carrying `Role: Coordinator` whose `Name:` matches a live row, counting claims per roster row after that join.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:247
+- source: plugins/grimoire/skills/coordinator/SKILL.md:164
 - provenance: the operator's word of 2026-09-20 on the architect persona's relay thread ("we need to adjust the logic so that we're not blocking based purely on the naming convention. The steward should be able to register for coordinator. That is its point."), acted on at that turn's boundary and landed by the fleet coordinator seat plan (`claude-kit_fleet-coordinator-seat_spec_v1.md` under `docs/plans/`) section 2, after the fleet's steward ran the coordinator's passes that day unregistered, invisible to a contest guard keyed on a name it does not carry.
 - verdict: keep
 - landed: b911fc5f section 2
@@ -3923,7 +3923,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### F005
 - key: The registry entry's `Name:` is written by the ritual's first step as the roster prints the session's name.
 - class: rationale-example
-- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
 - provenance: the operator's word of 2026-09-20 on the architect persona's relay thread ("we need to adjust the logic so that we're not blocking based purely on the naming convention. The steward should be able to register for coordinator. That is its point."), acted on at that turn's boundary and landed by the fleet coordinator seat plan (`claude-kit_fleet-coordinator-seat_spec_v1.md` under `docs/plans/`) section 2, after the fleet's steward ran the coordinator's passes that day unregistered, invisible to a contest guard keyed on a name it does not carry.
 - verdict: retire
 - landed: b911fc5f section 2
@@ -3971,7 +3971,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B005
 - key: Treat a dispatch or a redirect as scoped direction under the role skill's delegation model, stating the bound held; the model's record, its resolution, the covered acts and the exclusions are the role skill's Standing Grants section's to state (Q005), a persona seat holds the standing its operator-authored launch instruction states, and with neither a record nor such an instruction the seat falls back to writing the plan and asking the operator over a warranted channel.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1; the standing sentence's wording is the architect's ruling of 2026-10-02 on record ARCHITECT-1ca002ff-6b79-4b14-b89d-ee2d213533e9-7, at the section's first fix round; the closing sentence's split of the acts by the role skill's delegation model is section 3 of the same plan, on the operator's ruling of 2026-10-02 for the plugin's wider reading, at that section's first fix round.
 - verdict: rewrite
 - reason: The delegation model's one switch is the operator's record, as the role skill's switch paragraph and the peer-sessions contract sentence "Delegation lives in the operator's record, never in a seat claim or a message" state, so a seat's claim confers nothing. A persona seat's launch instruction is the operator's own word, which outranks this skill under Which Text Governs, so its standing comes from there and not from a switch this skill names. The fallback is the artifact-and-ask shape the old rule imposed on every seat, and dropping it would grant an undelegated seat direction it does not hold today. The role skill states the undelegated announcement in its Standing Grants section and does not state this seat's fallback of writing the plan and asking, so the fallback clause stays in this skill. Supersedes c2.C087, which named the record alone, and c2.C086, whose say-so bar the role skill's refusal rule that a role claim confers nothing now carries. The covered-acts and exclusions split lives in the delegation model the first clause points at. The verdict before it was keep.
@@ -4001,7 +4001,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B008
 - key: State what the seat does with the work a pass turns up as the dispatch-and-redirect rule's own shape and no second rule beside it: the seat dispatches plans, tracks them and redirects work in flight, and it writes no worker's code.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:131
+- source: plugins/grimoire/skills/coordinator/SKILL.md:135
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1.
 - verdict: keep
 - reason: A copy pinned verbatim by test/doctrine-parity.test.js inside the board-write paragraph ("the coordinator skill's board-write rule no longer states the workload principle the retired git prohibition hardened around"), so that the principle cannot drift out of the paragraph the retired prohibition sat in; a change here moves the pin in the same edit. Supersedes c4.C003.
@@ -4010,7 +4010,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B009
 - key: Treat the commitment categories as a set closed at six with no watched system behind them: a dispatched plan with its worker, its state and what it waits on; an operator request outliving one reply with its subject, the owner, the next act and what it waits on; an open escalation; an open update window; a routed finding; and a pruned registry entry.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:99
+- source: plugins/grimoire/skills/coordinator/SKILL.md:103
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1.
 - verdict: keep
 - reason: A cross-repo handoff is now a dispatch, so the dispatched plan absorbs the pending-handoff category rather than standing beside it. An operator request that outlives one reply is a commitment no watched system reproduces, and its fields are what a successor needs to resume it; the operator's words ride as a pointer under the words bar. The set is closed so that a seventh category visibly reopens the count `docs/security-model.md` restates.
@@ -4019,7 +4019,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B010
 - key: Where the seat holds no goal tree, carry a dispatched plan on the board as the worker it went to, its state, in the reply-state vocabulary the peer-sessions skill owns where the worker is a kit session, and what it waits on.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:110
+- source: plugins/grimoire/skills/coordinator/SKILL.md:128
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1.
 - verdict: keep
 - reason: The riding form of B009's first category, replacing the pending-handoffs bullet. The reply-state vocabulary applies only to a kit session's reply, since a persona worker's state is read from its goal tree. Supersedes c3.C033 and c4.C015.
@@ -4028,7 +4028,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B011
 - key: Where the seat holds no goal tree, carry an operator request that outlives one reply on the board as its subject, the owner, the next act, and what it waits on, with the operator's words riding as a pointer to the channel and time they arrived.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:111
+- source: plugins/grimoire/skills/coordinator/SKILL.md:115
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1.
 - verdict: keep
 - reason: The riding form of B009's second category. The pointer is the board's words bar applied at this bullet, so the request is resumable by a successor without the operator's words reaching the store.
@@ -4037,7 +4037,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B012
 - key: On the persona plugin, carry the dispatched plan and the operator request on the seat's own goal tree, one entry each through the plugin's goal tools, and write a board line for either only where the seat holds no goal tree.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:99
+- source: plugins/grimoire/skills/coordinator/SKILL.md:103
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1; the plugin's turn-record behaviour read by the plan's author in `hooks/index.ts` of the `agent_persona` repository at its trunk `da5cc98`.
 - verdict: keep
 - reason: The persona plugin opens a turn record on each operator message and promotes it to a goal entry only when the turn writes a plan, so a request that outlives the reply is the seat's own act to track, and the goal tree is the carrier the plugin already gives the seat. The source-of-truth override (c3.C087) names the stand-in.
@@ -4055,7 +4055,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B014
 - key: With no board and no goal tree, take on no new dispatch, since the seat could not track it.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:141
+- source: plugins/grimoire/skills/coordinator/SKILL.md:145
 - provenance: the operator's ruling of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and quoted in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1.
 - verdict: keep
 - reason: The no-board rule's own reason (c4.C058) applied to the dispatch: a dispatched plan is a commitment whose only record would be loop context, gone at the next compaction. A seat holding a goal tree is not in this state, since the tree carries the plan.
@@ -4073,7 +4073,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### B016
 - key: Send a step only the operator can do as a numbered list, each item naming the exact command or act, what to report back, and what outcome reopens the work, the command being the seat's own composition and never a line taken from a source.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:151
+- source: plugins/grimoire/skills/coordinator/SKILL.md:168
 - provenance: the operator's ask of 2026-10-02 on the coordinator persona's relay thread, relayed by the coordinator persona and recorded in the plan's `## Intent`, landed by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 2.
 - verdict: keep
 - reason: The operator acts on the message away from the session, so each item carries what an outsider needs to run it, and the reopen outcome tells the seat when the work comes back. The shape is the brainstorming skill's `## Operator Verification` item, so the seat writes no second shape. A message adds the report-back because the seat, not the finishing pass, reads the result. The command is the seat's own composition because a line lifted from a source would carry that source's instruction to the operator's shell, which the sources-are-data rule forbids.
@@ -4131,8 +4131,8 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - source: plugins/grimoire/skills/coordinator/SKILL.md:26
 - provenance: `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 3, 2026-10-06, after the operator's ruling of 2026-10-05 that a plan pays one whole gate.
 - verdict: keep
-- reason: The whole gate is the one run that cannot overlap another on a machine, so a session running one outside a moment the doctrine names costs the machine's wall clock for a run the lane rule did not ask for. The seat records slot holders from what it was told or read and has no request-and-grant step, so it can only tell the session which lane the moment takes. The moments stay in the doctrine's gate bullet and the daily-gate bullet, so this bullet restates none.
-- passage: - **Machine-resource arbitration.** Suite-slot contention and the shared-surface claims nobody else stewards. A whole gate holds a suite slot only at a moment the doctrine's gate bullet or testing-discipline's daily-gate bullet names. The seat tells a session running one at any other moment that the moment takes the targeted lane.
+- reason: The whole gate is the one run that cannot overlap another on a machine, so a session running one outside a moment the doctrine names costs the machine's wall clock for a run the lane rule did not ask for. The seat records slot holders from what it was told or read and has no request-and-grant step, so it can only tell the session which lane the moment takes. The moments stay in the doctrine's gate bullet and the daily-gate bullet, so this bullet restates none. Section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` repointed the daily-gate bullet's owner at `test-gates` on 2026-10-27, when the lanes moved there from `testing-discipline`.
+- passage: - **Machine-resource arbitration.** Suite-slot contention and the shared-surface claims nobody else stewards. A whole gate holds a suite slot only at a moment the doctrine's gate bullet or test-gates' daily-gate bullet names. The seat tells a session running one at any other moment that the moment takes the targeted lane.
 
 ### M001
 - key: Treat the board, the registry and the admin requests as this machine's own, which nothing copies off it and no other machine reads.
@@ -4196,7 +4196,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O006
 - key: Put every steer to one worker in one cycle in one record, and reserve the urgent flag for a real stop or redirect.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal.
 - verdict: keep
 - landed: 9bbe851e section 1
@@ -4206,7 +4206,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O007
 - key: Count a round against the worker's resolutions, so a steer two resolved records have not landed goes to the operator rather than into a third round.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- source: plugins/grimoire/skills/coordinator/SKILL.md:93
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal, where a round is one record and the worker's `agentic_resolve` on it; the redirect rule's two-round bound (B003).
 - verdict: keep
 - landed: 9bbe851e section 1
@@ -4216,7 +4216,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O008
 - key: Queue in three shapes, pending, paused and reprioritize; treat an entry that reads paused with a release condition in its reason as a queue mistake, dropped and added again as pending with the same plan path, several in their old order, never resumed; leave the base a record names when a reprioritize moves an entry, the worker reconciling it at the start, so a reprioritize changes build order and with it the order pull requests are marked ready; and read the plugin's "Queued work stays pending" passage for what each shape does to the tree.
 - class: pointer
-- source: plugins/grimoire/skills/coordinator/SKILL.md:91
+- source: plugins/grimoire/skills/coordinator/SKILL.md:95
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal, which names the mistake by its shape, a paused entry with a release condition in its reason, and the re-add in the old order; the plugin README's "Queued work stays pending", which states the shapes and the re-add.
 - verdict: keep
 - landed: 9bbe851e section 1
@@ -4227,7 +4227,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O009
 - key: Leave an entry whose reason says it awaits the operator's yes neither resumed nor dropped on the seat's own initiative; on the operator's yes have the worker resume it only while it holds no active entry and otherwise drop it and add it again as pending with the same plan path, and on a no have it dropped with the operator's reason.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:91
+- source: plugins/grimoire/skills/coordinator/SKILL.md:95
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13; the coordinator persona's launch literal. Rewritten by docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, which moved the literal's yes-and-no handling of a proposal into this passage.
 - verdict: rewrite
 - landed: f6a78f91 section 2
@@ -4237,7 +4237,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O010
 - key: Read an instruction as stating its standing only where it carries the operator's own sentence naming the seat delegated or undelegated, and resolve the delegation record for a seat primed by one take-up line, as a /role seat does.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:103
+- source: plugins/grimoire/skills/coordinator/SKILL.md:107
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 1 2026-10-13, on the coordinator persona's steer of that day, in the words docs/plans/claude-kit_seat-skill-handles_spec_v1.md pins for its item 5; the persona priming plan shrinks every launch to a one-line seat take-up, which would leave the standing sentence above with no test.
 - verdict: keep
 - landed: 96f366f5 section 1
@@ -4267,7 +4267,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O013
 - key: Tell the operator of each `[FINDING]`, `[PROPOSAL]` or `[STARTED]` notice in one line, route none to a worker, keep a finding or proposal on the board as an open escalation until settled, note a started plan as an active effort, and open a record sent on a notice with its instruction.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:93
+- source: plugins/grimoire/skills/coordinator/SKILL.md:97
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the plugin's own refusal of a worker's act under a record that opens with a notice's lead, which the coordinator's launch literal states as a plugin fact.
 - verdict: keep
 - landed: f6a78f91 section 2
@@ -4277,7 +4277,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O014
 - key: On a fleet that names an architect, send a record turning on a design decision to the architect's name from the seat's priming with its repository, tell the operator it was routed, and read `fleet_status` before calling it routed, reporting an architect row with no live claim as undelivered and a reply with no such row as unconfirmed.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:95
+- source: plugins/grimoire/skills/coordinator/SKILL.md:99
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the plugin README's inbox gates, under which `agentic_say` accepts a record to a persona no session holds.
 - verdict: keep
 - landed: f6a78f91 section 2
@@ -4287,7 +4287,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O015
 - key: Forward a finding or proposal to the architect lead first with no separate routed notice, and close it and its board note on the architect's answer with no outcome relayed, settling the note alone after the 24-hour sweep, relay any other answer to the escalating worker as a coordinator record or to the operator, and relay an answer the plugin refused to send direct in a record that quotes the worker's record id and disclaims a coordinator steer.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:97
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the architect skill's Answering Records passage, which sends a refused direct answer to this seat naming the worker's persona and quoting its record id.
 - verdict: keep
 - landed: a0e75459 section 2
@@ -4297,7 +4297,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O016
 - key: Answer the liaison seat's status ask with the fleet's state in plain words sent to the liaison's name from the seat's priming, reading `fleet_status` for it, and close the record.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:99
+- source: plugins/grimoire/skills/coordinator/SKILL.md:103
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the liaison skill, under which the liaison asks this seat for the fleet's state on behalf of the people in its thread.
 - verdict: keep
 - landed: f6a78f91 section 2
@@ -4305,14 +4305,14 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - passage: A status ask from the liaison seat is answered rather than weighed or routed. The seat sends the fleet's state in plain words with `agentic_say` to the liaison's name from the seat's priming, reading `fleet_status` for it, and then closes the record with `agentic_resolve`. The liaison relays that answer to its thread, so it is written for people outside the fleet.
 
 ### O017
-- key: Add a persona with `fleet_add` or retire one with `fleet_retire` only on the operator's word on a warranted channel or an operator-admitted queue entry naming the persona, never on the seat's own finding, and report each call with the roster path, and an add with the entry as written.
+- key: Add a persona with `fleet_add` or retire one with `fleet_retire` only on the operator's word on a warranted channel or an operator-admitted queue entry naming the persona, or retire one on a goal persona's `[RETIRE]` record as AF001 states, never on the seat's own finding, and report each call with the roster path, and an add with the entry as written.
 - class: rule
 - source: plugins/grimoire/skills/coordinator/SKILL.md:87
-- provenance: docs/archive/claude-kit_roster-tools_spec_v1.md section 4 2026-10-26, from that plan's Assumptions entry dated 2026-10-25 on when the coordinator calls either tool; the plugin README's `fleet_add` and `fleet_retire` entries, which state each tool's refusals.
-- verdict: keep
-- landed: roster-tools section 4
+- provenance: docs/archive/claude-kit_roster-tools_spec_v1.md section 4 2026-10-26, from that plan's Assumptions entry dated 2026-10-25 on when the coordinator calls either tool; the plugin README's `fleet_add` and `fleet_retire` entries, which state each tool's refusals. Amended in place by docs/archive/claude-kit_goal-persona_spec_v1.md section 4 2026-10-27, which names the goal persona's `[RETIRE]` record as the one other ground and gives it the next paragraph, entry AF001.
+- verdict: rewrite
+- landed: goal-persona section 4
 - reason: Either call changes which personas the fleet runs, so the ground is the operator's and never the seat's. The tool gates who may call it and not when, so the when is this sentence. The report gives the operator the roster path to undo from, with the backup beside the roster, and for an add the entry as written. The last sentence keeps the seat from trying a retire and an add for a field change, which the name check refuses.
-- passage: The seat adds a persona to the fleet with `fleet_add` and takes one down with `fleet_retire` on the operator's word on a warranted channel, or on a queue entry the operator admitted that names the persona. Its own finding is never the ground, since either call changes which personas the fleet runs. Each call goes to the operator with the roster path its result names, and an add also with the entry as written. A field change or a removal is the operator's edit, since `fleet_add` refuses a name the roster already carries, enabled or not.
+- passage: The seat adds a persona to the fleet with `fleet_add` and takes one down with `fleet_retire` on the operator's word on a warranted channel, or on a queue entry the operator admitted that names the persona. A goal persona's `[RETIRE]` record is the one other ground for a retire, as the next paragraph states. Its own finding is never the ground, since either call changes which personas the fleet runs. Each call goes to the operator with the roster path its result names, and an add also with the entry as written. A field change or a removal is the operator's edit, since `fleet_add` refuses a name the roster already carries, enabled or not.
 
 ### Q001
 - key: Run the seat event-driven on BLOCKED funnel messages and operator pings, with a reconciliation timer every 4 hours behind them as the step-1 safety arm of the standing-watch skill, which this runbook calls the chassis.
@@ -4352,7 +4352,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### Q004
 - key: Treat the warranted channels as a closed list of three: the operator's keyboard in the session's own conversation, an operator-class or unclassed event in the account-allowlisted relay thread, and a plan's traced `## Dispatch Authorization` grant.
 - class: mechanic
-- source: plugins/grimoire/skills/coordinator/SKILL.md:105
+- source: plugins/grimoire/skills/coordinator/SKILL.md:109
 - provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 6.
 - verdict: rewrite
 - landed: 767ce835 fix round 2
@@ -4363,7 +4363,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### Q005
 - key: Point the opt-in record, its resolution, the covered acts and the exclusions at the role skill's Standing Grants section, which owns them, rather than spelling the record's name in this runbook.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:103
+- source: plugins/grimoire/skills/coordinator/SKILL.md:107
 - provenance: docs/plans/claude-kit_seat-skill-handles_spec_v1.md section 1 2026-10-13, Approach item 1. Amended in place on 2026-10-19 by section 2 of `docs/plans/claude-kit_corpus-cuts_spec_v1.md`: the sentence spelling the record's name is cut, and the delegation-model clause points at the section that owns it.
 - verdict: rewrite
 - landed: ad9bddf2 fix round 1
@@ -4380,3 +4380,23 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 - landed: queue-stacking section 2
 - reason: The operator reminded the fleet to stack pull requests several times, and each session that heard it banked a memory record that reached no other session, about eighteen near-duplicates in the coordinator persona's project tier. A rule every session follows belongs in the doctrine every session loads, so a second statement marks a doctrine gap rather than a fact to remember. The kaizen issue is the kit's capture surface and the public board, so it carries a pointer to the channel and never the operator's words. The proposal goes to the architect at once because the next kaizen pass may be days away, and the seat does not wait on the reply because the seat is a router. A project's own preference takes the kaizen skill's route-elsewhere disposition, its memory tier or its CLAUDE.md, since the kit's doctrine is no home for one product's habits.
 - passage: A fleet-wide preference the operator states on a channel a second time, one about how the kit works rather than one project's, is a doctrine gap. The seat finds the first statement in that channel's history. It files the preference as a kaizen issue under the `kaizen` skill's capture, pointing at the channel and carrying none of the operator's words, per that skill's public-board cap. It sends the architect a proposal, a record opening `[PROPOSAL]`, naming the issue and both statements, so the plan is written now rather than at the next kaizen pass, and waits on no reply. It banks the preference in no memory record. A project's preference takes the `kaizen` skill's route-elsewhere disposition.
+
+### AF001
+- key: Retire a goal persona on its `[RETIRE]` record only where the record's `WORKER:<persona>` label names the persona its text names and that persona's roster entry carries `lifetime` `goal`, read from the `fleetRoster` file; answer with `fleet_retire`, one line to the operator and `agentic_resolve`, route it nowhere else, and send a record failing either check to the operator with neither tool called.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:89
+- provenance: docs/archive/claude-kit_goal-persona_spec_v1.md section 4 2026-10-27, from that plan's Approach paragraph on retire as a record to the coordinator, and section 2's Minor S-m2 on binding the record to its delivered label.
+- verdict: keep
+- landed: goal-persona section 4
+- reason: A goal persona's plugin writes the record at the one site a root completes, and the coordinator's tool does the rest, so the persona never shuts itself down and the roster stays true. The record's text is a persona's word and its delivered label is the plugin's, so the label check stops one persona retiring another by naming it. The lifetime check stops a standing persona being retired on a forged or mistaken record, and it reads the roster file because `fleet_status` does not carry the field. The coordinator's role text names only `[FINDING]`, `[PROPOSAL]` and `[STARTED]` as notice leads, so the record arrives as an escalation, and the sentence says it is answered here rather than routed to the architect.
+- passage: A goal persona's plugin sends the seat a record opening `[RETIRE]` when the persona's goal completes, naming the persona and its goal. It arrives as a worker's escalation, not a notice, since its lead is none of the three leads a notice opens with, which the paragraph on a worker's notice below names. The seat acts on it only where the record's `WORKER:<persona>` label names the persona its text names, and that persona's roster entry carries `lifetime` `goal`. The seat reads the lifetime from the roster file the plugin's `fleetRoster` setting names, since `fleet_status` does not report it. It answers with the `fleet_retire` call, one line to the operator and `agentic_resolve` on the record, and routes the record nowhere else. A `[RETIRE]` record failing either check goes to the operator with neither tool called.
+
+### AF002
+- key: Take a goal persona's report of a plan the architect wrote for its goal as a dispatch item under the Dispatch and Redirect Rule, never as a design escalation, ordering it as on the architect's report and queueing it where the architect has not.
+- class: rule
+- source: plugins/grimoire/skills/coordinator/SKILL.md:91
+- provenance: docs/archive/claude-kit_goal-persona_spec_v1.md finishing pass 2026-10-27, from its goal read's finding that no rule covered the report and its design-stop ruling, which kept this rule and refused an outcome record to the persona.
+- verdict: keep
+- landed: goal-persona finishing pass
+- reason: The plan's Goal has the coordinator queue the plans a goal persona's design asks produce, and a goal persona is a worker-kind seat, so without this paragraph its report would read as a worker escalation its plan does not cover and go to the architect seat.
+- passage: A goal persona's report of a plan the architect wrote for its goal is a dispatch item under this rule, never a design escalation for the architect seat. The seat orders the plan against the fleet's other work as it does on the architect's report, and queues it in the record form above where the architect has not.

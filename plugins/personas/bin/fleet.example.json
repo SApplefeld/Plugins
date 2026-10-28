@@ -46,5 +46,23 @@
     "coordinatorPersona": "steward",
     "architectPersona": "architect",
     "enabled": true
+  },
+  {
+    "name": "release",
+    "workdir": "D:/personas/release",
+    "permissionMode": "bypassPermissions",
+    "rundir": "D:/personas/release/run",
+    "coordinatorPersona": "steward",
+    "architectPersona": "architect",
+    "goal": {
+      "objective": "Ship the 2.0 release of the agent_persona repository",
+      "done": [
+        "the 2.0 tag is pushed and its release notes are published",
+        "the release build passes on the main branch"
+      ],
+      "turns": 400
+    },
+    "lifetime": "goal",
+    "enabled": true
   }
 ]

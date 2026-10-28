@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, activateNext, awaitingEntryAtOrAbove, blockedAncestorsToFree, bracketSafeText, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openTurnRecord, parseState, planHolderOf, previousSessionsText, recordPreviousSession, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, activateNext, awaitingEntryAtOrAbove, blockedAncestorsToFree, bracketSafeText, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openTurnRecord, parseState, planHolderOf, previousSessionsText, recordPreviousSession, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -51,6 +51,7 @@ import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validat
 import type { addGoalEntry as addGoalEntryFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, promoteOpenRecord as promoteOpenRecordFromModule } from "./records";
 import { skillPickTool } from "./skill-pick";
 import { GOAL_HISTORY_FILENAME, parsePersonaStore, stateNotLoadedText } from "./store-files";
+import { TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetResumeRefusedText } from "./goal-persona";
 import { markStretchApplied, noteStretchShown, stretchShownOfGet } from "./stretch-distillation";
 import { FREE_TEXT_MAX, boundedText, safeErrorText, stripBom } from "./text";
 import { isNudgeCountWork, isWorkTool } from "./turn-state-text";
@@ -1811,6 +1812,59 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // Outside those turns a call naming one is refused, and a call naming
     // none passes over them to the other paused entries.
     const mayResumeAwaiting = turnMayStartEffort("goal_resume_awaiting");
+    // A call naming the root the turn budget blocked lifts it, in a turn
+    // the operator, the coordinator persona or the architect persona's
+    // [QUEUE] record started, the same turns that resume an awaiting entry
+    // and the gate that decides them. The root returns to pending, never
+    // active, since only a leaf is active; its count restarts against the
+    // same budget, the entries the block paused return to pending, and its
+    // blocking asks are lifted as a resumed entry's are.
+    const budgetRoot = nodeId
+      ? sess.state.goals.find((g) => g.id === nodeId && g.parentId === null && g.status === "blocked" && g.blockedReason === TURN_BUDGET_REASON)
+      : undefined;
+    if (budgetRoot) {
+      if (!mayResumeAwaiting) {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        return { deny: AWAITING_YES_RESUME_REFUSED_TEXT };
+      }
+      const liftedAt = Date.now();
+      const budget = budgetRoot.turnBudget ?? 0;
+      const spent = budgetRoot.turnsSpent ?? 0;
+      budgetRoot.status = "pending";
+      budgetRoot.blockedReason = undefined;
+      budgetRoot.turnsSpent = 0;
+      budgetRoot.updatedAt = liftedAt;
+      let returned = 0;
+      for (const g of sess.state.goals) {
+        if (g.status !== "paused" || g.blockedReason !== TURN_BUDGET_PAUSED_REASON) continue;
+        g.status = "pending";
+        g.blockedReason = undefined;
+        g.updatedAt = liftedAt;
+        returned += 1;
+      }
+      for (const entry of openBlockingAsks(sess.state)) {
+        if (entry.nodeId === budgetRoot.id) liftAsk(sess.state, entry.id);
+      }
+      sess.state.decisions.push({
+        timestamp: liftedAt,
+        loop: "goal",
+        action: "resume",
+        detail: `Root ${budgetRoot.id} resumed (blocked: ${TURN_BUDGET_REASON}, ${spent} of ${budget} turns; turn budget restarted, ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending)`,
+      });
+      sess.state.updatedAt = liftedAt;
+      await persist();
+      return { result: `Resumed root ${budgetRoot.id} "${budgetRoot.title}". Turn budget restarted: ${budget} turns again. ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending; the controller's next tick starts one.` };
+    }
+    // While the turn budget blocks the root, no other entry resumes, the
+    // entries the block paused among them, and the call naming none picks
+    // none: a resumed entry would run while the counter skips the blocked
+    // root, so its turns would spend nothing. The root's release above is
+    // the one way back.
+    const budgetBlockedRoot = rootBudgetBlocked(sess.state) ? sess.state.goals.find((g) => g.parentId === null) : undefined;
+    if (budgetBlockedRoot) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: turnBudgetResumeRefusedText(budgetBlockedRoot.id) };
+    }
     // A call naming an entry the round budget blocked releases it: the
     // literal "Max rounds reached" is the one blocked reason it lifts, and
     // the entry's round count restarts below. Any other blocked entry, and
@@ -2390,8 +2444,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return refuse(`the entry breaks a roster rule: ${boundedText(validated.refusal)}.`);
     }
     const entry = validated.entry;
-    // Every value echoed from here on has passed the validator's text rule,
-    // so it carries no control character and no double quote. The glob rule
+    // Every value echoed from here on, save the goal block's texts, has passed
+    // the validator's text rule, so it carries no control character and no
+    // double quote. The goal texts may carry either. The glob rule
     // refuses only `*`, `?` and `[`, so a `]` passes, and model, which that
     // rule skips, keeps its `[..]` suffix. The success result echoes
     // JSON.stringify(entry) with no bracket-safing.
@@ -2495,10 +2550,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return refuse(`'${shown}' is this session's own persona, whose lever is supervisor_shutdown.`);
     }
     // Each role field is read the way the keeper hands it to the launch.
-    // Build-SupervisorInvocation (bin/keeper-functions.ps1:300-301) skips a
+    // Build-SupervisorInvocation (bin/keeper-functions.ps1:313-314) skips a
     // value that is null or whitespace-only and passes any other value as
     // its string, untrimmed. bin/agentic-common.sh emit_settings_json then
-    // reads an unset COORDINATOR_PERSONA as coordinator (:336), so a blank
+    // reads an unset COORDINATOR_PERSONA as coordinator (:339), so a blank
     // coordinatorPersona names coordinator here. architectPersona and
     // liaisonPersona take no default there, so a blank one names no persona.
     // The shell compares the role names with `=`, exact and case-sensitive,

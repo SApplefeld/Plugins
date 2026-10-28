@@ -72,6 +72,8 @@ Part of the executing-work skill: step 4 of the section loop, from a review's re
 
    **After each fix round, re-run step 2's promises command with `--against` its record in place of `--record`.** Before the close gate, re-read every promise over 0.6 or whose doubt rose 0.3 or more.
 
+   **A fix round's tests draw from the plan's reserve only past the section's allocation.** Brainstorming step 12 owns the reserve. The regression test for a defect that happened draws without asking, and the fix round's brief states that exception to its fix writer, so the writer does not meet the charter's "never a test written first".
+
    **This step runs the section's close gate, once the fixes, the folds and the Minor pass are in.** It is the section-close lane the doctrine's gate bullet names, with the contention lane where that bullet says so, and its counts and exit code go to the Chapter's `Gate:` line. That run is what the fold predicate below means by the gate you are about to run.
 
    **The adoption trigger is the block's second writer, and it fires on an event rather than a count:** any change to what a section's dispatches are built from, such as an adopted escalation, an operator decision or a spec amendment, is written to the `Standing Brief Amendments` block when adopted, before the next dispatch. An operator decision made mid-run also lands in the plan's `## Intent` section, per brainstorming's freeze paragraph. Where the plan has no such section, add the heading between `## Goal` and `## Approach` and record it as the same drift. The block still carries judge rulings and declared bullets to every sighted dispatch. The intake gap check's route (a) and (b) resolutions stay out of it and go on the Chapter's `Assumptions:` line.

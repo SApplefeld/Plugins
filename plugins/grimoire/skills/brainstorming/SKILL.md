@@ -55,7 +55,7 @@ Explore the problem with me in conversation, then capture the agreement as a spe
 
    A section earns a cheap tier only if an implementer without the conversation could build it from the section text alone. Write to that standard or assign a higher tier. Executing-work owns upgrades after a failed attempt or an environment fault, and never downgrades a section's tier mid-effort. Its `references/findings.md` may pick a fix writer below it.
 
-   Where a section carries real behavioral risk, give it a `Tests:` line naming the behaviors that earn one per the testing-discipline skill's litmus (`skills/testing-discipline/SKILL.md` under the kit plugin root), and the risk driving each, in both directions where a guard or flag is involved. It states **intent, never design**: what to lock, never fixtures, seams or structure. Like an acceptance bullet, it names the direction, token or agreement a pin holds, never the sentence that carries it. It is a floor over the named contracts and a ceiling on nothing. It may be amended on contact with the code, flagging the delta in the Chapter. A section whose method is a choice, where more than one would do, carries it on a `Method:` line with why this one, as intent and never design, and no consumer parses the line. That line is my trial, kept until a later plan shows it adds nothing.
+   Where a section carries real behavioral risk, give it a `Tests:` line naming the behaviors that earn one per the testing-discipline skill's Triage (`skills/testing-discipline/SKILL.md` under the kit plugin root), and the risk driving each, in both directions where a guard or flag is involved. It states **intent, never design**: what to lock, never fixtures, seams or structure. Like an acceptance bullet, it names the direction, token or agreement a pin holds, never the sentence that carries it. It is a floor over the named contracts and a ceiling at the section's allocation, stated on the line as a count of tests or of test lines by layer. A candidate past the allocation goes to the orchestrator for the plan's reserve, which the spec header names as `Test Reserve: <n> tests` or `<n> lines`, in the unit the plan's allocations use. A plan mixing tests and lines across sections states its reserve in tests. The orchestrator grants a request from the reserve or declines it with a reason, and a spent reserve declines. The Chapter's `Gate:` line records each draw and the reserve left. A plan whose header names no `Test Reserve:`, every plan written before the header, reads each `Tests:` line as a floor alone. It may be amended on contact with the code, flagging the delta in the Chapter. A section whose method is a choice, where more than one would do, carries it on a `Method:` line with why this one, as intent and never design, and no consumer parses the line. That line is my trial, kept until a later plan shows it adds nothing.
 
    Where a section's deliverable is a document for a reader, its body carries the review inputs: an `Audience:` line naming each persona and its knowledge level, the questions the document must answer for each, a `Voice:` line (`scott` | `company` | other), and the fact-base paths its claims are checked against. The `Voice:` value names a voice reference in the `prose-register` skill, or names none. When any persona is outside the operator and the operator's sessions, the body also carries a `Disclosure:` list of what the documents must not reveal. A docs-only section that names no audience, such as a plan doc edit or an index refresh, carries none of them.
 
@@ -72,6 +72,7 @@ Prefer rich references over prose: acceptance criteria as rubrics, and for UI or
 
 Status: In Progress | Ready
 Commit Model: Review-Only | Branch-and-PR | Commit-and-Push
+Test Reserve: <n> tests | <n> lines
 Created: YYYY-MM-DD
 
 ## Goal
@@ -92,7 +93,7 @@ Model: haiku | sonnet | opus | fable
 Locus: <omit to dispatch> | inline
 What gets built. Acceptance criteria as verifiable statements.
 Files in scope: <derived from the Approach's sweep where one ran>.
-Tests: <optional> the behaviors this section must lock and the risk driving each.
+Tests: <optional> the behaviors this section must lock and the risk driving each, with the allocation as a count of tests or of test lines by layer.
 Method: <optional> the method the section uses where more than one would do, and why this one
 Verify: <required> how the section is shown complete: each `docs/verification.md` row it runs, with its argument, or `none, because <why>`.
 References: <optional> the rubric, mockup, or reference implementation the acceptance leans on, by path.

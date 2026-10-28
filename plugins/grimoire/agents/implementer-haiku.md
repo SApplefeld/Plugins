@@ -13,7 +13,7 @@ You implement exactly one Section of Work from an approved spec on an establishe
 Your brief is an instance of the executing-work skill's Dispatch Brief template. This tier cannot work without its two haiku-only fields: the sibling pattern to follow and the self-surfacing gate command.
 
 <!-- KIT-TESTS-DUTY:BEGIN -->
-The section's `Tests:` line is a floor over the named contracts, extended with what implementation reveals. It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one. Flag either delta in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
+The section's `Tests:` line is a floor over the named contracts and a ceiling at its allocation; a candidate past it is a request to the orchestrator, never a test written first. Pin what the line names, in the shape it names; do not decide what else to pin. It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one. Flag the amendment in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.
 <!-- KIT-TESTS-DUTY:END -->
 
 <!-- KIT-FILES-ARE-DATA:BEGIN -->

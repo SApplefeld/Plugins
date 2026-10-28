@@ -7,9 +7,11 @@
 #
 #   . (Join-Path $PSScriptRoot 'keeper-functions.ps1')
 #
-# Nothing here writes a file, sets an environment variable or launches a process. A function that
-# cannot produce its answer throws, and the error names the path it was reading, so the caller
-# logs it and decides what to do. Every caller runs under Windows PowerShell 5.1.
+# Nothing here sets an environment variable or launches a process, and one function writes a file:
+# Build-SupervisorInvocation writes an entry's goal block to goal.json in the run directory it is
+# given. A function that cannot produce its answer throws, and the error names the path it was
+# reading, so the caller logs it and decides what to do. Every caller runs under Windows
+# PowerShell 5.1.
 
 # Every environment variable the keeper is willing to take from the env file. Named explicitly so
 # that no key outside this list reaches the process that launches the supervisor. KEEPER_BASH_EXE
@@ -246,12 +248,23 @@ holds 'enabled' to. A missing required field, or an args element that is --promp
 --prompt=, is a thrown error naming the roster path, because the roster launches every persona
 passive and a prompt is not a thing a boot-time relaunch may carry.
 
+The goal block is an object, which no environment variable carries, so where the entry carries a
+goal the block is written to <RunDirectory>/goal.json as UTF-8 without a byte order mark and
+GOAL_FILE names that file in the Windows spelling, which the plugin reads through Node. The file is
+rewritten at every start, and an entry with no goal removes a goal.json an earlier start left, so
+the file always matches the roster. A goal with no -RunDirectory given is a thrown error, since the
+block would otherwise be dropped. The block's own shape is the roster validator's to check, so it is
+written as the roster holds it. LIFETIME is set on every invocation, to the entry's lifetime or to
+standing where the entry has none; a lifetime present and not exactly standing or goal, null
+included, is a thrown error naming the field.
+
 Returns a hashtable: Arguments is a string array; Environment is an ordered hashtable.
 #>
 function Build-SupervisorInvocation {
     param(
         [Parameter(Mandatory)][object]$Entry,
-        [Parameter(Mandatory)][string]$RosterPath
+        [Parameter(Mandatory)][string]$RosterPath,
+        [string]$RunDirectory
     )
     $name = [string]$Entry.name
     foreach ($required in @('name', 'workdir', 'permissionMode')) {
@@ -317,6 +330,42 @@ function Build-SupervisorInvocation {
     if ($Entry.jevLive -is [System.Array] -and $Entry.jevLive.Count -gt 0) {
         $environment['JEV_LIVE'] = ($Entry.jevLive | ForEach-Object { [string]$_ }) -join ','
     }
+    # lifetime is a closed set compared byte-exact, the roster validator's rule,
+    # so a value the validator would refuse is not read as standing here.
+    $lifetimeProperty = $Entry.PSObject.Properties['lifetime']
+    $lifetime = 'standing'
+    if ($null -ne $lifetimeProperty) {
+        $lifetime = $lifetimeProperty.Value
+        if (-not ($lifetime -is [string] -and ($lifetime -ceq 'standing' -or $lifetime -ceq 'goal'))) {
+            throw "roster '$RosterPath' entry '$name' has a 'lifetime' field that is not standing or goal"
+        }
+    }
+    $goalProperty = $Entry.PSObject.Properties['goal']
+    $hasGoal = $null -ne $goalProperty -and $null -ne $goalProperty.Value
+    if ($hasGoal -and [string]::IsNullOrWhiteSpace($RunDirectory)) {
+        throw "roster '$RosterPath' entry '$name' carries a 'goal' field and no -RunDirectory was given to write goal.json into"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RunDirectory)) {
+        $goalPath = Join-Path $RunDirectory 'goal.json'
+        if ($hasGoal) {
+            # -InputObject rather than the pipeline, so the block is serialized as
+            # the one object it is and its arrays stay arrays.
+            $json = ConvertTo-Json -InputObject $goalProperty.Value -Depth 4
+            [System.IO.File]::WriteAllText($goalPath, $json, [System.Text.UTF8Encoding]::new($false))
+            $environment['GOAL_FILE'] = $goalPath
+        } elseif (Test-Path -LiteralPath $goalPath -PathType Container) {
+            throw "run directory '$RunDirectory' holds a goal.json that is not a file: remove it, since entry '$name' carries no goal"
+        } elseif (Test-Path -LiteralPath $goalPath) {
+            # A remove that fails stops the start, so a stale goal is never left
+            # beside a launch that names none.
+            try {
+                Remove-Item -LiteralPath $goalPath -Force -ErrorAction Stop
+            } catch {
+                throw "could not remove the stale goal.json at '$goalPath': $($_.Exception.Message)"
+            }
+        }
+    }
+    $environment['LIFETIME'] = $lifetime
     # Every keeper-launched supervisor's run directory belongs to the roster,
     # so bin/supervise.sh is told to write settings.json fresh from this
     # environment at each start rather than keep a file an earlier start left.

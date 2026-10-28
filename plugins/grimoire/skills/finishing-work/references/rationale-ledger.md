@@ -7117,8 +7117,8 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - provenance: Section 3 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md`, 2026-10-06, appended from section 1's round 1 blind review, on the operator's ruling of 2026-10-06 that a plan pays one whole gate and fixes a trunk red before its handoff.
 - verdict: keep
 - landed: 489dade7 section 3, with its fix round at a7122a73 and the finishing pass's at b6137279
-- reason: The base-head re-run, the bound to the plan's own red, the hold on a trunk red's fix or spec and the merge rule's one exception are each stated whole by their owners, the testing skill's whole-gate and base-head bullets and the doctrine's gate bullet. A restatement here would drift from them, so the sentence names the owners and the paragraph keeps only the one-gate and contention-lane sentences.
-- passage: The whole-gate and base-head bullets of `skills/testing-discipline/SKILL.md` under the kit plugin root own the red route, and the doctrine's "After each step, run the lane the moment calls for" bullet owns the merge exception.
+- reason: The base-head re-run, the bound to the plan's own red, the hold on a trunk red's fix or spec and the merge rule's one exception are each stated whole by their owners, the testing skill's whole-gate and base-head bullets and the doctrine's gate bullet. A restatement here would drift from them, so the sentence names the owners and the paragraph keeps only the one-gate and contention-lane sentences. Section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` repointed the passage's path at `test-gates` on 2026-10-27, when the moment it names moved there from `testing-discipline`.
+- passage: The whole-gate and base-head bullets of `skills/test-gates/SKILL.md` under the kit plugin root own the red route, and the doctrine's "After each step, run the lane the moment calls for" bullet owns the merge exception.
 
 ### N001
 - key: Run the hygiene step at every close-out, and the archive pass when it is due.

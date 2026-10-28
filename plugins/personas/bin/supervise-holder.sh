@@ -9,7 +9,8 @@
 # the final ask the supervisor drops in the ask-request file, relays an
 # interrupt the supervisor drops in the interrupt-request file as a fixed
 # control line it builds itself, exits a few seconds after the child's pid
-# disappears, and exits when it is signaled.
+# disappears, exits once the run directory is gone, exits when its poll wait
+# fails, and exits when it is signaled.
 #
 # The supervisor stops the child by killing this process (the pipe-close phase):
 # closing this process's stdout is the end of input the child reads to exit. So
@@ -28,7 +29,7 @@
 #
 # The priming and goal text this process writes is sized by
 # test-personas/injection-ledger.mjs, which reads the *_INSTRUCTION assignments, the
-# three PRIMING_BODY branches, GOAL_PROMPT_FRAMING and the [SUPERVISOR-PRIMING]
+# four PRIMING_BODY branches, GOAL_PROMPT_FRAMING and the [SUPERVISOR-PRIMING]
 # marker from this file. test-personas/channel-reply-instruction-test.sh reads the same
 # text from this file.
 #
@@ -38,8 +39,8 @@
 # The sixth argument is read as `${6:-}`, so a five-argument launch, the old
 # shape, watches no interrupt-request file at all.
 # The supervisor exports PERSONA, NO_CHANNEL, COORDINATOR_PERSONA,
-# ARCHITECT_PERSONA, LIAISON_PERSONA and CHILD_INDEX for the priming text and
-# the log lines, and SUPERVISOR_HOLDER_POLL_S for the hold cadence.
+# ARCHITECT_PERSONA, LIAISON_PERSONA, GOAL_FILE and CHILD_INDEX for the priming
+# text and the log lines, and SUPERVISOR_HOLDER_POLL_S for the hold cadence.
 set -u
 
 HOLDER_PID_FILE="$1"
@@ -71,6 +72,11 @@ NO_CHANNEL="${NO_CHANNEL:-0}"
 COORDINATOR_PERSONA="${COORDINATOR_PERSONA:-}"
 ARCHITECT_PERSONA="${ARCHITECT_PERSONA:-}"
 LIAISON_PERSONA="${LIAISON_PERSONA:-}"
+# The goal.json path the keeper writes for a goal persona, empty for every
+# other launch. The priming keys on whether it is set and never reads the
+# file: the plugin seeds the goal from it, and its free text stays out of the
+# launch text.
+GOAL_FILE="${GOAL_FILE:-}"
 
 # Diagnostics go to stderr, which the supervisor redirects to supervisor.err.
 # This process never writes to supervisor.log, and its stdout is the child's
@@ -105,6 +111,28 @@ holder_child_pid() {
   case "$p" in ''|*[!0-9]*) return 1 ;; esac
   HOLDER_CHILD_PID="$p"
 }
+
+# The run directory: the parent of the directory holding the child-pid file,
+# since the supervisor writes that file at $RUNDIR/child-N/child.pid. Once the
+# file has held a valid pid, the directory's absence means the run is over,
+# and the hold loop exits on it. The supervisor never removes or renames it
+# while a child lives. Anything else that removes it, such as a cleaning
+# command run in the child's working tree, ends the holder and closes the
+# child's input, which is accepted, since that act has already destroyed the
+# run's state. A child-pid path with fewer than two directory components
+# names no run directory, so the exit stays disarmed for it rather than reading
+# a bare file name as a directory that is gone. The two assignments below use
+# parameter expansion and the test uses builtins, so this forks nothing.
+HOLDER_CHILD_DIR="${CHILD_PID_FILE%/*}"
+HOLDER_RUN_DIR="${HOLDER_CHILD_DIR%/*}"
+if [ "$HOLDER_CHILD_DIR" = "$CHILD_PID_FILE" ] || [ "$HOLDER_RUN_DIR" = "$HOLDER_CHILD_DIR" ] || [ -z "$HOLDER_RUN_DIR" ]; then
+  HOLDER_RUN_DIR=""
+fi
+# Reads 1 once holder_child_pid has returned a valid pid, which arms the
+# run-directory exit. It never returns to 0: a child-pid file the supervisor's
+# sweep clears while the child lives must not disarm it, and must not exit the
+# holder either, since only the run directory's absence counts.
+HOLDER_CHILD_PID_READ=0
 
 # Whether one line is a final ask this holder may relay: a stream-json user
 # message carrying exactly one content block, of type text, whose text opens
@@ -312,7 +340,11 @@ holder_ask_file_whole() {  # <file> <first line as read>
   # Each arm appends to one empty init, so the injection ledger sizes this
   # name as the sum of all four lines, an upper bound on what one launch
   # carries.
+  # WORKER_SEAT reads 1 where the worker arm took the launch, the arm no seat
+  # name matches, and 0 for the three seats. The goal persona's priming branch
+  # below reads it, so a goal persona named like a seat keeps its seat's text.
   ROLE_TAKEUP_INSTRUCTION=""
+  WORKER_SEAT=0
   case "$PERSONA" in
     "${COORDINATOR_PERSONA:-}")
       ROLE_TAKEUP_INSTRUCTION+="You are the Coordinator seat. Invoke the Skill tool for grimoire:role and take the Coordinator seat; its runbook is grimoire:coordinator. "
@@ -325,6 +357,7 @@ holder_ask_file_whole() {  # <file> <first line as read>
       ;;
     *)
       ROLE_TAKEUP_INSTRUCTION+="You are the Worker seat. Invoke the Skill tool for grimoire:role and take the Worker seat; its runbook is the Roles bullet of grimoire:peer-sessions. "
+      WORKER_SEAT=1
       ;;
   esac
   # The persona sentence, built for every launch shape. It names the persona
@@ -487,8 +520,9 @@ holder_ask_file_whole() {  # <file> <first line as read>
     COORDINATOR_STEER_INSTRUCTION=""
   fi
   # Every launch opens with the same synthetic priming turn, whatever shape
-  # the child is: passive with a channel, passive with none, or a child that
-  # has a real goal prompt waiting. The goal prompt, when there is one, is
+  # the child is: passive with a channel, passive with none, a goal persona
+  # holding its seeded root, or a child that has a real goal prompt waiting.
+  # The goal prompt, when there is one, is
   # written as its own separate turn afterwards.
   #
   # [SUPERVISOR-PRIMING] marks this turn as synthetic (the child has no
@@ -515,10 +549,47 @@ holder_ask_file_whole() {  # <file> <first line as read>
   # A worker launched `--no-channel` with no `PROMPT_FILE` (exactly the
   # shape the `.kit/live-*` suites run) gets the same priming turn as
   # every other launch shape, so the skill-load instruction, which reaches
-  # every child but the architect's and the liaison's regardless of
-  # `NO_CHANNEL`, reaches this one too.
+  # every child but the architect's, the liaison's and a goal persona's
+  # regardless of `NO_CHANNEL`, reaches this one too.
+  #
+  # A goal persona takes the second branch. A goal persona is a worker-kind
+  # seat whose roster entry carries a goal block: the keeper writes that block
+  # to goal.json and passes its path as GOAL_FILE, and the plugin seeds the
+  # persona's goal-tree root from it at the first launch. The branch's body is
+  # the goal-holder text followed by
+  # the instruction to read the root it already holds rather than wait for a
+  # goal. The text carries what only the launch knows: that this persona holds
+  # that root as its one goal, that grimoire:goal-holder owns how it holds it,
+  # that its correspondents are the architect and the coordinator, and that it
+  # executes nothing in a repository itself. It names the root and never quotes
+  # it, since this script never reads goal.json and the goal's text reaches the
+  # persona through the plugin's goal context block alone.
+  # The branch keys on GOAL_FILE set on a worker-arm launch and nothing else,
+  # so a goal persona whose name matches a seat takes that seat's body. The
+  # take-up line and the persona sentence stay as a worker's, since a goal
+  # persona sends its design asks and reports as a named worker does. The
+  # steer sentence stays too, for the label standing it states and the
+  # coordinator's and architect's names its agentic_say clauses splice, so the
+  # correspondents sentence points at those names and splices none. Its plan
+  # facts, adding a queued plan with goal_add and checking its branch out, do
+  # not apply to this seat, so the body says a record queueing a plan here is
+  # declined and reported to the coordinator. Where ARCHITECT_PERSONA is empty
+  # the steer sentence names no architect, and the body sends each design ask
+  # to the coordinator instead. The skill-load sentence is cleared in the
+  # branch, as the architect's and liaison's are. A prompt file outranks
+  # the branch, since that is a task the operator wrote for this one launch,
+  # and that launch carries no goal-holder text. The goal persona's channel
+  # reply sentence rides the prefix as any launch's does, so this branch needs
+  # no channel variant.
   if [ -n "$PROMPT_FILE" ] && [ -f "$PROMPT_FILE" ]; then
     PRIMING_BODY="Your task from the operator arrives in the next message. When the task needs a plugin change live and your role does not keep you out of repositories, you may publish a build and restart onto it under the role skill's self-publish grant, as the passage 'Publish a build and restart onto it' in plugins/personas/README.md of the kit's source repository states. Reply now with one short line acknowledging you are ready, then act on it when it arrives."
+  elif [ "$WORKER_SEAT" -eq 1 ] && [ -n "$GOAL_FILE" ]; then
+    # The skill-load sentence, cleared for this seat. It sends a session to
+    # grimoire:executing-work to run a plan section by section, and this seat
+    # runs no plan. Cleared rather than left unset, so the priming write below
+    # splices an empty string under `set -u` as it does for the architect's.
+    SKILL_LOAD_INSTRUCTION=""
+    PRIMING_BODY="You are a goal persona: the root of your goal tree is the one goal you hold, seeded from your roster entry, and its done statements say when that goal is finished. Invoke the Skill tool for grimoire:goal-holder, which owns how you hold the goal. You execute nothing in a repository yourself, since every change your goal needs reaches its repository through a plan the architect persona writes and a worker runs. That rule outranks the sentences above on a queued plan. Decline a record that queues a plan to you, whether a coordinator steer or the architect's [QUEUE] record, through agentic_resolve, and report it to the coordinator, since a worker runs every plan. Your correspondents are the architect persona, for each design ask, and the coordinator persona, for each plan your goal needs and that plan's outcome, and you reach each through agentic_say by the name the sentences above give it. Where the sentences above name no architect persona, send each design ask to the coordinator persona instead. You hold a goal rather than waiting for one. Read your goal tree with goal_status before anything else, since its root is that goal. Reply now with one short line acknowledging you are ready, then take up your goal."
   elif [ "$NO_CHANNEL" -ne 1 ]; then
     PRIMING_BODY="You are the passive supervisor. If a goal tree holds open entries, resume the tree from goal_status whether or not an entry is active, and leave a paused entry for the operator or the coordinator to release; otherwise wait for a goal or a steering message from the operator. When a goal or the operator needs a plugin change live and your role does not keep you out of repositories, you may publish a build and restart onto it under the role skill's self-publish grant, as the passage 'Publish a build and restart onto it' in plugins/personas/README.md of the kit's source repository states. Reply now with one short line acknowledging you are ready, then carry on."
   else
@@ -564,6 +635,12 @@ fi
 # before the unlink is removed by the next holder that takes the same name, just
 # before it makes its own fifo. A fifo that cannot be made or
 # opened ends the holder with exit 1, so the loop never runs without its wait.
+# The same rule holds inside the loop: the wait's own status is read each
+# pass, and a status of 0 or over 128, which is how `read -t` reports a
+# timeout, continues, while any other status, such as end of file on a
+# descriptor that is not the fifo, ends the holder with exit 1 and a log line.
+# A wait that returned at once and was ignored would make the loop spin, since
+# a pass forks nothing and so nothing else slows it.
 # Every external command that runs while descriptor 9 is open closes it
 # (`9>&-`), so no relay child inherits it.
 #
@@ -581,6 +658,16 @@ fi
 # read. Keying on "seen alive" would leave this process holding the pipe forever
 # for a child that died that fast, which blocks the supervisor's own `wait` on
 # the pipeline.
+#
+# The exit on a gone run directory is armed by the child-pid file having held
+# a valid pid once, and is taken when the run directory, the parent of the
+# directory holding that file, no longer exists: the run is over and there is
+# nothing left to hold, so this process exits 0 with a log line naming the
+# directory. A pid file not yet written keeps this process waiting, as above,
+# and the child-pid file alone going missing never exits it, since the
+# supervisor's sweep may clear a child's handle while the child lives. Both
+# checks are builtins over state the loop already reads, so a pass still forks
+# nothing.
 HOLDER_TICK_FD=9
 HOLDER_TICK_FIFO="${TMPDIR:-/tmp}/supervise-holder-tick-$$"
 rm -f "$HOLDER_TICK_FIFO"
@@ -688,9 +775,24 @@ while true; do
     fi
     rm -f "$ASK_REQUEST_FILE" 8>&- 9>&-
   fi
-  if holder_child_pid && ! kill -0 "$HOLDER_CHILD_PID" 2>/dev/null; then
-    log "the child pid $HOLDER_CHILD_PID is gone; exiting so the child's input pipe closes"
+  if holder_child_pid; then
+    if [ "$HOLDER_CHILD_PID_READ" -eq 0 ]; then
+      HOLDER_CHILD_PID_READ=1
+      [ -n "$HOLDER_RUN_DIR" ] && log "read the child pid $HOLDER_CHILD_PID; exiting once it is gone or the run directory $HOLDER_RUN_DIR is"
+    fi
+    if ! kill -0 "$HOLDER_CHILD_PID" 2>/dev/null; then
+      log "the child pid $HOLDER_CHILD_PID is gone; exiting so the child's input pipe closes"
+      exit 0
+    fi
+  fi
+  if [ "$HOLDER_CHILD_PID_READ" -eq 1 ] && [ -n "$HOLDER_RUN_DIR" ] && [ ! -d "$HOLDER_RUN_DIR" ]; then
+    log "the run directory $HOLDER_RUN_DIR is gone; exiting so the child's input pipe closes"
     exit 0
   fi
-  read -t "$HOLDER_POLL_S" -u "$HOLDER_TICK_FD" || true
+  read -t "$HOLDER_POLL_S" -u "$HOLDER_TICK_FD"
+  HOLDER_WAIT_STATUS=$?
+  if [ "$HOLDER_WAIT_STATUS" -ne 0 ] && [ "$HOLDER_WAIT_STATUS" -le 128 ]; then
+    log "the poll wait returned status=$HOLDER_WAIT_STATUS rather than a timeout; exiting so the loop never runs without its wait"
+    exit 1
+  fi
 done

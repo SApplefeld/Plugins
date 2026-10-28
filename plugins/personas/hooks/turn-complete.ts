@@ -7,12 +7,13 @@
 // submit and the register-scope values behind closures, so this module
 // never receives the engine object and holds no state of its own.
 import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
-import type { liveAsk as liveAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule } from "./ask-layer";
+import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { meterSessionKnown } from "./beat";
 import type { ChannelSender, ExpectedTurn, SubmitOutcome } from "./channel-text";
 import type { CommonsStore } from "./commons";
 import type { CompactionPassState } from "./compaction-pass";
 import { deliveredRecordText } from "./context-assembly";
+import { TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetAskText } from "./goal-persona";
 import type { SharedHandlerState } from "./controller-tick";
 import type { MeterTurnInput } from "./cost-ledger";
 import { ASK_MARKER_VALUE, splitOf } from "./decision-journal";
@@ -33,7 +34,7 @@ import { KAIZEN_LONG_TURN_MS } from "./self-review";
 import { skillPickSettle } from "./skill-pick";
 import { safeErrorText } from "./text";
 import { stepWatchOf, turnScoreToolsOf, turnToolActivityText, type TurnToolFlags } from "./turn-state-text";
-import { ASK_MARKER_LINE, ASK_MARKER_LINE_BREAK, ASK_TURN_MAX, askRecommendOf, readStatusLine } from "./worker-ask";
+import { ASK_MARKER_LINE, ASK_MARKER_LINE_BREAK, ASK_TURN_MAX, askRecommendOf, ownAskStands, readStatusLine } from "./worker-ask";
 import type { TurnCompleteInput } from "claude-code";
 
 // The parameters of a module function after its deps argument, so a
@@ -126,6 +127,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
   setCurrentTurnIsChannelOrigin: (value: boolean) => void;
   currentTurnIsReprompt: () => boolean;
   setCurrentTurnIsReprompt: (value: boolean) => void;
+  currentTurnIsPriming: () => boolean;
   setCurrentTurnIsPriming: (value: boolean) => void;
   setCurrentTurnSenderClass: (value: ChannelSender["senderClass"]) => void;
   setCurrentTurnOriginKind: (value: string) => void;
@@ -140,13 +142,15 @@ export interface TurnCompleteContext extends SharedHandlerState {
   setPendingCompactionBank: (value: { turnKind: string } | null) => void;
   memoryGateDiscardPercent: () => number;
   drainInboxNow: () => (() => Promise<boolean>) | null;
+  openLedgerAsk: (...args: AfterDeps<typeof openLedgerAskFromModule>) => ReturnType<typeof openLedgerAskFromModule>;
+  withdrawLiftedAskBy: (...args: AfterDeps<typeof withdrawLiftedAskByFromModule>) => ReturnType<typeof withdrawLiftedAskByFromModule>;
 }
 
 // The turn-end body: what the handler's try block in hooks/index.ts runs
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -179,6 +183,13 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   const completesGateTurn = currentGateTurnId() !== null && e.turnId === currentGateTurnId()
     && !completesSubagentLoop;
   const turnKindAtStart: string = currentTurnKind();
+  // Whether the turn ending is the supervisor's priming turn, or a
+  // [SUPERVISOR-ASK] turn, which the same reading marks, read here for the
+  // same reason, since the reset below and the next turn.start both rewrite
+  // it. It is the turn's own reading from its turn.start, where
+  // isPrimingTurn carries the last typed prompt's over every turn the
+  // plugin submits after it. The turn budget spends nothing on that turn.
+  const completesPrimingTurn = completesGateTurn && currentTurnIsPriming();
   // The step watch's reading of this turn, read here for the same reason,
   // since the next turn.start replaces it, and spent here: the persona's
   // own completion of the turn the watch opened under takes it, so a
@@ -1596,6 +1607,69 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // skipped-turn rule: a turn the operator aborted leaves the record as it
   // was, and an entry queued off an aborted turn would announce itself to the
   // coordinator persona all the same.
+
+  // The turn budget: a root seeded with one counts each of the persona's own
+  // completed turns, and at the budget blocks with "Turn budget reached",
+  // pauses every active entry and opens one blocking ask to the operator
+  // naming the goal and the count. A root with no budget counts nothing,
+  // which is every root goal_create makes. Every completed turn counts, a
+  // nudge, a delivered record and a memory check among them, since each
+  // follows or drives the goal's work, save the supervisor's priming turn,
+  // so a restart costs the goal nothing, and a [SUPERVISOR-ASK] turn, which
+  // the same reading marks. An aborted, errored or refused turn
+  // spends none, and a root the budget already blocked counts none until
+  // goal_resume lifts it. The ask is one per block, as the cost cap's
+  // is: a standing own ask is left, and a lifted one is withdrawn before the
+  // next opens. The step sits above the record close, so the blocking ask
+  // it opens is one the close's open-ask rule reads.
+  if (completesGateTurn && sess.isOwner && !skipped && !completesPrimingTurn) {
+    const root = sess.state.goals.find((g) => g.parentId === null);
+    if (root && typeof root.turnBudget === "number" && root.status !== "complete" && root.status !== "abandoned"
+      && !(root.status === "blocked" && root.blockedReason === TURN_BUDGET_REASON)) {
+      const budgetNow = Date.now();
+      root.turnsSpent = (root.turnsSpent ?? 0) + 1;
+      root.updatedAt = budgetNow;
+      if (root.turnsSpent >= root.turnBudget) {
+        root.status = "blocked";
+        root.blockedReason = TURN_BUDGET_REASON;
+        for (const g of sess.state.goals) {
+          if (g.status !== "active") continue;
+          g.status = "paused";
+          g.blockedReason = TURN_BUDGET_PAUSED_REASON;
+          g.updatedAt = budgetNow;
+        }
+        sess.state.activeGoalId = null;
+        sess.state.decisions.push({
+          timestamp: budgetNow,
+          loop: "goal",
+          action: "block",
+          detail: `${root.id}: ${TURN_BUDGET_REASON} (${root.turnsSpent} of ${root.turnBudget} turns)`,
+        });
+        if (!ownAskStands(sess.state, "turn-budget", root.id)) {
+          const askText = turnBudgetAskText(root);
+          await withdrawLiftedAskBy(sess.state, sess.persona, "turn-budget", root.id, budgetNow);
+          const opened = await openLedgerAsk(sess.state, sess.persona, sess.mySessionId, root.id, askText, "", "turn-budget", true, budgetNow);
+          if (typeof opened === "string") {
+            sess.state.decisions.push({
+              timestamp: budgetNow,
+              loop: "monitor",
+              action: "ask_cap_refused",
+              detail: `${root.id}: turn-budget ask refused: ${opened === "cap" ? `the open cap of ${ASKS_OPEN_MAX}` : opened}`,
+            });
+          } else {
+            sess.state.decisions.push({
+              timestamp: budgetNow,
+              loop: "monitor",
+              action: "ask_opened",
+              detail: `${root.id}: turn-budget: ${root.turnsSpent} of ${root.turnBudget} turns (ask ${opened.id})`,
+            });
+            try { toast(`Agentic: ${root.id} blocked: turn budget reached (${root.turnsSpent} of ${root.turnBudget} turns)`); } catch { /* non-fatal */ }
+          }
+        }
+        try { status(""); } catch { /* non-fatal */ }
+      }
+    }
+  }
 
   // Section 5 (goal-every-turn): the record close, at the persona's own turn
   // end under the true-boundary guard, and the `none` arm of the
