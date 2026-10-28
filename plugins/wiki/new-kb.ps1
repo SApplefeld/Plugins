@@ -5,17 +5,30 @@ Creates a new knowledge base repo from the engine's template/ directory.
 
 .DESCRIPTION
 Instantiates a self-contained knowledge base: it copies the entire template/
-tree (including dotfiles and dot-directories) into a fresh destination, runs
-git init on the main branch, makes one initial commit, and verifies the result
-with tests/Test-KbStructure.ps1 before reporting success. It refuses to touch a
-destination that already holds files, so an existing repo is never overwritten.
-It creates no git remote and assumes no GitHub account, because each owning
-entity's git host and identity differ. It does not set git user.name or
-user.email; the account's own git config owns the committer identity, and a
-missing identity stops the run loudly rather than being papered over. On
-success it prints the follow-up steps, leading with trusting the new workspace,
-because Claude Code ignores permissions.allow in an untrusted workspace and a
-scheduled run there silently writes nothing.
+tree (including dotfiles and dot-directories) into a fresh destination, writes
+the version mark .claude/engine.json, runs git init on the main branch, makes
+one initial commit, and verifies the result with tests/Test-KbStructure.ps1
+before reporting success. It refuses to touch a destination that already holds
+files, so an existing repo is never overwritten. It creates no git remote and
+assumes no GitHub account, because each owning entity's git host and identity
+differ, and a knowledge base with no remote commits locally. It does not set
+git user.name or user.email; the account's own git config owns the committer
+identity, and a missing identity stops the run loudly rather than being papered
+over. On success it prints the follow-up steps, leading with trusting the new
+workspace, because Claude Code ignores permissions.allow in an untrusted
+workspace and a scheduled run there silently writes nothing.
+
+The version mark names the engine the knowledge base was copied from:
+{ "templateHash": "<sha256>", "source": "<text>", "copiedAt": "<ISO 8601 UTC>" }.
+templateHash is the SHA-256 over every file under this engine's own
+template/.claude/, so it names the vendored engine and never the schema or the
+content, and engine.json itself is outside it. Line endings are read as LF, so
+a CRLF and an LF checkout of one engine print the same hash. source is the installed plugin's
+version where this script runs from the installPath of wiki@applefeld in
+~/.claude/plugins/installed_plugins.json, else the engine checkout's short
+commit, else unknown. -PrintEngineHash prints the hash of this engine's
+template and exits 0, which is how a later engine decides whether a knowledge
+base is behind it.
 
 .PARAMETER Name
 The name of the knowledge base. It is used only in the initial commit message.
@@ -25,16 +38,26 @@ An empty or whitespace-only name is rejected.
 The destination directory to create as the KB repo root. It must not already
 exist with contents. A relative path is resolved against the current location.
 
+.PARAMETER PrintEngineHash
+Print the templateHash of this engine's template/.claude/ as 64 lowercase
+hexadecimal characters and exit 0, creating nothing.
+
 .EXAMPLE
 pwsh -NoProfile -File ./new-kb.ps1 -Name "Eleos KB" -Path ../eleos-kb
+
+.EXAMPLE
+pwsh -NoProfile -File ./new-kb.ps1 -PrintEngineHash
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Create')]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Create')]
     [string]$Name,
 
-    [Parameter(Mandatory)]
-    [string]$Path
+    [Parameter(Mandatory, ParameterSetName = 'Create')]
+    [string]$Path,
+
+    [Parameter(Mandatory, ParameterSetName = 'Hash')]
+    [switch]$PrintEngineHash
 )
 
 Set-StrictMode -Version Latest
@@ -74,14 +97,105 @@ function Invoke-GitOrStop {
     }
 }
 
-# A missing git executable throws before any exit code is set, which would
-# surface as a stack trace rather than a refusal.
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Stop-WithReason 'git was not found on PATH.'
+# The SHA-256 of every file under <template>/.claude/, as 64 lowercase
+# hexadecimal characters. The framing, which any other reader of the mark must
+# reproduce byte for byte: take every file under .claude/ at any depth, name
+# each by its path relative to the template folder with forward slashes (for
+# example .claude/kb-commit.ps1), sort those names ordinally (byte order of
+# their UTF-16 code units, no culture), and for each in that order feed the
+# hash the name as UTF-8 bytes, one 0x00 byte, the file's length in bytes as
+# decimal ASCII digits, one 0x00 byte, then the file's bytes. A file's bytes
+# are taken with every CR LF pair as a lone LF, and its length is counted after
+# that, so a checkout with either line ending prints one hash. The hash runs
+# over the engine's own template, never a knowledge base's copy, so
+# engine.json is outside it.
+function Get-EngineHash {
+    param([string]$TemplateRoot)
+    $claudeDir = Join-Path $TemplateRoot '.claude'
+    $files = @([System.IO.Directory]::GetFiles($claudeDir, '*', [System.IO.SearchOption]::AllDirectories))
+    $prefixLength = $TemplateRoot.TrimEnd('\', '/').Length + 1
+    $names = [System.Collections.Generic.List[string]]::new()
+    foreach ($file in $files) {
+        $names.Add($file.Substring($prefixLength).Replace('\', '/'))
+    }
+    $names.Sort([System.StringComparer]::Ordinal)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $zero = [byte[]]@(0)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($name in $names) {
+            # Latin-1 maps each byte to one character and back, so the
+            # replace drops each CR of a CR LF pair and leaves every other byte.
+            $latin1 = [System.Text.Encoding]::GetEncoding(28591)
+            $bytes = $latin1.GetBytes($latin1.GetString([System.IO.File]::ReadAllBytes((Join-Path $TemplateRoot $name))).Replace("`r`n", "`n"))
+            foreach ($part in @($utf8.GetBytes($name), $zero, $utf8.GetBytes($bytes.Length.ToString([System.Globalization.CultureInfo]::InvariantCulture)), $zero, $bytes)) {
+                if ($part.Length -gt 0) { [void]$sha.TransformBlock($part, 0, $part.Length, $null, 0) }
+            }
+        }
+        [void]$sha.TransformFinalBlock([byte[]]@(), 0, 0)
+        return (($sha.Hash | ForEach-Object { $_.ToString('x2') }) -join '')
+    } finally {
+        $sha.Dispose()
+    }
 }
 
-if ([string]::IsNullOrWhiteSpace($Name)) {
-    Stop-WithReason 'Name is required and must not be empty or whitespace.'
+# A property of parsed JSON, or $null where it is absent. Under Set-StrictMode
+# a plain access on a missing member throws.
+function Get-JsonProperty {
+    param($Object, [string]$PropertyName)
+    if ($null -eq $Object) { return $null }
+    foreach ($property in $Object.PSObject.Properties) {
+        if ([string]::Equals($property.Name, $PropertyName, [StringComparison]::Ordinal)) { return $property.Value }
+    }
+    return $null
+}
+
+# Full path with no trailing separator, compared ignoring case, as
+# kb-registry.ps1's ConvertTo-NormalPath compares folders.
+function ConvertTo-NormalPath {
+    param([string]$Value)
+    $full = [System.IO.Path]::GetFullPath($Value)
+    $pathRoot = [System.IO.Path]::GetPathRoot($full)
+    if ($full.Length -gt $pathRoot.Length) { $full = $full.TrimEnd('\', '/') }
+    return $full
+}
+
+# Where this engine came from, for the version mark's source: the version of
+# the wiki@applefeld entry in the account's installed_plugins.json whose
+# installPath is this script's folder, else the engine checkout's short commit,
+# else unknown. The install record is Claude Code's own file and is read as
+# untrusted: any shape but the expected one falls through.
+function Get-EngineSource {
+    param([string]$EngineRoot)
+    if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        $installRecord = Join-Path $env:USERPROFILE '.claude/plugins/installed_plugins.json'
+        try {
+            if (Test-Path -LiteralPath $installRecord -PathType Leaf) {
+                $record = Get-Content -LiteralPath $installRecord -Raw | ConvertFrom-Json
+                $entries = @(Get-JsonProperty (Get-JsonProperty $record 'plugins') 'wiki@applefeld')
+                $here = ConvertTo-NormalPath $EngineRoot
+                foreach ($entry in $entries) {
+                    $installPath = Get-JsonProperty $entry 'installPath'
+                    $version = Get-JsonProperty $entry 'version'
+                    if ($installPath -is [string] -and $version -is [string] -and -not [string]::IsNullOrWhiteSpace($version) -and
+                        [string]::Equals((ConvertTo-NormalPath $installPath), $here, [StringComparison]::OrdinalIgnoreCase)) {
+                        return $version
+                    }
+                }
+            }
+        } catch {
+            # An unreadable or off-shape install record is not this engine's version.
+        }
+    }
+    try {
+        $commit = @(& git -C $EngineRoot rev-parse --short HEAD 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $commit.Count -eq 1 -and $commit[0] -match '^[0-9a-f]{4,40}$') {
+            return $commit[0]
+        }
+    } catch {
+        # An engine folder outside any git checkout has no commit to name.
+    }
+    return 'unknown'
 }
 
 # The template lives next to this script. A missing template means the engine
@@ -91,6 +205,21 @@ if (-not (Test-Path -LiteralPath $templateDir -PathType Container)) {
     Stop-WithReason "template directory not found next to this script: $templateDir"
 }
 $templateDir = (Resolve-Path -LiteralPath $templateDir).ProviderPath
+
+if ($PrintEngineHash) {
+    Write-Output (Get-EngineHash $templateDir)
+    exit 0
+}
+
+# A missing git executable throws before any exit code is set, which would
+# surface as a stack trace rather than a refusal.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Stop-WithReason 'git was not found on PATH.'
+}
+
+if ([string]::IsNullOrWhiteSpace($Name)) {
+    Stop-WithReason 'Name is required and must not be empty or whitespace.'
+}
 
 $testScript = Join-Path $PSScriptRoot 'tests/Test-KbStructure.ps1'
 if (-not (Test-Path -LiteralPath $testScript -PathType Leaf)) {
@@ -111,8 +240,10 @@ if (Test-Path -LiteralPath $Path) {
 # worst failure this script can produce, so each is verified after the copy.
 $requiredFiles = @(
     '.claude/settings.json'
+    '.claude/engine.json'
     '.claude/kb-move.ps1'
     '.claude/kb-commit.ps1'
+    '.claude/kb-run.ps1'
     '.claude/skills/wiki-ingest/SKILL.md'
     '.claude/skills/wiki-lint/SKILL.md'
     '.claude/skills/wiki-query/SKILL.md'
@@ -142,6 +273,16 @@ $kbRoot = (Resolve-Path -LiteralPath $Path).ProviderPath
 # -Force includes hidden files and dot-directories, and -Recurse on a directory
 # entry carries its whole subtree, which a wildcard copy can silently skip.
 Get-ChildItem -LiteralPath $templateDir -Force | Copy-Item -Destination $kbRoot -Recurse -Force
+
+# The version mark, written before the verification below so a missing one
+# fails the copy, and before git add so the first commit carries it. The hash
+# is of this engine's template, computed above the copy's own .claude/ folder.
+$engineMark = New-Object System.Collections.Specialized.OrderedDictionary
+$engineMark['templateHash'] = Get-EngineHash $templateDir
+$engineMark['source'] = Get-EngineSource $PSScriptRoot
+$engineMark['copiedAt'] = [DateTime]::UtcNow.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+$engineMarkText = (ConvertTo-Json -InputObject $engineMark) + "`n"
+[System.IO.File]::WriteAllText((Join-Path $kbRoot '.claude/engine.json'), $engineMarkText, (New-Object System.Text.UTF8Encoding($false)))
 
 foreach ($rel in $requiredFiles) {
     $full = Join-Path $kbRoot $rel
@@ -186,8 +327,9 @@ Write-Output "Knowledge base created and committed: $kbRoot"
 Write-Output ''
 Write-Output 'Follow-up steps, in order:'
 Write-Output ''
-Write-Output '  1. Trust the workspace. Open Claude Code interactively in the new KB'
-Write-Output '     once and accept the trust dialog. Claude Code ignores permissions.allow'
+Write-Output '  1. Trust the workspace. Run kb-trust.ps1 -Path <kb> from the engine, or'
+Write-Output '     open Claude Code interactively in the new KB once and accept the'
+Write-Output '     trust dialog. Claude Code ignores permissions.allow'
 Write-Output '     in an untrusted workspace, so a scheduled run there writes nothing.'
 Write-Output '     The schema-specialization session in step 2 does this anyway.'
 Write-Output ''
@@ -195,8 +337,9 @@ Write-Output '  2. Specialize the schema. Run the interactive schema-specializat
 Write-Output '     session described in docs/instantiation.md to customize CLAUDE.md'
 Write-Output '     for the domain, then commit CLAUDE.md.'
 Write-Output ''
-Write-Output '  3. Create the remote and push. Create the repo by hand under the owning'
-Write-Output "     entity's own git account, then:"
+Write-Output '  3. Optionally attach a remote. A knowledge base with no remote commits'
+Write-Output '     locally and pushes nothing. To share or back one up, create the repo'
+Write-Output "     by hand under the owning entity's own git account, then:"
 Write-Output '         git remote add origin <url>'
 Write-Output '         git push -u origin main'
 Write-Output ''

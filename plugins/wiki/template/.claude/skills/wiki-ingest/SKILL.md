@@ -78,9 +78,10 @@ push failed or from step 1's reconcile:
     pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Unpushed
 
 If it lists any commits, emit step 5's push-only call to flush them, then
-stop. If it lists none, whether there are none or no upstream is
-configured, there is nothing to flush: make no commits, write nothing, and do not touch
-log.md. Report that the inbox was empty and end the run. When step 1
+stop. If it lists none, there is nothing to flush: make no commits, write
+nothing, and do not touch log.md. A wiki with no remote named `origin` is
+ordinary; it commits locally and pushes nothing, so the check lists none there
+and no push-only call is made. Report that the inbox was empty and end the run. When step 1
 reconciled nothing and nothing was unpushed, this is the common case,
 because the schedule fires far more often than files arrive, and a no-op
 run must cost nothing and leave no trace in git.
@@ -207,6 +208,12 @@ ending: flush with the same push-only call if it lists anything, and
 otherwise make no push call. If the push itself fails, the commits are
 safe locally: report the failure and end the run; that same check flushes
 them on a later run even if no file ever arrives.
+
+A wiki with no remote named `origin` is ordinary: it commits locally and
+pushes nothing. There `-Push` is a no-op that prints
+`kb-commit: no remote named 'origin'; nothing pushed.` and exits 0, so make
+the same calls as above, treat that line as success, and report that the wiki
+has no remote rather than that a push failed.
 
 The two helper commands above are the only sanctioned move and commit
 operations, and the permission rules match on a command's leading text, so

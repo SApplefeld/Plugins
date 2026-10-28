@@ -15,14 +15,19 @@ preserve.
 
 ## Two kinds of repository
 
-The engine repo (this one) contains the `template/` tree, the two operator
-scripts (`new-kb.ps1`, `register-task.ps1`), three KB tests, a plugin manifest,
-and this `docs/` library. `tests/Test-KbStructure.ps1` checks a KB's structure
+The engine repo (this one) contains the `template/` tree, the five operator
+scripts, the plugin-level `wiki-new` skill, six KB tests, a plugin manifest,
+and this `docs/` library. `new-kb.ps1` copies the template.
+`kb-create.ps1` creates a KB, `kb-trust.ps1` trusts it and `kb-registry.ps1`
+lists it. `register-task.ps1` registers a KB's scheduled tasks. `tests/Test-KbRegistry.ps1` drives the list script, and
+`tests/Test-KbCreate.ps1` drives creation, trust and the commit helper's
+no-remote case against a stub in place of `claude`. `tests/Test-KbStructure.ps1` checks a KB's structure
 and permission allowlist. `tests/Test-FeedInbox.ps1` drives the feeder and the
 registrar's Feed operation against a throwaway repository and KB.
 `tests/Test-ReconcileGate.ps1` drives the status helper's liveness read and the
 move helper's stamp against a throwaway KB, and checks that the three writing
-skills emit the liveness read. The source
+skills emit the liveness read. `tests/Test-KbRun.ps1` drives the run wrapper
+against a stub in place of `claude`. The source
 repository also holds the publish job, `.github/workflows/publish.yml`, and its
 scripts and their tests under `tools/publish/`. "Publishing to the marketplace"
 below covers them. The engine repo is machinery only.
@@ -33,9 +38,10 @@ KB needs, including the three skills and the permission allowlist. The engine is
 vendored (copied) into each KB, not installed as a shared plugin, so no runtime
 crosses between KBs and an engine update is a deliberate copy into one specific
 KB rather than a change that alters every KB at once. The `wiki@applefeld`
-plugin changes only how an operator obtains the engine. It delivers
-`new-kb.ps1`, `register-task.ps1` and the template, and each KB still receives
-its own copy.
+plugin changes how an operator obtains the engine and how a session creates a
+KB. It delivers the scripts, the `wiki-new` skill and the template, and each KB
+still receives its own copy. None of the five scripts is vendored into a KB,
+so a KB's agent can run none of them.
 
 ## The KB repo layout
 
@@ -51,10 +57,12 @@ machinery:
   log.md          append-only run digest
   CLAUDE.md       the schema: page types, conventions, workflows
   .claude/
+    engine.json   the engine version this KB was copied from
     settings.json the permission allowlist
     kb-move.ps1   the only sanctioned inbox-to-sources move
     kb-commit.ps1 the only sanctioned stage/commit/push
     kb-status.ps1 the read-only git status reads the skills need
+    kb-run.ps1    the run wrapper holding one lock per KB; granted to no agent
     feed-inbox.ps1 the repository feeder; granted to no agent
     feed.json     the feeder's sources; present only in a fed KB
     skills/wiki-ingest, wiki-lint, wiki-query
@@ -68,6 +76,55 @@ contradiction rule, and the `index.md`/`log.md` formats. It carries three
 horizon) that instantiation specializes for a domain. The skills own only
 sequence and invariants; the schema owns discipline.
 
+`engine.json` holds `templateHash`, a SHA-256 over every file under the
+engine's `template/.claude/`, taken as sorted relative paths with their bytes
+and with each CRLF read as LF. It also holds `source`, the installed plugin's
+version or the engine checkout's short commit, and `copiedAt`. The hash names
+the vendored machinery only, never the schema or the content, and
+`new-kb.ps1 -PrintEngineHash` prints the engine's current value to compare
+against. The file sits under `.claude/`, which the agent cannot write.
+`tests/Test-KbStructure.ps1 -RequireSchema` requires it.
+
+## Creation and the wiki list
+
+A session creates a KB through the plugin's `wiki-new` skill. The skill
+gathers a name, a description and an optional remote URL, then runs
+`kb-create.ps1`, which runs five steps in order, each a separate process:
+
+1. `kb-registry.ps1 Init -Root <root>`, only where the account has no list
+   yet.
+2. `new-kb.ps1`: the template copied to `<root>\<name>`, the version mark
+   written, the first commit made.
+3. `kb-trust.ps1`: the folder trusted, as the trust gate below describes.
+4. `git remote add origin` and `git push -u origin main`, only where a remote
+   was given.
+5. `kb-registry.ps1 Add`: the KB listed.
+
+Each step's refusal stops the run with that step's own stderr line. A stop
+after the copy names the folder for the operator to remove, and a stop from
+the trust step on also names the trust entry it may have left. The skill then
+fills the three `CUSTOMIZE` blocks from the description and commits
+`CLAUDE.md` with git directly, since `kb-commit.ps1` refuses the schema path.
+
+The wiki list is one JSON file per Windows account,
+`%LOCALAPPDATA%\llm-wiki\registry.json`, holding the root folder and one entry
+per KB with its name, folder, description and the time it was added.
+`kb-registry.ps1` is its only writer. It checks each entry it adds, and each
+description it changes, against these rules: a name of 1 to
+64 ASCII letters, digits, hyphens, underscores and dots, unique ignoring case;
+a folder on a local drive letter, reached through no link, outside every
+listed KB, and holding every file a new KB holds except the version mark
+`.claude/engine.json`, so a KB made before the mark existed can still be
+listed. A writer holds
+`registry.lock`, a sibling file opened with no sharing, from its read of the
+list through its move, so two writers never act on the same read. Each write
+goes to a temporary file in the same folder and moves over the list, so a
+killed writer leaves the previous list whole. Readers take no lock. `List`
+prints one tab-separated line per KB: name, folder, the first eight
+characters of its engine hash or `unknown`, and description. The list lives
+in one account's profile, so it can never route a document across the
+account boundary between entities.
+
 ## The four operations and their shared discipline
 
 Three skills implement the operations, and a fourth commit subject
@@ -79,7 +136,8 @@ headless execution. It snapshots `inbox/` once at run start (files arriving
 mid-run wait for the next run), and for each source in order it reads the file,
 moves the original to `sources/`, writes a per-source summary page, revises the
 handful of wiki pages the source genuinely touches, updates `index.md`, appends
-a `log.md` entry, and makes exactly one commit. It pushes once at run end. An
+a `log.md` entry, and makes exactly one commit. It pushes once at run end, and
+a KB with no remote named `origin` pushes nothing. An
 empty inbox produces no commit and a clean exit.
 
 **Lint** (`wiki-lint`) is the health pass, run by an optional scheduled task or
@@ -124,15 +182,50 @@ half-done fix on disk while it reads. Each recorded fix names the text it
 replaces or the absence it fills, and the write pass drops any fix whose
 condition no longer holds, so lint never overwrites a line another run changed
 during its checks. A lint fix can still land beside a newer edit on the same
-page, and the next lint pass catches what that leaves. Two runs that each make
-their last check before the other's first write can each see a clean tree and
-both write. The gap between a run's check and its write is a few agent steps. A
-run that writes nothing for thirty minutes reads as finished to the others, so
-its half-written page can be recovered by another run. Nothing short of a lock
-closes either, and the engine refuses a lock because a crashed run would leave
-it behind. Every
-commit subject is prefixed (`Ingest:`, `Lint:`, `Query:`, `Reconcile:`) so each
-operation is findable on its own in `git log`.
+page, and the next lint pass catches what that leaves. A run outside the run
+lock, described in the next paragraph, has this read as its only guard. Two such
+runs that each make their last check before the other's first write can each see
+a clean tree and both write. For an ingest, that window opens after each
+source's commit, since the tree is clean between sources, so a lint whose write
+pass starts in that gap sees nothing to yield to. A run that writes nothing for
+thirty minutes reads as finished to a run outside the lock, so its half-written
+page can be recovered by that run. Every commit subject is prefixed (`Ingest:`,
+`Lint:`, `Query:`, `Reconcile:`) so each operation is findable on its own in
+`git log`.
+
+**The run lock.** An ingest or lint run through the wrapper, `pwsh -NoProfile
+-File .claude/kb-run.ps1 -Operation Ingest` or `-Operation Lint`, holds the
+knowledge base's run lock for the whole run. An operator's hand run takes it,
+and so would any task whose action is that command. Without `-Claude <path>` the
+wrapper runs the first `claude` on PATH, and it stops with one stderr line where
+PATH holds none. The lock is a handle on `.git/kb-run.lock` that the wrapper's
+own process holds open with no sharing. The file itself stays after every run,
+and only the open handle is the lock. Windows releases the handle when the
+wrapper's process ends, so a crashed wrapper leaves no lock behind. A second run
+through the wrapper that finds the lock held prints one line on stdout, writes
+nothing and exits 0. Task Scheduler records that as a successful run, and the
+stdout line is the only sign it skipped. A run that takes the lock exits with
+its `claude` child's exit code, and the child writes straight to the wrapper's
+stdout and stderr. Where `.git` under the knowledge base is not a folder, as in
+a clone whose `.git` is a file, the lock cannot be taken, and the wrapper exits
+1 with one stderr line. With `-WhatIf` the wrapper takes no lock and runs
+nothing, and prints the one command it would run. No permission rule grants the
+wrapper, so the agent cannot start one. The wrapper bounds its `claude` child
+with a budget of 6900 seconds, which `KB_RUN_SECONDS` replaces as a whole number
+of seconds from 1 to 99999. Any other value exits 1 with one stderr line before
+`claude` starts. Past the budget it stops the child's whole process tree with
+`taskkill` and exits 1. Where `taskkill` fails, the wrapper ends only the child
+itself, so a process the child started can keep running with the lock released.
+A process the child leaves running after a normal exit outlives the lock the
+same way. `taskkill` finds a process's descendants through their parent, so a
+process whose own parent had exited before the stop is outside the tree and
+outlives the lock too. So does a descendant `taskkill` fails to stop while it
+stops the child. Task Scheduler's End stops only the wrapper's own process, and
+the wrapper then stops nothing. The child keeps running with the lock released,
+so a later run can overlap it. The ingest and lint tasks `register-task.ps1`
+registers call `claude` directly, so they take no lock. An interactive session
+in the knowledge base takes none either. Both are guarded only by the liveness
+read above.
 
 **Crash behavior.** Ingest is not crash-proof, it is crash-recoverable. Each
 completed source is committed before the next begins, so a crash loses at most
@@ -170,9 +263,9 @@ page's last-change date, the inbox listing, or the dirty paths written within
 the last thirty minutes, and writes nothing. The
 allowlist grants exactly those three `pwsh -NoProfile -File` invocations and
 denies all of raw git (`Bash(git:*)`), plus raw `mv`, `rm`, `cp`, `curl`,
-`wget`, and `ls`. The feeder, `feed-inbox.ps1`, is a fourth script in
-`.claude/` that no allow rule grants, so no agent runs it. Its scheduled task
-runs it, and so does an operator running it by hand.
+`wget`, and `ls`. The feeder, `feed-inbox.ps1`, and the run wrapper,
+`kb-run.ps1`, are two more scripts in `.claude/` that no allow rule grants, so
+no agent runs either. A scheduled task or an operator's hand runs them.
 
 **The agent cannot edit its own guard rails.** Writes are denied under
 `sources/`, `inbox/`, `.git/`, and `.claude/`. `CLAUDE.md` is in neither the
@@ -226,10 +319,35 @@ been trusted, and prints that warning only to stderr. A headless run in an
 untrusted KB therefore prompts on every write, gets no answer, and exits having
 written nothing. No CLI flag (`--settings`, `--allowedTools`, inline JSON)
 overrides this while a skill is executing. Workspace trust is therefore a hard
-prerequisite of automation, and it is established interactively (opening Claude
-Code in the KB once and accepting the dialog). Trust is per Windows account and
-per exact path, recorded in that account's own `~/.claude.json`. The `deny`
-rules, by contrast, hold trusted or not.
+prerequisite of automation. Trust is per Windows account and per exact path,
+recorded in that account's own `~/.claude.json`, and a folder does not inherit
+it from a trusted parent. The `deny` rules, by contrast, hold trusted or not.
+
+`kb-trust.ps1` is the trust writer, and creation runs it on every new KB. It
+runs `claude -p "Reply with the single word ok." --model haiku
+--permission-mode default` in the KB. In an untrusted folder whose
+`settings.json` holds an allow entry, Claude Code prints one stderr line
+opening `Ignoring ` that names the exact key it reads, between `projects["`
+and `"].hasTrustDialogAccepted`. The writer takes the key from that line and
+nowhere else, refuses it unless it names this folder, and sets
+`hasTrustDialogAccepted: true` under it through `System.Text.Json.Nodes`.
+That keeps every other property, including the empty-named one
+`ConvertFrom-Json` cannot hold. It copies the file to
+`~/.claude/kb-trust-backup.json` first, writes a temporary file beside the
+original and moves it over. It then runs the probe again and succeeds only
+where no warning prints, and a third read must still find the key true.
+
+The read through the move runs under Claude Code's own lock on the file, the
+folder `~/.claude.json.lock`, which the writer creates with a call that fails
+where it exists and removes only where it created it. A live session takes
+the same lock for each save, so neither erases the other's change. The writer
+never holds the lock across a probe, since each probe is a Claude Code process
+that takes it too. It waits up to 10 seconds for a held lock and then refuses,
+changing nothing. Once it holds the lock it reads its clock before the backup,
+before the move and after each blocked move, and refuses at 3 seconds, well
+inside the 10 second age at which Claude Code treats the lock as stale.
+Opening Claude Code in the KB once and accepting the dialog remains the hand
+path.
 
 ## The automation model
 
@@ -265,7 +383,8 @@ agent cannot write, so an ingested document cannot widen what is fed.
 ## The separation model
 
 Two boundaries keep KBs apart. The **repo boundary** separates content: each KB
-is its own repository with its own history and its own `origin`, and the
+is its own repository with its own history and, where it has one, its own
+`origin`, and the
 permission model gives the agent no way to write outside the repo or push
 anywhere but that KB's own remote. The **Windows account boundary** separates
 entities, under the one-account invariant that
@@ -333,7 +452,9 @@ and each failure stops the run before the next step:
    makes no commit and says so.
 
 The allowlist ships the manifest, the README, the license, the ignore file,
-the two operator scripts, the whole `template/` tree, the three KB tests and
+the five operator scripts, the whole `template/` tree, the `skills/` tree
+holding `wiki-new`, three KB tests (`tests/Test-KbStructure.ps1`,
+`tests/Test-FeedInbox.ps1` and `tests/Test-ReconcileGate.ps1`), and
 three documents: this one, [instantiation.md](instantiation.md) and
 [runbook_automation.md](runbook_automation.md). The workflow and
 `tools/publish/` stay in the source repository, so an installed copy holds

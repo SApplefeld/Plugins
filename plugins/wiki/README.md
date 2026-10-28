@@ -29,8 +29,8 @@ Every knowledge base built from this engine has three layers:
 **Ingest.** A file arrives in `inbox/`. The ingest run reads it, moves the
 original to `sources/` (never deleted, never edited again), writes a summary
 page for it, and revises the existing wiki pages that source actually touches,
-in one pass. It updates `index.md` and appends a `log.md` entry, then commits
-and pushes.
+in one pass. It updates `index.md` and appends a `log.md` entry, then commits,
+and pushes where the KB has a remote named `origin`.
 
 Designed for unattended, headless execution. Every completed source is
 committed before the next one starts, so a crash loses at most the source in
@@ -78,6 +78,7 @@ An instantiated knowledge base has this shape:
   .claude/        <- vendored engine skills (wiki-ingest, wiki-lint, wiki-query) + settings.json permission
                      allowlist + kb-move.ps1, kb-commit.ps1 and kb-status.ps1, the three vetted helpers
                      + feed-inbox.ps1, the repository feeder no agent may run
+                     + kb-run.ps1, the run wrapper holding one lock per KB, which no agent may run
   .gitignore
 ```
 
@@ -112,29 +113,61 @@ is fully self-contained: clone it, open Claude Code in it, and everything the
 KB needs, including the skills, is already inside. No shared runtime crosses
 domain lines, and an engine update is a deliberate, auditable copy into a
 specific KB rather than something that changes every KB's behavior at once.
+Each KB records which engine it was copied from in its own
+`.claude/engine.json`, a hash of the template's `.claude/` folder. A KB that
+is moved or cloned keeps that mark.
 
 ## How to instantiate a KB
 
-At a high level: copy `template/` into a new folder, run `git init -b main`
-in it, make an initial commit, then open an interactive Claude Code session
-in the new KB and specialize `CLAUDE.md` for the domain (page-type
-vocabulary, domain entities, citation granularity). Create the remote by hand
-on whichever git host and account the KB's owning entity uses, then push.
+Ask for one. In a Claude Code session on the Windows account that will own
+the KB, ask for a new wiki and say what it is for. The skill says wiki where
+this README says KB, and the two are one thing. The plugin's `wiki-new` skill
+asks for a name and a one-line description. It asks once per account for the
+folder KBs are created under, and it asks whether this KB gets a git remote.
+It then runs `kb-create.ps1`, which copies the template into `<root>\<name>`,
+makes the first commit and trusts the folder for Claude Code on this account.
+Trusting it writes outside the KB, into Claude Code's own settings: an entry
+for the folder in the account's `~/.claude.json`, whose earlier contents are
+first copied to `~/.claude/kb-trust-backup.json`. It also lists the KB, and
+pushes only where a remote was given. Last, the skill specializes `CLAUDE.md`
+for the domain from the description and commits it.
 
-`new-kb.ps1` automates the copy-and-init steps; see `docs/instantiation.md`
-for the full walkthrough including the schema-specialization session and
-remote setup.
+A remote is optional. A KB with no remote commits locally and pushes nothing.
+The ingest skill treats that as the normal case, and `kb-commit.ps1 -Push`
+prints one line and exits 0 where no `origin` exists, so a lint run's commit
+succeeds too. A remote suits a
+KB that is shared or heavily used and should be backed up to a git host. It
+must be an existing, empty repository on whichever host and account the KB's
+owning entity uses, since the skill does not create one. Scheduled ingest
+and lint runs need a remote: `register-task.ps1` refuses those tasks for a KB
+with no remote named `origin`, so a local-only KB is ingested and linted from
+a session.
+
+The account's KBs are listed in one file, `%LOCALAPPDATA%\llm-wiki\registry.json`.
+Only `kb-registry.ps1` writes it. It checks each entry it adds and each
+description it changes, and it refuses a list file that is off its shape.
+`pwsh -NoProfile -File kb-registry.ps1 List` prints one line per KB: its
+name, its folder, the first eight characters of its engine hash, and its
+description.
+
+The hand path still works. `new-kb.ps1` copies the template and makes the
+first commit, and `docs/instantiation.md` walks through trust, the
+schema-specialization session, the optional remote and listing the KB.
 
 To install the engine instead of cloning it, add the marketplace with
 `claude plugin marketplace add SApplefeld/plugins`, then install it with
-`claude plugin install wiki@applefeld`. Run `new-kb.ps1` from the installed
-folder, which sits under the plugin cache, and give `-Path` an absolute path
-outside that cache, since a relative one lands beside the installed copy and
-a plugin update can remove it. The plugin delivers the two setup scripts,
-`new-kb.ps1` and `register-task.ps1`, with the template, three tests and three
-documents. Each KB still gets its own vendored copy of the engine, as the
-section above describes. A developer who wants to change the engine clones this
-repository and runs `new-kb.ps1` from the clone.
+`claude plugin install wiki@applefeld`. The `wiki-new` skill finds the
+installed folder itself. For the hand path, that folder is the `installPath`
+Claude Code records for `wiki@applefeld` in
+`~/.claude/plugins/installed_plugins.json`. Give `new-kb.ps1` an absolute
+`-Path` outside the plugin cache, since a relative one lands beside the
+installed copy and a plugin update can remove it. The plugin delivers the
+`wiki-new` skill and the three scripts behind it: `kb-create.ps1`, which runs
+`kb-trust.ps1` and `kb-registry.ps1` in turn. It also delivers the two setup scripts, `new-kb.ps1`
+and `register-task.ps1`, with the template, three tests and three documents.
+Each KB still gets its own vendored copy of the engine, as the section above
+describes. A developer who wants to change the engine clones this repository
+and runs the scripts from the clone.
 
 ## How automation works
 
@@ -152,9 +185,10 @@ Two mechanics are easy to get wrong, and both fail silently:
   `permissions.allow` entirely in an untrusted workspace, and no command-line
   flag overrides that while a skill is executing. An untrusted KB's scheduled
   run therefore writes nothing and exits, with the warning going only to
-  stderr. Trust is established by opening Claude Code interactively in the KB
-  once and accepting the dialog, which the schema-specialization session
-  already does. The `deny` rules hold whether or not the workspace is trusted.
+  stderr. `kb-create.ps1` trusts a new KB through `kb-trust.ps1`. A KB made
+  by hand is trusted by running `kb-trust.ps1`, or by opening Claude Code
+  interactively in it once and accepting the dialog. The `deny` rules hold
+  whether or not the workspace is trusted.
 
 A KB whose sources live in git repositories can add a feeder.
 `register-task.ps1 -Operation Feed` registers an hourly `wiki-feed-<kb folder>`
@@ -172,8 +206,11 @@ registration and verification detail.
 pwsh -File tests/Test-KbStructure.ps1 -Path <kb-path>
 ```
 
-Add `-RequireSchema` once a KB has a specialized `CLAUDE.md` in place, and
-`-RequireSkills` to also require the three vendored skill files.
+Add `-RequireSchema` for an instantiated KB. It requires `CLAUDE.md` and the
+version mark `.claude/engine.json`, so the bare template, which has no version
+mark, is checked without it. A KB created before the version mark existed fails
+`-RequireSchema` on `.claude/engine.json` until the engine writes that file into
+it. Add `-RequireSkills` to also require the three vendored skill files.
 
 `tests/Test-FeedInbox.ps1` tests the feeder and the registrar's Feed operation
 against a throwaway repository and KB it builds and removes:
@@ -188,6 +225,13 @@ that read where their steps need it:
 
 ```
 pwsh -NoProfile -File tests/Test-ReconcileGate.ps1
+```
+
+`tests/Test-KbRun.ps1` tests the run wrapper's lock, budget stop and argument
+line against a stub it writes in place of `claude`:
+
+```
+pwsh -NoProfile -File tests/Test-KbRun.ps1
 ```
 
 ## How a release is cut
@@ -224,8 +268,9 @@ publish in these cases, among others:
   than the snapshot holds.
 
 The public folder is the engine as an installer needs it and nothing else:
-the plugin manifest, this README, the license, the ignore file, the two setup
-scripts, the template, the three tests above and three documents.
+the plugin manifest, this README, the license, the ignore file, the five
+operator scripts, the `wiki-new` skill, the template, three tests and three
+documents. `tools/publish/allowlist.txt` names each one.
 `node --test tools/publish/*.test.mjs` runs the tests for the publish scripts.
 
 ## Deliberately out of scope

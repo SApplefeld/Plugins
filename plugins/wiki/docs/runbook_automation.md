@@ -54,9 +54,13 @@ yours:
   lint run pushes through `kb-commit.ps1`, which pushes only to `origin`.
 - **The KB workspace trusted under that account.** Trust is per Windows
   account and per exact path, and it lives in that account's own
-  `~/.claude.json`. Establish it by opening Claude Code interactively in the
-  KB once as that account and accepting the trust dialog. This is the single
-  most important prerequisite; the next section says why.
+  `~/.claude.json`. A KB created through the `wiki-new` skill is already
+  trusted, since `kb-create.ps1` runs `kb-trust.ps1` on it. For a KB made by
+  hand, run `pwsh -NoProfile -File <engine>\kb-trust.ps1 -Path <kb>` as that
+  account, where `<engine>` is the engine checkout or the installed plugin
+  folder the README's install paragraph names, or open Claude Code interactively in the KB once as that account
+  and accept the trust dialog. This is the single most important
+  prerequisite; the next section says why.
 
 ## Two silent failure modes
 
@@ -74,7 +78,10 @@ goes only to stderr. No CLI flag overrides this while a skill is executing:
 allowlist for a direct prompt but are all ignored under skill execution. The
 `deny` rules hold whether or not the workspace is trusted, so trust affects
 only what the run is allowed to do, never what it is forbidden. Trust the KB
-under the owning account before registering anything. `register-task.ps1`
+under the owning account before registering anything. A created KB took its
+trust from `kb-trust.ps1`, which proved it with a second headless probe that
+printed no warning. A KB made by hand takes it from `kb-trust.ps1` or from the
+interactive dialog. `register-task.ps1`
 checks trust for the current account and refuses to register an untrusted KB,
 but it cannot read another account's `~/.claude.json`, so trust for the
 running account is ultimately yours to establish and verify.

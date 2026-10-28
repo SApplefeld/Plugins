@@ -5,8 +5,9 @@ Checks that a folder has the KB repo structure the llm-wiki engine expects.
 
 .DESCRIPTION
 Verifies the directories and files a KB repo must contain: inbox/, sources/,
-wiki/, .claude/, .claude/skills/, index.md, log.md, .gitignore, and the
-.claude/settings.json, kb-move.ps1, kb-commit.ps1, and kb-status.ps1 helpers.
+wiki/, .claude/, .claude/skills/, index.md, log.md, .gitignore, the
+.claude/settings.json, kb-move.ps1, kb-commit.ps1, and kb-status.ps1 helpers,
+and the kb-run.ps1 run wrapper.
 
 Also checks the permission allowlist, which is load-bearing: a headless run
 cannot answer a permission prompt, so a missing allow rule stalls an
@@ -27,8 +28,9 @@ judges structure, never whether a wiki page is accurate or useful.
 Path to the KB repo (or the bare template/) to check.
 
 .PARAMETER RequireSchema
-Also require CLAUDE.md to exist. An instantiated KB has one; the bare
-template does not until the schema is added.
+Also require CLAUDE.md and the version mark .claude/engine.json to exist. An
+instantiated KB has both; the bare template has no engine.json, since
+new-kb.ps1 writes it at the copy.
 
 .PARAMETER RequireSkills
 Also require the wiki-ingest, wiki-lint, and wiki-query skill files. An
@@ -99,15 +101,19 @@ foreach ($dir in $requiredDirs) {
     Test-Check -Description "directory exists: $dir" -Passed (Test-Path -LiteralPath $full -PathType Container)
 }
 
-$requiredFiles = @('index.md', 'log.md', '.gitignore', '.claude/settings.json', '.claude/kb-move.ps1', '.claude/kb-commit.ps1', '.claude/kb-status.ps1')
+$requiredFiles = @('index.md', 'log.md', '.gitignore', '.claude/settings.json', '.claude/kb-move.ps1', '.claude/kb-commit.ps1', '.claude/kb-status.ps1', '.claude/kb-run.ps1')
 foreach ($file in $requiredFiles) {
     $full = Join-Path $root $file
     Test-Check -Description "file exists: $file" -Passed (Test-Path -LiteralPath $full -PathType Leaf)
 }
 
 if ($RequireSchema) {
-    $full = Join-Path $root 'CLAUDE.md'
-    Test-Check -Description 'file exists: CLAUDE.md' -Passed (Test-Path -LiteralPath $full -PathType Leaf)
+    # An instantiated KB carries the schema and the version mark new-kb.ps1
+    # writes; the bare template carries the schema but not the version mark.
+    foreach ($file in @('CLAUDE.md', '.claude/engine.json')) {
+        $full = Join-Path $root $file
+        Test-Check -Description "file exists: $file" -Passed (Test-Path -LiteralPath $full -PathType Leaf)
+    }
 }
 
 if ($RequireSkills) {

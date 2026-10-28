@@ -29,7 +29,10 @@ text is truncated to 2000 characters before use.
 .PARAMETER Push
 When set, push the current branch to the origin remote after committing. The
 push runs even when this call had nothing to commit, so a commit made by an
-earlier call in the same run reaches origin rather than stranding locally.
+earlier call in the same run reaches origin rather than stranding locally. In a
+knowledge base with no remote named origin nothing is pushed: the call prints
+"kb-commit: no remote named 'origin'; nothing pushed." on stdout and exits 0,
+since a local-only knowledge base is the ordinary case.
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "sources/report.pdf|wiki/report-summary.md|index.md|log.md" -Message "Ingest report.pdf" -Push
@@ -156,10 +159,13 @@ try {
             Stop-WithReason 'unable to list git remotes.'
         }
         if ($remotes -notcontains 'origin') {
-            Stop-WithReason "no git remote named 'origin' is configured; cannot push."
+            # A knowledge base with no remote commits locally and pushes nothing;
+            # that is the ordinary local-first case, not a failure.
+            Write-Output "kb-commit: no remote named 'origin'; nothing pushed."
+        } else {
+            $pushArgs = @('-C', $repoRoot, '-c', "core.hooksPath=$hooksDir", 'push', 'origin', 'HEAD')
+            Invoke-GitOrStop -Arguments $pushArgs -FailReason 'git push origin HEAD failed.'
         }
-        $pushArgs = @('-C', $repoRoot, '-c', "core.hooksPath=$hooksDir", 'push', 'origin', 'HEAD')
-        Invoke-GitOrStop -Arguments $pushArgs -FailReason 'git push origin HEAD failed.'
     }
 } finally {
     if ($messageFile -and (Test-Path -LiteralPath $messageFile)) {
