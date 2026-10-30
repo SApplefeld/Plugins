@@ -42,17 +42,17 @@ and git keeps nothing of a stopped fetch. Every later fetch takes the
 later-fetch bound of 300 seconds, and every other git call the local bound of 60
 seconds.
 
-A run also holds a budget of 50 minutes from its start. The Feed task that
-register-task.ps1 registers has a 1-hour execution time limit, and the 10
-minutes between them cover local work and stopping a timed-out git process.
-Each git call waits for its bound or for what is left of the budget, whichever
+A run also holds a budget of 50 minutes from its start, which the walker,
+kb-walk.ps1, shortens through FEED_INBOX_RUN_SECONDS where less of its pass
+remains. Each git call waits for its bound or for what is left of the budget, whichever
 is shorter. A call past that wait has its process tree stopped, and the run
 exits 1 before writing that file, with one line naming the source and either
 the run budget or the kind of bound that stopped it. A git call due after the
 budget is spent is never started, and the run exits 1 the same way. So no git
-process the feeder starts outlives its run. Ending the task by hand in Task
-Scheduler still ends only pwsh, and a git fetch it started can run on after
-that.
+process the feeder starts outlives its run. The walker starts the feeder inside
+its kill-on-close job, so ending the walker's task ends any fetch with it. A
+feeder run by hand and ended by hand ends only pwsh, and a git fetch it
+started can run on after that.
 
 The environment variable FEED_INBOX_GIT_TIMEOUT_SECONDS replaces all three
 bounds, and FEED_INBOX_RUN_SECONDS replaces the budget. Each is a whole number
@@ -482,11 +482,12 @@ if (-not [string]::IsNullOrEmpty($timeoutOverride)) {
     foreach ($kind in @($script:gitBounds.Keys)) { $script:gitBounds[$kind] = [int]$timeoutOverride }
 }
 
-# The run budget, 50 minutes from the start of the run. The Feed task has a
-# 1-hour execution time limit, and the scheduler then stops only pwsh, so a git
-# process still running would outlive the run. Every git call waits no longer
-# than the budget has left, and the 10 minutes of margin cover local work and
-# stopping a timed-out process tree.
+# The run budget, 50 minutes from the start of the run by default. The walker
+# sets FEED_INBOX_RUN_SECONDS to the lesser of 3000 and its pass's remaining
+# seconds, and a hand run takes the default. A git process still running when
+# the run ends would outlive it, so every git call waits no longer than the
+# budget has left, which leaves time for local work and for stopping a
+# timed-out process tree.
 $script:runBudgetSeconds = 3000
 $budgetOverride = $env:FEED_INBOX_RUN_SECONDS
 if (-not [string]::IsNullOrEmpty($budgetOverride)) {

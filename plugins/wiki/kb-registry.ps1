@@ -24,9 +24,11 @@ text, and these rules leave them one spelling per folder except a subst
 drive and an 8.3 short name, which they do not see. A path is an existing
 directory, not a listed wiki's path, not inside one and not containing one,
 and holds
-every file in $requiredFiles, the set new-kb.ps1 verifies after a copy. That
-set leaves out .claude/engine.json, so a wiki made before the version mark
-existed can still be listed. A description holds no control character, C1
+every file in $requiredFiles, the set new-kb.ps1 verifies after a copy less
+.claude/engine.json and less .claude/skills/wiki-merge/SKILL.md. A wiki made
+before the version mark existed, or before the merge skill existed, can still
+be listed, and the walker's engine update brings it the merge skill.
+A description holds no control character, C1
 controls included, no line or paragraph separator and no text-direction mark, because List prints one
 tab-separated line per wiki and a reader must see the line as written.
 
@@ -121,7 +123,10 @@ function Stop-WithReason {
 }
 
 # The files a listed wiki must hold, the set new-kb.ps1 verifies after a copy
-# less .claude/engine.json. tests/Test-KbRegistry.ps1 pins the two sets equal.
+# less .claude/engine.json and less .claude/skills/wiki-merge/SKILL.md, so a wiki
+# made before the version mark or before the merge skill can still be listed.
+# The walker's engine update brings such a wiki the merge skill.
+# tests/Test-KbRegistry.ps1 pins the two sets equal, less those two files.
 $requiredFiles = @(
     '.claude/settings.json'
     '.claude/kb-move.ps1'

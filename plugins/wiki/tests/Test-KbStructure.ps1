@@ -16,8 +16,9 @@ secret. The checks confirm settings.json parses, denies writes under
 sources/, inbox/, .git/ and .claude/, denies every raw git verb and the raw
 shell verbs that would bypass the helpers, denies the Grep tool, denies reads
 of credential files, allows the three vetted helpers a KB session calls to
-move a file, to commit, and to read status, and pins permissions.defaultMode
-to default so a bypass-default account still runs under the allow-list.
+move a file, to commit, and to read status, grants no other script or
+command under Bash, and pins permissions.defaultMode to default so a
+bypass-default account still runs under the allow-list.
 
 Passing this check does not prove a headless run will complete. Claude Code
 ignores permissions.allow entirely in a workspace that has not been trusted,
@@ -33,9 +34,9 @@ instantiated KB has both; the bare template has no engine.json, since
 new-kb.ps1 writes it at the copy.
 
 .PARAMETER RequireSkills
-Also require the wiki-ingest, wiki-lint, and wiki-query skill files. An
-instantiated KB has all three; the bare template gains them as the engine
-is built out.
+Also require the wiki-ingest, wiki-lint, wiki-query, and wiki-merge skill
+files. An instantiated KB has all four; the bare template gains them as the
+engine is built out.
 
 .EXAMPLE
 pwsh -File tests/Test-KbStructure.ps1 -Path template
@@ -117,7 +118,7 @@ if ($RequireSchema) {
 }
 
 if ($RequireSkills) {
-    foreach ($skill in @('wiki-ingest', 'wiki-lint', 'wiki-query')) {
+    foreach ($skill in @('wiki-ingest', 'wiki-lint', 'wiki-query', 'wiki-merge')) {
         $full = Join-Path $root ".claude/skills/$skill/SKILL.md"
         Test-Check -Description "file exists: .claude/skills/$skill/SKILL.md" -Passed (Test-Path -LiteralPath $full -PathType Leaf)
     }
@@ -139,6 +140,7 @@ $settingsChecks = @(
     'allow array covers moving a file out of inbox/'
     'allow array covers the status helper'
     'allow array grants no raw git write verb'
+    'allow array grants only the three helpers under Bash'
     'permissions.defaultMode is pinned to default'
 )
 
@@ -217,6 +219,15 @@ if (-not $parsed) {
     Test-Check -Description 'allow array grants no raw git write verb' -Passed (
         -not (Test-RuleMatch $allowRules '^Bash\(git (add|commit|push|mv|remote|config|reset|clean|checkout)')
     )
+
+    # The agent reaches a script only through the three helpers. A rule granting
+    # the run wrapper or the feeder would let a hostile document start a nested
+    # run outside the lock and budget, or a fetch of every source. So every Bash
+    # rule, a bare Bash rule among them, must be the exact pwsh call on one of
+    # the three helpers, and a rule naming any other script, or no script, fails.
+    $bashRules = @($allowRules | Where-Object { $_ -match '^Bash(\(|$)' })
+    $strayBashRules = @($bashRules | Where-Object { $_ -notmatch '^Bash\(pwsh -NoProfile -File (\./)?\.claude/(kb-move|kb-commit|kb-status)\.ps1:\*\)$' })
+    Test-Check -Description 'allow array grants only the three helpers under Bash' -Passed (($bashRules.Count -gt 0) -and ($strayBashRules.Count -eq 0))
 
     # A session in the KB on an account whose own settings default to
     # bypassPermissions would otherwise run with only the deny wall, so it could

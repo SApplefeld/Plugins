@@ -16,9 +16,10 @@ window, that a tracked file deleted from disk never reads, that -Minutes is
 refused by Porcelain, Unpushed, PageDate and Inbox and when below 1, that Live
 refuses -Path, that Porcelain prints the same lines as git status --porcelain,
 that kb-move.ps1 stamps a file planted two days back so it reads as live at
-age 0, and that the three writing skills emit the Live read exactly, ingest and
-lint twice each and query once, with no -Minutes, ingest's last read inside
-step 4b before its move and lint's last inside its write pass.
+age 0, and that the four writing skills emit the Live read exactly, ingest and
+lint twice each and query and merge once, with no -Minutes, ingest's last read
+inside step 4b before its move, lint's last inside its write pass and merge's
+inside its live check.
 
 Each refusal check reads the refusal's own text, so it fails when a different
 rule refuses first. The test sets GIT_CONFIG_GLOBAL to an empty file and
@@ -278,7 +279,8 @@ try {
     $skillChecks = @(
         @('wiki-ingest', 2, '**b. Move it.**', 'pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name'),
         @('wiki-lint', 2, '## The write pass', '## The lint report'),
-        @('wiki-query', 1, '', '')
+        @('wiki-query', 1, '', ''),
+        @('wiki-merge', 1, '## 2. Check', '## 3. Join')
     )
     foreach ($skill in $skillChecks) {
         $skillFile = Join-Path $SkillRoot "$($skill[0])\SKILL.md"

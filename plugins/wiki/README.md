@@ -75,7 +75,7 @@ An instantiated knowledge base has this shape:
   index.md        <- catalog of every wiki page with one-line summaries, by category; read first on query
   log.md          <- append-only run digest (ingests, lint passes, queries filed back)
   CLAUDE.md       <- the schema: page types, conventions, workflows; per-KB, specialized over time
-  .claude/        <- vendored engine skills (wiki-ingest, wiki-lint, wiki-query) + settings.json permission
+  .claude/        <- vendored engine skills (wiki-ingest, wiki-lint, wiki-query, wiki-merge) + settings.json permission
                      allowlist + kb-move.ps1, kb-commit.ps1 and kb-status.ps1, the three vetted helpers
                      + feed-inbox.ps1, the repository feeder no agent may run
                      + kb-run.ps1, the run wrapper holding one lock per KB, which no agent may run
@@ -138,10 +138,8 @@ prints one line and exits 0 where no `origin` exists, so a lint run's commit
 succeeds too. A remote suits a
 KB that is shared or heavily used and should be backed up to a git host. It
 must be an existing, empty repository on whichever host and account the KB's
-owning entity uses, since the skill does not create one. Scheduled ingest
-and lint runs need a remote: `register-task.ps1` refuses those tasks for a KB
-with no remote named `origin`, so a local-only KB is ingested and linted from
-a session.
+owning entity uses, since the skill does not create one. The scheduled walker
+services a local-only KB too, skipping only its pull and its push.
 
 The account's KBs are listed in one file, `%LOCALAPPDATA%\llm-wiki\registry.json`.
 Only `kb-registry.ps1` writes it. It checks each entry it adds and each
@@ -163,38 +161,53 @@ Claude Code records for `wiki@applefeld` in
 `-Path` outside the plugin cache, since a relative one lands beside the
 installed copy and a plugin update can remove it. The plugin delivers the
 `wiki-new` skill and the three scripts behind it: `kb-create.ps1`, which runs
-`kb-trust.ps1` and `kb-registry.ps1` in turn. It also delivers the two setup scripts, `new-kb.ps1`
-and `register-task.ps1`, with the template, three tests and three documents.
+`kb-trust.ps1` and `kb-registry.ps1` in turn. It also delivers `new-kb.ps1`
+for the hand path, the walker `kb-walk.ps1`, and `register-walk.ps1` with the
+launcher it installs, with the template, six tests and three documents.
 Each KB still gets its own vendored copy of the engine, as the section above
 describes. A developer who wants to change the engine clones this repository
 and runs the scripts from the clone.
 
 ## How automation works
 
-A per-user Windows scheduled task runs headless Claude Code
+One Windows scheduled task per account, `wiki-walk`, runs the walker,
+`kb-walk.ps1`, every hour. Each pass visits every KB on the account's wiki
+list in turn, one at a time. For each it brings the vendored engine files up
+to the installed version, pulls from `origin` where one exists, runs the
+feeder where the KB has sources, runs an ingest where `inbox/` holds a file,
+runs a lint where the last one is a week old, and pushes. Dropping a file into
+`inbox/` is the entire hand-off: the next pass ingests it and pushes a commit.
+
+The walker calls a model only where there is work: an ingest with a file
+waiting, a lint that is due, or a pull that conflicts, which a model run joins.
+An idle KB costs no model call, so the hourly pass costs nothing on a quiet
+account. Each model run goes through the KB's wrapper, `.claude/kb-run.ps1`,
+which runs headless Claude Code
 (`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default`)
-with the KB folder as its working directory, on a cadence. Dropping a file into `inbox/` is the entire
-hand-off: the next scheduled run ingests it and pushes a commit. An empty
-inbox no-ops, so a frequent cadence costs nothing.
+with the KB folder as its working directory. Every pass writes
+`%LOCALAPPDATA%\llm-wiki\walk-status.json`, which names each KB, each step's
+outcome, every failure and every KB deferred on a conflict. `register-walk.ps1`
+registers the task once per account, and a plugin update reaches the walker
+and every KB's vendored files on the next pass with no re-registration.
 
 Two mechanics are easy to get wrong, and both fail silently:
 
 - **The model must be pinned.** A too-small or unpinned model does nothing
-  while emitting success-shaped text, so the task passes `--model sonnet`.
+  while emitting success-shaped text, so the run wrapper passes `--model sonnet`.
 - **The KB's workspace must be trusted first.** Claude Code ignores
   `permissions.allow` entirely in an untrusted workspace, and no command-line
   flag overrides that while a skill is executing. An untrusted KB's scheduled
   run therefore writes nothing and exits, with the warning going only to
-  stderr. `kb-create.ps1` trusts a new KB through `kb-trust.ps1`. A KB made
-  by hand is trusted by running `kb-trust.ps1`, or by opening Claude Code
-  interactively in it once and accepting the dialog. The `deny` rules hold
-  whether or not the workspace is trusted.
+  stderr. The walker checks trust first and skips an untrusted KB, naming it
+  `untrusted` in the status file. `kb-create.ps1` trusts a new KB through
+  `kb-trust.ps1`. A KB made by hand is trusted by running `kb-trust.ps1`, or
+  by opening Claude Code interactively in it once and accepting the dialog.
+  The `deny` rules hold whether or not the workspace is trusted.
 
-A KB whose sources live in git repositories can add a feeder.
-`register-task.ps1 -Operation Feed` registers an hourly `wiki-feed-<kb folder>`
-task that runs `.claude/feed-inbox.ps1` as plain PowerShell. It copies new and
-changed files from the repositories `.claude/feed.json` names into `inbox/`,
-and never runs Claude.
+A KB whose sources live in git repositories can add a feeder. Where the KB
+holds `.claude/feed.json`, each pass runs `.claude/feed-inbox.ps1` as plain
+PowerShell before the ingest. It copies new and changed files from the
+repositories `feed.json` names into `inbox/`, and never runs Claude.
 
 Tenancy is by Windows account: one account per entity, each with its own
 Claude login and its own git credentials. See `docs/runbook_automation.md` for
@@ -210,17 +223,17 @@ Add `-RequireSchema` for an instantiated KB. It requires `CLAUDE.md` and the
 version mark `.claude/engine.json`, so the bare template, which has no version
 mark, is checked without it. A KB created before the version mark existed fails
 `-RequireSchema` on `.claude/engine.json` until the engine writes that file into
-it. Add `-RequireSkills` to also require the three vendored skill files.
+it. Add `-RequireSkills` to also require the four vendored skill files.
 
-`tests/Test-FeedInbox.ps1` tests the feeder and the registrar's Feed operation
-against a throwaway repository and KB it builds and removes:
+`tests/Test-FeedInbox.ps1` tests the feeder against a throwaway repository and
+KB it builds and removes:
 
 ```
 pwsh -NoProfile -File tests/Test-FeedInbox.ps1
 ```
 
 `tests/Test-ReconcileGate.ps1` tests the status helper's `Live` read and the
-move helper's stamp the same way, and checks that the three writing skills emit
+move helper's stamp the same way, and checks that the four writing skills emit
 that read where their steps need it:
 
 ```
@@ -232,6 +245,17 @@ line against a stub it writes in place of `claude`:
 
 ```
 pwsh -NoProfile -File tests/Test-KbRun.ps1
+```
+
+`tests/Test-KbWalk.ps1` runs the walker over throwaway KBs and a temporary
+wiki list, with a stub in place of `claude`, and checks each step's model
+gate, the pull's merge and deferral, the budget and the lock.
+`tests/Test-WalkLauncher.ps1` tests the launcher's snapshot of a temporary
+install and `register-walk.ps1 -WhatIf`, and registers nothing:
+
+```
+pwsh -NoProfile -File tests/Test-KbWalk.ps1
+pwsh -NoProfile -File tests/Test-WalkLauncher.ps1
 ```
 
 ## How a release is cut
@@ -268,8 +292,8 @@ publish in these cases, among others:
   than the snapshot holds.
 
 The public folder is the engine as an installer needs it and nothing else:
-the plugin manifest, this README, the license, the ignore file, the five
-operator scripts, the `wiki-new` skill, the template, three tests and three
+the plugin manifest, this README, the license, the ignore file, the eight
+scripts at its root, the `wiki-new` skill, the template, six tests and three
 documents. `tools/publish/allowlist.txt` names each one.
 `node --test tools/publish/*.test.mjs` runs the tests for the publish scripts.
 

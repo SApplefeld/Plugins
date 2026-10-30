@@ -15,32 +15,39 @@ preserve.
 
 ## Two kinds of repository
 
-The engine repo (this one) contains the `template/` tree, the five operator
-scripts, the plugin-level `wiki-new` skill, six KB tests, a plugin manifest,
+The engine repo (this one) contains the `template/` tree, eight scripts at
+its root, the plugin-level `wiki-new` skill, eight tests, a plugin manifest,
 and this `docs/` library. `new-kb.ps1` copies the template.
 `kb-create.ps1` creates a KB, `kb-trust.ps1` trusts it and `kb-registry.ps1`
-lists it. `register-task.ps1` registers a KB's scheduled tasks. `tests/Test-KbRegistry.ps1` drives the list script, and
+lists it. `kb-walk.ps1` is the walker, which services every listed KB in one
+pass. `register-walk.ps1` registers the account's one scheduled task, whose
+action runs `Start-InstalledWikiWalk.ps1`, and that launcher reads the install
+record through `installed-plugin-functions.ps1` and runs the installed
+walker. `tests/Test-KbRegistry.ps1` drives the list script, and
 `tests/Test-KbCreate.ps1` drives creation, trust and the commit helper's
 no-remote case against a stub in place of `claude`. `tests/Test-KbStructure.ps1` checks a KB's structure
-and permission allowlist. `tests/Test-FeedInbox.ps1` drives the feeder and the
-registrar's Feed operation against a throwaway repository and KB.
-`tests/Test-ReconcileGate.ps1` drives the status helper's liveness read and the
-move helper's stamp against a throwaway KB, and checks that the three writing
-skills emit the liveness read. `tests/Test-KbRun.ps1` drives the run wrapper
-against a stub in place of `claude`. The source
+and permission allowlist. `tests/Test-FeedInbox.ps1` drives the feeder against
+a throwaway repository and KB. `tests/Test-ReconcileGate.ps1` drives the status
+helper's liveness read and the move helper's stamp against a throwaway KB, and
+checks that the writing skills emit the liveness read. `tests/Test-KbRun.ps1`
+drives the run wrapper against a stub in place of `claude`.
+`tests/Test-KbWalk.ps1` drives the walker over throwaway KBs with the same kind
+of stub, and `tests/Test-WalkLauncher.ps1` drives the launcher against a
+temporary install and the registrar under `-WhatIf`. The source
 repository also holds the publish job, `.github/workflows/publish.yml`, and its
 scripts and their tests under `tools/publish/`. "Publishing to the marketplace"
 below covers them. The engine repo is machinery only.
 
 A KB repo is what an operator instantiates from `template/`. It is fully
 self-contained: cloning it and opening Claude Code in it brings everything the
-KB needs, including the three skills and the permission allowlist. The engine is
+KB needs, including the four skills and the permission allowlist. The engine is
 vendored (copied) into each KB, not installed as a shared plugin, so no runtime
-crosses between KBs and an engine update is a deliberate copy into one specific
-KB rather than a change that alters every KB at once. The `wiki@applefeld`
+crosses between KBs. An engine update is a copy into each KB in turn: the
+walker makes it on its first pass after the installed engine changes, and
+commits it in that KB under an `Engine:` subject. The `wiki@applefeld`
 plugin changes how an operator obtains the engine and how a session creates a
 KB. It delivers the scripts, the `wiki-new` skill and the template, and each KB
-still receives its own copy. None of the five scripts is vendored into a KB,
+still receives its own copy. None of the root scripts is vendored into a KB,
 so a KB's agent can run none of them.
 
 ## The KB repo layout
@@ -65,7 +72,7 @@ machinery:
     kb-run.ps1    the run wrapper holding one lock per KB; granted to no agent
     feed-inbox.ps1 the repository feeder; granted to no agent
     feed.json     the feeder's sources; present only in a fed KB
-    skills/wiki-ingest, wiki-lint, wiki-query
+    skills/wiki-ingest, wiki-lint, wiki-query, wiki-merge
   .gitignore
 ```
 
@@ -79,7 +86,10 @@ sequence and invariants; the schema owns discipline.
 `engine.json` holds `templateHash`, a SHA-256 over every file under the
 engine's `template/.claude/`, taken as sorted relative paths with their bytes
 and with each CRLF read as LF. It also holds `source`, the installed plugin's
-version or the engine checkout's short commit, and `copiedAt`. The hash names
+version or the engine checkout's short commit, and `copiedAt`, the time
+`new-kb.ps1` wrote it. The walker's engine update rewrites the file holding
+`templateHash` alone, so two machines that update one KB to one engine write
+the same bytes, and their pulls merge without a conflict. The hash names
 the vendored machinery only, never the schema or the content, and
 `new-kb.ps1 -PrintEngineHash` prints the engine's current value to compare
 against. The file sits under `.claude/`, which the agent cannot write.
@@ -114,8 +124,8 @@ description it changes, against these rules: a name of 1 to
 64 ASCII letters, digits, hyphens, underscores and dots, unique ignoring case;
 a folder on a local drive letter, reached through no link, outside every
 listed KB, and holding every file a new KB holds except the version mark
-`.claude/engine.json`, so a KB made before the mark existed can still be
-listed. A writer holds
+`.claude/engine.json` and the merge skill, so a KB made before either existed
+can still be listed, and the walker's engine update brings it the merge skill. A writer holds
 `registry.lock`, a sibling file opened with no sharing, from its read of the
 list through its move, so two writers never act on the same read. Each write
 goes to a temporary file in the same folder and moves over the list, so a
@@ -125,11 +135,12 @@ characters of its engine hash or `unknown`, and description. The list lives
 in one account's profile, so it can never route a document across the
 account boundary between entities.
 
-## The four operations and their shared discipline
+## The skills and their shared discipline
 
-Three skills implement the operations, and a fourth commit subject
-(`Reconcile:`) recovers interrupted work. Every operation that writes shares one
-discipline.
+Three skills do the work a reader asks for, a commit
+subject (`Reconcile:`) recovers interrupted work, and a fourth skill,
+`wiki-merge`, joins a pull that conflicts. Every operation that writes shares
+one discipline.
 
 **Ingest** (`wiki-ingest`) is the core operation, written for unattended
 headless execution. It snapshots `inbox/` once at run start (files arriving
@@ -140,8 +151,8 @@ a `log.md` entry, and makes exactly one commit. It pushes once at run end, and
 a KB with no remote named `origin` pushes nothing. An
 empty inbox produces no commit and a clean exit.
 
-**Lint** (`wiki-lint`) is the health pass, run by an optional scheduled task or
-by hand. It runs six checks in
+**Lint** (`wiki-lint`) is the health pass, run by the walker once a week per KB
+or by hand. It runs six checks in
 cheap-first order: `index.md` drift, orphan pages, broken relative links,
 missing reciprocal cross-references, contradictions, and unsourced claims. It
 fixes what is mechanically unambiguous, flags what needs judgment, and appends a
@@ -156,7 +167,16 @@ answer says so rather than drawing on model memory. A valuable answer can be
 filed back as a synthesis page, which then goes through index and
 cross-reference maintenance like any page.
 
-**The commit seam.** All three writing skills begin with a reconcile front step
+**Merge** (`wiki-merge`) runs only where the walker's pull conflicts. It reads
+the conflicted paths through `kb-status.ps1 -What Porcelain`. Where every one
+is under `wiki/` or is `index.md` or `log.md`, it joins both sides of each into
+one text that keeps every claim and citation from each, under the schema's
+contradiction rule where they disagree, and commits the joined files under
+`Merge: join <n> pages from origin`. Where any conflicted path is elsewhere, it
+joins and commits nothing, and the walker aborts the merge and records the KB
+deferred.
+
+**The commit seam.** Ingest, lint and query each begin with a reconcile front step
 driven by `git status --porcelain`, because `kb-commit.ps1` stages the paths it
 is given from the working tree as they stand. An interrupted run leaves dirty
 files that would otherwise ride into the next run's commit under the wrong
@@ -164,7 +184,7 @@ subject. The reconcile step commits recovered edits alone first: an ingest run
 folds a crashed source's dirty edits into that orphan source's own commit only
 when an untracked `sources/` file actually exists, and otherwise commits stray
 edits under a `Reconcile:` subject before touching the inbox; lint and query
-each commit stray edits under `Reconcile:` before doing their own work.
+each commit stray edits under `Reconcile:` before doing their own work. The merge skill has no reconcile step: it runs on the tree a conflicting pull left mid-merge, and its one commit completes that merge.
 
 The reconcile step reads liveness before it recovers anything. Where the tree
 is dirty, the skill runs `kb-status.ps1 -What Live`, which lists each dirty path
@@ -190,13 +210,25 @@ source's commit, since the tree is clean between sources, so a lint whose write
 pass starts in that gap sees nothing to yield to. A run that writes nothing for
 thirty minutes reads as finished to a run outside the lock, so its half-written
 page can be recovered by that run. Every commit subject is prefixed (`Ingest:`,
-`Lint:`, `Query:`, `Reconcile:`) so each operation is findable on its own in
-`git log`.
+`Lint:`, `Query:`, `Reconcile:`, `Merge:`, `Engine:`) so each operation is
+findable on its own in `git log`.
 
-**The run lock.** An ingest or lint run through the wrapper, `pwsh -NoProfile
--File .claude/kb-run.ps1 -Operation Ingest` or `-Operation Lint`, holds the
-knowledge base's run lock for the whole run. An operator's hand run takes it,
-and so would any task whose action is that command. Without `-Claude <path>` the
+**Commits outside the wall.** The walker commits with raw git, which the agent
+never holds. It makes two kinds of commit: an engine update under
+`Engine: update to <hash8>`, and the merge commit of a pull git merges with no
+conflict. Both are made by the walker's own process, outside any model run,
+under the account's git identity and with hooks disabled through an empty
+`core.hooksPath`. Neither passes through the allow list, since no model is
+running to be granted anything. A merge the model joins is committed inside the
+wall instead. The `wiki-merge` skill calls `kb-commit.ps1` with no `-Push`,
+which completes the merge because every conflicted path is then staged, and the
+walker pushes it at the KB's last step.
+
+**The run lock.** An ingest, lint or merge run through the wrapper,
+`pwsh -NoProfile -File .claude/kb-run.ps1 -Operation Ingest`, `Lint` or
+`Merge`, holds the knowledge base's run lock for the whole run. Every model run
+the walker starts goes through the wrapper, and an operator's hand run through
+it takes the lock too. Without `-Claude <path>` the
 wrapper runs the first `claude` on PATH, and it stops with one stderr line where
 PATH holds none. The lock is a handle on `.git/kb-run.lock` that the wrapper's
 own process holds open with no sharing. The file itself stays after every run,
@@ -214,20 +246,20 @@ wrapper, so the agent cannot start one. The wrapper bounds its `claude` child
 with a budget of 6900 seconds, which `KB_RUN_SECONDS` replaces as a whole number
 of seconds from 1 to 99999. Any other value exits 1 with one stderr line before
 `claude` starts. Past the budget it stops the child's whole process tree with
-`taskkill` and exits 1. Where `taskkill` fails, the wrapper ends only the child
-itself, so a process the child started can keep running with the lock released.
-A process the child leaves running after a normal exit outlives the lock the
-same way. `taskkill` finds a process's descendants through their parent, so a
-process whose own parent had exited before the stop is outside the tree and
-outlives the lock too. So does a descendant `taskkill` fails to stop while it
-stops the child. Task Scheduler's End stops only the wrapper's own process, and
-the wrapper then stops nothing. The child keeps running with the lock released,
-so a later run can overlap it. The ingest and lint tasks `register-task.ps1`
-registers call `claude` directly, so they take no lock. An interactive session
-in the knowledge base takes none either. Both are guarded only by the liveness
-read above.
+`taskkill` and exits 1. The child runs inside a Windows job object created with
+kill-on-close, which the wrapper alone holds, so when the wrapper ends, however
+it ends, the operating system ends every process still in the job. That covers
+a process `taskkill` missed and one the child left running after a normal exit.
+A process the child starts in the moment before its assignment to the job is
+outside it. Where the job cannot be made or the child cannot be assigned, the
+run goes on without it, and such a process can outlive the lock. The walker in
+turn starts each wrapper inside its own kill-on-close job, so ending the
+walker's task ends every wrapper and its tree. The walker's pass lock,
+`%LOCALAPPDATA%\llm-wiki\walk.lock`, keeps two passes from running at once.
+An interactive session in the knowledge base takes no lock, and is guarded
+only by the liveness read above.
 
-**Crash behavior.** Ingest is not crash-proof, it is crash-recoverable. Each
+**Crash behavior.** Ingest is crash-recoverable. Each
 completed source is committed before the next begins, so a crash loses at most
 the one in-flight source's uncommitted work. The window between a move and its
 commit leaves an untracked file in `sources/` that is invisible to the next
@@ -351,28 +383,71 @@ path.
 
 ## The automation model
 
-A per-user Windows scheduled task runs headless Claude Code with the KB folder
-as its working directory, on a cadence. Every KB has a frequent ingest task
-owned by the KB's Windows account. A weekly lint task is optional, and it can
-run beside any ingest cadence. The action is
-`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default`.
-The prompt names the skill in prose, the stable form for a headless run. The
-model pin is load-bearing and fails silently when wrong: a too-small or
-unpinned model does nothing while emitting success-shaped text. The permission
-mode pin holds the run to the workspace allow-list on an account whose own
-default is to bypass permissions.
+One scheduled task per Windows account, `wiki-walk`, runs the walker,
+`kb-walk.ps1`, every hour. A run of it is a pass. The pass takes the lock
+`%LOCALAPPDATA%\llm-wiki\walk.lock`, so two passes never overlap, reads the
+account's wiki list, and visits each listed KB in turn, starting after the KB
+the last pass ended on, so a long KB cannot starve the rest. For each KB it
+takes seven steps: trust, engine update, pull, feed, ingest, lint and push.
 
-`register-task.ps1` builds the action and refuses to register any
-task that would silently do nothing: a path that is not a git repo, a repo
-missing the requested skill, a repo with no `origin` remote, or an untrusted
-workspace for the current account. The task registers with an S4U principal (no
+- **Trust** reads the KB's entry in the running account's `~/.claude.json` and
+  skips an untrusted KB, since a headless run there writes nothing.
+- **Engine update** compares the `templateHash` committed in the KB's
+  `.claude/engine.json` with the installed engine's, and where they differ
+  copies the engine's `template/.claude/` over the KB's, keeping `feed.json`
+  and any file the engine does not ship, and commits. A KB with a live uncommitted file, or a merge left in progress, is recorded `deferred` and updated on a later pass.
+- **Pull** first aborts any merge left in progress, then fetches `origin` and merges `origin/main` where the KB has a remote.
+  A conflict runs the merge skill, except one on `.claude/settings.json`,
+  which starts no model run. A merge the skill does not finish, as where a
+  conflicted path is outside what it may join, is aborted and the KB recorded
+  deferred. Three deferred passes running make a KB stuck, and its merge run
+  then starts at most once a day.
+- **Feed** runs `feed-inbox.ps1` where the KB holds `.claude/feed.json`.
+- **Ingest** runs where `inbox/` holds a file other than `.gitkeep`.
+- **Lint** runs where the KB's last successful lint is absent or more than
+  seven days old. It is stamped done only where the run exits 0 and a `Lint:`
+  commit landed.
+- **Push** pushes where `origin` exists and the remote lacks a commit, and
+  pushes with `-u` where the branch has no upstream yet.
+
+Before an engine update, an ingest and a lint, the walker reads `kb-status.ps1 -What Live`
+and defers the step where any file is live, so a model run never starts only
+to yield. A model is called only by a conflicting pull, an ingest with work or
+a due lint, so an idle KB costs nothing. Each model run goes through the
+wrapper, whose action is
+`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default`,
+with `wiki-lint` or `wiki-merge` in place of `wiki-ingest`. The prompt names
+the skill in prose, the stable form for a headless run. The model pin is
+load-bearing and fails silently when wrong: a too-small or unpinned model does
+nothing while emitting success-shaped text. The permission mode pin holds the
+run to the workspace allow list on an account whose own default is to bypass
+permissions.
+
+The pass holds a budget of 6900 seconds, under the task's 2-hour limit. A KB
+not started before it runs out is recorded `skipped: budget`, and the next pass
+starts with it. Every child the walker starts runs inside a kill-on-close job
+the walker holds, so ending the task ends every child's tree. Each pass writes
+`%LOCALAPPDATA%\llm-wiki\walk-status.json`, naming each KB, each step's
+outcome, every failure and every KB still deferred, and appends a block to
+`walk.log` beside it. The walker exits 0 after a pass whatever it recorded,
+since Task Scheduler logs any exit as completion and never retries, so the
+status file is the report.
+
+`register-walk.ps1` copies the launcher, `Start-InstalledWikiWalk.ps1`, into a
+folder outside the plugin cache and registers `wiki-walk` under the task folder
+`\llm-wiki\<domain>.<account>\`. At each start the launcher reads Claude Code's
+install record for `wiki@applefeld`, copies that version's folder to
+`%LOCALAPPDATA%\llm-wiki\runtime\<version>\` where no complete copy exists,
+and runs the copy's walker in its own process. So a plugin update reaches the
+walker at the next start with no re-registration, and the walker's engine
+update carries it into each KB. The task registers with an S4U principal (no
 stored password, runs whether or not the user is logged on) at the cost of no
 access to Windows Credential Manager, so an HTTPS push backed by it can fail
 under the task. An SSH remote with a passphrase-less key works under S4U. See
 [runbook_automation.md](runbook_automation.md) for registration and the
 verification checklist.
 
-A KB whose sources live in git repositories adds a third task, the feeder.
+A KB whose sources live in git repositories adds the feeder.
 `feed-inbox.ps1` is plain PowerShell that copies new and changed files from the
 repositories `feed.json` names into `inbox/`, under names that encode the
 source, the path and the blob hash, so dedupe needs no state file. It never runs
@@ -393,11 +468,11 @@ states in full.
 
 ## Data flow, end to end
 
-A file is dropped into a KB's `inbox/`. The next scheduled ingest run snapshots
-the inbox, moves the file into `sources/` through `kb-move.ps1`, writes its
-summary page and revises the wiki pages it bears on, updates `index.md` and
-`log.md`, and commits that source's work through `kb-commit.ps1`, pushing once
-at run end to `origin`. The wiki, `index.md`, and `git log` are the durable
+A file is dropped into a KB's `inbox/`. The next pass finds the inbox holding
+it and starts an ingest, which snapshots the inbox, moves the file into
+`sources/` through `kb-move.ps1`, writes its summary page and revises the wiki
+pages it bears on, updates `index.md` and `log.md`, and commits that source's
+work through `kb-commit.ps1`, pushing once at run end to `origin`. The wiki, `index.md`, and `git log` are the durable
 record a human reads; `sources/` is the immutable evidence behind every cited
 claim. A lint pass keeps the wiki internally consistent, and an
 interactive query reads it back with citations. Dropping the file is the entire
@@ -452,10 +527,11 @@ and each failure stops the run before the next step:
    makes no commit and says so.
 
 The allowlist ships the manifest, the README, the license, the ignore file,
-the five operator scripts, the whole `template/` tree, the `skills/` tree
-holding `wiki-new`, three KB tests (`tests/Test-KbStructure.ps1`,
-`tests/Test-FeedInbox.ps1` and `tests/Test-ReconcileGate.ps1`), and
-three documents: this one, [instantiation.md](instantiation.md) and
+the eight scripts at the repository root, the whole `template/` tree, the `skills/` tree
+holding `wiki-new`, six tests (`tests/Test-KbStructure.ps1`,
+`tests/Test-FeedInbox.ps1`, `tests/Test-ReconcileGate.ps1`,
+`tests/Test-KbRun.ps1`, `tests/Test-KbWalk.ps1` and
+`tests/Test-WalkLauncher.ps1`), and three documents: this one, [instantiation.md](instantiation.md) and
 [runbook_automation.md](runbook_automation.md). The workflow and
 `tools/publish/` stay in the source repository, so an installed copy holds
 neither. `node --test tools/publish/*.test.mjs` runs the publish scripts'
@@ -474,5 +550,5 @@ pwsh -NoProfile -File tests/Test-KbStructure.ps1 -Path <kb> -RequireSchema -Requ
 
 When extending the engine, the invariants above are the ones a change must
 preserve: the three helpers stay the agent's only git and move operations, the deny wall
-stays intact, every writing operation keeps its reconcile front step, and no
+stays intact, ingest, lint and query each keep their reconcile front step, and no
 change may make a headless run depend on answering a prompt.

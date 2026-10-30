@@ -1,8 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Exercises the repository feeder, template/.claude/feed-inbox.ps1, and the Feed
-operation of register-task.ps1 against a throwaway git repository and KB.
+Exercises the repository feeder, template/.claude/feed-inbox.ps1, against a
+throwaway git repository and KB.
 
 .DESCRIPTION
 Builds a local upstream git repository and two KBs copied from template/ under
@@ -11,12 +11,11 @@ and runs the vendored feeder under the same PowerShell host that runs this test.
 It checks the drip cap, fed names and provenance headers, dedupe against inbox/
 and sources/, a changed upstream file, excluded and unmatched paths, refused
 names, -WhatIf, hook neutralization against a planted hook, the failure paths
-(bad URL, refused URL forms, invalid config, missing config), the template
-allow-list, and register-task.ps1 -WhatIf for Feed and Ingest. A second upstream
-covers shell-metacharacter mapping, the '..' and 25 MB refusals, UTF-32 BE,
-selection order across two sources, the KB lock, the stale-temp sweep, and the
-git timeouts and the run budget, driven by a sleeping upload-pack hook. The
-feeder's default run budget is checked against the Feed task's time limit.
+(bad URL, refused URL forms, invalid config, missing config), and the template
+allow-list. A second upstream covers shell-metacharacter mapping, the '..' and
+25 MB refusals, UTF-32 BE, selection order across two sources, the KB lock, the
+stale-temp sweep, and the git timeouts and the run budget, driven by a sleeping
+upload-pack hook.
 
 The feeder keeps private clones under
 %LOCALAPPDATA%\llm-wiki-feed\<kb-name>-<path hash>. The test KBs are named
@@ -400,47 +399,6 @@ try {
     # --- The template grants the feeder no allow rule, so the KB agent cannot run it.
     $settings = [System.IO.File]::ReadAllText((Join-Path $script:engineRoot 'template\.claude\settings.json')) | ConvertFrom-Json
     Test-Check 'no allow rule in template settings.json names feed-inbox' (@($settings.permissions.allow | Where-Object { $_ -match 'feed' }).Count -eq 0)
-
-    # --- Acceptance 7: register-task.ps1 -WhatIf. The KB is untrusted, so a Feed
-    # description that succeeds as the current user proves no trust check ran.
-    $register = Join-Path $script:engineRoot 'register-task.ps1'
-    $user = ".\$env:USERNAME"
-    $r = Invoke-Captured $script:psExe @('-NoProfile', '-File', $register, '-Operation', 'Feed', '-KbPath', $kb, '-User', $user, '-WhatIf')
-    $feeder = Join-Path $kb '.claude\feed-inbox.ps1'
-    Test-Check 'Feed -WhatIf exits 0 on an untrusted KB with no origin' ($r.ExitCode -eq 0)
-    Test-Check 'Feed -WhatIf executes pwsh' ($r.Stdout -match '(?m)^Execute:\s+[^\r\n]*\\pwsh\.exe\r?$')
-    Test-Check 'Feed -WhatIf runs the vendored feeder' ($r.Stdout.Contains("Arguments:  -NoProfile -File `"$feeder`""))
-    Test-Check 'Feed -WhatIf makes no Claude call' ($r.Stdout -notmatch 'claude\.exe|--model|--permission-mode|-p ')
-    Test-Check 'Feed -WhatIf defaults to Hourly and wiki-feed-<kb>' (($r.Stdout -match '(?m)^Cadence:\s+Hourly') -and ($r.Stdout -match "(?m)^Task name:\s+wiki-feed-$kbName\s*$"))
-    Test-Check 'Feed -WhatIf describes a 1-hour execution time limit' ($r.Stdout -match '(?m)^Time limit:\s+PT1H\s*$')
-    # The feeder's default run budget, read from its source, must sit at least
-    # 300 seconds below the time limit the registrar describes, leaving room to
-    # stop a timed-out process tree, so the two cannot drift apart silently.
-    $budgetMatch = [regex]::Match([System.IO.File]::ReadAllText($feeder), '(?m)^\$script:runBudgetSeconds = (\d+)\r?$')
-    $limitMatch = [regex]::Match($r.Stdout, '(?m)^Time limit:\s+(\S+)\s*$')
-    Test-Check "the feeder's default run budget sits at least 300 seconds below the Feed task's time limit" ($budgetMatch.Success -and $limitMatch.Success -and ([int]$budgetMatch.Groups[1].Value -le ([System.Xml.XmlConvert]::ToTimeSpan($limitMatch.Groups[1].Value).TotalSeconds - 300)))
-    $plainFeedStderr = $r.Stderr
-    $r = Invoke-Captured $script:psExe @('-NoProfile', '-File', $register, '-Operation', 'Feed', '-KbPath', $kb, '-User', $user, '-SkipTrustCheck', '-WhatIf')
-    Test-Check 'Feed -WhatIf -SkipTrustCheck still exits 0 and warns on one stderr line naming the switch, which Feed alone does not print' (($r.ExitCode -eq 0) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match 'SkipTrustCheck') -and ($plainFeedStderr -notmatch 'SkipTrustCheck'))
-
-    Remove-Item -LiteralPath (Join-Path $kb2 '.claude\feed.json') -Force
-    $r = Invoke-Captured $script:psExe @('-NoProfile', '-File', $register, '-Operation', 'Feed', '-KbPath', $kb2, '-User', $user, '-WhatIf')
-    Test-Check 'Feed refuses a KB without .claude/feed.json' (($r.ExitCode -ne 0) -and ($r.Stderr -match 'missing the Feed file: \.claude/feed\.json'))
-
-    $null = Invoke-Captured 'git' @('-C', $kb, 'remote', 'add', 'origin', (Join-Path $work 'no-remote.git'))
-    $r = Invoke-Captured $script:psExe @('-NoProfile', '-File', $register, '-Operation', 'Ingest', '-KbPath', $kb, '-User', $user, '-WhatIf')
-    Test-Check 'Ingest -WhatIf still refuses an untrusted KB' (($r.ExitCode -ne 0) -and ($r.Stderr -match 'not trusted'))
-    $r = Invoke-Captured $script:psExe @('-NoProfile', '-File', $register, '-Operation', 'Ingest', '-KbPath', $kb, '-User', "./$env:USERNAME", '-WhatIf')
-    Test-Check 'Ingest -WhatIf reads ./user as the current account' (($r.ExitCode -ne 0) -and ($r.Stderr -match 'not trusted') -and ($r.Stderr -notmatch 'cannot verify workspace trust'))
-    $r = Invoke-Captured $script:psExe @('-NoProfile', '-File', $register, '-Operation', 'Ingest', '-KbPath', $kb, '-User', "OTHERDOMAIN\$env:USERNAME", '-WhatIf')
-    Test-Check 'Ingest -WhatIf refuses another domain''s account of the same name' (($r.ExitCode -ne 0) -and ($r.Stderr -match 'cannot verify workspace trust'))
-    if (Get-Command -Name 'claude' -CommandType Application -ErrorAction SilentlyContinue) {
-        $r = Invoke-Captured $script:psExe @('-NoProfile', '-File', $register, '-Operation', 'Ingest', '-KbPath', $kb, '-User', $user, '-SkipTrustCheck', '-WhatIf')
-        Test-Check 'Ingest -WhatIf still describes the pinned claude action' (($r.ExitCode -eq 0) -and $r.Stdout.Contains('Arguments:  -p "Use the wiki-ingest skill." --model sonnet --permission-mode default') -and ($r.Stdout -match '(?m)^Cadence:\s+Every4Hours'))
-        Test-Check 'Ingest -WhatIf keeps the 2-hour execution time limit' ($r.Stdout -match '(?m)^Time limit:\s+PT2H\s*$')
-    } else {
-        Write-Host '[SKIP] Ingest -WhatIf action check: claude is not on PATH'
-    }
 
     # --- A second upstream for name mapping, name and size refusals, UTF-32 BE,
     # selection order across sources, the KB lock, the stale-temp sweep, and the

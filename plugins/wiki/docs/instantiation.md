@@ -15,13 +15,13 @@ records the engine version in `.claude/engine.json`, initializes git, and makes
 the first commit. The result holds everything the KB
 needs to run: the three-layer content directories (`inbox/`, `sources/`,
 `wiki/`), the schema (`CLAUDE.md`), the vetted helper scripts and permission
-allowlist under `.claude/`, and the three skills (`wiki-ingest`, `wiki-lint`,
-`wiki-query`). Outside the folder, instantiation leaves two records on the
+allowlist under `.claude/`, and the four skills (`wiki-ingest`, `wiki-lint`,
+`wiki-query`, `wiki-merge`). Outside the folder, instantiation leaves two records on the
 owning account: the KB's trust entry in `~/.claude.json` and its line in the
 account's wiki list, `%LOCALAPPDATA%\llm-wiki\registry.json`. No shared runtime
-crosses into the KB, so an engine update is a
-deliberate copy into a specific KB, never a change that touches every KB at
-once. For the pattern at a glance, see the engine [README](../README.md); for
+crosses into the KB: each KB holds its own copy of the engine files, and the
+scheduled walker brings each listed KB's copy up to the installed engine on
+its next pass, as a commit in that KB. For the pattern at a glance, see the engine [README](../README.md); for
 the engineering design and the reasons behind it, see
 [architecture.md](architecture.md).
 
@@ -30,8 +30,8 @@ the engineering design and the reasons behind it, see
 Every KB is owned by one Windows account, and that account is the boundary
 between entities (see the hard invariant at the end). On the owning account:
 
-- **PowerShell 7 (`pwsh`) on PATH.** The helper scripts and the scheduled tasks
-  invoke `pwsh`. Windows PowerShell 5.1 also runs `new-kb.ps1`, but the
+- **PowerShell 7 (`pwsh`) on PATH.** The helper scripts and the account's
+  `wiki-walk` task invoke `pwsh`. Windows PowerShell 5.1 also runs `new-kb.ps1`, but the
   automation runbook standardizes on `pwsh`.
 - **git configured with that account's own identity and credentials.**
   `new-kb.ps1` makes the initial commit as whoever the account's git config
@@ -101,8 +101,8 @@ commit, and then runs the structural check against the result. It refuses a
 destination that already holds files, so it never overwrites an existing repo.
 It creates no git remote, since step 4 is optional. On success it prints four
 follow-up steps, leading with trusting the workspace, and steps 2 to 5 below
-cover them. Its last printed step says to register the ingest task, plus a
-lint task and a feed task where they belong, and Step 5 below says when.
+cover them. Its last printed step says to list the KB and register the
+account's walker, and Step 5 below says how.
 
 Then add the KB to the account's wiki list, so every reader of the list sees
 it. Where the account has no list yet, create one first with the folder your
@@ -122,9 +122,11 @@ accepted. The folder need not sit under the root. The root is where
 `wiki-new` puts the KBs it creates.
 
 `Add` refuses a name that breaks that rule, a folder missing any file a new KB
-holds other than `.claude/engine.json`, and a folder inside a listed KB, among
+holds other than `.claude/engine.json` and
+`.claude/skills/wiki-merge/SKILL.md`, and a folder inside a listed KB, among
 other cases, each with one `kb-registry:` line on stderr. A KB made before the
-version mark existed can still be listed. The list itself is never edited by
+version mark or the merge skill existed can still be listed, and the walker's
+engine update brings it the merge skill. The list itself is never edited by
 hand.
 
 ### Step 2: trust the workspace
@@ -174,8 +176,8 @@ it from a trusted parent. There are two ways to establish it:
 Do not edit `~/.claude.json` by hand. The key is
 `projects["<absolute path>"].hasTrustDialogAccepted`, and the path must match
 exactly what Claude Code records. It stores some keys with forward slashes
-(`D:/personal/eleos-kb`) and some with escaped backslashes
-(`D:\\personal\\eleos-kb`), and the drive-letter case must match. A key that
+(`D:/Wikis/acme-kb`) and some with escaped backslashes
+(`D:\\Wikis\\acme-kb`), and the drive-letter case must match. A key that
 does not match is not an error. It is simply ignored, and the KB stays
 untrusted while looking trusted. `kb-trust.ps1` avoids that by taking the key
 from Claude Code's own warning and proving it with the second probe.
@@ -183,8 +185,11 @@ from Claude Code's own warning and proving it with the second probe.
 To check whether a KB is already trusted, read `~/.claude.json` and look for the
 KB's absolute path under `projects`, with `hasTrustDialogAccepted: true`. Note
 that this file contains at least one property with an empty-string name, which
-makes a naive `ConvertFrom-Json` throw on both PowerShell 5.1 and 7. `register-task.ps1`
-reads it correctly and refuses to register a task for an untrusted KB.
+makes a naive `ConvertFrom-Json` throw on both PowerShell 5.1 and 7. The
+walker, `kb-walk.ps1`, reads it correctly. Its first step for each KB reads
+that entry under the running account, and it skips an untrusted KB, recording
+it `untrusted` in the pass's status file, since a headless run there writes
+nothing.
 
 ### Step 3: specialize the schema
 
@@ -256,11 +261,13 @@ run uses to push, pushes only to a remote named `origin`.
 
 ### Step 5: register automation
 
-Register the scheduled ingest task for this KB under the owning account, plus
-a weekly lint task beside it and a feed task for a fed KB. See [runbook_automation.md](runbook_automation.md) for registration and
-verification detail. `register-task.ps1` registers an ingest or lint task only
-for a KB with a remote named `origin`, so a KB without one is ingested and
-linted from an interactive session.
+Each account runs one scheduled task, `wiki-walk`, which services every KB on
+the account's wiki list each hour. Where the account has none yet, register it
+once from an elevated PowerShell, as the owning account, with
+`register-walk.ps1`. A KB listed in Step 1 is then serviced from the
+next pass, with no registration of its own. A KB with no remote is serviced
+too, with no pull and no push. See [runbook_automation.md](runbook_automation.md)
+for registration and verification detail.
 
 ## Verifying an instantiated KB
 
@@ -274,7 +281,7 @@ A KB created before the version mark existed fails this check on
 `.claude/engine.json` until the engine writes that file into it.
 
 A green run confirms the KB's structure: the required directories and files are
-present, `CLAUDE.md` and the three skills exist, `settings.json` parses, and the
+present, `CLAUDE.md` and the four skills exist, `settings.json` parses, and the
 permission allowlist has the right shape (it denies writes under `sources/`,
 `inbox/`, `.git/`, and `.claude/`, denies all of raw git and the raw shell verbs
 that would bypass the helpers, denies credential reads, allows the three vetted

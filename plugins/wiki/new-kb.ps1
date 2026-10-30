@@ -247,6 +247,7 @@ $requiredFiles = @(
     '.claude/skills/wiki-ingest/SKILL.md'
     '.claude/skills/wiki-lint/SKILL.md'
     '.claude/skills/wiki-query/SKILL.md'
+    '.claude/skills/wiki-merge/SKILL.md'
     'CLAUDE.md'
     'index.md'
     'log.md'
@@ -343,8 +344,8 @@ Write-Output "     by hand under the owning entity's own git account, then:"
 Write-Output '         git remote add origin <url>'
 Write-Output '         git push -u origin main'
 Write-Output ''
-Write-Output '  4. Register automation. Register the scheduled ingest task, plus a weekly lint'
-Write-Output '     task beside it and a feed task for a fed KB,'
-Write-Output '     as described in docs/runbook_automation.md.'
+Write-Output '  4. List and automate. Add the knowledge base to the wiki list with'
+Write-Output '     kb-registry.ps1 Add, and register the wiki-walk task once per account'
+Write-Output '     with register-walk.ps1, as described in docs/runbook_automation.md.'
 
 exit 0
