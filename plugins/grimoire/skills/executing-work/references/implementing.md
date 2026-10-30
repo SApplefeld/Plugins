@@ -9,7 +9,7 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
    **The same open writes the section's promises file, `.kit/scratch/<plan-slug>/promises-section-<n>.json`.** It holds one `{ id, promise }` entry per acceptance bullet and per sentence naming a behavior the section builds. A dispatched implementer runs it through the brief's `Promise check:` field.
 
    - **A section that writes under `docs/` goes to the main thread whatever its tier.** An implementer may return drafted prose in its final message, but the main thread writes it. Record `Locus: inline` under the `Model:` line, which keeps the bare tier the section earned.
-   - **Tier `haiku` / `sonnet` / `opus` / `fable`:** dispatch the matching `implementer-<tier>` agent with a brief built from the Dispatch Brief template.
+   - **Tier `sonnet` / `opus` / `fable`:** dispatch the matching `implementer-<tier>` agent with a brief built from the Dispatch Brief template. A `Model: haiku` line, or a `Model: sonnet` line whose body cites no case on brainstorming step 12's list, is read as `opus`. Amend it to `opus` on the plan's own branch at the section open, record the drift in the Chapter, and dispatch `implementer-opus`.
 
      ```
      Dispatch Brief (all REQUIRED unless marked):
@@ -129,9 +129,6 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        verbatim from `<root>/agents/security-reviewer.md` by the same ladder. A
        grant failing either screen is narrowed, or returned to the main thread
        with the reason, rather than written
-     - [haiku only] The sibling pattern to follow and the self-surfacing gate
-       command, per `brainstorming/SKILL.md` step 12; if either cannot be
-       named, dispatch at opus
      - [below-fable session, fable tier] The explicit fable model override,
        passed only after step 1's capacity reading; the spec's tier
        assignment is the authorization

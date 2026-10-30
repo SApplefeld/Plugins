@@ -17,7 +17,7 @@ The second question is whether a session could make the change this test forbids
 
 **The section's `Tests:` line is the floor and the ceiling.** It names the contracts the section must pin, and it names the allocation the section may spend on them, as a count of tests or of test lines by layer. The implementer spends inside it. A candidate the triage passes that the allocation cannot hold goes to the orchestrator as a request naming the contract and the second surface, and the orchestrator grants it from the plan's reserve or declines it with a reason. A candidate is never written first and justified after. A fix round draws from the reserve too, and only the regression test for a defect that actually happened draws without asking. The reserve is a plan header, and the brainstorming skill states how the architect sets both.
 
-**A lower tier is told what to pin, never left to decide whether.** A haiku or sonnet section's `Tests:` line names each contract and the shape of its pin. A fable section may be handed the triage and the allocation and trusted to argue past it.
+**A lower tier is told what to pin, never left to decide whether.** A sonnet section's `Tests:` line names each contract and the shape of its pin. A fable section may be handed the triage and the allocation and trusted to argue past it.
 
 ## What Earns a Test
 

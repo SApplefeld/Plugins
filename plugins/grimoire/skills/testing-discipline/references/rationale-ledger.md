@@ -664,15 +664,15 @@ Extracted at `6bc07fb`: whole document (`skills.testing-discipline.SKILL.md`). A
 - passage: A fix round draws from the reserve too, and only the regression test for a defect that actually happened draws without asking.
 
 ### AG007
-- key: Name each contract and its pin's shape on a haiku or sonnet section's Tests: line.
+- key: Name each contract and its pin's shape on a sonnet section's Tests: line.
 - class: rule
 - source: plugins/grimoire/skills/testing-discipline/SKILL.md:20
-- provenance: section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, landing the draft written in that plan's design session of 2026-10-27 with the operator present, as its Intent records
-- verdict: keep
-- landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 1
+- provenance: section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` 2026-10-27, landing the draft written in that plan's design session of 2026-10-27 with the operator present, as its Intent records; narrowed in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, since no plan writes a haiku section.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
 - reason: The triage is a judgment call, and a lower tier handed it alone writes the tests it sees fit, the unsupervised pattern the plan's Intent describes. Naming each contract and its pin's shape moves that judgment to the architect for those tiers.
 - passage: A lower tier is told what to pin, never left to decide whether.
-- passage: A haiku or sonnet section's `Tests:` line names each contract and the shape of its pin.
+- passage: A sonnet section's `Tests:` line names each contract and the shape of its pin.
 
 ### AG008
 - key: Write a test for a contract whose break no gate short of a test reliably catches, with the earn list as that class's open instances.

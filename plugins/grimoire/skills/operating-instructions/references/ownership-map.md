@@ -13,7 +13,8 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Designing a non-trivial change: scope check, questions, spec | `brainstorming` |
 | A plan's `## Intent` record, its `Serves:` line and why chain included, and a ruling after the spec ships | `brainstorming` (step 9, step 1 for the direction ledgers the `Serves:` line cites and the interview that builds the chain, and its freeze paragraph for a later ruling) |
 | A plan's brief: its seven parts, register, bound and path, its write at plan open and its refresh before the ready | `prose-register` (Plan Brief) for the form and register, `brainstorming` (step 9) for the write, `finishing-work` (step 6) for the refresh |
-| A section's model tier, and the tier bands | `brainstorming` |
+| A section's writer: the opus default, the bar on haiku, and who extends the sonnet list | doctrine (Opus writes a dispatched section) |
+| The tier bands with every condition inside them, and the sonnet list's entries | `brainstorming` (step 12) |
 | A section's `Verify:` line, its acceptance commands' write-time trunk run and its pre-review run | `brainstorming` (Spec Format, steps 9 and 10), `executing-work` (step 2, the `Gate:` line) |
 | The scout sweep deriving a section's files in scope | `brainstorming` |
 | Reading a spec against its Goal before approval, the `[unrefusable-frame]` question included | `brainstorming` (step 10, plan review) |

@@ -1,6 +1,6 @@
 ---
 name: implementer-sonnet
-description: "Scoped implementation agent, Sonnet tier, the exception to the opus default. Use to implement a single Section of Work from an approved spec only where its body names a self-surfacing gate (a build or existing test that fails loudly on wrong output) and says the section holds no judgment call, never on a security-sensitive surface, with a sibling file to follow named where one exists. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
+description: "Scoped implementation agent, Sonnet tier, the exception to the opus default. Use to implement a single Section of Work from an approved spec only where its body cites a case on the brainstorming rubric's closed list of sonnet cases, a list the operator alone extends, never on a security-sensitive surface. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 effort: medium
