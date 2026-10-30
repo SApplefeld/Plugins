@@ -27,7 +27,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, holdOf, isPlanningDue, isRootFinished, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
+import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
@@ -36,20 +36,26 @@ import { claimResource, commonsWinner, readAllClaims, readAllEntries, type Commo
 import { compactionPassStep, type CompactionPassDeps, type CompactionPassOption } from "./compaction-pass";
 import { backoffFactor, bumpWindow, effectiveWindowCount, estimateTokens, fnv1aHash, shouldRunClassify } from "./cost-ledger";
 import { splitOf } from "./decision-journal";
-import type { drainOrphanSweep as drainOrphanSweepFromModule, drainSupervisorMailbox as drainSupervisorMailboxFromModule } from "./drains";
+import type { drainBoxNotices as drainBoxNoticesFromModule, drainOrphanSweep as drainOrphanSweepFromModule, drainSupervisorMailbox as drainSupervisorMailboxFromModule } from "./drains";
 import { fleetReadingOf, readFleetRows, type FleetLine, type fleetPromptText } from "./fleet";
 import type { PluginHost } from "./host";
 import { shownDoneStatement } from "./goal-persona";
 import type { HookBudget, LiveAskResult } from "./jev-live";
 import { SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundIn, deliveryPrefix, deliveryRecordProblem, enforceChannelWindow, listInboxRecords, mayReachPersona, readAskRecord, readInboxRecord, sendPluginRecord, sweepExpiredRecords, type InboxRecord } from "./operator";
+import { PLAN_ARCHIVE_DIRS } from "./plan-record";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
 import { CONTROLLER_DECISION, PLAN_SWITCH, PLAN_SWITCH_NO_MATCH, controllerLabelsOf, controllerLastAnswerText, controllerStateText, kaizenLine, resolverOf, type ControllerStateFact } from "./question-catalog";
 import { FINDING_COOLOFF_MS, FINDING_UNROUTABLE_AFTER_MS, buildSelfReviewInput, dedupeSelfReview, evictSelfReview, isClosureTimingLesson, isSelfScoringLesson, reviewOwnRecord, shouldSelfReview } from "./self-review";
 import type { SessionState } from "./session-state";
+import { readPersonaStore } from "./store-files";
 import { safeErrorText } from "./text";
 import { AGENT_HOLD_REPORT_MS } from "./turn-state-text";
 import { openAskBy, ownAskStands } from "./worker-ask";
 import type { ProcessRunResult } from "claude-code";
+
+// The line that opens the planner's roadmap block when the roadmap was read
+// from an archive place.
+const ROADMAP_ARCHIVED_SENTENCE = "This roadmap is archived as complete; plan only what the objective still needs.";
 
 // The parameters of a module function after its deps argument, so a
 // context field over an ask-layer or drains wrapper carries that wrapper's
@@ -98,6 +104,9 @@ export interface TickContext extends SharedHandlerState {
   fsExists: (path: string) => Promise<boolean>;
   fsRead: (path: string) => Promise<string>;
   fsWrite: (path: string, text: string) => Promise<void>;
+  // The engine's clock wait, for the store reader's second read of an empty
+  // store file.
+  sleep: (ms: number) => Promise<void>;
   completeSelfReview: (prompt: string) => Promise<unknown>;
   completePlanner: (planPrompt: string) => Promise<unknown>;
   classifyController: (summary: string, labels: readonly string[]) => Promise<string | undefined>;
@@ -124,6 +133,7 @@ export interface TickContext extends SharedHandlerState {
   appendToChannelLog: (lines: string[]) => Promise<string>;
   drainSupervisorMailbox: (...args: AfterDeps<typeof drainSupervisorMailboxFromModule>) => ReturnType<typeof drainSupervisorMailboxFromModule>;
   drainOrphanSweep: (...args: AfterDeps<typeof drainOrphanSweepFromModule>) => ReturnType<typeof drainOrphanSweepFromModule>;
+  drainBoxNotices: (...args: AfterDeps<typeof drainBoxNoticesFromModule>) => ReturnType<typeof drainBoxNoticesFromModule>;
   drainMemoryOwed: () => Promise<void>;
   drainAskBriefOwed: (cfg: Record<string, unknown>, expectedTurns: ExpectedTurn[]) => Promise<void>;
   drainPairDraftOwed: (turnOpen: (turnId: string) => boolean) => Promise<void>;
@@ -137,6 +147,7 @@ export interface TickContext extends SharedHandlerState {
   submitDelivery: (oldest: InboxRecord, ground: string, deliveryBlocks: string[]) => Promise<SubmitOutcome>;
   fleetStoreRefusedNote: (err: unknown) => FleetLine;
   submitFleet: (changed: Parameters<typeof fleetPromptText>[0], notes: FleetLine[], movedKeys: number, fleetNow: number) => Promise<SubmitOutcome>;
+  submitStoreLost: (line: FleetLine) => Promise<SubmitOutcome>;
   noteReconcileStoreRefused: (err: unknown) => void;
   submitReconcile: () => Promise<SubmitOutcome>;
   submitTrunkGate: () => Promise<SubmitOutcome>;
@@ -167,6 +178,8 @@ export interface TickContext extends SharedHandlerState {
   supervisorMailboxSkipped: Set<string>;
   orphanSweepFindings: string;
   orphanSweepSkipped: Set<string>;
+  boxNotices: string;
+  boxNoticesSkipped: Set<string>;
   reconcileEveryMs: number;
   trunkGateHour: number | undefined;
   nudgeFloorMs: number;
@@ -251,11 +264,9 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
   if (sess.isOwner) {
     let onDisk: { activeSessionId: string; epoch: number } | null = null;
     try {
-      if (await ctx.fsExists(sess.storePath)) {
-        const store = JSON.parse(await ctx.fsRead(sess.storePath)) as Record<string, unknown>;
-        const existing = store[sess.persona] as AgentState | undefined;
-        if (existing) onDisk = existing;
-      }
+      const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep }, sess.storePath);
+      const existing = store[sess.persona] as AgentState | undefined;
+      if (existing) onDisk = existing;
     } catch { /* store read failed */ }
 
     if (onDisk && shouldYield(onDisk, sess.mySessionId, sess.myEpoch)) {
@@ -417,9 +428,7 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
             // a live owner whose own slot is missing would read it at its
             // next persist and yield to a session that owns nothing.
             try {
-              const store: Record<string, unknown> = await ctx.fsExists(sess.storePath)
-                ? (JSON.parse(await ctx.fsRead(sess.storePath)) as Record<string, unknown>)
-                : {};
+              const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep }, sess.storePath);
               const existing = store[sess.persona] as AgentState | undefined;
               if (existing) {
                 const existingDecisions = existing.decisions ?? [];
@@ -446,9 +455,7 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
         // nothing is promoted.
         if (holderHb === null) return;
       }
-      const store: Record<string, unknown> = await ctx.fsExists(sess.storePath)
-        ? (JSON.parse(await ctx.fsRead(sess.storePath)) as Record<string, unknown>)
-        : {};
+      const store = await readPersonaStore({ exists: ctx.fsExists, read: ctx.fsRead, sleep: ctx.sleep }, sess.storePath);
       const existing = store[sess.persona] as AgentState | undefined;
       if (existing) {
         sess.state = parseState(JSON.stringify(existing));
@@ -772,14 +779,16 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
 // orphanSweepFindings option names one and the mailbox pass delivered no
 // shutdown: every unacknowledged finding is delivered as one labelled turn
 // where no turn is open, after which the tick ends the same way; while a
-// turn is open the findings stay for the first idle tick's pass. The cost
+// turn is open the findings stay for the first idle tick's pass. Then the
+// box notices file, where the boxNotices option names one and neither pass
+// above delivered, drained the same way under its own label. The cost
 // bookkeeping stays in the idle part, below
 // the fleet block: its persist is the bare store write whose throw the
 // fleet's tick-failure reading reports, and its sweep collects stale
 // commons entries the fleet block must read first. Resolves false where
 // nothing more runs this tick.
 export async function alwaysTick(ctx: TickContext): Promise<boolean> {
-  const { sess, expectedTurns, turnIsOpen, supervisorMailbox, supervisorMailboxSkipped, orphanSweepFindings, orphanSweepSkipped } = ctx;
+  const { sess, expectedTurns, turnIsOpen, supervisorMailbox, supervisorMailboxSkipped, orphanSweepFindings, orphanSweepSkipped, boxNotices, boxNoticesSkipped } = ctx;
   // 1. Owner check.
   if (!sess.isOwner) return false;
   if (supervisorMailbox !== "") {
@@ -795,6 +804,13 @@ export async function alwaysTick(ctx: TickContext): Promise<boolean> {
       try { await ctx.persist(); } catch { /* the store refused; the lines above wait in memory */ }
     }
     if (sweep.delivered) return false;
+  }
+  if (boxNotices !== "") {
+    const notices = await ctx.drainBoxNotices(boxNotices, expectedTurns, boxNoticesSkipped, turnIsOpen);
+    if (notices.logged) {
+      try { await ctx.persist(); } catch { /* the store refused; the lines above wait in memory */ }
+    }
+    if (notices.delivered) return false;
   }
 
   return true;
@@ -830,6 +846,40 @@ export function trunkGateDecision(now: Date, hour: number, stampedDate: string |
 // is open.
 export async function idleTick(ctx: TickContext): Promise<void> {
   const { liveAsk, shadowAsk, shadowOutcome, selfReviewLessonCount, nudgeCapAskText, completionText, completionShape, noteCompletionShape, dropDecision, clearAgentHold, PROPOSAL_EVERY_MS, PLAN_RECORD_MAX_RESENDS, sess, cfg, expectedTurns, turnIsOpen, MAX_CONSECUTIVE_NUDGES, controllerTickMs, coordinatorPersona, architectPersona, fleetRoster, reconcileEveryMs, trunkGateHour, nudgeFloorMs, nudgeIdleMs, gitProbeMs, selfReviewStreak, selfReviewDebounceTurns, selfReviewMaxPerHour, costEnabled, costMaxNudgesPerHour, costMaxPluginCallsPerHour, costBackoffAfterTicks, costBackoffMaxMs, jevMode, jevLive } = ctx;
+  // The lost store. A session that came up on a store that was empty or
+  // would not read says so in the first prompt this part submits. The fleet
+  // block below carries the line on the coordinator persona's [FLEET] prompt
+  // where it watches a roster; every other session has no such prompt, and
+  // a persona whose tree is gone holds no active goal, so nothing else here
+  // opens a turn and the loss would sit in a decision line no one reads. So
+  // those sessions get a [STORE LOST] turn of their own, ahead of the fleet
+  // block and the inbox drain, and the model tells the coordinator, which
+  // re-queues the work. The line is cleared here, before the submit, and
+  // not when the submit reports. The prompt submit does not resolve until
+  // the session is next idle, and until that turn opens the tick sees no
+  // open turn and runs in full, so a tick landing in that window would read
+  // the same line and queue a second [STORE LOST] turn beside the first. A
+  // refused submit puts the line back and records why, so the next idle
+  // tick says it again rather than the session going quiet.
+  if (!(sess.persona === coordinatorPersona && fleetRoster !== "")) {
+    const storeLostLine = ctx.startStoreProblem();
+    if (storeLostLine !== null) {
+      ctx.setStartStoreProblem(null);
+      const storeLostOutcome = await ctx.submitStoreLost(storeLostLine);
+      if (!storeLostOutcome.ok) {
+        ctx.setStartStoreProblem(storeLostLine);
+        sess.state.decisions.push({
+          timestamp: Date.now(),
+          loop: "monitor",
+          action: "store_lost_prompt_failed",
+          detail: `the [STORE LOST] turn was ${storeLostOutcome.how}, so the line stands for the next idle tick: ${storeLostOutcome.reason}`.slice(0, 200),
+        });
+        // Attempted rather than depended on, as at the [FLEET] submit below:
+        // the store may be the thing refusing, and the line waits in memory.
+        try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
+      }
+    }
+  }
   // Section 6: the fleet wake. The steward is woken by this block rather
   // than by a cadence written into its own standing instruction. A duty
   // written "on each tick" states a trigger the runtime does not have:
@@ -1648,7 +1698,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         // alone.
         const inboxForReview = sess.isOwner ? await listInboxRecords(ctx.commonsStore(), sess.persona) : [];
         const findings = reviewOwnRecord(
-          { decisions: sess.state.decisions, memory: sess.state.memory, inbox: inboxForReview, sent: sr.sent.map((e) => ({ signal: e.signal, sentAt: e.sentAt })) },
+          { decisions: sess.state.decisions, memory: sess.state.memory, inbox: inboxForReview, sent: sr.sent.map((e) => ({ signal: e.signal, sentAt: e.sentAt })), architectPersona: ctx.architectPersona },
           { selfReviewEveryTurns: ctx.selfReviewEveryTurns(), selfReviewDebounceTurns, now },
         );
         for (const f of findings) {
@@ -2078,14 +2128,41 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       }
 
       // R2: re-read the roadmap file at every planning event.
+      // Where the file is gone, the same name under the plan-record reader's
+      // archive places answers, and the prompt says so. A roadmap found nowhere
+      // is recorded once for this event.
       let roadmapText = "";
+      let roadmapArchived = false;
+      let roadmapFound = false;
       const rp = root!.roadmapPath;
       if (rp) {
         try {
           if (await ctx.fsExists(rp)) {
             roadmapText = await ctx.fsRead(rp);
+            roadmapFound = true;
+          } else {
+            const name = rp.split(/[\\/]/).pop() ?? "";
+            if (name !== "" && name !== "." && name !== "..") {
+              for (const dir of PLAN_ARCHIVE_DIRS) {
+                const archived = `${dir}/${name}`;
+                if (await ctx.fsExists(archived)) {
+                  roadmapText = await ctx.fsRead(archived);
+                  roadmapFound = true;
+                  roadmapArchived = true;
+                  break;
+                }
+              }
+            }
           }
         } catch { /* roadmap unreadable; planner gets empty text */ }
+        if (!roadmapFound) {
+          sess.state.decisions.push({
+            timestamp: Date.now(),
+            loop: "goal",
+            action: "roadmap_missing",
+            detail: `Root ${root!.id}: no readable roadmap at ${bracketSafeText(oneLine(rp))} or its archive places`,
+          });
+        }
       }
 
       // Planning call: Haiku complete, JSON array of plans.
@@ -2119,11 +2196,11 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         `The operator's objective is: "${root!.objective}".\n\n` +
         doneWhenBlock +
         (roadmapText
-          ? `Roadmap file content:\n${roadmapText}\n\n`
+          ? (roadmapArchived ? `${ROADMAP_ARCHIVED_SENTENCE}\n` : "") + `Roadmap file content:\n${roadmapText}\n\n`
           : "") +
         historyBlock +
         `Create a plan of 0 to 7 steps to accomplish the objective.\n` +
-        (roadmapText
+        (roadmapText && !roadmapArchived
           ? `When a roadmap is provided, produce exactly one plan per numbered roadmap item.\n`
           : "") +
         `Return a JSON array. Each element: {"title": string, "objective": string, "maxRounds": number (5-20)}.\n` +
@@ -2266,8 +2343,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         });
 
         // BM2: Check planner variance (flag, not trim)
-        if (roadmapText) {
-          // Count numbered items in the roadmap
+        if (roadmapText && !roadmapArchived) {
+          // Count numbered items in the roadmap (an archived roadmap is not counted)
           const numberedItems = roadmapText.match(/^\d+\./gm) || [];
           const roadmapCount = numberedItems.length;
           if (plans.length !== roadmapCount) {

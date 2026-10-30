@@ -16,12 +16,27 @@ import { MEMQ_NAME_CHARSET } from "./stretch-distillation";
 // cause stands.
 export const STATE_NOT_LOADED_STORE_CAUSE = "the store file could not be read, so this session came up on an empty default state";
 
+// The two phrases session.start composes into its start-up store line, one for
+// a store that would not read and one for a store that was empty, shared with
+// the store_empty_at_start decision line and with the tests that tell the two
+// starts apart. The line has two carriers: a note on the first [FLEET] prompt
+// for the coordinator persona watching a roster, and a [STORE LOST] turn of
+// its own for every other session.
+export const STORE_UNREADABLE_AT_START = "could not be read when this session started";
+export const STORE_EMPTY_AT_START = "was empty when this session started";
+
+// How long readPersonaStore waits before it reads an empty store file a
+// second time. The engine's fs.write truncates the file before it writes the
+// text, so a read landing between the two finds the file empty while a
+// peer's write is still under way.
+export const STORE_EMPTY_REREAD_MS = 50;
+
 export function stateNotLoadedText(cause: string): string {
   return `This session never loaded its persona's state: ${cause}. The stored goal tree is not shown and was not changed.`;
 }
 
-// The persona store's text parsed and shape-checked, for the reads that load a
-// persona's state from it: session.start's and agentic_identity's two. A parse
+// The persona store's text parsed and shape-checked, for readPersonaStore
+// below, which every read of the store in hooks/ goes through. A parse
 // that returns is not a store that read. JSON.parse("null") returns null, and
 // an array, a number and a string all parse as cleanly, but none of them holds
 // a persona entry to load or an object a claim can be written into: a lookup
@@ -34,6 +49,38 @@ export function parsePersonaStore(text: string): Record<string, unknown> {
     throw new Error(`the file parsed as ${parsed === null ? "null" : Array.isArray(parsed) ? "an array" : typeof parsed} rather than as an object of persona entries`);
   }
   return parsed as Record<string, unknown>;
+}
+
+// The persona store file read, for every site that loads a persona's state
+// from it or writes into it. An absent file, and a file whose text is empty
+// or whitespace alone on two reads, read as a store with no entries. A
+// zero-byte file is what a truncating write leaves when the disk refuses the
+// text: it holds nothing another persona could lose, and reading it as empty
+// is what lets the owner's next write rebuild it. The same truncation shows
+// for a moment on every write, since the engine empties the file before it
+// writes the text, so a store several personas share reads empty while a
+// peer's write is under way. An empty first read is therefore read again
+// once, after STORE_EMPTY_REREAD_MS through fs.sleep, and only a second empty
+// read, or a file gone by then, reads as empty. A first read holding text is
+// never read again. Any text, on either read, goes through parsePersonaStore
+// and keeps its refusals, since a file holding text may be another persona's
+// tree or a write caught midway. onEmpty is called wherever the second read
+// reads as empty, which is how session.start tells a lost store from one
+// never written.
+export type PersonaStoreFs = { exists(path: string): Promise<boolean>; read(path: string): Promise<string>; sleep(ms: number): Promise<void> };
+
+export async function readPersonaStore(fs: PersonaStoreFs, path: string, onEmpty?: () => void): Promise<Record<string, unknown>> {
+  if (!(await fs.exists(path))) return {};
+  let text = await fs.read(path);
+  if (text.trim() === "") {
+    await fs.sleep(STORE_EMPTY_REREAD_MS);
+    text = (await fs.exists(path)) ? await fs.read(path) : "";
+    if (text.trim() === "") {
+      onEmpty?.();
+      return {};
+    }
+  }
+  return parsePersonaStore(text);
 }
 
 // The three files a supervised session keeps in its launch directory, and

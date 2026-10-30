@@ -40,7 +40,7 @@ import type { PluginHost } from "./host";
 import type { HookBudget } from "./jev-live";
 import type { boundaryBankCompactionBoundary, boundaryKitInstallPathOf } from "./memq-boundary";
 import { memqVerbArgsOf } from "./memq-command";
-import { COORDINATOR_GROUND, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundAtSend, deliveryGroundIn, deliveryRecordProblem, getHighestInboxSeq, listAskRecords, listInboxRecords, mayReachPersona, personaNameProblem, readAskRecord, readReplyRecord, writeInboxRecord, type InboxRecord } from "./operator";
+import { COORDINATOR_GROUND, architectLineRecords, askKey, claimReaderRole, deliveryArchitectLine, deliveryGroundAtSend, deliveryGroundIn, deliveryRecordProblem, getHighestInboxSeq, heldForDrain, listAskRecords, listInboxRecords, mayReachPersona, parseStoreRecord, personaNameProblem, readAskRecord, readReplyRecord, resolutionRecordText, senderPersonaOf, writeInboxRecord, type InboxRecord } from "./operator";
 import { parseScanPairs } from "./pair-drafter";
 import type { PlanRecordReading } from "./plan-record";
 import { isPlanEntry, planLeftOpenText, planStatusText, reactivateAskedEntry } from "./plan-route";
@@ -50,7 +50,7 @@ import { shellCommandOf } from "./recognition";
 import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validateRosterEntry, writeRoster } from "./roster";
 import type { addGoalEntry as addGoalEntryFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, promoteOpenRecord as promoteOpenRecordFromModule } from "./records";
 import { skillPickTool } from "./skill-pick";
-import { GOAL_HISTORY_FILENAME, parsePersonaStore, stateNotLoadedText } from "./store-files";
+import { GOAL_HISTORY_FILENAME, readPersonaStore, stateNotLoadedText } from "./store-files";
 import { TURN_BUDGET_PAUSED_REASON, TURN_BUDGET_REASON, turnBudgetResumeRefusedText } from "./goal-persona";
 import { markStretchApplied, noteStretchShown, stretchShownOfGet } from "./stretch-distillation";
 import { FREE_TEXT_MAX, boundedText, safeErrorText, stripBom } from "./text";
@@ -80,6 +80,9 @@ export interface ToolCallContext extends SharedHandlerState {
   fsExists: (path: string) => Promise<boolean>;
   fsRead: (path: string) => Promise<string>;
   fsWrite: (path: string, text: string) => Promise<void>;
+  // The engine's clock wait, for the store reader's second read of an empty
+  // store file.
+  sleep: (ms: number) => Promise<void>;
   commonsStore: () => CommonsStore;
   host: () => PluginHost;
   compactionPassDeps: () => CompactionPassDeps;
@@ -144,11 +147,52 @@ export interface ToolCallContext extends SharedHandlerState {
   setLastBreakInCheckAt: (value: number) => void;
 }
 
+// What a goal tool's store write came to: true where it landed, false where
+// persist yielded, and the error text where it threw.
+export type GoalWriteOutcome = boolean | { failed: string };
+
+// A goal tool's store write. persist reads and writes the store with no try
+// of its own, so a store that does not parse or a disk that refuses the write
+// throws here, and a throw left to unwind would leave the caller unanswered
+// while the change stands in memory. A settled write returns persist's
+// boolean, with `rollBack` handed to persist for the yield path. A throw runs
+// `rollBack` where one was given, pushes one goal_write_failed decision naming
+// the tool, the ids the change touched and the error, and returns the error
+// text, bounded and bracket-safe, for the tool's answer. The decision waits
+// in memory with the change, and both land on the next write that succeeds.
+export async function persistAnswering(
+  ctx: Pick<ToolCallContext, "persist" | "sess">,
+  tool: string,
+  applied: string,
+  rollBack?: () => void,
+): Promise<GoalWriteOutcome> {
+  try {
+    return await ctx.persist(rollBack);
+  } catch (err) {
+    rollBack?.();
+    const failed = boundedText(safeErrorText(err));
+    ctx.sess.state.decisions.push({
+      timestamp: Date.now(),
+      loop: "goal",
+      action: "goal_write_failed",
+      detail: `${tool} on ${applied}: the store write failed with ${failed}; the change ${rollBack ? "was rolled back" : "stands in memory"}`,
+    });
+    return { failed };
+  }
+}
+
+// The sentence a goal tool's answer ends with where its store write threw and
+// its change stands in memory. A tool whose repeat adds a second copy says so,
+// since the caller cannot tell from the store that the first one applied.
+export function goalWriteFailedText(failed: string, repeatDoubles: boolean): string {
+  return ` The store write failed with ${failed}; the change stands in memory and lands on the next write that succeeds.${repeatDoubles ? " A repeat of this call would apply it twice." : ""}`;
+}
+
 // The served body: what the handler's try block in hooks/index.ts answered
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsOperators, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsOperators, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -277,9 +321,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // as a persona state is refused below, both before the session takes the
     // new name, resets its untracked-work line or releases its old claim. A
     // refused switch leaves the session on the persona it held.
-    const store: Record<string, unknown> = await fsExists(sess.storePath)
-      ? parsePersonaStore(await fsRead(sess.storePath))
-      : {};
+    const store = await readPersonaStore({ exists: fsExists, read: fsRead, sleep }, sess.storePath);
     const previousPersona = sess.persona;
     // An absent or falsy slot stays absent and takes the default state
     // below. A slot that does not parse refuses the switch with a deny that
@@ -582,10 +624,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     setCountResetSinceNudgeOpened(true);
     sess.lastNudgeAt = 0;
 
-    const writeOk = await persist();
-    if (writeOk) {
+    const written = await persistAnswering(ctx, "goal_create", rootId);
+    if (written !== false) {
       return {
-        result: `Root created; planning runs at the next controller tick.`,
+        result: `Root created; planning runs at the next controller tick.${written === true ? "" : goalWriteFailedText(written.failed, false)}`,
       };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -780,6 +822,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       coordinatorPersona,
       architectPersona,
     });
+    if (!added.ok && added.failed !== undefined) {
+      return { result: `Not added: the store write failed with ${added.failed}; the plan entry was taken back out of the tree and no record went to the coordinator persona. A repeat of this call is safe.` };
+    }
     if (!added.ok) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       return { deny: added.deny };
@@ -793,10 +838,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         : awaitingYes ? ` It waits paused for the operator's yes, and a [PROPOSAL] record naming ${newNode.id} went to the coordinator persona.`
         : ` A [STARTED] record naming ${newNode.id} went to the coordinator persona.`;
       const fromTask = sourceTask === undefined ? "" : ` The task ${sourceTask.id} it was made from left the list.`;
+      const writeFailed = added.writeFailed === undefined ? "" : goalWriteFailedText(added.writeFailed, true);
       return {
         result: (nextActive
           ? `Added ${kind} "${title.slice(0, 50)}". Now active: ${nextActive.id} "${nextActive.title}".`
-          : `Added ${kind} "${title.slice(0, 50)}". No active goal; planning or activation will occur at the next tick.`) + told + fromTask,
+          : `Added ${kind} "${title.slice(0, 50)}". No active goal; planning or activation will occur at the next tick.`) + told + fromTask + writeFailed,
       };
     }
   }
@@ -917,9 +963,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       });
     }
 
-    const writeOk = await persist();
-    if (writeOk) {
-      return { result: `${action} applied to ${nodeId}. Now: [${node.status}] "${node.title}".` };
+    const written = await persistAnswering(ctx, "goal_edit", nodeId);
+    if (written !== false) {
+      return { result: `${action} applied to ${nodeId}. Now: [${node.status}] "${node.title}".${written === true ? "" : goalWriteFailedText(written.failed, false)}` };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
@@ -952,6 +998,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const list = sess.state.longTermGoals;
     const now = Date.now();
     let resultText: string;
+    let changedId: string;
 
     if (action === "add") {
       const title = String((e as any).title || "").trim();
@@ -986,6 +1033,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         detail: `${entry.id} "${entry.title.slice(0, 50)}"`,
       });
       resultText = `Long-term goal added: ${entry.id} "${entry.title}".`;
+      changedId = entry.id;
     } else {
       const id = String((e as any).id || "").trim();
       const reason = String((e as any).reason || "").trim();
@@ -1011,11 +1059,12 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         detail: `${dropped.id} "${String(dropped.title ?? "").slice(0, 50)}": ${reason.slice(0, 80)}`,
       });
       resultText = `Long-term goal dropped: ${dropped.id} "${String(dropped.title ?? "")}".`;
+      changedId = dropped.id;
     }
 
-    const writeOk = await persist();
-    if (writeOk) {
-      return { result: resultText };
+    const written = await persistAnswering(ctx, "goal_longterm", changedId);
+    if (written !== false) {
+      return { result: written === true ? resultText : resultText + goalWriteFailedText(written.failed, action === "add") };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
@@ -1054,12 +1103,17 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       detail: `${previous} -> ${level}`,
     };
     sess.state.decisions.push(decision);
-    const writeOk = await persistOrRollBack(() => {
+    // A thrown write rolls the level back too, so the answer says it did not
+    // change and a repeat is safe.
+    const written = await persistAnswering(ctx, "goal_autonomy", `autonomy ${previous} -> ${level}`, () => {
       sess.state.autonomy = previous;
       dropDecision(decision);
     });
-    if (writeOk) {
+    if (written === true) {
       return { result: `Autonomy level set: ${level} (was ${previous}).` };
+    }
+    if (written !== false) {
+      return { result: `Autonomy level not changed: the store write failed with ${written.failed}; it stays ${previous}. A repeat of this call is safe.` };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
@@ -1148,12 +1202,12 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         named.blockedReason = undefined;
         named.lead = null;
         await completeRootByGoalDone(named, note);
-        const rootWriteOk = await persist();
-        if (!rootWriteOk) {
+        const rootWritten = await persistAnswering(ctx, "goal_done", named.id);
+        if (rootWritten === false) {
           setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
           return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
         }
-        return { result: `Complete: "${named.title}" (the root). Every entry under it was complete or abandoned; the goal tree is finished.` };
+        return { result: `Complete: "${named.title}" (the root). Every entry under it was complete or abandoned; the goal tree is finished.${rootWritten === true ? "" : goalWriteFailedText(rootWritten.failed, false)}` };
       }
       if (named.status === "complete" || named.status === "abandoned") {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -1290,8 +1344,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       sess.state.monitor.selfReview.pendingPeriodic = true;
     }
 
-    const writeOk = await persist();
-    if (writeOk) {
+    const doneIds = [...new Set([completedId, ...closedIds, ...(nextId ? [nextId] : [])])].join(", ");
+    const written = await persistAnswering(ctx, "goal_done", doneIds);
+    if (written !== false) {
+      const writeFailed = written === true ? "" : goalWriteFailedText(written.failed, false);
       // F4: goal_done result names the health command, exit code, and first tail line.
       const health = sess.state.monitor.env.health;
       let healthText = "";
@@ -1330,17 +1386,17 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
           ? ` A plan is finished and another is next: report and end this turn now, with no WAITING: or BLOCKED: line. The next turn starts ${nextId}.`
           : "";
         return {
-          result: `Complete: "${completedTitle}".${leftOpenText} Next active: ${nextId} "${nextNode.title}".${handOverText}${healthText}`,
+          result: `Complete: "${completedTitle}".${leftOpenText} Next active: ${nextId} "${nextNode.title}".${handOverText}${healthText}${writeFailed}`,
         };
       }
       if (otherActive && !wasActive) {
-        return { result: `Complete: "${completedTitle}".${leftOpenText} ${otherActive.id} "${otherActive.title}" is still active.${healthText}` };
+        return { result: `Complete: "${completedTitle}".${leftOpenText} ${otherActive.id} "${otherActive.title}" is still active.${healthText}${writeFailed}` };
       }
       if (heldBy) {
-        return { result: `Complete: "${completedTitle}".${leftOpenText} Nothing was activated: ${heldBy}.${healthText}` };
+        return { result: `Complete: "${completedTitle}".${leftOpenText} Nothing was activated: ${heldBy}.${healthText}${writeFailed}` };
       }
-      if (leftOpenText !== "") return { result: `Complete: "${completedTitle}".${leftOpenText}${healthText}` };
-      return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${healthText}` };
+      if (leftOpenText !== "") return { result: `Complete: "${completedTitle}".${leftOpenText}${healthText}${writeFailed}` };
+      return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${healthText}${writeFailed}` };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
@@ -1852,8 +1908,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         detail: `Root ${budgetRoot.id} resumed (blocked: ${TURN_BUDGET_REASON}, ${spent} of ${budget} turns; turn budget restarted, ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending)`,
       });
       sess.state.updatedAt = liftedAt;
-      await persist();
-      return { result: `Resumed root ${budgetRoot.id} "${budgetRoot.title}". Turn budget restarted: ${budget} turns again. ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending; the controller's next tick starts one.` };
+      const rootWritten = await persistAnswering(ctx, "goal_resume", budgetRoot.id);
+      const rootResumed = `Resumed root ${budgetRoot.id} "${budgetRoot.title}". Turn budget restarted: ${budget} turns again. ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending; the controller's next tick starts one.`;
+      return { result: typeof rootWritten === "boolean" ? rootResumed : rootResumed + goalWriteFailedText(rootWritten.failed, false) };
     }
     // While the turn budget blocks the root, no other entry resumes, the
     // entries the block paused among them, and the call naming none picks
@@ -1999,8 +2056,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       if (entry.nodeId === target.id) liftAsk(sess.state, entry.id);
     }
     sess.state.updatedAt = Date.now();
-    await persist();
-    return { result: `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.${budgetRelease ? " Round budget restarted." : ""}` };
+    const written = await persistAnswering(ctx, "goal_resume", target.id);
+    const resumed = `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.${budgetRelease ? " Round budget restarted." : ""}`;
+    return { result: typeof written === "boolean" ? resumed : resumed + goalWriteFailedText(written.failed, false) };
   }
 
   // Serve memory_add.
@@ -2168,16 +2226,68 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       const holder = await readHolderMeta(commonsStore(), `persona:${persona}`, sess.staleAfterMs);
       if (holder) { ownerTurnStartedAt = holder.turnStartedAt; ownerWorkdir = holder.workdir; }
     } catch { /* commons read failed; report records without the deferred view */ }
-    // Attach replies to records, and the deferred view to pending ones.
+    // Attach replies to records, and the deferred view to pending ones. The
+    // readAt stamp below is for the window roll and not the reader, so the
+    // result leaves it out and a stamped record reads as it did unstamped.
     const withReplies = await Promise.all(myRecords.map(async (rec) => {
       const reply = await readReplyRecord(commonsStore(), persona, rec.id);
-      const base = reply ? { ...rec, reply: reply.text } : rec;
+      const shown: InboxRecord = { ...rec };
+      delete shown.readAt;
+      const base = reply ? { ...shown, reply: reply.text } : shown;
       if (rec.status === "pending" && ownerTurnStartedAt !== null) {
         return { ...base, deferred: true, turnRunningMs: Math.max(0, Date.now() - ownerTurnStartedAt) };
       }
       return base;
     }));
-    return { result: JSON.stringify({ inbox: withReplies, asks: openAsks, ...(ownerWorkdir !== null ? { workdir: ownerWorkdir } : {}) }, null, 2) };
+    const result = JSON.stringify({ inbox: withReplies, asks: openAsks, ...(ownerWorkdir !== null ? { workdir: ownerWorkdir } : {}) }, null, 2);
+    // A resolved record this call returned is stamped readAt, which lets the
+    // owner's window roll take it: until then the roll keeps it, so the
+    // resolution waits for its sender rather than rolling unread. The file's
+    // one-writer rule holds: this session wrote the record, so the sender
+    // stamps its own record here, and the owner alone advances its status.
+    // Each stamp re-reads the record and writes only where it is still
+    // resolved and unstamped. Three owner writes can land between a read and
+    // a set. The owner's reply filing reads and re-sets a resolved record and
+    // can drop a stamp written between its read and its set; the record then
+    // waits for the next call or the TTL sweep. The owner's agentic_resolve
+    // writes noteSentAs after its push, and a stamp whose re-read precedes
+    // that write and whose set follows it drops noteSentAs. The record still
+    // rolls, since readAt is set, and the roll is noteSentAs's only reader.
+    // A sweep or roll that deletes the record between the re-read and the
+    // set has the set write it back, so a later roll or sweep logs it to the
+    // channel log a second time. A failed read or set leaves that record as
+    // it was, and the call logs one inbox_read_stamp_failed however many
+    // failed, then returns its result.
+    const store = commonsStore();
+    let stampsTried = 0;
+    let stampFailures = 0;
+    let firstStampError: unknown = undefined;
+    for (const rec of myRecords) {
+      if (rec.status !== "resolved" || rec.readAt !== undefined || !rec.key) continue;
+      stampsTried++;
+      try {
+        const again = parseStoreRecord<InboxRecord>(await store.get(rec.key));
+        if (again !== null && again.status === "resolved" && again.readAt === undefined) {
+          again.readAt = Date.now();
+          await store.set(rec.key, again);
+        }
+      } catch (err) {
+        stampFailures++;
+        if (firstStampError === undefined) firstStampError = err;
+      }
+    }
+    if (stampFailures > 0) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "worker",
+        action: "inbox_read_stamp_failed",
+        detail: `readAt not written on ${stampFailures} of ${stampsTried} resolved records to '${persona}': ${boundedText(safeErrorText(firstStampError))}`,
+      });
+      // Attempted rather than depended on: the stamp is for the roll, so a
+      // refused persist leaves the line in memory for the next write.
+      try { await persist(); } catch { /* persist could not read or write the store; the decision waits in memory */ }
+    }
+    return { result };
   }
 
   // Section 3: serve fleet_status (one row per roster persona: what the
@@ -2636,6 +2746,57 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return { deny: `record '${id}' left the store before it could be resolved.` };
     }
     const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
+    // A non-empty note is pushed to the persona the sender's session owns, as
+    // an ordinary record from this session. The claims and the ground are
+    // read before the flip below: the answer leg opens only on a record of
+    // the target's owner that is still delivered or answered, so an
+    // architect reading after the flip would lose its answer stamp. A record
+    // that is itself a pushed note pushes nothing, so a note exchange ends at
+    // one hop. The push is attempted, not depended on: a read that throws
+    // here leaves the resolve to land and is logged after it. The gate and
+    // the pushed text read the trimmed note, as agentic_say reads its text,
+    // so a whitespace-only note pushes nothing; the record keeps the note
+    // as given.
+    const pushNote = note.trim();
+    let senderPersona: string | null = null;
+    let pushAnswersRecord = false;
+    let unpushed: string | null = null;
+    let pushReadError: unknown = undefined;
+    if (pushNote !== "") {
+      if (typeof target.resolutionOf === "string" && target.resolutionOf !== "") {
+        unpushed = "resolution_record";
+      } else {
+        try {
+          const claims = await readAllClaims(store, sess.staleAfterMs);
+          const found = senderPersonaOf(claims, target.from);
+          if (found === null) {
+            unpushed = "no_persona";
+          } else if (personaNameProblem(found) !== null) {
+            // The name is store data; one that fails the name rule would key
+            // the push under another persona's prefix.
+            unpushed = "bad_name";
+          } else if (target.from === sess.mySessionId) {
+            // A record this session wrote itself, such as a plugin-composed
+            // send, pushes nothing: deliveryGroundIn grants the coordinator
+            // ground before it refuses a writer-owned target, so a push here
+            // would land in this session's own turn.
+            unpushed = "no_claim";
+          } else {
+            // The ground reads the claims already read above.
+            const records = await architectLineRecords(store, claims, sess.mySessionId, architectPersona);
+            const ground = deliveryGroundIn(claims, found, sess.mySessionId, coordinatorPersona, { persona: architectPersona, records });
+            if ("ground" in ground) {
+              senderPersona = found;
+              pushAnswersRecord = ground.answersRecord !== undefined;
+            } else {
+              unpushed = ground.refused;
+            }
+          }
+        } catch (err) {
+          pushReadError = err;
+        }
+      }
+    }
     parsed.status = "resolved";
     parsed.resolvedAt = Date.now();
     parsed.outcome = outcome;
@@ -2647,6 +2808,57 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       action: "operator_resolved",
       detail: `record ${id} resolved ${outcome}${note ? `: "${note.slice(0, 80)}"` : ""}`,
     });
+    // The resolve has landed; nothing below may turn it into a throw or a
+    // refusal. An answer-leg push is stamped with the resolved record's id
+    // rather than the leg's own pick, which is the owner's first open record
+    // to the architect and may be another one.
+    let pushedId: string | null = null;
+    let pushError: unknown = pushReadError;
+    if (senderPersona !== null) {
+      try {
+        const seq = await getHighestInboxSeq(store, senderPersona, sess.mySessionId) + 1;
+        pushedId = await writeInboxRecord(store, senderPersona, sess.mySessionId, seq, resolutionRecordText(id, outcome, pushNote), "say", undefined, false, pushAnswersRecord ? id : undefined, id);
+      } catch (err) {
+        pushError = err;
+      }
+    }
+    if (pushedId !== null) {
+      // The stamp says the note reached the sender's persona. A stamp that
+      // fails leaves the push standing and is named on the decision.
+      let stampFailed = "";
+      try {
+        const again = parseStoreRecord<InboxRecord>(await store.get(target.key));
+        if (again !== null) {
+          again.noteSentAs = pushedId;
+          await store.set(target.key, again);
+        } else {
+          stampFailed = "; noteSentAs was not written: the record was not found for the stamp";
+        }
+      } catch (err) {
+        stampFailed = `; noteSentAs was not written: ${boundedText(safeErrorText(err))}`;
+      }
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "worker",
+        action: "operator_resolution_pushed",
+        detail: `record ${id}: the note was sent to '${senderPersona}' as record ${pushedId}${stampFailed}`,
+      });
+    } else if (pushError !== undefined) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "worker",
+        action: "operator_resolution_push_failed",
+        detail: `record ${id}: ${boundedText(safeErrorText(pushError))}`,
+      });
+      unpushed = "push_failed";
+    } else if (unpushed !== null) {
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "worker",
+        action: "operator_resolution_unpushed",
+        detail: `record ${id}: ${unpushed}`,
+      });
+    }
     // Attempted rather than depended on. The resolve itself is the commons
     // record written above, which stands whatever the persona store does, so
     // a throw here would tell the caller the resolve failed after it landed
@@ -2654,6 +2866,12 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // decision line stands in memory and the first write that is not refused
     // carries it.
     try { await persist(); } catch { /* persist could not read or write the store; the line above waits in memory */ }
+    if (pushedId !== null) {
+      return { result: `Record ${id} resolved (${outcome}); the note was sent to ${senderPersona} as record ${pushedId}.` };
+    }
+    if (unpushed !== null) {
+      return { result: `Record ${id} resolved (${outcome}); the note was not sent: ${unpushed}.` };
+    }
     return { result: `Record ${id} resolved (${outcome}).` };
   }
 
@@ -2889,8 +3107,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         // grounds it is compared against are the ones deliveryGroundIn
         // produces, the coordinator's read from the same constant, so
         // producer and check cannot drift.
-        if (ground === null || ground === COORDINATOR_GROUND) continue;
-        if (architectPersona !== "" && ground === `WORKER:${architectPersona}`) continue;
+        if (ground === null || heldForDrain(ground, architectPersona)) continue;
         grounds.set(rec, ground);
         break;
       }

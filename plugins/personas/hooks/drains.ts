@@ -5,12 +5,13 @@
 // decisions its writes log; the ask brief drain, which drafts a worker ask's
 // decision brief and writes it onto the ask entry and the commons record; the
 // pair drain, which drafts the [PAIR DRAFTS] block a decay scan owes; the
-// pass over the supervisor's mailbox; and the pass over the orphan sweeper's
-// findings file. hooks/index.ts holds the wiring: the
+// pass over the supervisor's mailbox; and the passes over the orphan
+// sweeper's findings file and the box notices file. hooks/index.ts holds the
+// wiring: the
 // deps each call takes, the session object these functions read and write,
 // the fork watches among its fields, the fork and completion model requests,
 // whose scrub test-personas/redactor-module-test.mjs reads from that file,
-// and the [SUPERVISOR] and [ORPHAN SWEEP] submits, whose frames
+// and the [SUPERVISOR], [ORPHAN SWEEP] and [BOX NOTICE] submits, whose frames
 // test-personas/injection-ledger.mjs reads from that file.
 //
 // No `import $` and no side effects at load. The engine's loader follows `$`
@@ -52,8 +53,9 @@ export type DrainsSession = Pick<SessionState, "persona" | "mySessionId" | "isOw
 // write that gives the persona up; the memq run; the scrubbed transcript
 // fork and the memory fallback's scrubbed Haiku completion, with the
 // completion reader and the no-text note; the follow-up queue's decision
-// writer; the [SUPERVISOR] and [ORPHAN SWEEP] submits; and the JSONL append
-// the two ack files take.
+// writer; the [SUPERVISOR], [ORPHAN SWEEP] and [BOX NOTICE] submits; the
+// one-record scrub the box notices pass runs before its ack write; and the
+// JSONL append the three ack files take.
 export interface DrainsDeps {
   session: DrainsSession;
   host: PluginHost;
@@ -69,6 +71,8 @@ export interface DrainsDeps {
   appendLines: (path: string, lines: string[]) => Promise<void>;
   submitSupervisorShutdown: (expectedTurns: ExpectedTurn[], rec: { id: string; text: string }) => Promise<SubmitOutcome>;
   submitOrphanSweep: (expectedTurns: ExpectedTurn[], findingLines: string[]) => Promise<SubmitOutcome>;
+  submitBoxNotices: (expectedTurns: ExpectedTurn[], noticeLines: string[]) => Promise<SubmitOutcome>;
+  scrubRecordLine: (line: string) => string | null;
 }
 
 // The slice of DrainsDeps a decision note reads, which a caller holding no
@@ -738,26 +742,56 @@ export async function drainSupervisorMailbox(
   return outcome;
 }
 
-// --- The orphan sweeper's findings ---
+// --- The record files: the orphan sweeper's findings and the box notices ---
 //
 // bin/orphan-sweep.ps1, run by the KitOrphanSweep scheduled task, appends one
 // JSON line per orphaned process tree to the file the orphanSweepFindings
 // option names, and this plugin writes the ack file beside it, the findings
 // path with .ack.jsonl appended, as the sweeper names its seen file with
 // .seen.json appended. The sweeper is the findings file's only writer and
-// this plugin the ack file's. A record is
-// a JSON object whose id is a non-empty string; every other field is the
-// sweeper's and passes through as data.
+// this plugin the ack file's. A finding is a JSON object whose id is a
+// non-empty string; every other field is the sweeper's and passes through as
+// data.
+//
+// Any process under the account may append one JSON line per notice to the
+// file the boxNotices option names, the wiki walker among them, so that file
+// is a hostile input. The plugin writes its ack file beside it the same way
+// and is that file's only writer. A notice is a JSON object whose id and text
+// are non-empty strings; every other field passes through as data. A writer
+// never reuses an id, and may rotate the file by renaming it whole, since
+// the acks are keyed by id.
+//
+// Both files take one drain, drainRecordFile, keyed by a RecordDrain.
 
-// One findings line read as a record, or the reason it is not one. The line
-// is kept whole, trimmed of the line ending a Windows writer leaves, since it
-// is the line the turn carries.
-function parseOrphanFindingLine(line: string): { id: string; line: string } | { problem: string } {
+// One record file's drain: the prefix of the decision actions it logs, the
+// noun its decisions name the records by, the turn label, the two bounds,
+// whether a record needs a text, whether a record the redactor withholds is
+// held back alone rather than failing its whole batch, and the submit that
+// opens its turn.
+interface RecordDrain {
+  action: string;
+  noun: string;
+  label: string;
+  maxRecords: number;
+  maxText: number;
+  requireText: boolean;
+  holdWithheld: boolean;
+  submit: (expectedTurns: ExpectedTurn[], lines: string[]) => Promise<SubmitOutcome>;
+}
+
+// One record file line read as a record, or the reason it is not one. The
+// line is kept whole, trimmed of the line ending a Windows writer leaves,
+// since it is the line the turn carries.
+function parseRecordLine(line: string, requireText: boolean): { id: string; line: string } | { problem: string } {
   let parsed: unknown;
   try { parsed = JSON.parse(line); } catch { return { problem: "is not JSON" }; }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { problem: "is not a JSON object" };
   const id = (parsed as Record<string, unknown>).id;
   if (typeof id !== "string" || id.length === 0) return { problem: "has no id that is a non-empty string" };
+  if (requireText) {
+    const text = (parsed as Record<string, unknown>).text;
+    if (typeof text !== "string" || text.length === 0) return { problem: "has no text that is a non-empty string" };
+  }
   return { id, line: line.trim() };
 }
 
@@ -769,24 +803,12 @@ function parseOrphanFindingLine(line: string): { id: string; line: string } | { 
 const ORPHAN_SWEEP_FINDINGS_MAX = 20;
 const ORPHAN_SWEEP_TEXT_MAX = 40_000;
 
-// One controller tick's pass over the findings file. A line whose id is
-// already in the ack file is passed over, so no finding is delivered twice.
-// The other findings of the pass, up to the two bounds above, are delivered
-// in one turn opening [ORPHAN SWEEP ids=<n>], n the count of findings it
-// carries, submitted through the expected-turn path. Findings past the
-// bounds get no ack line, so the next pass delivers them. A pass that
-// reaches its findings while a turn is open, by `turnOpen` at that moment,
-// acknowledges and delivers nothing: a turn submitted into an open turn is
-// queued rather than answered, so the findings stay unacknowledged for the
-// first idle tick's pass, and no state is kept between the two. One
-// delivered line per submitted finding is written before the submit, and a
-// pass that cannot read or write the ack file acts on nothing, so a finding
-// can never be delivered without the line that keeps it from being delivered
-// again; a submit that opens no turn adds a failed line per submitted finding
-// beside its delivered one. A line that is not a
-// record is never acknowledged, and is logged once per session under the key
-// `skipped` holds. A missing, empty or unreadable findings file is a pass
-// that does nothing. Nothing here throws. The [ORPHAN SWEEP] turn's text and
+// The same two bounds for one [BOX NOTICE] turn, over notice lines.
+const BOX_NOTICES_MAX = 20;
+const BOX_NOTICES_TEXT_MAX = 40_000;
+
+// One controller tick's pass over the findings file: drainRecordFile under
+// the orphan_sweep_ actions and the [ORPHAN SWEEP] label. The turn's text and
 // its submit are submitOrphanSweep's, in hooks/index.ts.
 export async function drainOrphanSweep(
   deps: DrainsDeps,
@@ -795,15 +817,78 @@ export async function drainOrphanSweep(
   skipped: Set<string>,
   turnOpen: () => boolean,
 ): Promise<{ delivered: boolean; logged: boolean }> {
+  return drainRecordFile(deps, {
+    action: "orphan_sweep",
+    noun: "findings",
+    label: "ORPHAN SWEEP",
+    maxRecords: ORPHAN_SWEEP_FINDINGS_MAX,
+    maxText: ORPHAN_SWEEP_TEXT_MAX,
+    requireText: false,
+    holdWithheld: false,
+    submit: deps.submitOrphanSweep,
+  }, findingsPath, expectedTurns, skipped, turnOpen);
+}
+
+// One controller tick's pass over the notices file: drainRecordFile under the
+// box_notice_ actions and the [BOX NOTICE] label, refusing a record with no
+// text and holding a withheld notice back from its batch, since any writer
+// shares the file and one notice must not cost the others their delivery.
+// The turn's text and its submit are submitBoxNotices's, in hooks/index.ts.
+export async function drainBoxNotices(
+  deps: DrainsDeps,
+  noticesPath: string,
+  expectedTurns: ExpectedTurn[],
+  skipped: Set<string>,
+  turnOpen: () => boolean,
+): Promise<{ delivered: boolean; logged: boolean }> {
+  return drainRecordFile(deps, {
+    action: "box_notice",
+    noun: "notices",
+    label: "BOX NOTICE",
+    maxRecords: BOX_NOTICES_MAX,
+    maxText: BOX_NOTICES_TEXT_MAX,
+    requireText: true,
+    holdWithheld: true,
+    submit: deps.submitBoxNotices,
+  }, noticesPath, expectedTurns, skipped, turnOpen);
+}
+
+// One controller tick's pass over a record file. A line whose id is already
+// in the ack file is passed over, so no record is delivered twice. The other
+// records of the pass, up to the drain's two bounds, are delivered in one
+// turn opening [<label> ids=<n>], n the count of records it carries,
+// submitted through the expected-turn path. Records past the bounds get no
+// ack line, so the next pass delivers them. A pass that reaches its records
+// while a turn is open, by `turnOpen` at that moment, acknowledges and
+// delivers nothing: a turn submitted into an open turn is queued rather than
+// answered, so the records stay unacknowledged for the first idle tick's
+// pass, and no state is kept between the two. One delivered line per
+// submitted record is written before the submit, and a pass that cannot read
+// or write the ack file acts on nothing, so a record can never be delivered
+// without the line that keeps it from being delivered again; a submit that
+// opens no turn adds a failed line per submitted record beside its delivered
+// one. A drain that holds withheld records back gives a record the redactor
+// withholds one failed line and no delivered line, and leaves it out of the
+// turn. A line that is not a record is never acknowledged, and is logged once
+// per session under the key `skipped` holds. A missing, empty or unreadable
+// record file is a pass that does nothing. Nothing here throws.
+async function drainRecordFile(
+  deps: DrainsDeps,
+  drain: RecordDrain,
+  recordsPath: string,
+  expectedTurns: ExpectedTurn[],
+  skipped: Set<string>,
+  turnOpen: () => boolean,
+): Promise<{ delivered: boolean; logged: boolean }> {
   const outcome = { delivered: false, logged: false };
-  let findingsText: string;
+  let recordsText: string;
   let ackText = "";
-  const ackPath = `${findingsPath}.ack.jsonl`;
+  const ackPath = `${recordsPath}.ack.jsonl`;
   try {
-    if (!(await deps.host.fileExists(findingsPath))) return outcome;
-    findingsText = String(await deps.host.readFile(findingsPath));
-    // An empty findings file is the healthy steady state, and needs no ack read.
-    if (findingsText.trim() === "") return outcome;
+    if (!(await deps.host.fileExists(recordsPath))) return outcome;
+    recordsText = String(await deps.host.readFile(recordsPath));
+    // An empty record file is the healthy steady state, and needs no ack read.
+    if (recordsText.trim() === "") return outcome;
     if (await deps.host.fileExists(ackPath)) ackText = String(await deps.host.readFile(ackPath));
   } catch {
     return outcome;
@@ -816,17 +901,17 @@ export async function drainOrphanSweep(
       if (a !== null && typeof a === "object" && typeof (a as { id?: unknown }).id === "string") handled.add((a as { id: string }).id);
     } catch { /* a line this plugin did not write whole acknowledges nothing */ }
   }
-  // The sweeper appends each finding whole with its newline, so a findings
-  // file that does not end in one has its last line still being written.
-  // That line is left for the next pass, which reads it whole, rather than
-  // read here as a malformed record.
-  const lines = findingsText.split("\n");
-  if (!findingsText.endsWith("\n")) lines.pop();
-  const findings: { id: string; line: string }[] = [];
+  // A writer appends each record whole with its newline, so a record file
+  // that does not end in one has its last line still being written. That
+  // line is left for the next pass, which reads it whole, rather than read
+  // here as a malformed record.
+  const lines = recordsText.split("\n");
+  if (!recordsText.endsWith("\n")) lines.pop();
+  const records: { id: string; line: string }[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (line.trim() === "") continue;
-    const rec = parseOrphanFindingLine(line);
+    const rec = parseRecordLine(line, drain.requireText);
     if ("problem" in rec) {
       const key = `${index}:${line}`;
       if (!skipped.has(key)) {
@@ -834,8 +919,8 @@ export async function drainOrphanSweep(
         deps.session.state.decisions.push({
           timestamp: Date.now(),
           loop: "monitor",
-          action: "orphan_sweep_line_skipped",
-          detail: `findings line ${index + 1} ${rec.problem}; skipped and not acknowledged`.slice(0, 200),
+          action: `${drain.action}_line_skipped`,
+          detail: `${drain.noun} line ${index + 1} ${rec.problem}; skipped and not acknowledged`.slice(0, 200),
         });
         outcome.logged = true;
       }
@@ -843,48 +928,77 @@ export async function drainOrphanSweep(
     }
     if (handled.has(rec.id)) continue;
     handled.add(rec.id);
-    findings.push(rec);
+    records.push(rec);
   }
-  if (findings.length === 0 || turnOpen()) return outcome;
-  const batch: { id: string; line: string }[] = [];
+  if (records.length === 0 || turnOpen()) return outcome;
+  let batch: { id: string; line: string }[] = [];
   let batchText = 0;
-  for (const f of findings) {
-    if (batch.length === ORPHAN_SWEEP_FINDINGS_MAX) break;
-    if (batch.length > 0 && batchText + f.line.length > ORPHAN_SWEEP_TEXT_MAX) break;
+  for (const f of records) {
+    if (batch.length === drain.maxRecords) break;
+    if (batch.length > 0 && batchText + f.line.length > drain.maxText) break;
     batch.push(f);
     batchText += f.line.length;
+  }
+  // A drain that holds withheld records back scrubs each batch line alone
+  // here, so its submit takes the scrubbed lines and scrubs nothing again. A
+  // line the redactor withholds gets one failed line and no delivered line,
+  // and stays out of the turn. Any other drain's submit scrubs the batch
+  // whole and opens no turn where any value is withheld.
+  const held: { id: string; line: string }[] = [];
+  if (drain.holdWithheld) {
+    const kept: { id: string; line: string }[] = [];
+    for (const f of batch) {
+      const line = deps.scrubRecordLine(f.line);
+      if (line === null) held.push(f);
+      else kept.push({ id: f.id, line });
+    }
+    batch = kept;
   }
   // New ack lines are appended through appendLines in hooks/index.ts, which
   // reads the file again immediately before its write, as the mailbox pass's
   // are.
   try {
-    await deps.appendLines(ackPath, batch.map((f) => JSON.stringify({ id: f.id, at: Date.now(), action: "delivered" })));
+    await deps.appendLines(ackPath, [
+      ...batch.map((f) => JSON.stringify({ id: f.id, at: Date.now(), action: "delivered" })),
+      ...held.map((f) => JSON.stringify({ id: f.id, at: Date.now(), action: "failed", reason: "withheld: the redactor's scan failed" })),
+    ]);
   } catch {
     return outcome;
   }
-  const sweepOutcome = await deps.submitOrphanSweep(expectedTurns, batch.map((f) => f.line));
-  // A submit that opened no turn keeps each finding's delivered line, which
+  if (held.length > 0) {
+    deps.session.state.decisions.push({
+      timestamp: Date.now(),
+      loop: "monitor",
+      action: `${drain.action}_failed`,
+      detail: `${held.length} ${drain.noun} withheld by the redactor's scan; acknowledged failed and not submitted`,
+    });
+    outcome.delivered = true;
+    outcome.logged = true;
+  }
+  if (batch.length === 0) return outcome;
+  const submitOutcome = await drain.submit(expectedTurns, batch.map((f) => f.line));
+  // A submit that opened no turn keeps each record's delivered line, which
   // is what keeps it from being submitted again, and adds a failed line
   // beside it, so the ack file does not claim a delivery that never reached
   // the session.
-  if (!sweepOutcome.ok) {
-    const reason = `${sweepOutcome.how}: ${sweepOutcome.reason}`.slice(0, 200);
+  if (!submitOutcome.ok) {
+    const reason = `${submitOutcome.how}: ${submitOutcome.reason}`.slice(0, 200);
     try {
       await deps.appendLines(ackPath, batch.map((f) => JSON.stringify({ id: f.id, at: Date.now(), action: "failed", reason })));
     } catch { /* the delivered lines stand; the decision below names the failure */ }
   }
-  deps.session.state.decisions.push(sweepOutcome.ok
+  deps.session.state.decisions.push(submitOutcome.ok
     ? {
       timestamp: Date.now(),
       loop: "monitor",
-      action: "orphan_sweep_delivered",
-      detail: `${batch.length} findings submitted as [ORPHAN SWEEP ids=${batch.length}]`,
+      action: `${drain.action}_delivered`,
+      detail: `${batch.length} ${drain.noun} submitted as [${drain.label} ids=${batch.length}]`,
     }
     : {
       timestamp: Date.now(),
       loop: "monitor",
-      action: "orphan_sweep_failed",
-      detail: `${batch.length} findings submit ${sweepOutcome.how}; left delivered: ${sweepOutcome.reason}`.slice(0, 200),
+      action: `${drain.action}_failed`,
+      detail: `${batch.length} ${drain.noun} submit ${submitOutcome.how}; left delivered: ${submitOutcome.reason}`.slice(0, 200),
     });
   outcome.delivered = true;
   outcome.logged = true;

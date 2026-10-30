@@ -40,7 +40,8 @@
 // the digest prints them. lastRecordAt and lastOperatorAt are the newest
 // across every session read; lastOperatorAt reads operator messages only.
 // activeGoal is true where the persona's entry names an active goal, false
-// where it names none, and null where the store or the entry cannot be read.
+// where it names none, and null where the store is empty or the store or the
+// entry cannot be read.
 // The lines after it are the digest, oldest session first: a session line
 // naming the first and last record of the tail read and the version, then
 // "operator <hh:mm>: <text>" and "persona <hh:mm>: <text>" in file order, which
@@ -82,8 +83,9 @@
 // oldest message lines dropped first and then the oldest frame lines, with a
 // line saying how many were dropped.
 //
-// Failure. A store, a folder or a transcript that cannot be read, and a
-// record that is not JSON, is skipped with one line on stderr naming it. The
+// Failure. A store that is empty, a store, a folder or a transcript that
+// cannot be read, and a record that is not JSON, is skipped with one line on
+// stderr naming it. The
 // script still prints the header and exits 0, with an empty digest where
 // nothing could be read, so a caller always has the header to decide on.
 
@@ -493,12 +495,21 @@ export function recap(flags, opts = {}) {
   const excluded = (id) => exclude !== '' && id.toLowerCase() === exclude.toLowerCase();
 
   // --- The persona's store entry. ---
+  // A store file that is empty, or whitespace alone, is named as empty rather
+  // than quoted as the parse error it throws, since that is the file a write
+  // the disk refused leaves. The read is one-shot, with no second read after a
+  // wait: the operator can run the recap again.
   let entry = null;
   let store = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(storePath, 'utf8').replace(/^\uFEFF/, ''));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) store = parsed;
-    else notes.push('the store ' + storePath + ' is not an object of persona entries');
+    const text = fs.readFileSync(storePath, 'utf8').replace(/^\uFEFF/, '');
+    if (text.trim() === '') {
+      notes.push('the store ' + storePath + ' is empty, the shape a write the disk refused leaves, so there is no entry to read');
+    } else {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) store = parsed;
+      else notes.push('the store ' + storePath + ' is not an object of persona entries');
+    }
   } catch (e) {
     notes.push('the store ' + storePath + ' cannot be read: ' + digestText(e && e.message, 200));
   }

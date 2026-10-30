@@ -1687,11 +1687,13 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
     reapTurnRecords(sess.state, Date.now());
     settleExpiredDispositionStamps();
     if (!turnOpenAfterDelete && !skipped) {
-      await promotePlanTouchingRecord(
+      // A promotion whose store write threw leaves its record open, and the
+      // close is skipped this turn end so a live verdict cannot deliver it.
+      const keptOpen = await promotePlanTouchingRecord(
         planEditedPathsAtDelete, coordinatorPersona, architectPersona,
         () => turnStartSeq() !== turnStartSeqAtDelete,
       );
-      await closeTurnRecordAtTurnEnd(
+      if (!keptOpen) await closeTurnRecordAtTurnEnd(
         turnLeaf ? turnLeaf.objective : "", e.answer, askedTextAtDelete, activityTextAtDelete, endedOnLead,
         readLiveAgent, () => turnStartSeq() !== turnStartSeqAtDelete, jevMode, jevLive, hookBudget,
       );

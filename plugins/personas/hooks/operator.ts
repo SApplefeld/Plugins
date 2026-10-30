@@ -3,14 +3,18 @@
 // D2: Reader claim and tools (agentic_say, agentic_inbox).
 //
 // Substrate: $.store (per plugin, global across sessions, async JSON values).
-// Key layout: one writer per key.
+// Key layout: one session creates each key, and other sessions may write it
+// after, as the Writer lines below state for inbox and floor keys.
 //
 // Records:
 // - inbox:<persona>:<writerSessionId>:<seq> = { id, from, at, text, kind, answers?, urgent?, status }
 // - reply:<persona>:<msgId> = { at, text }
 // - ask:<persona>:<askId> = { at, nodeId, question, status }
+// - seq:<persona>:<writerSessionId> = { seq, at }, the writer's sequence floor
 //
-// Writer: the reader session writes inbox records; the owner advances status.
+// Writer: the reader session writes inbox records and its own floor key. The
+// owner advances status. The reader's agentic_inbox re-sets its own resolved
+// inbox record with readAt. The owner's TTL sweep deletes a writer's floor key.
 // Reader: the reader session calls agentic_inbox to read replies.
 
 // --- Types ---
@@ -37,7 +41,10 @@ export interface InboxRecord {
   resolvedAt?: number; // set by the owner's agentic_resolve, with the two below
   outcome?: InboxOutcome;
   note?: string;
-  answersRecord?: string; // set by agentic_say on the answer leg alone: the id of the target owner's record to the architect that opened it
+  answersRecord?: string; // set on the answer leg alone: agentic_say stamps the first well-formed record the target owner sent the architect that is still delivered or answered, and agentic_resolve's note push stamps the record it resolved
+  noteSentAs?: string; // set by the owner's agentic_resolve on the record it resolved: the id of the record that carried its note to the sender's persona
+  resolutionOf?: string; // set by agentic_resolve on the record it pushes: the id of the resolved record whose note it carries
+  readAt?: number; // set by the sender's own agentic_inbox on a resolved record it returned; lets enforceChannelWindow roll the record
 }
 
 export interface ReplyRecord {
@@ -68,12 +75,13 @@ const REPLY_PREFIX = "reply:";
 const ASK_PREFIX = "ask:";
 const READER_PREFIX = "reader:";
 const PERSONA_PREFIX = "persona:";
+const SEQ_PREFIX = "seq:";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // --- Store interface ---
 
 import type { CommonsStore, CommonsMeta, UnionedClaim } from "./commons";
-import { claimResource, releaseResource, readAllClaims, commonsWinner } from "./commons";
+import { claimResource, releaseResource, readAllClaims, readAllEntries, commonsWinner } from "./commons";
 import { LINE_TERMINATOR } from "./agent-state";
 import type { AskEntryStatus } from "./agent-state";
 
@@ -99,6 +107,12 @@ function readerKey(persona: string): string {
 // builds the same string by hand at its claim and release sites.
 function personaKey(persona: string): string {
   return `${PERSONA_PREFIX}${persona}`;
+}
+
+// The floor key of one writer's sequence for one persona. It starts with
+// `seq:`, so no `inbox:` or `reply:` prefix scan ever reads it.
+function seqKey(persona: string, writerSessionId: string): string {
+  return `${SEQ_PREFIX}${persona}:${writerSessionId}`;
 }
 
 // The one rule for a string that is spliced inside a delivery bracket (a
@@ -137,6 +151,13 @@ export function personaNameProblem(name: unknown): string | null {
 /**
  * Write an inbox record. The reader session is the writer.
  * Returns the record id.
+ *
+ * Before the record is written, the writer's floor key for `persona` is
+ * raised to `seq` where `seq` is higher than the floor it holds, so
+ * getHighestInboxSeq still reads this number once the record has rolled or
+ * been swept. A floor write that throws refuses the send with nothing
+ * written, and a record write that throws leaves the floor raised over a
+ * number no record holds, which is a gap in the numbering and nothing else.
  */
 export async function writeInboxRecord(
   store: CommonsStore,
@@ -148,6 +169,7 @@ export async function writeInboxRecord(
   answers?: string,
   urgent?: boolean,
   answersRecord?: string,
+  resolutionOf?: string,
 ): Promise<string> {
   const id = `${persona}-${writerSessionId}-${seq}`;
   const key = inboxKey(persona, writerSessionId, seq);
@@ -161,8 +183,13 @@ export async function writeInboxRecord(
     answers,
     ...(urgent ? { urgent: true } : {}),
     ...(answersRecord ? { answersRecord } : {}),
+    ...(resolutionOf ? { resolutionOf } : {}),
     status: "pending",
   };
+  if (seq > await readSeqFloor(store, persona, writerSessionId)) {
+    const floor: SeqFloor = { seq, at: record.at };
+    await store.set(seqKey(persona, writerSessionId), floor);
+  }
   await store.set(key, record);
   return id;
 }
@@ -374,8 +401,9 @@ export async function listAskRecords(
 
 /**
  * A store delete that failed during `sweepExpiredRecords` after every expired
- * record was appended to the channel log: `removed` of `total` logged records
- * left the store before the failure, and the rest are still in it.
+ * record was appended to the channel log: `removed` of `total` keys left the
+ * store before the failure, and the rest are still in it. The keys are the
+ * logged records first, then the floor keys the sweep deletes unlogged.
  */
 export class SweepDeleteError extends Error {
   readonly removed: number;
@@ -409,7 +437,14 @@ export class SweepDeleteError extends Error {
  * append: the error propagates with every record still in the store, so the
  * caller records the refusal rather than a count. A delete that fails after
  * the append landed throws a `SweepDeleteError` instead, carrying how many
- * of the logged records were removed before it.
+ * of the keys were removed before it.
+ *
+ * A writer's floor key, `seq:<persona>:<writer>`, is deleted only when three
+ * conditions all hold: the writer has no commons entry seen within `ttlMs` of
+ * now, no `inbox:<persona>:<writer>:` key this sweep leaves in the store, and
+ * the floor's own `at` is older than `ttlMs`. A floor key holds no text and is
+ * not logged; it is deleted after the logged records and counts in the
+ * returned number.
  */
 export async function sweepExpiredRecords(
   store: CommonsStore,
@@ -457,17 +492,45 @@ export async function sweepExpiredRecords(
     const ask = raw as AskRecord;
     if (ask.status !== "open" && ask.at < cutoff) expired.push({ key, kind, record: raw });
   }
+  // Floor keys, scoped to this persona's own prefix as the inbox and reply
+  // scans above are. A floor is kept while any of three things holds: its
+  // writer has a commons entry seen within the TTL, the writer has an inbox
+  // record this sweep leaves in the store, or the floor's own `at` is within
+  // the TTL. Every send raises the floor, so its `at` is the writer's last
+  // send, and a writer that is idle or paused keeps its floor for a full TTL
+  // after that send even once the commons has dropped its entry, which the
+  // commons does after about 90 seconds without a heartbeat. A floor whose
+  // value does not parse or carries no finite `at` is decided by the first
+  // two conditions alone. A writer silent for a full TTL with every record
+  // gone loses its floor and numbers again from 1.
+  const seqPrefix = `${SEQ_PREFIX}${persona}:`;
+  const floorKeys = keys.filter((key) => key.startsWith(seqPrefix));
+  const deadFloorKeys: string[] = [];
+  if (floorKeys.length > 0) {
+    const expiredKeys = new Set(expired.map((e) => e.key));
+    const liveWriters = new Set((await readAllEntries(store)).filter((entry) => entry.lastSeen >= cutoff).map((entry) => entry.sessionId));
+    for (const key of floorKeys) {
+      const writer = key.slice(seqPrefix.length);
+      if (liveWriters.has(writer)) continue;
+      const writerInboxPrefix = `${INBOX_PREFIX}${persona}:${writer}:`;
+      if (keys.some((k) => k.startsWith(writerInboxPrefix) && !expiredKeys.has(k))) continue;
+      const floorAt = parseStoreRecord<SeqFloor>(await store.get(key))?.at;
+      if (typeof floorAt === "number" && Number.isFinite(floorAt) && floorAt >= cutoff) continue;
+      deadFloorKeys.push(key);
+    }
+  }
   if (expired.length > 0) {
     const sweptAt = Date.now();
     await appendLines(expired.map((e) => JSON.stringify({ persona, kind: e.kind, key: e.key, sweptAt, record: e.record })));
-    try {
-      for (const e of expired) {
-        await store.delete(e.key);
-        swept++;
-      }
-    } catch (err) {
-      throw new SweepDeleteError(swept, expired.length, err);
+  }
+  const doomed = [...expired.map((e) => e.key), ...deadFloorKeys];
+  try {
+    for (const key of doomed) {
+      await store.delete(key);
+      swept++;
     }
+  } catch (err) {
+    throw new SweepDeleteError(swept, doomed.length, err);
   }
 
   return swept;
@@ -482,16 +545,27 @@ export async function sweepExpiredRecords(
  * by the owner start's reconcile, which expires an open record no ledger
  * entry names, while a closed ask record ages out on its TTL through
  * `sweepExpiredRecords` above); it
- * covers `inbox:` records that are `"skipped"` or `"resolved"` and every
- * `reply:` record except one whose inbox record is present as `"delivered"`
- * or `"answered"`, combined and ordered oldest-first, keeping the newest
+ * covers `inbox:` records that are `"skipped"`, or `"resolved"` and carrying
+ * `readAt` or `noteSentAs`, and every `reply:` record except one whose inbox
+ * record is kept, combined and ordered oldest-first, keeping the newest
  * `windowSize` and rolling the rest. A `pending` record is live work the
  * drain has not consumed yet, and a `delivered` or `answered` record is an
- * open steer whose state the sender still reads, so both stay in the store
- * whatever the window, and so does the open steer's reply; the TTL sweep is
- * the bound on those. Every other reply, whether its record is `resolved`,
- * `skipped` or gone, enters the window on its own age, so it can roll on a
- * different cadence from its record.
+ * open steer whose state the sender still reads. A `resolved` record with
+ * neither `readAt` nor `noteSentAs` holds a resolution its sender has not
+ * read through agentic_inbox and that no pushed record carried to it. All
+ * three stay in the store whatever the window, and so does their reply; the
+ * TTL sweep is the bound on those. The sweep ages a record by the latest of
+ * `at`, `deliveredAt` and `resolvedAt`, so a kept resolution leaves the store
+ * at the first sweep after one TTL from its resolve, as an open steer leaves
+ * at the first sweep after one TTL from its delivery. The share of the
+ * store's 4 MiB ceiling these kept records take is not measured. Every other
+ * reply, whether its record is
+ * `skipped`, gone, or `resolved` with `readAt` or `noteSentAs`, enters the
+ * window on its own age, so it can
+ * roll on a different cadence from its record.
+ * A writer's floor key (`SEQ_PREFIX`) is never read or rolled here: it holds
+ * the writer's highest sequence number, which must outlive the records it
+ * numbered, and only `sweepExpiredRecords` deletes it.
  * Returns the number of records rolled.
  */
 export async function enforceChannelWindow(
@@ -501,8 +575,9 @@ export async function enforceChannelWindow(
   appendLines: (lines: string[]) => Promise<void>,
 ): Promise<number> {
   const allInbox = await listInboxRecords(store, persona);
-  const inbox = allInbox.filter((r) => r.status === "skipped" || r.status === "resolved");
-  const openSteerIds = new Set(allInbox.filter((r) => r.status === "delivered" || r.status === "answered").map((r) => r.id));
+  const unreadResolution = (r: InboxRecord): boolean => r.status === "resolved" && r.readAt === undefined && r.noteSentAs === undefined;
+  const inbox = allInbox.filter((r) => r.status === "skipped" || (r.status === "resolved" && !unreadResolution(r)));
+  const keptIds = new Set(allInbox.filter((r) => r.status === "delivered" || r.status === "answered" || unreadResolution(r)).map((r) => r.id));
   const keys = await store.keys();
   const replyPrefix = `${REPLY_PREFIX}${persona}:`;
   const combined: { key: string; at: number; kind: "inbox" | "reply"; record: unknown }[] = inbox.map((r) => ({
@@ -513,7 +588,7 @@ export async function enforceChannelWindow(
   }));
   for (const key of keys) {
     if (key.startsWith(replyPrefix)) {
-      if (openSteerIds.has(key.slice(replyPrefix.length))) continue;
+      if (keptIds.has(key.slice(replyPrefix.length))) continue;
       const raw = await store.get(key);
       if (raw) combined.push({ key, at: (raw as ReplyRecord).at, kind: "reply", record: raw });
     }
@@ -624,6 +699,18 @@ function ownedNamedPersonasOf(claims: UnionedClaim[], sessionId: string): string
 }
 
 /**
+ * The persona a record's writer session owns, which is where agentic_resolve
+ * sends the record's note: the alphabetically first named persona the
+ * session owns, else `default` where the session is the commons winner of
+ * the default persona, else null, as for a pure reader that owns none.
+ */
+export function senderPersonaOf(claims: UnionedClaim[], writerSessionId: string): string | null {
+  const named = ownedNamedPersonasOf(claims, writerSessionId);
+  if (named.length > 0) return named[0];
+  return commonsWinner(claims, personaKey("default")) === writerSessionId ? "default" : null;
+}
+
+/**
  * The ground string deliveryGroundIn returns for a writer holding the
  * coordinator persona. Both the value this module produces and every check
  * against it read this constant, so the producer and its readers cannot
@@ -672,7 +759,8 @@ export interface ArchitectLine {
  * to the architect persona whose status is `delivered` or `answered` and
  * which passes deliveryRecordProblem: a record the architect has taken
  * delivery of and not resolved. The ground then carries that record's id
- * as `answersRecord`, which agentic_say stamps on the answer it writes. At
+ * as `answersRecord`, which agentic_say stamps on the answer it writes.
+ * agentic_resolve's note push stamps the resolved record's id instead. At
  * delivery the leg holds on that stamp and on the writer still owning the
  * architect persona, with no read of the architect's inbox, so an answer
  * admitted at send is delivered under the architect's label even where the
@@ -792,6 +880,19 @@ export function deliveryArchitectLine(architectPersona: string, rec: { answersRe
 }
 
 /**
+ * Whether a record stored under `ground` is held for the drain by design: a
+ * record under the coordinator's ground, or under the architect persona's
+ * WORKER ground where the plugin holds an architect (`architectPersona` is
+ * not ""), breaks in on the sender's urgent flag alone and otherwise waits
+ * for the drain. The delivery break-in and the self-review message_wait
+ * signal both read this, so the grounds the break-in passes over and the
+ * grounds the signal does not count cannot drift apart.
+ */
+export function heldForDrain(ground: string, architectPersona: string): boolean {
+  return ground === COORDINATOR_GROUND || (architectPersona !== "" && ground === `WORKER:${architectPersona}`);
+}
+
+/**
  * The one rule for the record fields a delivery reads: `id` is a non-empty
  * string that passes the bracket rule above, and `text` is a string. Both
  * are store data any plugin-loaded session wrote: an id carrying "]" could
@@ -816,8 +917,9 @@ export function deliveryRecordProblem(rec: { id: unknown; text: unknown }): stri
  * why the record arrived and grants nothing: delegated authority comes only
  * from a coordinator prompt, never from a bracket on a tool result.
  * `ground` is what deliveryGroundIn returned and `id` has passed
- * deliveryRecordProblem. The id rides in-band because agentic_inbox is
- * reader-only, so nothing else tells the owner the id agentic_resolve takes.
+ * deliveryRecordProblem. The id rides in-band because agentic_inbox returns
+ * nothing to the owner, so nothing else tells the owner the id agentic_resolve
+ * takes.
  */
 export function deliveryPrefix(ground: string, id: string, mark: "plain" | "urgent" | "waited"): string {
   return `[${ground} id=${id}${mark === "plain" ? "" : `, ${mark}`}]`;
@@ -869,7 +971,9 @@ export function deliveryText(
  * deliveryGroundIn at the send gate, over one fresh read of the commons
  * claims and of the architect's records where the writer owns the architect
  * persona. On the answer leg the ground carries `answersRecord`, which
- * agentic_say stamps on the record it writes.
+ * agentic_say stamps on the record it writes. agentic_resolve's note push
+ * reads its ground through deliveryGroundIn over claims it already holds,
+ * and on the answer leg stamps the resolved record's id instead.
  */
 export async function deliveryGroundAtSend(
   store: CommonsStore,
@@ -899,8 +1003,40 @@ export async function mayReachPersona(
   return "ground" in await deliveryGroundAtSend(store, target, writer, coordinatorPersona, architectPersona, staleAfterMs);
 }
 
+// The value of a `seq:<persona>:<writerSessionId>` key: the highest sequence
+// number the writer has used for that persona, and when it was written.
+interface SeqFloor {
+  seq: number;
+  at: number;
+}
+
+// A sequence number the next send can add one to: a safe non-negative
+// integer below `Number.MAX_SAFE_INTEGER`. At 2^53 and above `seq + 1`
+// equals `seq`, so a writer taking that number would overwrite its own
+// record.
+function isUsableSeq(seq: unknown): seq is number {
+  return typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0 && seq < Number.MAX_SAFE_INTEGER;
+}
+
+// The writer's floor for `persona`, or 0 where it holds none. A value that
+// does not parse or carries no usable `seq` reads as no floor rather than
+// throwing, so a corrupt key never stops a send.
+async function readSeqFloor(
+  store: CommonsStore,
+  persona: string,
+  writerSessionId: string,
+): Promise<number> {
+  const floor = parseStoreRecord<SeqFloor>(await store.get(seqKey(persona, writerSessionId)));
+  const seq = floor?.seq;
+  return isUsableSeq(seq) ? seq : 0;
+}
+
 /**
- * Get the highest existing inbox seq for a persona and writer session.
+ * Get the highest inbox seq a writer session has used for a persona: the
+ * larger of its live `inbox:` keys' highest and its floor key, so a writer
+ * whose every record has rolled or been swept still takes the next number
+ * rather than starting again at 1. Returns 0 for a writer with no keys and
+ * no floor.
  */
 export async function getHighestInboxSeq(
   store: CommonsStore,
@@ -914,12 +1050,12 @@ export async function getHighestInboxSeq(
     if (key.startsWith(prefix)) {
       const seqStr = key.slice(prefix.length);
       const seq = parseInt(seqStr, 10);
-      if (!isNaN(seq) && seq > maxSeq) {
+      if (isUsableSeq(seq) && seq > maxSeq) {
         maxSeq = seq;
       }
     }
   }
-  return maxSeq;
+  return Math.max(maxSeq, await readSeqFloor(store, persona, writerSessionId));
 }
 
 /**
@@ -939,4 +1075,17 @@ export async function sendPluginRecord(
   const seq = await getHighestInboxSeq(store, target, writerSessionId) + 1;
   const id = await writeInboxRecord(store, target, writerSessionId, seq, text, "say");
   return { id, writer: writerSessionId, seq };
+}
+
+/**
+ * The text of the record agentic_resolve sends to the sender's persona when
+ * it resolves record `id` with a non-empty note: `Record <id> is resolved
+ * <outcome>.` and the note after one space on the same line. The id stands
+ * in clear in the record-id shape the transcript redactor reads as an
+ * identifier.
+ * The note is the resolver's own text, as an agentic_say text is, and the
+ * delivery site quotes every line after the first through deliveryText.
+ */
+export function resolutionRecordText(id: string, outcome: InboxOutcome, note: string): string {
+  return `Record ${id} is resolved ${outcome}. ${note}`;
 }

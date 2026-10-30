@@ -57,7 +57,7 @@ The header is one JSON object:
 | `sessions` | The session ids the digest read, oldest first. Empty where nothing could be read. |
 | `lastRecordAt` | The time of the newest record across the sessions read, or `null`. |
 | `lastOperatorAt` | When the operator last wrote in any session read, or `null`. |
-| `activeGoal` | `true` where the store names an active goal for this persona, `false` where it names none. `null` where the store, or this persona's entry in it, could not be read. |
+| `activeGoal` | `true` where the store names an active goal for this persona, `false` where it names none. `null` where the store is empty, or where the store or this persona's entry in it could not be read. |
 
 Two personas can share a working directory, and so a transcript folder. Where `lineage` reads `unrecorded`, the digest may be another persona's conversation. Say so whenever you repeat anything from it.
 

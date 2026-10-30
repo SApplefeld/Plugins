@@ -113,13 +113,14 @@ holder_child_pid() {
 }
 
 # The run directory: the parent of the directory holding the child-pid file,
-# since the supervisor writes that file at $RUNDIR/child-N/child.pid. Once the
-# file has held a valid pid, the directory's absence means the run is over,
-# and the hold loop exits on it. The supervisor never removes or renames it
-# while a child lives. Anything else that removes it, such as a cleaning
-# command run in the child's working tree, ends the holder and closes the
-# child's input, which is accepted, since that act has already destroyed the
-# run's state. A child-pid path with fewer than two directory components
+# since the supervisor writes that file at $RUNDIR/child-N/child.pid. The
+# directory's absence means the run is over, and the hold loop exits on it from
+# the first poll, whatever the child-pid file holds, since the supervisor
+# creates the directory before the launch. The supervisor never removes or
+# renames it while a child lives. Anything else that removes it, such as a
+# cleaning command run in the child's working tree, ends the holder and closes
+# the child's input, which is accepted, since that act has already destroyed
+# the run's state. A child-pid path with fewer than two directory components
 # names no run directory, so the exit stays disarmed for it rather than reading
 # a bare file name as a directory that is gone. The two assignments below use
 # parameter expansion and the test uses builtins, so this forks nothing.
@@ -128,11 +129,6 @@ HOLDER_RUN_DIR="${HOLDER_CHILD_DIR%/*}"
 if [ "$HOLDER_CHILD_DIR" = "$CHILD_PID_FILE" ] || [ "$HOLDER_RUN_DIR" = "$HOLDER_CHILD_DIR" ] || [ -z "$HOLDER_RUN_DIR" ]; then
   HOLDER_RUN_DIR=""
 fi
-# Reads 1 once holder_child_pid has returned a valid pid, which arms the
-# run-directory exit. It never returns to 0: a child-pid file the supervisor's
-# sweep clears while the child lives must not disarm it, and must not exit the
-# holder either, since only the run directory's absence counts.
-HOLDER_CHILD_PID_READ=0
 
 # Whether one line is a final ask this holder may relay: a stream-json user
 # message carrying exactly one content block, of type text, whose text opens
@@ -659,15 +655,15 @@ fi
 # for a child that died that fast, which blocks the supervisor's own `wait` on
 # the pipeline.
 #
-# The exit on a gone run directory is armed by the child-pid file having held
-# a valid pid once, and is taken when the run directory, the parent of the
-# directory holding that file, no longer exists: the run is over and there is
-# nothing left to hold, so this process exits 0 with a log line naming the
-# directory. A pid file not yet written keeps this process waiting, as above,
-# and the child-pid file alone going missing never exits it, since the
-# supervisor's sweep may clear a child's handle while the child lives. Both
-# checks are builtins over state the loop already reads, so a pass still forks
-# nothing.
+# The exit on a gone run directory is taken from the first poll, whatever the
+# child-pid file holds, when the run directory, the parent of the directory
+# holding that file, no longer exists: the run is over and there is nothing
+# left to hold, so this process exits 0 with a log line naming the directory.
+# A pid file not yet written keeps this process waiting while the run
+# directory stands, and the child-pid file alone going missing never exits it,
+# since the supervisor's sweep may clear a child's handle while the child
+# lives. Both checks are builtins over state the loop already reads, so a pass
+# still forks nothing.
 HOLDER_TICK_FD=9
 HOLDER_TICK_FIFO="${TMPDIR:-/tmp}/supervise-holder-tick-$$"
 rm -f "$HOLDER_TICK_FIFO"
@@ -776,16 +772,12 @@ while true; do
     rm -f "$ASK_REQUEST_FILE" 8>&- 9>&-
   fi
   if holder_child_pid; then
-    if [ "$HOLDER_CHILD_PID_READ" -eq 0 ]; then
-      HOLDER_CHILD_PID_READ=1
-      [ -n "$HOLDER_RUN_DIR" ] && log "read the child pid $HOLDER_CHILD_PID; exiting once it is gone or the run directory $HOLDER_RUN_DIR is"
-    fi
     if ! kill -0 "$HOLDER_CHILD_PID" 2>/dev/null; then
       log "the child pid $HOLDER_CHILD_PID is gone; exiting so the child's input pipe closes"
       exit 0
     fi
   fi
-  if [ "$HOLDER_CHILD_PID_READ" -eq 1 ] && [ -n "$HOLDER_RUN_DIR" ] && [ ! -d "$HOLDER_RUN_DIR" ]; then
+  if [ -n "$HOLDER_RUN_DIR" ] && [ ! -d "$HOLDER_RUN_DIR" ]; then
     log "the run directory $HOLDER_RUN_DIR is gone; exiting so the child's input pipe closes"
     exit 0
   fi

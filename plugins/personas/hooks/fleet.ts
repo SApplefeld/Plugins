@@ -1208,12 +1208,16 @@ export function fleetReadingOf(
       }
     }
   }
-  // The store this session came up on, where it could not be read. It
-  // rides the first prompt that goes out rather than one of its own,
-  // and it is a note rather than a compared reading: there is one of
-  // them per session and no later reading to compare it against. It is
-  // cleared only once a prompt carrying it has been submitted, in the tick,
-  // so a prompt that never went out leaves the line for the next tick.
+  // The store this session came up on, where it was empty or could not be
+  // read. For the coordinator persona watching a roster, the one session
+  // this reading runs for, it rides the first [FLEET] prompt that goes out;
+  // every other session says it in a [STORE LOST] turn of its own, which
+  // the controller tick submits. Here it is a note rather than a compared
+  // reading: there is one of them per session and no later reading to
+  // compare it against. In the tick, the [FLEET] carrier clears it once its
+  // prompt is submitted, and the [STORE LOST] carrier clears it ahead of its
+  // submit and restores it on a refusal, so a prompt that never went out
+  // leaves the line for the next tick.
   if (startStoreProblem !== null) notes.push(startStoreProblem);
   // The reconciliation block's own refused write, carried here for the
   // reason the line above is: it is composed on a tick that has already

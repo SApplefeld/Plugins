@@ -42,9 +42,9 @@ export type RecordsSession = Pick<SessionState, "persona" | "mySessionId" | "sta
 // commons store over `$`; the wait rule's hold host for a hook's budget; the
 // wording call's scrubbed model request with the completion reader and the
 // no-text note; liveAsk and shadowOutcome, the ask layer's wrappers there;
-// the persist, its rollback form, activate and the decision drop; the
-// getter and setter of the nudge-reset flag activate sets; and the session's
-// working-directory read.
+// the persist, its rollback form, the goal tools' answering form, activate
+// and the decision drop; the getter and setter of the nudge-reset flag
+// activate sets; and the session's working-directory read.
 export interface RecordsDeps {
   session: RecordsSession;
   host: PluginHost;
@@ -67,7 +67,10 @@ export interface RecordsDeps {
   ) => Promise<LiveAskResult | null>;
   shadowOutcome: (host: PluginHost, callStampId: string, kind: OutcomeKind, value: string) => void;
   persist: () => Promise<boolean>;
-  persistOrRollBack: (rollBack: () => void) => Promise<boolean>;
+  // persistAnswering in hooks/tool-call.ts: persist's boolean on a settled
+  // write, or the error text of a write that threw, journaled. A `rollBack`
+  // given is handed to persist for the yield path and run on a throw.
+  persistAnswering: (tool: string, applied: string, rollBack?: () => void) => Promise<boolean | { failed: string }>;
   activate: (nextId: string | null, reason: string) => void;
   dropDecision: (entry: AgentState["decisions"][number]) => void;
   countResetSinceNudgeOpened: () => boolean;
@@ -595,10 +598,17 @@ export const clearChildBlockedAncestors = (deps: Pick<RecordsDeps, "session">, c
 //
 // What it does not do is build the caller's message. The deny text of a refusal
 // is returned, so the tool can pass it to the model and the boundary can log it,
-// and the entry is returned, so the tool can name what is active now.
+// and the entry is returned, so the tool can name what is active now. A
+// prompted add whose store write threw keeps the entry in memory and returns it
+// with the error text in writeFailed, so the tool answers with both. An
+// unprompted add whose store write threw takes the entry back out of the tree,
+// sends no record and returns the error text in failed, with no deny, so the
+// tool answers that the plan was not added and the promotion route logs the
+// cause.
 export type GoalEntryAdd =
-  | { ok: true; node: GoalNode }
-  | { ok: false; deny: string };
+  | { ok: true; node: GoalNode; writeFailed?: string }
+  | { ok: false; deny: string; failed?: undefined }
+  | { ok: false; failed: string; deny?: undefined };
 
 export async function addGoalEntry(
   deps: RecordsDeps,
@@ -670,9 +680,9 @@ export async function addGoalEntry(
     updatedAt: now,
     ...(planPath ? { planPath } : {}),
   };
-  // What this add changes, so an unprompted add whose save yields or
-  // whose record cannot be written can take it back: the root's fields
-  // where the add reopened it, the active slot before any activation,
+  // What this add changes, so an unprompted add whose save yields, whose
+  // store write throws or whose record cannot be written can take it back:
+  // the root's fields where the add reopened it, the active slot before any activation,
   // the task route three drops, the open record it promotes, and the
   // decision lines the add pushed.
   const priorActiveGoalId = deps.session.state.activeGoalId;
@@ -804,7 +814,18 @@ export async function addGoalEntry(
     for (const d of addDecisions) deps.dropDecision(d);
   };
 
-  const writeOk = unprompted ? await deps.persistOrRollBack(rollBackAdd) : await deps.persist();
+  // A thrown write is answered, not rethrown. The prompted add keeps the entry
+  // in memory and returns it with the error. The unprompted add rolls the
+  // entry back and returns the error with no entry, and sends no record, since
+  // a record goes out only behind a landed write. The helper writes the one
+  // goal_write_failed line for either.
+  const written = unprompted
+    ? await deps.persistAnswering("goal_add", newNode.id, rollBackAdd)
+    : await deps.persistAnswering("goal_add", newNode.id);
+  if (typeof written !== "boolean") {
+    return unprompted ? { ok: false, failed: written.failed } : { ok: true, node: newNode, writeFailed: written.failed };
+  }
+  const writeOk = written;
   if (writeOk && unprompted) {
     const recordText = unpromptedPlanRecordText(awaitingYes, deps.session.persona, newNode.id, newNode.title, planPath);
     let sent: { id: string; writer: string; seq: number };
@@ -908,7 +929,12 @@ export async function addGoalEntry(
  * every producer of that field and the load call, so no guard is repeated here.
  *
  * Nothing here throws to the caller: the working-directory read is caught, and
- * addGoalEntry answers a refusal rather than raising it.
+ * addGoalEntry answers a refusal or a failed write rather than raising it.
+ *
+ * It returns true only where the add's store write threw, which means the record
+ * must stay open past this turn end's close: the close would otherwise set it
+ * delivered on a live verdict and no later boundary could promote it. Every
+ * other path returns false.
  */
 export async function promotePlanTouchingRecord(
   deps: RecordsDeps,
@@ -916,10 +942,10 @@ export async function promotePlanTouchingRecord(
   coordinatorPersona: string,
   architectPersona: string,
   newerTurnStarted: () => boolean,
-): Promise<void> {
+): Promise<boolean> {
   const open = openTurnRecord(deps.session.state);
-  if (open === null || open.goalId !== undefined) return;
-  if (architectPersona !== "" && deps.session.persona === architectPersona) return;
+  if (open === null || open.goalId !== undefined) return false;
+  if (architectPersona !== "" && deps.session.persona === architectPersona) return false;
 
   // The working directory is read only where this turn edited something that
   // named a plan document, so a turn that touched none costs no host call on
@@ -948,9 +974,9 @@ export async function promotePlanTouchingRecord(
   // started during the read means this completion no longer owns the turn, and
   // a completion that does not own the turn writes nothing. And the open record
   // is read again, since a store write in between can have expired it.
-  if (newerTurnStarted()) return;
+  if (newerTurnStarted()) return false;
   const record = openTurnRecord(deps.session.state);
-  if (record === null || record.id !== open.id) return;
+  if (record === null || record.id !== open.id) return false;
 
   // One line per reading rather than one per boundary: a line whose action,
   // record and text are the ones last logged from here says nothing new, and
@@ -976,7 +1002,7 @@ export async function promotePlanTouchingRecord(
   };
 
   const path = edited ?? record.planPath;
-  if (path === undefined) return;
+  if (path === undefined) return false;
   if (!PLAN_PATH_PATTERN.test(path)) {
     // The shape of a stored string cannot change between boundaries, so the path
     // is dropped rather than written back: keeping it would buy a re-test and a
@@ -986,23 +1012,23 @@ export async function promotePlanTouchingRecord(
       "turn_record_promotion_refused",
       `record ${record.id} drops the plan path ${path}: it fails the shape the store's own pattern names`,
     );
-    return;
+    return false;
   }
   record.planPath = path;
 
   const root = deps.session.state.goals.find((g) => g.parentId === null);
   if (root === undefined) {
     noted("no goal tree exists, and only the operator opens one");
-    return;
+    return false;
   }
   if (deps.session.state.goals.some((g) => g.kind === "plan" && g.planPath === path)) {
     noted("the tree already holds a plan entry for that plan document");
-    return;
+    return false;
   }
   const autonomy = deps.session.state.autonomy;
   if (autonomy === "propose") {
     noted("the autonomy level is propose, which proposes through the standing block rather than the tree");
-    return;
+    return false;
   }
 
   const added = await addGoalEntry(deps, {
@@ -1023,5 +1049,11 @@ export async function promotePlanTouchingRecord(
     coordinatorPersona,
     architectPersona,
   });
-  if (!added.ok) refused(added.deny);
+  if (added.ok) return false;
+  if (added.failed !== undefined) {
+    refused(`the store write failed with ${added.failed}; the plan entry was taken back out of the tree`);
+    return true;
+  }
+  refused(added.deny);
+  return false;
 }

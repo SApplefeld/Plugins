@@ -1,6 +1,6 @@
 ---
 name: implementer-opus
-description: "Scoped implementation agent, Opus tier. Use to implement a single Section of Work from an approved spec when the section has moderate complexity - multi-file coordination, nuanced refactoring, performance-sensitive logic, or mild ambiguity within a clear design. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
+description: "Scoped implementation agent, Opus tier, the default for dispatched work. Use to implement a single Section of Work from an approved spec whose body names no reason for another tier - well-bounded work with a clear contract, multi-file coordination, a refactor seam, a performance-sensitive path, or ambiguity within a clear design. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: opus
 effort: medium

@@ -33,7 +33,7 @@ Explore the problem with me in conversation, then capture the agreement as a spe
 
    Each acceptance command is run on the trunk at the write, its result recorded in the bullet as its control value, `(trunk: <value>)`. One the author cannot run there says so, with why.
 
-10. **Spec self-review.** Before handing the spec to executing-work, read it once and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways and a `Model:` of opus or fable whose body names no reason, with no second inline pass.
+10. **Spec self-review.** Before handing the spec to executing-work, read it once and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways and a `Model:` of sonnet or fable whose body names no reason, with no second inline pass.
 
     Coverage is checked here: every surface step 7's sweep returned appears in some section's Files in scope or under `## Out of Scope`, and one appearing in neither is placed before the spec ships. Every claim the Goal makes is owned by some section's acceptance criteria. A Goal sentence no section delivers is given a section, recorded under `## Operator Verification` where only my action can deliver it, or struck from the Goal. Every section's `Verify:` line names rows `docs/verification.md` holds, or the none form. A missing catalog or row is added by curating-docs' create path.
 
@@ -46,10 +46,11 @@ Explore the problem with me in conversation, then capture the agreement as a spe
 11. **Record the commit model in the spec header:** Commit-and-Push unless I name another, and the sketch approval covers it. Commit-and-Push is "land it on main and leave no mess." `curating-docs/SKILL.md`'s machine contract section states the values the header takes, and executing-work's step 7, Apply the commit model, states what each does.
 
 12. **Assign a model tier to each Section of Work.** Tier picks the model. Briefability picks the locus (dispatch versus main thread).
-   - **haiku:** default for well-bounded work on an established shape: a clear contract, single-responsibility scope, low integration risk and a self-surfacing gate, a build or existing test that fails loudly on wrong output. New procs, services, mappings, DTOs, tests, CRUD surfaces, renames, sweeps. Assign it only where the section names a sibling file and the gate, and never to a security-sensitive surface. A sibling is a file, never a style skill's convention.
-   - **sonnet:** default for well-bounded work with a clear contract and low integration risk whose section leaves the sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call.
-   - **opus:** only where the body names coordination, refactor seam, performance-sensitive path or ambiguity. A section naming none is sonnet.
+   - **sonnet:** only where the body names a self-surfacing gate, a build or existing test that fails loudly on wrong output, and says the section holds no judgment call. Never on a security-sensitive surface. Where a sibling file to follow exists, the body names it. A sibling is a file, never a style skill's convention.
+   - **opus:** default for dispatched work: well-bounded work with a clear contract, and work whose body names coordination, refactor seam, performance-sensitive path or ambiguity. A section naming none is opus.
    - **fable:** only where the body names novel logic, security-sensitive surface, cross-cutting seam or subtle correctness.
+
+   `haiku` is a tier no rubric assigns, and a trial plan replaying a section at that tier names it with its reason.
 
    **Locus rides on its own line, never on the `Model:` line.** A section that cannot be briefed at any tier, because the spec will evolve in contact with the code or the brief would cost more than the work, carries `Locus: inline` beneath its `Model:` line, and is otherwise dispatched. Inline is the deliberate exception and the escalation ceiling, never the default. `Model:` is a bare token naming the model that runs, with the reasoning in the section body, so an inline section on the execution session is `Model: opus`. Question `fable` plus `inline`, since a Fable main thread exists only on a design session.
 

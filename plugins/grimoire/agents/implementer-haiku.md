@@ -1,6 +1,6 @@
 ---
 name: implementer-haiku
-description: "Scoped implementation agent, Haiku tier. Use to implement a single well-bounded Section of Work from an approved spec on an established shape - the brief names a sibling pattern to follow and a self-surfacing gate (a build or existing test that fails loudly if the output is wrong). Dispatch with a brief built from the executing-work skill's Dispatch Brief template, its haiku-only fields filled. Escalates any judgment call rather than guessing."
+description: "Scoped implementation agent, Haiku tier, which no rubric assigns: only a trial plan that names the tier dispatches it. Use to implement a single well-bounded Section of Work from an approved spec on an established shape - the brief names a sibling pattern to follow and a self-surfacing gate (a build or existing test that fails loudly if the output is wrong). Dispatch with a brief built from the executing-work skill's Dispatch Brief template, its haiku-only fields filled. Escalates any judgment call rather than guessing."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: haiku
 effort: medium

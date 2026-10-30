@@ -183,6 +183,12 @@
       "title": "Orphan sweep findings path",
       "description": "The findings file the KitOrphanSweep scheduled task writes, one JSON line per process tree that outlived its session. The controller tick reads it and writes <findings>.ack.jsonl beside it, delivering every finding not yet acknowledged as one turn opening [ORPHAN SWEEP ids=<n>], which posts each to this session's thread and kills nothing. Set it on one session per machine; left unset, the tick reads no findings file."
     },
+    "boxNotices": {
+      "type": "string",
+      "default": "",
+      "title": "Box notices path",
+      "description": "A notices file any process under this account may append to, one JSON line per notice whose id and text are non-empty strings, such as the wiki walker's walk-notices.jsonl. The controller tick reads it after the orphan sweep findings and writes <notices>.ack.jsonl beside it, delivering every notice not yet acknowledged as one turn opening [BOX NOTICE ids=<n>], which posts each notice's text to this session's thread. Set it on one session per machine, since each session with it set delivers every notice; left unset, the tick reads no notices file."
+    },
     "heartbeatPath": {
       "type": "string",
       "default": "",
