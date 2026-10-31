@@ -47,7 +47,7 @@ A red seen with another suite, build or embedding pass on the box that passes on
 
 **The run credits every failing test, or its per-test data is wrong in a known direction.** A tool's default stops a mutant's run at the first failures, so a test scheduled later is never credited and looks useless. Stryker's `disable-bail` and its equivalents in other tools are on for every audit, and a kill set from a run without it is not read. The score is unaffected either way.
 
-**The run is scoped, because its cost is the mutant count times the covering tests' clock.** A folder of a few thousand production lines takes a quarter hour on a small box with fast tests, and a folder whose tests build a database takes hours. The audit runs over one folder under a prune plan, or over one section's changed lines with the tests that section added when a reviewer flags it, with the tool's incremental mode where it has one. The run's clock and box ride the moment-pin like any figure.
+**The run is scoped, because its cost is the mutant count times the covering tests' clock.** A folder of a few thousand production lines takes a quarter hour on a small box with fast tests, and a folder whose tests build a database takes hours. The audit runs over one folder under a prune plan, or over one section's changed lines with the tests that section added when a reviewer flags it, with the tool's incremental mode where it has one. The run's clock and box ride the moment-pin like any figure. A tool run is bounded by the tool's own per-mutant timeout, and a hand-rolled mutation run takes testing-discipline's hang-limit rule.
 
 **The audit produces three lists, and each list is a question, never a verdict.**
 

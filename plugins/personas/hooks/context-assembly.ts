@@ -8,7 +8,9 @@
 // (PromptSubmitArgs omits `context` in .claude/types/claude-code.d.ts). So
 // the delivery takes five of these blocks, the goal block, the task list,
 // the standing text, the memory-recognition block and the follow-up block,
-// inside its submitted text, framed by deliveryWithContext below. The memory
+// inside its submitted text, framed by deliveryWithContext below. The
+// [MID-TURN MESSAGE] re-prompt is framed the same way and also takes the
+// [ASKS] block, which a typed prompt carrying the operator's words takes. The memory
 // block is a typed prompt's alone: it is the recall chain's rendering, whose
 // outcome window and once-per-session rule are keyed to typed prompts.
 //
@@ -17,8 +19,8 @@
 // the blocks reach outside the persona's state arrives as ContextSources,
 // which contextSourcesOf in hooks/index.ts builds.
 
-import type { AgentState, AutonomyLevel, GoalNode, TaskItem } from "./agent-state";
-import { TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
+import type { AgentState, AskEntry, AutonomyLevel, GoalNode, TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
 import { TURN_END_SOURCE } from "./follow-ups";
 import { DONE_HOLD_REASON, goalContextText } from "./goal-persona";
 import { STRETCH_SOURCE } from "./stretch-distillation";
@@ -43,10 +45,15 @@ function followUpMarker(source: string): string {
 // the priming turn. It carries `stillQuiet`, read once every source that
 // reads has answered and before any write: a store read can take a while,
 // and a delivery that finds a turn opened meanwhile is not sent, so it
-// writes nothing and gets null back.
+// writes nothing and gets null back. `operatorsWord` marks a prompt carrying
+// the operator's own words, the test the hold lift in hooks/index.ts reads,
+// and only such a prompt takes the [ASKS] block: a typed prompt that lifts
+// the hold, and the [MID-TURN MESSAGE] re-prompt, whose messages are all
+// operator-class. A record delivery leaves it unset, since a reader's answer
+// record has already closed its ask.
 export type ContextTrigger =
-  | { kind: "typed"; recordOpened: boolean; restartRecap: boolean }
-  | { kind: "delivery"; stillQuiet(): boolean };
+  | { kind: "typed"; recordOpened: boolean; restartRecap: boolean; operatorsWord: boolean }
+  | { kind: "delivery"; stillQuiet(): boolean; operatorsWord?: boolean };
 
 // What the blocks read and reach beyond this file. `state` is the persona's
 // own state, which the blocks read and into which the [ENV], [LESSON] and
@@ -100,6 +107,10 @@ function askAgeText(ms: number): string {
   if (s < 86_400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86_400)}d`;
 }
+
+// The [ASKS] block's closing sentence, a named literal so the injection
+// ledger can size it.
+export const ASKS_CLOSE_TEXT = "Close the ask this message answers with ask_close in this turn; a message that answers none closes none.";
 
 // The [STANDING] block's fixed sentences: the idle order and the line naming
 // the goal tree as the queue. Each is a named literal of its own so the
@@ -158,6 +169,23 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
   // The tree's root, whose seeded done statements and turn count each goal
   // block below carries; undefined where the tree is empty.
   const root = state.goals.find((g) => g.parentId === null);
+  // The persona's open asks, one line each, newest first, up to
+  // GOAL_TREE_ASK_LINES and then the count of the rest: the id, how long
+  // the ask has stood, whether the work is stopped on it or proceeding on
+  // its recommendation, and the question. The recommendation and the
+  // question are the worker's own text, folded to one line and cut, the
+  // fold every field of a goal block takes, and passed through
+  // bracketSafeText so a question cannot forge a label in the block. The
+  // [GOAL TREE] block's Open asks: part and the [ASKS] block both build
+  // their lines with askLine, so the two list each ask alike.
+  const now = Date.now();
+  const openAsks = openAskEntries(state).slice().sort((a, b) => b.openedAt - a.openedAt);
+  const askLine = (entry: AskEntry): string =>
+    `${entry.id} · ${askAgeText(now - entry.openedAt)} · ${entry.blocking ? "blocking" : entry.recommend.trim() === "" ? "proceeding" : `proceeding on ${bracketSafeText(oneLine(entry.recommend).slice(0, 60))}`} · ${bracketSafeText(oneLine(entry.question).slice(0, 120))}\n`;
+  const openAskLines = openAsks.slice(0, GOAL_TREE_ASK_LINES).map(askLine).join("");
+  const openAskCountLine = openAsks.length > GOAL_TREE_ASK_LINES
+    ? `and ${openAsks.length - GOAL_TREE_ASK_LINES} more\n`
+    : "";
   if (activeNode && activeNode.status === "active") {
     // Build the [GOAL TREE] block: Active, Path, Pending siblings, Last note.
     const parent = activeNode.parentId
@@ -195,21 +223,6 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
     // Section 3 (boundary-compaction): the active entry's plan document
     // and section, spliced right after the Path: line.
     const planLine = planDocumentLine(state, activeNode);
-    // The persona's open asks, one line each, newest first, up to
-    // GOAL_TREE_ASK_LINES and then the count of the rest: the id, how long
-    // the ask has stood, whether the work is stopped on it or proceeding on
-    // its recommendation, and the question. The recommendation and the
-    // question are the worker's own text, folded to one line and cut, the
-    // fold every other field of this block takes, and passed through
-    // bracketSafeText so a question cannot forge a label in the block.
-    const now = Date.now();
-    const openAsks = openAskEntries(state).slice().sort((a, b) => b.openedAt - a.openedAt);
-    const openAskLines = openAsks.slice(0, GOAL_TREE_ASK_LINES)
-      .map((entry) => `${entry.id} · ${askAgeText(now - entry.openedAt)} · ${entry.blocking ? "blocking" : entry.recommend.trim() === "" ? "proceeding" : `proceeding on ${bracketSafeText(oneLine(entry.recommend).slice(0, 60))}`} · ${bracketSafeText(oneLine(entry.question).slice(0, 120))}\n`)
-      .join("");
-    const openAskCountLine = openAsks.length > GOAL_TREE_ASK_LINES
-      ? `and ${openAsks.length - GOAL_TREE_ASK_LINES} more\n`
-      : "";
     const openAsksPart = openAsks.length > 0
       ? `Open asks:\n` + openAskLines + openAskCountLine
       : "";
@@ -340,6 +353,28 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       contextBlocks.push(idleBlock);
       try { log(`Agentic: [NO GOAL] reminder injected`); } catch { /* non-fatal */ }
     }
+  }
+
+  // --- [ASKS] block: every open ask, in the line shape the Open asks: part
+  // takes, then the sentence telling the session to close the one the
+  // operator's words answer. Only the session owning the persona closes its
+  // ask, and with no active entry no other block names one, so a prompt
+  // carrying the operator's words takes this block whatever the tree holds.
+  // Built only where an ask is open. It names every open ask, since a session
+  // closes only an id it was given, so its bound is the ledger's own open cap;
+  // the count line is a defensive tail that the cap keeps from firing.
+  if (trigger.operatorsWord === true && openAsks.length > 0) {
+    const asksLines = openAsks.slice(0, ASKS_OPEN_MAX).map(askLine).join("");
+    const asksCountLine = openAsks.length > ASKS_OPEN_MAX
+      ? `and ${openAsks.length - ASKS_OPEN_MAX} more\n`
+      : "";
+    const asksBlock =
+      `[ASKS]\n` +
+      asksLines +
+      asksCountLine +
+      ASKS_CLOSE_TEXT;
+    contextBlocks.push(asksBlock);
+    try { log(`Agentic: [ASKS] injected (${openAsks.length} open)`); } catch { /* non-fatal */ }
   }
 
   // --- [STANDING] block: the idle order, the goal tree named as the

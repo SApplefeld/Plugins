@@ -21,7 +21,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | A hard-to-reverse architecture fork | `design-council` |
 | A verdict on a decision framed with the operator's own preference | doctrine (Match my precision) |
 | Gaps at intake, and how each is routed | doctrine (Enumerate the gaps at intake) |
-| Filing a question that is the operator's to decide, and what is never filed | doctrine (Surface decisions in batches) |
+| Filing a question that is the operator's to decide, closing it when the answer arrives, and what is never filed | doctrine (Surface decisions in batches) |
 | A plan doc's name, format, `Status` lifecycle and `Commit Model` values, and the `docs/` taxonomy | `curating-docs` |
 | Archiving a plan, pruning the backlog, refreshing indexes | `curating-docs` |
 
@@ -51,7 +51,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | Consult triggers and mechanics | `consult` |
 | Weighing a review finding or operator correction before acting | `responding-to-review` |
 | Root-causing a failure | `systematic-debugging` |
-| Whether a change earns a test, which tests retire, test shape and cost at authoring | `testing-discipline` |
+| Whether a change earns a test, which tests retire, test shape and cost at authoring, a test run's hang limit and a probe's restore | `testing-discipline` |
 | Lane mechanics, the red protocol, the clock and fixture time, the layer map, the mutation audit | `test-gates` |
 | Which lane each gate moment takes, and the delta against its baseline | doctrine (After each step, run the lane) |
 | Starting a heavy process on a shared machine | doctrine (One heavy process at a time is a per-machine budget) |

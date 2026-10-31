@@ -96,7 +96,9 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        in the agent's subfolder. A control that must touch the tree under
        review is a tree-mutating probe, carried here because an agent holds no
        skills: no other agent reads the tree while it
-       runs, and it restores from copies taken before the first mutation
+       runs, it restores from copies taken before the first mutation, and it
+       runs as the wrapper `<root>/skills/testing-discipline/SKILL.md` states,
+       under the runner's own hang limit with its restore in the exit path
      - Workaround bar: a workaround needing a paragraph to justify means fix the
        code or escalate
      - Promise check: the promises file's path and the command

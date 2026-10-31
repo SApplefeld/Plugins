@@ -908,7 +908,10 @@ export async function addGoalEntry(
  * `propose` the same line is logged and nothing else happens, which is the
  * level's own rule: the standing block already tells a persona how to propose,
  * and an entry here would propose the plan to the steward on the author's
- * behalf. At `plan-and-ask` and `plan-and-start` the entry is added through
+ * behalf. A session on the default persona logs the same line and adds nothing,
+ * since that persona has no road to a coordinator persona and the add would be
+ * refused at every boundary of the session. At `plan-and-ask` and
+ * `plan-and-start` the entry is added through
  * addGoalEntry, so the paused-awaiting-yes shape and the [PROPOSAL] or [STARTED]
  * record are the dial's own, and the record is marked promoted by that same path.
  * A refused add logs one turn_record_promotion_refused naming the cause and
@@ -931,10 +934,17 @@ export async function addGoalEntry(
  * Nothing here throws to the caller: the working-directory read is caught, and
  * addGoalEntry answers a refusal or a failed write rather than raising it.
  *
- * It returns true only where the add's store write threw, which means the record
+ * It returns true wherever the add it made was refused, which means the record
  * must stay open past this turn end's close: the close would otherwise set it
- * delivered on a live verdict and no later boundary could promote it. Every
- * other path returns false.
+ * delivered on a live verdict and no later boundary could promote it. A refused
+ * add failed for a cause outside the record that can lift by a later boundary,
+ * among them a store write that threw, the reach rule's refusal, a coordinator
+ * record that could not be written, and a store a live session holds. A noted
+ * reading returns false and leaves the record to the close: it made no add,
+ * since the rule it read made none due, so the record is judged as any other.
+ * A session on the default persona is such a reading, since its persona has no
+ * road to a coordinator persona for the whole session. Every path that reaches
+ * no add returns false too.
  */
 export async function promotePlanTouchingRecord(
   deps: RecordsDeps,
@@ -1030,6 +1040,12 @@ export async function promotePlanTouchingRecord(
     noted("the autonomy level is propose, which proposes through the standing block rather than the tree");
     return false;
   }
+  // The add would refuse this before acting, and a session's persona never
+  // changes within it, so no later boundary could land the add.
+  if (deps.session.persona === "default") {
+    noted("the session is on the default persona, which has no road to a coordinator persona");
+    return false;
+  }
 
   const added = await addGoalEntry(deps, {
     kind: "plan",
@@ -1055,5 +1071,5 @@ export async function promotePlanTouchingRecord(
     return true;
   }
   refused(added.deny);
-  return false;
+  return true;
 }

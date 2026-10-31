@@ -12,7 +12,7 @@
 // Built at each call site rather than cached in session state: `$` is
 // rebuilt on a plugin reload and a cached closure set would hold the old one.
 
-import type { ApiMessage, CommandRunArgs, CommandRunResult, FsEntry, HttpInit, HttpResponse, SessionMessage, SessionUsage, SessionUsageArgs, StateRead, StateSetResult, StateValue } from "claude-code";
+import type { ApiMessage, CommandRunArgs, CommandRunResult, FsEntry, HttpInit, HttpResponse, SessionMessage, SessionUsage, SessionUsageArgs, Settings, StateRead, StateSetResult, StateValue } from "claude-code";
 
 // The compaction pass's verdict cache, as hooks/personas.d.ts declares it.
 type CompactionVerdicts = StateValue<"personas", "compactionVerdicts">;
@@ -61,6 +61,29 @@ export interface PluginHost {
   // $.command.run(args): queued until the session is idle, and rejects an
   // unknown name.
   runCommand(args: CommandRunArgs): Promise<CommandRunResult>;
+  // The four variables the Channels launch wrapper sets in a watched
+  // session's environment, each undefined where unset. The relay adapter
+  // (hooks/relay-adapter.ts) reads them for its request headers and nothing
+  // else does; the token's value reaches one header and no other surface.
+  // $.env.get("CHANNEL_PROCESS_TOKEN").
+  getChannelProcessToken(): Promise<string | undefined>;
+  // $.env.get("CHANNEL_SESSION").
+  getChannelSession(): Promise<string | undefined>;
+  // $.env.get("CHANNEL_LINEAGE").
+  getChannelLineage(): Promise<string | undefined>;
+  // $.env.get("CHANNEL_SESSION_MIRROR").
+  getChannelSessionMirror(): Promise<string | undefined>;
+  // $.env.get("LOCALAPPDATA"): the root the Channels broker's state folder
+  // sits under, undefined where unset.
+  getLocalAppData(): Promise<string | undefined>;
+  // $.settings.read({ source: "user" }): the user settings file as loaded,
+  // its `hooks` object whole, and `{}` where the file is absent.
+  readUserSettings(): Promise<Settings>;
+  // $.ui.log(text, { to: "debug" }): one line to the debug log alone, never
+  // the transcript. The engine declares the call synchronous, so hostOf wraps
+  // its return in Promise.resolve for the reason the note below gives: a
+  // host call is an op event and resolves whatever its declaration says.
+  logDebug(text: string): Promise<void>;
 }
 
 // Every member above returns a promise, and that holds for engine calls whose
@@ -71,4 +94,6 @@ export interface PluginHost {
 // would be a lie tsc cannot catch, and a test fake returning the plain value
 // would agree with the declaration and disagree with the engine. Code in this
 // plugin reads the wall clock with Date.now() directly, as it does everywhere
-// else.
+// else. logDebug is the one member over a call declared synchronous, and it
+// is honest on both sides because hostOf wraps the call's return in
+// Promise.resolve: the engine's promise and a fake's undefined both resolve.

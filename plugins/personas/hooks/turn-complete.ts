@@ -1687,8 +1687,10 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
     reapTurnRecords(sess.state, Date.now());
     settleExpiredDispositionStamps();
     if (!turnOpenAfterDelete && !skipped) {
-      // A promotion whose store write threw leaves its record open, and the
-      // close is skipped this turn end so a live verdict cannot deliver it.
+      // A promotion whose add was refused leaves its record open, and the
+      // close is skipped this turn end so a live verdict cannot deliver it
+      // before the next boundary tries again. A noted reading made no add, so
+      // its record goes to the close like any other.
       const keptOpen = await promotePlanTouchingRecord(
         planEditedPathsAtDelete, coordinatorPersona, architectPersona,
         () => turnStartSeq() !== turnStartSeqAtDelete,

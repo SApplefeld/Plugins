@@ -187,7 +187,7 @@
       "type": "string",
       "default": "",
       "title": "Box notices path",
-      "description": "A notices file any process under this account may append to, one JSON line per notice whose id and text are non-empty strings, such as the wiki walker's walk-notices.jsonl. The controller tick reads it after the orphan sweep findings and writes <notices>.ack.jsonl beside it, delivering every notice not yet acknowledged as one turn opening [BOX NOTICE ids=<n>], which posts each notice's text to this session's thread. Set it on one session per machine, since each session with it set delivers every notice; left unset, the tick reads no notices file."
+      "description": "A notices file any process under this account may append to, one JSON line per notice whose id and text are non-empty strings, such as the wiki walker's walk-notices.jsonl, given as an absolute path written out, since the plugin expands no environment variable in it. The controller tick reads it after the orphan sweep findings and writes <notices>.ack.jsonl beside it, delivering the notices not yet acknowledged, at most 20 a turn, as one turn opening [BOX NOTICE ids=<n>]. The turn posts each notice's text to this session's thread and sends the coordinator persona a [PROPOSAL] record to resolve what each notice names, whatever the persona's autonomy. Set it on one session per machine, since each session with it set delivers every notice, and make that a worker persona's session: the coordinator persona's own session cannot send itself the record, and a default-persona session has no road to it. Left unset, the tick reads no notices file."
     },
     "heartbeatPath": {
       "type": "string",
@@ -206,6 +206,12 @@
       "default": true,
       "title": "Transcript redactor",
       "description": "Whether the redactor hides secrets from the transcript: a value a tool prints, a prompt carries, a context block holds or a subagent task quotes is swapped for a placeholder before the model reads it, the real value is restored only inside Bash, PowerShell, Write, Edit, MultiEdit and NotebookEdit, in a call that writes no store, or inside an MCP tool redactorRestoreTools names, and a store surface carrying a raw secret is refused. true by default. false passes every event through untouched."
+    },
+    "relayAdapter": {
+      "type": "string",
+      "default": "off",
+      "title": "Relay adapter",
+      "description": "off or live, and off is the default. live has the module post five of the Channels relay's hook events to the broker on loopback port 8787 itself, as the relay's settings hooks post them: SessionStart, UserPromptSubmit, PostToolUse and both Stop entries, each with the process token the launch wrapper set as a header, and spool a SessionStart no attempt delivered under the broker's state folder. It posts only where CHANNEL_PROCESS_TOKEN is set, and never an event a settings hook in the user settings file still posts, so turning it on with those hooks installed changes nothing. The PreToolUse question hold stays a settings hook under either owner. Any other value reads as off."
     },
     "credentialFiles": {
       "type": "string",

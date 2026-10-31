@@ -9,8 +9,9 @@
 //   <path>: row <entry>               one line per changed path, naming the
 //   <path>: whole <entry> (<reason>)  map entry or the reason that placed it
 //   <path>: unmapped
-//   node --test <test files>          targeted only: the matched rows' tests
-//   PERSONAS_SUITE_LIST=<suites> node --test test/personas-offline.test.js
+//   node --test --test-timeout=1800000 <test files>
+//                                     targeted only: the matched rows' tests
+//   PERSONAS_SUITE_LIST=<suites> node --test --test-timeout=1800000 test/personas-offline.test.js
 //                                     targeted only, where a row names suites,
 //                                     each as its path under test-personas/
 //
@@ -93,6 +94,10 @@ const { safePath } = require('./kit-size.js');
 
 const MAP_FILE = path.join('test', 'gate-lanes.json');
 const WRAPPER = 'test/personas-offline.test.js';
+// The runner with its own hang limit, 30 minutes per test: the smallest of 10,
+// 30 and 60 minutes that is at least twice the gate's slowest test. The offline
+// runner's suite tests carry their own limit, above the suite's ceiling.
+const NODE_TEST = 'node --test --test-timeout=1800000';
 const RUNS_FILE = path.join('.kit', 'trunk-gate', 'runs.jsonl');
 const GIT_TIMEOUT_MS = 30000;
 // The outcomes a daily gate records when it ran or meant to run a whole gate.
@@ -247,10 +252,10 @@ function render(result) {
         else lines.push(safePath(p) + ': unmapped');
     }
     if (result.lane === 'targeted') {
-        if (result.tests.length > 0) lines.push('node --test ' + result.tests.join(' '));
+        if (result.tests.length > 0) lines.push(NODE_TEST + ' ' + result.tests.join(' '));
         if (result.suites.length > 0) {
             lines.push('PERSONAS_SUITE_LIST=' + result.suites.map((s) => path.posix.relative('test-personas', s)).join(',')
-                + ' node --test ' + WRAPPER);
+                + ' ' + NODE_TEST + ' ' + WRAPPER);
         }
     }
     return lines;

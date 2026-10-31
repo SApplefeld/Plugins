@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit-wide authority on what a test suite costs to consult and what it detects. It owns these moments: mapping a repository's test layers by run cost; choosing which lane runs at a fix round, a section close, a push, a merge, finishing, and a handoff; discriminating a red from a flake; recording, pinning and comparing wall-clock, fixture-time and contention figures, including the pre-suite check of the box and the gate line's test ledger; and auditing a suite with mutation testing. It states no runnable commands, since a repo's lane invocations are per-repo facts held in that project's memory tier. Load class: named-trigger, per its own frontmatter description, which lists the acts and events that call it (choosing a lane, running the finishing gate, reading a red or a wall-clock figure, recording the gate line, mapping layers, auditing a suite).
 
-Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md`, which moved the lanes, the red protocol and the clock and box here from `testing-discipline`. The entries keyed `C`, `X`, `A`, `B` and `AE` moved from the testing-discipline ledger with their ids and history, each with a provenance line naming the move and its source line re-read in this file. Claim ids are unique only under their heading, so an id a moved entry names in its reason or provenance resolves under the testing-discipline heading unless this ledger holds it. The `AG` entries are that section's new text.
+Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md`, which moved the lanes, the red protocol and the clock and box here from `testing-discipline`. The entries keyed `C`, `X`, `A`, `B` and `AE` moved from the testing-discipline ledger with their ids and history, each with a provenance line naming the move and its source line re-read in this file. Claim ids are unique only under their heading, so an id a moved entry names in its reason or provenance resolves under the testing-discipline heading unless this ledger holds it. The `AG` entries are that section's new text. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30, which added the mutation audit's hang-limit sentence (AK001 below).
 
 ### C001
 - key: Read a repo's actual lane and suite commands from that project's memory tier wherever this skill names a lane.
@@ -477,3 +477,13 @@ Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gat
 - reason: A session copies the shape of the files it joins, so a suite still full of the old pattern teaches it to every new test, whatever the skill says.
 - passage: A prune plan runs the audit before the doctrine lands, or the suite keeps teaching the old pattern.
 - passage: A session copies the shape it sees in the files it joins, so the retire pass over the existing suite is what makes the authoring rules take.
+
+### AK001
+- key: Bound a mutation tool's run by its own per-mutant timeout, and run a hand-rolled mutation under testing-discipline's hang-limit rule.
+- class: pointer
+- source: plugins/grimoire/skills/test-gates/SKILL.md:50
+- provenance: `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 2026-10-30, from the incident that plan's `## Intent` records: on 2026-10-29 a both-ways probe with no bound grew a test host to 21.1 GB on a 16 GB guest and took the machine down.
+- verdict: keep
+- landed: `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1
+- reason: A mutant is a deliberate defect, and a deliberate defect can be a program that never halts. A mutation tool's run carries its own per-mutant timeout, as that plan's Approach states, so it needs nothing more, and the `test-hang-gate` guard passes the tool's own command. A hand-rolled mutation has no such timer, so the sentence routes it to the owner of the hang-limit rule (AK001 in the testing-discipline ledger) rather than restating it.
+- passage: A tool run is bounded by the tool's own per-mutant timeout, and a hand-rolled mutation run takes testing-discipline's hang-limit rule.

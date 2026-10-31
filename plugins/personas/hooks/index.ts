@@ -206,9 +206,9 @@ import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore
 import { formatterHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
 import { childEnvOf, gitHooksPathOf } from "./spawn";
 import { newSpawnTypes, recordSpawnType, spawnLogLine, spawnTypeOf, type SpawnTypes } from "./spawn-types";
-// The seven deny guards: the four the kit's command hooks held, ported, the
-// shared-state guard, the git commit gate and the em-dash guard beside them,
-// and the path host their tree reads go through.
+// The eight deny guards: the four the kit's command hooks held, ported, the
+// shared-state guard, the git commit gate, the em-dash guard and the test-hang
+// gate beside them, and the path host their tree reads go through.
 import { pathOpsOf, readonlyAgentGuard, type LexHost } from "./guards/readonly-agent";
 import { docsWriteGuard } from "./guards/docs-write";
 import { prDocsGuard } from "./guards/pr-docs";
@@ -216,6 +216,7 @@ import { GIT_ENV_REDIRECTS, mergedPrPushGuard } from "./guards/merged-pr-push";
 import { sharedStateGuard } from "./guards/shared-state";
 import { gitCommitGateGuard } from "./guards/git-commit-gate";
 import { emDashGuard } from "./guards/em-dash";
+import { testHangGateGuard } from "./guards/test-hang-gate";
 // The memq grant, answered on tool.check.
 import { MEMQ_GRANT_REASON, memqGrantMatches, memqGrantable, type MemqGrantDeps } from "./guards/memq-grant";
 import { ATTACHMENT_WITHHELD, BLOCK_WITHHELD, bodyFileRefusal, PROMPT_WITHHELD, REFUSED_TOOLS, REFUSED_TOOL_REASON, SPAWN_WITHHELD, scrubAttachment, scrubContextBlocks, scrubPrompt, scrubServed, scrubSpawn, scrubText, seedFiles, seedVault, serverOf, setRedactorOn, setRestoreTools, toolCallBack, toolCallDown, toolCallRefusal, unrestoredNotice, withheldContextBlocks, withheldToolResult, type SeedFile, type ToolCallDown } from "./redactor";
@@ -235,6 +236,9 @@ import { controllerTick, drainInbox, heartbeatTick, type TickContext } from "./c
 import { persistAnswering, serveToolCall, type EffortAct, type ToolCallContext } from "./tool-call";
 import { serveTurnComplete, type TurnCompleteContext } from "./turn-complete";
 import { readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, liftHeldAsksForReprompt } from "./mid-turn-reprompt";
+// The relay adapter: the Channels broker's hook events, posted by the module
+// itself under the `plugin` hook owner, behind the relayAdapter option.
+import { relayAdapterOf } from "./relay-adapter";
 
 // Names this module exports whose bodies live in the concern modules above.
 export type ChannelSender = ChannelSenderFromModule;
@@ -300,6 +304,13 @@ function hostOf(dp: any): PluginHost {
     sessionUsage: (args?: SessionUsageArgs) => dp.session.usage(args),
     sessionMessages: (args?: { as: "api" }) => dp.session.messages(args),
     runCommand: (args: CommandRunArgs) => dp.command.run(args),
+    getChannelProcessToken: () => dp.env.get("CHANNEL_PROCESS_TOKEN"),
+    getChannelSession: () => dp.env.get("CHANNEL_SESSION"),
+    getChannelLineage: () => dp.env.get("CHANNEL_LINEAGE"),
+    getChannelSessionMirror: () => dp.env.get("CHANNEL_SESSION_MIRROR"),
+    getLocalAppData: () => dp.env.get("LOCALAPPDATA"),
+    readUserSettings: () => dp.settings.read({ source: "user" }),
+    logDebug: (text: string) => Promise.resolve(dp.ui.log(text, { to: "debug" })),
   };
 }
 
@@ -791,7 +802,7 @@ async function guardWindowsOf(dp: any): Promise<boolean> {
   }
 }
 
-// The module's own before guards for one call, the seven deny guards, built
+// The module's own before guards for one call, the eight deny guards, built
 // over the hook-bound `$` for hostOf's reason. They run beside the guards
 // runner.ts holds registered, in the same runBefore pass, after those.
 function moduleBeforeGuards(dp: any): BeforeGuard[] {
@@ -818,6 +829,7 @@ function moduleBeforeGuards(dp: any): BeforeGuard[] {
     sharedStateGuard({ lexHost }),
     gitCommitGateGuard({ lexHost, readFile: (path: string) => guardReadFileOf(dp, path), quote: (text: string) => bracketSafeText(oneLine(text)) }),
     emDashGuard({ quote: (text: string) => bracketSafeText(oneLine(text)) }),
+    testHangGateGuard({ quote: (text: string) => bracketSafeText(oneLine(text)) }),
   ];
 }
 
@@ -4739,7 +4751,7 @@ export const register: Register = async (on, options) => {
     await registerTool("ask_close", () => $.tool.register({
       name: "ask_close",
       description:
-        "Close one of your open asks to the operator by its id, as the Open asks: part of the [GOAL TREE] block lists it. " +
+        "Close one of your open asks to the operator by its id, as the Open asks: part of the [GOAL TREE] block or the [ASKS] block lists it. " +
         "Close an ask once the operator's word answers it, once the choice you proceeded on held and the question no longer matters, or once you no longer need the answer. " +
         "An operator's reply closes no ask by itself: it lifts the hold on blocking asks, and the ask it answered is yours to close here. " +
         "The result lists the ids still open. Owner only. An id that is not open is refused.",
@@ -7117,7 +7129,8 @@ export const register: Register = async (on, options) => {
       // opens a record attached to that entry and puts nothing to Jev.
       let answeredAskNodeId: string | null = null;
       const operatorsPrompt = OPERATOR_ORIGIN_KINDS.has(originReading.kind) && originReading.senderClass !== "participant";
-      if (sess.isOwner && !supervisorAskTurn && operatorsPrompt) {
+      const operatorsWord = sess.isOwner && !supervisorAskTurn && operatorsPrompt;
+      if (operatorsWord) {
         const held = openBlockingAsks(sess.state).slice().sort((a, b) => a.openedAt - b.openedAt);
         if (held.length > 0) {
           const liftedAt = Date.now();
@@ -7211,6 +7224,7 @@ export const register: Register = async (on, options) => {
           kind: "typed",
           recordOpened,
           restartRecap: restartRecap === "auto" && sess.isOwner && e.text.startsWith("[SUPERVISOR-PRIMING]"),
+          operatorsWord,
         },
         keptText,
         contextSourcesOf(
@@ -7315,7 +7329,8 @@ export const register: Register = async (on, options) => {
         },
         // The [MID-TURN MESSAGE] re-prompt, hooks/mid-turn-reprompt.ts: the
         // scan over the closing turn's window, then one turn carrying what
-        // it took, framed with the context blocks as a delivery is. The
+        // it took, framed with the context blocks as a delivery is, and
+        // with the [ASKS] block, since its messages are the operator's. The
         // blocks are built whatever opens meanwhile, since the re-prompt is
         // queued either way. A refused submit withdraws the follow-ups the
         // blocks offered, as a refused delivery does.
@@ -7325,7 +7340,7 @@ export const register: Register = async (on, options) => {
           if (scanned.kind !== "taken") return;
           const repromptBody = repromptText(scanned.messages);
           const repromptFollowUps: string[] = [];
-          const repromptBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => true }, repromptBody, contextSourcesOf($, undefined, repromptFollowUps));
+          const repromptBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => true, operatorsWord: true }, repromptBody, contextSourcesOf($, undefined, repromptFollowUps));
           const framedRepromptText = deliveryWithContext(repromptBlocks ?? [], repromptBody);
           const repromptEntry = expectTurn({ kind: "reprompt", coveredAt: scanned.messages.map((m) => m.at), senderClass: "operator", text: framedRepromptText });
           const repromptOutcome = await submitExpectedTurn($, expectedTurns, repromptEntry);
@@ -7411,12 +7426,26 @@ export const register: Register = async (on, options) => {
     }
   });
 
-  // An "off" session installs nothing past this point: ten hooks and one
-  // timer. The hooks are the ten above, session.start, session.compact,
-  // turn.start, tool.call, prompt.submit, agent.spawn, prompt.context,
-  // prompt.attachment, tool.check and turn.complete, whose off branches run
-  // the guards, the memq grant, the after hooks, the recognition block, the
-  // redactor and the compaction pass; turn.complete's closes the turn the
+  // --- The relay adapter (hooks/relay-adapter.ts) ---
+  // Four classic events, posted to the Channels broker as its settings hooks
+  // post them, only where the relayAdapter option reads `live` and the
+  // session carries a process token. Registered in every arming tier, since
+  // a session under the `plugin` hook owner is announced by nothing else, and
+  // each hook returns next(e) whatever its post did. `$` reaches the adapter
+  // only through hostOf, as every other module's host does.
+  const relayAdapter = relayAdapterOf(cfg.relayAdapter);
+  on("classic.SessionStart", async ($, e, next) => relayAdapter.hook(hostOf($), "SessionStart", e, next));
+  on("classic.UserPromptSubmit", async ($, e, next) => relayAdapter.hook(hostOf($), "UserPromptSubmit", e, next));
+  on("classic.PostToolUse", async ($, e, next) => relayAdapter.hook(hostOf($), "PostToolUse", e, next));
+  on("classic.Stop", async ($, e, next) => relayAdapter.hook(hostOf($), "Stop", e, next));
+
+  // An "off" session installs nothing past this point: fourteen hooks and
+  // one timer. The hooks are the ten module events above, session.start,
+  // session.compact, turn.start, tool.call, prompt.submit, agent.spawn,
+  // prompt.context, prompt.attachment, tool.check and turn.complete, whose
+  // off branches run the guards, the memq grant, the after hooks, the
+  // recognition block, the redactor and the compaction pass, and the relay
+  // adapter's four classic events; turn.complete's closes the turn the
   // pass's idle test reads. The timer is the compaction pass's, started in
   // session.start's off branch.
   if (arming === "off") return;
