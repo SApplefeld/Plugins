@@ -1,4 +1,4 @@
-// The web surface's pages: one script for all six. Each page names itself in `<body data-page>`,
+// The web surface's pages: one script for all seven. Each page names itself in `<body data-page>`,
 // fetches its view and the siblings reading from the broker every five seconds and draws them again.
 // The page holds no state the broker does not, apart from which session list is expanded.
 //
@@ -34,6 +34,7 @@
     plan: { render: renderPlan, url: planUrl },
     health: { render: renderHealth, url: () => "/web/health" },
     "needs-me": { render: renderNeedsMe, url: () => "/web/needs-me" },
+    ask: { render: renderAsk, url: askUrl, gone: askGone },
     talk: { render: renderTalk, url: talkUrl, accept: talkAccept, follow: true },
   };
 
@@ -400,6 +401,32 @@
     return txt(row.client) || txt(row.branch);
   }
 
+  /** A publish row Mark published can act on: a row the button can act on that carries the trunk head it read. */
+  function publishRowOf(value) {
+    return rolloutRowOf(value) && txt(value.head) !== "";
+  }
+
+  /**
+   * A publish tag's age from its `YYYY-MM-DD` date, in whole local days: "today", else "3d ago". Null where the tag's name
+   * carried no date, so the row is drawn without an age.
+   */
+  function tagAge(value, now) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(txt(value));
+    if (match === null) return null;
+    const day = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    if (Number.isNaN(day.getTime())) return null;
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const days = Math.round((today.getTime() - day.getTime()) / 86400000);
+    return days <= 0 ? "today" : span(days * 86400000) + " ago";
+  }
+
+  /** A publish row's line: "2 commits on trunk since publish-20261020, 2d ago", the age left out where the tag has none. */
+  function publishSince(row, now) {
+    const age = tagAge(row.lastTagDate, now);
+    return plural(num(row.toPublish) ?? 0, "commit", "commits") + " on trunk since " + txt(row.lastTag) + (age === null ? "" : ", " + age);
+  }
+
   /**
    * The one toast the pages share: a line, and an optional command the operator can select and copy. Its live region is in the
    * page empty before the first message, so a screen reader announces that message. Focus moves to Dismiss where the tapped
@@ -490,6 +517,79 @@
     return button;
   }
 
+  /**
+   * Posts Mark published for a publish row and shows the broker's answer in the toast; nothing is thrown. The post carries
+   * the trunk head the row showed, so the broker tags only that commit and answers 409 with the head it fetched where the
+   * trunk has moved since. The broker's answer to a tag carries the tag, what the push starts and the undo command, and
+   * the toast shows all three as the broker sent them.
+   */
+  async function postPublish(row) {
+    let response;
+    try {
+      response = await fetch("/web/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: row.repo, head: txt(row.head) }),
+        signal: AbortSignal.timeout(ROLLOUT_POST_MS),
+      });
+    } catch (error) {
+      const again = " Tapping again answers \"Already published\" if the tag landed.";
+      if (error instanceof Error && error.name === "TimeoutError") showToast("The broker did not answer in 15 minutes, so the tag is not confirmed." + again);
+      else showToast("The broker could not be reached, so the tag is not confirmed." + again);
+      return;
+    }
+    let answer = null;
+    let readable = true;
+    try {
+      answer = await response.json();
+    } catch (error) {
+      readable = false;
+    }
+    const body = isObject(answer) ? answer : {};
+    if (response.status === 200) {
+      if (!readable) showToast("The broker's answer was not JSON, so the tag is not confirmed.");
+      else if (txt(body.tag) === "") showToast("The broker's answer named no tag, so the tag is not confirmed.");
+      else if (txt(body.undo) === "") showToast("Tagged " + txt(body.tag) + ".");
+      else showToast("Tagged " + txt(body.tag) + "." + (txt(body.starts) === "" ? "" : " " + txt(body.starts)) + " To undo it, run:", txt(body.undo));
+    } else if (response.status === 409) {
+      // A head in the answer is the trunk's now, past the one the row showed; the view read after this tap shows it.
+      if (txt(body.head) !== "") showToast("Not published: new commits landed on the trunk since the page read it. Tap Mark published again to publish the head shown now.");
+      else showToast(txt(body.tag) === "" ? "Already published: the trunk head carries a publish tag." : "Already published: " + txt(body.tag));
+    } else if (response.status === 502) {
+      // A timeout is the one kind where the push may have gone through after the broker stopped waiting.
+      const kind = txt(body.kind);
+      const landed = kind === "timeout" ? " The tag may have landed. Tapping again answers \"Already published\" if it did." : "";
+      showToast("Mark published failed" + (kind === "" ? "" : " (" + kind + ")") + "." + landed);
+    } else {
+      showToast("Mark published failed: the broker answered HTTP " + response.status + ".");
+    }
+  }
+
+  /** Marks one publish row published. The button stays disabled until the answer, and the page reads its view again after it. */
+  async function sendPublish(row) {
+    const key = rolloutKey(row);
+    if (rolloutBusy.has(key)) return;
+    rolloutBusy.add(key);
+    redrawNeeds();
+    try {
+      await postPublish(row);
+    } finally {
+      rolloutBusy.delete(key);
+      await refreshView();
+    }
+  }
+
+  /** The Mark published button for a publish row, which sits where a client row carries Mark rolled out. */
+  function publishButton(row, cls) {
+    const button = h("button", "ro-button " + cls, "Mark published");
+    button.type = "button";
+    button.setAttribute("aria-label", "Mark published, " + txt(row.repo));
+    button.disabled = rolloutBusy.has(rolloutKey(row));
+    button.dataset.focusKey = "publish|" + rolloutKey(row);
+    button.addEventListener("click", () => sendPublish(row));
+    return button;
+  }
+
   /** The footer line of a card: what the counts are, and when the tags were read. */
   function rolloutFooter(words, readAt) {
     const at = parse(readAt);
@@ -505,10 +605,13 @@
     card.setAttribute("aria-labelledby", "rollout-heading");
     const rows = objects(summary.rows);
     const waiting = rows.filter((row) => num(row.toRollOut) > 0);
+    const publishing = objects(summary.publish).filter((row) => num(row.toPublish) > 0);
     const held = rolloutHeld(view);
 
+    // The count names clients only where every row waiting is a client branch; a publish row is a repository, so a mix reads "waiting" alone.
+    const count = num(summary.waiting) ?? waiting.length + publishing.length;
     const head = h("div", "ro-head");
-    const heading = label(held ? "Rollout" : "Rollout · " + plural(num(summary.waiting) ?? waiting.length, "client", "clients") + " waiting");
+    const heading = label(held ? "Rollout" : "Rollout · " + (publishing.length === 0 ? plural(count, "client", "clients") : count) + " waiting");
     heading.id = "rollout-heading";
     head.append(heading);
     const oldest = dayOf(summary.oldestAt, now);
@@ -521,13 +624,20 @@
     }
 
     const shared = isObject(view.shared) ? objects(view.shared.rows) : [];
-    if (waiting.length === 0 && shared.length === 0) return null;
+    if (waiting.length === 0 && publishing.length === 0 && shared.length === 0) return null;
     const full = h("div", "ro-full");
     for (const row of waiting) {
       const line = h("div", "ro-line");
       const text = h("span");
       const since = tagDay(row.lastTagDate) === "" ? ", no rollout tag yet" : " since " + tagDay(row.lastTagDate);
       text.append(h("b", null, rolloutClient(row)), " · " + num(row.toRollOut) + " merged" + since);
+      line.append(text, h("span", "ro-day", dayOf(row.oldestAt, now) ?? ""));
+      full.append(line);
+    }
+    for (const row of publishing) {
+      const line = h("div", "ro-line");
+      const text = h("span");
+      text.append(h("b", null, txt(row.repo)), " · " + publishSince(row, now));
       line.append(text, h("span", "ro-day", dayOf(row.oldestAt, now) ?? ""));
       full.append(line);
     }
@@ -554,6 +664,11 @@
       });
       condensed.append(line);
     }
+    for (const row of publishing) {
+      const line = h("div", "ro-flow");
+      line.append(h("b", null, txt(row.repo)), " ", h("span", "muted", "· " + publishSince(row, now)));
+      condensed.append(line);
+    }
     for (const one of shared) {
       const line = h("div", "ro-flow");
       const clients = num(one.clients) ?? 0;
@@ -563,7 +678,8 @@
       condensed.append(line);
     }
     card.append(condensed);
-    card.append(rolloutFooter("commits on each branch past its last rollout tag", summary.readAt));
+    const counted = publishing.length === 0 ? "commits on each branch past its last rollout tag" : "commits past each branch's last rollout tag or the trunk's last publish tag";
+    card.append(rolloutFooter(counted, summary.readAt));
     return card;
   }
 
@@ -609,17 +725,64 @@
     return card;
   }
 
-  /** The Needs-me page's Roll out group, one row and one button per client branch with something waiting, or nothing where the slot is null. */
+  /** The repo page's card for the repository the persona's checkout reads where it ships by publish tags, or nothing where the slot is null. */
+  function publishRepoCard(view) {
+    const row = view.publish;
+    if (!isObject(row)) return null;
+    const now = nowOf(view);
+    const card = h("section", "card pad attn ro-repo");
+    card.setAttribute("aria-labelledby", "rollout-heading");
+    const head = h("div", "ro-head");
+    const heading = label("Rollout");
+    heading.id = "rollout-heading";
+    head.append(heading);
+    const held = rolloutHeld(view);
+    if (held) head.append(h("div", "ro-sub held", "tags unread"));
+    else head.append(h("div", "ro-tag", txt(row.lastTag)));
+    card.append(head);
+    if (held) {
+      card.append(rolloutFooter("the rows from the last read are not shown", row.readAt));
+      return card;
+    }
+
+    const toPublish = num(row.toPublish) ?? 0;
+    card.append(h("div", "ro-lead", publishSince(row, now) + (toPublish > 0 ? ":" : ".")));
+    const commits = objects(row.commits);
+    if (commits.length > 0) {
+      const grid = h("div", "ro-commits");
+      for (const commit of commits) {
+        const mark = h("span", "ro-check", "✓");
+        mark.setAttribute("aria-hidden", "true");
+        grid.append(mark, h("span", null, txt(commit.title)), h("span", "ro-day", dayOf(commit.at, now) ?? ""));
+      }
+      card.append(grid);
+    }
+    if (toPublish > commits.length) card.append(h("div", "ro-more", "and " + (toPublish - commits.length) + " more"));
+    if (publishRowOf(row)) {
+      const action = h("div", "ro-action");
+      action.append(publishButton(row, "ro-button-repo"));
+      card.append(action);
+    }
+    card.append(rolloutFooter("tags the trunk head; the tag starts the publish workflow", null));
+    return card;
+  }
+
+  /**
+   * The Needs-me page's Roll out group, one row and one button per client branch and per publish repository with something
+   * waiting, or nothing where the slot is null.
+   */
   function rolloutGroup(view) {
     if (!Array.isArray(view.rollout)) return null;
     const now = nowOf(view);
     const rows = objects(view.rollout);
+    const publishing = objects(view.publish);
     const held = rolloutHeld(view);
-    if (!held && rows.length === 0) return null;
+    if (!held && rows.length === 0 && publishing.length === 0) return null;
     const section = h("section", "section");
     section.setAttribute("aria-label", "Roll out");
     const head = h("div", "section-head");
-    head.append(label("Roll out · " + (held ? "tags unread" : plural(rows.length, "client", "clients")), "h2"));
+    const count = publishing.length === 0 ? plural(rows.length, "client", "clients") : rows.length + publishing.length + " waiting";
+    head.append(label("Roll out · " + (held ? "tags unread" : count), "h2"));
     section.append(head);
     const card = h("div", "card");
     if (held) card.append(h("div", "nm-none", "tags unread"));
@@ -636,6 +799,20 @@
         text.append(h("span", "muted", "· " + parts.join(" · ")));
         line.append(text);
         if (rolloutRowOf(row)) line.append(rolloutButton(row, "ro-button-need"));
+        card.append(line);
+      }
+      for (const row of publishing) {
+        const line = h("div", "ro-need");
+        const text = h("div");
+        text.append(h("b", null, txt(row.repo)), " · " + publishSince(row, now) + " ");
+        const oldest = dayOf(row.oldestAt, now);
+        if (oldest !== null) text.append(h("span", "muted", "· oldest " + oldest));
+        // The head the tap ships, by its title, and what the tag starts; no title where the row carries no commits.
+        const newest = objects(row.commits)[0];
+        if (newest !== undefined && txt(newest.title) !== "") text.append(h("div", "muted", "newest: " + txt(newest.title)));
+        text.append(h("div", "muted", "the tag starts the publish workflow"));
+        line.append(text);
+        if (publishRowOf(row)) line.append(publishButton(row, "ro-button-need"));
         card.append(line);
       }
     }
@@ -669,8 +846,21 @@
     return x < y ? -1 : x > y ? 1 : 0;
   }
 
+  /** An ask's id on the Needs me page: its repo, a colon and its ask id, unencoded, or null for any other item. */
+  function askKey(item) {
+    return item.kind === "ask" && txt(item.askId) !== "" ? txt(item.repo) + ":" + txt(item.askId) : null;
+  }
+
+  /** The ask page of an item that is an ask naming its repo and id, or null for any other item. */
+  function askHrefOf(item) {
+    return item.kind === "ask" && txt(item.repo) !== "" && txt(item.askId) !== ""
+      ? "/ask?repo=" + encodeURIComponent(item.repo) + "&id=" + encodeURIComponent(item.askId)
+      : null;
+  }
+
   function needRow(item, now) {
-    const row = item.repo ? link("need-row", repoHref(item.repo)) : h("div", "need-row");
+    const href = askHrefOf(item);
+    const row = href !== null ? link("need-row", href) : item.repo ? link("need-row", repoHref(item.repo)) : h("div", "need-row");
     row.append(h("span", "who", item.repo ? item.repo : "Hands"));
     const middle = h("span");
     if (item.kind === "blocked") middle.append(h("span", "tag", "blocked"));
@@ -693,24 +883,35 @@
     return worker && worker.leaseOpen ? "lease open" : "lease closed";
   }
 
+  // The band draws a need whole, so the repo card's need line is a pointer cut at this many code points.
+  const NEED_POINTER_POINTS = 80;
+
+  /** `text` cut to its first `points` code points, an ellipsis marking a cut. */
+  function cutPoints(text, points) {
+    const characters = Array.from(text);
+    return characters.length <= points ? text : characters.slice(0, points).join("") + "…";
+  }
+
+  /**
+   * A repo that needs the operator, as a card: its head links to the repo page and its need line, one
+   * line, to the ask page for an ask and to the repo page otherwise, so the card holds two links side by
+   * side rather than one inside the other.
+   */
   function repoCard(repo, needs, now) {
-    const card = link("card repo-card attn", repoHref(repo.name));
-    const head = h("div", "repo-head");
+    const card = h("div", "card repo-card attn");
+    const head = link("repo-head", repoHref(repo.name));
     const name = h("div", "repo-name");
     name.append(txt(repo.name), chevron());
     head.append(name);
     const opened = parse(repo.oldestOpenAt);
-    const word = repo.state === "asking" ? "asking" : repo.state === "blocked" ? "blocked" : "stalled";
+    const item = needs.find((candidate) => candidate.repo === repo.name && candidate.kind !== "hands");
+    // The badge names the repo's own state where it is one a need explains, else the kind of need it holds.
+    const word = CARD_STATES.indexOf(repo.state) >= 0 ? repo.state : item && item.kind === "ask" ? "asking" : "blocked";
     head.append(
       h("span", repo.state === "stalled" ? "badge red" : "badge", word + (opened === null ? "" : " · " + span(now - opened))),
     );
     card.append(head);
-    const item = needs.find((candidate) => candidate.repo === repo.name && candidate.kind !== "hands");
-    if (item) {
-      const line = h("div", null, txt(item.text));
-      if (item.recommend) line.append(h("span", "rec", "Recommends: " + item.recommend));
-      card.append(line);
-    }
+    if (item) card.append(link("need-line", askHrefOf(item) ?? repoHref(repo.name), cutPoints(txt(item.text), NEED_POINTER_POINTS)));
     const meta = h("div", "meta");
     meta.append("queue " + (num(repo.queueDepth) ?? 0) + " · " + workerWords(repo.worker, now) + " · " + leaseWords(repo.worker));
     if (num(repo.unseen) > 0) {
@@ -725,6 +926,8 @@
     const row = link("row", repoHref(repo.name));
     const name = h("div", "name");
     name.append(dot(repo.state === "working" ? "blue" : "hollow"), txt(repo.name));
+    // A stalled repo with nothing to answer is a row carrying the stalled word. The view holds no time it stalled.
+    if (repo.state === "stalled") name.append(h("span", "badge red", "stalled"));
     row.append(name);
     const turn = parse(repo.worker ? repo.worker.lastTurnAt : null);
     const step = repo.step && num(repo.step.section) !== null && num(repo.step.sectionCount) !== null ? repo.step : null;
@@ -791,10 +994,13 @@
 
     const stack = h("section", "repos");
     stack.setAttribute("aria-label", "Repos");
-    for (const repo of repos.filter((candidate) => CARD_STATES.indexOf(candidate.state) >= 0)) {
+    // A repo with an ask or a blocked item in the band needs the operator and draws as a card; every other
+    // repo draws as a row, or as a chip in the dormant box.
+    const needy = new Set(needs.filter((item) => item.kind === "ask" || item.kind === "blocked").map((item) => item.repo));
+    for (const repo of repos.filter((candidate) => needy.has(candidate.name))) {
       stack.append(repoCard(repo, needs, now));
     }
-    const active = repos.filter((candidate) => CARD_STATES.indexOf(candidate.state) < 0 && candidate.state !== "dormant");
+    const active = repos.filter((candidate) => !needy.has(candidate.name) && candidate.state !== "dormant");
     if (active.length > 0) {
       const group = h("div", "card full");
       const rows = h("div", "rows");
@@ -802,7 +1008,7 @@
       group.append(rows);
       stack.append(group);
     }
-    const dormant = repos.filter((candidate) => candidate.state === "dormant");
+    const dormant = repos.filter((candidate) => !needy.has(candidate.name) && candidate.state === "dormant");
     if (dormant.length > 0) {
       const box = h("section", "card dormant full");
       const top2 = h("div", "section-head");
@@ -916,7 +1122,8 @@
     const left = h("div", "stack");
     const headingBox = headingCard(view, true);
     if (headingBox !== null) left.append(headingBox);
-    const rolloutBox = rolloutRepoCard(view);
+    // A repository ships one way, so at most one of the two slots holds a row.
+    const rolloutBox = rolloutRepoCard(view) ?? publishRepoCard(view);
     if (rolloutBox !== null) left.append(rolloutBox);
 
     const changed = list(view.changed);
@@ -1112,7 +1319,7 @@
     "no-completed-plans": "no plan finished in the last 7 days",
     "no-queue": "the queue has not been read yet",
   };
-  const SESSION_ORDER = { "needs you": 0, blocked: 0, exited: 1, idle: 2, working: 3 };
+  const SESSION_ORDER = { "needs you": 0, blocked: 0, working: 1, idle: 2, exited: 3 };
   const SESSIONS_SHOWN = 8;
   let sessionsExpanded = false;
 
@@ -1147,7 +1354,7 @@
     const sessions = list(view.sessions).slice().sort((a, b) => {
       const x = Object.prototype.hasOwnProperty.call(SESSION_ORDER, a.surfaceState) ? SESSION_ORDER[a.surfaceState] : 2;
       const y = Object.prototype.hasOwnProperty.call(SESSION_ORDER, b.surfaceState) ? SESSION_ORDER[b.surfaceState] : 2;
-      return x - y;
+      return x - y || txt(a.name).localeCompare(txt(b.name), undefined, { sensitivity: "base" });
     });
     const card = h("div", "card pad");
     if (sessions.length === 0) card.append(h("div", "muted", "No live sessions."));
@@ -1190,53 +1397,52 @@
     return lines;
   }
 
+  /**
+   * One account's card: the binding window's name and percentage as the headline, the account and its
+   * projection under it, and every window's bar at the foot, an untouched account's at 0% included.
+   */
   function accountRow(account, now) {
-    const box = h("div", "account");
+    const box = h("div", "card account");
+    const lines = windowLines(account);
+    const untouched = lines.length > 0 && lines.every((line) => num(line.window.pct) === 0);
     const head = h("div", "account-head");
-    const who = h("span", "who", account.email ? account.email : "Account #" + account.number);
-    if (account.active) who.append(h("span", "muted", " · active"));
-    head.append(who);
-    let bound = "";
     let elapsed = "";
     let projection = "";
     if (account.binding && num(account.binding.pct) > 0) {
       const name = Object.prototype.hasOwnProperty.call(WINDOW_NAMES, account.binding.name) ? WINDOW_NAMES[account.binding.name] : txt(account.binding.name);
-      bound = "bound by " + name;
-      if (account.lastsToReset === false) bound += " · dry before reset";
-      else if (account.lastsToReset === true) projection = " · lasts to reset";
+      const pct = num(account.binding.pct);
+      head.append(h("span", "binding" + (pct >= 80 ? " hot" : ""), name + " " + pct + "%"));
+      if (account.lastsToReset === false) projection = "dry before reset";
+      else if (account.lastsToReset === true) projection = "lasts to reset";
       if (num(account.elapsedPct) !== null) elapsed = Math.round(account.elapsedPct) + "% of the window elapsed";
+    } else {
+      head.append(h("span", "binding muted", untouched ? "untouched · 0%" : "no window bound"));
     }
-    if (account.failing) {
-      const failing = "sign-in failing · " + account.consecutiveFailures + (account.consecutiveFailures === 1 ? " try" : " tries");
-      bound = bound ? failing + " · " + bound : failing;
-    }
-    if (bound) {
-      const boundCell = h("span", "bound", bound);
-      if (projection) boundCell.append(h("span", "muted", projection));
-      head.append(boundCell);
-    }
+    if (projection) head.append(h("span", account.lastsToReset === false ? "bound" : "muted", projection));
     box.append(head);
+    const who = h("div", "who", account.email ? account.email : "Account #" + account.number);
+    if (account.active) who.append(h("span", "muted", " · active"));
+    box.append(who);
+    if (account.failing) {
+      box.append(h("div", "bound", "sign-in failing · " + account.consecutiveFailures + (account.consecutiveFailures === 1 ? " try" : " tries")));
+    }
     if (elapsed) box.append(h("div", "meta", elapsed));
     if (account.organizationName) box.append(h("div", "meta", txt(account.organizationName)));
-
-    const lines = windowLines(account);
-    const untouched = lines.length > 0 && lines.every((line) => num(line.window.pct) === 0);
-    if (untouched) {
-      const reset = lines.map((line) => parse(line.window.resetsAt)).find((at) => at !== null);
-      box.append(h("div", "meta", "untouched · 0%" + (reset === undefined ? "" : " · resets " + until(reset - now))));
-    } else if (lines.length > 0) {
-      const grid = h("div", "windows");
-      for (const line of lines) {
-        const pct = num(line.window.pct) ?? 0;
-        const reset = parse(line.window.resetsAt);
-        grid.append(h("span", "muted", line.name), h("span", null, pct + "%"), bar(pct, pct >= 80), h("span", "muted", reset === null ? "" : until(reset - now)));
-      }
-      box.append(grid);
-    }
     if (account.spend) {
       const spend = account.spend;
       const used = num(spend.used) === null || num(spend.limit) === null ? "" : " · " + spend.used + " of " + spend.limit + " " + txt(spend.currency);
       box.append(h("div", "meta", "Spend " + (num(spend.pct) ?? 0) + "%" + used));
+    }
+
+    // The windows close the card, so the bars of cards side by side end level.
+    if (lines.length > 0) {
+      const grid = h("div", "windows");
+      for (const line of lines) {
+        const pct = num(line.window.pct) ?? 0;
+        const reset = parse(line.window.resetsAt);
+        grid.append(h("span", "muted", line.name), h("span", null, pct + "%"), h("span", "muted reset", reset === null ? "" : until(reset - now)), bar(pct, pct >= 80));
+      }
+      box.append(grid);
     }
     return box;
   }
@@ -1282,19 +1488,20 @@
     if (!isObject(kit)) return null;
     const total = num(kit.total) ?? 0;
     const behind = objects(kit.sessions).filter((session) => session.behind === true);
+    const behindCount = num(kit.behind) ?? behind.length;
     const card = h("div", "card pad kit");
     const head = h("div", "section-head");
     head.append(h("h3", "label muted", "Kit version"));
     const count = h("div");
-    count.append(h("b", null, String(Math.max(0, total - (num(kit.behind) ?? behind.length)))), " of " + total + " on current");
+    if (behindCount > 0) count.append(h("b", null, String(behindCount)), " of " + total + " started before the update");
+    else count.append("all ", h("b", null, String(total)), " on current");
     head.append(count);
     card.append(head);
     const published = parse(kit.updatedAt);
     const line = h("div", "kit-line", published === null ? "Release time unknown." : "Published " + span(now - published) + " ago");
     if (kit.sha) line.append(" ", h("span", "muted mono", txt(kit.sha)));
     card.append(line);
-    if (behind.length === 0) card.append(h("div", "meta", "all on current"));
-    else card.append(h("div", "meta", (behind.length === 1 ? "A session whose process" : "Sessions whose process") + " started before the update: " + behind.map((session) => txt(session.name)).join(", ")));
+    if (behind.length > 0) card.append(h("div", "meta", "Restart to take it: " + behind.map((session) => txt(session.name)).join(", ")));
     return card;
   }
 
@@ -1308,10 +1515,15 @@
     box.append(head);
     const verdict = verdictCard(view);
     if (verdict) box.append(verdict);
-    const card = h("div", "card");
-    if (accounts.length === 0) card.append(h("div", "pad muted", view.asOf && view.asOf.usage === null ? "No reading yet." : "No accounts reporting."));
-    for (const account of accounts) card.append(accountRow(account, now));
-    box.append(card);
+    if (accounts.length === 0) {
+      const card = h("div", "card");
+      card.append(h("div", "pad muted", view.asOf && view.asOf.usage === null ? "No reading yet." : "No accounts reporting."));
+      box.append(card);
+      return box;
+    }
+    const tiles = h("div", "accounts");
+    for (const account of accounts) tiles.append(accountRow(account, now));
+    box.append(tiles);
     return box;
   }
 
@@ -1485,6 +1697,14 @@
     "no-question": "No question is waiting for a typed answer; nothing was sent.",
   };
 
+  /** What the status line says while a sent line's request has timed out and the ring has not carried it. */
+  const UNCONFIRMED_WORDS = "The broker has not answered yet. The line shows here once it lands.";
+  /**
+   * How long an echo whose request ended with no readable answer reads not yet confirmed before it
+   * reads may not have sent: past this, the operator looks for the line in the thread rather than waits.
+   */
+  const UNSENT_MARK_MS = 5 * 60 * 1000;
+
   /** The most files one line may carry, the broker's own bound and the count one Discord message takes. */
   const MAX_FILES = 10;
   /** How long one file's upload may take: a file at the host's cap crosses a phone's link in well under this. */
@@ -1497,9 +1717,11 @@
    * line being typed and the files picked for it, so a redraw keeps both, the last send's outcome,
    * and whether a pick or verdict is out and what the last one came to. `drawn` holds the keys of
    * the waiting cards on the page, `seeded` is whether a first reading has been settled, and `waiting`
-   * is whether the last reading held any waiting card.
+   * is whether the last reading held any waiting card. `echoes` holds the lines the composer sent
+   * that the ring has not carried back yet, each drawn after the ring's lines until a poll brings
+   * its own copy. A line of files alone has no words to draw, so its echo is held and never shown.
    */
-  const talk = { lineage: null, lines: [], nextSeq: 0, ringStart: null, plan: null, draft: "", picked: [], sending: false, status: null, acting: false, pendingStatus: null, drawn: new Set(), seeded: false, waiting: false };
+  const talk = { lineage: null, lines: [], echoes: [], nextSeq: 0, ringStart: null, plan: null, draft: "", picked: [], sending: false, sends: 0, status: null, acting: false, pendingStatus: null, drawn: new Set(), seeded: false, waiting: false };
 
   /** A size in the short form a file chip shows: 512 B, 40 KB, 3.2 MB. */
   function byteSize(n) {
@@ -1552,6 +1774,7 @@
     if (restarted || (num(view.nextSeq) !== null && view.nextSeq < talk.nextSeq)) {
       const lineage = talk.lineage;
       talk.lines = [];
+      talk.echoes = [];
       talk.nextSeq = 0;
       talk.ringStart = null;
       const whole = await fetchView(talkUrl());
@@ -1566,13 +1789,125 @@
       if (seq === null) continue;
       const held = talk.lines.findIndex((drawn) => drawn.seq === seq);
       if (held >= 0) talk.lines[held] = line;
-      else if (seq > seen) talk.lines.push(line);
+      else if (seq > seen) {
+        talk.lines.push(line);
+        landEcho(line);
+      }
     }
     if (talk.lines.length > 200) talk.lines.splice(0, talk.lines.length - 200);
     talk.nextSeq = num(view.nextSeq) ?? talk.nextSeq;
     talk.ringStart = stamp ?? talk.ringStart;
     settlePending(view);
     return view;
+  }
+
+  /**
+   * The code points the broker strips from a line before its ring copy, `isInvisible` in
+   * `broker/sanitize.ts`: C0 but the tab, DEL, the soft hyphen, the zero-width family and the bidi
+   * marks, the bidi embeddings and isolates, the word joiner family, the variation selectors, the
+   * byte order mark and the tag block. A phone's emoji keyboard adds a variation selector to many
+   * emoji, so the typed words and the ring's copy differ until both pass through this.
+   */
+  function invisibleCode(code) {
+    return (code <= 0x1f && code !== 0x09) || code === 0x7f || code === 0x00ad ||
+      (code >= 0x200b && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2060 && code <= 0x2064) || (code >= 0x2066 && code <= 0x2069) ||
+      (code >= 0xfe00 && code <= 0xfe0f) || code === 0xfeff || (code >= 0xe0000 && code <= 0xe007f);
+  }
+
+  /** A line's words as the match compares them: the invisible class gone and the ends trimmed. */
+  function matchWords(text) {
+    return Array.from(text).filter((character) => !invisibleCode(character.codePointAt(0))).join("").trim();
+  }
+
+  /**
+   * Takes the echo a landed line's words pair with off the list and marks it landed, or answers null
+   * where none has those words. An echo whose request is out or was delivered is taken before one
+   * whose request ended with no readable answer, since a line resent after such an end is the one
+   * the broker is known to hold. A line of files alone carries no words, so its held echo pairs with
+   * words that are empty.
+   */
+  function takeEcho(words) {
+    const matches = (echo) => matchWords(echo.text) === words;
+    let at = talk.echoes.findIndex((echo) => echo.mark !== "not yet confirmed" && matches(echo));
+    if (at < 0) at = talk.echoes.findIndex(matches);
+    if (at < 0) return null;
+    const [echo] = talk.echoes.splice(at, 1);
+    echo.landed = true;
+    return echo;
+  }
+
+  /**
+   * Drops the echo a newly arrived ring line carries back: an inbound operator line whose author
+   * ends in " (page)" and whose words are the echo's, both read through `matchWords`. Only a line
+   * arriving for the first time is matched, so two sends of the same words each wait for a line of
+   * their own, in `takeEcho`'s order. A
+   * landed line was delivered, so while no send has started since and no delivered answer settled
+   * it first, the composer settles as a delivered line's does, at the landing even while the
+   * request is still out, and a status still speaking of the send reads Sent., or Answered. for a
+   * typed answer to a held question. A later send owns the
+   * composer and the status, so a landing after it changes neither.
+   */
+  function landEcho(line) {
+    if (line.kind !== "inbound" || line.senderClass !== "operator" || !txt(line.author).endsWith(" (page)")) return;
+    const echo = takeEcho(matchWords(txt(line.text)));
+    if (echo === null || echo.settled || echo.send !== talk.sends) return;
+    settleLanded(echo);
+    // Settled here, so a refusal that moves this landing by `moveLanding` knows the composer took it.
+    echo.settled = true;
+    if (talk.status === UNCONFIRMED_WORDS || talk.status === "Sending.") talk.status = echo.answering ? "Answered." : "Sent.";
+  }
+
+  /**
+   * Moves the landing a refused send's echo took to the next echo with the same words, and answers
+   * whether one took it. The broker's refusal says this send delivered nothing, so the line that
+   * landed was an earlier send of the same words, which still waits on the list. With no such echo
+   * the landing stays where it is, since a line on the page is the broker's word that it holds one.
+   * Where the landing settled the composer, by `settleLanded` in `landEcho`, it took the refused
+   * send's files out of the picks and its words out of the composer. The picks come back, ahead of
+   * any picked since, less the files the earlier send carried, which it delivered. The words both
+   * sends carried leave: the composer is not touched again, so a draft typed since the landing,
+   * the words among it or not, stays as typed.
+   */
+  function moveLanding(echo) {
+    const taken = takeEcho(matchWords(echo.text));
+    if (taken === null) return false;
+    if (echo.settled) {
+      const back = echo.picked.filter((pick) => talk.picked.indexOf(pick) < 0).concat(talk.picked);
+      talk.picked = back.filter((pick) => taken.picked.indexOf(pick) < 0);
+    }
+    return true;
+  }
+
+  /**
+   * The mark an echo draws. One whose request ended with no readable answer reads not yet confirmed
+   * until the timer that end set, `UNSENT_MARK_MS` long, flags it unsent, then may not have sent,
+   * which stays until the echo lands or a change of persona, a reload or a broker restart clears
+   * it. The timer is the one clock, so a wall clock moved back cannot hold the first mark past the
+   * moment. The mark held on the echo is unchanged, so the echo still pairs in `takeEcho`'s order.
+   */
+  function echoMark(echo) {
+    return echo.mark === "not yet confirmed" && echo.unsent ? "may not have sent" : echo.mark;
+  }
+
+  /**
+   * Takes a landed line's words out of the composer and its files out of the picks, as a delivered
+   * line's are. A draft that is the words as `matchWords` compares them is the line itself, however
+   * the two differ in the invisible class, so it clears whole and leaves no invisible remainder to
+   * send. A draft that no longer starts with the words was rewritten and is left as typed.
+   */
+  function settleLanded(echo) {
+    const words = matchWords(echo.text);
+    const draft = talk.draft.trimStart();
+    if (words !== "" && matchWords(draft) === words) talk.draft = "";
+    else if (echo.text !== "" && draft.startsWith(echo.text)) talk.draft = draft.slice(echo.text.length).trimStart();
+    talk.picked = talk.picked.filter((pick) => echo.picked.indexOf(pick) < 0);
+  }
+
+  /** Takes one echo off the page, where it is still there. */
+  function dropEcho(echo) {
+    const at = talk.echoes.indexOf(echo);
+    if (at >= 0) talk.echoes.splice(at, 1);
   }
 
   /** The keys of the view's waiting cards: a question by its entry id, a request by its request id. A card with no id has no key, so it is neither drawn nor counted held. */
@@ -1683,6 +2018,7 @@
     if (lineage === talk.lineage) return;
     talk.lineage = lineage;
     talk.lines = [];
+    talk.echoes = [];
     talk.nextSeq = 0;
     talk.status = null;
     talk.pendingStatus = null;
@@ -1743,6 +2079,20 @@
    * With `answers`, the line is the typed answer to the question the session is held on: no file
    * rides it, the picks stay for the next line, and an answered line clears the draft as a
    * delivered one does.
+   * The line's words draw as an echo marked sending once its files are up, and a poll that
+   * carries the ring's own copy replaces it. The broker's readable answer that nothing was sent, and its refusal with an
+   * HTTP 4xx, take the echo away. A request that ends any other way once it is out, by a timeout, a
+   * dropped connection, an HTTP 5xx or an unreadable body, keeps it, marked not yet confirmed, since
+   * the broker may still deliver the line; `echoMark` reads it may not have sent once the timer set
+   * at that end, `UNSENT_MARK_MS` long, flags it, and the timer draws the page then, since a broker
+   * that is down answers no poll. A selection or a line being typed holds that draw as it holds a
+   * poll, for at most as many tries of `POLL_MS` as the poll's hold allows, after which the timer
+   * draws over it. A refusal of a send whose echo already took a landing, while an
+   * earlier send of the same words still waits, moves that landing to the earlier send, by
+   * `moveLanding`, which gives the refused send's files back to the picks. A failure
+   * before the request goes out, such as an upload
+   * the broker refused, sent nothing. A line of files alone keeps an echo the transcript never
+   * draws, so its landing settles the picks as a line with words does.
    */
   async function sendLine(answers) {
     const answering = answers === true;
@@ -1751,20 +2101,47 @@
     const lineage = talk.lineage;
     if ((text === "" && picked.length === 0) || talk.sending || lineage === null) return;
     talk.sending = true;
+    const send = ++talk.sends;
     talk.status = "Sending.";
     if (lastView !== null) draw(lastView);
+    let echo = null;
+    let posted = false;
+    let refused = false;
+    let said = false;
     try {
       for (const pick of picked) if (pick.id === null) pick.id = await uploadFile(pick, lineage);
       const ids = picked.map((pick) => pick.id);
+      // A line of files alone has no words to draw, so its echo is held and never shown. A pill
+      // tapped during the uploads moved the page, so the echo is kept only where the page still
+      // shows the line's persona.
+      if (lineage === talk.lineage) {
+        echo = { text, picked, send, answering, author: "You (page)", at: Date.now(), mark: "sending", unsent: false, landed: false, settled: false, shown: matchWords(text) !== "" };
+        talk.echoes.push(echo);
+        if (echo.shown && lastView !== null) draw(lastView);
+      }
+      posted = true;
       const response = await fetch("/web/say", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(answering ? { lineage, text, answers: true } : { lineage, text, files: ids }),
         signal: AbortSignal.timeout(sayTimeoutMs(ids.length)),
       });
-      if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status);
+      if (!response.ok) {
+        // A 4xx is the broker refusing the line, so nothing was sent. A 5xx may come after the
+        // broker read it, so its state is unknown.
+        refused = response.status >= 400 && response.status < 500;
+        throw new Unreadable("the broker answered HTTP " + response.status);
+      }
       const answer = await response.json();
       const status = txt(answer.status);
+      said = true;
+      // A line a poll carried back while the request was out settled at its landing, so the answer
+      // changes nothing, and the ring is not read again, since the poll that carried it just was.
+      // Save where the answer refuses the send while an earlier send of the same words still waits:
+      // the refusal says this send delivered nothing, so the landing was that earlier send's and
+      // moves to it, and the refusal stands.
+      if (echo !== null && echo.landed && (status === "delivered" || status === "answered" || !moveLanding(echo))) return;
+      if (status !== "delivered" && status !== "answered") dropEcho(echo);
       if (status === "delivered" || status === "answered") {
         // Only the sent text is cleared. Words typed after it while the send was out are the next
         // draft, without the space that joined them; a draft that no longer starts with the sent
@@ -1774,6 +2151,7 @@
         // The same for the files: those picked after the send began stay for the next line.
         talk.picked = talk.picked.filter((pick) => picked.indexOf(pick) < 0);
         talk.status = status === "answered" ? "Answered." : "Sent.";
+        if (echo !== null) echo.settled = true;
       } else if (status === "unknown-file") {
         // The ids name files saved for a session no longer live; the picks stay for the next send.
         for (const pick of talk.picked) pick.id = null;
@@ -1784,9 +2162,49 @@
       talk.sending = false;
       await refreshTalk();
     } catch (error) {
-      talk.status = "Could not send: " + (error instanceof Unreadable ? error.message : "the broker did not answer") + ".";
+      // Once the broker has answered, the answer's words stand and a failed read after it is the
+      // poll's notice to give. A pill tapped while the send was out moved the page, so its status is
+      // left to the persona it now shows. A line a poll carried back while the request was out
+      // settled at its landing, so the request's end changes nothing. A request that went
+      // out and ended with no readable answer leaves the broker's state unknown, so its echo stays,
+      // not yet confirmed, save a 4xx, which is the broker's refusal. An echo cleared before it
+      // landed, by a change of persona or a broker restart, takes no such words, since no landing
+      // would take them back. A 4xx refusing a send whose echo took a landing, while an earlier
+      // send of the same words still waits, moves the landing to that send and the refusal stands.
+      if (!said) {
+        const here = lineage === talk.lineage;
+        if (echo !== null && echo.landed && !(refused && moveLanding(echo))) {
+          // Settled at its landing.
+        } else if (posted && !refused) {
+          if (echo !== null) {
+            echo.mark = "not yet confirmed";
+            // The mark `echoMark` draws changes `UNSENT_MARK_MS` after this end, on the timer's own
+            // clock, which flags the echo unsent at that moment and draws it. A broker that is down
+            // fails every poll, which draws nothing, so no poll's draw can be relied on to carry the
+            // mark: a selection or a line being typed holds the draw as it holds a poll, and the
+            // timer tries again every `POLL_MS`, skipping at most `HOLD_POLLS` times before it draws
+            // over the hold, as the poll does. An echo landed or cleared by then is off the list and
+            // draws nothing. The end is set once per send, so an echo gets one timer.
+            const drawUnsent = (skipped) => {
+              if (lastView === null || talk.echoes.indexOf(echo) < 0) return;
+              if ((selected() === null && !composing()) || skipped >= HOLD_POLLS) draw(lastView);
+              else setTimeout(() => drawUnsent(skipped + 1), POLL_MS);
+            };
+            setTimeout(() => {
+              echo.unsent = true;
+              drawUnsent(0);
+            }, UNSENT_MARK_MS);
+          }
+          if (here && echo !== null && talk.echoes.indexOf(echo) >= 0) talk.status = UNCONFIRMED_WORDS;
+        } else {
+          dropEcho(echo);
+          if (here) talk.status = "Could not send: " + (error instanceof Unreadable ? error.message : "the broker did not answer") + ".";
+        }
+      }
     } finally {
       talk.sending = false;
+      // One send is out at a time, so a status still saying so is this send's, and it has ended.
+      if (talk.status === "Sending.") talk.status = null;
       if (lastView !== null) draw(lastView);
       const compose = document.getElementById("talk-compose");
       if (compose !== null && document.activeElement === document.body) compose.focus();
@@ -2017,6 +2435,7 @@
     if (line.senderClass === "participant") head.append(" · participant");
     if (Object.prototype.hasOwnProperty.call(KIND_WORDS, line.kind) && KIND_WORDS[line.kind] !== who) head.append(" · " + KIND_WORDS[line.kind]);
     if (Object.prototype.hasOwnProperty.call(RECEIPT_WORDS, line.receipt)) head.append(" · " + RECEIPT_WORDS[line.receipt]);
+    if (typeof line.echo === "string") head.append(" · " + line.echo);
     box.append(head);
     const files = list(line.files).filter((file) => file !== null && typeof file === "object");
     // A line of files alone draws no empty bubble above them.
@@ -2098,8 +2517,11 @@
     const lines = talk.lines;
     const transcript = h("section", "transcript");
     transcript.setAttribute("aria-label", "Conversation");
-    if (lines.length === 0) transcript.append(h("div", "muted talk-empty", "No lines yet."));
+    const shown = talk.echoes.filter((echo) => echo.shown);
+    if (lines.length === 0 && shown.length === 0) transcript.append(h("div", "muted talk-empty", "No lines yet."));
     for (const line of lines) transcript.append(talkLine(line, lineage, now));
+    // Sent lines the ring has not carried back yet, in the operator's own style.
+    for (const echo of shown) transcript.append(talkLine({ kind: "inbound", senderClass: "operator", author: echo.author, text: echo.text, at: echo.at, echo: echoMark(echo) }, lineage, now));
     out.append(transcript);
 
     const newest = lines.length === 0 ? null : num(lines[lines.length - 1].at);
@@ -2299,7 +2721,7 @@
     return item.kind === "ask" && txt(item.repo) !== "" && txt(item.askId) !== "" && txt(item.recommend).trim() !== "";
   }
 
-  /** Posts to an Agree route and answers its JSON; a refusal or a broken answer throws with the words for it. */
+  /** Posts to an Agree route, or the ask page's Done, and answers its JSON; a refusal or a broken answer throws with the words for it. */
   async function postAgree(name, body, timeoutMs) {
     let response;
     try {
@@ -2312,7 +2734,7 @@
     } catch (error) {
       throw new Unreadable("the broker did not answer");
     }
-    if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status);
+    if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status, response.status);
     try {
       return await response.json();
     } catch (error) {
@@ -2336,7 +2758,8 @@
       lastOk = Date.now();
       draw(view);
     } catch (error) {
-      redrawNeeds();
+      if (isGone(error)) drawGone();
+      else redrawNeeds();
     }
   }
 
@@ -2409,13 +2832,17 @@
   /** One item: who and how long, what it says, what is recommended, and for an ask Agree and Correct with the broker's last word. */
   function needsItem(item, now) {
     const box = h("div", "nm-item");
+    const anchor = askKey(item);
+    if (anchor !== null) box.id = anchor;
     const head = h("div", "nm-head");
     const who = h("span", "nm-who", item.repo ? txt(item.repo) : "Hands");
     const opened = parse(item.openedAt);
     if (item.kind === "blocked") who.append(" ", h("span", "tag", "blocked"));
     else if (item.kind === "ask" && item.blocking === true) who.append(" ", h("span", "tag", "blocking"));
     head.append(who, h("span", "nm-age", opened === null ? "" : span(now - opened)));
-    box.append(head, h("div", "nm-text", txt(item.text)));
+    // An ask's question opens its own page; any other item's text is plain.
+    const href = askHrefOf(item);
+    box.append(head, href !== null ? link("nm-text", href, txt(item.text)) : h("div", "nm-text", txt(item.text)));
     if (txt(item.recommend) !== "") box.append(h("div", "rec", "Recommends: " + txt(item.recommend)));
     if (item.kind !== "ask" || txt(item.repo) === "") return box;
 
@@ -2529,6 +2956,170 @@
   }
 
   // ---------------------------------------------------------------------------------------------
+  // Ask page
+  // ---------------------------------------------------------------------------------------------
+
+  /** The repo and ask id the address names, or null where either is missing. */
+  function askParams() {
+    const query = new URLSearchParams(location.search);
+    const repo = query.get("repo");
+    const id = query.get("id");
+    return repo && id ? { repo: repo, id: id } : null;
+  }
+
+  function askUrl() {
+    const params = askParams();
+    return params === null ? null : "/web/ask?repo=" + encodeURIComponent(params.repo) + "&id=" + encodeURIComponent(params.id);
+  }
+
+  /**
+   * One ask: who asked and how long ago, the question, the recommendation, the brief, the plan, the
+   * thread, then Agree, Answer and Done. Agree and Answer are the Needs me page's Agree and Correct,
+   * with the same body, words and touched mark, so the batch there skips an ask answered here.
+   */
+  function renderAsk(view) {
+    const out = document.createDocumentFragment();
+    const now = nowOf(view);
+    // The ask in the Needs me item's shape, so the shared Agree and touched mark key it the same way.
+    const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), text: txt(view.question), recommend: view.recommend };
+    // The re-raise the page drew, which Done sends so its mark records the version of the ask that was seen.
+    const drawn = { reraisedAt: typeof view.reraisedAt === "string" ? view.reraisedAt : null };
+
+    const top = h("div", "top");
+    top.append(back("/", "Standup"));
+    const row = h("div", "top-row");
+    const who = h("h1", null, item.repo);
+    if (view.blocking === true) who.append(" ", h("span", "tag", "blocking"));
+    row.append(who, stamp(view));
+    top.append(row);
+    const opened = parse(view.openedAt);
+    if (opened !== null) top.append(h("p", "sub", "asked " + span(now - opened) + " ago"));
+    out.append(top);
+
+    const ask = h("section", "card pad section ask-card");
+    ask.setAttribute("aria-label", "Ask");
+    ask.append(h("div", "ask-question", item.text));
+    if (txt(item.recommend) !== "") ask.append(h("div", "rec", "Recommends: " + txt(item.recommend)));
+    out.append(ask);
+
+    if (txt(view.brief).trim() !== "") {
+      const brief = h("section", "card pad section");
+      brief.setAttribute("aria-label", "Brief");
+      brief.append(label("Brief"), h("div", "ask-brief", txt(view.brief)));
+      out.append(brief);
+    }
+
+    const where = h("section", "card pad section ask-where");
+    if (txt(view.planPath) !== "") where.append(h("div", "meta", "Plan"), h("div", "mono", txt(view.planPath)));
+    // The talk page's rule: the thread link is the one URL the page did not build, so only Discord's is drawn.
+    const thread = txt(view.thread);
+    if (thread.indexOf(DISCORD_PREFIX) === 0) where.append(link("ask-thread", thread, "Open the thread"));
+    if (where.childNodes.length > 0) out.append(where);
+
+    const key = needsKey(item);
+    const controls = h("div", "nm-controls ask-controls");
+    if (agreeable(item)) {
+      const agreeButton = h("button", "nm-agree", "Agree");
+      agreeButton.type = "button";
+      agreeButton.disabled = needsMe.acting;
+      agreeButton.dataset.focusKey = "agree|" + key;
+      agreeButton.addEventListener("click", () => sendAgree(item));
+      controls.append(agreeButton);
+    }
+    const answer = link("nm-correct", correctHref(item), "Answer");
+    answer.dataset.focusKey = "answer|" + key;
+    answer.addEventListener("click", () => {
+      touch(key);
+      leaveDraft(item.repo, 'Answer on "' + item.text + '": ');
+    });
+    controls.append(answer);
+    const done = h("button", "nm-correct", "Done");
+    done.type = "button";
+    done.dataset.focusKey = "done|" + key;
+    if (view.done === true) {
+      // Marked done: the other pages hide the ask until the persona closes it or asks again.
+      done.disabled = true;
+      controls.append(done);
+      const at = parse(view.doneAt);
+      if (at !== null) controls.append(h("span", "meta", "marked done " + dayClock(at, now)));
+    } else {
+      done.disabled = askDone.sendingKey === key;
+      done.addEventListener("click", () => sendDone(item, drawn));
+      controls.append(done);
+    }
+    out.append(controls);
+    // A Done's line belongs to its own ask, and goes for good once a reading draws that ask done.
+    if (askDone.statusKey === key && view.done === true) {
+      askDone.statusKey = null;
+      askDone.status = null;
+    }
+    if (askDone.status !== null && askDone.statusKey === key) {
+      const status = h("div", "meta nm-status", askDone.status);
+      status.setAttribute("role", "status");
+      out.append(status);
+    }
+    if (txt(item.recommend).trim() === "") out.append(h("div", "meta", "no recommendation to agree to"));
+    const words = needsMe.statuses.get(key);
+    if (words !== undefined) {
+      const status = h("div", "meta nm-status", words);
+      status.setAttribute("role", "status");
+      out.append(status);
+    }
+
+    out.append(sources(view, ["roster", "ledger", "registry"]));
+    return out;
+  }
+
+  /** The ask page's Done post: the ask whose post is out, and the ask and words its last failure left. */
+  const askDone = { sendingKey: null, statusKey: null, status: null };
+
+  /**
+   * Marks the ask done: one post at a time, then the page reads its view again, so the button reads Done
+   * with the mark's time without a reload. A refusal or no answer leaves the button live with one line
+   * saying so, and a post that landed under a refresh that did not says that instead.
+   */
+  async function sendDone(item, drawn) {
+    if (askDone.sendingKey !== null) return;
+    const key = needsKey(item);
+    askDone.sendingKey = key;
+    askDone.status = null;
+    redrawNeeds();
+    try {
+      // The ask and the re-raise the page drew, so the broker marks only the version the operator saw.
+      const body = { repo: item.repo, askId: item.askId, reraisedAt: drawn.reraisedAt };
+      await postAgree("done", body, TIMEOUT_MS);
+      // Until a new reading draws the ask as done, the page says the mark landed.
+      askDone.statusKey = key;
+      askDone.status = "Marked done. The page shows it on its next refresh.";
+    } catch (error) {
+      askDone.statusKey = key;
+      askDone.status =
+        error instanceof Unreadable && error.status === 409
+          ? "Not marked done: the ask was raised again since this page drew it. Read it again."
+          : "Not marked done: " + (error instanceof Unreadable ? error.message : "the broker did not answer") + ".";
+    } finally {
+      askDone.sendingKey = null;
+      await refreshView();
+    }
+  }
+
+  /** What the ask page draws where the broker holds no such open ask: a line saying so, and no button to act on it. */
+  function askGone() {
+    const out = document.createDocumentFragment();
+    const top = h("div", "top");
+    top.append(back("/", "Standup"));
+    const row = h("div", "top-row");
+    row.append(h("h1", null, "Ask"));
+    top.append(row);
+    out.append(top);
+    const card = h("section", "card pad section ask-gone");
+    card.setAttribute("role", "status");
+    card.append(h("p", null, "This ask is not open. The broker's last reading lists no open ask at this address."));
+    out.append(card);
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Polling
   // ---------------------------------------------------------------------------------------------
 
@@ -2539,7 +3130,13 @@
   let heldPolls = 0;
   let lastOk = null;
 
-  class Unreadable extends Error {}
+  /** A failed read, with the HTTP status where the broker answered one, so the ask page can tell a closed ask from an outage. */
+  class Unreadable extends Error {
+    constructor(message, status) {
+      super(message);
+      this.status = typeof status === "number" ? status : null;
+    }
+  }
 
   function setNotice(message) {
     notice.textContent = message;
@@ -2565,6 +3162,7 @@
       control.dataset.focusKey = href + "|" + count;
     }
     app.replaceChildren(drawn);
+    goneDrawn = false;
     if (follow) window.scrollTo(0, document.documentElement.scrollHeight);
     if (focused) {
       const again = Array.from(app.querySelectorAll("[data-focus-key]")).find((control) => control.dataset.focusKey === focused);
@@ -2584,6 +3182,28 @@
     return active !== null && (active.id === "talk-compose" || active.id === "steer-text") && active.value !== "";
   }
 
+  /** Whether the not-open line is what the page shows, so a later failed poll leaves it in place. */
+  let goneDrawn = false;
+
+  /** A failed read the page draws as gone: a 404 on a page that has a gone draw, the ask page alone. */
+  function isGone(error) {
+    return page.gone !== undefined && error instanceof Unreadable && error.status === 404;
+  }
+
+  /** Draws the page's not-open line from this answer alone; nothing is kept, so a later 200 draws the thing again. */
+  function drawGone() {
+    const drawn = page.gone();
+    const rail = sandboxRail(siblingsView);
+    if (rail !== null) drawn.prepend(rail);
+    app.replaceChildren(drawn);
+    lastView = null;
+    goneDrawn = true;
+    notice.hidden = true;
+    // A Done line belongs to the ask that was drawn, so it goes with it.
+    askDone.statusKey = null;
+    askDone.status = null;
+  }
+
   async function fetchView(url) {
     let response;
     try {
@@ -2595,7 +3215,7 @@
     } catch (error) {
       throw new Unreadable("the broker did not answer");
     }
-    if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status);
+    if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status, response.status);
     try {
       return await response.json();
     } catch (error) {
@@ -2704,10 +3324,18 @@
         failure = "the reading could not be drawn";
       }
     } catch (error) {
+      if (isGone(error)) {
+        drawGone();
+        setTimeout(poll, POLL_MS);
+        return;
+      }
       failure = error instanceof Unreadable ? error.message : "the reading could not be fetched";
     }
     if (failure !== null) {
-      if (lastView === null) {
+      if (lastView === null && goneDrawn) {
+        // The not-open line stays: an outage after it says only that the page could not refresh.
+        setNotice("Could not refresh: " + failure + ".");
+      } else if (lastView === null) {
         setNotice("Could not load: " + failure + ". Trying again every " + POLL_MS / 1000 + " seconds.");
         app.replaceChildren(h("p", "muted", "No reading yet."));
       } else {
@@ -2721,7 +3349,7 @@
     if (page === undefined) return;
     const url = page.url();
     if (url === null) {
-      const empty = { plan: "Open a plan from a repo page.", talk: "No session named in the address." };
+      const empty = { plan: "Open a plan from a repo page.", talk: "No session named in the address.", ask: "Open an ask from the standup or Needs me page." };
       app.replaceChildren(h("p", "muted", empty[document.body.dataset.page] ?? "No repo named in the address."));
       return;
     }

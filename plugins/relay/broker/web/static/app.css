@@ -408,16 +408,8 @@ a.need-row:hover {
 .repo-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 12px;
+  padding: 0 12px 12px;
   min-height: 44px;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-a.repo-card:hover {
-  color: var(--ink);
-  background: var(--bg);
 }
 
 .repo-head {
@@ -425,6 +417,29 @@ a.repo-card:hover {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+}
+
+/* A repo card holds two links, its head and its need line, each a full tap target and ink-coloured until hovered. */
+a.repo-head,
+a.need-line {
+  min-height: 44px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.repo-head:hover .repo-name,
+a.need-line:hover {
+  text-decoration: underline;
+}
+
+/* The need line is a pointer to the band's whole text: one line, clipped with an ellipsis where it overflows. */
+a.need-line {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 24px;
+  padding: 10px 0;
 }
 
 .repo-name {
@@ -794,7 +809,7 @@ a.plan-row:hover {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px 12px;
   font-size: 13px;
 }
@@ -830,37 +845,55 @@ a.plan-row:hover {
   cursor: pointer;
 }
 
+/* The account cards: one across on a phone, two across where the page is wide (see the media block). */
+.accounts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
 .account {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.account:last-child {
-  border-bottom: 0;
 }
 
 .account-head {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 13px;
 }
 
-.account-head .who {
+.account-head .binding {
+  font-size: 15px;
   font-weight: 600;
 }
 
-.account-head .bound {
-  font-weight: 600;
+.account-head .binding.hot,
+.account .bound {
   color: var(--amber);
-  text-align: right;
 }
 
-.account-head .bound .muted {
-  font-weight: 400;
+.account .bound {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account .who {
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.account > .windows {
+  margin-top: auto;
+  padding-top: 8px;
 }
 
 .verdict {
@@ -913,11 +946,20 @@ a.plan-row:hover {
 
 .windows {
   display: grid;
-  grid-template-columns: 48px 40px minmax(0, 1fr) 64px;
+  grid-template-columns: 48px 40px minmax(0, 1fr);
   gap: 2px 10px;
   align-items: center;
   font-family: var(--mono);
   font-size: 12px;
+}
+
+.windows .reset {
+  justify-self: end;
+}
+
+.windows .bar {
+  grid-column: 1 / -1;
+  margin-bottom: 6px;
 }
 
 .bar {
@@ -1019,6 +1061,10 @@ a.plan-row:hover {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
     gap: 16px;
     align-items: start;
+  }
+
+  .accounts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .repo-cols {
@@ -1495,6 +1541,38 @@ button.chip {
   font-size: 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+a.nm-text {
+  display: block;
+}
+
+.ask-question {
+  font-size: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-brief {
+  font-size: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.ask-controls {
+  padding: 4px 0 8px;
+}
+
+.nm-correct:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .nm-controls {

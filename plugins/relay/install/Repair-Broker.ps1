@@ -485,6 +485,12 @@ function Get-ChannelHostHealth {
         Write-ChannelCheck -Name 'up to date with origin' -Ok $false -Detail "origin is $behind commit(s) ahead; re-run with -Pull"
     }
 
+    # Last, so the checks above stay together on the screen. It needs the file to read and the node
+    # that already passed its own check to run the report; without either, the lines above already say so.
+    if ($envExists -and $node) {
+        Write-ChannelSettingsReport -EnvFile $EnvFile -NodeExe $node.Source -RepoRoot $RepoRoot
+    }
+
     return [pscustomobject]@{ HostName = $hostName; HeadCommit = $commit; CommitsBehind = $behind }
 }
 

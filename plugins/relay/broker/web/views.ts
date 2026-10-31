@@ -34,7 +34,7 @@ import { headingOf } from "./direction.ts";
 import type { DirectionReading, Heading } from "./direction.ts";
 import type { InstalledRelease } from "./plugins.ts";
 import { SHARED_ROW_CAP } from "./rollout.ts";
-import { EMPTY_MARKS, planMarkKey } from "./watermarks.ts";
+import { EMPTY_MARKS, doneHides, doneKey, planMarkKey } from "./watermarks.ts";
 import type { Marks } from "./watermarks.ts";
 
 /** The sources a view draws from, in the order `asOf` and `held` list them. */
@@ -87,6 +87,27 @@ export type RolloutRow = {
 };
 
 /**
+ * One repository that ships by publish tags on its default branch: its latest publish tag, the one
+ * on the newest first-parent commit, and the first-parent commits on that branch past it. `branch`
+ * is the default branch's name. `commits` holds at most `ROLLOUT_COMMIT_CAP` of them, each one from
+ * the default branch; `toPublish` is the count.
+ */
+export type PublishRow = {
+  repo: string;
+  branch: string;
+  /** The default branch's head as the reader read it, the commit Mark published sends back so the tap ships only what the page showed. */
+  head: string;
+  lastTag: string;
+  /** The tag's date segment as `YYYY-MM-DD`, null where the name carries none. */
+  lastTagDate: string | null;
+  toPublish: number;
+  oldestAt: string | null;
+  newestAt: string | null;
+  commits: RolloutCommit[];
+  readAt: string;
+};
+
+/**
  * One first-parent commit on a repository's default branch from the shared window, with how far it
  * has fanned out: `fannedOut` client branches contain it and `atClients` have a latest rollout tag
  * that does, each by ancestry. `clients` is the number of client branches the repository has, a
@@ -111,6 +132,8 @@ export type RolloutReading = {
   checkouts: readonly RolloutCheckout[];
   /** Every repository's shared rows, in the order its rows come. */
   shared: readonly SharedRow[];
+  /** Every repository's publish row, from the repositories with no client branch. */
+  publish: readonly PublishRow[];
   /** The latest time any repository's refs were read, null where none has been. */
   readAt: string | null;
 };
@@ -118,9 +141,11 @@ export type RolloutReading = {
 /** The standup page's rollout card: every row, with the counts the card's heading draws. */
 export type RolloutSummary = {
   rows: RolloutRow[];
-  /** Rows with something to roll out. */
+  /** Every publish row. */
+  publish: PublishRow[];
+  /** Client rows with something to roll out, plus publish rows with something to publish. */
   waiting: number;
-  /** The sum of `toRollOut` over the rows. */
+  /** The sum of `toRollOut` over the client rows and `toPublish` over the publish rows. */
   changes: number;
   oldestAt: string | null;
   readAt: string | null;
@@ -247,6 +272,35 @@ export type NeedsMeView = {
   sandbox: string;
   groups: { blocked: Item[]; ask: Item[]; hands: Item[] };
   rollout: RolloutRow[] | null;
+  /** The publish rows with something to publish, null while the source has never read. */
+  publish: PublishRow[] | null;
+  asOf: AsOf;
+  held: readonly SourceName[];
+};
+
+/**
+ * The ask page's view: one open ask as the persona's ledger holds it, with the fields the Needs-me
+ * item drops. `title` is the ledger entry's `entryTitle` and `brief` the kit's decision brief, which
+ * the kit scrubs with its redactor where one is present and the ledger reader only caps in length, so
+ * the brief may still hold a secret and is drawn as text and sent nowhere else. `thread` is the
+ * Discord link of the thread of the persona's session that has not ended, null where none exists or
+ * the link cannot be built.
+ */
+export type AskView = {
+  repo: string;
+  askId: string;
+  question: string;
+  recommend: string | null;
+  blocking: boolean;
+  openedAt: string | null;
+  reraisedAt: string | null;
+  title: string | null;
+  planPath: string | null;
+  brief: string | null;
+  thread: string | null;
+  /** Whether a done mark hides the ask on every other page, and when it was set; the ask page still draws it. */
+  done: boolean;
+  doneAt: string | null;
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -257,6 +311,8 @@ export type RepoView = {
   heading: Heading | null;
   /** The row of the client branch the persona's checkout is on; null off a client branch. */
   rollout: RolloutRow | null;
+  /** The publish row of the repository the persona's checkout reads, on any branch; null where it has none. */
+  publish: PublishRow | null;
   changed: PlanRow[] | null;
   upNext: PlanRow[];
   worker: Worker;
@@ -535,6 +591,9 @@ type Repo = {
   queue: PersonaQueue | null;
   heartbeatAt: number | null;
   status: PersonaStatus | null;
+  /** Every open ask the persona's ledger lists, a done one included; only the ask page reads it. */
+  open: readonly AskEntry[];
+  /** The open asks no done mark hides: what every list and count of asks reads. */
   asks: readonly AskEntry[];
   record: SessionRecord | null;
   state: RepoState;
@@ -550,13 +609,16 @@ function fleet(readings: Readings): Repo[] {
     );
     const queue = held?.queue ?? null;
     const status = queue === null ? null : (statuses.get(queue) ?? null);
-    const asks = readings.ledger.value?.find((item) => item.name === persona.name)?.open ?? [];
+    const open = readings.ledger.value?.find((item) => item.name === persona.name)?.open ?? [];
+    const done = (readings.marks ?? EMPTY_MARKS).done;
+    const asks = open.filter((ask) => !doneHides(done.get(doneKey(persona.name, ask.id)), ask));
     const heartbeatAt = held?.heartbeatAt ?? null;
     return {
       persona,
       queue,
       heartbeatAt,
       status,
+      open,
       asks,
       record: liveByLineage(readings.records, persona.name),
       state: repoState({
@@ -925,12 +987,13 @@ function sessionLine(readings: Readings, record: SessionRecord): SessionLine {
 /**
  * The plugin release with each live session marked behind or current, or null while the source is held,
  * since a last good release kept after a failed read may predate the update the record now holds.
- * Each session carries the name its line in `sessions` carries, so the two lists agree.
+ * It reads the same folded records `sessions` is built from, and each session carries the name its line
+ * there carries, so the two lists agree.
  */
-function kitOf(readings: Readings, lines: readonly SessionLine[]): Kit | null {
+function kitOf(readings: Readings, records: readonly SessionRecord[], lines: readonly SessionLine[]): Kit | null {
   const release = readings.plugins.value;
   if (release === null || readings.held.includes("plugins")) return null;
-  const sessions = readings.records.flatMap((record, index) =>
+  const sessions = records.flatMap((record, index) =>
     record.state !== "live"
       ? []
       : [
@@ -1047,27 +1110,36 @@ function verdictOver(readings: Readings, repos: readonly Repo[]): Verdict {
 // Rollout
 // ---------------------------------------------------------------------------------------------
 
-/** The standup card over every row the reader holds, or null while the source has never read. */
+/**
+ * The standup card over every row the reader holds, or null while the source has never read. A
+ * publish row counts as a client row does: waiting where it has commits, its commits among the
+ * changes, and its oldest commit among the oldest.
+ */
 function rolloutSummary(readings: Readings): RolloutSummary | null {
   const reading = readings.rollout.value;
   if (reading === null) return null;
   let oldest: number | null = null;
   let changes = 0;
   let waiting = 0;
-  for (const row of reading.rows) {
-    changes += row.toRollOut;
-    if (row.toRollOut > 0) waiting += 1;
+  const counted = [
+    ...reading.rows.map((row) => ({ count: row.toRollOut, oldestAt: row.oldestAt })),
+    ...reading.publish.map((row) => ({ count: row.toPublish, oldestAt: row.oldestAt })),
+  ];
+  for (const row of counted) {
+    changes += row.count;
+    if (row.count > 0) waiting += 1;
     if (row.oldestAt === null) continue;
     const at = Date.parse(row.oldestAt);
     if (Number.isFinite(at) && (oldest === null || at < oldest)) oldest = at;
   }
-  return { rows: [...reading.rows], waiting, changes, oldestAt: iso(oldest), readAt: reading.readAt };
+  return { rows: [...reading.rows], publish: [...reading.publish], waiting, changes, oldestAt: iso(oldest), readAt: reading.readAt };
 }
 
 /**
  * The standup page's shared card: every repository's shared rows merged newest first by committer
  * date and capped at `SHARED_ROW_CAP` overall, each row naming its repository. The card is null
- * while the source has never read well, or no repository has a default branch commit in the window.
+ * while the source has never read well, or no repository with a client branch has a default branch
+ * commit in the window.
  */
 function sharedOf(readings: Readings): StandupView["shared"] {
   const reading = readings.rollout.value;
@@ -1081,6 +1153,26 @@ function rolloutWaiting(readings: Readings): RolloutRow[] | null {
   const reading = readings.rollout.value;
   if (reading === null) return null;
   return reading.rows.filter((row) => row.toRollOut > 0);
+}
+
+/** The publish rows with something to publish, the Needs-me page's, or null while the source has never read. */
+function publishWaiting(readings: Readings): PublishRow[] | null {
+  const reading = readings.rollout.value;
+  if (reading === null) return null;
+  return reading.publish.filter((row) => row.toPublish > 0);
+}
+
+/**
+ * The publish row of the repository a persona's checkout reads, on whatever branch it is on, or
+ * null: where the source has never read, where the checkout was not read, or where its repository
+ * reads no publish row.
+ */
+function publishOf(readings: Readings, workdir: string): PublishRow | null {
+  const reading = readings.rollout.value;
+  if (reading === null) return null;
+  const checkout = reading.checkouts.find((candidate) => sameFolder(candidate.root, workdir));
+  if (checkout === undefined) return null;
+  return reading.publish.find((row) => row.repo === checkout.repo) ?? null;
 }
 
 /**
@@ -1228,6 +1320,44 @@ export function needsMeView(readings: Readings): NeedsMeView {
       hands: items.filter((item) => item.kind === "hands"),
     },
     rollout: rolloutWaiting(readings),
+    publish: publishWaiting(readings),
+    asOf: asOf(readings),
+    held: readings.held,
+  };
+}
+
+/**
+ * The view of one open ask, or null when no roster entry is called `name` or its ledger lists no open
+ * ask with that id. `threadLink` turns a session id into its thread's link, and is asked only for
+ * the lineage's session that has not ended, where one exists.
+ */
+export function askView(
+  readings: Readings,
+  name: string,
+  askId: string,
+  threadLink: (sessionId: string) => string | null,
+): AskView | null {
+  const repo = fleet(readings).find((candidate) => candidate.persona.name === name);
+  if (repo === undefined) return null;
+  const ask = repo.open.find((candidate) => candidate.id === askId);
+  if (ask === undefined) return null;
+  const item = askItem(repo, ask);
+  const mark = (readings.marks ?? EMPTY_MARKS).done.get(doneKey(repo.persona.name, ask.id));
+  const done = doneHides(mark, ask);
+  return {
+    repo: repo.persona.name,
+    askId: ask.id,
+    question: ask.question,
+    recommend: ask.recommend,
+    blocking: item.blocking,
+    openedAt: item.openedAt,
+    reraisedAt: iso(ask.reraisedAt),
+    title: ask.entryTitle,
+    planPath: item.planPath,
+    brief: ask.brief,
+    thread: repo.record === null ? null : threadLink(repo.record.sessionId),
+    done,
+    doneAt: done && mark !== undefined ? iso(mark.markedAt) : null,
     asOf: asOf(readings),
     held: readings.held,
   };
@@ -1265,6 +1395,7 @@ export function repoView(readings: Readings, name: string): RepoView | null {
     name: repo.persona.name,
     heading: repoHeading(readings, workdir),
     rollout: rolloutOf(readings, workdir),
+    publish: publishOf(readings, workdir),
     changed,
     upNext,
     worker: workerOf(readings, repo),
@@ -1307,15 +1438,25 @@ export function planView(readings: Readings, root: string, relativePath: string)
   };
 }
 
+/**
+ * The records the health page lists: a stale or ended record is left out where a live record carries its
+ * lineage, so a restarted persona is listed once. One with no live successor, or with no lineage, stays.
+ */
+function listedRecords(records: readonly SessionRecord[]): SessionRecord[] {
+  const live = new Set(records.flatMap((record) => (record.state === "live" && record.lineage ? [record.lineage] : [])));
+  return records.filter((record) => !(record.state !== "live" && record.lineage && live.has(record.lineage)));
+}
+
 export function healthView(readings: Readings): HealthView {
   const repos = fleet(readings);
-  const sessions = readings.records.map((record) => sessionLine(readings, record));
+  const records = listedRecords(readings.records);
+  const sessions = records.map((record) => sessionLine(readings, record));
   return {
     expected: readings.roster.value === null ? null : repos.length,
     reporting: readings.roster.value === null ? null : repos.length - holesOf(readings, repos).length,
     holes: holesOf(readings, repos),
     sessions,
-    kit: kitOf(readings, sessions),
+    kit: kitOf(readings, records, sessions),
     capacity: (readings.usage.value ?? []).map((account) => accountLine(account, readings.now)),
     verdict: verdictOver(readings, repos),
     hands: handsItems(readings, repos),

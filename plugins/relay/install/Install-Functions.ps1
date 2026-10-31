@@ -342,12 +342,13 @@ call's entries are recognized and replaced by the second, not duplicated beside 
 an event carrying several entries, such as Stop's liveness tick and mirror post, because the whole
 per-event array is rebuilt from the kept entries plus the fragment's, never appended to.
 
--HookOwner 'plugin' is the same pass with nothing appended: the kit's persona plugin, which lives
-outside this repository, posts this project's events itself, so every recognized entry under each
-of the fragment's events is dropped and none is re-added. An event left with no entries is removed
-from "hooks", and an event holding none of this project's entries is left exactly as found. The
-"hooks" object itself is never created or removed under 'plugin', so a file whose every event
-belonged to this project keeps an empty "hooks" object, and a file that had none gains none.
+-HookOwner 'plugin' is the same pass with nothing appended, for a host whose events the kit's
+persona plugin would post itself, so every recognized entry under each of the fragment's events is
+dropped and none is re-added. The persona plugin has no adapter that posts them today. An event
+left with no entries is removed from "hooks", and an event holding none of this project's entries
+is left exactly as found. The "hooks" object itself is never created or removed under 'plugin',
+so a file whose every event belonged to this project keeps an empty "hooks" object, and a file
+that had none gains none.
 The fragment is still validated, and its permission rules are still merged, since the reply tool
 arrives through the plugin's MCP server under either owner.
 
@@ -578,11 +579,60 @@ function Get-ChannelEnvFile {
 
 <#
 .SYNOPSIS
+Prints what a host's broker.env leaves unset, what to copy to the next host, what stays on this one,
+and what the broker does not recognize.
+
+.DESCRIPTION
+Runs broker/settings-report.ts from $RepoRoot under $NodeExe on the file and writes a line naming the
+file, then the module's output, to the screen. The catalog the report reads lives in that module, so
+this function holds no copy of it. On success only the report's stdout is printed, so a warning node
+writes to stderr stays off the report. Reports and never throws: a node that cannot be launched or a
+report that exits non-zero writes one failure line, since the pass that calls this has more to print
+after it.
+
+.PARAMETER RepoRoot
+The checkout whose report runs, the same one the caller checked. Defaults to the checkout holding
+this file.
+#>
+function Write-ChannelSettingsReport {
+    param(
+        [Parameter(Mandatory)][string]$EnvFile,
+        [Parameter(Mandatory)][string]$NodeExe,
+        [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot)
+    )
+    $reportScript = Join-Path $RepoRoot 'broker\settings-report.ts'
+    Write-Host "  Settings in ${EnvFile}:"
+    # Continue for the call: the report writes to stderr on a bad file, which under a caller's Stop
+    # preference Windows PowerShell 5.1 would turn into a terminating error once redirected.
+    $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = $null
+    try {
+        # Each stderr line arrives as an error record, and its string form is the line itself.
+        $output = @(& $NodeExe $reportScript $EnvFile 2>&1)
+    } catch {
+        Write-Host "  [FAIL] settings report: could not run: $($_.Exception.Message)"
+        return
+    }
+    $code = $LASTEXITCODE
+    if ($code -ne 0) {
+        $reason = ((($output | ForEach-Object { [string]$_ }) -join ' ') -replace '\s+', ' ').Trim()
+        $what = if ($null -eq $code) { "node at '$NodeExe' could not be launched" } else { "the report exited $code" }
+        $tail = if ($reason) { ": $reason" } else { '' }
+        Write-Host "  [FAIL] settings report: $what$tail"
+        return
+    }
+    foreach ($line in $output) {
+        if ($line -isnot [System.Management.Automation.ErrorRecord]) { Write-Host "  $line" }
+    }
+}
+
+<#
+.SYNOPSIS
 Every environment variable Start-Broker.ps1 is willing to set from broker.env.
 
 .DESCRIPTION
-Exactly the variables broker/config.ts, broker/discord/config.ts, and broker/security/senders.ts
-read. Named explicitly rather than setting whatever key happens to be in the
+Exactly the keys broker/settings.ts catalogs as broker settings, which a test holds equal to this
+list both ways. Named explicitly rather than setting whatever key happens to be in the
 file: write access to broker.env would otherwise be arbitrary environment injection into the process
 that then reads the bot token file, and something like NODE_OPTIONS in that file is a code-execution
 primitive with no hook or ACL bypass required at all. CHANNEL_NODE_EXE and CHANNEL_TASK_USER are
@@ -684,7 +734,8 @@ $script:ChannelBrokerEnvAllowlist = @(
 )
 
 # The four metadata keys the allowlist's description names: broker.env carries them, and they stay
-# off the allowlist. Start-Broker.ps1 logs a key in the file that is on neither list.
+# off the allowlist. Set-ChannelBrokerEnvironment warns on, and Start-Broker.ps1 logs, only a key in
+# the file that is on neither list.
 $script:ChannelBrokerEnvFileMetadataKeys = @(
     'CHANNEL_NODE_EXE',
     'CHANNEL_TASK_USER',
@@ -697,17 +748,23 @@ $script:ChannelBrokerEnvFileMetadataKeys = @(
 Sets every allowlisted key from an env file into the current process's environment.
 
 .DESCRIPTION
-A key not on $script:ChannelBrokerEnvAllowlist is skipped with a warning rather than set, and never
-silently, since write access to the file this reads from would otherwise be arbitrary environment
-injection into the broker process.
+A key not on $script:ChannelBrokerEnvAllowlist is never set, since write access to the file this
+reads from would otherwise be arbitrary environment injection into the broker process.
+
+Such a key is skipped with a warning, so an injected key is never skipped silently. The one
+exception is a key on $script:ChannelBrokerEnvFileMetadataKeys, which is skipped with no warning:
+the installer writes those four to the file itself, so a warning on them would fire on every
+healthy start and bury the one that marks an injected key.
 #>
 function Set-ChannelBrokerEnvironment {
     param([Parameter(Mandatory)][string]$Path)
     $values = Get-ChannelEnvFile -Path $Path
     foreach ($key in $values.Keys) {
         if ($script:ChannelBrokerEnvAllowlist -notcontains $key) {
-            Write-Warning ("Set-ChannelBrokerEnvironment: '$key' in '$Path' is not a recognized " +
-                "broker setting and was not applied.")
+            if ($script:ChannelBrokerEnvFileMetadataKeys -notcontains $key) {
+                Write-Warning ("Set-ChannelBrokerEnvironment: '$key' in '$Path' is not a recognized " +
+                    "broker setting and was not applied.")
+            }
             continue
         }
         Set-Item -Path "env:$key" -Value $values[$key]

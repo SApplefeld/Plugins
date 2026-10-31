@@ -52,16 +52,18 @@ import type { TalkRing, TalkViewInput } from "./talk.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
 import { CLIENT_PREFIX } from "./rollout.ts";
-import type { RolloutMark, RolloutReader } from "./rollout.ts";
+import type { PublishMark, RolloutMark, RolloutReader } from "./rollout.ts";
 import { appendDirection, calendarDate, steerText } from "./direction.ts";
 import type { SteerOutcome } from "./direction.ts";
 import { liveByLineage } from "../registry.ts";
 import type { SessionRecord } from "../registry.ts";
 import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
+import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { healthView, needsMeView, planView, repoView, rootName, standupView } from "./views.ts";
+import { askView, healthView, needsMeView, planView, repoView, rootName, standupView } from "./views.ts";
 import type { Readings } from "./views.ts";
+import { doneHides, doneKey } from "./watermarks.ts";
 import type { WatermarkStore } from "./watermarks.ts";
 
 /**
@@ -97,6 +99,7 @@ const PAGE_ROUTES: Readonly<Record<string, string>> = {
   "/health": "health.html",
   "/talk": "talk.html",
   "/needs-me": "needs-me.html",
+  "/ask": "ask.html",
 };
 const REPO_PREFIX = "/repo/";
 const REPO_PAGE = "repo.html";
@@ -619,15 +622,22 @@ function sendJson(response: ServerResponse, body: unknown, status = 200): void {
 }
 
 /**
- * Registers `/web/standup`, `/web/needs-me`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`. Each answers a
- * GET from the readings `source` hands back, the pass's latest, and reads no file of its own. A
+ * Registers `/web/standup`, `/web/needs-me`, `/web/ask`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`.
+ * Each answers a GET from the readings `source` hands back, the pass's latest, and reads no file of its own. A
  * request string reaches no response and no log: it is compared with names the broker holds and dropped.
  *
  * A refused shape answers 400 and a well-shaped request for something the readings do not hold
  * answers 404, both with an empty body. A reader failing is not a failure here: the view says which
  * source is held and serves what the pass last read.
+ *
+ * `threads` gives the ask view its thread link, through the same two lookups the talk view takes;
+ * without it, or with no guild configured, every ask's `thread` reads null.
  */
-export function registerViewHandlers(register: WebHandler["register"], source: () => Readings): void {
+export function registerViewHandlers(
+  register: WebHandler["register"],
+  source: () => Readings,
+  threads?: Pick<TalkViewInput, "threadFor" | "guildId">,
+): void {
   const get = (name: string, answer: (request: IncomingMessage, response: ServerResponse) => void): void => {
     register(name, (request, response) => {
       request.resume();
@@ -645,6 +655,20 @@ export function registerViewHandlers(register: WebHandler["register"], source: (
   get("summary", (_request, response) => sendJson(response, summaryView(source())));
   // The view carries the batch cap the Agree route enforces, so the page never holds its own copy.
   get("needs-me", (_request, response) => sendJson(response, { ...needsMeView(source()), maxBatch: MAX_AGREE_BATCH }));
+
+  get("ask", (request, response) => {
+    const query = queryOf(request.url ?? "");
+    const rawRepo = single(query, "repo");
+    const rawId = single(query, "id");
+    const repo = rawRepo === null ? null : decodeParam(rawRepo);
+    const id = rawId === null ? null : decodeParam(rawId);
+    if (repo === null || repo === "" || id === null || id === "") return empty(response, 400);
+    const threadLink = (sessionId: string): string | null =>
+      threads === undefined ? null : jumpLink(threads.guildId(), threads.threadFor(sessionId), null);
+    const view = askView(source(), repo, id, threadLink);
+    if (view === null) return empty(response, 404);
+    sendJson(response, view);
+  });
 
   get("repo", (request, response) => {
     const raw = single(queryOf(request.url ?? ""), "name");
@@ -1218,7 +1242,7 @@ export type RolloutHandlerOptions = {
   /** The pass's own rollout reader, so a tap and the timed fetch take one lock per repository. */
   reader: Pick<RolloutReader, "mark">;
   /**
-   * Runs after a tag is pushed and before the answer: the pass's own run, whose rollout reading
+   * Runs once a tag is pushed, after the answer is sent: the pass's own run, whose rollout reading
    * then takes the rows the reader recomputed, so the next view read counts from the new tag.
    */
   afterMark?: () => void;
@@ -1283,6 +1307,104 @@ export function registerRolloutHandler(register: WebHandler["register"], options
         case "pushed":
           options.log?.info(`web rollout: ${marked.tag} at ${marked.sha.slice(0, 7)} by ${peer.login}`);
           sendJson(response, { tag: marked.tag, sha: marked.sha, undo: `git push origin :refs/tags/${marked.tag}` });
+          options.afterMark?.();
+      }
+    },
+    { operatorWord: true },
+  );
+}
+
+/**
+ * What a publish push starts, sent with every 200 so the page shows it beside the undo command:
+ * the repository's publish workflow runs on any `publish-*` tag, and a run begun is not stopped by
+ * deleting the tag.
+ */
+const PUBLISH_STARTS = "The push starts this repository's publish workflow, which ships the plugin to the public marketplace, and deleting the tag stops no run already started.";
+
+export type PublishHandlerOptions = {
+  /** The pass's own rollout reader, so a tap and the timed fetch take one lock per repository. */
+  reader: Pick<RolloutReader, "markPublished">;
+  /** Runs after the answer is sent, once a tag is pushed or the head moved: the pass's own run, so the next view read counts from the new tag or carries the moved head. */
+  afterMark?: () => void;
+  /** Where each tap's one line goes: the tag, the sha and the login, an existing tag, a moved head, a 404, or a failure's kind. */
+  log?: Logger;
+};
+
+/** A commit sha as the page sends it back: the forty lowercase hex characters the row's `head` carries. */
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * Registers `POST /web/publish` with `{repo, head}`, Mark published. The route carries the
+ * operator's word, so the gate has already refused the broker host's own node and required the
+ * same-origin JSON headers, and the login the tag's message names is the peer's. `head` is the
+ * default branch head the page showed, the publish row's `head`, so a tap ships only the commit
+ * the operator saw. A body that is not the expected object, a `repo` that is not a non-empty
+ * string, or a `head` that is not a forty-character hex sha answers 400 with an empty body and no
+ * fetch. A `repo` the reader has not grouped, one with a client branch or no default branch, or
+ * one with no publish tag on its default branch's first-parent line answers 404 before anything is
+ * tagged. The reader fetches the repository under its lock, so two taps run one after the other.
+ * A head the fetch brought that is not `head` answers 409 `{head}` with the one it brought, and
+ * tags nothing, so the page can show it and the operator tap again. The second of two taps finds
+ * the first one's tag on the head and answers 409 `{tag}`, the body empty where the tag's name is
+ * one the page may not print. Otherwise the day's publish tag is made at the default branch head
+ * and pushed, and the answer is `{tag, sha, undo, starts}`: `undo` the one command that removes
+ * the tag from the remote, and `starts` the one sentence saying what the push starts. A fetch, a
+ * tag or a push that fails answers 502 `{kind}` with the runner's kind, a push's local tag deleted
+ * first. Every tap past the 400s logs one line. Nothing of the body reaches a log, and nothing of
+ * git's stderr or the remote URL can.
+ */
+export function registerPublishHandler(register: WebHandler["register"], options: PublishHandlerOptions): void {
+  register(
+    "publish",
+    async (request, response, peer) => {
+      if (request.method !== "POST") {
+        request.resume();
+        response.writeHead(405, { allow: "POST", "content-length": 0 });
+        response.end();
+        return;
+      }
+      const body = await readJsonObject(request, MAX_ROLLOUT_BODY_BYTES);
+      if (body === null) return empty(response, 400);
+      const { repo, head } = body;
+      if (typeof repo !== "string" || repo === "") return empty(response, 400);
+      if (typeof head !== "string" || !COMMIT_SHA.test(head)) return empty(response, 400);
+      let marked: PublishMark;
+      try {
+        marked = await options.reader.markPublished(repo, peer.login, head);
+      } catch (error) {
+        // The fetch or a local git command failed: the runner's kind alone, which never quotes the remote.
+        const kind = error instanceof Error ? error.message : "unknown";
+        options.log?.warn(`web publish: failed ${kind} before the push`);
+        sendJson(response, { kind }, 502);
+        return;
+      }
+      switch (marked.status) {
+        case "unknown-repo":
+        case "not-publish":
+          // The name is not logged: it is the post's own text.
+          options.log?.info("web publish: refused, unknown repository, one with client branches, or one never published");
+          empty(response, 404);
+          return;
+        case "moved":
+          // The fetched head is the reader's own, never the post's, and one static line says why.
+          options.log?.info("web publish: refused, the trunk head moved since the page read it");
+          sendJson(response, { head: marked.head }, 409);
+          // The reader recomputed the rows under the lock; the pass run puts the moved head into the
+          // view the page reads next, so the tap the toast asks for sends that head.
+          options.afterMark?.();
+          return;
+        case "exists":
+          // A tag whose name the reader refuses is named nowhere: not in the line, not in the body.
+          options.log?.info(marked.tag === null ? "web publish: a publish tag exists at the head" : `web publish: ${marked.tag} exists`);
+          sendJson(response, marked.tag === null ? {} : { tag: marked.tag }, 409);
+          return;
+        case "push-failed":
+          options.log?.warn(`web publish: push failed ${marked.kind} for ${marked.tag}`);
+          sendJson(response, { kind: marked.kind }, 502);
+          return;
+        case "pushed":
+          options.log?.info(`web publish: ${marked.tag} at ${marked.sha.slice(0, 7)} by ${peer.login}`);
+          sendJson(response, { tag: marked.tag, sha: marked.sha, undo: `git push origin :refs/tags/${marked.tag}`, starts: PUBLISH_STARTS });
           options.afterMark?.();
       }
     },
@@ -1555,7 +1677,7 @@ export function registerFileHandlers(register: WebHandler["register"], options: 
 }
 
 // ---------------------------------------------------------------------------------------------
-// The two marks the operator sets
+// The three marks the operator sets
 // ---------------------------------------------------------------------------------------------
 
 /** A mark post carries one repo name or one root and path; past this it is not one. */
@@ -1605,13 +1727,20 @@ export type WatermarkHandlerOptions = {
 };
 
 /**
- * Registers `POST /web/caught-up` with `{repo}` and an optional `drawnAt`, and `POST /web/seen` with
- * `{root, path}`, the path as sent and not percent-encoded. A caught-up mark is stamped with the oldest
+ * Registers `POST /web/caught-up` with `{repo}` and an optional `drawnAt`, `POST /web/seen` with
+ * `{root, path}`, the path as sent and not percent-encoded, and `POST /web/done` with `{repo, askId}` and
+ * the `reraisedAt` the page drew, null where it drew none. A caught-up mark is stamped with the oldest
  * of the clock, the readings and `drawnAt`, so never later than the server's readings, nor than the
  * page's drawn view where the page sends `drawnAt`. A seen mark snapshots the plan as the latest pass
  * holds it, so a pass landing between the plan page's draw and its post records the newer reading.
+ * A done mark carries the ask's `openedAt` and `reraisedAt` from the latest reading and the tap's time,
+ * which is for display. A post whose drawn `reraisedAt` is not the reading's answers 409 with
+ * `{status: "changed"}` and marks nothing, since the operator has not seen that re-raise. A second post
+ * on an ask the mark still hides keeps the first mark's time and writes nothing; a post on an ask raised
+ * again since its mark, drawn as such, writes a new mark. Done hides and sends nothing as the operator's word, so it is no word route.
  * The section 1 gate has already required the JSON content type and the same-origin headers. A
- * request that names a repo the roster does not hold, or a plan no sweep holds, answers 404; a body
+ * request that names a repo the roster does not hold, a plan no sweep holds, or an ask the reading does
+ * not list open, answers 404; a body
  * that is not the expected object, a root no configured root carries, or a path the plan screen
  * refuses answers 400. A refused request writes nothing. A write that fails answers 500 with an
  * empty body and one log line that carries no error text, and changes no mark.
@@ -1681,5 +1810,23 @@ export function registerWatermarkHandlers(
     write(response, at, () => {
       store.seen(view.root, view.path, { status: view.status, chapters: view.chapters.length }, at);
     });
+  });
+
+  post("done", (body, response) => {
+    const { repo, askId, reraisedAt } = body;
+    if (typeof repo !== "string" || typeof askId !== "string" || repo === "" || askId === "") return empty(response, 400);
+    // The re-raise the page drew: null or absent where it drew none, else a time.
+    const drawn = reraisedAt === null || reraisedAt === undefined ? null : typeof reraisedAt === "string" ? Date.parse(reraisedAt) : Number.NaN;
+    if (drawn !== null && !Number.isFinite(drawn)) return empty(response, 400);
+    const readings = source();
+    if (!(readings.roster.value ?? []).some((persona) => persona.name === repo)) return empty(response, 404);
+    const ask = readings.ledger.value?.find((reading) => reading.name === repo)?.open.find((entry) => entry.id === askId);
+    if (ask === undefined) return empty(response, 404);
+    const held = store.marks().done.get(doneKey(repo, askId));
+    if (held !== undefined && doneHides(held, ask)) return sendJson(response, { at: new Date(held.markedAt).toISOString() });
+    // The ask was raised again since the page drew it: the operator has not seen this version, so nothing is marked.
+    if (drawn !== ask.reraisedAt) return sendJson(response, { status: "changed" }, 409);
+    const at = now();
+    write(response, at, () => store.markDone({ repo, askId, openedAt: ask.openedAt, seenRaise: ask.reraisedAt, markedAt: at }));
   });
 }

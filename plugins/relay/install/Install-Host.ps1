@@ -97,7 +97,9 @@ repeat.
 .PARAMETER HookOwner
 Who posts this project's hook events on this host: 'settings' (the default) merges them into the
 settings file from hooks/settings-fragment.json, and 'plugin' leaves them to the kit's persona plugin
-(outside this repository) and removes every entry of this project's from the settings file.
+(outside this repository) and removes every entry of this project's from the settings file. The
+persona plugin has no adapter that posts them today, so a 'plugin' host gets no hook of this
+project's, as docs/install.md states under "Hook owner: settings or plugin".
 Case-insensitive. The value applied is recorded in broker.env as CHANNEL_HOOK_OWNER, and a run that
 omits this parameter takes the recorded value, so a later re-run does not put removed hooks back.
 A recorded value other than the two fails the run rather than falling back to either.

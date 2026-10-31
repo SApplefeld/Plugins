@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { comparablePath, defaultEventsPath } from "./board/events.ts";
 import { assertTokenFileIsProtected } from "./discord/credentials.ts";
+import { FLAG_TRUE, unsetGatingKeys } from "./settings.ts";
 
 export type BrokerConfig = {
   /** Bound on 127.0.0.1 only. The listener is never exposed off-box. */
@@ -332,6 +333,12 @@ export type BrokerConfig = {
    * is `loadWebConfig`'s to check, since the list means nothing while `CHANNEL_WEB_BIND` is unset.
    */
   webSiblings: readonly string[];
+  /**
+   * The gating keys the environment leaves unset whose switch, where one applies, is on, in catalog
+   * order (`settings.ts` owns the rule). A feature or surface stays off for each of them, and the
+   * broker's start-up names them in one line. Empty on a host that sets every gating key.
+   */
+  settingsUnset: readonly string[];
 };
 
 /**
@@ -645,7 +652,6 @@ function boundedFraction(
   return value;
 }
 
-const FLAG_TRUE: readonly string[] = ["1", "true", "yes", "on"];
 /**
  * Exported because broker/intake.ts's per-request `X-Channel-Mirror` header reads the same off
  * vocabulary this config knob does. A second literal would let the two drift: a header spelling
@@ -1202,6 +1208,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     webTailscale: env.CHANNEL_WEB_TAILSCALE?.trim() || DEFAULT_WEB_TAILSCALE,
     webStaticRoot: env.CHANNEL_WEB_STATIC_ROOT?.trim() || defaultWebStaticRoot(),
     webSiblings: webList(env.CHANNEL_WEB_SIBLINGS) ?? [],
+    settingsUnset: unsetGatingKeys(env),
   };
   // Flux refuses an eager threshold above the end-of-turn threshold, so the pair is refused here
   // rather than at the socket. With eager off the eager threshold is never sent, and the pair is

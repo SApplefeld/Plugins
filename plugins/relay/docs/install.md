@@ -126,8 +126,9 @@ The per-session switch needs the hooks installed from this version of the reposi
 header the mirror hooks carry, so a host installed before the switch existed has no such header. The
 wrapper refuses to launch with `-NoMirror` against settings that lack it rather than mirroring the
 session anyway, and the fix is re-running the installer. That check covers a host whose hook owner
-is `settings`. On a `plugin` host the persona plugin sends the header, and the wrapper has no
-installed hook to check it against, as "Hook owner: settings or plugin" below describes.
+is `settings`. A `plugin` host would rely on the persona plugin to carry the header, and the
+wrapper has no installed hook to check it against. No such host exists today, as "Hook owner:
+settings or plugin" below states.
 
 **The optional fleet cards send content of their own, and all three are off until you turn them
 on.** The usage card (`CHANNEL_USAGE_CARD`) carries each account's identity and headroom. The board card
@@ -137,7 +138,15 @@ worker persona the fleet roster names, with that persona's name, its queued plan
 reason a worker wrote on a blocked entry. With
 `CHANNEL_BOARD_PROJECTS` set it sweeps plan documents under the project roots you name, and uses
 the last path segment of each root as the project name. So a root at or just under your home
-directory would put your account name there too. The decisions card (`CHANNEL_DECISIONS_CARD`,
+directory would put your account name there too. The card's folder view sweeps that setting alone,
+and leaving it empty turns the folder view off. The web pages, with `CHANNEL_WEB_BIND` set, sweep
+the setting where it is set and otherwise each roster persona's working directory, so a host that
+never set it still sees its plans there. With the roster set and the setting empty, each plan's
+title, status, progress and next step under those working directories reaches whoever can open the
+pages: an admitted login on an admitted device, and any account's process on this host while the
+host's own tailnet login is admitted and `CHANNEL_WEB_DEVICES` is unset or names it (T5 in
+`docs/security-model.md`). The decisions card
+(`CHANNEL_DECISIONS_CARD`,
 which needs `CHANNEL_BOARD_ROSTER`) lists every open ask the roster's personas hold, and posts each
 ask to the card's thread. That message carries the ask's question, up to 1,000 code points and as
 its worker wrote it. Once the ask's entry carries the decision brief the kit drafts from the
@@ -148,6 +157,11 @@ reaches unless the voice is on, and the response gate described above sends it a
 lines. The voice, when on, ranks its spoken turns with the same key and also reaches Deepgram and
 Anthropic, as "The voice's key files and commands" below describes. All three cards are configured in `broker.env` and
 documented in `operations.md`; a value tuned by hand there survives a re-install.
+Two of the paths the cards read belong to the host. `CHANNEL_USAGE_CACHE_ROOT` is where the usage
+card reads the usage cache and account list. `CHANNEL_BOARD_EVENTS_PATH` is the events file the
+board card tails, and the broker reads it whenever Discord is configured or the web listener is on,
+board card or not. Each defaults to a path under this host's profile, so a second host sets its own
+only where its files live elsewhere, and never copies the first host's value.
 
 Create Public Threads and Manage Threads are the two that fail quietly if missed: the broker posts a
 starter message successfully and then cannot open a thread on it.
@@ -258,6 +272,22 @@ The reasoning is in `security-model.md`; the short version is that every one of
 those paths is executed automatically, either by the scheduled task at startup or by Claude Code at
 the start of every session on the machine.
 
+The installer writes into `broker.env` the keys its own parameters and checks supply. Every
+install writes `CHANNEL_HOST_NAME` from `-HostName`, `CHANNEL_BROKER_PORT` from `-Port`,
+`CHANNEL_DISCORD_CHANNEL` from `-ChannelId`, and `CHANNEL_DISCORD_TOKEN_FILE`, the bot token file.
+It also writes `CHANNEL_BROKER_LOG_FILE` and `CHANNEL_BROKER_STATE` under the state root,
+`CHANNEL_NODE_EXE` from the `node` it found, and `CHANNEL_TASK_USER` from the account running the
+install. `CHANNEL_ALLOWED_USER_ID` comes from `-AllowedUserId`, `CHANNEL_SENDERS` from `-Senders`,
+and the web listener's keys, such as `CHANNEL_WEB_BIND` and `CHANNEL_WEB_PORT`, from the `-Web`
+parameters, each only where given. The hook owner and the marketplace are recorded too, as
+`CHANNEL_HOOK_OWNER` and `CHANNEL_PLUGIN_MARKETPLACE`, which "Hook owner: settings or plugin" below
+describes. A second host gets each of these from its own install and never copies the first host's
+values, with three exceptions. `CHANNEL_ALLOWED_USER_ID`, `CHANNEL_WEB_OPERATORS` and
+`CHANNEL_WEB_DEVICES` name the operator's own account, logins and devices, so their values are the
+same on every host. The repair pass's settings report on the first host lists them under
+`Set here, copy to the next host:`, as "When a broker looks stale, doubled, or wrong" in
+[`operations.md`](operations.md) describes.
+
 The hooks belong in the **user-level** settings file rather than a project one, because the sessions
 being watched live in arbitrary repositories. That is also why the `SessionStart` hook names its
 script by absolute path: a hook runs with the monitored session's own project as its working
@@ -326,28 +356,37 @@ hook entries by their headers, ignores their timeouts, and re-adds them from the
 written. For the same reason a host already installed keeps whatever value it was installed with
 until its next `Install-Host` run, and nothing at launch reports the difference, so a fleet host
 that has not been re-installed since a timeout change is still running the old one. All of this
-describes a `settings` host. On a `plugin` host the timeouts are whatever the persona plugin sends,
-and re-running the installer changes none of them.
+describes a `settings` host. On a `plugin` host the timeouts would be whatever the persona plugin
+set, and re-running the installer would change none of them. No such host exists today, as "Hook
+owner: settings or plugin" below states.
 
 ### Hook owner: settings or plugin
 
 A host has one hook owner, recorded as `CHANNEL_HOOK_OWNER` in `broker.env`, and it decides whether
 the installer puts this project's hooks in the settings file. Under `settings`, the default, the
 installer merges the fragment's hook entries into `~/.claude/settings.json` as described above.
-Under `plugin`, the persona plugin posts the same events itself, so the installer removes every hook
-entry of this project's from the settings file and merges none. It edits the file through the same
-backup and atomic write the merge uses, and leaves every other tool's hooks where they are. It still
-merges the relay tools' two permission rules. Both tools reach a session through this repository's
-relay plugin under either owner, so the rules are needed either way.
+The `plugin` owner exists for a persona plugin that carries the same events itself. Under it, the
+installer removes every hook entry of this project's from the settings file and merges none. It
+edits the file through the same backup and atomic write the merge uses, and leaves every other
+tool's hooks where they are. It still merges the relay tools' two permission rules. Both tools reach
+a session through this repository's relay plugin under either owner, so the rules are needed either
+way.
+
+**No host is served on `plugin` today.** No adapter exists to post the events: the kit's persona
+plugin has no relay adapter and no `relayAdapter` option. The kit's core module plan, archived in
+the kit at `docs/archive/claude-kit_core-module_spec_v1.md`, closed its section 5 with nothing built
+on 2026-10-05. The operator chose on 2026-10-28 to have the adapter built, and the kit carries that
+work as a relay adapter plan of its own, which is written and not yet built. That plan would add
+`relayAdapter` as a persona plugin option that ships `off`. So every host stays on `settings`. A
+host switched to `plugin` today has no hook of this project's anywhere, so no session on it is
+announced and no question in it is answerable from Discord.
 
 Three things here carry the word plugin, and they are separate. `plugin` is a value of the hook
 owner. The relay plugin, under `plugins/relay` in this repository, carries the relay's MCP server
 into a session, and it is the same under both owners. The persona plugin is a separate Claude Code
 plugin that this repository does not hold. It ships from the kit, the operator's
-separate kit repository. Its relay adapter posts this project's hook events on a
-`plugin` host, and the plugin's `relayAdapter` option turns the adapter `off` or `live`. The kit's
-core module plan names the persona plugin's README, `plugins/personas/README.md` in the kit, as
-where the steps for setting that option land.
+separate kit repository. It is the plugin the `plugin` owner would rely on to post this
+project's hook events, and it has no adapter that does, as the paragraph above states.
 
 Pass `-HookOwner settings` or `-HookOwner plugin` to `Install-All.ps1` or `Install-Host.ps1`. A run
 without the switch applies the owner the last install recorded, and a host with no recorded owner
@@ -369,23 +408,26 @@ different marketplace than the recorded one stops, naming the file and the value
 A `plugin` host gives up two things this repository otherwise checks. The launch wrapper's two
 installed-hook checks find no hook of this project's and stay silent: the one comparing the
 `SessionStart` hook's path with this checkout, and the one confirming the mirror switch header that
-`-NoMirror` relies on. And the hook timeouts and headers are whatever the plugin sends, not the
+`-NoMirror` relies on. And the hook timeouts and headers would be whatever the plugin set, not the
 values in `hooks/settings-fragment.json` and its pins. The fragment stays in the repository as the
 `settings` owner's template.
 
-A `plugin` host also relies on the adapter for a session's start directory. The broker reads it from
-the `cwd` field of the `SessionStart` post that launches the session, never a compaction's, and it
-bounds the one file a session's reply may carry
+A `plugin` host would also rely on the adapter for a session's start directory. The broker reads it
+from the `cwd` field of the `SessionStart` post that launches the session, never a compaction's,
+and it bounds the one file a session's reply may carry
 ("A session can send one file" in `operations.md`). Where the adapter's `SessionStart` post carries
 no `cwd`, every file a session names is refused as `this session's working directory is not recorded
 or no longer exists`, and the reply's text is not posted either.
 
-**Switch a host only when the persona plugin is known to carry the hooks.** Removing them first
-leaves every session started afterwards unannounced, with no question answerable from Discord. The
-adapter is built by the kit's core module plan, `docs/plans/claude-kit_core-module_spec_v1.md` in
-the kit, on its `plans/core-module` branch until that branch merges. That plan closes each section
-with a Chapter appended at its end, and its section 5 Chapter is where the hook entries the adapter
-took over are recorded. Read these conditions in order:
+**Switch a host only when the persona plugin is known to carry the hooks.** Today it carries none.
+Removing them first leaves every session started afterwards unannounced, with no question answerable
+from Discord. A kit plan closes each finished section with a Chapter appended at its end, recording
+what the section delivered. The conditions below read the section 5 Chapter of the kit's core module
+plan, archived in the kit at `docs/archive/claude-kit_core-module_spec_v1.md`, where the hook
+entries an adapter took over would be recorded. That plan closed section 5 by a ruling with nothing
+built and wrote no section 5 Chapter, so the Chapter does not exist and condition 1 holds on every
+host. When the kit's relay adapter plan ships, this repository takes a plan of
+its own that rewrites these conditions against the real adapter. Read these conditions in order:
 
 1. Keep the default `settings` until the kit's core module plan has merged and its section 5 Chapter
    names which of the six the adapter took.
@@ -489,7 +531,7 @@ The other voice settings have defaults and need no entry: the loopback and eager
 
 To turn the voice on and join a channel:
 
-1. Restart the broker with `.\install\Repair-Broker.ps1` from an elevated prompt at the checkout root. Every setting takes effect at a restart. The start log then reads `the voice is on`, and says whether the channel can hear and speak, which it does only with the Deepgram key file, and whether the Jev and fast keys are read. Where the channel can hear, it also says whether the turn hold is off, plain or judged, and how long it holds a turn's end.
+1. Restart the broker with `.\install\Repair-Broker.ps1` from an elevated prompt at the root that "When a broker looks stale, doubled, or wrong" in [`operations.md`](operations.md) names. Every setting takes effect at a restart. The start log then reads `the voice is on`, and says whether the channel can hear and speak, which it does only with the Deepgram key file, and whether the Jev and fast keys are read. Where the channel can hear, it also says whether the turn hold is off, plain or judged, and how long it holds a turn's end.
 2. Join an ordinary voice channel in the server. A stage channel is not supported.
 3. In the thread of a live session, type `voice on` from an operator account. The bot joins the channel you are sitting in. If you are in no voice channel, the thread gets one notice saying so.
 4. Talk. A light question is answered by the fast model. A technical or factual question is handed to the session. Where the reply is slow the persona fills the wait, first with a short thinking line and then, if the reply is slower still, a still-looking line, and the session's reply is spoken when it returns. Speak over the persona to stop it; a "mm-hm" lets it carry on. Your spoken turns and the fast model's answers are mirrored into the thread as text, unless `CHANNEL_MIRROR=off`, and the session's replies are there already. Holding lines are spoken only. "Talking to a session aloud" in `operations.md` describes each of these in full.
@@ -540,9 +582,10 @@ that key's value as it is. `CHANNEL_WEB_TAILSCALE`, `CHANNEL_WEB_STATIC_ROOT` an
 `CHANNEL_DIRECTION_LEDGER` stay hand-set.
 
 The pages' rollout cards, which show what each `clients/*` branch has merged since its last
-deploy, need git 2.37 or later on the scheduled task account's `PATH`. The reader finds repositories
+deploy, or what a repository that ships by `publish-*` tags has on its default branch since its
+newest one, need git 2.37 or later on the scheduled task account's `PATH`. The reader finds repositories
 through the `CHANNEL_BOARD_PROJECTS` roots and the roster personas' working directories, and fetches
-over https under the task account's stored git credential. Mark rolled out also needs a committer
+over https under the task account's stored git credential. Mark rolled out and Mark published also need a committer
 identity, `user.name` and `user.email`, in that account's git config. A host without git draws no
 rollout card, and every other page works as before. [`operations.md`](operations.md) names the tag
 convention and the undo command.

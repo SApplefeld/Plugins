@@ -90,6 +90,7 @@ import {
   registerAgreeHandlers,
   registerFileHandlers,
   registerPermissionHandler,
+  registerPublishHandler,
   registerQuestionHandler,
   registerRolloutHandler,
   registerSayHandler,
@@ -105,7 +106,7 @@ import type { SiblingPoller } from "./web/siblings.ts";
 import { createTalkRing } from "./web/talk.ts";
 import type { TalkTap } from "./web/talk.ts";
 import { DEFAULT_THRESHOLDS } from "./web/views.ts";
-import { openWatermarks, watermarksFileFor } from "./web/watermarks.ts";
+import { openWatermarks, watermarksFileFor, withMarks } from "./web/watermarks.ts";
 import type {
   QuestionAlert,
   QuestionEntryView,
@@ -1191,6 +1192,18 @@ export async function startBroker(
     console.warn(message);
     logger.warn(message);
   };
+  const note = (message: string): void => {
+    console.log(message);
+    logger.info(message);
+  };
+
+  // One line naming the gating keys this host leaves unset, by the rule `unsetGatingKeys` in
+  // broker/settings.ts states, so a feature that stays dark for want of a key is named in the log. A
+  // host that sets them all writes nothing. It is written before the refusals below, so a start they
+  // refuse still names every unset key and not only the one that refused it.
+  if (config.settingsUnset.length > 0) {
+    note(`broker: settings left unset: ${config.settingsUnset.join(", ")} (docs/operations.md, Tunables)`);
+  }
 
   // Read once, for the response gate and the voice alike, and before anything is opened or bound,
   // so a host whose gate cannot judge fails at once with the reason on disk: under the scheduled
@@ -1272,11 +1285,6 @@ export async function startBroker(
       }
     },
   });
-
-  const note = (message: string): void => {
-    console.log(message);
-    logger.info(message);
-  };
 
   // The announcements the SessionStart hook spooled while no broker was listening, read beside
   // the state file under the /hook route's own body cap. The folder is named at start because the
@@ -2646,8 +2654,13 @@ export async function startBroker(
     webPass = pass;
     // The operator's marks sit beside the registry snapshot, and the views take them with each reading.
     const marks = openWatermarks(watermarksFileFor(config.stateFile), note);
-    const readings = () => ({ ...pass.readings(), marks: marks.marks() });
-    registerViewHandlers(webServer.register, readings);
+    // The merge drops a done mark whose ask the ledger reading shows closed before it hands the marks on.
+    const readings = () => withMarks(pass.readings(), marks);
+    // The ask page's thread link takes the two lookups the talk view takes, through the same closures.
+    registerViewHandlers(webServer.register, readings, {
+      threadFor: (sessionId) => threadFor(sessionId),
+      guildId: () => (gateway === null ? null : gateway.guildId()),
+    });
     // The sibling sandboxes' summaries, polled on the pass's cadence and never on a request, so a
     // page's poll of this origin costs the siblings nothing. The route serves the last poll's state.
     const siblings = createSiblingPoller({
@@ -2663,6 +2676,9 @@ export async function startBroker(
     // a session. After a push the pass runs once, so its rollout reading takes the rows the reader
     // recomputed and the next view read counts from the new tag.
     registerRolloutHandler(webServer.register, { reader: sources.rollout, afterMark: () => pass.run(), log: logger });
+    // Mark published, the same shape for a repository that ships by publish tags on its trunk: one
+    // tag to the remote, which starts that repository's publish workflow, then one pass run.
+    registerPublishHandler(webServer.register, { reader: sources.rollout, afterMark: () => pass.run(), log: logger });
     // Steer, outside the Discord block: the line goes to the machine's direction ledger, the file the
     // kit's sessions read as the operator's standing word, never to a session. After a write the pass
     // runs once, so its direction reading takes the new item and the next view read draws it.

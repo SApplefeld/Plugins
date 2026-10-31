@@ -16,7 +16,7 @@
 // reading. A source going from read to held is logged once, by name, and again only after it has read
 // well in between.
 import path from "node:path";
-import { initialEventState, readEvents } from "../board/events.ts";
+import { comparablePath, initialEventState, readEvents } from "../board/events.ts";
 import type { EventReaderState, ReadEventsResult } from "../board/events.ts";
 import { sweepArchivedPlans, sweepPlans, statPlanFile } from "../board/plans.ts";
 import type {
@@ -41,6 +41,7 @@ import type { UsageAccount, UsageReading } from "../usage/cache.ts";
 import type { BrokerConfig } from "../config.ts";
 import { readBriefFile } from "./brief.ts";
 import type { Brief, BriefHold } from "./brief.ts";
+import { foldRootName } from "./config.ts";
 import { readDirection } from "./direction.ts";
 import type { DirectionReading } from "./direction.ts";
 import { installedPluginsPath, readInstalledPlugins } from "./plugins.ts";
@@ -58,7 +59,8 @@ export type PassSources = {
   roster: () => readonly RosterPersona[];
   queues: (personas: readonly RosterPersona[]) => readonly PersonaQueue[];
   ledger: (personas: readonly RosterPersona[]) => readonly LedgerReading[];
-  plans: () => PlansReading;
+  /** The live and archived plans under `roots`, the root list the pass hands its sweep. */
+  plans: (roots: readonly string[]) => PlansReading;
   events: (previous: EventReaderState, roots: readonly string[]) => ReadEventsResult;
   usage: () => UsageReading;
   /** The relay plugin's release from the harness's install record, or `UNREADABLE` where it gave none. */
@@ -231,9 +233,9 @@ export function webPassSources(config: WebPassConfig, log: (message: string) => 
     roster: () => (roster === null ? [] : roster.read()),
     queues: (personas) => queues.read(personas),
     ledger: (personas) => ledger.read(personas),
-    plans: () => {
-      const liveReadings = live(config.boardProjects);
-      const archivedReadings = archived(config.boardProjects);
+    plans: (roots) => {
+      const liveReadings = live(roots);
+      const archivedReadings = archived(roots);
       return {
         live: liveReadings,
         archived: archivedReadings,
@@ -247,6 +249,47 @@ export function webPassSources(config: WebPassConfig, log: (message: string) => 
     heartbeatAt: (workdir) => statPlanFile(path.join(workdir, HEARTBEAT_FILE_NAME), true)?.mtimeMs ?? null,
     // The bare repositories the reader fetches into live under the state root, beside the state file.
     rollout: createRolloutReader({ log, stateRoot: path.dirname(config.stateFile) }),
+  };
+}
+
+/**
+ * The roots the plan sweep reads each pass: the setting, as given, where it is set, else each roster
+ * persona's working directory in roster order, a directory whose resolved path an earlier one has
+ * dropped and a later root whose folded last folder name matches an earlier one's skipped, logged once
+ * per pair. A page addresses a root by its last folder name, so two roots sharing one would answer for
+ * each other; `broker/web/config.ts` refuses that pair in the setting, and a roster can still hold one.
+ * The skip line names the two personas and neither folder, since a working directory typically carries
+ * the account name. Each root keeps the spelling it was given. With the setting empty and no roster
+ * read, it is empty.
+ */
+export function createSweepRoots(
+  log: (message: string) => void,
+): (boardProjects: readonly string[], personas: readonly RosterPersona[] | null) => readonly string[] {
+  const skippedPairs = new Set<string>();
+  return (boardProjects, personas) => {
+    if (boardProjects.length > 0) return boardProjects;
+    const seen = new Set<string>();
+    const named = new Map<string, { key: string; persona: string }>();
+    const roots: string[] = [];
+    for (const persona of personas ?? []) {
+      const root = persona.workdir;
+      const rootKey = comparablePath(path.resolve(root));
+      if (seen.has(rootKey)) continue;
+      seen.add(rootKey);
+      const name = foldRootName(path.basename(root));
+      const earlier = named.get(name);
+      if (earlier !== undefined) {
+        const pair = JSON.stringify([earlier.key, rootKey]);
+        if (!skippedPairs.has(pair)) {
+          log(`web pass: ${persona.name}'s folder skipped from the plan sweep (its last folder name matches ${earlier.persona}'s)`);
+        }
+        skippedPairs.add(pair);
+        continue;
+      }
+      named.set(name, { key: rootKey, persona: persona.name });
+      roots.push(root);
+    }
+    return roots;
   };
 }
 
@@ -281,6 +324,9 @@ export function createWebPass(options: WebPassOptions): WebPass {
   let eventState = initialEventState();
   let eventRoots: readonly string[] | null = null;
   let timer: NodeJS.Timeout | null = null;
+  // The roots the latest pass handed the plan sweep, which the views join plans to a repo through.
+  const sweepRoots = createSweepRoots(log);
+  let planRoots: readonly string[] = config.boardProjects;
 
   /** Runs one source's read; a throw or an unusable reading holds the source and keeps its value. */
   function attempt<T>(name: SourceName, slot: Reading<T>, at: number, read: () => T | typeof UNREADABLE): void {
@@ -363,10 +409,15 @@ export function createWebPass(options: WebPassOptions): WebPass {
     if (rolloutState === null || (rolloutState.attempted && !noGit)) {
       const state = rolloutState;
       attempt("rollout", rollout, at, () =>
-        state === null || state.held ? UNREADABLE : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, readAt: state.readAt },
+        state === null || state.held ? UNREADABLE : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, publish: state.publish, readAt: state.readAt },
       );
     }
-    attempt("plans", plans, at, () => sources.plans());
+    // The setting where it is set, else the folders of the roster's last good reading. The page joins
+    // plans to a repo through these roots, so they move only with a sweep that read well, and an
+    // unchanged list keeps its array.
+    const roots = sweepRoots(config.boardProjects, personas);
+    attempt("plans", plans, at, () => sources.plans(roots));
+    if (!held.has("plans") && !sameRoots(roots, planRoots)) planRoots = roots;
     if (plans.value !== null) planIndex(plans.value);
     if (personas !== null) attempt("events", events, at, () => readEventStream(personas));
     attempt("usage", usage, at, () => {
@@ -398,7 +449,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
         host: config.host,
         staleAfterMs: config.staleAfterMs,
         thresholds: options.thresholds,
-        roots: config.boardProjects,
+        roots: planRoots,
         directionConfigured: config.directionLedgerPath !== "",
         records: options.records(),
         signals: options.signals,
