@@ -3327,19 +3327,18 @@ This document is the installed mirror of the operating-instructions skill body: 
 
 This document is the kit's ownership map: a lookup table that names, for each moment the kit governs, the one document whose text is the rule for that moment. It owns the moment of resolving which skill or doctrine section governs a situation when two documents speak to it, the moment of placing a new rule you are about to write, and the moment you are in a situation with no rule you can find; it also owns the amendment protocol for moving a row and the handling of a moment it lists as unowned or contested. A session loads it on a named trigger: when two documents speak to one moment, when a rule must be placed, or when the governing rule for the current moment cannot be found.
 
-Extracted at `6bc07fb`: whole document (`skills.operating-instructions.references.ownership-map.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 4 on 2026-09-19 (C075 and C076 below, and C012 amended). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 4 on 2026-09-20 (C077 to C079 below, and C021 amended in place onto the two tiers), and at that plan's finishing pass on 2026-09-21 (C080 below, split out of C079, which is narrowed in place). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C081 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (`P` entries below, with C035 retired to P001). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `8954074c` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: row 995 dropped the pointer-and-copy column, each live entry's `passage:` line quotes the text that section landed, C002, C004 and P001 read `verdict: retire` naming their rows, and M001 below carries the legend C004 split into. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which added the Jev promise check row (`B` entries below). Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`D` entries below, the two rows it added under Coordination and Seats). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C012, C026, C048, C049, C057 and W002 rewritten to their rows as they now read, and C047's and C077's reasons reworded. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: C046 and C060 deleted with their rows. Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12 (N001 below). Amended by section 1 of `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` on 2026-10-13, which seated the Architect in the kit's skills (O001 below, with D001 rewritten to its row as it now reads and its key, provenance and reason reworded). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17 (F001 below, the `Verify:` row). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 1 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: C075 rewritten to its row as it now reads, naming the why chain. Amended by `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 on 2026-10-21 (AC001 below, the rendered-visual row, written at that plan's finishing pass). Amended by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-10-26 (AF001 below, the goal-holder row). Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30, which split the model-tier row: C010 rewritten to the brainstorming half, and AI001 below for the doctrine half.
+Extracted at `6bc07fb`: whole document (`skills.operating-instructions.references.ownership-map.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 4 on 2026-09-19 (C075 and C076 below, and C012 amended). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 4 on 2026-09-20 (C077 to C079 below, and C021 amended in place onto the two tiers), and at that plan's finishing pass on 2026-09-21 (C080 below, split out of C079, which is narrowed in place). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C081 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 3 on 2026-09-22 (`P` entries below, with C035 retired to P001). Redrafted on 2026-09-26 by section 11 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `8954074c` with its fix round at `bac21117`, so every live entry's `passage:` line quotes the text at `bac21117`. Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: row 995 dropped the pointer-and-copy column, each live entry's `passage:` line quotes the text that section landed, C002, C004 and P001 read `verdict: retire` naming their rows, and M001 below carries the legend C004 split into. Amended on 2026-10-01 by section 3 of `docs/plans/claude-kit_jev-code-checks_spec_v1.md`, which added the Jev promise check row (`B` entries below). Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 1 on 2026-10-02 (`D` entries below, the two rows it added under Coordination and Seats). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: C012, C026, C048, C049, C057 and W002 rewritten to their rows as they now read, and C047's and C077's reasons reworded. Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: C046 and C060 deleted with their rows. Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12 (N001 below). Amended by section 1 of `docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md` on 2026-10-13, which seated the Architect in the kit's skills (O001 below, with D001 rewritten to its row as it now reads and its key, provenance and reason reworded). Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17 (F001 below, the `Verify:` row). Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 1 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: C075 rewritten to its row as it now reads, naming the why chain. Amended by `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 on 2026-10-21 (AC001 below, the rendered-visual row, written at that plan's finishing pass). Amended by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-10-26 (AF001 below, the goal-holder row). Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30, which split the model-tier row: C010 rewritten to the brainstorming half, and AI001 below for the doctrine half. Amended by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1 on 2026-11-01 (AN001 to AN010 below, for the rows that had no entry; C001, C006, C014, C023, C026, C041, C053, C056, C067, C074, C075 and T003 rewritten in place to the map as it now reads; and C055 retired, its recap row struck at 1acad2a).
 
 ### C001
 - key: State a rule whole in its owning document, with its grant, bounds, and carve-outs together.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:3
-- provenance: 5cd8f22 2026-09-01, the commit that shipped the doctrine's "Which text governs" section and this map together, after sessions came to believe they were barred from commits and pushes their plan headers authorized.
+- provenance: 5cd8f22 2026-09-01, the commit that shipped the doctrine's "Which text governs" section and this map together, after sessions came to believe they were barred from commits and pushes their plan headers authorized; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 62b0290 section 47
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: The rule holds, but the doctrine's "One owner per moment" bullet states it whole with the "never in part" bound and the unowned carve-out this copy drops, and the doctrine is always loaded when the map is read. Replacing the restatement with a pointer loses no instruction. Lands at landed line 3 (section 47's close) as 'The rule this map serves is the doctrine's "One owner per moment, and the map names it" bullet (`skills/operating-instructions/SKILL.md` under the kit plugin root), which states it whole.', the pointer replacing the paragraph's first two sentences, C002's with it; the rulings A001, A002 and A003 land through it.
-- proposed: Replace the map's first two sentences with a pointer at the doctrine's "One owner per moment, and the map names it" bullet, keeping the map's own sentence about what the map answers.
-- proposed: Fold this finding into A001's pointer; do not land a compressed restatement that keeps the rule in two places.
-- proposed: The map carries a pointer at the doctrine's bullet in place of the restatement.
+- proposed: The doctrine's "One owner per moment, and the map names it" bullet states the rule this map serves, and its Which Text Governs section states the ranking.
 - baseline-test: yes
 - passage: The doctrine's "One owner per moment, and the map names it" bullet states the rule this map serves, and its Which Text Governs section states the ranking.
 
@@ -3388,11 +3387,12 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Change a row only when ownership moves, and land that row change in the same change as the prose that moves.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:9
-- provenance: 5cd8f22 2026-09-01, the amendment paragraph shipped with the map so its rows track the prose rather than drifting from it.
+- provenance: 5cd8f22 2026-09-01, the amendment paragraph shipped with the map so its rows track the prose rather than drifting from it; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 62b0290 section 47
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: The rule stays; only the sentence shape changes, since the paragraph's first sentence chains the rule and its bound. Keep the "operator's ruling" clause attached to the third instruction, because it is the bound on the gate C008 carries. Lands at landed line 9 (section 47's close) as 'How to amend: a row changes when ownership moves. The move lands in the same change as the prose that moves.', the paragraph's one chained sentence split at its 'and'; the ruling A008 lands through it. The paragraph carried three sentences at the extraction commit, one per instruction, so C007's and C008's sentences stand unchanged; as authored, this reason's opener said the paragraph chains three instructions into one sentence, corrected in place at section 47's close.
-- proposed: Split the passage into one sentence per instruction, keeping "because assigning an owner is the operator's ruling" attached to the third.
+- proposed: Amending: a row changes when ownership moves. It lands in the same change as the prose that moves.
 - baseline-test: yes
 - passage: Amending: a row changes when ownership moves. It lands in the same change as the prose that moves.
 
@@ -3468,12 +3468,13 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the `cold` skill for a verdict on a decision whose framing carries the operator's own preference.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:20
-- provenance: 5cd8f22 2026-09-01.
+- provenance: 5cd8f22 2026-09-01; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 1acad2a section 1
 - landed: 869b978 section 2
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: Cold retires under `docs/plans/claude-kit_skill-retirement_spec_v1.md` section 1, so the row re-homes to the doctrine bullet that states the bar (c1.C062).
-- proposed: "| A verdict on a decision whose framing carries the operator's own preference | doctrine (Match my precision) | none |"
+- proposed: | A verdict on a decision framed with the operator's own preference | doctrine (Match my precision) |
 - passage: | A verdict on a decision framed with the operator's own preference | doctrine (Match my precision) |
 
 ### C015
@@ -3554,10 +3555,11 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the `executing-work` skill's routing for which surfaces a subagent may write, and that `docs/` belongs to the curator and the main session alone.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:34
-- provenance: 5cd8f22 2026-09-01.
-- verdict: keep
+- provenance: 5cd8f22 2026-09-01; the enforcement cell reworded to `docs-write` by 3dbd59a9 2026-10-16; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
+- verdict: rewrite
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: No finding. The row names `hooks/docs-write-guard.js` as the enforcement beside the prose owner, which is the pattern C005 exists to make readable.
-- passage: | Which surfaces a subagent may write | `executing-work`, enforced by `hooks/docs-write-guard.js` |
+- passage: | Which surfaces a subagent may write | `executing-work`, enforced by `docs-write` |
 
 ### C024
 - key: Read the `executing-work` skill for killing or replacing a dispatched agent for a reason other than a stall.
@@ -3581,12 +3583,13 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the `executing-work` skill's step 8 for the compaction boundary a section close declares.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:44
-- provenance: 5cd8f22 2026-09-01.
+- provenance: 5cd8f22 2026-09-01; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 52b0fe8 section 6
 - landed: 1aa3fff5 section 4
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: The row also names `hooks/kit-compact-gate.js`, which is the enforcement the doctrine's clause does not mention, so the row carries more than a duplicate pointer. The owner cell names executing-work's step 8, whose bold lead reads "Declare the compaction boundary.", the step that declares the boundary once the Chapter is appended and the commit model honored.
-- proposed: `executing-work` (step 8, opening the compaction checkpoint)
+- proposed: | The compaction boundary a section close declares | `executing-work` (step 8) |
 - passage: | The compaction boundary a section close declares | `executing-work` (step 8) |
 
 ### C027
@@ -3693,13 +3696,13 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - passage: | The pull request at finishing: opened if none is open, marked ready, auto-merge armed, integrated per commit model | `finishing-work` |
 
 ### C038
-- key: Read `finishing-work` and `branch-hygiene` for the strand-check on a record that lives only on a frozen PR branch.
+- key: Read `finishing-work`, `branch-hygiene` and `coordinator` for the strand-check on a record that lives only on a frozen PR branch, and for the reap that follows it.
 - class: pointer
-- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:54
-- provenance: 5cd8f22 2026-09-01; the moment cell rewritten 2026-09-13 under rulings 27 and 8 of the corpus rewrite's rulings batch.
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:67
+- provenance: 5cd8f22 2026-09-01; the moment cell rewritten 2026-09-13 under rulings 27 and 8 of the corpus rewrite's rulings batch; the coordinator owner added by docs/plans/claude-kit_merged-plan-reap_spec_v1.md section 2, 2026-11-01.
 - verdict: keep
-- reason: One of the few rows with two owners named deliberately, both skills carrying the check at their own end. The moment reads "merged PR branch", because the freeze binds a merged branch rather than an open one, and it names invoking the reap of the plan's own merged branch and clean worktree once the strand-check runs clean, at finishing-work's close. The owner column splits the two owners' shares so the row beneath it (C039) is not read as a second owner of the same moment: finishing-work owns the check at the close and the reap's invocation with its three routes, branch-hygiene owns the check at session start and the reap's mechanics.
-- passage: | A record only on a merged PR branch: the strand-check, and the reap of the plan's merged branch | `finishing-work` (at the close, and invoking the reap) and `branch-hygiene` (at session start, and the reap's mechanics) |
+- reason: One of the few rows with several owners named deliberately: two skills carry the check at their own end, and the coordinator takes the reap finishing-work owes a later session at its pass. The moment reads "merged PR branch", because the freeze binds a merged branch rather than an open one, and it names invoking the reap of the plan's own merged branch and clean worktree once the strand-check runs clean, at finishing-work's close. The owner column splits the three owners' shares so the row beneath it (C039) is not read as a second owner of the same moment: finishing-work owns the check at the close and the reap's invocation with its three routes, branch-hygiene owns the check at session start and the reap's mechanics, and the coordinator owns the owed reap at its pass, a tree it leaves falling to the nudge.
+- passage: | A record only on a merged PR branch: the strand-check, and the reap of the plan's merged branch | `finishing-work` (at the close, and invoking the reap), `branch-hygiene` (at session start, and the reap's mechanics) and `coordinator` (the owed merged-plan reap at its pass where a coordinator is live by finishing-work's reading, a tree or branch that pass does not reap falling to the SessionStart branch-reaper nudge) |
 
 ### C039
 - key: Read the `branch-hygiene` skill for reaping merged branches, recovering stranded commits, and what may be deleted without asking.
@@ -3724,11 +3727,12 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the doctrine's "Name the rollback and stop for a yes" and "Which text governs" for whether this session may commit or push at all and what form an authorization takes.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:62
-- provenance: 5cd8f22 2026-09-01; this is the row for the exact moment the commit was written about, sessions reading a copied stop as a bar on an authorized push.
+- provenance: 5cd8f22 2026-09-01; this is the row for the exact moment the commit was written about, sessions reading a copied stop as a bar on an authorized push; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 52b0fe8 section 6
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: No finding, and this row is load-bearing: it is where a session that met a stop on a charter or the output style learns which document actually decides. The pointer column names executing-work's step 7, whose bold lead reads "Apply the commit model", the step that carries out the commit-model authorization the doctrine's bullet governs.
-- proposed: `executing-work` (step 7, applying the commit model), `role` (delegation exclusions), the output style checklist
+- proposed: | Whether this session may commit or push, and the form an authorization takes | doctrine (Name the rollback and stop for a yes; Which Text Governs) |
 - passage: | Whether this session may commit or push, and the form an authorization takes | doctrine (Name the rollback and stop for a yes; Which Text Governs) |
 
 ### C042
@@ -3831,11 +3835,12 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the `coordinator` skill's seat git standing for a seat running git in the memory store, where a read of the store's own history is routed rather than performed.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:79
-- provenance: 286ed41 2026-09-02, the merge-seam commit: this moment sat in the contested section until the standing-grants plan settled it, and the row moved out under the contested section's own rule.
+- provenance: 286ed41 2026-09-02, the merge-seam commit: this moment sat in the contested section until the standing-grants plan settled it, and the row moved out under the contested section's own rule; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 52b0fe8 section 6
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: No finding, and this row is the worked example of C069: a contested moment leaves that section only once the ruling has landed and the losing text is current. The owner cell names the coordinator skill's ledger section, spelled `## The ledger`, whose sentence reads "The seat may run git in the store exactly as any other session on this machine may, and reading the store's own configuration and history is work it routes rather than performs."
-- proposed: `coordinator` (the ledger section, on a seat running git in the store)
+- proposed: | A seat running git in the memory store | `coordinator` (Ledger) |
 - passage: | A seat running git in the memory store | `coordinator` (Ledger) |
 - flag: stale
 
@@ -3853,21 +3858,23 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the `recap` skill for reporting where a long-running session stands without disturbing it.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:81
-- provenance: 5cd8f22 2026-09-01.
-- verdict: keep
-- reason: No finding.
+- provenance: 5cd8f22 2026-09-01; retired by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
+- verdict: retire
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 1acad2a4 2026-09-14, section 1 of `docs/archive/claude-kit_skill-retirement_spec_v1.md`, retired the recap skill and struck its row from the map, and 8954074c carried the entry with no passage line, so the map holds no row for it to quote.
 - flag: stale
 
 ### C056
 - key: Read the `park` skill for parking a session at its next safe point with everything durable committed and a resume path recorded.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:82
-- provenance: 286ed41 2026-09-02, which added the missing row after the park-and-quiesce plan shipped a skill the map predated; the every-skill-owns-a-moment pin is what surfaced the gap.
+- provenance: 286ed41 2026-09-02, which added the missing row after the park-and-quiesce plan shipped a skill the map predated; the every-skill-owns-a-moment pin is what surfaced the gap; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 1acad2a section 1
 - landed: 869b978 section 2
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: The row is the worked example of C007: a new skill without rows is a hole the parity pin catches. Recap retires under `docs/plans/claude-kit_skill-retirement_spec_v1.md` section 1, so the row's pointer at it leaves; the `landed:` line above records that strip. Park retires under the same plan's section 2, whose Decision 2 cuts the drain rather than re-homing it, so the row's owner is executing-work's `WAITING:` stop shape, `executing-work` leaves the pointer column as the owner, the resume-path clause leaves with the drain, and `hooks/session-start.js` leaves with the handoff inventory it read.
-- proposed: "| Parking a session at its next safe point when the operator or a relayed drain window asks, with everything durable committed | `executing-work` (the `WAITING:` stop shape) | `coordinator` (the update window), `kit-goal`, `peer-sessions` |"
+- proposed: | Parking a session at its next safe point on request | `executing-work` (the `WAITING:` stop shape) |
 - passage: | Parking a session at its next safe point on request | `executing-work` (the `WAITING:` stop shape) |
 
 ### C057
@@ -3958,11 +3965,12 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: When you meet a moment listed as unowned or contested, declare the reading you take under the intake gap check.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:101
-- provenance: 5cd8f22 2026-09-01; the install commit's before-and-after probe showed a session go from silently supplying a reconciliation on the contested pull-request moment to declaring a gap that cites the map.
+- provenance: 5cd8f22 2026-09-01; the install commit's before-and-after probe showed a session go from silently supplying a reconciliation on the contested pull-request moment to declaring a gap that cites the map; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 62b0290 section 47
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: The rule holds and the map is its owner, the doctrine carrying only the declare clause as a pointer. Only the sentence shape changes: the paragraph's middle sentence chains three acts and their justification, and the split keeps every act and the operator's-ruling clause. Lands at landed line 101 (section 47's close) as 'A session that meets one declares the reading it takes under the intake gap check. It reports the gap in its close-out. It does not resolve the contest by editing either document, since the assignment is the operator's ruling.', the middle sentence split into its three acts; the ruling A053 lands through it.
-- proposed: Split into one sentence per act, keeping "since the assignment is the operator's ruling" with the no-editing instruction.
+- proposed: A session that meets one declares the reading it takes under the intake gap check.
 - baseline-test: yes
 - passage: A session that meets one declares the reading it takes under the intake gap check.
 
@@ -4028,12 +4036,12 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Apply this six-tier precedence order (harness, live word, positional grant, doctrine, owning skill, other surfaces) when two surfaces disagree.
 - class: mechanic
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:5
-- provenance: 5cd8f22 2026-09-01, which wrote the six-rank ordering into the doctrine byte-identically in both parity copies and had the map name the ranking it serves.
+- provenance: 5cd8f22 2026-09-01, which wrote the six-rank ordering into the doctrine byte-identically in both parity copies and had the map name the ranking it serves; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 62b0290 section 47
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: The doctrine owns the ranking and states each tier with its scope qualifiers; the map's compressed six labels are a copy in part, unprotected by any parity pin, so they can drift from the owner silently. The pointer and the map's own "which skill owns the moment" sentence carry everything a reader of the map needs. Lands at landed line 5 (section 47's close) as 'The doctrine's "Which text governs" section states the ranking this map serves. The map answers the one question the ranking leaves open: which skill owns the moment.', the six labels gone; the rulings A062 and A063 land through it.
-- proposed: Keep the pointer at "Which text governs" and the sentence about what the map answers; drop the six-tier restatement.
-- proposed: The map's line 5 becomes the pointer plus its own "which skill owns the moment" sentence.
+- proposed: The doctrine's "One owner per moment, and the map names it" bullet states the rule this map serves, and its Which Text Governs section states the ranking.
 - baseline-test: yes
 - passage: The doctrine's "One owner per moment, and the map names it" bullet states the rule this map serves, and its Which Text Governs section states the ranking.
 
@@ -4041,10 +4049,11 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the `brainstorming` skill for a plan's `## Intent` record: its parts, the why chain among them, its register, its byte bound, who writes it and where a ruling made after the spec ships lands.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:16
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 4 2026-09-19; sections 1 to 3 installed the record at brainstorming step 9 and pointed six surfaces at it, and the map carried no row for the moment. Amended in place by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, which named the why chain in the row so a reader meeting the chain on a charter finds its owner.
-- verdict: keep
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 4 2026-09-19; sections 1 to 3 installed the record at brainstorming step 9 and pointed six surfaces at it, and the map carried no row for the moment. Amended in place by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, which named the why chain in the row so a reader meeting the chain on a charter finds its owner. The `Serves:` line and its direction ledgers named in the row by c97a782d 2026-10-25; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
+- verdict: rewrite
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: The record is read by more seats than any other part of a spec bar the Goal, so the map's job of naming one owner is exactly what a reader meeting it on a charter needs. The owner column names step 9 and the freeze paragraph together because the write and the later ruling are one moment split across two of brainstorming's own passages, and a reader sent to the skill without the second would find no home for a ruling made after approval.
-- passage: | A plan's `## Intent` record, its why chain included, and a ruling after the spec ships | `brainstorming` (step 9, step 1 for the interview that builds the chain, and its freeze paragraph for a later ruling) |
+- passage: | A plan's `## Intent` record, its `Serves:` line and why chain included, and a ruling after the spec ships | `brainstorming` (step 9, step 1 for the direction ledgers the `Serves:` line cites and the interview that builds the chain, and its freeze paragraph for a later ruling) |
 
 ### C076
 - key: Read the `executing-work` skill for the add-decision written before a section or a fix is built, and for the design stop it fires.
@@ -4078,12 +4087,13 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - key: Read the doctrine's Disagree-up-front bullet for pushback carrying no new fact, the one re-check of the evidence before the read is restated or downgraded.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:98
-- provenance: docs/backlog.md 2026-09-13, batch 2 ruling 21 part B, on the reason the cold skill's ledger entry C022 recorded: the doctrine's bullet states the whole protocol and is loaded in every session that loads cold, so the map names the doctrine as owner and cold's Verify-before-concluding line as the pointer.
+- provenance: docs/backlog.md 2026-09-13, batch 2 ruling 21 part B, on the reason the cold skill's ledger entry C022 recorded: the doctrine's bullet states the whole protocol and is loaded in every session that loads cold, so the map names the doctrine as owner and cold's Verify-before-concluding line as the pointer; brought to the live text by `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1.
 - verdict: rewrite
 - landed: 1acad2a section 1
 - landed: 869b978 section 2
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
 - reason: Cold retires under `docs/plans/claude-kit_skill-retirement_spec_v1.md` section 1, so its pointer leaves and the owner column stays.
-- proposed: "| Pushback carrying no new fact, a bare "are you sure?": the one re-check of the evidence before the read is restated or downgraded | doctrine (Disagree up front) | none |"
+- proposed: | A bare "are you sure?" with no new fact | doctrine (Disagree up front) |
 - passage: | A bare "are you sure?" with no new fact | doctrine (Disagree up front) |
 
 ### W001
@@ -4291,6 +4301,106 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
 - reason: The bullet owns these three alone (AI001 under the SKILL.md heading), so a session placing a rule about who may write a section resolves to the doctrine rather than to the rubric. C010 keeps the bands and the list's entries.
 - passage: | A section's writer: the opus default, the bar on haiku, and who extends the sonnet list | doctrine (Opus writes a dispatched section) |
+
+### AN001
+- key: Read `prose-register` (Plan Brief) for a plan brief's form and register, `brainstorming` step 9 for its write, and `finishing-work` step 6 for its refresh.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:15
+- provenance: 93260387 2026-10-25, section 3 of `docs/archive/claude-kit_direction-and-brief_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 93260387 has the prose-register skill state the brief as a projection of the plan into seven labelled parts, brainstorming step 9 write it at plan open, and finishing-work step 6 refresh it before the archive move, which is the split the row names.
+- passage: | A plan's brief: its seven parts, register, bound and path, its write at plan open and its refresh before the ready | `prose-register` (Plan Brief) for the form and register, `brainstorming` (step 9) for the write, `finishing-work` (step 6) for the refresh |
+
+### AN002
+- key: Read the doctrine's "Surface decisions in batches" bullet for filing a question that is the operator's to decide, closing it when the answer arrives, and what is never filed.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:24
+- provenance: eefbb026 2026-10-12, under `docs/archive/claude-kit_ask-open-tool_spec_v1.md`, the plan whose Claim ids row that commit adds; the close named in the row by fa47be64 2026-10-30, section 2 of `docs/archive/claude-kit_ask-close-on-answer_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: eefbb026 names the bullet as the owner of the filing moment, which the map listed nowhere before, and fa47be64 names the close beside the filing, since the map's Amending paragraph moves a row with its rule.
+- passage: | Filing a question that is the operator's to decide, closing it when the answer arrives, and what is never filed | doctrine (Surface decisions in batches) |
+
+### AN003
+- key: Read `executing-work` step 1 for the capacity reading taken before a `fable` override dispatch.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:48
+- provenance: 3aedccd7 2026-09-24, section 2 of `docs/archive/claude-kit_capacity-gate_spec_v1.md`, which added the row; cut to its moment and owner by 55bee13d 2026-09-30, section 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 3aedccd7 states the rule whole in one executing-work step 1 bullet, run before any fable-override dispatch, and gives the map the capacity-reading row owned by executing-work.
+- passage: | The capacity reading before a `fable` override dispatch | `executing-work` (step 1) |
+
+### AN004
+- key: Read the doctrine's per-machine budget bullet for starting a heavy process on a shared machine.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:57
+- provenance: 5cd8f22 2026-09-01 installed the moment under `role` (C032); 658a62e7 2026-09-21, section 1 of `docs/archive/claude-kit_heavy-process-claim-retirement_spec_v1.md`, made the doctrine its owner; cut to its moment and owner by 55bee13d 2026-09-30, section 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 658a62e7 removed the heavy-process claim from its owning contract in the role skill and from every copy of the pre-spawn rule, so the box rule rests on the poll the doctrine's bullet states, and C032 retired with the claim.
+- passage: | Starting a heavy process on a shared machine | doctrine (One heavy process at a time is a per-machine budget) |
+
+### AN005
+- key: Read the `role` skill's coordinator-directory contract for the direction ledger: its two files, their line shape and their one writer.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:90
+- provenance: a7771f6f 2026-10-24, section 1 of `docs/archive/claude-kit_direction-and-brief_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: a7771f6f has the role skill's coordinator-directory contract name `direction.md` as a fourth form, written by the operator alone and read by sessions, with a repository's `docs/direction.md` in the same shape, and moves the map with it.
+- passage: | The direction ledger: the machine's `direction.md` and a repository's `docs/direction.md`, their line shape and their one writer | `role` (the coordinator-directory contract) |
+
+### AN006
+- key: Read the doctrine's relay-message bullet for a warranted-channel message delivered inside a tool result.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:91
+- provenance: 36f9aed6 2026-09-20, which closed `docs/archive/claude-kit_relay-channel-standing_spec_v1.md`; cut to its moment and owner by 55bee13d 2026-09-30, section 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 36f9aed6 adds the doctrine bullet under Which text governs on how to read an operator message the harness delivers inside a tool result, and the map gains the moment's row naming that bullet.
+- passage: | A warranted-channel message inside a tool result | doctrine (A relay message delivered inside a tool result) |
+
+### AN007
+- key: Read the `liaison` skill for the liaison seat's conduct in a shared client thread.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:99
+- provenance: 2507b995 2026-09-30, under `docs/archive/claude-kit_liaison-seat_spec_v1.md`, which added the row; cut to its moment and owner by 55bee13d 2026-09-30, section 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 2507b995 adds the liaison skill for the persona seat that several client users share one thread with, and the map gains a row naming liaison as the owner of the seat's conduct in a shared client thread.
+- passage: | The liaison seat's conduct in a shared client thread | `liaison` |
+
+### AN008
+- key: Read the `prose-register` skill for the recipe and scaling of the structure bullets and the marketing override.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:118
+- provenance: 16bd2d47 2026-09-22, under `docs/archive/claude-kit_prose-register_spec_v1.md`, which added the row; cut to its moment and owner by 55bee13d 2026-09-30, section 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 16bd2d47 builds the prose-register skill to hold what the doctrine's rule leaves out, the recipe and the scaling among them, so every layer of the register has one owner.
+- passage: | Recipe and scaling for the structure bullets and the marketing override | `prose-register` |
+
+### AN009
+- key: Read the `prose-register` skill's Voice Layer for which reference a `Voice:` value names and how a new voice is admitted.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:119
+- provenance: 16bd2d47 2026-09-22, under `docs/archive/claude-kit_prose-register_spec_v1.md`, which added the row; cut to its moment and owner by 55bee13d 2026-09-30, section 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 16bd2d47 moves the voice layer into the prose-register skill, under an admission of voice rules only, so every layer of the register has one owner.
+- passage: | A `Voice:` value's reference, and admitting a new voice | `prose-register` (Voice Layer) |
+
+### AN010
+- key: Read the `prose-register` skill's `references/ai-tells.md` for the machine-prose tells catalog.
+- class: pointer
+- source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:120
+- provenance: 16bd2d47 2026-09-22, under `docs/archive/claude-kit_prose-register_spec_v1.md`, which added the row; cut to its moment and owner by 55bee13d 2026-09-30, section 2 of `docs/archive/claude-kit_mechanism-cut_spec_v1.md`.
+- verdict: keep
+- landed: `docs/archive/claude-kit_map-ledger-pin_spec_v1.md` section 1
+- reason: 16bd2d47 moves the tells catalog into the prose-register skill, so every layer of the register has one owner.
+- passage: | The machine-prose tells catalog | `prose-register` (`references/ai-tells.md`) |
 
 ## plugins/grimoire/output-styles/kit.md
 

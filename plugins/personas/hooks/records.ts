@@ -1014,9 +1014,13 @@ export async function promotePlanTouchingRecord(
   const path = edited ?? record.planPath;
   if (path === undefined) return false;
   if (!PLAN_PATH_PATTERN.test(path)) {
-    // The shape of a stored string cannot change between boundaries, so the path
-    // is dropped rather than written back: keeping it would buy a re-test and a
-    // line at every later boundary and no promotion ever.
+    // The route's third reading, beside noted and refused. The shape of a stored
+    // string cannot change between boundaries, so the path is dropped rather
+    // than written back: keeping it would buy a re-test and a line at every
+    // later boundary and no promotion ever. It shares the refused action because
+    // its outcome for the log's reader is the same, no entry added, and its line
+    // tells the two apart. It returns false because a dropped path leaves
+    // nothing to retry, so the close runs.
     delete record.planPath;
     logOnce(
       "turn_record_promotion_refused",
