@@ -6,14 +6,15 @@
 // from is here too, since it is the one state the tier and the session's bridge share. The tier
 // appends the operator's turns itself; a persona line, its own answer or the session's reply, is
 // appended through `said` by the bridge once the operator has heard it through, which only the
-// bridge can tell.
+// bridge can tell. A turn the transcriber heard a tone in is ranked and answered with the tone's
+// note on its text, `withTone`'s, and the ring holds the turn without it.
 //
 // Each turn takes one direction and never none. Every failure of the screen, of Jev or of the model
 // hands the turn off and holds it, so the persona's session is the floor and nothing here
 // throws to its caller or drops a turn in silence. A speech the speaker fails is not a hand-off:
 // the bridge posted the line to the thread before the speech was asked for, and with the mirror
-// off the speaker's own fallback posts the unspoken words there instead. A turn withdrawn by a
-// `resumed` or by another turn's long cut-in (`cutIn`) is the one exception to the rule: its work
+// off the speaker's own fallback posts the unspoken words there instead. A turn withdrawn by
+// another turn's long cut-in (`cutIn`) is the one exception to the rule: its work
 // is discarded, it is neither answered nor handed off, and a hand-off already delivered for it
 // stands.
 //
@@ -29,6 +30,7 @@
 // number.
 import { SECRET_SCREEN, createJevClient } from "../jev/client.ts";
 import type { JevFetch, JevResult } from "../jev/client.ts";
+import { TONE_LABEL_SHAPE } from "./inworld.ts";
 import type { Player } from "./player.ts";
 import { STILL_LOOKING_LINES, THINKING_LINES, systemPrompt } from "./prompt.ts";
 import { RANK_QUESTIONS, RANK_REPEAT_LOG, decide, rankState } from "./rank.ts";
@@ -39,6 +41,19 @@ import type { TurnEvent } from "./transcriber.ts";
 
 /** The one host an answer is ever asked of. A constant, so no argument or setting can redirect it. */
 export const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+
+/**
+ * The turn's text as the fast tier ranks and answers it and the bridge hands it off: with
+ * ` (sounded <label>)` after it where the transcriber heard a tone that fits `TONE_LABEL_SHAPE`,
+ * and as it is otherwise, so a turn with no tone never carries an invented one. The label is the
+ * speech vendor's text, so one off that shape, an uppercase or a spaced label among others, gets
+ * no note, as no tone does, and no vendor text but a plain label reaches the model or the session.
+ * The system prompt tells the model how to read the note. The ring never holds it, since a
+ * remembered note would be sent to the vendors again as history.
+ */
+export function withTone(text: string, tone: string | undefined): string {
+  return tone !== undefined && TONE_LABEL_SHAPE.test(tone) ? `${text} (sounded ${tone})` : text;
+}
 
 /** The Messages API version every request names. */
 export const ANTHROPIC_VERSION = "2023-06-01";
@@ -224,11 +239,12 @@ export type FastTierOptions = {
    */
   player: Pick<Player, "play">;
   /**
-   * Told the turn's text once per hand-off, at the hand-off, after the thinking line is queued
-   * where `holdFirstMs` is zero. The bridge delivers it to the session with the ring's lines past
-   * the mark, and moves the mark.
+   * Told the turn's text and its tone, where the transcriber heard one, once per hand-off, at the
+   * hand-off, after the thinking line is queued where `holdFirstMs` is zero. The text is the ring's
+   * line, without the tone's note. The bridge delivers it to the session with the note and the
+   * ring's lines past the mark, and moves the mark.
    */
-  handOff: (turn: string) => void;
+  handOff: (turn: string, tone?: string) => void;
   /**
    * `CHANNEL_VOICE_HOLD_FIRST_MS`: how long after a hand-off the thinking line waits for the
    * session's reply before it is spoken. Zero speaks it at the hand-off.
@@ -255,7 +271,7 @@ export type FastTierOptions = {
 export type FastTier = {
   /**
    * Takes one turn event. An `end` with words is ranked, an `end` with none, a lost one included,
-   * is nothing, a `resumed` withdraws, and the rest are ignored.
+   * is nothing, and the rest are ignored.
    */
   take: (event: TurnEvent) => void;
   /**
@@ -309,16 +325,17 @@ export type FastTier = {
 type Outcome = "answered" | "handed off";
 
 /**
- * One finished turn and its work: the user line it put in the ring, the conversation it is answered
- * over (the ring before it plus that line), when it ended, the controller that aborts its model
- * call, and the flags that keep a cancelled turn from being answered or handed off, each of the two
- * holding lines from being spoken twice for one turn, and a withdrawn turn's line from being pulled
- * from under an answer already spoken to it. `speaking` is the answer's text while its speech is in
- * flight, so a withdrawal then can name it to the bridge.
+ * One finished turn and its work: its tone, the user line it put in the ring, the conversation it
+ * is answered over (the ring before it plus the turn's text with its tone's note), when it ended,
+ * the controller that aborts its model call, and the flags that keep a cancelled turn from being
+ * answered or handed off, each of the two holding lines from being spoken twice for one turn, and a
+ * withdrawn turn's line from being pulled from under an answer already spoken to it. `speaking` is
+ * the answer's text while its speech is in flight, so a withdrawal then can name it to the bridge.
  */
 type Turn = {
   number: number;
   text: string;
+  tone: string | undefined;
   line: SpokenLine;
   history: readonly SpokenLine[];
   endedAt: number;
@@ -519,7 +536,7 @@ export function createFastTier(options: FastTierOptions): FastTier {
       if (armed.timers.length > 0) hold = armed;
     }
     try {
-      options.handOff(turn.text);
+      options.handOff(turn.text, turn.tone);
     } catch {
       log(`voice: the hand-off callback threw turn=${String(turn.number)}`);
     }
@@ -584,11 +601,14 @@ export function createFastTier(options: FastTierOptions): FastTier {
           },
         });
 
-  /** A finished turn: into the ring, through the screen, and to the judge. */
-  function ended(number: number, text: string): void {
+  /**
+   * A finished turn: into the ring, through the screen, and to the judge. The ring takes the text
+   * alone, and the ranking and the answer take it with the tone's note.
+   */
+  function ended(number: number, text: string, tone: string | undefined): void {
     const endedAt = now();
-    // A record for the same turn is an earlier end this one replaces, handled as a `resumed`
-    // handles it: its work still open is withdrawn, its line leaves the ring unless an answer was
+    // A record for the same turn is an earlier end this one replaces: its work still open is
+    // withdrawn, its line leaves the ring unless an answer was
     // spoken to it, and each of its holding lines already spoken is not spoken again. Settled
     // records of other turns are no longer needed.
     const prior = open.get(number);
@@ -606,11 +626,13 @@ export function createFastTier(options: FastTierOptions): FastTier {
     // the turn and the ring together, which agree, since the ring holds no screened line.
     const held = ring.append(line, "turn");
     const hit = !held || screened(before.map((earlier) => earlier.text));
+    const noted = withTone(text, tone);
     const turn: Turn = {
       number,
       text,
+      tone,
       line,
-      history: held ? [...before, line] : before,
+      history: held ? [...before, { role: "user", text: noted }] : before,
       endedAt,
       controller: new AbortController(),
       cancelled: false,
@@ -633,9 +655,9 @@ export function createFastTier(options: FastTierOptions): FastTier {
       return;
     }
     // A key of its own per submission: the Jev client parks a second submission on one key behind
-    // the first call, which would hold a resumed turn's new end behind its withdrawn one.
+    // the first call, which would hold a turn's later end behind its withdrawn one.
     submissions += 1;
-    judge.submit(`${String(number)}/${String(submissions)}`, rankState(before, text, names()), turn);
+    judge.submit(`${String(number)}/${String(submissions)}`, rankState(before, noted, names()), turn);
   }
 
   /**
@@ -657,22 +679,11 @@ export function createFastTier(options: FastTierOptions): FastTier {
   return {
     take(event) {
       if (event.kind === "end") {
-        // A lost end has no final text, and an eager end can carry none: neither is a turn, so
+        // A lost end has no final text, and an empty end carries none: neither is a turn, so
         // neither is ranked, remembered or held.
         if (event.lost === true || event.text.trim() === "") return;
-        ended(event.turn, event.text);
-        return;
+        ended(event.turn, event.text, event.tone);
       }
-      if (event.kind !== "resumed") return;
-      const turn = open.get(event.turn);
-      // An answer to an ASK has no record here: the bridge holds it through a resume, and its line
-      // stays in the ring.
-      if (turn === undefined) return;
-      withdraw(turn);
-      // The ring never holds a withdrawn half-turn: the line goes, and the resumed turn's end puts
-      // the whole turn in. A line an answer was already spoken to stays, so the answer keeps what
-      // it answered.
-      if (!turn.answered) ring.remove(turn.line);
     },
     speak(text, remember) {
       clearHold();

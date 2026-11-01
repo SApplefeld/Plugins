@@ -689,9 +689,9 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_VOICE_LOOPBACK',
     # The path of the file the transcription key is read from, never the key.
     'CHANNEL_VOICE_STT_KEY_FILE',
+    # The path of the file the speech key is read from, never the key.
+    'CHANNEL_SPEECH_KEY_FILE',
     'CHANNEL_VOICE_EOT_THRESHOLD',
-    'CHANNEL_VOICE_EAGER_THRESHOLD',
-    'CHANNEL_VOICE_EAGER',
     'CHANNEL_VOICE_SHORT_TURN_WORDS',
     'CHANNEL_SPEECH_VOICE',
     'CHANNEL_SPEECH_TIMEOUT_MS',
@@ -702,7 +702,6 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_VOICE_FAST_MODEL',
     'CHANNEL_VOICE_MEMORY_TURNS',
     'CHANNEL_VOICE_MAX_SPOKEN_WORDS',
-    'CHANNEL_VOICE_EAGER_SETTLE_MS',
     'CHANNEL_VOICE_HOLD_FIRST_MS',
     'CHANNEL_VOICE_HOLD_SECOND_MS',
     'CHANNEL_VOICE_TURN_HOLD',

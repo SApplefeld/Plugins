@@ -154,8 +154,8 @@ worker's transcript, the brief follows the ask's message as one message per part
 TypeSafe's classifier, reached
 under the optional step "The Jev key file" below, is the one host other than Discord this broker
 reaches unless the voice is on, and the response gate described above sends it a gated thread's
-lines. The voice, when on, ranks its spoken turns with the same key and also reaches Deepgram and
-Anthropic, as "The voice's key files and commands" below describes. All three cards are configured in `broker.env` and
+lines. The voice, when on, ranks its spoken turns with the same key and also reaches Inworld, Cartesia
+and Anthropic, as "The voice's key files and commands" below describes. All three cards are configured in `broker.env` and
 documented in `operations.md`; a value tuned by hand there survives a re-install.
 Two of the paths the cards read belong to the host. `CHANNEL_USAGE_CACHE_ROOT` is where the usage
 card reads the usage cache and account list. `CHANNEL_BOARD_EVENTS_PATH` is the events file the
@@ -501,21 +501,23 @@ on the installer's allowlist, so a value set by hand here survives the next inst
 
 The voice lets an operator talk to a session from a Discord voice channel. It is off unless `CHANNEL_VOICE=on`, and this step is optional: without it nothing of the voice runs, and no audio leaves the machine. Step 1 covers the Discord side, the Guild Voice States intent and the Connect and Speak permissions.
 
-Two key files serve it. Each holds one line, the key alone.
+Three key files serve it. Each holds one line, the key alone.
 
-- `CHANNEL_VOICE_STT_KEY_FILE` names the file holding the Deepgram key that transcribes the operator's audio and speaks the persona's lines, in the voice `flux-cole-en` of Deepgram's Flux text-to-speech, unless `CHANNEL_SPEECH_VOICE` names another Deepgram Flux voice, whose name starts with `flux-`. Without it the bot joins deaf and mute, and answers stay in the thread.
+- `CHANNEL_VOICE_STT_KEY_FILE` names the file holding the Inworld key that transcribes the operator's audio, ends each turn and reads its tone. The file holds the ready-made Base64 Basic credential that Inworld's portal gives, and the broker sends it as stored, adding nothing. Without it the bot joins deaf and mute, and answers stay in the thread, since speech needs this file as well as the Cartesia one.
+- `CHANNEL_SPEECH_KEY_FILE` names the file holding the Cartesia key that speaks the persona's lines, in the voice Skylar unless `CHANNEL_SPEECH_VOICE` names another Cartesia voice id. Without it the bot joins mute, and answers stay in the thread.
 - `CHANNEL_VOICE_FAST_KEY_FILE` names the file holding the Anthropic key the fast model answers under. Without it no turn is answered by the fast model, and every turn goes to the session.
 
-Create each file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside `discord-token.txt`, from the same plain non-elevated session step 2 requires. A file created under that directory inherits the access control list step 2 set. Write each file with the command from the Jev key step above, changing the path and the prompt. These two lines write the Deepgram and Anthropic key files:
+Create each file inside the state root, `%LOCALAPPDATA%\sapplefeld-channels\`, beside `discord-token.txt`, from the same plain non-elevated session step 2 requires. A file created under that directory inherits the access control list step 2 set. That session also makes the operator's own account the owner of each file. With `CHANNEL_VOICE` on, the broker reads the voice key files at start and checks each one's owner and grants. On a default Windows policy, a file written from an elevated prompt is owned by `BUILTIN\Administrators`. The broker accepts that owner. But the operator's inherited grant then counts as access beyond the owner, so the broker refuses to start. Write each file with the command from the Jev key step above, changing the path and the prompt. These three lines write the Inworld, Cartesia and Anthropic key files:
 
 ```powershell
-Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\deepgram-key.txt" -Value (Read-Host 'Deepgram key') -Encoding ascii
+Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\inworld-key.txt" -Value (Read-Host 'Inworld key') -Encoding ascii
+Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\cartesia-key.txt" -Value (Read-Host 'Cartesia key') -Encoding ascii
 Set-Content -Path "$env:LOCALAPPDATA\sapplefeld-channels\anthropic-key.txt" -Value (Read-Host 'Anthropic key') -Encoding ascii
 ```
 
 None of the keys goes in `broker.env`, only the paths.
 
-The broker checks both files at start exactly as it checks the token file: the file and its directory must be owned by the broker's account or an administrative identity, must grant nobody beyond the owner, Administrators and SYSTEM, and must not be a symbolic link or junction. Each path must also sit inside the state root, the directory holding the broker's state file, and a path equal to the root or outside it is refused before the file is opened. Unlike the Jev key file, a named file that fails any of this stops a broker with the voice on, naming the file and the cause, as an unusable token file does. A file that is missing, unreadable or empty, or whose content holds anything but visible ASCII with no spaces, is refused the same way. A trailing newline is fine.
+The broker checks all three files at start exactly as it checks the token file: the file and its directory must be owned by the broker's account or an administrative identity, must grant nobody beyond the owner, Administrators and SYSTEM, and must not be a symbolic link or junction. Each path must also sit inside the state root, the directory holding the broker's state file, and a path equal to the root or outside it is refused before the file is opened. Unlike the Jev key file, a named file that fails any of this stops a broker with the voice on, naming the file and the cause, as an unusable token file does. A file that is missing, unreadable or empty, or whose content holds anything but visible ASCII with no spaces, is refused the same way. A trailing newline is fine.
 
 The voice also ranks each spoken turn with the Jev key file, `CHANNEL_JEV_KEY_FILE`, from the step above. It is read whenever the voice is on, and the voice needs no other TypeSafe key. With no usable Jev key every spoken turn goes to the session unranked. A turn is ranked only where the fast key file is also named, since without it no answer could follow the ranking. A named Jev key file that cannot be used is warned once and does not stop the broker, unless `CHANNEL_RESPONSE_GATE` is `shadow` or `live`, which refuses as the step above says.
 
@@ -523,15 +525,18 @@ Add the keys to `broker.env`:
 
 ```
 CHANNEL_VOICE=on
-CHANNEL_VOICE_STT_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\deepgram-key.txt
+CHANNEL_VOICE_STT_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\inworld-key.txt
+CHANNEL_SPEECH_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\cartesia-key.txt
 CHANNEL_VOICE_FAST_KEY_FILE=C:\Users\<you>\AppData\Local\sapplefeld-channels\anthropic-key.txt
 ```
 
-The other voice settings have defaults and need no entry: the loopback and eager switches, both off, the idle window, the end-of-turn thresholds, the short-turn word count, the two ranking thresholds, the fast model, the memory length, the spoken-word bound, the answer settle, the two holding-line waits, the turn hold's mode, length and completeness threshold, the Flux voice name and the speech timeout. `operations.md` carries each one's range in its tunables table. All twenty-two voice keys are on the installer's allowlist, so values set by hand here survive the next install.
+The other voice settings have defaults and need no entry: the loopback switch, off, the idle window, the end-of-turn threshold, which unset leaves to Inworld's own default, the short-turn word count, the two ranking thresholds, the fast model, the memory length, the spoken-word bound, the two holding-line waits, the turn hold's mode, length and completeness threshold, the Cartesia voice and the speech timeout. `operations.md` carries each one's range in its tunables table. All twenty voice keys are on the installer's allowlist, so values set by hand here survive the next install.
+
+`CHANNEL_SPEECH_VOICE` takes only a Cartesia voice id, lowercase hex in groups of 8, 4, 4, 4 and 12 joined by hyphens. Unset, it is Skylar, `db6b0ed5-d5d3-463d-ae85-518a07d3c2b4`. A value left from the earlier voice vendor, a name starting `flux-` such as `flux-cole-en`, stops the broker at start, naming the rule. Delete that line from `broker.env`, or replace it with a Cartesia voice id, before the restart below.
 
 To turn the voice on and join a channel:
 
-1. Restart the broker with `.\install\Repair-Broker.ps1` from an elevated prompt at the root that "When a broker looks stale, doubled, or wrong" in [`operations.md`](operations.md) names. Every setting takes effect at a restart. The start log then reads `the voice is on`, and says whether the channel can hear and speak, which it does only with the Deepgram key file, and whether the Jev and fast keys are read. Where the channel can hear, it also says whether the turn hold is off, plain or judged, and how long it holds a turn's end.
+1. Restart the broker with `.\install\Repair-Broker.ps1` from an elevated prompt at the root that "When a broker looks stale, doubled, or wrong" in [`operations.md`](operations.md) names. Every setting takes effect at a restart. The start log then reads `the voice is on`, and says whether the channel can hear and speak. It hears only with the Inworld key file, and speaks only with both the Inworld and the Cartesia key files. It also says whether the Jev and fast keys are read. Where the channel can hear, it also says whether the turn hold is off, plain or judged, and how long it holds a turn's end.
 2. Join an ordinary voice channel in the server. A stage channel is not supported.
 3. In the thread of a live session, type `voice on` from an operator account. The bot joins the channel you are sitting in. If you are in no voice channel, the thread gets one notice saying so.
 4. Talk. A light question is answered by the fast model. A technical or factual question is handed to the session. Where the reply is slow the persona fills the wait, first with a short thinking line and then, if the reply is slower still, a still-looking line, and the session's reply is spoken when it returns. Speak over the persona to stop it; a "mm-hm" lets it carry on. Your spoken turns and the fast model's answers are mirrored into the thread as text, unless `CHANNEL_MIRROR=off`, and the session's replies are there already. Holding lines are spoken only. "Talking to a session aloud" in `operations.md` describes each of these in full.

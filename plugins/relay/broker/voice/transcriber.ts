@@ -1,6 +1,6 @@
 // The transcription boundary: operator PCM in, turn events out. Everything above this file reads
 // turns through `Transcriber` alone, so the vendor behind it can change without anything above it
-// changing. Flux is the first implementation, in flux.ts.
+// changing. The broker builds Inworld's, in inworld.ts.
 //
 // The barge-in rule lives here too, since it is the one consumer of turn events this layer owns:
 // it is how the player yields the floor when the operator starts speaking.
@@ -12,10 +12,9 @@ import type { Player } from "./player.ts";
  * as when its connection drops mid-turn: it has no final text, so `text` is empty, and `heard`
  * holds the words transcribed before the loss, which may be none. A consumer that answers turns
  * skips an `end` with `lost` set, since it has no final text and `heard` may be a partial
- * transcript. `resumed` withdraws an `end` already emitted for the same turn, when the speaker
- * turned out not to have finished. An `end` with `eager` set is an early end, one a `resumed` may
- * still withdraw; with no resume behind it, it is the turn's only end, since the final end it ran
- * ahead of is never sent. An `end` without it is final.
+ * transcript. Every `end` is final: the turn has no later event. `tone` on an `end` that is not
+ * lost is the speaker's tone as the transcriber heard it, one short label, absent where it was not
+ * confident.
  */
 export type TurnEvent =
   | { kind: "start"; speakerId: string; turn: number }
@@ -25,12 +24,19 @@ export type TurnEvent =
       speakerId: string;
       turn: number;
       text: string;
-      eager?: true;
+      tone?: string;
       lost?: undefined;
       heard?: undefined;
     }
-  | { kind: "end"; speakerId: string; turn: number; text: ""; lost: true; heard: string; eager?: undefined }
-  | { kind: "resumed"; speakerId: string; turn: number };
+  | {
+      kind: "end";
+      speakerId: string;
+      turn: number;
+      text: "";
+      lost: true;
+      heard: string;
+      tone?: undefined;
+    };
 
 export type Transcriber = {
   /** Takes one frame of 48 kHz 16-bit mono PCM and the account it came from. */
@@ -70,11 +76,9 @@ export type HeldShortReading = {
  * the persona has finished is an ordinary turn, and what the persona said before it was heard. A
  * short turn that ends while the persona is mid-reply, `held.speaking()` reading true, is a
  * backchannel over the persona, and `held.onHeldShort` is called with its number, which is the one
- * reading of that judgment: the bridge posts such a turn and neither ranks nor hands it off, save
- * the end of an answer to an ASK the bridge holds, which is still that answer. A short
- * turn while the persona is silent is a turn of its own and is reported to neither. A `resumed` is
- * the speaker carrying on after an early `end`, so it is taken as a start: the player is paused
- * again, and the next `end` for the turn decides again. Returns the call that unbinds it.
+ * reading of that judgment: the bridge posts such a turn and neither ranks nor hands it off. A
+ * short turn while the persona is silent is a turn of its own and is reported to neither. Returns
+ * the call that unbinds it.
  */
 export function bindBargeIn(
   transcriber: Pick<Transcriber, "onTurn">,
@@ -88,7 +92,7 @@ export function bindBargeIn(
   // `end` is counted on `heard`, the words transcribed before the loss, and any other on `text`.
   let holding = false;
   return transcriber.onTurn((event) => {
-    if (event.kind === "start" || event.kind === "resumed") {
+    if (event.kind === "start") {
       if (!holding) {
         player.pause();
         holding = true;

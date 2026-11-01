@@ -57,8 +57,6 @@ export type VoiceJoinOptions = {
   mirror: boolean;
   /** `CHANNEL_VOICE_MAX_SPOKEN_WORDS`. */
   maxSpokenWords: number;
-  /** `CHANNEL_VOICE_EAGER_SETTLE_MS`. */
-  eagerSettleMs: number;
   /** The typing keeper's hold, or a no-op where no keeper is built. */
   hold: (threadId: string, until: number) => () => void;
   /** How long a held typing line stands with no frame to release it. */
@@ -153,7 +151,6 @@ export function voiceJoin(
       post: paced,
       mirror: options.mirror,
       maxSpokenWords: options.maxSpokenWords,
-      eagerSettleMs: options.eagerSettleMs,
       player,
       hold: options.hold,
       holdMs: options.holdMs,

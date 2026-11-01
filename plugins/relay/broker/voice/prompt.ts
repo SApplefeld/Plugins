@@ -15,7 +15,8 @@ export const HAND_OFF_REPLY = "[hand off]";
  * carries the honesty rule, and forbids claiming to be Scott. It then gives the model its role as
  * the social half of one speaker, in four rules: it never takes back what the persona said, it
  * answers a light turn offhand in a few spoken sentences, it never speaks about its own reach, and
- * it replies with `HAND_OFF_REPLY` alone for a turn that needs the session's real answer. The
+ * it replies with `HAND_OFF_REPLY` alone for a turn that needs the session's real answer. Its last
+ * sentence says how to read the tone's note a turn may carry, `withTone`'s in fast.ts. The
  * conversation itself rides as messages, never inside the prompt.
  */
 export const SYSTEM_PROMPT =
@@ -35,7 +36,9 @@ export const SYSTEM_PROMPT =
   "A technical question, a question about a setting, a state or a fact, or any turn you cannot " +
   "carry offhand as the same speaker, is the session's. For it you reply with exactly " +
   HAND_OFF_REPLY +
-  " and nothing more, and the pause and the answer follow in the persona's voice.";
+  " and nothing more, and the pause and the answer follow in the persona's voice. " +
+  "A note after a turn in the form \"(sounded <label>)\" is a guess about the speaker's tone, to be " +
+  "weighed lightly and never spoken back.";
 
 /** The system prompt for the persona whose session is `sessionName`. */
 export function systemPrompt(sessionName: string): string {

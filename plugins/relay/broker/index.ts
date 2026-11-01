@@ -11,6 +11,7 @@ import {
   WEB_BIND_RETRY_MS,
   loadConfig,
   readJevKey,
+  readSpeechKey,
   readVoiceFastKey,
   readVoiceSttKey,
 } from "./config.ts";
@@ -1209,10 +1210,12 @@ export async function startBroker(
   // so a host whose gate cannot judge fails at once with the reason on disk: under the scheduled
   // task there is no console for the throw to reach.
   let judgeKey: string | null;
-  // The Deepgram key, which hears and speaks, is read on the same terms, and only where the voice
-  // is on: a named file the voice cannot use refuses the start, as an unusable Discord token file
-  // does, and so does one outside the state root, the directory holding the state file.
+  // The transcription key, Inworld's, is read on the same terms, and only where the voice is on: a
+  // named file the voice cannot use refuses the start, as an unusable Discord token file does, and
+  // so does one outside the state root, the directory holding the state file.
   let sttKey: string | null;
+  // And the speech key, Cartesia's, under the same rule.
+  let speechKey: string | null;
   // And the fast tier's Anthropic key, under the same rule.
   let fastKey: string | null;
   // The web surface's configuration, on the same terms: null is the surface off, and a written
@@ -1224,6 +1227,7 @@ export async function startBroker(
     judgeKey = readJudgeKey(config, warn);
     const stateRoot = path.dirname(config.stateFile);
     sttKey = config.voice ? readVoiceSttKey(config.voiceSttKeyFile, stateRoot) : null;
+    speechKey = config.voice ? readSpeechKey(config.speechKeyFile, stateRoot) : null;
     fastKey = config.voice ? readVoiceFastKey(config.voiceFastKeyFile, stateRoot) : null;
     web = loadWebConfig(config, options.web);
   } catch (error) {
@@ -2398,14 +2402,15 @@ export async function startBroker(
     // Opus codec.
     if (config.voice && gateway.voice !== null) {
       const { createVoice } = await import("./voice/connection.ts");
-      const { createFlux } = await import("./voice/flux.ts");
+      const { createInworld } = await import("./voice/inworld.ts");
       const { createTurnHold } = await import("./voice/turn-hold.ts");
       const { transcriptionHooks } = await import("./voice/transcription.ts");
       const { ANSWER_TIMEOUT_MS, createFastTier } = await import("./voice/fast.ts");
       const { JEV_TIMEOUT_MS } = await import("./jev/client.ts");
-      const { createFluxSpeech } = await import("./voice/flux-speech.ts");
+      const { createCartesiaSpeech } = await import("./voice/cartesia-speech.ts");
       const { voiceJoin } = await import("./voice/join.ts");
       const key = sttKey;
+      const cartesiaKey = speechKey;
       const voiceGateway = gateway.voice;
       // The turn hold's mode as it will run: `judged` needs the Jev key, and without one it runs
       // plain, said once here rather than on every join.
@@ -2426,11 +2431,13 @@ export async function startBroker(
         return ended;
       };
       // The transcriber lives exactly as long as the joined channel: opened on the join, closed on
-      // the leave, so no audio reaches Deepgram while the bot is in no channel. The voice's own
+      // the leave, so no audio reaches Inworld while the bot is in no channel. The voice's own
       // stop leaves the channel, which closes it. The bridge, the fast tier and the speaker live
       // exactly as long, built by `attach` on the join and released by its detach on the leave.
-      // The speaker takes the same Deepgram key as the transcriber, so the voice speaks exactly
-      // when it hears.
+      // The speaker takes Cartesia's key and the transcriber Inworld's. Speech needs both key
+      // files, since the speaker is built only when the transcriber attaches the bridge: without
+      // the speech key the channel hears and is mute, and without the transcription key it is
+      // deaf and mute.
       voice = createVoice({
         gateway: voiceGateway,
         gate,
@@ -2439,19 +2446,17 @@ export async function startBroker(
         ...transcriptionHooks({
           key,
           shortTurnWords: config.voiceShortTurnWords,
-          // The hold wraps Flux, so every consumer the hooks subscribe reads turns through it: the
-          // barge-in rule and the bridge share one hold per end. Off, the transcriber is wired
+          // The hold wraps Inworld, so every consumer the hooks subscribe reads turns through it:
+          // the barge-in rule and the bridge share one hold per end. Off, the transcriber is wired
           // bare.
           create: (stt) => {
-            const flux = createFlux({
+            const inworld = createInworld({
               key: stt,
-              eotThreshold: config.voiceEotThreshold,
-              eagerThreshold: config.voiceEagerThreshold,
-              eager: config.voiceEager,
+              endOfTurnConfidenceThreshold: config.voiceEotThreshold,
               log: note,
             });
-            if (turnHold === "off") return flux;
-            return createTurnHold(flux, {
+            if (turnHold === "off") return inworld;
+            return createTurnHold(inworld, {
               mode: turnHold,
               holdMs: config.voiceTurnHoldMs,
               threshold: config.voiceCompleteThreshold,
@@ -2479,7 +2484,6 @@ export async function startBroker(
             writer: mirrorWriter,
             mirror: config.mirror,
             maxSpokenWords: config.voiceMaxSpokenWords,
-            eagerSettleMs: config.voiceEagerSettleMs,
             hold: (id, until) => typingKeeper?.hold(id, until) ?? ((): void => {}),
             // The longest the path from a turn's end to its first frame can run: the ranking's
             // timeout, then the fast model's, then the speech socket's.
@@ -2500,11 +2504,11 @@ export async function startBroker(
                 log: note,
               }),
             speaker:
-              key === null
+              cartesiaKey === null
                 ? null
                 : ({ player, fallback }) =>
-                    createFluxSpeech({
-                      key,
+                    createCartesiaSpeech({
+                      key: cartesiaKey,
                       voice: config.speechVoice,
                       timeoutMs: config.speechTimeoutMs,
                       player,
@@ -2529,8 +2533,7 @@ export async function startBroker(
           (config.voiceLoopback ? ", and the development loopback is on" : "") +
           (key === null
             ? "; CHANNEL_VOICE_STT_KEY_FILE is unset, so the channel is deaf and mute, and the thread keeps working"
-            : `; operator audio is transcribed by Deepgram Flux while the bot is in a channel` +
-              (config.voiceEager ? ", with eager end of turn" : "") +
+            : `; operator audio is transcribed by Inworld while the bot is in a channel` +
               // The hold as it will run, so a judged setting without a key reads as the plain hold
               // it is.
               (turnHold === "off"
@@ -2538,8 +2541,12 @@ export async function startBroker(
                 : `, and a turn's end is held for up to ${String(config.voiceTurnHoldMs)}ms` +
                   (holdJudge === null
                     ? " (plain)"
-                    : ` (judged, released at once at or above ${String(config.voiceCompleteThreshold)})`)) +
-              `, and the voice speaks through Deepgram Flux in the voice ${config.speechVoice}`) +
+                    : ` (judged, released at once at or above ${String(config.voiceCompleteThreshold)})`))) +
+          (cartesiaKey === null
+            ? "; CHANNEL_SPEECH_KEY_FILE is unset, so the channel is mute, and the thread keeps working"
+            : key === null
+              ? "; the speech key is read, but speech needs both key files, so nothing is spoken"
+              : `; the voice speaks through Cartesia in the voice ${config.speechVoice}`) +
           // The fast tier's keys as read at this start, each named by what it is for: the Jev key
           // the response gate and the voice share is the fast tier's ranking key, and the fast key
           // with its model is its answering key. The line says what is read and nothing of what is

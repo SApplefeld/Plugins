@@ -1,10 +1,10 @@
-// The turn hold: a `Transcriber` wrapped around the one Flux builds, so a thought the operator
-// gathers across a pause reaches every consumer of turn events as one turn. An `end` with words is
-// held rather than emitted, for up to the hold setting, and a new turn the same operator starts
-// inside the wait joins the held words into one turn under the held turn's number. In the `judged`
-// mode one Jev question is asked over the held words, and an answer that reads them as a finished
-// thought releases the end at once; a doubtful answer, a failure of any kind, or the `plain` mode
-// leaves the timer to release it.
+// The turn hold: a `Transcriber` wrapped around the vendor's, so a thought the operator gathers
+// across a pause reaches every consumer of turn events as one turn. An `end` with words is held
+// rather than emitted, for up to the hold setting, and a new turn the same operator starts inside
+// the wait joins the held words into one turn under the held turn's number, carrying the tone of
+// its last piece. In the `judged` mode one Jev question is asked over the held words, and an answer
+// that reads them as a finished thought releases the end at once; a doubtful answer, a failure of
+// any kind, or the `plain` mode leaves the timer to release it.
 //
 // The wrapper keeps one listener list of its own, called in subscription order, so the barge-in
 // rule and the bridge share one hold, one timer and one Jev call per end, and the barge-in rule
@@ -57,11 +57,12 @@ type Hold = {
 /**
  * A continuation joined into a held turn: the inner transcriber's turn `from` is emitted as the
  * held turn `to`, under the held turn's account, with `prefix` ahead of each event's text. The
- * mapping outlives the hold that made it, so a resume or a late end of the joined turn still reads
+ * mapping outlives the hold that made it, so a late update or end of the joined turn still reads
  * as the held turn, and it ends at the next `start`, which is a turn of its own, or when the
- * continuation is lost, which releases `prefix` alone as the turn's end.
+ * continuation is lost, which releases `prefix` alone as the turn's end, with `tone`, the held
+ * end's own.
  */
-type Joined = { from: number; to: number; speakerId: string; prefix: string };
+type Joined = { from: number; to: number; speakerId: string; prefix: string; tone?: string };
 
 /** The held text, one space and the continuation's text, trimmed. */
 function join(prefix: string, text: string): string {
@@ -105,7 +106,7 @@ export function createTurnHold(inner: Transcriber, options: TurnHoldOptions): Tr
       : `, jev=${held.answer.probability.toFixed(2)} in ${String(held.answer.roundTripMs)}ms`;
   }
 
-  /** Ends the hold without emitting, for a join, a resume or the leave. */
+  /** Ends the hold without emitting, for a join or the leave. */
   function drop(): Hold {
     const held = hold as Hold;
     clearTimer(held.timer);
@@ -113,7 +114,7 @@ export function createTurnHold(inner: Transcriber, options: TurnHoldOptions): Tr
     return held;
   }
 
-  /** Ends the hold and emits the held end as it stands, its `eager` flag included. */
+  /** Ends the hold and emits the held end as it stands. */
   function release(how: string): void {
     const held = drop();
     log(`voice: turn hold turn=${String(held.end.turn)} ${how} after ${String(now() - held.openedAt)}ms${answered(held)}`);
@@ -131,7 +132,7 @@ export function createTurnHold(inner: Transcriber, options: TurnHoldOptions): Tr
           log,
           now,
           onResult: (_key, held, result: JevResult<CompleteQuestion>) => {
-            // An answer for a hold that has closed, by a join, a resume, the timer or the leave, is
+            // An answer for a hold that has closed, by a join, the timer or the leave, is
             // late and dropped. A failure is already on the repeat log by its kind, and leaves the
             // timer to run.
             if (held !== hold || !result.ok) return;
@@ -164,7 +165,14 @@ export function createTurnHold(inner: Transcriber, options: TurnHoldOptions): Tr
         return { kind: "update", speakerId, turn, text: join(prefix, event.text) };
       case "end":
         // A lost end of the joined turn never reaches here: `handle` releases the held words for it.
-        return { kind: "end", speakerId, turn, text: join(prefix, event.text), ...(event.eager === true ? { eager: true as const } : {}) };
+        // The joined end carries the continuation's tone, the last piece's, or none where it has none.
+        return {
+          kind: "end",
+          speakerId,
+          turn,
+          text: join(prefix, event.text),
+          ...(event.tone === undefined ? {} : { tone: event.tone }),
+        };
       default:
         return { ...event, speakerId, turn };
     }
@@ -175,11 +183,11 @@ export function createTurnHold(inner: Transcriber, options: TurnHoldOptions): Tr
     if (joined !== null && received.kind === "end" && received.lost === true && received.turn === joined.from) {
       // The continuation is lost, so its words have no final text and are not answered, as a lost
       // turn's never are. The held words had already ended before the join, so they go on as the
-      // held turn's finished end, with no eager flag, rather than being lost with the continuation.
-      const { to: turn, speakerId, prefix } = joined;
+      // held turn's finished end rather than being lost with the continuation.
+      const { to: turn, speakerId, prefix, tone } = joined;
       joined = null;
       log(`voice: turn hold turn=${String(turn)} released when the joined turn was lost`);
-      emit({ kind: "end", speakerId, turn, text: prefix });
+      emit({ kind: "end", speakerId, turn, text: prefix, ...(tone === undefined ? {} : { tone }) });
       return;
     }
     const event = mapped(received);
@@ -192,7 +200,13 @@ export function createTurnHold(inner: Transcriber, options: TurnHoldOptions): Tr
           if (event.speakerId === held.end.speakerId) {
             // The operator carrying on inside the wait: the held words and the new turn are one
             // turn, so nothing is emitted and the new turn reads as the held one from here on.
-            joined = { from: received.turn, to: held.end.turn, speakerId: held.end.speakerId, prefix: held.end.text };
+            joined = {
+              from: received.turn,
+              to: held.end.turn,
+              speakerId: held.end.speakerId,
+              prefix: held.end.text,
+              ...(held.end.tone === undefined ? {} : { tone: held.end.tone }),
+            };
             drop();
             log(`voice: turn hold turn=${String(held.end.turn)} joined by the next turn after ${String(now() - held.openedAt)}ms${answered(held)}`);
             return;
@@ -204,21 +218,10 @@ export function createTurnHold(inner: Transcriber, options: TurnHoldOptions): Tr
         return;
       }
       case "update":
-        // Where an update of the held turn arrives while the hold is open, as it may after an eager
-        // end that has not been resumed, its words replace the held text and the release carries
-        // them, since no later end would.
+        // Where an update of the held turn arrives while the hold is open, its words replace the
+        // held text and the release carries them, since no later end would.
         if (hold !== null && event.turn === hold.end.turn && event.text !== "") {
           hold.end = { ...hold.end, text: event.text };
-        }
-        emit(event);
-        return;
-      case "resumed":
-        if (hold !== null && event.turn === hold.end.turn) {
-          // The turn is still open as far as every consumer knows, so there is nothing to emit; its
-          // next end opens a fresh hold.
-          const held = drop();
-          log(`voice: turn hold turn=${String(held.end.turn)} resumed after ${String(now() - held.openedAt)}ms${answered(held)}`);
-          return;
         }
         emit(event);
         return;

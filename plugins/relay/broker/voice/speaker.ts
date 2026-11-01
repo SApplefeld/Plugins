@@ -1,6 +1,6 @@
 // The speech boundary: text in, 48 kHz 16-bit mono PCM out to the joined channel's player.
 // Everything above this file speaks through `Speaker` alone, so the vendor behind it can change
-// without anything above it changing. Deepgram Flux is the implementation, in flux-speech.ts.
+// without anything above it changing. The broker builds Cartesia's, in cartesia-speech.ts.
 
 /** One line of the spoken conversation: the operator's (`user`) or the persona's own. */
 export type SpokenLine = { role: "user" | "persona"; text: string };

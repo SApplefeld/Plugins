@@ -228,24 +228,26 @@ export type BrokerConfig = {
    */
   voiceLoopback: boolean;
   /**
-   * The file the transcription key is read from, or null when none is named. The same Deepgram key
-   * also speaks. The key itself is never a setting, for the reason the Jev key's is not. Null with
-   * the voice on leaves the channel deaf and mute: the bot joins, no audio goes to Deepgram, and
-   * nothing is spoken.
+   * The file the transcription key, Inworld's, is read from, or null when none is named. The key
+   * itself is never a setting, for the reason the Jev key's is not. Null with the voice on leaves
+   * the channel deaf and mute: the bot joins, no audio goes to Inworld, and nothing is spoken, since
+   * speech needs both key files.
    */
   voiceSttKeyFile: string | null;
-  /** Flux's end-of-turn threshold, from 0.5 to 0.9. */
-  voiceEotThreshold: number;
   /**
-   * Flux's eager end-of-turn threshold, from 0.3 to 0.9, sent only with `voiceEager` on. With it on,
-   * a value above `voiceEotThreshold` is refused, since Flux refuses that pair.
+   * Inworld's `endOfTurnConfidenceThreshold`, from 0.0 to 1.0, or null when unset, which sends
+   * nothing and leaves Inworld's own default.
    */
-  voiceEagerThreshold: number;
-  /** Whether Flux's eager end of turn ends a turn early, withdrawn again if the speaker carries on. */
-  voiceEager: boolean;
+  voiceEotThreshold: number | null;
   /** A turn that interrupts the persona with fewer words than this lets it carry on, from 1 to 10. */
   voiceShortTurnWords: number;
-  /** The Deepgram Flux voice the persona speaks in, a name starting with `flux-`. */
+  /**
+   * The file the speech key, Cartesia's, is read from, or null when none is named. The key itself
+   * is never a setting. Null with the voice on leaves the channel mute: no text goes to Cartesia,
+   * and nothing is spoken.
+   */
+  speechKeyFile: string | null;
+  /** The Cartesia voice the persona speaks in, a voice id of lowercase hex in Cartesia's 8-4-4-4-12 shape. */
   speechVoice: string;
   /**
    * How long the speech socket may take to connect, to answer a turn with its first audio, to go
@@ -271,12 +273,6 @@ export type BrokerConfig = {
    * 20 to 600. The whole reply reaches the thread whatever this is.
    */
   voiceMaxSpokenWords: number;
-  /**
-   * How long an operator's answer to a spoken question is held after an eager end of its turn, in
-   * case the operator carries on, before it is handed to the session, from 500 to 5000 ms. A final
-   * end hands it off at once.
-   */
-  voiceEagerSettleMs: number;
   /**
    * Whether a turn's end is held so a thought gathered across a pause reaches the voice as one
    * turn. `off` wires the transcriber bare. `plain` holds every end with words for
@@ -510,30 +506,22 @@ const DEFAULT_ATTACHMENT_RETAIN_DAYS = 14;
 const DEFAULT_VOICE_IDLE_MS = 10 * 60 * 1000;
 const MIN_VOICE_IDLE_MS = 30 * 1000;
 const MAX_VOICE_IDLE_MS = 2 * 60 * 60 * 1000;
-// Flux's own default and its accepted ranges: Deepgram takes an end-of-turn threshold from 0.5 and
-// an eager one from 0.3, so a value below either floor would pass here and fail at the socket. The
-// 0.9 ceilings keep a typo from waiting out nearly every turn on the end-of-turn timeout. Flux also
-// refuses an eager threshold above the end-of-turn threshold, so with eager on `loadConfig` refuses
-// that pair; with eager off the eager threshold is never sent and the pair is not checked. Source:
-// https://developers.deepgram.com/docs/flux/configuration
-const DEFAULT_VOICE_EOT_THRESHOLD = 0.7;
-const MIN_VOICE_EOT_THRESHOLD = 0.5;
-const MAX_VOICE_EOT_THRESHOLD = 0.9;
-const DEFAULT_VOICE_EAGER_THRESHOLD = 0.5;
-const MIN_VOICE_EAGER_THRESHOLD = 0.3;
-const MAX_VOICE_EAGER_THRESHOLD = 0.9;
+// Inworld's `endOfTurnConfidenceThreshold` is a confidence, so it is held to 0.0 to 1.0, and unset
+// sends nothing, leaving Inworld's own default. Source: https://docs.inworld.ai/stt/turn-detection
+const MIN_VOICE_EOT_THRESHOLD = 0;
+const MAX_VOICE_EOT_THRESHOLD = 1;
 // Two words: a cough or a "mm-hm" lets the persona carry on, and "wait, stop" does not. The ceiling
 // keeps a typo from letting a whole sentence talk under the persona without stopping it.
 const DEFAULT_VOICE_SHORT_TURN_WORDS = 2;
 const MIN_VOICE_SHORT_TURN_WORDS = 1;
 const MAX_VOICE_SHORT_TURN_WORDS = 10;
-// Deepgram's Flux voice Cole. The voice name rides the speech socket's URL as its model, so it is
-// held to a plain lowercase slug, and `/v2/speak` serves Flux voices alone, so it must start with
-// `flux-`: a wrong voice refuses the start naming the rule rather than failing every reply.
-const DEFAULT_SPEECH_VOICE = "flux-cole-en";
-const SPEECH_VOICE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const SPEECH_VOICE_PREFIX = "flux-";
-// Eight seconds of silence from Deepgram, and the answer is posted to the thread instead. The floor
+// Cartesia's voice Skylar. Cartesia names a voice by an id of lowercase hex in groups of 8, 4, 4, 4
+// and 12 joined by hyphens, so anything else is refused at the start naming the rule rather than
+// failing every reply. Sources: https://docs.cartesia.ai/api-reference/tts/websocket and
+// https://docs.cartesia.ai/build-with-cartesia/tts-models
+const DEFAULT_SPEECH_VOICE = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4";
+const SPEECH_VOICE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Eight seconds of silence from Cartesia, and the answer is posted to the thread instead. The floor
 // keeps a typo from failing every reply, and the thirty-second ceiling keeps a stalled socket from
 // holding a reply for minutes.
 const DEFAULT_SPEECH_TIMEOUT_MS = 8 * 1000;
@@ -564,13 +552,6 @@ const MAX_VOICE_MEMORY_TURNS = 64;
 const DEFAULT_VOICE_MAX_SPOKEN_WORDS = 120;
 const MIN_VOICE_MAX_SPOKEN_WORDS = 20;
 const MAX_VOICE_MAX_SPOKEN_WORDS = 600;
-// A second and a half after an eager end before an answer to a spoken question goes to the session,
-// so an answer the operator carries on with arrives whole. The floor keeps a typo from handing off
-// before a resume can land, and the ceiling keeps an answer from waiting long after the operator
-// has stopped.
-const DEFAULT_VOICE_EAGER_SETTLE_MS = 1500;
-const MIN_VOICE_EAGER_SETTLE_MS = 500;
-const MAX_VOICE_EAGER_SETTLE_MS = 5000;
 // Two seconds after a spoken turn's end before the held words go on, so a thought that carries on
 // inside the wait joins them. The floor keeps a hold worth having, and the ceiling keeps a finished
 // turn from waiting long after the operator has stopped. The threshold is the finished-thought
@@ -637,13 +618,16 @@ function bounded(
   return value;
 }
 
-/** `bounded` for a knob that is a fraction rather than a count: any finite number in the range. */
-function boundedFraction(
+/**
+ * `bounded` for a knob that is a fraction rather than a count: any finite number in the range. A
+ * null fallback reads an unset knob as null, for a knob whose unset state sends nothing.
+ */
+function boundedFraction<Fallback extends number | null>(
   raw: string | undefined,
   minimum: number,
   maximum: number,
-  fallback: number,
-): number {
+  fallback: Fallback,
+): number | Fallback {
   if (raw === undefined || raw.trim() === "") return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
@@ -902,18 +886,13 @@ function directionLedgerPath(env: NodeJS.ProcessEnv): string {
   return configured;
 }
 
-/** The Flux voice: a lowercase slug, since it rides the socket URL, starting with `flux-`. */
+/** The Cartesia voice: a voice id in Cartesia's shape, lowercase hex in groups of 8-4-4-4-12. */
 function speechVoice(raw: string | undefined): string {
   const value = raw?.trim();
   if (value === undefined || value === "") return DEFAULT_SPEECH_VOICE;
   if (!SPEECH_VOICE.test(value)) {
     throw new Error(
-      `CHANNEL_SPEECH_VOICE expects a lowercase name of letters, digits and hyphens, got ${JSON.stringify(raw)}`,
-    );
-  }
-  if (!value.startsWith(SPEECH_VOICE_PREFIX)) {
-    throw new Error(
-      `CHANNEL_SPEECH_VOICE expects a Deepgram Flux voice, a name starting with ${SPEECH_VOICE_PREFIX}, got ${JSON.stringify(raw)}`,
+      `CHANNEL_SPEECH_VOICE expects a Cartesia voice id, lowercase hex in groups of 8-4-4-4-12 joined by hyphens, got ${JSON.stringify(raw)}`,
     );
   }
   return value;
@@ -1111,21 +1090,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       env.CHANNEL_VOICE_EOT_THRESHOLD,
       MIN_VOICE_EOT_THRESHOLD,
       MAX_VOICE_EOT_THRESHOLD,
-      DEFAULT_VOICE_EOT_THRESHOLD,
+      null,
     ),
-    voiceEagerThreshold: boundedFraction(
-      env.CHANNEL_VOICE_EAGER_THRESHOLD,
-      MIN_VOICE_EAGER_THRESHOLD,
-      MAX_VOICE_EAGER_THRESHOLD,
-      DEFAULT_VOICE_EAGER_THRESHOLD,
-    ),
-    voiceEager: strictFlag(env.CHANNEL_VOICE_EAGER, false),
     voiceShortTurnWords: bounded(
       env.CHANNEL_VOICE_SHORT_TURN_WORDS,
       MIN_VOICE_SHORT_TURN_WORDS,
       MAX_VOICE_SHORT_TURN_WORDS,
       DEFAULT_VOICE_SHORT_TURN_WORDS,
     ),
+    // The path alone, as the transcription key file's is: the file is read where the voice is built,
+    // by `readSpeechKey`, so a broker with the voice off never opens it.
+    speechKeyFile: env.CHANNEL_SPEECH_KEY_FILE?.trim() || null,
     // Read whatever the flag, like the voice's other knobs, so a bad value refuses the restart that
     // writes it.
     speechVoice: speechVoice(env.CHANNEL_SPEECH_VOICE),
@@ -1163,12 +1138,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MIN_VOICE_MAX_SPOKEN_WORDS,
       MAX_VOICE_MAX_SPOKEN_WORDS,
       DEFAULT_VOICE_MAX_SPOKEN_WORDS,
-    ),
-    voiceEagerSettleMs: bounded(
-      env.CHANNEL_VOICE_EAGER_SETTLE_MS,
-      MIN_VOICE_EAGER_SETTLE_MS,
-      MAX_VOICE_EAGER_SETTLE_MS,
-      DEFAULT_VOICE_EAGER_SETTLE_MS,
     ),
     // The turn hold's three, read whatever the flag for the same reason as the rest of the voice's.
     voiceTurnHold: voiceTurnHoldMode(env.CHANNEL_VOICE_TURN_HOLD),
@@ -1210,15 +1179,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     webSiblings: webList(env.CHANNEL_WEB_SIBLINGS) ?? [],
     settingsUnset: unsetGatingKeys(env),
   };
-  // Flux refuses an eager threshold above the end-of-turn threshold, so the pair is refused here
-  // rather than at the socket. With eager off the eager threshold is never sent, and the pair is
-  // not checked.
-  if (config.voiceEager && config.voiceEagerThreshold > config.voiceEotThreshold) {
-    throw new Error(
-      `expected CHANNEL_VOICE_EAGER_THRESHOLD (${String(config.voiceEagerThreshold)}) at or below ` +
-        `CHANNEL_VOICE_EOT_THRESHOLD (${String(config.voiceEotThreshold)}) with CHANNEL_VOICE_EAGER on`,
-    );
-  }
   // The still-looking line follows the thinking line, so a second moment at or before the first
   // would speak it over the thinking line or ahead of it. Checked whatever the voice flag, like the
   // two knobs themselves.
@@ -1282,14 +1242,47 @@ export function readVoiceSttKey(
   // the token file is held to.
   protect: (file: string) => void = assertTokenFileIsProtected,
 ): string | null {
+  return readVoiceKey("transcription", file, stateRoot, protect);
+}
+
+/**
+ * The speech key, Cartesia's, read from the file `CHANNEL_SPEECH_KEY_FILE` names, or null where
+ * none is named.
+ *
+ * The file must sit inside the state root, under the rule `readVoiceSttKey` states, and is refused
+ * before it is opened otherwise. Past that it is held to the Discord token file's protection check
+ * and refused the way the transcription key is: a named file the voice cannot use throws, and the
+ * broker refuses to start. The refusal names the file and the cause, never the contents.
+ */
+export function readSpeechKey(
+  file: string | null,
+  stateRoot: string,
+  // Injectable so a test reaches each refusal without a hardened file; the default is the check
+  // the token file is held to.
+  protect: (file: string) => void = assertTokenFileIsProtected,
+): string | null {
+  return readVoiceKey("speech", file, stateRoot, protect);
+}
+
+/**
+ * Reads the voice key `file` names under the state-root rule `readVoiceSttKey` states, or null
+ * where none is named. Each refusal names the key by `label`, the file and the cause, never the
+ * contents.
+ */
+function readVoiceKey(
+  label: string,
+  file: string | null,
+  stateRoot: string,
+  protect: (file: string) => void,
+): string | null {
   if (file === null) return null;
   if (!isInside(file, stateRoot)) {
-    throw new Error(`the transcription key file ${file} is outside the state root ${stateRoot}`);
+    throw new Error(`the ${label} key file ${file} is outside the state root ${stateRoot}`);
   }
   try {
     return readKeyFile(file, protect);
   } catch (error) {
-    throw new Error(`the transcription key file ${file} ${(error as Error).message}`);
+    throw new Error(`the ${label} key file ${file} ${(error as Error).message}`);
   }
 }
 

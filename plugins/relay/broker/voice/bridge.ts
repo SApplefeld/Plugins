@@ -19,6 +19,7 @@ import type { RelayEvent } from "../routing/relays.ts";
 import { bufferedEvent } from "../routing/response-gate.ts";
 import type { SessionState } from "../registry.ts";
 import type { SenderGate } from "../security/senders.ts";
+import { withTone } from "./fast.ts";
 import type { FastTier, Remember, TierSpeaker } from "./fast.ts";
 import type { Player } from "./player.ts";
 import { conversationLine } from "./rank.ts";
@@ -43,7 +44,12 @@ export type TierBinding = {
   names: () => LineNames;
   speaker: TierSpeaker | null;
   player: Pick<Player, "play">;
-  handOff: (turn: string) => void;
+  /**
+   * The turn's text as the ring holds it and its tone, where the transcriber heard one. The event
+   * the session is handed carries the turn with `withTone`'s note, ` (sounded <label>)`, after it
+   * where the label fits that note's shape.
+   */
+  handOff: (turn: string, tone?: string) => void;
   /**
    * An answer whose turn was withdrawn while its speech was in flight: the bridge forgets it, so a
    * half-turn's answer is never remembered without its question.
@@ -93,15 +99,8 @@ export type VoiceBridgeOptions = {
   tier: (binding: TierBinding) => FastTier;
   /** Builds the voice around the tier's timed player, or null where the voice is mute. */
   speaker: ((player: Pick<Player, "play">) => Speaker) | null;
-  /**
-   * `CHANNEL_VOICE_EAGER_SETTLE_MS`: how long an answer to an ASK whose turn ended eagerly is held
-   * for a resume before it is handed off.
-   */
-  eagerSettleMs: number;
   log: (message: string) => void;
   now?: () => number;
-  setTimer?: (callback: () => void, ms: number) => NodeJS.Timeout;
-  clearTimer?: (timer: NodeJS.Timeout) => void;
 };
 
 export type VoiceBridge = {
@@ -132,8 +131,7 @@ export type VoiceBridge = {
   cutIn: (turn: number, cut: boolean) => void;
   /**
    * The barge-in rule's reading that `turn` is a short turn spoken over speech the player held, a
-   * backchannel: its end, which follows this call, is posted and neither ranked nor handed off,
-   * unless the turn is the held answer to an ASK, whose end is still the answer.
+   * backchannel: its end, which follows this call, is posted and neither ranked nor handed off.
    */
   heldShort: (turn: number) => void;
   /** Whether a speech handed to the speaker has not settled: the persona is mid-reply. */
@@ -144,8 +142,6 @@ export type VoiceBridge = {
 
 export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
   const now = options.now ?? Date.now;
-  const setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
-  const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
   const { threadId } = options;
   // Hand-offs delivered and not yet taken by a prompt signal, oldest first, each the session it
   // went to.
@@ -159,11 +155,6 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
   const held: string[] = [];
   // A spoken reply that asked: the operator's next spoken turn answers it directly.
   let askOpen = false;
-  // The answer to an ASK not yet handed off: the answering turn's number, its latest text, and the
-  // settle timer an eager end starts, or null. Held so a resume of that turn within the settle keeps
-  // it the answer and the turn's final end hands it off whole, once. A resume after the settle has
-  // handed it off finds nothing held, and the rest of the turn is an ordinary turn.
-  let answer: { turn: number; text: string; settle: NodeJS.Timeout | null } | null = null;
   // The turn the barge-in rule read as a backchannel over held speech, or null. Set just ahead of
   // that turn's end and cleared by it.
   let backchannel: number | null = null;
@@ -326,7 +317,11 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     return since.map((line) => conversationLine(line, names));
   }
 
-  function handOff(turn: string): void {
+  /**
+   * Delivers the turn to the session: the ring's lines past the mark, found by the turn's text as
+   * the ring holds it, then the turn with `withTone`'s note where it carries a tone that note takes.
+   */
+  function handOff(turn: string, tone?: string): void {
     const bound = session();
     try {
       if (bound === null || bound.state === "ended") {
@@ -335,7 +330,7 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
         speakLine(CANNOT_REACH_LINE);
         return;
       }
-      const text = [...linesBefore(turn), turn].join("\n");
+      const text = [...linesBefore(turn), withTone(turn, tone)].join("\n");
       const event = bufferedEvent(threadId, [
         {
           id: `voice-${String(now())}`,
@@ -383,46 +378,15 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     tier.speak(spoken, "session reply").catch(() => {});
   }
 
-  /** Stops the held answer's settle, where one is running. */
-  function stopSettle(): void {
-    if (answer === null || answer.settle === null) return;
-    clearTimer(answer.settle);
-    answer.settle = null;
-  }
-
-  /** Hands the held answer off, once: into the ring as the answer, then to the session. */
-  function deliverAnswer(): void {
-    if (answer === null) return;
-    stopSettle();
-    const { turn, text } = answer;
-    answer = null;
-    // The answer reaches the session even where the tier fails to take its line.
+  /** Hands the answer to an ASK off, once: into the ring as the answer, then to the session. */
+  function deliverAnswer(turn: number, text: string, tone: string | undefined): void {
+    // The answer reaches the session even where the tier fails to take its line. The ring takes the
+    // text alone, and the hand-off takes it with the tone's note.
     try {
       tier.answeredAsk(turn, text);
     } finally {
-      handOff(text);
+      handOff(text, tone);
     }
-  }
-
-  /**
-   * Takes the answering turn's latest end: a final end hands the answer off at once, and an eager
-   * one starts the settle, which hands it off unless a resume of the turn stops it first.
-   */
-  function settleOrDeliver(eager: boolean): void {
-    if (answer === null) return;
-    if (!eager) {
-      deliverAnswer();
-      return;
-    }
-    // One settle per answer: an eager end with no resume before it restarts the one running.
-    stopSettle();
-    answer.settle = setTimer(() => {
-      try {
-        deliverAnswer();
-      } catch {
-        options.log(`voice: handing an answer off failed in the bridge for thread ${threadId}`);
-      }
-    }, options.eagerSettleMs);
   }
 
   function onEnd(event: Extract<TurnEvent, { kind: "end" }>): void {
@@ -431,10 +395,6 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     if (!operator) return;
     floor = false;
     const spoke = event.text !== "" && event.lost !== true;
-    // The held answer's turn ending again after a resume: it is still the answer, so it is neither
-    // read as a backchannel nor ranked, and the open ASK it already closed is not read again.
-    const resumedAnswer = answer !== null && answer.turn === event.turn;
-    if (resumedAnswer && backchannel === event.turn) backchannel = null;
     // A backchannel over the persona's speech is the transcript's and nothing else's: posted as
     // every operator turn is, kept out of the ring, and neither ranked nor handed off, so an open
     // ASK stays open for the turn that answers it. The replies held through it are still spoken.
@@ -452,7 +412,7 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
     commitSaid();
     // Whether this turn answers a question the persona asked, read before the held replies are
     // spoken: one of them may itself ask, and that question is answered by the next turn.
-    const answering = !resumedAnswer && askOpen && spoke;
+    const answering = askOpen && spoke;
     if (answering) askOpen = false;
     for (const text of held.splice(0)) speakReply(text);
     speakerId = event.speakerId;
@@ -466,17 +426,10 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
         releaseTyping = next;
       }
     }
-    // The answer is held rather than handed off here: an eager end may be withdrawn by a resume,
-    // and the turn's next end then replaces the text. A lost or empty end keeps the text held, so
-    // the answer is never dropped.
-    if (resumedAnswer) {
-      if (spoke && answer !== null) answer.text = event.text;
-      settleOrDeliver(spoke && event.eager === true);
-      return;
-    }
+    // Every end is the turn's last, so the answer is whole here and goes to the session at once. A
+    // lost or empty end answers nothing and leaves the ASK open for the turn that does.
     if (answering) {
-      answer = { turn: event.turn, text: event.text, settle: null };
-      settleOrDeliver(event.eager === true);
+      deliverAnswer(event.turn, event.text, event.tone);
       return;
     }
     tier.take(event);
@@ -492,21 +445,7 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
         // Only the operator holds the floor: a participant's start neither holds a reply back nor
         // reaches the tier.
         if (options.gate.classOf(event.speakerId) !== "operator") return;
-        if (answer !== null) {
-          // Flux starts a new turn only after the held answer's turn has ended for good, so the
-          // answer is whole and goes ahead of the new turn. A resume of its own turn stops the
-          // settle, and the turn's next end decides again.
-          // A failed hand-off is logged and never keeps the new turn's start from the tier.
-          if (event.kind === "start" && answer.turn !== event.turn) {
-            try {
-              deliverAnswer();
-            } catch {
-              options.log(`voice: handing an answer off failed in the bridge for thread ${threadId}`);
-            }
-          }
-          else if (event.kind === "resumed" && answer.turn === event.turn) stopSettle();
-        }
-        if (event.kind === "start" || event.kind === "resumed") floor = true;
+        if (event.kind === "start") floor = true;
         tier.take(event);
       } catch {
         options.log(`voice: a turn event failed in the bridge for thread ${threadId}`);
@@ -569,9 +508,6 @@ export function createVoiceBridge(options: VoiceBridgeOptions): VoiceBridge {
       floor = false;
       held.length = 0;
       askOpen = false;
-      // An answer still settling leaves with the channel, never handed off.
-      stopSettle();
-      answer = null;
       backchannel = null;
       releaseHold();
     },
