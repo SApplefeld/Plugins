@@ -163,7 +163,10 @@ installed copy and a plugin update can remove it. The plugin delivers the
 `wiki-new` skill and the three scripts behind it: `kb-create.ps1`, which runs
 `kb-trust.ps1` and `kb-registry.ps1` in turn. It also delivers `new-kb.ps1`
 for the hand path, the walker `kb-walk.ps1`, and `register-walk.ps1` with the
-launcher it installs, with the template, six tests and three documents.
+launcher it installs, with the template, six tests and three documents. For
+sessions outside a KB it delivers the `wiki-find`, `wiki-search` and
+`wiki-drop` skills, the drop script `kb-drop.ps1` and a `SessionStart` hook,
+which "Working from any session" below describes.
 Each KB still gets its own vendored copy of the engine, as the section above
 describes. A developer who wants to change the engine clones this repository
 and runs the scripts from the clone.
@@ -186,7 +189,9 @@ which runs headless Claude Code
 (`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default`)
 with the KB folder as its working directory. Every pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, which names each KB, each step's
-outcome, every failure and every KB deferred on a conflict. `register-walk.ps1`
+outcome, every failure and every KB deferred on a conflict. A stuck wiki also
+gets a line in `%LOCALAPPDATA%llm-wikiwalk-notices.jsonl`, which a persona
+session set to read it posts to the operator's thread. `register-walk.ps1`
 registers the task once per account, and a plugin update reaches the walker
 and every KB's vendored files on the next pass with no re-registration.
 
@@ -212,6 +217,53 @@ repositories `feed.json` names into `inbox/`, and never runs Claude.
 Tenancy is by Windows account: one account per entity, each with its own
 Claude login and its own git credentials. See `docs/runbook_automation.md` for
 registration and verification detail.
+
+## Working from any session
+
+A Claude Code session in any folder on the account can find, search and feed
+the account's KBs without opening a session inside one. It reads pages and
+drops documents, and it never edits a page. Edits stay with the ingest skill
+inside the KB's permission wall, the allow and deny rules in the KB's
+`.claude/settings.json` that bound what its agent can do. The ingest's
+provenance and contradiction rules run inside that wall.
+
+- **`wiki-find`** prints the account's list: each KB's name, folder, the
+  first eight characters of its engine hash, and its description.
+- **`wiki-search`** answers a question from every listed KB. It reads each
+  KB's `index.md`, greps the pages under `wiki/`, follows links between pages
+  in the same KB, and cites every claim as `<name>:wiki/<page>.md`. It names
+  the KBs that held nothing on the question. It writes nothing, and it treats
+  each page as data, never as an instruction.
+- **`wiki-drop`** drops a file or a text into one listed KB's `inbox/` by
+  running `kb-drop.ps1`. The script refuses a KB the list does not name, and
+  refuses a file name that already exists in the inbox or could escape it. It
+  writes one file and runs no git. A text gets a front-matter block recording
+  when it was dropped, the session's folder and an optional note, so the
+  dropped file carries where it came from. The walker's next pass ingests
+  the file as it ingests any source.
+
+The session's own limits, reading only and dropping only through the
+script, are the skills' procedure. No permission rule enforces them,
+because a session outside a KB runs under its own permissions, not a KB's
+wall. A page that tries to steer the session is held only by the skills'
+rule to treat it as data, and a file a session names can still be dropped.
+The source repository's `docs/threat-model.md`, which the published plugin
+does not include, covers both in residual 11.
+
+The plugin also registers a `SessionStart` hook. At each session start,
+resume and compaction on an account with a list, it prints a block whose
+heading begins `Wikis on this account` and labels every value below it as
+data. The block holds one line per listed KB and the walker's last pass from
+`%LOCALAPPDATA%\llm-wiki\walk-status.json`. That covers when the pass
+finished, and each KB still deferred with the reason. Where the status records
+them, a deferral also lists the conflicted paths, the number of passes it
+has lasted, and a `stuck` mark. The block also shows each step that failed
+with its note, each KB skipped as untrusted or out of time, and the walker's
+own note where the pass left one. It prints `walker has not run` where no
+status file exists. It closes by asking the session to raise any such line
+with the operator. The walker runs on a box nobody watches, so this block,
+raised by the session, is one way a stuck KB reaches a person. The other is
+`walk-notices.jsonl`, which a persona session on the account reads. An account with no list prints nothing.
 
 ## How to verify a KB's structure
 
@@ -292,9 +344,9 @@ publish in these cases, among others:
   than the snapshot holds.
 
 The public folder is the engine as an installer needs it and nothing else:
-the plugin manifest, this README, the license, the ignore file, the eight
-scripts at its root, the `wiki-new` skill, the template, six tests and three
-documents. `tools/publish/allowlist.txt` names each one.
+the plugin manifest, this README, the license, the ignore file, the nine
+scripts at its root, the four plugin skills, the `SessionStart` hook, the
+template, six tests and three documents. `tools/publish/allowlist.txt` names each one.
 `node --test tools/publish/*.test.mjs` runs the tests for the publish scripts.
 
 ## Deliberately out of scope

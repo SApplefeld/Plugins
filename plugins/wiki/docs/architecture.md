@@ -15,11 +15,18 @@ preserve.
 
 ## Two kinds of repository
 
-The engine repo (this one) contains the `template/` tree, eight scripts at
-its root, the plugin-level `wiki-new` skill, eight tests, a plugin manifest,
-and this `docs/` library. `new-kb.ps1` copies the template.
+The engine repo (this one) contains the `template/` tree, nine scripts at
+its root, four plugin-level skills separate from the four vendored into each
+KB, a `SessionStart` hook, ten tests, a plugin
+manifest, and this `docs/` library. `new-kb.ps1` copies the template.
 `kb-create.ps1` creates a KB, `kb-trust.ps1` trusts it and `kb-registry.ps1`
-lists it. `kb-walk.ps1` is the walker, which services every listed KB in one
+lists it. `kb-drop.ps1` writes one file into a listed KB's `inbox/`, the only
+write a session outside every KB makes into an existing KB. The skills are `wiki-new`, which
+creates a KB, and `wiki-find`, `wiki-search` and `wiki-drop`, which list the
+account's KBs, answer a question from them and drop a document into one.
+`hooks/hooks.json` registers `hooks/session-start.ps1`, which prints the
+account's KBs and the walker's last pass at each session start, resume and
+compaction, and prints nothing on an account with no list. `kb-walk.ps1` is the walker, which services every listed KB in one
 pass. `register-walk.ps1` registers the account's one scheduled task, whose
 action runs `Start-InstalledWikiWalk.ps1`, and that launcher reads the install
 record through `installed-plugin-functions.ps1` and runs the installed
@@ -33,7 +40,15 @@ checks that the writing skills emit the liveness read. `tests/Test-KbRun.ps1`
 drives the run wrapper against a stub in place of `claude`.
 `tests/Test-KbWalk.ps1` drives the walker over throwaway KBs with the same kind
 of stub, and `tests/Test-WalkLauncher.ps1` drives the launcher against a
-temporary install and the registrar under `-WhatIf`. The source
+temporary install and the registrar under `-WhatIf`. `tests/Test-KbDrop.ps1`
+drives the drop script and the session-start hook against a temporary
+`LOCALAPPDATA` holding a list and a status file.
+`tests/Test-UnsafeTextParity.ps1` checks that the hook, `kb-registry.ps1`,
+`kb-create.ps1`, `kb-trust.ps1`, `kb-walk.ps1` and the template's
+`feed-inbox.ps1` hold
+the same class of control, format, line separator and paragraph separator
+characters they strip or refuse, and sweeps every other script for a
+line that strips by category without the whole class. The source
 repository also holds the publish job, `.github/workflows/publish.yml`, and its
 scripts and their tests under `tools/publish/`. "Publishing to the marketplace"
 below covers them. The engine repo is machinery only.
@@ -46,7 +61,8 @@ crosses between KBs. An engine update is a copy into each KB in turn: the
 walker makes it on its first pass after the installed engine changes, and
 commits it in that KB under an `Engine:` subject. The `wiki@applefeld`
 plugin changes how an operator obtains the engine and how a session creates a
-KB. It delivers the scripts, the `wiki-new` skill and the template, and each KB
+KB. It delivers the scripts, the four plugin skills, the `SessionStart` hook
+and the template, and each KB
 still receives its own copy. None of the root scripts is vendored into a KB,
 so a KB's agent can run none of them.
 
@@ -429,7 +445,9 @@ starts with it. Every child the walker starts runs inside a kill-on-close job
 the walker holds, so ending the task ends every child's tree. Each pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, naming each KB, each step's
 outcome, every failure and every KB still deferred, and appends a block to
-`walk.log` beside it. The walker exits 0 after a pass whatever it recorded,
+`walk.log` beside it, and a line to `walk-notices.jsonl` there, the file a
+persona reads, when a KB becomes stuck, once a day while it stays stuck, and
+when it clears. The walker exits 0 after a pass whatever it recorded,
 since Task Scheduler logs any exit as completion and never retries, so the
 status file is the report.
 
@@ -465,6 +483,27 @@ anywhere but that KB's own remote. The **Windows account boundary** separates
 entities, under the one-account invariant that
 [runbook_automation.md](runbook_automation.md), "The hard invariant, restated",
 states in full.
+
+A Claude Code session in any other folder on the account sits outside every
+KB's wall. Beyond creating a KB through `wiki-new`, it reaches existing KBs
+in two ways only. As a reader, its
+`wiki-find` skill prints the account's list and its `wiki-search` skill reads
+each listed KB's `index.md` and `wiki/` pages and cites each page it uses. As a
+dropper, its `wiki-drop` skill runs `kb-drop.ps1`, which writes one file under
+a listed KB's `inbox/`. The next walker pass ingests that file inside the
+wall, under the same rules as any source. The session never writes a page,
+never runs git in a KB and never opens `sources/`. Those limits are the skills'
+procedure, and no permission rule enforces them. Residual 11 of the source
+repository's `docs/threat-model.md`, which the published plugin does not
+include, names what that leaves open.
+
+On an account with a list, the `SessionStart` hook gives the same session the
+walker's last status. It prints each listed KB, then each KB still deferred with its
+reason, conflicted paths, pass count and stuck mark where recorded, each
+failed step, each untrusted or skipped KB and the walker's own note, from
+`%LOCALAPPDATA%\llm-wiki\walk-status.json`. It closes by asking the session
+to raise those lines, so the operator can hear about a stuck KB from
+whatever session they open.
 
 ## Data flow, end to end
 
@@ -527,8 +566,8 @@ and each failure stops the run before the next step:
    makes no commit and says so.
 
 The allowlist ships the manifest, the README, the license, the ignore file,
-the eight scripts at the repository root, the whole `template/` tree, the `skills/` tree
-holding `wiki-new`, six tests (`tests/Test-KbStructure.ps1`,
+the nine scripts at the repository root, the whole `template/` tree, the `skills/` tree
+holding the four plugin skills, the `hooks/` tree, six tests (`tests/Test-KbStructure.ps1`,
 `tests/Test-FeedInbox.ps1`, `tests/Test-ReconcileGate.ps1`,
 `tests/Test-KbRun.ps1`, `tests/Test-KbWalk.ps1` and
 `tests/Test-WalkLauncher.ps1`), and three documents: this one, [instantiation.md](instantiation.md) and

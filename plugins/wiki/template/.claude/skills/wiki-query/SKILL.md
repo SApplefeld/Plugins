@@ -125,11 +125,13 @@ Then, in one commit:
   subject `Query:` so a filed answer reads apart from an ingest or lint commit
   in `git log`, and carry `-Push`:
 
-      pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "wiki/why-acme-left-europe.md|wiki/acme-corp.md|index.md|log.md" -Message "Query: why Acme left Europe" -Push
+      pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path 'wiki/why-acme-left-europe.md|wiki/acme-corp.md|index.md|log.md' -Message 'Query: why Acme left Europe' -Push
 
   `-Path` is one string, paths separated by a vertical bar with no spaces
-  around it. Emit the command exactly as written; the permission rule matches
-  on its leading text, and a near-miss is refused.
+  around it. Both values take single quotes, which pass every byte but an
+  apostrophe unchanged. An apostrophe would end the quote before kb-commit
+  runs, so write the message without one. Emit the command exactly as written; the permission
+  rule matches on its leading text, and a near-miss is refused.
 
 ## 7. Never touch sources/
 

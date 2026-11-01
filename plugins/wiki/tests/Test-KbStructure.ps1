@@ -36,7 +36,10 @@ new-kb.ps1 writes it at the copy.
 .PARAMETER RequireSkills
 Also require the wiki-ingest, wiki-lint, wiki-query, and wiki-merge skill
 files. An instantiated KB has all four; the bare template gains them as the
-engine is built out.
+engine is built out. Whether or not they are required, every skill file
+present and the root CLAUDE.md are read, and a helper argument either emits in
+double quotes fails the check, since Bash expands a $ or a backtick inside
+double quotes before the helper sees the name.
 
 .EXAMPLE
 pwsh -File tests/Test-KbStructure.ps1 -Path template
@@ -123,6 +126,39 @@ if ($RequireSkills) {
         Test-Check -Description "file exists: .claude/skills/$skill/SKILL.md" -Passed (Test-Path -LiteralPath $full -PathType Leaf)
     }
 }
+
+# A skill emits each helper argument inside Bash single quotes, which pass a
+# hand-dropped name to the helper byte for byte. A double-quoted argument lets
+# Bash expand a $ or a backtick in the value first, so the helper sees a
+# different name and the run stops. The shape matched is a single-dash
+# parameter token followed by a double quote after spaces, an equals sign or a
+# colon, so a double-quoted argument under a single-dash parameter not named
+# here fails as well. A bare, unquoted argument and a double-dash flag are not
+# matched. Every skill file present and the
+# root CLAUDE.md, whose command examples a session copies, are read, and a
+# failure names each offending file and line.
+$skillsDir = Join-Path $root '.claude/skills'
+$quoteFiles = @()
+if (Test-Path -LiteralPath $skillsDir -PathType Container) {
+    $quoteFiles += @(Get-ChildItem -LiteralPath $skillsDir -Filter 'SKILL.md' -Recurse -File)
+}
+$schemaFile = Join-Path $root 'CLAUDE.md'
+if (Test-Path -LiteralPath $schemaFile -PathType Leaf) {
+    $quoteFiles += Get-Item -LiteralPath $schemaFile
+}
+$doubleQuoted = @()
+$rootPrefixLength = ([string]$root).TrimEnd('\', '/').Length + 1
+foreach ($quoteFile in $quoteFiles) {
+    $relative = $quoteFile.FullName.Substring($rootPrefixLength).Replace('\', '/')
+    $lineNumber = 0
+    foreach ($line in [System.IO.File]::ReadAllLines($quoteFile.FullName)) {
+        $lineNumber++
+        if ($line -match '(^|[^A-Za-z0-9-])-[A-Za-z]+(\s+|\s*[=:]\s*)"') { $doubleQuoted += "${relative}:$lineNumber" }
+    }
+}
+$quoteDescription = 'skill files and CLAUDE.md pass every helper argument in single quotes, none in double quotes'
+if ($doubleQuoted.Count -gt 0) { $quoteDescription += ": $($doubleQuoted -join ', ')" }
+Test-Check -Description $quoteDescription -Passed ($doubleQuoted.Count -eq 0)
 
 $settingsChecks = @(
     'settings.json has permissions.allow array'

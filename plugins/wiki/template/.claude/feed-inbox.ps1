@@ -776,9 +776,10 @@ try {
         }
 
         # Every rule of the three helpers that take a name (kb-move.ps1 refuses
-        # / \ or : and a leading dash; kb-commit.ps1 and kb-status.ps1 refuse
-        # '..' and :), plus what Windows cannot hold as a file name, plus the
-        # length cap and the size cap.
+        # / \ or :, a leading dash and an apostrophe, which the map above has
+        # already removed; kb-commit.ps1 and kb-status.ps1 refuse '..' and :),
+        # plus what Windows cannot hold as a file name, plus the length cap and
+        # the size cap.
         $reason = $null
         if ($fedName -match '[/\\:]') {
             $reason = 'its fed name would contain / \ or :, which kb-move.ps1 refuses'
@@ -868,9 +869,12 @@ try {
             if ($firstLf -gt $bodyStart -and $body[$firstLf - 1] -eq 13) {
                 $newline = "`r`n"
             }
-            # A backtick in the path would end the code span around it, and a
-            # newline or other control character would break the block's one line.
-            $shownPath = $repoPath.Replace('`', '') -replace '\p{Cc}', '-'
+            # A backtick in the path would end the code span around it, a newline
+            # or other control character would break the block's one line, and a
+            # format character, such as a bidi control, would reorder or hide part
+            # of the path on screen. The class is the one
+            # the engine's scripts strip, kept identical by Test-UnsafeTextParity.
+            $shownPath = $repoPath.Replace('`', '') -replace '[\p{Cc}\p{Cf}\u2028\u2029]|\uDB40[\uDC00-\uDC7F]', '-'
             $header = "> Fed by feed-inbox.ps1 from $($candidate.Source.ShownUrl) branch $($candidate.Source.Branch), path ``$shownPath``, commit $commit dated $commitDate.$newline$newline"
             $headerBytes = $utf8NoBom.GetBytes($header)
             $content = New-Object byte[] ($headerBytes.Length + $body.Length - $bodyStart)

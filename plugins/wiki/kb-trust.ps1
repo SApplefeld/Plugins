@@ -45,8 +45,8 @@ entries live.
 
 ~/ is the USERPROFILE environment variable, read at each run. Every refusal is
 one stderr line, "kb-trust: <reason>", with exit 1; a refusal after the first
-probe carries that probe's first stderr line, with control and text-direction
-characters removed.
+probe carries that probe's first stderr line, with control, basic-plane format, tag and
+separator characters removed.
 
 .PARAMETER Path
 The knowledge base folder, absolute, on a local drive letter.
@@ -77,9 +77,10 @@ function Stop-WithReason {
 }
 
 # Text a refusal line may not carry, copied from kb-registry.ps1's $unsafeText:
-# control characters, C1 included, line and paragraph separators, and the
-# text-direction marks and controls.
-$unsafeText = '[\p{Cc}\u200E\u200F\u061C\u2028\u2029\u202A-\u202E\u2066-\u2069]'
+# control characters, C1 included, the basic plane's format characters and the
+# tag characters, which hold the text-direction marks and controls and the
+# zero-width characters, and line and paragraph separators.
+$unsafeText = '[\p{Cc}\p{Cf}\u2028\u2029]|\uDB40[\uDC00-\uDC7F]'
 
 # The probe's command line is fixed text; no caller value is placed in it.
 $probeArguments = '-p "Reply with the single word ok." --model haiku --permission-mode default'
@@ -197,7 +198,7 @@ function Get-ProbeSummary {
 
 # --- The folder.
 if ([regex]::IsMatch($Path, $unsafeText)) {
-    Stop-WithReason 'path must not contain control characters, line or paragraph separators or text-direction marks'
+    Stop-WithReason 'path must not contain control characters, line or paragraph separators, or format characters, text-direction marks and zero-width characters included'
 }
 if (-not [System.IO.Path]::IsPathFullyQualified($Path)) {
     Stop-WithReason "path is not absolute: $Path"
@@ -267,7 +268,7 @@ if ($null -eq $key) {
     Stop-WithReason "the warning line names no projects key ($(Get-ProbeSummary $first))"
 }
 if ([regex]::IsMatch($key, $unsafeText)) {
-    Stop-WithReason 'the warning line''s key holds control characters or text-direction marks, so it is not used'
+    Stop-WithReason 'the warning line''s key holds control or format characters or line or paragraph separators, so it is not used'
 }
 # The key names this folder, compared as kb-registry.ps1 compares folders, or
 # it is not written: a forged or confusing line must not trust another folder.

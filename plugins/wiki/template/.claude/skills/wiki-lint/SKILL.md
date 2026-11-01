@@ -141,7 +141,7 @@ The staleness horizon only classifies what you flag, never whether to look.
 Read it from CLAUDE.md with an **anchored** match on a line beginning
 `Staleness horizon:`. Do not use a loose match: it reads the schema's nearby
 prose instead of the value and silently disables the read. Get a page's last-change date with
-`pwsh -NoProfile -File ./.claude/kb-status.ps1 -What PageDate -Path "wiki/<page>.md"`,
+`pwsh -NoProfile -File ./.claude/kb-status.ps1 -What PageDate -Path 'wiki/<page>.md'`,
 which prints it as `YYYY-MM-DD`, and measure the horizon back from today. An
 unsourced claim on a page whose last change predates the horizon is reported as
 **stale**; every other unsourced claim is reported as **unsourced**. Both are
@@ -198,10 +198,12 @@ ingest commit in `git log`. Name every path the commit touches: each fixed
 `wiki/` page, `index.md` if it changed, and `log.md`. Emit exactly, because
 permission rules match a command's leading text and a near-miss stalls the run:
 
-    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "<paths>" -Message "Lint: <summary>" -Push
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message 'Lint: <summary>' -Push
 
 `-Path` is one string, paths separated by a vertical bar with no spaces around
-it: `-Path "wiki/acme-corp.md|index.md|log.md"`. This is the run's own commit
+it: `-Path 'wiki/acme-corp.md|index.md|log.md'`. Both values take single
+quotes, which pass every byte but an apostrophe unchanged. An apostrophe
+would end the quote before kb-commit runs, so write the summary without one. This is the run's own commit
 and it carries `-Push`, which also flushes any earlier `Reconcile:` commit. Even
 a clean run makes it, so a lint pass always leaves an auditable trace in git.
 The one exception is a run that stopped because another run is live, at the

@@ -49,7 +49,8 @@ such a name only at its last step. By then the folder is copied and trusted,
 and pushed where a remote was given.
 
 The description is one line that says what the wiki is for. It holds no tab,
-no line break, no other control character and no text-direction mark. It is
+no line break, no other control character and no format character, such as a
+text-direction mark, a zero-width character or an emoji joiner. It is
 the list's description and the source of step 6, so keep what the operator
 said about the domain, its documents and its terms. A description outside that
 rule gets one question to the operator for new wording.
@@ -103,8 +104,6 @@ Find the plugin root, the folder that holds `kb-create.ps1`, in this order:
 2. In `~/.claude/plugins/installed_plugins.json`, the entries under
    `wiki@applefeld`: take the first whose `installPath` folder holds
    `kb-create.ps1`.
-3. The repository this session runs in, only where its
-   `.claude-plugin/plugin.json` names the plugin `wiki`.
 
 Use the first that holds `kb-create.ps1`. If none does, stop and tell the
 operator the engine was not found.
@@ -131,7 +130,8 @@ To preview, add `-WhatIf`: it prints the five steps and runs none of them.
 
 The run can outlast a foreground command's 10-minute limit. `kb-trust.ps1`
 allows each of its two headless probes 300 seconds, and with `-Remote` the
-first `git push` has no time limit of its own. So run the call as a background
+first `git push` waits up to `KB_PUSH_TIMEOUT_SECONDS`, 300 by default. So run
+the call as a background
 command that writes its own exit code to a file as its last act, such as
 `; echo $? > "$TEMP/wiki-new.exit"` in bash. Read that file and the output
 when it finishes. Do not interrupt it, and touch nothing under

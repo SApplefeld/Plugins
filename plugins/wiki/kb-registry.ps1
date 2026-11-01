@@ -29,7 +29,8 @@ every file in $requiredFiles, the set new-kb.ps1 verifies after a copy less
 before the version mark existed, or before the merge skill existed, can still
 be listed, and the walker's engine update brings it the merge skill.
 A description holds no control character, C1
-controls included, no line or paragraph separator and no text-direction mark, because List prints one
+controls included, no line or paragraph separator and no basic-plane format character or tag character, text-direction marks
+and zero-width characters included, because List prints one
 tab-separated line per wiki and a reader must see the line as written.
 
 A refused call prints one line, "kb-registry: <reason>", on stderr, exits 1
@@ -58,7 +59,8 @@ What to do, positional:
   Add     list the wiki -Name at -Path with -Description, and print its line.
   Remove  drop the wiki -Name from the list.
   Set     replace the description of -Name with -Description, and print its line.
-  Get     print the line of -Name.
+  Get     print the line of -Name, or with -Json the entry's object as the
+          list file holds it.
   Root    print the root folder.
   List    print one line per wiki, name<TAB>path<TAB>engine<TAB>description,
           or with -Json the list's wikis array as JSON. The engine column is the
@@ -66,7 +68,8 @@ What to do, positional:
           .claude/engine.json, or unknown where that file is absent or does not
           hold a 64-character hexadecimal templateHash.
 Where no list exists, List prints nothing, List -Json prints [], and every
-other verb but Init exits 1.
+other verb but Init exits 1. A name that is not listed exits 1 from Get, with
+or without -Json, printing nothing on stdout.
 
 .PARAMETER Root
 The absolute folder new wikis are created under, for Init.
@@ -81,7 +84,8 @@ The wiki's absolute folder, for Add.
 A one-paragraph description of the wiki, for Add and Set. May be empty.
 
 .PARAMETER Json
-For List, print the wikis array as JSON.
+For List, print the wikis array as JSON. For Get, print the named entry's
+object as JSON. Every other verb ignores it.
 
 .EXAMPLE
 pwsh -NoProfile -File ./kb-registry.ps1 Init -Root D:\Wikis
@@ -357,9 +361,11 @@ function Get-NameRefusal {
     return $null
 }
 
-# Text a List line may not carry: control characters, C1 included, line and
-# paragraph separators, and the text-direction marks and controls.
-$unsafeText = '[\p{Cc}\u200E\u200F\u061C\u2028\u2029\u202A-\u202E\u2066-\u2069]'
+# Text a List line may not carry: control characters, C1 included, the basic
+# plane's format characters and the tag characters, which hold the
+# text-direction marks and controls and the zero-width characters, and line and
+# paragraph separators.
+$unsafeText = '[\p{Cc}\p{Cf}\u2028\u2029]|\uDB40[\uDC00-\uDC7F]'
 
 # Refuses a folder that is on no drive, on a network drive, or reached through
 # a link at any existing level, naming it as $What. The folder rules compare
@@ -367,7 +373,7 @@ $unsafeText = '[\p{Cc}\u200E\u200F\u061C\u2028\u2029\u202A-\u202E\u2066-\u2069]'
 function Assert-LocalFolder {
     param([string]$Full, [string]$What)
     if ([regex]::IsMatch($Full, $unsafeText)) {
-        Stop-WithReason "$What must not contain control characters, line or paragraph separators or text-direction marks"
+        Stop-WithReason "$What must not contain control characters, line or paragraph separators, or format characters, text-direction marks and zero-width characters included"
     }
     $drive = [System.IO.DriveInfo]::new($Full.Substring(0, 1))
     if ($drive.DriveType -eq [System.IO.DriveType]::NoRootDirectory) {
@@ -384,12 +390,12 @@ function Assert-LocalFolder {
 }
 
 # Refuses a description holding a control character, a line or paragraph
-# separator or a text-direction mark, since List is one tab-separated line
+# separator or a format character, text-direction marks included, since List is one tab-separated line
 # per wiki and must read as written.
 function Assert-Description {
     param([string]$Text)
     if ([regex]::IsMatch($Text, $unsafeText)) {
-        Stop-WithReason 'description must not contain control characters, tab, line breaks and text-direction marks included'
+        Stop-WithReason 'description must not contain control characters, tab and line breaks included, or format characters, text-direction marks and zero-width characters included'
     }
 }
 
@@ -557,7 +563,11 @@ try {
             Assert-Bound 'Name'
             $index = Find-Wiki $list $Name
             if ($index -lt 0) { Stop-WithReason "name '$Name' is not listed" }
-            Write-Output (Format-WikiLine $list.wikis[$index])
+            if ($Json) {
+                Write-Output (ConvertTo-Json -InputObject $list.wikis[$index] -Depth 3 -EscapeHandling EscapeNonAscii)
+            } else {
+                Write-Output (Format-WikiLine $list.wikis[$index])
+            }
         }
     }
 } finally {

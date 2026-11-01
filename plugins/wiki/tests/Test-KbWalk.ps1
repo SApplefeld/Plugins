@@ -69,6 +69,22 @@ lint left under the 60-second child floor skipped for budget; a second
 walker refused by the lock; and the walker killed while its stub sleeps,
 leaving no stub process in the process list.
 
+The notices file, walk-notices.jsonl beside the status file, is checked by id
+and text as well, and stuck and still-stuck records by their paths field: the
+settings-file conflict's stuck record on its first pass with no pass count; the
+stuck record on the third pass of a conflict the stub never joins, none on the
+first two and none on the fourth, inside the day; a still-stuck record on the
+fifth pass with the last notice 25 hours back; a cleared record with the
+restore point and no paths field on the pass whose stub joins the page,
+with noticedStuck and lastNoticeAt gone from the state; no record for a
+one-pass conflict or for a noticed wiki whose pull is refused for budget; a
+file past 1 MB renamed to walk-notices.jsonl.1 over an earlier one before
+the pass's record lands in a new file; an append that fails while the test
+holds the file, leaving the state with no notice fields, and the next pass
+writing the stuck record; a conflicted path holding U+202E carried in the
+paths field with a hyphen in that character's place; and a conflict on 12
+paths whose text counts 12 and whose paths field holds the first 10.
+
 The test sets GIT_CONFIG_GLOBAL to an empty file and GIT_CONFIG_NOSYSTEM for
 its own process and restores both when it finishes. It records every process
 it starts and stops only those, by their own process objects, plus any stub
@@ -356,6 +372,7 @@ $statePath = Join-Path $listDir 'walk-state.json'
 $statusPath = Join-Path $listDir 'walk-status.json'
 $lockPath = Join-Path $listDir 'walk.lock'
 $walkLog = Join-Path $listDir 'walk.log'
+$noticesPath = Join-Path $listDir 'walk-notices.jsonl'
 $claudeJson = Join-Path $profileDir '.claude.json'
 $wikisDir = Join-Path $work 'wikis'
 $remotesDir = Join-Path $work 'remotes'
@@ -470,6 +487,40 @@ function Get-Step {
 function Get-Deferred {
     param($Status)
     return @(@($Status['deferred']) | ForEach-Object { "$($_['name']): $($_['reason'])" })
+}
+
+# The records of the notices file, each parsed. A line that does not parse is
+# kept as a record holding only unparsable. With a name, only the records whose
+# id opens with that name and a colon; the file is absent until a pass writes
+# a notice, and then the result is empty.
+function Get-Notices {
+    param([string]$Name = '')
+    if (-not (Test-Path -LiteralPath $noticesPath)) { return @() }
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($line in @(Get-Lines ([System.IO.File]::ReadAllText($noticesPath)))) {
+        try {
+            $record = $line | ConvertFrom-Json -AsHashtable
+        } catch {
+            $record = @{ unparsable = $line }
+        }
+        if ($Name -ne '' -and -not ([string]$record['id']).StartsWith("$Name`:", [StringComparison]::Ordinal)) { continue }
+        $records.Add($record)
+    }
+    return $records.ToArray()
+}
+
+# Whether a notice record's paths field is a JSON array holding exactly the
+# expected names, in order and case-sensitively.
+function Test-NoticePaths {
+    param($Record, [string[]]$Expected)
+    if ($null -eq $Record -or -not $Record.ContainsKey('paths')) { return $false }
+    $field = $Record['paths']
+    if (-not ($field -is [System.Collections.IList])) { return $false }
+    if ($field.Count -ne $Expected.Count) { return $false }
+    for ($i = 0; $i -lt $Expected.Count; $i++) {
+        if (-not ($field[$i] -is [string]) -or ($field[$i] -cne $Expected[$i])) { return $false }
+    }
+    return $true
 }
 
 # The environment every walker run gets: the test's own account folders, no
@@ -716,6 +767,7 @@ try {
     $deferredPaths = @(if ($deferredEntry.Count -eq 1) { @($deferredEntry[0]['paths']) } else { @() })
     Test-Check 'where the stub leaves the markers, the merge is aborted: MERGE_HEAD is gone, HEAD and the page are as before, and the stub ran once with Merge' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $mergeArgs) -and $mergeHeadGone -and ((Invoke-Git $epsilon @('rev-parse', 'HEAD')).Trim() -ceq $headBefore) -and ($pageText -ceq $localText))
     Test-Check 'the status lists the wiki under deferred with reason conflict, the path wiki/page.md, passes 1 and stuck false, its result deferred, and no later step recorded' (($deferredEntry.Count -eq 1) -and ($deferredEntry[0]['reason'] -ceq 'conflict') -and ($deferredPaths.Count -eq 1) -and ($deferredPaths[0] -ceq 'wiki/page.md') -and ($deferredEntry[0]['passes'] -eq 1) -and ($deferredEntry[0]['stuck'] -eq $false) -and ($epsilonStatus['result'] -ceq 'deferred') -and ((Get-Step $status 'epsilon' 'pull') -ceq 'deferred: conflict') -and (-not $epsilonStatus['steps'].ContainsKey('ingest')) -and (-not $epsilonStatus['steps'].ContainsKey('push')))
+    Test-Check 'the wiki deferred on a conflict for one pass appends no notice, and the notices file holds no record naming it' (@(Get-Notices 'epsilon').Count -eq 0)
     Clear-Stub
     $r = Invoke-Walker
     $status = Read-Status
@@ -760,6 +812,10 @@ try {
     $lambdaDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'lambda' })
     $lambdaPaths = @(if ($lambdaDeferred.Count -eq 1) { @($lambdaDeferred[0]['paths']) } else { @() })
     Test-Check 'a conflict on .claude/settings.json makes no stub call, and the pass defers the wiki with that path, stuck true on its first pass with passes 1, MERGE_HEAD gone and HEAD as before' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ($lambdaDeferred.Count -eq 1) -and ($lambdaDeferred[0]['reason'] -ceq 'conflict') -and ($lambdaPaths -ccontains '.claude/settings.json') -and ($lambdaDeferred[0]['passes'] -eq 1) -and ($lambdaDeferred[0]['stuck'] -eq $true) -and ((Get-Step $status 'lambda' 'pull') -ceq 'deferred: conflict') -and $lambdaMergeHeadGone -and ((Invoke-Git $lambda @('rev-parse', 'HEAD')).Trim() -ceq $lambdaHeadBefore))
+    $lambdaNotices = @(Get-Notices 'lambda')
+    $lambdaStuckText = 'lambda is stuck: its pull from origin conflicts on .claude/settings.json, which no headless run may attempt; a session or a person must resolve the conflict in the wiki, and the walker resumes once a pull lands.'
+    Test-Check 'the settings-file conflict appends one stuck record on its first pass, source wiki-walk, its text naming .claude/settings.json and carrying no pass count' (($lambdaNotices.Count -eq 1) -and ([string]$lambdaNotices[0]['id']).StartsWith('lambda:stuck:', [StringComparison]::Ordinal) -and ($lambdaNotices[0]['source'] -ceq 'wiki-walk') -and ($lambdaNotices[0]['text'] -ceq $lambdaStuckText) -and (-not ([string]$lambdaNotices[0]['text']).Contains('passes')))
+    Test-Check 'the settings-file stuck record carries a paths field holding exactly .claude/settings.json' (($lambdaNotices.Count -eq 1) -and (Test-NoticePaths $lambdaNotices[0] @('.claude/settings.json')))
 
     # The stuck rule. phi's origin and local history disagree on a page and
     # the stub never joins it, so each pass defers it with the count one
@@ -789,6 +845,7 @@ try {
     Set-List @('phi')
     Set-State -LastLintAt @{ phi = $yesterday }
     $phiPassesOk = $true
+    $phiNoticeCounts = @()
     foreach ($pass in 1..3) {
         Clear-Stub
         $r = Invoke-Walker
@@ -797,9 +854,17 @@ try {
         $phiDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'phi' })
         $phiPassOk = (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $phi) -and ($records[0].Args -ceq $mergeArgs) -and ((Get-Step $status 'phi' 'pull') -ceq 'deferred: conflict') -and ($phiDeferred.Count -eq 1) -and ($phiDeferred[0]['passes'] -eq $pass) -and ($phiDeferred[0]['stuck'] -eq ($pass -ge 3))
         if (-not $phiPassOk) { Write-Host "phi pass $pass off its expected shape" }
+        $phiNoticeCounts += @(Get-Notices 'phi').Count
         $phiPassesOk = $phiPassesOk -and $phiPassOk
     }
     Test-Check 'a wiki whose conflict the stub never joins is deferred on three passes in a row, each calling the stub once with Merge, with passes 1, 2 and 3 and stuck true only on the third' $phiPassesOk
+    $phiNotices = @(Get-Notices 'phi')
+    $phiStuckText = 'phi is stuck: its pull from origin has conflicted on 1 path for 3 passes in a row and the model merge did not join them; the walker fetches every hour and retries the merge once a day; a session must resolve the conflict in the wiki.'
+    $phiFinishedAt = Get-StampText $status['finishedAt']
+    Test-Check 'the first and second passes of the conflict append no notice, and the third, which makes the wiki stuck, appends one stuck record with source wiki-walk, the id phi:stuck: and the pass''s finish time, and the text naming the wiki, 1 path, 3 passes and the daily retry' (($phiNoticeCounts.Count -eq 3) -and ($phiNoticeCounts[0] -eq 0) -and ($phiNoticeCounts[1] -eq 0) -and ($phiNoticeCounts[2] -eq 1) -and ($phiNotices.Count -eq 1) -and ($phiNotices[0]['id'] -ceq "phi:stuck:$phiFinishedAt") -and ($phiNotices[0]['source'] -ceq 'wiki-walk') -and ($phiNotices[0]['text'] -ceq $phiStuckText))
+    Test-Check 'the stuck record carries a paths field holding exactly wiki/page.md, and its text does not name the path' (($phiNotices.Count -eq 1) -and (Test-NoticePaths $phiNotices[0] @('wiki/page.md')) -and (-not ([string]$phiNotices[0]['text']).Contains('wiki/page.md')))
+    $state = Read-State
+    Test-Check 'the state of the wiki made stuck holds noticedStuck true and a lastNoticeAt time' (($state['wikis']['phi']['noticedStuck'] -eq $true) -and ((Get-StampText $state['wikis']['phi']['lastNoticeAt']).Length -gt 0))
     $state = Read-State
     $phiLastRun = [DateTime]::MinValue
     $phiLastRunStamped = [DateTime]::TryParseExact((Get-StampText $state['wikis']['phi']['lastMergeRunAt']), 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$phiLastRun)
@@ -819,8 +884,10 @@ try {
     $phiTracking = (Invoke-Git $phi @('rev-parse', 'refs/remotes/origin/main')).Trim()
     $phiMergeHeadGone = (Invoke-Captured 'git' @('-C', $phi, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
     Test-Check 'the stuck wiki''s fourth pass inside the day fetches the commit origin gained meanwhile, starts no stub, lists it deferred with passes 4, stuck true and its path, HEAD as before and no merge left, and the log names the time its run is held until' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $phiLastRunStamped -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'phi' 'pull') -ceq 'deferred: conflict') -and ($phiDeferred.Count -eq 1) -and ($phiDeferred[0]['passes'] -eq 4) -and ($phiDeferred[0]['stuck'] -eq $true) -and ($phiPaths.Count -eq 1) -and ($phiPaths[0] -ceq 'wiki/page.md') -and ($phiTracking -ceq $phiRemoteHead) -and $phiMergeHeadGone -and ((Invoke-Git $phi @('rev-parse', 'HEAD')).Trim() -ceq $phiHeadBefore) -and ([System.IO.File]::ReadAllText($walkLog).Contains("held until $phiHeldUntil")))
+    Test-Check 'the stuck wiki''s fourth pass inside the day appends no notice' (@(Get-Notices 'phi').Count -eq 1)
     $state = Read-State
     $state['wikis']['phi']['lastMergeRunAt'] = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    $state['wikis']['phi']['lastNoticeAt'] = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
     [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $state -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
     Clear-Stub
     $r = Invoke-Walker
@@ -828,6 +895,148 @@ try {
     $status = Read-Status
     $phiDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'phi' })
     Test-Check 'with the last run''s time 25 hours back, the stuck wiki''s fifth pass starts the stub with Merge again and lists it with passes 5' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $phi) -and ($records[0].Args -ceq $mergeArgs) -and ($phiDeferred.Count -eq 1) -and ($phiDeferred[0]['passes'] -eq 5) -and ($phiDeferred[0]['stuck'] -eq $true))
+    $phiNotices = @(Get-Notices 'phi')
+    $phiStillText = 'phi is still stuck after 5 passes: its pull from origin conflicts on 1 path; a session must resolve the conflict in the wiki.'
+    Test-Check 'with the last notice 25 hours back, the stuck wiki''s fifth pass appends one still-stuck record naming 5 passes and 1 path, its paths field holding exactly wiki/page.md' (($phiNotices.Count -eq 2) -and ([string]$phiNotices[1]['id']).StartsWith('phi:still:', [StringComparison]::Ordinal) -and ($phiNotices[1]['text'] -ceq $phiStillText) -and (Test-NoticePaths $phiNotices[1] @('wiki/page.md')))
+
+    # A pass whose stub joins the page clears the wiki: the walker lands the
+    # merge and the notice says so with the restore point.
+    $state = Read-State
+    $state['wikis']['phi']['lastMergeRunAt'] = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $state -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText($resolvedFile, "remote line and local line`n")
+    $phiJoinHeadBefore = (Invoke-Git $phi @('rev-parse', 'HEAD')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker @{ 'KBWALK_STUB_MODE' = 'resolve' }
+    $status = Read-Status
+    $state = Read-State
+    $phiNotices = @(Get-Notices 'phi')
+    $phiClearedText = "phi is no longer stuck: its pull landed, merged by model, restore point $phiJoinHeadBefore."
+    Test-Check 'a pass whose stub joins the page appends one cleared record whose text carries merged by model and the pre-merge HEAD as the restore point, and the state holds neither noticedStuck nor lastNoticeAt' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Get-Step $status 'phi' 'pull') -ceq "ran: merged by model, restore point $phiJoinHeadBefore") -and ($phiNotices.Count -eq 3) -and ([string]$phiNotices[2]['id']).StartsWith('phi:cleared:', [StringComparison]::Ordinal) -and ($phiNotices[2]['text'] -ceq $phiClearedText) -and (-not $state['wikis']['phi'].ContainsKey('noticedStuck')) -and (-not $state['wikis']['phi'].ContainsKey('lastNoticeAt')))
+    Test-Check 'the cleared record carries no paths key' (($phiNotices.Count -eq 3) -and (-not $phiNotices[2].ContainsKey('paths')) -and (-not $phiNotices[2].ContainsKey('unparsable')))
+
+    $allNotices = @(Get-Notices)
+    $noticeIds = @($allNotices | ForEach-Object { [string]$_['id'] })
+    $noticesWellFormed = ($allNotices.Count -ge 4) -and (@($noticeIds | Select-Object -Unique).Count -eq $noticeIds.Count)
+    foreach ($notice in $allNotices) {
+        $noticesWellFormed = $noticesWellFormed -and ($notice['id'] -is [string]) -and ($notice['id'] -ne '') -and ($notice['text'] -is [string]) -and ($notice['text'] -ne '') -and ($notice['source'] -ceq 'wiki-walk') -and (-not $notice.ContainsKey('unparsable'))
+    }
+    Test-Check 'every record in the notices file parses as JSON with a unique non-empty string id, a non-empty string text and the source wiki-walk' $noticesWellFormed
+
+    # The notices file past 1 MB is renamed over any earlier rotated file before
+    # the pass writes, and the pass's record lands in a new file. lambda is
+    # still stuck on its settings file, with its last notice 25 hours back.
+    $seedRecord = ConvertTo-Json -Compress -InputObject ([ordered]@{ id = 'seed:rotation:1'; text = ('x' * 1100000); source = 'wiki-walk'; at = $yesterday })
+    [System.IO.File]::WriteAllText($noticesPath, ($seedRecord + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText("$noticesPath.1", "an earlier rotated file`n", (New-Object System.Text.UTF8Encoding($false)))
+    $rotationState = [ordered]@{
+        cursor = $null
+        wikis  = [ordered]@{ lambda = [ordered]@{ lastLintAt = $yesterday; conflictPasses = 1; noticedStuck = $true; lastNoticeAt = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture) } }
+    }
+    Set-List @('lambda')
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $rotationState -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Clear-Stub
+    $r = Invoke-Walker
+    $rotatedLength = if (Test-Path -LiteralPath "$noticesPath.1") { (Get-Item -LiteralPath "$noticesPath.1").Length } else { 0 }
+    $rotatedHead = if (Test-Path -LiteralPath "$noticesPath.1") { [System.IO.File]::ReadAllText("$noticesPath.1").Substring(0, 30) } else { '' }
+    $freshNotices = @(Get-Notices)
+    Test-Check 'a notices file seeded past 1 MB is renamed to walk-notices.jsonl.1 over the earlier one before the pass writes, and the pass''s still-stuck record lands alone in a new walk-notices.jsonl' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($rotatedLength -gt 1MB) -and $rotatedHead.StartsWith('{"id":"seed:rotation:1"', [StringComparison]::Ordinal) -and ($freshNotices.Count -eq 1) -and ([string]$freshNotices[0]['id']).StartsWith('lambda:still:', [StringComparison]::Ordinal) -and ((Get-Item -LiteralPath $noticesPath).Length -lt 1MB))
+
+    # A notices file the walker cannot open: the test holds it with no sharing
+    # through a pass that makes lambda stuck on its settings file. The append
+    # fails, so the state keeps lambda with no notice fields, and the next pass,
+    # with the file free, writes the stuck line.
+    $heldState = [ordered]@{
+        cursor = $null
+        wikis  = [ordered]@{ lambda = [ordered]@{ lastLintAt = $yesterday; conflictPasses = 1 } }
+    }
+    Set-List @('lambda')
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $heldState -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    $heldStuckBefore = @(Get-Notices 'lambda' | Where-Object { ([string]$_['id']).StartsWith('lambda:stuck:', [StringComparison]::Ordinal) }).Count
+    Clear-Stub
+    $heldFile = [System.IO.File]::Open($noticesPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    try {
+        $r = Invoke-Walker
+    } finally {
+        $heldFile.Dispose()
+    }
+    $state = Read-State
+    $heldStuckAfter = @(Get-Notices 'lambda' | Where-Object { ([string]$_['id']).StartsWith('lambda:stuck:', [StringComparison]::Ordinal) }).Count
+    Test-Check 'a pass whose notice append fails logs it, writes no stuck record, and saves the stuck wiki''s state with neither noticedStuck nor lastNoticeAt' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($heldStuckAfter -eq $heldStuckBefore) -and ([System.IO.File]::ReadAllText($walkLog).Contains('the notices file could not be written')) -and (-not $state['wikis']['lambda'].ContainsKey('noticedStuck')) -and (-not $state['wikis']['lambda'].ContainsKey('lastNoticeAt')))
+    Clear-Stub
+    $r = Invoke-Walker
+    $state = Read-State
+    $heldStuckNext = @(Get-Notices 'lambda' | Where-Object { ([string]$_['id']).StartsWith('lambda:stuck:', [StringComparison]::Ordinal) })
+    Test-Check 'the next pass, with the notices file free, appends the stuck record and saves noticedStuck true' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($heldStuckNext.Count -eq ($heldStuckBefore + 1)) -and ($heldStuckNext[-1]['text'] -ceq $lambdaStuckText) -and ($state['wikis']['lambda']['noticedStuck'] -eq $true))
+
+    # A conflicted path a remote can steer: stigma's page name holds U+202E,
+    # the right-to-left override. The pass that makes it stuck carries the path
+    # in its paths field with a hyphen in that character's place, and the text
+    # holds no U+202E.
+    $override = [string][char]0x202E
+    $stigmaBare = Join-Path $remotesDir 'stigma.git'
+    $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $stigmaBare)
+    $stigma = New-Wiki 'stigma'
+    $stigmaPage = Join-Path $stigma "wiki\a$($override)b.md"
+    [System.IO.File]::WriteAllText($stigmaPage, "base line`n")
+    $null = Invoke-Git $stigma @('add', '-A')
+    $null = Invoke-Git $stigma @('commit', '-q', '-m', 'Add page')
+    $null = Invoke-Git $stigma @('remote', 'add', 'origin', $stigmaBare)
+    $null = Invoke-Git $stigma @('push', '-q', '-u', 'origin', 'main')
+    $stigmaOther = Join-Path $remotesDir 'stigma-other'
+    $null = Invoke-Git $remotesDir @('clone', '-q', $stigmaBare, $stigmaOther)
+    $null = Invoke-Git $stigmaOther @('config', 'user.name', 'other side')
+    $null = Invoke-Git $stigmaOther @('config', 'user.email', 'other@test.invalid')
+    [System.IO.File]::WriteAllText((Join-Path $stigmaOther "wiki\a$($override)b.md"), "remote line`n")
+    $null = Invoke-Git $stigmaOther @('commit', '-q', '-a', '-m', 'Remote edit')
+    $null = Invoke-Git $stigmaOther @('push', '-q', 'origin', 'main')
+    [System.IO.File]::WriteAllText($stigmaPage, "local line`n")
+    $null = Invoke-Git $stigma @('commit', '-q', '-a', '-m', 'Local edit')
+    $stigmaState = [ordered]@{
+        cursor = $null
+        wikis  = [ordered]@{ stigma = [ordered]@{ lastLintAt = $yesterday; conflictPasses = 2 } }
+    }
+    Set-List @('stigma')
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $stigmaState -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Clear-Stub
+    $r = Invoke-Walker
+    $stigmaNotices = @(Get-Notices 'stigma')
+    $stigmaStuckText = 'stigma is stuck: its pull from origin has conflicted on 1 path for 3 passes in a row and the model merge did not join them; the walker fetches every hour and retries the merge once a day; a session must resolve the conflict in the wiki.'
+    Test-Check 'a stuck record for a conflicted path holding U+202E carries no U+202E in its text or its paths field, and the field shows the path with a hyphen in its place' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($stigmaNotices.Count -eq 1) -and ([string]$stigmaNotices[0]['id']).StartsWith('stigma:stuck:', [StringComparison]::Ordinal) -and (-not ([string]$stigmaNotices[0]['text']).Contains($override)) -and ($stigmaNotices[0]['text'] -ceq $stigmaStuckText) -and (Test-NoticePaths $stigmaNotices[0] @('wiki/a-b.md')))
+    $stigmaLog = [System.IO.File]::ReadAllText($walkLog, [System.Text.Encoding]::UTF8)
+    Test-Check 'the log names the conflicted path holding U+202E with a hyphen in its place' ((-not $stigmaLog.Contains($override)) -and $stigmaLog.Contains('wiki/a-b.md'))
+
+    # A conflict on 12 pages: the stuck record's text counts all 12, and its
+    # paths field holds the first 10 in git's order.
+    $shoNames = @(1..12 | ForEach-Object { 'wiki/p{0:D2}.md' -f $_ })
+    $shoBare = Join-Path $remotesDir 'sho.git'
+    $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $shoBare)
+    $sho = New-Wiki 'sho'
+    foreach ($name in $shoNames) { [System.IO.File]::WriteAllText((Join-Path $sho $name), "base line`n") }
+    $null = Invoke-Git $sho @('add', '-A')
+    $null = Invoke-Git $sho @('commit', '-q', '-m', 'Add pages')
+    $null = Invoke-Git $sho @('remote', 'add', 'origin', $shoBare)
+    $null = Invoke-Git $sho @('push', '-q', '-u', 'origin', 'main')
+    $shoOther = Join-Path $remotesDir 'sho-other'
+    $null = Invoke-Git $remotesDir @('clone', '-q', $shoBare, $shoOther)
+    $null = Invoke-Git $shoOther @('config', 'user.name', 'other side')
+    $null = Invoke-Git $shoOther @('config', 'user.email', 'other@test.invalid')
+    foreach ($name in $shoNames) { [System.IO.File]::WriteAllText((Join-Path $shoOther $name), "remote line`n") }
+    $null = Invoke-Git $shoOther @('commit', '-q', '-a', '-m', 'Remote edit')
+    $null = Invoke-Git $shoOther @('push', '-q', 'origin', 'main')
+    foreach ($name in $shoNames) { [System.IO.File]::WriteAllText((Join-Path $sho $name), "local line`n") }
+    $null = Invoke-Git $sho @('commit', '-q', '-a', '-m', 'Local edit')
+    $shoState = [ordered]@{
+        cursor = $null
+        wikis  = [ordered]@{ sho = [ordered]@{ lastLintAt = $yesterday; conflictPasses = 2 } }
+    }
+    Set-List @('sho')
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $shoState -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Clear-Stub
+    $r = Invoke-Walker
+    $shoNotices = @(Get-Notices 'sho')
+    $shoStuckText = 'sho is stuck: its pull from origin has conflicted on 12 paths for 3 passes in a row and the model merge did not join them; the walker fetches every hour and retries the merge once a day; a session must resolve the conflict in the wiki.'
+    Test-Check 'a stuck record for a conflict on 12 paths counts 12 paths in its text and holds the first 10 in its paths field' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($shoNotices.Count -eq 1) -and ([string]$shoNotices[0]['id']).StartsWith('sho:stuck:', [StringComparison]::Ordinal) -and ($shoNotices[0]['text'] -ceq $shoStuckText) -and (Test-NoticePaths $shoNotices[0] $shoNames[0..9]))
 
     # A conflicting pull whose wiki's run lock is held: the wrapper prints its
     # lock line and does nothing. The walker reads that line from the captured
@@ -1307,7 +1516,7 @@ try {
     $null = Invoke-Git $omicron @('commit', '-q', '-m', 'Slow status')
     $omicronState = [ordered]@{
         cursor = $null
-        wikis  = [ordered]@{ omicron = [ordered]@{ lastLintAt = $yesterday; conflictPasses = 2; lastMergeRunAt = $yesterday; deferred = [ordered]@{ reason = 'conflict'; paths = @('wiki/page.md') } } }
+        wikis  = [ordered]@{ omicron = [ordered]@{ lastLintAt = $yesterday; conflictPasses = 2; lastMergeRunAt = $yesterday; noticedStuck = $true; lastNoticeAt = $eightDaysAgo; deferred = [ordered]@{ reason = 'conflict'; paths = @('wiki/page.md') } } }
     }
     Set-List @('omicron')
     [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $omicronState -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
@@ -1318,6 +1527,7 @@ try {
     $omicronDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'omicron' })
     $omicronPaths = @(if ($omicronDeferred.Count -eq 1) { @($omicronDeferred[0]['paths']) } else { @() })
     Test-Check 'a wiki deferred on a conflict last pass whose pull this pass is refused for budget is still listed under deferred with reason conflict, its path and its count of 2 passes unchanged, and keeps its last run time' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Get-Step $status 'omicron' 'pull') -ceq 'skipped: budget') -and ($omicronDeferred.Count -eq 1) -and ($omicronDeferred[0]['reason'] -ceq 'conflict') -and ($omicronPaths.Count -eq 1) -and ($omicronPaths[0] -ceq 'wiki/page.md') -and ($omicronDeferred[0]['passes'] -eq 2) -and ($omicronDeferred[0]['stuck'] -eq $false) -and ($state['wikis']['omicron']['conflictPasses'] -eq 2) -and ((Get-StampText $state['wikis']['omicron']['lastMergeRunAt']) -ceq $yesterday))
+    Test-Check 'a noticed wiki whose pull this pass is refused for budget appends no notice and keeps noticedStuck true and its last notice time' ((@(Get-Notices 'omicron').Count -eq 0) -and ($state['wikis']['omicron']['noticedStuck'] -eq $true) -and ((Get-StampText $state['wikis']['omicron']['lastNoticeAt']) -ceq $eightDaysAgo))
     Test-Check 'a child that exited 0 while a process it left held its stdout is drained for 5 seconds, the leftover is ended before it writes its marker, with a log line saying so, and the exit code stands, so the step reads skipped: budget and not timed out' (((Get-Step $status 'omicron' 'update') -ceq 'skipped: budget') -and ($r.Stdout.Contains('a process it left still held its output 5 seconds after it ended, and was ended with the job''s processes')) -and (@($status['failures']).Count -eq 0) -and (-not (Test-Path -LiteralPath $leftoverMarker)))
 
     # A child stopped at the budget still leaves what it printed: the wiki's

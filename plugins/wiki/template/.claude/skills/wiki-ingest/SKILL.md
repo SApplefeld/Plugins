@@ -109,12 +109,12 @@ steps for it (index entry, log entry, its own commit). A source is never
 silently dropped and never left in the inbox to be retried forever.
 
 **b. Move it.** First look at the name itself. kb-move refuses a name
-containing `/`, `\`, or `:`, equal to `.` or `..`, or starting with a
-dash, and no call can change that outcome, so do not make one: skip this
-source and continue with the rest of the snapshot. It cannot be moved and
-cannot be auto-renamed, because kb-move takes the name only as it is and
-no other mover exists; leave it in the inbox, make no commit for it, and
-record in the report that a human must rename it.
+containing `/`, `\`, `:` or an apostrophe (`'`), equal to `.` or `..`, or
+starting with a dash, and no call can change that outcome, so do not make
+one: skip this source and continue with the rest of the snapshot. It cannot
+be moved and cannot be auto-renamed, because kb-move takes the name only as
+it is and no other mover exists; leave it in the inbox, make no commit for
+it, and record in the report that a human must rename it.
 
 For every other name, check once more that no other run has started
 writing since step 1. Run exactly:
@@ -130,11 +130,17 @@ inbox. A line is usually another run's, but a page an earlier commit of this
 run failed to name also reads as live here and stops the run the same way;
 that costs one scheduled slot, and a later run recovers the page. If it prints nothing, emit exactly:
 
-    pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name "<file>"
+    pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name '<file>'
 
-Quote the name: unquoted, a name containing a space splits into two
-arguments and the call fails. The quotes are compatible with the
-permission rule, which matches on the command's leading text.
+Put the name in single quotes, never double quotes and never bare. Single
+quotes pass the name to kb-move byte for byte: a `$`, a backtick or a space
+inside them is part of the name, where double quotes would expand the first
+two and no quotes would split on the third. The permission rule reads the
+command's leading text and is not reached by the quote. A name holding an
+apostrophe cannot be written inside single quotes: the apostrophe would end
+the quote and hand the rest of the name to the shell. That is why the check
+above skips such a name before any call. kb-move also refuses one, for a
+name that reaches it another way.
 
 On success it prints the destination path, `sources/<file>`. If it refuses
 because `sources/<file>` already exists, the file was ingested by an
@@ -178,10 +184,14 @@ bullet under the same heading.
 the moved source, its summary page, every wiki page you revised,
 `index.md`, and `log.md`. Emit exactly:
 
-    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "<paths>" -Message "<msg>"
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message '<msg>'
 
 `-Path` is one string, paths separated by a vertical bar with no spaces
-around it: `-Path "sources/report.pdf|wiki/report-summary.md|index.md|log.md"`.
+around it: `-Path 'sources/report.pdf|wiki/report-summary.md|index.md|log.md'`.
+Both values take single quotes, as the move does, so a `$` or a backtick in a
+path or a message reaches kb-commit unchanged. Neither may hold an
+apostrophe, which would end the quote before kb-commit runs, so write the
+message without one.
 The message subject begins `Ingest:` and names the source, then a blank line,
 then a short body listing the pages revised. Every operation prefixes its
 subject the same way (`Ingest:`, `Lint:`, `Query:`, `Reconcile:`), which is
@@ -191,7 +201,7 @@ what makes each one findable on its own in `git log`.
 
 The final source's kb-commit call, and only that one, carries `-Push`:
 
-    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "<paths>" -Message "<msg>" -Push
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message '<msg>' -Push
 
 One push per run. A run that stopped at step 1 or step 4b because another run
 is live makes no push at all, whatever it committed: the rest of this step
@@ -201,7 +211,7 @@ made commits, counting step 1's, but ended without one (a duplicate-drop
 or skipped last source, or any other early stop), still push, with a call that
 stages nothing new:
 
-    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "log.md" -Message "Ingest: push pending commits" -Push
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path 'log.md' -Message 'Ingest: push pending commits' -Push
 
 If the run made no commits at all, run step 3's unpushed check before
 ending: flush with the same push-only call if it lists anything, and

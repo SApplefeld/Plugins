@@ -84,10 +84,11 @@ leave it:
 - `.claude/` is the engine. Writes there are denied.
 - `inbox/`, `.gitignore`, and any other path are not the wiki's to join.
 
-Three more cases count as outside the set, wherever the path is. A path with
+Four more cases count as outside the set, wherever the path is. A path with
 the code `DD`, or with no file on disk, has no text to join and nothing
 `kb-commit.ps1` can stage. A path that step 1 printed in double quotes holds
-characters the helper cannot be given exactly.
+characters the helper cannot be given exactly. A path holding an apostrophe
+cannot be written inside the single quotes `-Path` takes.
 
 If any conflicted path is outside the set, join nothing. Edit no file, commit
 nothing, and go to the report. This is why: a commit completes a merge only when
@@ -154,10 +155,12 @@ commit like a joined page. Report it as kept over a deletion.
 
 When every conflicted path is joined, emit exactly:
 
-    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "<paths>" -Message "Merge: join <n> pages from origin"
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message 'Merge: join <n> pages from origin'
 
 `<paths>` is every conflicted path, each once, separated by a vertical bar with
-no spaces around it: `-Path "wiki/acme-corp.md|index.md|log.md"`. `<n>` is the
+no spaces around it: `-Path 'wiki/acme-corp.md|index.md|log.md'`. Both values
+take single quotes, which pass every byte but an apostrophe unchanged, and a
+path holding one is outside the set, as above. `<n>` is the
 number of paths in `<paths>`, `index.md` and `log.md` included. `kb-commit.ps1` stages each named path, which marks its
 conflict resolved, and its commit then completes the merge, carrying origin's
 clean changes with it. A conflicted path left out of `<paths>` stays

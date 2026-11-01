@@ -18,7 +18,10 @@ is written to stdout.
 .PARAMETER Name
 The bare file name of the item in inbox/ to move. It must be a plain leaf
 name: no directory separators, no drive markers, and not a relative-parent
-reference.
+reference. It must hold no apostrophe. The skills pass the name inside a
+Bash single-quoted string, where an apostrophe ends the string before this
+script runs, so a skill checks the name first and never makes that call. The
+refusal here catches a name that reaches the script escaped or double-quoted.
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name report.pdf
@@ -59,6 +62,14 @@ if ($Name -eq '.' -or $Name -eq '..') {
 }
 if ($Name.StartsWith('-')) {
     Stop-WithReason 'Name must not start with a dash.'
+}
+# A skill emits the name inside a Bash single-quoted string, the one form
+# that passes $, backticks and spaces byte for byte. An apostrophe ends that
+# string in Bash before this script runs, so on that route the skill's own
+# check, which skips such a name, is the guard. This refusal catches a name
+# that arrives escaped or double-quoted, and a person renames the file.
+if ($Name.Contains("'")) {
+    Stop-WithReason 'Name must not contain an apostrophe; rename the file.'
 }
 
 $inboxPath   = Join-Path (Join-Path $repoRoot 'inbox') $Name

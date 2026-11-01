@@ -207,8 +207,8 @@ validates its own arguments. A third, `kb-status.ps1`, is the only git read,
 and the skills name its uses:
 
 ```
-pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name <file-in-inbox>
-pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path "<paths>" -Message "<msg>" [-Push]
+pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name '<file-in-inbox>'
+pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message '<msg>' [-Push]
 ```
 
 `kb-move.ps1` is the only path into `sources/`. It refuses to overwrite an
@@ -216,7 +216,7 @@ existing source, so a re-dropped file is a refusal, not a silent loss.
 
 `kb-commit.ps1` stages exactly the paths you name and nothing else. Separate
 them with a vertical bar, which Windows forbids in a file name, and use no
-spaces around it: `-Path "sources/report.pdf|wiki/report-summary.md|index.md|log.md"`.
+spaces around it: `-Path 'sources/report.pdf|wiki/report-summary.md|index.md|log.md'`.
 It accepts only paths under `sources/` or `wiki/`, or exactly `index.md` or
 `log.md`. It runs no git hook. It pushes only to `origin`, only with `-Push`.
 

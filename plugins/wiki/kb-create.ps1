@@ -39,7 +39,13 @@ The folder new knowledge bases are created under, needed only where no wiki
 list exists yet.
 
 .PARAMETER Remote
-An existing git repository URL to attach as origin and push main to.
+An existing git repository URL to attach as origin and push main to. The push
+runs with git's, the credential manager's and ssh's prompts turned off, so a
+missing credential fails it, and it waits at
+most 300 seconds, or the whole number of seconds from 1 to 99999 that
+KB_PUSH_TIMEOUT_SECONDS holds. Any other value in that variable is refused
+before step 1. A push past its bound stops the run at step 4 with a line
+naming the bound, followed by the run's lines naming what it left.
 
 .EXAMPLE
 pwsh -NoProfile -File ./kb-create.ps1 -Name acme -Description "Acme contracts and correspondence." -Root D:\Wikis
@@ -151,6 +157,70 @@ function Invoke-Engine {
     }
 }
 
+# Stops a running git process and the processes it started, such as ssh, a remote
+# helper or a credential helper, by taskkill /T. Its output is read and
+# discarded so it never reaches this script's stdout.
+function Stop-GitProcessTree {
+    param([System.Diagnostics.Process]$Process)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    $psi.Arguments = "/PID $($Process.Id) /T /F"
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $killer = [System.Diagnostics.Process]::Start($psi)
+    $null = $killer.StandardError.ReadToEndAsync()
+    $null = $killer.StandardOutput.ReadToEnd()
+    [void]$killer.WaitForExit(10000)
+    if (-not $Process.WaitForExit(5000)) {
+        # taskkill could not stop it; stop the git process itself so this run
+        # does not end with it still pushing.
+        $Process.Kill()
+    }
+}
+
+# Runs git push with every prompt turned off and a time bound, passes its output
+# through, and returns its exit code. No one answers a terminal,
+# credential-manager or ssh prompt here, so each is told not to ask; the
+# variables are set on the git process alone, never on this script's
+# environment. Past the bound the git process tree is stopped while git runs and the run stops
+# with one line naming the bound, and git's own output is not passed through.
+function Invoke-BoundedPush {
+    param([string[]]$Arguments)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $script:gitExe
+    $psi.Arguments = (@($Arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $psi.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
+    $psi.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
+    $psi.EnvironmentVariables['GCM_INTERACTIVE'] = 'never'
+    $psi.EnvironmentVariables['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $deadline = [DateTime]::UtcNow.AddSeconds($script:pushTimeoutSeconds)
+    $finished = $process.WaitForExit($script:pushTimeoutSeconds * 1000)
+    if ($finished) {
+        # The streams close when every process holding them ends, which can be
+        # after git itself, so they share what is left of the same bound.
+        $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+        $finished = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), $remaining)
+    }
+    if (-not $finished) {
+        Stop-GitProcessTree $process
+        Stop-WithReason "step 4 (git push -u origin main) did not finish within the push bound of $script:pushTimeoutSeconds seconds; whether it reached the remote is unknown."
+    }
+    $process.WaitForExit()
+    [Console]::Out.Write($stdoutTask.Result)
+    [Console]::Error.Write($stderrTask.Result)
+    return $process.ExitCode
+}
+
 # Splits text into its non-empty lines.
 function Get-Lines { param([string]$Text) return @($Text -split "`r?`n" | Where-Object { $_ -ne '' }) }
 
@@ -180,8 +250,21 @@ foreach ($sibling in @($registry, $newKb, $trust)) {
         Stop-WithReason "sibling script not found next to this script: $sibling"
     }
 }
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+$gitCmd = Get-Command -Name 'git' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -eq $gitCmd) {
     Stop-WithReason 'git was not found on PATH.'
+}
+$script:gitExe = $gitCmd.Source
+
+# Step 4's time bound: 300 seconds, or KB_PUSH_TIMEOUT_SECONDS where set, so a
+# test can drive the timeout quickly. A bad value stops the run here, before
+# anything is copied, trusted or pushed.
+$script:pushTimeoutSeconds = 300
+if ($PSBoundParameters.ContainsKey('Remote') -and -not [string]::IsNullOrEmpty($env:KB_PUSH_TIMEOUT_SECONDS)) {
+    if ($env:KB_PUSH_TIMEOUT_SECONDS -notmatch '^[1-9][0-9]{0,4}$') {
+        Stop-WithReason 'KB_PUSH_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 99999.'
+    }
+    $script:pushTimeoutSeconds = [int]$env:KB_PUSH_TIMEOUT_SECONDS
 }
 
 # The list's name and description rules, checked here so a value step 5 would
@@ -195,9 +278,9 @@ $reservedNames = @('CON', 'PRN', 'AUX', 'NUL') + (0..9 | ForEach-Object { "COM$_
 if ($reservedNames -contains $Name.Split('.')[0]) {
     Stop-WithReason "name '$Name' is a reserved device name"
 }
-$unsafeText = '[\p{Cc}\u200E\u200F\u061C\u2028\u2029\u202A-\u202E\u2066-\u2069]'
+$unsafeText = '[\p{Cc}\p{Cf}\u2028\u2029]|\uDB40[\uDC00-\uDC7F]'
 if ([regex]::IsMatch($Description, $unsafeText)) {
-    Stop-WithReason 'description must not contain control characters, tab, line breaks and text-direction marks included'
+    Stop-WithReason 'description must not contain control characters, tab and line breaks included, or format characters, text-direction marks and zero-width characters included'
 }
 # A child PowerShell process run with -File reads a value starting with a
 # hyphen, en dash, em dash or horizontal bar as a parameter name, so no value
@@ -282,20 +365,10 @@ $null = Invoke-Step 3 'kb-trust.ps1' $trust @('-Path', $wikiPath)
 if ($PSBoundParameters.ContainsKey('Remote')) {
     & git -C $wikiPath remote add -- origin $Remote
     if ($LASTEXITCODE -ne 0) { Stop-WithReason "step 4 (git remote add origin) failed with exit $LASTEXITCODE." }
-    # No git or credential-manager prompt: a missing HTTPS credential fails
-    # here instead of waiting on an answer. An ssh prompt, or an askpass
-    # helper the account has configured, is not covered.
-    $savedPrompt = $env:GIT_TERMINAL_PROMPT
-    $savedGcm = $env:GCM_INTERACTIVE
-    try {
-        $env:GIT_TERMINAL_PROMPT = '0'
-        $env:GCM_INTERACTIVE = 'never'
-        & git -C $wikiPath push -u origin main
-        $pushExit = $LASTEXITCODE
-    } finally {
-        $env:GIT_TERMINAL_PROMPT = $savedPrompt
-        $env:GCM_INTERACTIVE = $savedGcm
-    }
+    # No git, credential-manager or ssh prompt and a time bound: a missing
+    # credential fails here instead of waiting on an answer, and a remote that
+    # never answers stops the run at the bound.
+    $pushExit = Invoke-BoundedPush @('-C', $wikiPath, 'push', '-u', 'origin', 'main')
     if ($pushExit -ne 0) { Stop-WithReason "step 4 (git push -u origin main) failed with exit $pushExit." }
 }
 

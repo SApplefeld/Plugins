@@ -152,6 +152,33 @@ and is rotated at 5 MB. The walker exits 0 after a pass, whatever it recorded, a
 where LOCALAPPDATA is unset, KB_WALK_SECONDS is not a whole number of seconds from 1 to 99999,
 or it could not read the list, take the lock or write the status.
 
+A wiki that becomes stuck is reported in walk-notices.jsonl beside the status
+file, which a session on the account reads. The walker appends one JSON line
+with id, text, paths on a stuck or still-stuck line, source (the string
+wiki-walk) and at, written before the state
+and the status, and never rewrites a line. A line is written in the pass whose
+pull leaves a wiki stuck, in each pass at least 24 hours after the wiki's last
+line while its pull is still deferred, and in the pass whose pull lands after a
+line was written. The wiki's state entry holds noticedStuck and lastNoticeAt
+for this, and a pass whose append fails puts both back as they were, so the
+next pass writes the line. A pull refused for budget or failed writes nothing
+and leaves both as they were. A line's text names the wiki, how many paths
+git found conflicted and the pass count, or for a conflict on
+.claude/settings.json that file alone; it names no other path and never a
+page's content. Its paths field is an array of at most the first 10
+conflicted paths; a cleared line has none. Those names and the cleared line's note are text a
+remote can steer, so a path's ASCII control characters become spaces as in
+every log line, and each path in the field and the note then has every other
+control character, every basic-plane format character, and every tag, line
+separator and paragraph separator character replaced by a hyphen. A pass
+killed, or whose state write fails,
+after its append writes the notice again, under a new id, in the next pass
+whose pull is deferred; where a later pull lands first, no cleared line
+follows that notice,
+and a disk that fills mid-append can leave one line a reader cannot parse and
+skips. A file over 1 MB is renamed to
+walk-notices.jsonl.1 before the pass appends, over any earlier one.
+
 With -WhatIf the walker takes no lock, runs nothing but the list read, and
 writes nothing on disk. It prints the wikis it would visit, in order, and
 exits 0.
@@ -495,13 +522,16 @@ function ConvertTo-ComparablePath {
 # whitespace, as the feeder's Format-RedactedUrl reads it, and is replaced
 # first, so a control byte inside it that is not whitespace is masked with the
 # rest rather than turned into a space that ends the match. A tab, carriage
-# return or line feed still ends it. Output a child prints to the
-# walker's own streams never passes through here.
+# return or line feed still ends it. ASCII controls then become spaces, and
+# every other character of $script:unsafeText becomes a hyphen, so a steered
+# path or git message cannot reorder or hide part of a log line. Output a
+# child prints to the walker's own streams never passes through here.
 function ConvertTo-LogText {
     param([string]$Text)
     if ($null -eq $Text) { return '' }
     $masked = $Text -replace '://[^/\s]*@', '://***@'
-    return ($masked -replace '[\x00-\x1F\x7F]', ' ').Trim()
+    $spaced = $masked -replace '[\x00-\x1F\x7F]', ' '
+    return ([regex]::Replace($spaced, $script:unsafeText, '-')).Trim()
 }
 
 # One line to the pass's log and to stdout, where the children's output goes too.
@@ -601,7 +631,8 @@ function Invoke-Child {
         [hashtable]$Environment = @{},
         [switch]$Capture,
         [switch]$Relay,
-        [switch]$Required
+        [switch]$Required,
+        [switch]$Utf8
     )
     if ($Required) {
         $waitMilliseconds = [int][Math]::Max($script:requiredFloorSeconds * 1000, ($script:requiredDeadline - [DateTime]::UtcNow).TotalMilliseconds)
@@ -619,6 +650,12 @@ function Invoke-Child {
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = [bool]$Capture
     $psi.RedirectStandardError = [bool]$Capture
+    # git writes paths as UTF-8 bytes; read in the console code page they turn
+    # into other characters and escape the strip a notice applies.
+    if ($Capture -and $Utf8) {
+        $psi.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        $psi.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
+    }
     foreach ($name in $Environment.Keys) {
         if ($null -eq $Environment[$name]) {
             [void]$psi.EnvironmentVariables.Remove($name)
@@ -687,7 +724,7 @@ function Invoke-Git {
         'GIT_SSH_COMMAND'     = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
     }
     $guards = @('-C', $WikiPath, '-c', "core.hooksPath=$script:hooksDir") + $script:gitStallBound
-    return Invoke-Child 'git' ($guards + $Arguments) $WikiPath $environment -Capture -Required:$Required
+    return Invoke-Child 'git' ($guards + $Arguments) $WikiPath $environment -Capture -Required:$Required -Utf8
 }
 
 # True where a captured stdout's first non-empty line starts with the child's
@@ -1256,6 +1293,98 @@ function Invoke-Budgeted {
     }
 }
 
+# The time of the wiki's last notice, from its state entry, or $null where the
+# entry holds none it can read.
+function Get-LastNoticeAt {
+    param($State)
+    $last = [DateTime]::MinValue
+    if ($State.Contains('lastNoticeAt') -and ($State['lastNoticeAt'] -is [string]) -and
+        [DateTime]::TryParseExact($State['lastNoticeAt'], 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$last)) {
+        return $last.ToUniversalTime()
+    }
+    return $null
+}
+
+# Text a remote can steer, such as a conflicted path, with each character of
+# the line-unsafe class kb-registry.ps1 defines in its $unsafeText replaced by
+# a hyphen, so a notice stays one line that reads as written.
+function ConvertTo-NoticeText {
+    param([string]$Text)
+    return [regex]::Replace([string]$Text, $script:unsafeText, '-')
+}
+
+# The conflicted paths as a notice's paths field carries them: the first
+# $noticePathLimit, each stripped. The caller wraps the result in @() so one
+# path or none still makes an array.
+function ConvertTo-NoticePaths {
+    param([object[]]$Paths)
+    $kept = @($Paths | Select-Object -First $script:noticePathLimit)
+    return @($kept | ForEach-Object { ConvertTo-NoticeText ([string]$_) })
+}
+
+# The conflicted paths as a notice's text counts them: "1 path", "N paths", or
+# "paths the walker did not record" where the deferral holds none. The text
+# carries only this count, so a steered name never reaches the sentence.
+function Format-NoticePathCount {
+    param([object[]]$Paths)
+    $count = @($Paths).Count
+    if ($count -eq 0) { return 'paths the walker did not record' }
+    if ($count -eq 1) { return '1 path' }
+    return "$count paths"
+}
+
+# Collects the notice this visit's pull verdict earns, and keeps the wiki's
+# noticedStuck and lastNoticeAt in step with it. Only a pull that ran or was
+# deferred anew speaks; a pull refused for budget, failed or skipped
+# leaves the wiki as it was. A pull that ran clears a noticed wiki. A deferred
+# pull earns a stuck line where the wiki is stuck and has no notice yet, and a
+# still-stuck line where its last notice is 24 hours or more old. Each notice
+# carries the two fields as they stood before this visit changed them, so
+# Write-Notices can put them back where the append fails.
+function Add-VisitNotice {
+    param($Wiki, $State, [string]$PullOutcome)
+    $noticed = $State.Contains('noticedStuck') -and ($State['noticedStuck'] -eq $true)
+    $prior = [ordered]@{}
+    foreach ($field in @('noticedStuck', 'lastNoticeAt')) {
+        if ($State.Contains($field)) { $prior[$field] = $State[$field] }
+    }
+    if ($PullOutcome -ceq 'ran') {
+        if (-not $noticed) { return }
+        $State.Remove('noticedStuck')
+        $State.Remove('lastNoticeAt')
+        $note = ConvertTo-NoticeText ([string]$Wiki.steps['pull']['note'])
+        $text = "$($Wiki.name) is no longer stuck: its pull landed."
+        if ($note -ne '') { $text = "$($Wiki.name) is no longer stuck: its pull landed, $note." }
+        $script:notices.Add([pscustomobject]@{ Name = $Wiki.name; Kind = 'cleared'; Text = $text; Paths = $null; State = $State; Prior = $prior })
+        return
+    }
+    if ($PullOutcome -cne 'deferred') { return }
+    if (-not ($State.Contains('deferred') -and $State['deferred'] -is [System.Collections.IDictionary])) { return }
+    $deferral = $State['deferred']
+    $paths = @()
+    if ($deferral.Contains('paths')) { $paths = @($deferral['paths']) }
+    $passes = Get-ConflictPasses $State
+    $now = [DateTime]::UtcNow
+    $pathCount = Format-NoticePathCount $paths
+    if (-not $noticed) {
+        if (-not ($deferral.Contains('stuck') -and $deferral['stuck'] -eq $true)) { return }
+        $kind = 'stuck'
+        if ($paths -ccontains '.claude/settings.json') {
+            $text = "$($Wiki.name) is stuck: its pull from origin conflicts on .claude/settings.json, which no headless run may attempt; a session or a person must resolve the conflict in the wiki, and the walker resumes once a pull lands."
+        } else {
+            $text = "$($Wiki.name) is stuck: its pull from origin has conflicted on $pathCount for $passes passes in a row and the model merge did not join them; the walker fetches every hour and retries the merge once a day; a session must resolve the conflict in the wiki."
+        }
+    } else {
+        $last = Get-LastNoticeAt $State
+        if ($null -ne $last -and $last -gt $now.AddHours(-$script:noticeIntervalHours)) { return }
+        $kind = 'still'
+        $text = "$($Wiki.name) is still stuck after $passes passes: its pull from origin conflicts on $pathCount; a session must resolve the conflict in the wiki."
+    }
+    $State['noticedStuck'] = $true
+    $State['lastNoticeAt'] = $now.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    $script:notices.Add([pscustomobject]@{ Name = $Wiki.name; Kind = $kind; Text = $text; Paths = @(ConvertTo-NoticePaths $paths); State = $State; Prior = $prior })
+}
+
 # One wiki's visit: the trust gate, then the six steps in order.
 function Invoke-Visit {
     param($Wiki)
@@ -1325,6 +1454,7 @@ function Invoke-Visit {
         if ($standingConflict -and $pullOutcome -cne 'ran' -and $pullOutcome -cne 'deferred') {
             $state['deferred'] = $prior
         }
+        Add-VisitNotice $Wiki $state $pullOutcome
     }
 }
 
@@ -1341,9 +1471,65 @@ function Write-JsonWhole {
     }
 }
 
-# Writes the state and the status, the pass-level notes joined into the
-# status's note, and stops the pass with exit 1 where the status cannot be
-# written.
+# Appends the pass's collected notices to the notices file, one JSON line
+# each. A file over 1 MB is first renamed to walk-notices.jsonl.1 over any
+# earlier one; a rename that fails is logged and the lines go to the current
+# file. A file whose last byte is not a line feed, as a killed append leaves
+# it, gets one before the new lines. Where the append fails it is logged, and
+# each noticed wiki's noticedStuck and lastNoticeAt go back to what they were
+# before this pass, so the state written next makes the next pass compare
+# again and write the line then.
+function Write-Notices {
+    if ($script:notices.Count -eq 0) { return }
+    try {
+        if ([System.IO.File]::Exists($script:noticesPath) -and (Get-Item -LiteralPath $script:noticesPath).Length -gt $script:noticesMaxBytes) {
+            [System.IO.File]::Move($script:noticesPath, "$script:noticesPath.1", $true)
+        }
+    } catch {
+        Write-Log "the notices file could not be rotated: $(Get-FirstLine (Get-InnerError $_.Exception).Message)"
+    }
+    try {
+        $at = [string]$script:status.finishedAt
+        $lines = New-Object System.Collections.Generic.List[string]
+        foreach ($notice in $script:notices) {
+            $record = [ordered]@{ id = "$($notice.Name):$($notice.Kind):$at"; text = $notice.Text }
+            if ($null -ne $notice.Paths) { $record['paths'] = @($notice.Paths) }
+            $record['source'] = 'wiki-walk'
+            $record['at'] = $at
+            $lines.Add((ConvertTo-Json -InputObject $record -Compress))
+        }
+        $stream = [System.IO.FileStream]::new($script:noticesPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read)
+        try {
+            $prefix = ''
+            if ($stream.Length -gt 0) {
+                $null = $stream.Seek(-1, [System.IO.SeekOrigin]::End)
+                if ($stream.ReadByte() -ne 10) { $prefix = "`n" }
+            }
+            $null = $stream.Seek(0, [System.IO.SeekOrigin]::End)
+            $bytes = $script:utf8NoBom.GetBytes($prefix + ($lines -join "`n") + "`n")
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush($true)
+        } finally {
+            $stream.Dispose()
+        }
+    } catch {
+        Write-Log "the notices file could not be written, so this pass's notices are left for the next pass: $(Get-FirstLine (Get-InnerError $_.Exception).Message)"
+        foreach ($notice in $script:notices) {
+            foreach ($field in @('noticedStuck', 'lastNoticeAt')) {
+                if ($notice.Prior.Contains($field)) {
+                    $notice.State[$field] = $notice.Prior[$field]
+                } else {
+                    $notice.State.Remove($field)
+                }
+            }
+        }
+    }
+}
+
+# Writes the notices, then the state and the status, the pass-level notes
+# joined into the status's note, and stops the pass with exit 1 where the
+# status cannot be written. The notices go first so the state records a
+# notice's fields only once its line is in the file.
 function Write-PassFiles {
     $script:status.finishedAt = [DateTime]::UtcNow.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
     $deferred = New-Object System.Collections.Generic.List[object]
@@ -1365,6 +1551,7 @@ function Write-PassFiles {
         if ($script:status.Contains('note')) { $notes = @($script:status['note']) + $notes }
         $script:status['note'] = $notes -join '; '
     }
+    Write-Notices
     try {
         Write-JsonWhole $script:statePath ([ordered]@{ cursor = $script:cursor; wikis = $script:stateWikis })
     } catch {
@@ -1396,6 +1583,18 @@ $script:streamDrainSeconds = 5
 $script:passNotes = New-Object System.Collections.Generic.List[string]
 $script:gitStallBound = @('-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=60')
 $script:logPath = $null
+# The notices file's size bound in bytes, the hours between a stuck wiki's
+# repeated lines, the most conflicted paths one line's paths field holds, and
+# the lines the pass's visits have collected for it.
+$script:noticesMaxBytes = 1MB
+$script:noticeIntervalHours = 24
+$script:noticePathLimit = 10
+$script:notices = New-Object System.Collections.Generic.List[object]
+# Text a notice may not carry, copied from kb-registry.ps1's $unsafeText:
+# control characters, the basic plane's format characters, the tag characters,
+# and line and paragraph separators. tests/Test-UnsafeTextParity.ps1 checks the
+# copy.
+$script:unsafeText = '[\p{Cc}\p{Cf}\u2028\u2029]|\uDB40[\uDC00-\uDC7F]'
 $whatIf = [bool]$WhatIfPreference
 
 if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
@@ -1406,6 +1605,7 @@ $lockPath = Join-Path $walkDir 'walk.lock'
 $script:statePath = Join-Path $walkDir 'walk-state.json'
 $script:statusPath = Join-Path $walkDir 'walk-status.json'
 $walkLog = Join-Path $walkDir 'walk.log'
+$script:noticesPath = Join-Path $walkDir 'walk-notices.jsonl'
 
 $lock = $null
 $script:hooksDir = $null

@@ -486,6 +486,14 @@ try {
     $null = Invoke-Upstream @('-c', 'core.protectNTFS=false', 'update-index', '--add', '--cacheinfo', "100644,$nlSha,$nlPath")
     $null = Invoke-Upstream @('-c', 'core.protectNTFS=false', 'commit', '-q', '-m', 'newline path')
     $nlName = "odd--odd--new-line--$($nlSha.Substring(0, 7)).md"
+    # A path holding a right-to-left override, committed the same way.
+    $bidiPath = "odd/bidi$([char]0x202E)txt.md"
+    $bidiBody = Get-Utf8Bytes "bidi path`n"
+    $bidiFile = Join-Path $work 'bidi-body.txt'
+    [System.IO.File]::WriteAllBytes($bidiFile, $bidiBody)
+    $bidiSha = Invoke-Upstream @('hash-object', '-w', '--', $bidiFile)
+    $null = Invoke-Upstream @('-c', 'core.protectNTFS=false', 'update-index', '--add', '--cacheinfo', "100644,$bidiSha,$bidiPath")
+    $null = Invoke-Upstream @('-c', 'core.protectNTFS=false', 'commit', '-q', '-m', 'bidi path')
 
     # Name mapping, the name and size refusals, and UTF-32 BE.
     New-TestKb $kb4
@@ -510,7 +518,9 @@ try {
     $nlFed = Join-Path $inbox4 $nlName
     $nlLineFeeds = if (Test-Path -LiteralPath $nlFed) { @([System.IO.File]::ReadAllBytes($nlFed) | Where-Object { $_ -eq 10 }).Count } else { -1 }
     Test-Check 'a newline in the path leaves the header block at its 2 lines, 3 line feeds with the 1-line body' ($nlLineFeeds -eq 3)
-    Test-Check 'odd-source summary counts fed 3, skipped 0, refused 2, inbox 3' (Test-Summary $r.Stdout @(3, 0, 2, 3))
+    $bidiName = "odd--odd--bidi-txt--$($bidiSha.Substring(0, 7)).md"
+    Test-Check 'the header shows a right-to-left override in the path as a dash, the rest intact' (($names4 -ccontains $bidiName) -and (Test-Header $bidiName 'odd/bidi-txt.md' $bidiBody "`n" $null))
+    Test-Check 'odd-source summary counts fed 4, skipped 0, refused 2, inbox 4' (Test-Summary $r.Stdout @(4, 0, 2, 4))
 
     # The git timeout. A packObjectsHook in a global config file read through
     # GIT_CONFIG_GLOBAL makes the upstream side of a first fetch sleep, and
