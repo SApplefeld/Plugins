@@ -37,33 +37,75 @@ inbox snapshot and to every future commit, so nothing else will ever
 recover it. Finish its ingest now, before touching the inbox: write its
 summary page, or complete the one already on disk, then revise pages,
 update `index.md`, append its `log.md` entry under this run's heading, and
-commit it exactly as step 4 commits a normal source. One commit per
-orphan. Any uncommitted edits to `index.md`, `log.md`, or a `wiki/` page,
-and any untracked `wiki/` page, are that same interrupted work: fold those
-paths into the orphan's commit (the first orphan's, if there are several)
-so they cannot ride into a later source's commit.
+commit it by its handle, exactly as step 4g commits a normal source. Read
+the handle by running exactly:
 
-If the working tree carries recovered work with **no** untracked file
-under `sources/`, those changes came from some other interrupted run, not
+    pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Sources
+
+It prints one line per file under `sources/` as
+`<handle><tab><bytes><tab><name>`, committed sources included, and omits
+`.gitkeep`. Take the handle from the line whose name is the orphan's, and
+emit step 4g's command with it as `-SourceHandle '<handle>'`. Nothing read
+from the file name goes on the line: never put `sources/<file>` in `-Path`,
+since kb-commit writes the subject from the name it reads on disk. One
+commit per orphan. Any uncommitted edits to `index.md`, `log.md`, or a
+`wiki/` page, and any untracked `wiki/` page, found before you start are
+that same interrupted work. Where there are any, commit them before
+finishing any untracked orphan, and after any staged orphan the next
+paragraph names, so no page name reaches the line and none rides into a
+source's commit:
+
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Reconcile -Message '<body>'
+
+Name no path on that line. `-Reconcile` reads the tree itself, and the body
+is a short note on what the run recovered.
+
+A file under `sources/` that `-What Porcelain` shows staged, with `A` in
+its first column, is the same orphan, left by a run that died inside
+kb-commit after it staged the source and before it committed. Recover it
+before anything else in this step: `-Reconcile` refuses while a source is
+staged. If more than one file under `sources/` is staged, stop the whole run
+and report them, since one commit would carry both. Otherwise its pages are
+already staged, so write nothing and emit only its handle and a body, with
+no `-Path`:
+
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -SourceHandle '<handle>' -Message '<body>'
+
+The commit takes the index as it stands, which holds what the interrupted
+kb-commit staged, so another run's unstaged edits to the same files stay
+out of it. Then commit any other recovered work by `-Reconcile`, then
+finish any untracked orphan. If `-Reconcile` refuses on a staged path, stop
+the whole run and report the refusal, as step 4b does for a refused move.
+
+If the working tree carries recovered work with **no** untracked or staged
+file under `sources/`, those changes came from some other interrupted run, not
 an ingest: a modified `index.md`, `log.md`, or `wiki/` page, or an
 untracked `wiki/` page that a crashed query or lint run wrote but never
-committed. An untracked `wiki/` page is recovered work exactly as a
-modified one is, and `kb-commit.ps1` accepts `wiki/` paths, so name it in
-the commit like any other. Commit them alone, before touching the inbox,
-under a subject beginning `Reconcile:` that names the files recovered;
-never fold them into a source's commit. `kb-commit.ps1` stages the named
-paths from the working tree as they stand, so an ingest run that started on
-a dirty tree would otherwise commit another run's edits inside a source's
-own commit under that source's message. Count what you reconciled for the
-final report.
+committed. Commit them alone, before touching the inbox, and never fold
+them into a source's commit. Emit exactly:
+
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Reconcile -Message '<body>'
+
+Name no path on that line. `-Reconcile` reads the tree itself: it stages
+every modified or untracked `wiki/` page and a modified `index.md` or
+`log.md`, nothing under `sources/` or `inbox/`, and writes the subject
+`Reconcile: <n> files` with the staged paths listed in the body, so a
+hand-placed page's name reaches git from the file system and never from
+the line. `-Message` is the body that follows, a short note on what was
+recovered, in single quotes and holding no apostrophe. It refuses when
+nothing qualifies. `kb-commit.ps1` stages the paths from the working tree
+as they stand, so an ingest run that started on a dirty tree would
+otherwise commit another run's edits inside a source's own commit under
+that source's message. Count what you reconciled for the final report.
 
 ## 2. Snapshot the inbox
 
 List `inbox/` exactly once, at the start of the run, with
 `pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox`, which prints one
-line per file as `<bytes><tab><name>` and omits `.gitkeep`. That listing,
-names and sizes both, is the run's
-entire workload. The inbox is a live drop zone: a file arriving after the
+line per file as `<handle><tab><bytes><tab><name>` and omits `.gitkeep`. The
+handle is twelve hexadecimal digits the helper computed from the name; it is
+how step 4 moves and commits the file, so keep each line's handle with its
+name. That listing, handles, names and sizes, is the run's entire workload. The inbox is a live drop zone: a file arriving after the
 snapshot is not part of this run and waits for the next one. Never re-list
 the inbox later to pick up stragglers.
 
@@ -109,12 +151,12 @@ steps for it (index entry, log entry, its own commit). A source is never
 silently dropped and never left in the inbox to be retried forever.
 
 **b. Move it.** First look at the name itself. kb-move refuses a name
-containing `/`, `\`, `:` or an apostrophe (`'`), equal to `.` or `..`, or
-starting with a dash, and no call can change that outcome, so do not make
-one: skip this source and continue with the rest of the snapshot. It cannot
-be moved and cannot be auto-renamed, because kb-move takes the name only as
-it is and no other mover exists; leave it in the inbox, make no commit for
-it, and record in the report that a human must rename it.
+containing `/`, `\` or `:`, equal to `.` or `..`, or starting with a dash,
+and no call can change that outcome, so do not make one: skip this source
+and continue with the rest of the snapshot. It cannot be moved and cannot be
+auto-renamed, because kb-move takes the file only as it is and no other
+mover exists; leave it in the inbox, make no commit for it, and record in
+the report that a human must rename it.
 
 For every other name, check once more that no other run has started
 writing since step 1. Run exactly:
@@ -130,23 +172,25 @@ inbox. A line is usually another run's, but a page an earlier commit of this
 run failed to name also reads as live here and stops the run the same way;
 that costs one scheduled slot, and a later run recovers the page. If it prints nothing, emit exactly:
 
-    pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name '<file>'
+    pwsh -NoProfile -File ./.claude/kb-move.ps1 -Handle '<handle>'
 
-Put the name in single quotes, never double quotes and never bare. Single
-quotes pass the name to kb-move byte for byte: a `$`, a backtick or a space
-inside them is part of the name, where double quotes would expand the first
-two and no quotes would split on the third. The permission rule reads the
-command's leading text and is not reached by the quote. A name holding an
-apostrophe cannot be written inside single quotes: the apostrophe would end
-the quote and hand the rest of the name to the shell. That is why the check
-above skips such a name before any call. kb-move also refuses one, for a
-name that reaches it another way.
+`<handle>` is the first column of this file's line in the step 2 snapshot,
+in single quotes. The line carries nothing read from the file: the handle is
+twelve hexadecimal digits kb-status computed from the name, and kb-move
+recomputes it against the live inbox at the call and moves the one file
+whose handle matches, under its exact name, whatever that name holds. Never
+put the file's name on the line; `-Name` is for a person at the keyboard.
+The permission rule reads the command's leading text and is not reached by
+the quote.
 
-On success it prints the destination path, `sources/<file>`. If it refuses
-because `sources/<file>` already exists, the file was ingested by an
-earlier run and this is a duplicate drop: do not overwrite, make no commit
-for it, leave the inbox file where it is, note it for the final report,
-and move on to the next source. If it refuses for any other reason, stop
+On success it prints the destination path, `sources/<file>`. Read that line
+to learn where the file went, and never copy it onto a later command line;
+step g names the source by the same handle. If it refuses because
+`sources/<file>` already exists, the file was ingested by an earlier run and
+this is a duplicate drop: do not overwrite, make no commit for it, leave the
+inbox file where it is, note it for the final report, and move on to the
+next source. If it refuses for any other reason, among them a handle that
+matches no file because the file left the inbox after the snapshot, stop
 the run: emit step 5's push-only call so the commits this run already made
 reach origin, then report the refusal. Never work around a refusal.
 
@@ -180,20 +224,25 @@ heading per run: the run's first entry writes the heading, whether from
 step 1's reconcile or from this step, and each later source appends its
 bullet under the same heading.
 
-**g. Commit exactly this source's work, in one commit.** Name every path:
-the moved source, its summary page, every wiki page you revised,
-`index.md`, and `log.md`. Emit exactly:
+**g. Commit exactly this source's work, in one commit.** The source goes by
+its handle, the same one step b moved it by, and every other path is named:
+its summary page, every wiki page you revised, `index.md`, and `log.md`.
+Emit exactly:
 
-    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message '<msg>'
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -SourceHandle '<handle>' -Path '<pages>|index.md|log.md' -Message '<body>'
 
-`-Path` is one string, paths separated by a vertical bar with no spaces
-around it: `-Path 'sources/report.pdf|wiki/report-summary.md|index.md|log.md'`.
-Both values take single quotes, as the move does, so a `$` or a backtick in a
-path or a message reaches kb-commit unchanged. Neither may hold an
-apostrophe, which would end the quote before kb-commit runs, so write the
-message without one.
-The message subject begins `Ingest:` and names the source, then a blank line,
-then a short body listing the pages revised. Every operation prefixes its
+kb-commit resolves the handle against `sources/`, stages that file with the
+`-Path` entries, and writes the subject itself as `Ingest:` and the source's
+exact name, read from the file system. Never put `sources/<file>` in
+`-Path`: the helper refuses an entry under `sources/` beside a handle, and
+the name must not sit on the line. `-Path` is one string, paths separated by
+a vertical bar with no spaces around it:
+`-Path 'wiki/report-summary.md|index.md|log.md'`. `-Message` is the body
+alone: a short text listing the pages revised, with no subject line, since
+the helper writes the subject. Both values take single quotes, as the move
+does, so a `$` or a backtick in a path or the body reaches kb-commit
+unchanged. Neither may hold an apostrophe, which would end the quote before
+kb-commit runs, so write the body without one. Every operation prefixes its
 subject the same way (`Ingest:`, `Lint:`, `Query:`, `Reconcile:`), which is
 what makes each one findable on its own in `git log`.
 
@@ -201,7 +250,7 @@ what makes each one findable on its own in `git log`.
 
 The final source's kb-commit call, and only that one, carries `-Push`:
 
-    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message '<msg>' -Push
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -SourceHandle '<handle>' -Path '<pages>|index.md|log.md' -Message '<body>' -Push
 
 One push per run. A run that stopped at step 1 or step 4b because another run
 is live makes no push at all, whatever it committed: the rest of this step

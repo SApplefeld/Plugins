@@ -277,7 +277,7 @@ try {
     $liveCommand = 'pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Live'
     # Each skill's read count, and the two texts its last read must fall between.
     $skillChecks = @(
-        @('wiki-ingest', 2, '**b. Move it.**', 'pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name'),
+        @('wiki-ingest', 2, '**b. Move it.**', 'pwsh -NoProfile -File ./.claude/kb-move.ps1 -Handle'),
         @('wiki-lint', 2, '## The write pass', '## The lint report'),
         @('wiki-query', 1, '', ''),
         @('wiki-merge', 1, '## 2. Check', '## 3. Join')

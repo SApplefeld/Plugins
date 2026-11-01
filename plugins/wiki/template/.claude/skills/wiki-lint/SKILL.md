@@ -52,12 +52,20 @@ as follows.
 
 If `index.md`, `log.md`, or any
 `wiki/` page is modified, or a `wiki/` page is untracked, those are the
-recovered edits of a run that died before committing. An untracked `wiki/` page
-is recovered work exactly as a modified one is, and `kb-commit.ps1` accepts
-`wiki/` paths, so name it in the commit like any other. Commit them alone,
-before linting, under a subject beginning `Reconcile:` that names the files
-recovered, so this run's own commit holds only this run's findings; the checks
-then re-verify the whole wiki, catching any half-applied edit. If instead a file
+recovered edits of a run that died before committing. Commit them alone,
+before linting, so this run's own commit holds only this run's findings; the
+checks then re-verify the whole wiki, catching any half-applied edit. Emit
+exactly:
+
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Reconcile -Message '<body>'
+
+Name no path on that line. `-Reconcile` reads the tree itself: it stages every
+modified or untracked `wiki/` page and a modified `index.md` or `log.md`,
+nothing under `sources/` or `inbox/`, and writes the subject
+`Reconcile: <n> files` with the staged paths listed in the body, so a
+hand-placed page's name reaches git from the file system and never from the
+line. `-Message` is the body that follows, a short note on what the run recovered,
+in single quotes and holding no apostrophe. If instead a file
 under `sources/` is untracked, that is a crashed ingest, not lint's business:
 report it and leave it for the next ingest run. Lint never moves or commits a
 source.

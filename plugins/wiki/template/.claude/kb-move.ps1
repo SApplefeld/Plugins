@@ -4,11 +4,13 @@
 Moves one file from inbox/ to sources/ inside a knowledge base repo.
 
 .DESCRIPTION
-The single sanctioned path by which a file reaches sources/. It accepts a bare
-file name, validates that the name cannot escape inbox/ or overwrite an
-existing source, confirms both the origin and destination resolve to locations
-inside the repo and outside .git/ and .claude/, then sets the file's last-write
-time to now and moves it. A move keeps the time the file arrived with, so
+The single sanctioned path by which a file reaches sources/. It takes the file
+by its bare name or by the handle `kb-status.ps1 -What Inbox` prints for it,
+resolves a handle against the live inbox, validates that the name cannot escape
+inbox/ or overwrite an existing source, confirms both the origin and
+destination resolve to locations inside the repo and outside .git/ and
+.claude/, then sets the file's last-write time to now and moves it. A move
+keeps the time the file arrived with, so
 without the stamp a source dropped days ago would read as stale to
 `kb-status.ps1 -What Live` in the gap before the first page write; with it the
 arrival counts as a touch. sources/ is immutable, so an existing destination is
@@ -18,23 +20,46 @@ is written to stdout.
 .PARAMETER Name
 The bare file name of the item in inbox/ to move. It must be a plain leaf
 name: no directory separators, no drive markers, and not a relative-parent
-reference. It must hold no apostrophe. The skills pass the name inside a
+reference. It must hold no apostrophe: a name on a shell line sits inside a
 Bash single-quoted string, where an apostrophe ends the string before this
-script runs, so a skill checks the name first and never makes that call. The
-refusal here catches a name that reaches the script escaped or double-quoted.
+script runs, and the refusal here catches a name that reaches the script
+escaped or double-quoted. A file so named is moved by its handle instead. A
+person at the keyboard moves a file by name; the skills move by handle.
+Exactly one of -Name and -Handle is given.
+
+.PARAMETER Handle
+The handle of the item in inbox/ to move: the first 12 lowercase hexadecimal
+digits of the SHA-256 of the file name's UTF-8 bytes, as the first column of
+`kb-status.ps1 -What Inbox` prints it. The skills move by handle, so no byte
+of a hand-dropped name sits on their command line for the shell to re-read.
+The shape is checked first, then the inbox is listed as the status helper
+lists it and each file's handle recomputed. A handle matching no file, or more
+than one, is refused. The resolved name then passes every check -Name passes
+but the apostrophe refusal, which guards only a name typed on the line, so a
+name starting with a dash is refused by handle as by name. Exactly one of
+-Name and -Handle is given.
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name report.pdf
+
+.EXAMPLE
+pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox
+Prints `3f2a9c1d8e07<tab>1204<tab>report.pdf`. Then:
+pwsh -NoProfile -File ./.claude/kb-move.ps1 -Handle '3f2a9c1d8e07'
+Moves inbox/report.pdf to sources/report.pdf and prints `sources/report.pdf`.
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name report.pdf
 pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Live
 Prints `0<tab>sources/report.pdf` among any other live paths.
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Name')]
 param(
-    [Parameter(Mandatory)]
-    [string]$Name
+    [Parameter(Mandatory, ParameterSetName = 'Name')]
+    [string]$Name,
+
+    [Parameter(Mandatory, ParameterSetName = 'Handle')]
+    [string]$Handle
 )
 
 Set-StrictMode -Version Latest
@@ -48,8 +73,48 @@ function Stop-WithReason {
     exit 1
 }
 
+# The handle of a file name: the first 12 lowercase hexadecimal digits of the
+# SHA-256 digest of the name's UTF-8 bytes, with no byte-order mark, no case
+# folding and no Unicode normalisation. It depends on the name alone, so a
+# listing and a later call agree while the file keeps its name. The same
+# function sits in kb-status.ps1 and kb-commit.ps1 byte for byte.
+function Get-NameHandle {
+    param([string]$Name)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Name))
+    } finally {
+        $sha.Dispose()
+    }
+    return -join ($digest[0..5] | ForEach-Object { $_.ToString('x2') })
+}
+
 # The repo root is the parent of the .claude/ directory this script lives in.
 $repoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).ProviderPath
+
+# A handle resolves to a name against the live inbox, listed as kb-status.ps1
+# -What Inbox lists it: the inbox's own files, .gitkeep left out. The shape is
+# checked before the inbox is read, so a value that is not a handle is refused
+# as such whatever the tree holds. The resolved name then runs every check a
+# name given on the line runs but the apostrophe refusal, which guards only
+# the shell line a handle never puts the name on.
+if ($PSCmdlet.ParameterSetName -eq 'Handle') {
+    if ($Handle -cnotmatch '^[0-9a-f]{12}$') {
+        Stop-WithReason 'Handle must be twelve lowercase hexadecimal digits, as kb-status.ps1 -What Inbox prints it.'
+    }
+    $inboxDir = Join-Path $repoRoot 'inbox'
+    if (-not (Test-Path -LiteralPath $inboxDir -PathType Container)) {
+        Stop-WithReason 'inbox/ does not exist.'
+    }
+    $matched = @(Get-ChildItem -LiteralPath $inboxDir -File | Where-Object { ($_.Name -ne '.gitkeep') -and ((Get-NameHandle $_.Name) -ceq $Handle) })
+    if ($matched.Count -eq 0) {
+        Stop-WithReason "no file in inbox/ has the handle $Handle; the file has left the inbox since it was listed."
+    }
+    if ($matched.Count -gt 1) {
+        Stop-WithReason "more than one file in inbox/ has the handle $Handle; a person moves them by name."
+    }
+    $Name = $matched[0].Name
+}
 
 if ([string]::IsNullOrEmpty($Name)) {
     Stop-WithReason 'Name is required.'
@@ -63,12 +128,13 @@ if ($Name -eq '.' -or $Name -eq '..') {
 if ($Name.StartsWith('-')) {
     Stop-WithReason 'Name must not start with a dash.'
 }
-# A skill emits the name inside a Bash single-quoted string, the one form
-# that passes $, backticks and spaces byte for byte. An apostrophe ends that
-# string in Bash before this script runs, so on that route the skill's own
-# check, which skips such a name, is the guard. This refusal catches a name
-# that arrives escaped or double-quoted, and a person renames the file.
-if ($Name.Contains("'")) {
+# A name given on the line sits inside a Bash single-quoted string, the one
+# form that passes $, backticks and spaces byte for byte, and an apostrophe
+# ends that string in Bash before this script runs. This refusal catches a
+# name that arrives escaped or double-quoted, and a person renames the file.
+# A name resolved from a handle never sat on a shell line, so it is exempt:
+# the handle route is how a file whose name holds an apostrophe is moved.
+if ($PSCmdlet.ParameterSetName -eq 'Name' -and $Name.Contains("'")) {
     Stop-WithReason 'Name must not contain an apostrophe; rename the file.'
 }
 

@@ -23,7 +23,8 @@ under its own leaf name and adds nothing, since a copied file carries no front
 matter of ours; -Name, -DroppedBy and -Note are refused with it.
 
 A name, or a copied file's leaf name, is refused where it is empty or blank,
-holds a backslash, a slash or a colon, starts with a dot, holds a character the
+holds a backslash, a slash or a colon, starts with a dot, holds an apostrophe,
+holds a character the
 file system forbids in a name, has a stem before its first dot that is a Windows
 reserved device name (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9, in any
 case), ends in a dot or a space, or equals an entry already in the inbox under a
@@ -191,6 +192,10 @@ if ($fileName.IndexOfAny([char[]]@('\', '/', ':')) -ge 0) {
     Stop-WithReason "name '$fileName' holds a path separator or a colon"
 }
 if ($fileName.StartsWith('.', [StringComparison]::Ordinal)) { Stop-WithReason "name '$fileName' starts with a dot" }
+# A session's own name is the one a person types on a shell line, where an
+# apostrophe ends a single-quoted string, so a name holding one is refused here
+# as kb-move.ps1 -Name refuses it.
+if ($fileName.Contains("'")) { Stop-WithReason "name '$fileName' holds an apostrophe" }
 if ($fileName.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) {
     Stop-WithReason "name '$fileName' holds a character a file name may not hold"
 }

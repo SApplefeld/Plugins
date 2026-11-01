@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Stages an explicit set of paths, commits them, and optionally pushes.
+Stages an explicit set of paths, or a source named by handle, or the recovered
+pages it finds itself, commits them, and optionally pushes.
 
 .DESCRIPTION
 The single sanctioned path by which a knowledge base commits. It accepts only
@@ -12,6 +13,14 @@ with a wildcard, commits with hooks disabled and the message read from a file,
 and, with -Push, pushes the current branch to origin. Every git invocation is
 checked, so a failed git step stops the run loudly rather than reporting a
 success that did not happen.
+
+Three forms, one per parameter set. With -Path alone, the paths given are
+staged and -Message is the whole message: the form a person uses. With
+-SourceHandle, the source under sources/ whose name has that handle is staged
+with any -Path entries, and the helper writes the subject from the name it
+resolved. With -Reconcile, the helper reads the working tree itself and stages
+the recovered pages. The skills use the last two, so no byte of a hand-dropped
+or hand-placed file name sits on their command line for the shell to re-read.
 
 .PARAMETER Path
 The repo-relative paths to stage and commit, separated by a vertical bar. Each
@@ -24,12 +33,36 @@ the only form that survives that call. No entry may hold an apostrophe. The
 skills pass the string inside a Bash single-quoted string, where an apostrophe
 ends the string before this script runs. The skills check for one on some
 routes only, so the refusal here is a partial control: it catches one that
-arrives escaped or double-quoted.
+arrives escaped or double-quoted. Required on its own; optional beside
+-SourceHandle, where no entry may be under sources/, compared without regard
+to case, since the handle names the source; refused beside -Reconcile.
+
+.PARAMETER SourceHandle
+The handle of the source under sources/ to stage: the first 12 lowercase
+hexadecimal digits of the SHA-256 of the file name's UTF-8 bytes, the value
+`kb-status.ps1 -What Inbox` printed for the file before kb-move.ps1 moved it,
+or the value `kb-status.ps1 -What Sources` prints for a file already there.
+The shape is checked first, then the files under sources/ are listed and each
+one's handle recomputed. A handle matching no file, or more than one, is
+refused. The resolved file is staged after the -Path entries, and the message
+is the subject `Ingest: <resolved name>`, a blank line, then -Message as the
+body, whatever that body opens with.
+
+.PARAMETER Reconcile
+Stage the recovered work of an interrupted run, read from `git status` by this
+helper: every modified or untracked file under wiki/, and a modified index.md
+or log.md. Nothing under sources/ or inbox/ is staged, and a tree with nothing
+that qualifies is refused. A path outside that set already staged is refused
+too, a source an interrupted commit staged among them, which is committed
+first by -SourceHandle. The message is the subject `Reconcile: <n> files`,
+a blank line, the staged paths one per line, a blank line, then -Message as
+the body. Takes no -Path.
 
 .PARAMETER Message
-The commit message. It may hold no apostrophe, for the same reason as -Path.
-Control characters other than newline are stripped and the text is truncated
-to 2000 characters before use.
+The commit message, or with -SourceHandle or -Reconcile its body. It may hold
+no apostrophe, for the same reason as -Path. Control characters other than
+newline are stripped, and the whole message, subject and path list included,
+is truncated to 2000 characters before use.
 
 .PARAMETER Push
 When set, push the current branch to the origin remote after committing. The
@@ -49,11 +82,28 @@ naming the bound. A process git started that outlives git is not reached.
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path 'sources/report.pdf|wiki/report-summary.md|index.md|log.md' -Message 'Ingest report.pdf' -Push
+
+.EXAMPLE
+pwsh -NoProfile -File ./.claude/kb-commit.ps1 -SourceHandle '3f2a9c1d8e07' -Path 'wiki/report-summary.md|index.md|log.md' -Message 'Revised: acme-corp, pricing-model' -Push
+Stages sources/report.pdf, the file whose handle that is, with the three
+paths, under the subject `Ingest: report.pdf` and the body given.
+
+.EXAMPLE
+pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Reconcile -Message 'Recovered from an interrupted lint run.'
+Stages the modified and untracked wiki/ pages and a modified index.md or
+log.md, under the subject `Reconcile: <n> files` and a body listing them.
 #>
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Path')]
 param(
-    [Parameter(Mandatory)]
+    [Parameter(Mandatory, ParameterSetName = 'Path')]
+    [Parameter(ParameterSetName = 'SourceHandle')]
     [string]$Path,
+
+    [Parameter(Mandatory, ParameterSetName = 'SourceHandle')]
+    [string]$SourceHandle,
+
+    [Parameter(Mandatory, ParameterSetName = 'Reconcile')]
+    [switch]$Reconcile,
 
     [Parameter(Mandatory)]
     [string]$Message,
@@ -74,6 +124,22 @@ function Stop-WithReason {
     param([string]$Reason)
     [Console]::Error.WriteLine("kb-commit: $Reason")
     exit 1
+}
+
+# The handle of a file name: the first 12 lowercase hexadecimal digits of the
+# SHA-256 digest of the name's UTF-8 bytes, with no byte-order mark, no case
+# folding and no Unicode normalisation. It depends on the name alone, so a
+# listing and a later call agree while the file keeps its name. The same
+# function sits in kb-status.ps1 and kb-move.ps1 byte for byte.
+function Get-NameHandle {
+    param([string]$Name)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Name))
+    } finally {
+        $sha.Dispose()
+    }
+    return -join ($digest[0..5] | ForEach-Object { $_.ToString('x2') })
 }
 
 # Runs git and stops the run if it reports failure.
@@ -190,20 +256,60 @@ function Invoke-BoundedPush {
 # The repo root is the parent of the .claude/ directory this script lives in.
 $repoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).ProviderPath
 
-$paths = @($Path -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
-if ($paths.Count -eq 0) {
+$sourceHandleSet = ($PSCmdlet.ParameterSetName -eq 'SourceHandle')
+$reconcileSet    = ($PSCmdlet.ParameterSetName -eq 'Reconcile')
+
+$paths = @()
+if ($PSBoundParameters.ContainsKey('Path')) {
+    $paths = @($Path -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+}
+if ($paths.Count -eq 0 -and -not $sourceHandleSet -and -not $reconcileSet) {
     Stop-WithReason 'at least one path is required.'
 }
 
-foreach ($entry in $paths) {
+# A source handle resolves to a name against the files under sources/, as
+# kb-status.ps1 -What Inbox listed the file before kb-move.ps1 moved it. The
+# shape is checked before the directory is read, so a value that is not a
+# handle is refused as such whatever the tree holds.
+$resolvedSource = $null
+if ($sourceHandleSet) {
+    if ($SourceHandle -cnotmatch '^[0-9a-f]{12}$') {
+        Stop-WithReason 'SourceHandle must be twelve lowercase hexadecimal digits, as kb-status.ps1 -What Inbox or -What Sources prints it.'
+    }
+    $sourcesDir = Join-Path $repoRoot 'sources'
+    if (-not (Test-Path -LiteralPath $sourcesDir -PathType Container)) {
+        Stop-WithReason 'sources/ does not exist.'
+    }
+    $matched = @(Get-ChildItem -LiteralPath $sourcesDir -File | Where-Object { ($_.Name -ne '.gitkeep') -and ((Get-NameHandle $_.Name) -ceq $SourceHandle) })
+    if ($matched.Count -eq 0) {
+        Stop-WithReason "no file under sources/ has the handle $SourceHandle; kb-move.ps1 has not moved it there."
+    }
+    if ($matched.Count -gt 1) {
+        Stop-WithReason "more than one file under sources/ has the handle $SourceHandle; a person commits them by path."
+    }
+    $resolvedSource = $matched[0].Name
+}
+
+# Every staged path passes these checks: the caller's -Path entries, and the
+# paths the helper builds from sources/ and from git status. The apostrophe
+# rule and the sources/ rule guard the command line, so they hold for the
+# caller's entries only.
+function Assert-PathEntry {
+    param([string]$entry, [bool]$fromHelper)
     if ([string]::IsNullOrWhiteSpace($entry)) {
         Stop-WithReason 'a path entry is empty.'
     }
     if ([System.IO.Path]::IsPathRooted($entry)) {
         Stop-WithReason "path must be repo-relative, not rooted: $entry"
     }
-    if ($entry -like '*..*') {
+    # A name the helper read from a listing may hold two dots in a row; only
+    # a '..' segment leaves the folder. The caller's entries keep the stricter
+    # substring rule.
+    if ((-not $fromHelper) -and ($entry -like '*..*')) {
         Stop-WithReason "path must not contain '..': $entry"
+    }
+    if ($fromHelper -and ($entry -match '(^|[/\\])\.\.([/\\]|$)')) {
+        Stop-WithReason "path must not contain a '..' segment: $entry"
     }
     if ($entry.Contains(':')) {
         Stop-WithReason "path must not contain ':': $entry"
@@ -213,11 +319,17 @@ foreach ($entry in $paths) {
     # ends that string in Bash before this script runs, so on that route the
     # ingest and merge skills keep one out of the call. This refusal catches
     # one that arrives escaped or double-quoted.
-    if ($entry.Contains("'")) {
+    if ((-not $fromHelper) -and $entry.Contains("'")) {
         Stop-WithReason "path must not contain an apostrophe: $entry"
     }
 
     $normalized = $entry -replace '\\', '/'
+    # With a handle the helper names the source itself, so a -Path entry under
+    # sources/ would put a source's name on the line after all, or stage a
+    # second source into this source's commit.
+    if ((-not $fromHelper) -and $sourceHandleSet -and ($normalized -like 'sources/*')) {
+        Stop-WithReason "path under sources/ is not taken with -SourceHandle; the handle names the source: $entry"
+    }
     $inScope = ($normalized -eq 'index.md') -or
                ($normalized -eq 'log.md') -or
                ($normalized -like 'sources/*') -or
@@ -232,6 +344,90 @@ foreach ($entry in $paths) {
     }
 }
 
+foreach ($entry in $paths) {
+    Assert-PathEntry $entry $false
+}
+
+# The resolved source joins the staged set after the caller's entries: its
+# name came from the directory listing, never from the line.
+if ($sourceHandleSet) {
+    Assert-PathEntry "sources/$resolvedSource" $true
+    $paths += "sources/$resolvedSource"
+}
+
+# With -Reconcile the staged set is read from git status: every modified,
+# staged-as-new or untracked file under wiki/, and a modified or staged-as-new
+# index.md or log.md. A page staged as new is what an interrupted commit leaves. -z keeps every
+# path unquoted and unescaped, and --untracked-files=all lists an untracked
+# file by its own path. The output is read as UTF-8 so a non-ASCII path
+# resolves on disk; a host with no console to set keeps its default encoding,
+# and the console's encoding is put back afterward.
+if ($reconcileSet) {
+    $savedEncoding = $null
+    try {
+        $savedEncoding = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    } catch { }
+    try {
+        $status = & git -C $repoRoot status --porcelain -z --untracked-files=all
+        $gitExit = $LASTEXITCODE
+        $alreadyStaged = & git -C $repoRoot diff --cached --name-only -z
+        $stagedExit = $LASTEXITCODE
+    } finally {
+        if ($null -ne $savedEncoding) {
+            try { [Console]::OutputEncoding = $savedEncoding } catch { }
+        }
+    }
+    if ($gitExit -ne 0) {
+        Stop-WithReason 'git status --porcelain failed.'
+    }
+    if ($stagedExit -ne 0) {
+        Stop-WithReason 'git diff --cached failed.'
+    }
+
+    # Each entry is `XY path`. A rename or copy is followed by one more entry
+    # holding its origin, and both are skipped: a rename is already staged.
+    $entries = @((@($status) -join "`n") -split "`0" | Where-Object { $_ -ne '' })
+    $recovered = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $entry = $entries[$i]
+        if ($entry.Length -lt 4) {
+            continue
+        }
+        $xy = $entry.Substring(0, 2)
+        if ($xy -cmatch '[RC]') {
+            $i++
+            continue
+        }
+        $relative = $entry.Substring(3)
+        $modified  = $xy.Contains('M') -or $xy.StartsWith('A')
+        $untracked = ($xy -eq '??')
+        $qualifies = ($relative.StartsWith('wiki/', [System.StringComparison]::Ordinal) -and ($modified -or $untracked)) -or
+                     ((($relative -eq 'index.md') -or ($relative -eq 'log.md')) -and $modified)
+        if (-not $qualifies) {
+            continue
+        }
+        # A path deleted from the working tree is not recovered work.
+        if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $relative) -PathType Leaf)) {
+            continue
+        }
+        $recovered.Add($relative)
+    }
+    if ($recovered.Count -eq 0) {
+        Stop-WithReason 'nothing to reconcile: no modified or untracked file under wiki/, and no modified index.md or log.md.'
+    }
+    # The commit takes the whole index, so a path staged before this call
+    # would ride in uncounted. It is refused rather than committed.
+    $outside = @((@($alreadyStaged) -join "`n") -split "`0" | Where-Object { ($_ -ne '') -and (-not $recovered.Contains($_)) })
+    if ($outside.Count -gt 0) {
+        Stop-WithReason "a path outside the reconcile set is already staged ($($outside.Count) in all); a person commits or unstages it first: $($outside[0])"
+    }
+    foreach ($relative in $recovered) {
+        Assert-PathEntry $relative $true
+    }
+    $paths = @($recovered)
+}
+
 if ([string]::IsNullOrWhiteSpace($Message)) {
     Stop-WithReason 'commit message is empty.'
 }
@@ -239,8 +435,31 @@ if ($Message.Contains("'")) {
     Stop-WithReason 'commit message must not contain an apostrophe.'
 }
 
+# The helper writes the subject where it resolved the name itself, so the
+# name reaches git from the file system and never from the line. -Message is
+# the body, whatever it opens with.
+$fullMessage = $Message
+if ($sourceHandleSet) {
+    $fullMessage = "Ingest: $resolvedSource`n`n$Message"
+} elseif ($reconcileSet) {
+    $listed = New-Object System.Collections.Generic.List[string]
+    $budget = 1000
+    foreach ($p in $paths) {
+        if ($p.Length + 1 -gt $budget) {
+            break
+        }
+        $listed.Add($p)
+        $budget -= $p.Length + 1
+    }
+    $more = ''
+    if ($listed.Count -lt $paths.Count) {
+        $more = "`n... and $($paths.Count - $listed.Count) more"
+    }
+    $fullMessage = "Reconcile: $($paths.Count) files`n`n$($listed -join "`n")$more`n`n$Message"
+}
+
 # Strip ASCII control characters other than newline, then cap the length.
-$cleanMessage = $Message -replace '[\x00-\x09\x0B-\x1F\x7F]', ''
+$cleanMessage = $fullMessage -replace '[\x00-\x09\x0B-\x1F\x7F]', ''
 if ($cleanMessage.Length -gt 2000) {
     $cleanMessage = $cleanMessage.Substring(0, 2000)
 }
@@ -269,7 +488,14 @@ if (-not $PSCmdlet.ShouldProcess($repoRoot, 'Stage, commit, and optionally push'
     exit 0
 }
 
-$addArgs = @('-C', $repoRoot, 'add', '--') + $paths
+# --literal-pathspecs on the handle and reconcile routes: a name the helper
+# read from disk holding [ ] or * stages that file alone, never a sibling the
+# pattern would match. A person's plain -Path stages as it always has.
+if ($sourceHandleSet -or $reconcileSet) {
+    $addArgs = @('-C', $repoRoot, '--literal-pathspecs', 'add', '--') + $paths
+} else {
+    $addArgs = @('-C', $repoRoot, 'add', '--') + $paths
+}
 Invoke-GitOrStop -Arguments $addArgs -FailReason 'git add failed.'
 
 & git -C $repoRoot diff --cached --quiet
@@ -288,7 +514,9 @@ try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($messageFile, $cleanMessage, $utf8NoBom)
 
-        $commitArgs = @('-C', $repoRoot, '-c', "core.hooksPath=$hooksDir", 'commit', '-F', $messageFile)
+        # The commit names no pathspec, so the flag here guards nothing; it
+        # takes the whole index.
+        $commitArgs = @('-C', $repoRoot, '-c', "core.hooksPath=$hooksDir", '--literal-pathspecs', 'commit', '-F', $messageFile)
         Invoke-GitOrStop -Arguments $commitArgs -FailReason 'git commit failed.'
     } else {
         Write-Output 'nothing to commit'

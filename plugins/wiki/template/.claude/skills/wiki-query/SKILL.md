@@ -95,12 +95,20 @@ and that they can ask again once that run finishes. The answer itself stands.
 If it prints nothing, every dirty path outside `inbox/` is an older leftover.
 Files waiting in `inbox/` are pending drops, not leftovers: leave them. If the
 tree carries recovered work, meaning a modified `index.md`, `log.md` or
-`wiki/` page, or an untracked `wiki/` page, commit it alone first, with a
-message beginning `Reconcile:` that names the files, and only then file the
-answer. An untracked `wiki/` page is recovered work exactly
-as a modified one is, and `kb-commit.ps1` accepts `wiki/` paths, so name it in
-the commit like any other. An untracked file under `sources/` is a crashed
-ingest, not yours: report it, leave it, and let the next ingest run reconcile it.
+`wiki/` page, or an untracked `wiki/` page, commit it alone first, and only
+then file the answer. Emit exactly:
+
+    pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Reconcile -Message '<body>'
+
+Name no path on that line. `-Reconcile` reads the tree itself: it stages every
+modified or untracked `wiki/` page and a modified `index.md` or `log.md`,
+nothing under `sources/` or `inbox/`, and writes the subject
+`Reconcile: <n> files` with the staged paths listed in the body, so a
+hand-placed page's name reaches git from the file system and never from the
+line. `-Message` is the body that follows, a short note on what the run recovered,
+in single quotes and holding no apostrophe. An untracked file under `sources/`
+is a crashed ingest, not yours: report it, leave it, and let the next ingest
+run reconcile it.
 
 Then, in one commit:
 

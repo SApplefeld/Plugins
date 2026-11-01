@@ -17,7 +17,7 @@ preserve.
 
 The engine repo (this one) contains the `template/` tree, nine scripts at
 its root, four plugin-level skills separate from the four vendored into each
-KB, a `SessionStart` hook, ten tests, a plugin
+KB, a `SessionStart` hook, eleven tests, a plugin
 manifest, and this `docs/` library. `new-kb.ps1` copies the template.
 `kb-create.ps1` creates a KB, `kb-trust.ps1` trusts it and `kb-registry.ps1`
 lists it. `kb-drop.ps1` writes one file into a listed KB's `inbox/`, the only
@@ -38,6 +38,9 @@ a throwaway repository and KB. `tests/Test-ReconcileGate.ps1` drives the status
 helper's liveness read and the move helper's stamp against a throwaway KB, and
 checks that the writing skills emit the liveness read. `tests/Test-KbRun.ps1`
 drives the run wrapper against a stub in place of `claude`.
+`tests/Test-KbMove.ps1` drives the handle routes of the status, move and
+commit helpers and `kb-commit.ps1 -Reconcile` against a throwaway KB, and
+checks that the three helpers' copies of the handle function are byte-equal.
 `tests/Test-KbWalk.ps1` drives the walker over throwaway KBs with the same kind
 of stub, and `tests/Test-WalkLauncher.ps1` drives the launcher against a
 temporary install and the registrar under `-WhatIf`. `tests/Test-KbDrop.ps1`
@@ -82,8 +85,8 @@ machinery:
   .claude/
     engine.json   the engine version this KB was copied from
     settings.json the permission allowlist
-    kb-move.ps1   the only sanctioned inbox-to-sources move
-    kb-commit.ps1 the only sanctioned stage/commit/push
+    kb-move.ps1   the only sanctioned inbox-to-sources move, by handle
+    kb-commit.ps1 the only sanctioned stage/commit/push, a source by -SourceHandle
     kb-status.ps1 the read-only git status reads the skills need
     kb-run.ps1    the run wrapper holding one lock per KB; granted to no agent
     feed-inbox.ps1 the repository feeder; granted to no agent
@@ -196,11 +199,17 @@ deferred.
 driven by `git status --porcelain`, because `kb-commit.ps1` stages the paths it
 is given from the working tree as they stand. An interrupted run leaves dirty
 files that would otherwise ride into the next run's commit under the wrong
-subject. The reconcile step commits recovered edits alone first: an ingest run
-folds a crashed source's dirty edits into that orphan source's own commit only
-when an untracked `sources/` file actually exists, and otherwise commits stray
-edits under a `Reconcile:` subject before touching the inbox; lint and query
-each commit stray edits under `Reconcile:` before doing their own work. The merge skill has no reconcile step: it runs on the tree a conflicting pull left mid-merge, and its one commit completes that merge.
+subject. The reconcile step commits recovered edits alone first, through
+`kb-commit.ps1 -Reconcile`, which reads the tree itself and names no path on
+the line. An ingest run first recovers a source an interrupted commit left
+staged, committing it by `-SourceHandle` with no `-Path`, since its pages are
+already staged. It stops the whole run when more than one source is staged,
+or when `-Reconcile` refuses on a staged path. It then commits the other
+recovered edits under a `Reconcile:` subject, and only then finishes any
+untracked orphan source, whose handle it reads from
+`kb-status.ps1 -What Sources`. All of this runs before the inbox is touched.
+Lint and query each commit stray edits by `-Reconcile` before doing their own
+work. The merge skill has no reconcile step: it runs on the tree a conflicting pull left mid-merge, and its one commit completes that merge.
 
 The reconcile step reads liveness before it recovers anything. Where the tree
 is dirty, the skill runs `kb-status.ps1 -What Live`, which lists each dirty path
@@ -296,18 +305,28 @@ missing allow rule stalls an unattended run and a missing deny rule lets it do
 damage.
 
 **Three vetted helpers are the agent's only git and move operations.** `kb-move.ps1` is the
-only path into `sources/`: it takes a bare inbox file name, refuses a name
+only path into `sources/`: it takes the handle `kb-status.ps1 -What Inbox`
+prints beside an inbox file, which it resolves against the inbox at the call,
+or a bare inbox file name from a person at the keyboard. It refuses a handle
+matching no file or more than one, refuses a name
 containing a separator or leading dash, refuses to overwrite an existing source
 (so a re-dropped file is a refusal, not a silent loss), confirms the resolved
 paths stay inside the repo and clear of `.git/` and `.claude/`, then sets the
 file's last-write time to now and moves it. `kb-commit.ps1` is the only path
 that commits: it accepts only
 bar-delimited repo-relative paths under `sources/` or `wiki/` or exactly
-`index.md`/`log.md`, stages them explicitly (never a wildcard), commits with an
+`index.md`/`log.md`, a source by `-SourceHandle`, whose `Ingest:` subject it
+writes from the name on disk, or `-Reconcile`, which stages the recovered pages
+it reads from git status and refuses while a path outside that set is already
+staged. It stages them explicitly (never a wildcard), commits with an
 empty `core.hooksPath` so a repo-planted git hook cannot execute, and pushes
-only to a remote named `origin`, only with `-Push`. `kb-status.ps1` is the only
+only to a remote named `origin`, only with `-Push`. On the `-SourceHandle` and
+`-Reconcile` routes it hands git `--literal-pathspecs`, so a name holding `[`
+or `*` stages that file alone, while a plain `-Path` reaches git as a pathspec.
+`kb-status.ps1` is the only
 git read: it reports the working tree's porcelain status, unpushed commits, a
-page's last-change date, the inbox listing, or the dirty paths written within
+page's last-change date, the inbox or sources listing with a handle beside
+each file, or the dirty paths written within
 the last thirty minutes, and writes nothing. The
 allowlist grants exactly those three `pwsh -NoProfile -File` invocations and
 denies all of raw git (`Bash(git:*)`), plus raw `mv`, `rm`, `cp`, `curl`,
