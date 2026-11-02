@@ -725,7 +725,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 2b6e936 2026-09-02, the memory-recognition-reach plan that gave the add verbs a birth-trigger flag.
 - verdict: retire
 - landed: d2c43f1 section 22
-- reason: restated where the triggers section owns it, "`--trigger <type>:<pattern>` on the `add-type` or `add-operator` that creates one.".
+- reason: restated where the triggers section owns it, "`--trigger <type>:<pattern>` on the `add-type`, `add-operator` or `put` that creates one.".
 - proposed: (via A113) Cut the add-type row's --trigger passage to one clause ("--trigger declares the record's triggers at birth under the triggers verb's grammar; the triggers section owns the door").
 - baseline-test: yes
 - passage: `--trigger` declares triggers at birth under the `triggers` verb's grammar.
@@ -791,7 +791,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 6cbb24a 2026-08-03, which added the machine scope to the operator tier. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names `--replace` as the other way the three fields are set; the verdict before it was keep.
 - verdict: rewrite
 - landed: 5e0e049e section 3
-- reason: The scope is set at creation or by a `--replace` that states the record whole, and `--update` carrying it is refused, so a fact scoped wrong costs a whole rewrite; the decision has to be made before the call.
+- reason: The scope is set at creation or by a `--replace` that states every scalar, and `--update` carrying it is refused, so a fact scoped wrong costs a whole rewrite; the decision has to be made before the call.
 - passage: `--machine` scopes the fact to one box.
 - passage: Like `--tag` and `--supersedes`, it is set at creation or by `--replace`, and `--update` carrying any of them is refused.
 
@@ -3580,7 +3580,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: Line 38 bars copying out of `get`; this names the tool to use instead, and both are needed (A170, A171). Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: To correct a project record, read it with `memq get` and write it again with `memq put --replace`, passing its tags again, since a replace clears every list it does not name.
+- passage: To correct a project record, read it with `memq get` and write it again with `memq put --replace`, which keeps every list the call does not name.
 
 ### c3.C082
 - key: Do the same read on a `not checked` line and fix what its cause names: the record's frontmatter block, the project's root, or the record's file.
@@ -3599,7 +3599,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: Distinct from c3.C087, which is the re-anchor after a correction; the idle-clock consequence lives here now that c3.C054 retires (A172, A173). Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: Then re-run `memq anchor` and `memq triggers`.
+- passage: Re-run `memq anchor` where the correction moved the record's files.
 
 ### c3.C084
 - key: Correct a record by rewriting its file with the Write tool and carrying its whole frontmatter block across: `anchors:`, `tags:`, `created:`, `pinned:`, `machine:`, `supersedes:` and `triggers:`.
@@ -3609,7 +3609,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: The paragraph binds the mechanics to the project tier, so it never meets the operator tier's Write bar; each dropped field loses its effect silently and nothing detects the drop (A174). Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: To correct a project record, read it with `memq get` and write it again with `memq put --replace`, passing its tags again, since a replace clears every list it does not name.
+- passage: To correct a project record, read it with `memq get` and write it again with `memq put --replace`, which keeps every list the call does not name.
 
 ### c3.C085
 - key: Expect a rewrite that drops the `anchors:` line to silence the drift instead of settling it, since a Write replaces the file.
@@ -4174,7 +4174,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - reason: The doors survive inside c4.C019's rule sentence; the calling convention around them is each verb's row (29 and 30), which every verb in the document carries as its contract.
 - proposed: (via A030) Reduce line 219 to: write the field through the CLI, never by hand, at either door (`memq triggers` on an existing record, `--trigger` on the add verb that creates one); `--replace` is how a wrong declaration is corrected, and on a shared tier it takes `--confirm-shared` since a replace states the line whole; a write that adds an entry moves the record's mtime, which on a shared tier postpones archival for every project and machine, so declare a trigger there because the recognition is worth having, never to keep a record alive; read stderr for whether a replace corrected a line or wrote a record's first. Point at the row for flags, tiers and refusals.
 - baseline-test: yes
-- passage: `memq triggers <name> <type>:<pattern>...` on a record that exists, or `--trigger <type>:<pattern>` on the `add-type` or `add-operator` that creates one.
+- passage: `memq triggers <name> <type>:<pattern>...` on a record that exists, or `--trigger <type>:<pattern>` on the `add-type`, `add-operator` or `put` that creates one.
 
 ### c4.C021
 - key: Expect the verb to splice a single line into the record, leaving every other byte, the body most of all, exactly where it was.
@@ -6311,7 +6311,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: rewrite
 - landed: e09d31a8 section 5
 - reason: A caller that spawns memq cannot reproduce the resolver's legs, a store pin, a worktree's main checkout and a transcript filing, so a path it derived itself files records where no reader looks. The index is what session start prints, so a record written without a line ranks and publishes on its frontmatter description (D001) while staying out of every session's opening text. The caller owns its names, which is why a duplicate is refused rather than updated and why there is no neighbours block. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: `memq put <name> "<description>" (--body "..."\|--body-file <path>) [--tag t]... [--author <a>] [--replace]` | Write one project-tier record, carrying the checkout's space; `--replace` overwrites an existing name, restating every field, the space included, but the pin, which it keeps.
+- passage: `memq put <name> "<description>" (--body "..."\|--body-file <path>) [--tag t]... [--trigger <type>:<pattern>]... [--author <a>] [--replace]` | Write one project-tier record, carrying the checkout's space; `--replace` overwrites an existing name, restating every scalar but the pin and keeping every list the call does not name.
 
 ### D005
 - key: Read `memq judged` as the fleet block's judged lines for a spawning caller, not as a digest a session reads at effort start.
@@ -6348,7 +6348,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - source: plugins/grimoire/skills/memory-system/SKILL.md:244, the Search Before Writing section
 - provenance: the memory-in-sql plan's write-door paragraph and its section 5, which retired the Write tool as the project tier's door.
 - verdict: keep
-- reason: A name the store already holds is refused unless `--replace` is given, so a correction is an explicit act and a second session cannot overwrite a record by reusing its name. A replace states the record whole and clears every list it does not name, which is why the correction text names the tags and the anchor and trigger verbs. `put` prints no neighbours block, so the search before a write is the session's own.
+- reason: A name the store already holds is refused unless `--replace` is given, so a correction is an explicit act and a second session cannot overwrite a record by reusing its name. A replace keeps every list the call does not name, so a correction keeps the triggers that surfaced the record. `put` prints no neighbours block, so the search before a write is the session's own.
 - passage: A project-tier memory is written with `memq put`, and a correction with `memq put --replace`.
 
 ### E003
@@ -6462,7 +6462,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12, on the operator's ruling of 2026-10-12, which names repair, supersede and archive for shared-tier records and not delete.
 - verdict: keep
 - landed: 05d1edf6 section 3
-- reason: The ruling grants repair, supersede and archive for shared-tier records and not delete, so a shared delete stays the operator's, and a credential is a delete plus a rotation whatever else is true (c3.C030's paragraph). Inside a pair the partner already holds the current fact, so archiving the redundant member loses nothing and needs no pointer. Superseding within a pair is a `--replace` rewrite of the newer member, which clears every field a `--replace` clears: its anchors, an existing pointer and its author, and its triggers and machine scope unless restated (memq.js, the add verbs' field composition). So the routine step does not supersede. `--archive-operator` refuses without `--confirm-shared`, so the archive points at that paragraph's rules. The project tier is the session's own, so `forget` stays open there.
+- reason: The ruling grants repair, supersede and archive for shared-tier records and not delete, so a shared delete stays the operator's, and a credential is a delete plus a rotation whatever else is true (c3.C030's paragraph). Inside a pair the partner already holds the current fact, so archiving the redundant member loses nothing and needs no pointer. Superseding within a pair is a `--replace` rewrite of the newer member, which restates its author and clears its machine scope unless restated (memq.js, the add verbs' field composition). So the routine step does not supersede. `--archive-operator` refuses without `--confirm-shared`, so the archive points at that paragraph's rules. The project tier is the session's own, so `forget` stays open there.
 - passage: In a shared-tier pair, repair a member with the right fact and poor wording. Archive the member whose fact its partner already holds, with `decay-prune --archive-operator|--archive-type <name>` under the `--confirm-shared` rules below, needing no pointer. A never-true shared record goes to the operator, and a credential-bearing one at once for delete and rotation. A project-tier pair takes `forget`, `put --replace` or `decay-prune --archive`.
 
 ### N005

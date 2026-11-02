@@ -31,6 +31,7 @@
 //                     [(--body "..."|--body-file "<path>") --confirm-shared]
 //   memq put <name> "<description>" (--body "..."|--body-file "<path>")
 //            [--tag t]... [--author <a>]
+//            [--trigger <type>:<pattern>]...
 //            (inside a run it lands in memory/pending/<run-id>/)
 //   memq forget <name> --confirm
 //   memq delete-type <type> <name> --confirm-shared
@@ -2602,7 +2603,9 @@ function boundedFreeText(value, cap, label) {
 // keystroke, and the repair for it restores nothing but what the author comes
 // back and re-types. Refusal at compose time, with the actual length beside
 // the cap, is the one report the author can act on in the same breath.
-// Returns the sanitized text, or null after the usage error.
+// Returns the sanitized text, or null after the refusal, which is refuseValue's
+// one line with no usage listing, since the value is at fault and not the
+// command's shape.
 function sharedFreeText(value, cap, label) {
     // boundedFreeText's rule, for boundedFreeText's reason: a value bound for
     // disk takes the charset rule without the channel's elision.
@@ -2611,7 +2614,7 @@ function sharedFreeText(value, cap, label) {
         process.stderr.write('memq: ' + label + ' reduced to printable ASCII without double quotes\n');
     }
     if (stripped.length > cap) {
-        usage(label + ' is ' + stripped.length + ' characters; the cap is ' + cap
+        refuseValue(label + ' is ' + stripped.length + ' characters; the cap is ' + cap
             + ', and shared-tier text over it is refused rather than silently cut. Shorten it and rerun');
         return null;
     }
@@ -5177,6 +5180,7 @@ function usage(problem) {
         'usage: memq log <key> pass|fail "<summary>" [--tag t]... [--detail "..."]\n'
         + '       memq find <term> [--tag t] [--memories|--all] [--archived]\n'
         + '       memq get <key|name> [--type|--type=<type>|--operator] [--no-stamp]\n'
+        + '                (exit 1 where no tier holds the name)\n'
         + '       memq recall [--situation "<text>"]\n'
         + '       memq judged --situation "<text>" [--tag t] [--limit <n>]\n'
         + '       memq recall-candidates --situation "<text>" [--subject <word-or-path>]...\n'
@@ -5204,6 +5208,7 @@ function usage(problem) {
         + '                         [(--body "..."|--body-file "<path>") --confirm-shared]\n'
         + '       memq put <name> "<description>" (--body "..."|--body-file "<path>")\n'
         + '                [--tag t]... [--author <a>] [--replace]\n'
+        + '                [--trigger <type>:<pattern>]...\n'
         + '                (inside a run it lands in memory/pending/<run-id>/)\n'
         + '       memq forget <name> --confirm\n'
         + '       memq delete-type <type> <name> --confirm-shared\n'
@@ -5225,6 +5230,16 @@ function usage(problem) {
         + '       memq jev-calibration [--since <n>d]\n'
         + '       memq meter-drain\n'
         + '                (sends the persona module\'s meter folder to the memory database)\n');
+    process.exitCode = 1;
+}
+
+// A refusal of a value's own content, a description over its cap or a body
+// holding no text: the one line naming the field, and exit 1, with no listing.
+// The command's shape was right, so the listing tells the caller nothing and
+// buries the line that does. A fault in the shape, an unknown option, a missing
+// value or a wrong argument count, keeps usage().
+function refuseValue(problem) {
+    process.stderr.write('memq: ' + problem + '\n');
     process.exitCode = 1;
 }
 
@@ -8118,8 +8133,10 @@ function rowAliveMs(row) {
 // another supersedes answers here in full with no note naming its successor,
 // because the row carries what it supersedes and not what supersedes it. A
 // hit from a run's pending directory appends a read stamp to that directory's
-// usage.jsonl. Nothing missing is an error: only
-// argument/usage errors exit nonzero.
+// usage.jsonl. A name no tier holds prints `nothing named` on stderr,
+// nothing on stdout, and exits 1, so a caller keying on the exit code reads a
+// miss as a miss. A stand-down that asks no tier, the network-share hoist and
+// a store root the database does not serve, exits 0, since it read nothing.
 //
 // `--no-stamp` serves the same output and writes no read stamp and no judged
 // pointer outcome, for a caller fetching a body for its own records rather
@@ -8169,7 +8186,7 @@ function cmdGet(argv, options) {
     // under a flag it would swallow the
     // named tier's own answer, since a name the memory-file predicate refuses
     // never reaches the rungs where an absent tier is refused by name, and the
-    // caller would read exit 0 for a tier that is not there. It is `touch`'s
+    // caller would read a miss for a tier that is not there. It is `touch`'s
     // own gate on `touch`'s own wording, that verb taking a name and no key.
     if ((fromType || fromOperator) && !isMemoryFilename(target + '.md')) {
         return usage('name must be characters from [A-Za-z0-9_.-], at most '
@@ -8230,6 +8247,7 @@ function cmdGet(argv, options) {
     const file = target + '.md';
     if (!isMemoryFilename(file)) {
         process.stderr.write('memq: nothing named \'' + sanitize(target, NAME_CAP) + '\'\n');
+        process.exitCode = 1;
         return;
     }
     // The pending rung stays a file: a record written inside a run lands in
@@ -8297,6 +8315,7 @@ function cmdGet(argv, options) {
         const hit = answering(rows);
         if (hit === null) {
             process.stderr.write('memq: nothing named \'' + sanitize(target, NAME_CAP) + '\'\n');
+            process.exitCode = 1;
             return;
         }
         const row = rows[hit.at];
@@ -9550,9 +9569,14 @@ function cmdTouch(argv, options) {
 
     // The type is named with the tier, for the reason `triggers` names it: a
     // store holds a tier per type, so with `--type=<type>` in play the tier
-    // word alone no longer says which record a line is about.
+    // word alone no longer says which record a line is about. A project stamp
+    // names the key it resolved, on the success, refusal and queued lines alike,
+    // so a stamp from a directory that keys to another project shows at the
+    // stamp rather than at a later read. The key is text from .git/config, so it
+    // is printed through sanitize at db-refresh's cap for a printed key.
     const stampWhere = toType ? ' in the ' + sanitize(stampType, TYPE_CAP) + ' type tier'
-        : toOperator ? ' in the operator tier' : ' in the project tier';
+        : toOperator ? ' in the operator tier'
+            : ' in the project tier ' + sanitize(projectKeyOf, PATH_DISPLAY_CAP);
     const what = 'the applied stamp for \'' + sanitize(name, NAME_CAP) + '\'' + stampWhere;
     // The stamp goes to the host through mem.usp_AppendUsage with the queue
     // behind it, and no usage.jsonl line is written: a stamp the host cannot
@@ -9570,9 +9594,7 @@ function cmdTouch(argv, options) {
         process.exitCode = 1;
         return;
     }
-    process.stdout.write('touched ' + sanitize(name, NAME_CAP) + ' applied'
-        + (toType ? ' in the ' + sanitize(stampType, TYPE_CAP) + ' type tier'
-            : toOperator ? ' in the operator tier' : '') + '\n');
+    process.stdout.write('touched ' + sanitize(name, NAME_CAP) + ' applied' + stampWhere + '\n');
 }
 
 // One path argument judged and hashed, as `{sha}` or `{refusal}`.
@@ -10588,16 +10610,17 @@ function triggerFaultWords(fault, entry, sharedTier) {
     return fault;
 }
 
-// The `--trigger` entries a shared-tier add verb was given, as the list its
-// create path writes, or null having already written the refusal. It is
-// `cmdTriggers`'s entry loop, member for member, because birth and a later
-// declaration are the same judgement at two moments and a record's line has
-// to read the same whichever wrote it: every refusal collected rather than
-// the first returned, so a caller who mistyped two entries of four fixes both
-// on one re-run; a `glob:` entry refused outright, both add verbs writing a
-// shared tier; the same entry given twice reduced to one mention at its first
-// position; and every refused entry shown through triggerRefusalText, so
-// store-bound text never rides back out raw.
+// The `--trigger` entries a write verb was given, as the list it writes, or
+// null having already written the refusal. It is `cmdTriggers`'s entry loop,
+// member for member, because birth and a later declaration are the same
+// judgement at two moments and a record's line has to read the same whichever
+// wrote it: every refusal collected rather than the first returned, so a
+// caller who mistyped two entries of four fixes both on one re-run; a `glob:`
+// entry refused outright where `sharedTier` says the line is bound for the
+// type or operator tier, and admitted on the project tier, `cmdTriggers`'s
+// rule for the same reason; the same entry given twice reduced to one
+// mention at its first position; and every refused entry shown through
+// triggerRefusalText, so store-bound text never rides back out raw.
 //
 // The whole command is refused on any bad entry rather than the entry
 // dropped, which is `triggers`'s rule and the reason it is: what a create
@@ -10612,17 +10635,17 @@ function triggerFaultWords(fault, entry, sharedTier) {
 // The count is asked after the entries are judged, so a command that is over
 // the cap and also malformed hears about the shape first, which is what its
 // author has to fix before the count means anything.
-function addTriggerEntries(given) {
+function addTriggerEntries(given, sharedTier) {
     const wanted = [];
     const seen = new Set();
     const refusals = [];
     for (const one of given) {
         const fault = triggerEntryFault(one);
         if (fault !== null) {
-            refusals.push(triggerRefusalText(one, triggerFaultWords(fault, one, true)));
+            refusals.push(triggerRefusalText(one, triggerFaultWords(fault, one, sharedTier)));
             continue;
         }
-        if (one.startsWith('glob:')) {
+        if (sharedTier && one.startsWith('glob:')) {
             refusals.push(triggerRefusalText(one, SHARED_TIER_GLOB_REFUSAL));
             continue;
         }
@@ -10689,6 +10712,46 @@ function noTriggerNote(name, tierFlag) {
     process.stderr.write('memq: \'' + shown + '\' declares no recognition triggers, so nothing'
         + ' puts it in front of a session at the moment it applies; ' + remedy
         + ' (types: ' + SHARED_TRIGGER_TYPES.join(', ') + ')\n');
+}
+
+// The three lists a write verb sends to mem.usp_PutRecord, as the fields
+// recordEntry takes. A create sends every list, an empty one for none, so a
+// new record declares nothing by accident. A replace sends only the lists the
+// call named and leaves the rest undefined, which recordEntry sends as NULL
+// and the procedure reads as keep: tags where no --tag rode, triggers where no
+// --trigger rode, and anchors always, since no write verb states an anchor.
+// The triggers are what surfaced the record a replace corrects, so a replace
+// that cleared them would disarm the next correction.
+function writtenLists(replace, tags, triggers) {
+    return {
+        tags: replace && tags.length === 0 ? undefined : tags,
+        triggers: replace && triggers.length === 0 ? undefined : triggers,
+        anchors: replace ? undefined : []
+    };
+}
+
+// The stderr line a replace prints after its success line, naming the lists
+// writtenLists left undefined. This client never read the record, so it names
+// what was kept rather than what the record holds. It names the ways to
+// restate a kept list on the replace and to clear the triggers, since the
+// triggers verb's --replace with no entry is the one door that clears them.
+// `triggersFlag` is the tier spelling that verb needs for this record. Under
+// the engine store signals both trigger doors are refused, --trigger on every
+// write verb and the triggers verb's --replace on a shared tier or a pinned
+// project store, so the line names neither there.
+function keptListsNote(name, lists, triggersFlag) {
+    const shown = sanitize(name, NAME_CAP);
+    const signalled = storeSignalsPresent();
+    const kept = ['tags', 'triggers', 'anchors'].filter((list) => lists[list] === undefined);
+    const restate = [lists.tags === undefined ? '--tag' : null,
+        lists.triggers === undefined && !signalled ? '--trigger' : null].filter((flag) => flag !== null);
+    process.stderr.write('memq: the ' + kept.slice(0, -1).join(', ')
+        + (kept.length > 1 ? ' and ' : '') + kept[kept.length - 1] + ' of \'' + shown + '\''
+        + ' are kept as the record had them, since a replace sends only the lists it names'
+        + (restate.length > 0 ? '; restate one with ' + restate.join(' or ') + ' on the replace' : '')
+        + (lists.triggers === undefined && !signalled
+            ? ', or clear the triggers with `memq triggers ' + shown + ' --replace' + triggersFlag + '`' : '')
+        + '\n');
 }
 
 // memq decay-scan: report the store's decay candidates, one deterministic
@@ -12135,7 +12198,8 @@ async function neighbourBlock(name, description, options) {
 // project may rely on is not silently replaced by a one-line command. The
 // sanctioned rewrites are --update, which replaces the record's description,
 // and with --body or --body-file its body as well, that wider repair gated
-// behind --confirm-shared, and --replace, which states the record whole. The
+// behind --confirm-shared, and --replace, which writes the record over the one
+// held and keeps the lists it does not name (writtenLists). The
 // description is also the body when --body is absent; prose over its cap is
 // refused at this write boundary rather than cut (sharedFreeText owns the
 // reasoning), and an unregistered tag warns without blocking, exactly as in
@@ -12293,11 +12357,11 @@ async function cmdAddType(argv, options) {
     const repair = update && (body !== undefined || bodyFile !== undefined);
     // Two ways to write over an existing record, and a command names one of
     // them: --update changes the description and, with a body, the body,
-    // keeping every other field; --replace states the record whole.
+    // keeping every other field; --replace writes the record over the one held.
     if (update && replace) {
         return usage('--update and --replace are two ways to write over an existing record:'
             + ' --update changes the description and, with --body or --body-file, the body, and'
-            + ' --replace states the record whole. Pass one, not both');
+            + ' --replace writes the record over the one held. Pass one, not both');
     }
     if (update && (tags.length > 0 || supersedes !== undefined || triggers.length > 0)) {
         return usage('--update sets no tags, no supersedes pointer and no recognition triggers;'
@@ -12434,7 +12498,7 @@ async function cmdAddType(argv, options) {
     // Every entry judged before anything is read or written, so a mistyped
     // trigger costs no store access and leaves nothing behind: the refusal is
     // the whole command, this file's rule for a shared-tier write.
-    const wantedTriggers = addTriggerEntries(triggers);
+    const wantedTriggers = addTriggerEntries(triggers, true);
     if (wantedTriggers === null) return;
     // The consent the shared tier takes for a write that puts this caller's
     // text over a record whole: a body repair and a --replace alike, since
@@ -12466,7 +12530,7 @@ async function cmdAddType(argv, options) {
     // below answers that shape in the terms the caller supplied it.
     if ((update || body !== undefined || bodyFile !== undefined)
         && description.trim() === '') {
-        return usage('the description holds no text, so the record would carry none; a shared-tier'
+        return refuseValue('the description holds no text, so the record would carry none; a shared-tier'
             + ' record carries a description every listing shows');
     }
     // The file channel resolves here, after the checks that read the
@@ -12488,7 +12552,7 @@ async function cmdAddType(argv, options) {
     // or a redirect that wrote nothing. A repair answers to the same rule: a
     // body replaced by nothing is the blank record arriving one command later.
     if ((!update || repair) && stored.trim() === '') {
-        return usage('the body holds no text, so there is nothing to record; a shared-tier body'
+        return refuseValue('the body holds no text, so there is nothing to record; a shared-tier body'
             + ' is never written blank (with neither --body nor --body-file, the description is'
             + ' the body)');
     }
@@ -12499,7 +12563,7 @@ async function cmdAddType(argv, options) {
     // cut, sharedFreeText's rule, on both channels.
     const record = '# ' + name + '\n\n' + stored + '\n';
     if ((!update || repair) && record.length > BODY_CAP) {
-        return usage('the record is ' + record.length + ' characters (its body is '
+        return refuseValue('the record is ' + record.length + ' characters (its body is '
             + stored.length + '); the cap is ' + BODY_CAP + ', the whole `get` prints, and'
             + ' shared-tier text over it is refused rather than silently cut. Shorten it and rerun');
     }
@@ -12524,20 +12588,21 @@ async function cmdAddType(argv, options) {
 
     const shown = sanitize(name, NAME_CAP);
     // The record as mem.usp_PutRecord takes it. A create and a --replace state
-    // every field, an empty list for none, so a replace clears what it does
-    // not name; the author is this session's, authorValue's reading. An
-    // --update states the description and, on a repair, the body, and sends
-    // every other field NULL, which the procedure reads as keep.
+    // every scalar field, and the lists are writtenLists', so a replace keeps
+    // each list it does not name; the author is this session's, authorValue's
+    // reading. An --update states the description and, on a repair, the body,
+    // and sends every other field NULL, which the procedure reads as keep.
     // A type record carries no machine scope, so the field is stated empty,
-    // which the procedure stores as no machine: a replace states the record
-    // whole, and NULL here would keep one. The pin is the one field a replace
-    // does not state: it sends NULL, so the host keeps the pin the record
-    // carries, since no verb takes a pin flag and a replace that cleared it
-    // would unpin a record its author pinned on purpose. A create sends false.
+    // which the procedure stores as no machine, where NULL on a replace would
+    // keep one. The pin is the one scalar a replace does not state: it sends
+    // NULL, so the host keeps the pin the record carries, since no verb takes
+    // a pin flag and a replace that cleared it would unpin a record its author
+    // pinned on purpose. A create sends false.
+    const lists = writtenLists(replace, tags, wantedTriggers);
     const fields = update
         ? { description, body: repair ? record : null, replace: true }
         : {
-            description, body: record, tags, triggers: wantedTriggers, anchors: [], pinned: replace ? null : false,
+            description, body: record, ...lists, pinned: replace ? null : false,
             machine: '', supersedes: supersedes === undefined ? null : supersedes,
             author: authorValue(), replace
         };
@@ -12578,11 +12643,13 @@ async function cmdAddType(argv, options) {
         + ' (body ' + stored.length + ' chars'
         + (supersedes === undefined ? '' : ', superseding ' + sanitize(supersedes, NAME_CAP))
         + (replace ? ', replaced' : '') + ')\n');
+    if (replace) keptListsNote(name, lists, ' --type=' + sanitize(type, TYPE_CAP) + ' --confirm-shared');
     // The record landed either way; what the note says is what it landed
-    // without. It prints on the create and replace paths alone, `--update`
-    // having returned above: an existing record's trigger state is not a
-    // repair's to judge.
-    if (wantedTriggers.length === 0) {
+    // without. It prints on the create path alone: `--update` returned above,
+    // an existing record's trigger state not being a repair's to judge, and a
+    // replace naming no trigger keeps the record's line, which the kept line
+    // above says.
+    if (!replace && wantedTriggers.length === 0) {
         noTriggerNote(name, '--type=' + sanitize(type, TYPE_CAP));
     }
 }
@@ -12602,11 +12669,11 @@ async function cmdAddType(argv, options) {
 // never overwritten: a shared fact another session may rely on is not
 // silently replaced by a one-line command. The sanctioned rewrites are
 // add-type's: --update, its description channel ungated and its body channel
-// behind --confirm-shared, and --replace, which states the record whole. The
-// description is also the body when --body is absent; prose over its cap is
-// refused at this write boundary rather than cut (sharedFreeText owns the
-// reasoning), and an unregistered tag warns without blocking, exactly as in
-// `log`.
+// behind --confirm-shared, and --replace, which writes the record over the one
+// held and keeps the lists it does not name. The description is also the
+// body when --body is absent; prose over its cap is refused at this write
+// boundary rather than cut (sharedFreeText owns the reasoning), and an
+// unregistered tag warns without blocking, exactly as in `log`.
 //
 // --machine scopes the fact to one box, sent as the record's machine column
 // through mem.usp_PutRecord. It is the whole of the store's answer to a
@@ -12748,7 +12815,7 @@ async function cmdAddOperator(argv, options) {
     if (update && replace) {
         return usage('--update and --replace are two ways to write over an existing record:'
             + ' --update changes the description and, with --body or --body-file, the body, and'
-            + ' --replace states the record whole. Pass one, not both');
+            + ' --replace writes the record over the one held. Pass one, not both');
     }
     if (update && (tags.length > 0 || machine !== undefined || supersedes !== undefined
         || triggers.length > 0)) {
@@ -12826,7 +12893,7 @@ async function cmdAddOperator(argv, options) {
     // Every entry judged before anything is read or written, add-type's rule:
     // a mistyped trigger costs no store access and the refusal is the whole
     // command.
-    const wantedTriggers = addTriggerEntries(triggers);
+    const wantedTriggers = addTriggerEntries(triggers, true);
     if (wantedTriggers === null) return;
     // The consent the shared tier takes for a write that puts this caller's
     // text over a record whole, add-type's rule: a body repair and a --replace
@@ -12852,7 +12919,7 @@ async function cmdAddOperator(argv, options) {
     // own: on an update and on a create carrying a body.
     if ((update || body !== undefined || bodyFile !== undefined)
         && description.trim() === '') {
-        return usage('the description holds no text, so the record would carry none; a shared-tier'
+        return refuseValue('the description holds no text, so the record would carry none; a shared-tier'
             + ' record carries a description every listing shows');
     }
     // The file channel resolves where add-type resolves it, for add-type's
@@ -12869,7 +12936,7 @@ async function cmdAddOperator(argv, options) {
     // reasons: the check reads the text about to be written rather than the
     // flag that supplied it, and a repair answers to the same rule.
     if ((!update || repair) && stored.trim() === '') {
-        return usage('the body holds no text, so there is nothing to record; a shared-tier body'
+        return refuseValue('the body holds no text, so there is nothing to record; a shared-tier body'
             + ' is never written blank (with neither --body nor --body-file, the description is'
             + ' the body)');
     }
@@ -12877,7 +12944,7 @@ async function cmdAddOperator(argv, options) {
     // prose under its heading, measured as the record `get` prints.
     const record = '# ' + name + '\n\n' + stored + '\n';
     if ((!update || repair) && record.length > BODY_CAP) {
-        return usage('the record is ' + record.length + ' characters (its body is '
+        return refuseValue('the record is ' + record.length + ' characters (its body is '
             + stored.length + '); the cap is ' + BODY_CAP + ', the whole `get` prints, and'
             + ' shared-tier text over it is refused rather than silently cut. Shorten it and rerun');
     }
@@ -12897,18 +12964,20 @@ async function cmdAddOperator(argv, options) {
 
     const shown = sanitize(name, NAME_CAP);
     // The record as mem.usp_PutRecord takes it, add-type's composition: a
-    // create and a --replace state every field, an empty list for none, and
-    // an --update states the description and, on a repair, the body, sending
-    // every other field NULL, which the procedure reads as keep. The machine
+    // create and a --replace state every scalar field and send writtenLists'
+    // lists, so a replace keeps each list it does not name, and an --update
+    // states the description and, on a repair, the body, sending every other
+    // field NULL, which the procedure reads as keep. The machine
     // scope is stated as given, or as the empty string where --machine was
     // not, which the procedure stores as no machine, so a replace without the
     // flag clears a scope the record carried, and the line after the success
-    // line says so. The pin is the one field a replace does not state, for
+    // line says so. The pin is the one scalar a replace does not state, for
     // add-type's reason: it sends NULL and the host keeps the record's pin.
+    const lists = writtenLists(replace, tags, wantedTriggers);
     const fields = update
         ? { description, body: repair ? record : null, replace: true }
         : {
-            description, body: record, tags, triggers: wantedTriggers, anchors: [], pinned: replace ? null : false,
+            description, body: record, ...lists, pinned: replace ? null : false,
             machine: machine === undefined ? '' : machine,
             supersedes: supersedes === undefined ? null : supersedes, author: authorValue(), replace
         };
@@ -12944,6 +13013,7 @@ async function cmdAddOperator(argv, options) {
         + ' (body ' + stored.length + ' chars'
         + (supersedes === undefined ? '' : ', superseding ' + sanitize(supersedes, NAME_CAP))
         + (replace ? ', replaced' : '') + ')\n');
+    if (replace) keptListsNote(name, lists, ' --operator --confirm-shared');
     // A replace states the machine scope empty where no --machine rode with
     // it, which clears a scope the record carried. This client never read the
     // record, so it cannot say whether there was one, and says so in that
@@ -12951,14 +13021,14 @@ async function cmdAddOperator(argv, options) {
     // line exists to make visible.
     if (replace && machine === undefined) {
         process.stderr.write('memq: the machine scope of \'' + shown + '\' is cleared if the record had one,'
-            + ' since --replace states the record whole and no --machine was given; re-run with'
+            + ' since --replace states every scalar and no --machine was given; re-run with'
             + ' --machine <name> to scope it again\n');
     }
-    // The note add-type prints for the same reason and on the same paths. No
+    // The note add-type prints for the same reason and on the same path. No
     // clause beside the flag, the operator tier needing none: `--operator`
     // resolves without a working directory, so the spelling lands on this
     // record wherever it is run.
-    if (wantedTriggers.length === 0) noTriggerNote(name, '--operator');
+    if (!replace && wantedTriggers.length === 0) noTriggerNote(name, '--operator');
 }
 
 // memq put: one project-tier record sent to the memory database under the
@@ -12976,10 +13046,17 @@ async function cmdAddOperator(argv, options) {
 // The pending file takes add-type's layout, a frontmatter block, the `# <name>`
 // heading, a blank line and the body, with put's own fields in the block:
 // `description:`, `tags:` in the inline form where tags are given,
-// `created:` as today's date, `author:` where --author is given, and the
-// run's provenance lines. Outside a run the same fields travel as the
-// procedure's own columns, every list stated, so a `--replace` states the
-// whole record and clears what it does not name.
+// `created:` as today's date, `author:`
+// where --author is given, and the run's provenance lines. Outside a run the
+// same fields travel as the procedure's own columns, the lists as
+// writtenLists sends them, so a `--replace` keeps each list it does not name.
+//
+// --trigger names a moment that recognizes this record, add-type's flag
+// under add-type's rule, judged by addTriggerEntries and refused under the
+// engine store signals. The project tier admits `glob:`, `cmdTriggers`'s rule,
+// since a glob is matched against paths under this project's own root. No
+// note prints where a record lands without one, since the project block
+// surfaces a project record without a trigger.
 //
 // A name the project tier holds live or retired, or the run's pending tier
 // holds, is refused with exit 1 and a stderr
@@ -12989,13 +13066,15 @@ async function cmdAddOperator(argv, options) {
 //
 // The refusals are add-type's wherever they apply to a create: the name
 // grammar, the tag grammar and count, one body over exactly one channel, a
-// blank body, the record cap, --body-file under the engine store signals, and
+// blank body, the record cap, --body-file and --trigger under the engine store
+// signals, a refused trigger entry, and
 // for the pending file the link refusal ahead of the existence check. Each
 // answers before anything is written or sent.
 async function cmdPut(argv, options) {
     const opts = options || {};
     const positionals = [];
     const tags = [];
+    const triggers = [];
     let body;
     let bodyFile;
     let author;
@@ -13006,6 +13085,12 @@ async function cmdPut(argv, options) {
             const v = argv[++i];
             if (v === undefined || v.startsWith('--')) return usage('--tag needs a value');
             tags.push(v);
+        } else if (a === '--trigger') {
+            const v = argv[++i];
+            if (v === undefined || v.startsWith('--')) return usage('--trigger needs a value');
+            // Repeatable, add-type's rule and its reason: the entry cap over
+            // the whole list bounds it rather than a one-value rule here.
+            triggers.push(v);
         } else if (a === '--replace') {
             replace = true;
         } else if (a === '--body') {
@@ -13063,6 +13148,21 @@ async function cmdPut(argv, options) {
             + ' engine store signals (KIT_MEMORY_ROOT with KIT_MEMORY_ROOT_ALLOW_DATA=1). This'
             + ' path crosses no shell wrapper, so --body carries a body of any shape here');
     }
+    // add-type's refusal, for add-type's reason: the grant vector's second
+    // lock behind the hook's `--trigger` screen, since a line written at a
+    // record's birth reaches the surface the grant withholds the `triggers`
+    // verb on.
+    if (triggers.length > 0 && storeSignalsPresent()) {
+        return usage('--trigger declares when a record is put in front of a session, which is'
+            + ' refused under the engine store signals (KIT_MEMORY_ROOT with'
+            + ' KIT_MEMORY_ROOT_ALLOW_DATA=1): the standing grant an unattended worker runs'
+            + ' under withholds the `triggers` verb for that reach, and a line written at the'
+            + ' record\'s birth reaches the same surface. The record still lands without it');
+    }
+    // Every entry judged before anything is read or written, add-type's rule,
+    // on the project tier's reading, which admits `glob:`.
+    const wantedTriggers = addTriggerEntries(triggers, false);
+    if (wantedTriggers === null) return;
     // The description is free text on one frontmatter line, so a line break
     // or any other control character is refused rather than stripped: one
     // would forge a field into the block, and a silent strip would store a
@@ -13071,17 +13171,17 @@ async function cmdPut(argv, options) {
     // is trimmed, which is the shape frontmatterDescription reads back. Its
     // length is bounded below, with the block it lands in.
     if (/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/.test(positionals[1])) {
-        return usage('the description is one line: it holds a line break or another control'
+        return refuseValue('the description is one line: it holds a line break or another control'
             + ' character, which would forge a frontmatter field');
     }
     const description = positionals[1].trim();
     if (description === '') {
-        return usage('the description holds no text; an unindexed record is found by its'
+        return refuseValue('the description holds no text; an unindexed record is found by its'
             + ' frontmatter description');
     }
     const scalar = descriptionScalar(description);
     if (scalar === null) {
-        return usage('the description cannot be written so that it reads back as given: it is a'
+        return refuseValue('the description cannot be written so that it reads back as given: it is a'
             + ' bare block-scalar indicator, or it needs quoting and holds both quote characters'
             + ' or a single quote and a backslash. Add words after a bare | or >, or drop one'
             + ' quote kind, or drop the backslash');
@@ -13100,10 +13200,14 @@ async function cmdPut(argv, options) {
         if (body === null) return;
     }
     if (body.trim() === '') {
-        return usage('the body holds no text, so there is nothing to record');
+        return refuseValue('the body holds no text, so there is nothing to record');
     }
     const front = ['description: ' + scalar];
     if (tags.length > 0) front.push('tags: ' + tags.join(', '));
+    // A triggers: line counts toward the frontmatter bound below and never
+    // reaches a pending file, since a run needs the store signals and they
+    // refuse --trigger before this point.
+    if (wantedTriggers.length > 0) front.push('triggers: ' + wantedTriggers.join(', '));
     front.push('created: ' + new Date().toISOString().slice(0, 10));
     if (author !== undefined) front.push('author: ' + author);
     for (const line of provenanceLines()) front.push(line);
@@ -13116,7 +13220,7 @@ async function cmdPut(argv, options) {
     // characters meets it well before its character count would suggest.
     const blockBytes = Buffer.byteLength(block, 'utf8');
     if (blockBytes > FRONTMATTER_READ_CAP) {
-        return usage('the frontmatter block is ' + blockBytes + ' bytes of UTF-8; the bound is '
+        return refuseValue('the frontmatter block is ' + blockBytes + ' bytes of UTF-8; the bound is '
             + FRONTMATTER_READ_CAP + ', the bytes every reader reads of a record head, and a'
             + ' block past it reads as unclosed with no description. Shorten the description');
     }
@@ -13124,13 +13228,12 @@ async function cmdPut(argv, options) {
     // add-type's cap on the whole record, because `get` reads and caps the
     // whole file: over-cap text is refused rather than cut.
     if (content.length > BODY_CAP) {
-        return usage('the record is ' + content.length + ' characters (its body is '
+        return refuseValue('the record is ' + content.length + ' characters (its body is '
             + body.length + '); the cap is ' + BODY_CAP + ', the whole `get` prints, and text'
             + ' over it is refused rather than silently cut. Shorten it and rerun');
     }
 
     const cwd = process.cwd();
-    const where = ' in the project tier';
     // Inside a run the record lands in the run's pending tier as a file, since
     // promotion into the project tier is the engine's adjudication by file;
     // outside one, pendingDir is null and the record goes to the memory
@@ -13146,32 +13249,38 @@ async function cmdPut(argv, options) {
         return;
     }
     // The record as mem.usp_PutRecord takes it: the prose under its heading as
-    // the body, the fields in their own columns, and every list stated, an
-    // empty one for none, so a --replace states the whole record and clears
-    // what it does not name. The machine scope is stated empty for the same
-    // reason, which the procedure stores as no machine. A create sends the
-    // author --author gave and NULL otherwise, the record's own field; a
-    // replace states the author too, the session's where --author gave none,
-    // since a NULL scalar keeps the column and a replace states every field.
-    // The pin is the one field a replace does not state: it sends NULL, so
+    // the body, the fields in their own columns, and the lists as
+    // writtenLists sends them, so a --replace keeps each list it does not
+    // name. The machine scope is stated empty, which the procedure stores as
+    // no machine. A create sends the author --author gave and NULL otherwise,
+    // the record's own field; a replace states the author too, the session's where --author gave none,
+    // since a NULL scalar keeps the column and a replace states every scalar.
+    // The pin is the one scalar a replace does not state: it sends NULL, so
     // the host keeps the pin the record carries, since put takes no pin flag
     // and a replace that cleared it would unpin a record its author pinned on
     // purpose. A create sends false. The space is the checkout's declared
     // label. Under none a create sends NULL, and a replace sends the empty
-    // string, which every reader takes as no space, since a replace states the
-    // record whole and a NULL would keep the space the record already carries.
+    // string, which every reader takes as no space, since a NULL would keep
+    // the space the record already carries.
+    //
+    // Every line naming the tier names the key it resolved too, the success
+    // line and the refusals alike, so a write from a directory that keys to
+    // another project shows at the write rather than at a later read. The key
+    // is text from .git/config, so it is printed through sanitize at
+    // db-refresh's cap for a printed key.
     const shown = sanitize(name, NAME_CAP);
+    const key = projectKey(cwd);
+    const where = ' in the project tier ' + sanitize(key, PATH_DISPLAY_CAP);
     const space = projectSpace(cwd);
+    const lists = writtenLists(replace, tags, wantedTriggers);
     const answered = memoryDatabase.writeThrough(memoryDatabase.recordEntry({
         tier: 'project',
-        projectKey: projectKey(cwd),
+        projectKey: key,
         space: space === null && replace ? '' : space,
         name,
         description,
         body: '# ' + name + '\n\n' + body + '\n',
-        tags,
-        triggers: [],
-        anchors: [],
+        ...lists,
         pinned: replace ? null : false,
         machine: '',
         author: author !== undefined ? author : (replace ? authorValue() : null),
@@ -13192,6 +13301,7 @@ async function cmdPut(argv, options) {
     }
     process.stdout.write('stored ' + shown + where + ' (body ' + body.length + ' chars'
         + (replace ? ', replaced' : '') + ')\n');
+    if (replace) keptListsNote(name, lists, '');
     // The body is embedded through the configured endpoint in the same call,
     // so a record is searchable by meaning as soon as it is stored. An
     // endpoint that is absent or fails never fails the save: the record is
