@@ -67,7 +67,7 @@ named claude on PATH runs, and a PATH holding none stops the run.
 pwsh -NoProfile -File ./.claude/kb-run.ps1 -Operation Ingest
 
 .EXAMPLE
-pwsh -NoProfile -File ./.claude/kb-run.ps1 -Operation Lint -Claude "C:\Users\eleos\.local\bin\claude.exe" -WhatIf
+pwsh -NoProfile -File ./.claude/kb-run.ps1 -Operation Lint -Claude "C:\Users\acme\.local\bin\claude.exe" -WhatIf
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(

@@ -77,6 +77,8 @@ not merely under yours:
 - **`pwsh` (PowerShell 7) and `claude` on that account's PATH.** The task runs
   the launcher with `pwsh`, the skills run the KB's helper scripts with
   `pwsh`, and the launcher hands the walker the `claude` it finds on PATH.
+  An S4U task sees the account's own PATH entries as well as the machine's,
+  so a `claude` installed for that account alone is found.
 - **Git configured with that account's own identity.** Every commit the walker
   makes uses `git config user.email`, and an update or merge with no identity
   is recorded `failed: git identity unset`.
@@ -479,9 +481,12 @@ revisions of already-fed files follow. A busy repository therefore cannot
 starve a quiet one. Each fed file is one Sonnet run's worth of ingest, so the
 batch size is also the cost knob.
 
-A fed file is named `<source>--<path with / as -->--<blob sha 7>.<ext>`. Any
+A fed file is named
+`<source>--<path without its extension, / as -->--<blob sha 7>.<ext>`. Any
 character outside letters, digits, `.`, `_` and `-` becomes `-`, so a name is
-always one the ingest helpers accept and the agent's shell cannot expand. A
+always one the ingest helpers accept and the agent's shell cannot expand.
+For example, `docs/Q3 plan.md` at a blob whose hash starts `a1b2c3d`, fed from
+a source named `acme`, arrives as `acme--docs--Q3-plan--a1b2c3d.md`. A
 Markdown or text file gains a short provenance header naming the repository,
 path, commit and commit date. The wiki's schema uses it to tell a newer
 revision of a document from an older one. A changed upstream file is fed once

@@ -129,7 +129,7 @@ reversible rather than overwriting the truth.
 
 A knowledge base fed from git repositories by `.claude/feed-inbox.ps1` gets
 a new source each time a fed file's content changes. A fed source is named
-`<source>--<path with / as -->--<blob>.<ext>`, and a fed markdown file opens
+`<source>--<path without its extension, / as -->--<blob>.<ext>`, and a fed markdown file opens
 with a quoted line naming its repository, path, commit and commit date. Two
 sources whose names share the same `<source>--<path>--` stem are revisions
 of one file. The one whose header carries the later commit date clearly
@@ -149,7 +149,13 @@ tooling. The two forms that occur:
 
 Every page must be reachable from `index.md`. Cross-references are
 reciprocal: if page A links to page B as a meaningful relationship, B links
-back to A. When you add a link one way, add the return link in the same pass.
+back to A. A link is a meaningful relationship when its sentence states how
+the two pages' subjects connect, such as one owning, employing or competing
+with the other, or one being an instance of the other. A synthesis's links
+to the pages it draws on are relationships, so each of those pages links
+back to the synthesis. A per-source summary's links to the pages its document
+revised are not relationships, so they need no return link. When you add a
+link one way, add the return link in the same pass.
 
 ## Citations
 

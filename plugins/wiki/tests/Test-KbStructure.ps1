@@ -45,7 +45,7 @@ double quotes before the helper sees the name.
 pwsh -File tests/Test-KbStructure.ps1 -Path template
 
 .EXAMPLE
-pwsh -File tests/Test-KbStructure.ps1 -Path ./eleos-kb -RequireSchema -RequireSkills
+pwsh -File tests/Test-KbStructure.ps1 -Path ./acme-kb -RequireSchema -RequireSkills
 #>
 [CmdletBinding()]
 param(

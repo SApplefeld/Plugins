@@ -6,6 +6,12 @@ holds machinery and a template only. It holds no knowledge-base content, ever:
 every real knowledge base lives in its own repo, instantiated from the
 `template/` directory here.
 
+An entity is a person, organization, product or other named thing. A wiki
+keeps an entity page for each one worth linking to from other pages. Each
+knowledge base also
+belongs to one owning entity, always a person or organization, whose Windows
+account holds it.
+
 ## The three-layer architecture
 
 Every knowledge base built from this engine has three layers:
@@ -25,6 +31,9 @@ Every knowledge base built from this engine has three layers:
   is built to resist.
 
 ## The three operations
+
+Ingest adds a document to the wiki, query answers a question from it, and
+lint checks its health and fixes what it can.
 
 **Ingest.** A file arrives in `inbox/`. The ingest run reads it, moves the
 original to `sources/` (never deleted, never edited again), writes a summary
@@ -154,8 +163,11 @@ schema-specialization session, the optional remote and listing the KB.
 
 To install the engine instead of cloning it, add the marketplace with
 `claude plugin marketplace add SApplefeld/plugins`, then install it with
-`claude plugin install wiki@applefeld`. The `wiki-new` skill finds the
-installed folder itself. For the hand path, that folder is the `installPath`
+`claude plugin install wiki@applefeld`. `applefeld` is the marketplace's own
+name, which its catalog file, `.claude-plugin/marketplace.json` in
+`SApplefeld/plugins`, declares, and `wiki@applefeld` names the `wiki` plugin
+in it. The `wiki-new` skill finds the installed folder itself. For the hand
+path, that folder is the `installPath`
 Claude Code records for `wiki@applefeld` in
 `~/.claude/plugins/installed_plugins.json`. Give `new-kb.ps1` an absolute
 `-Path` outside the plugin cache, since a relative one lands beside the
@@ -190,7 +202,7 @@ which runs headless Claude Code
 with the KB folder as its working directory. Every pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, which names each KB, each step's
 outcome, every failure and every KB deferred on a conflict. A stuck wiki also
-gets a line in `%LOCALAPPDATA%llm-wikiwalk-notices.jsonl`, which a persona
+gets a line in `%LOCALAPPDATA%\llm-wiki\walk-notices.jsonl`, which a persona
 session set to read it posts to the operator's thread. `register-walk.ps1`
 registers the task once per account, and a plugin update reaches the walker
 and every KB's vendored files on the next pass with no re-registration.
@@ -316,11 +328,9 @@ This section is for the source repository. The publish workflow, its
 allowlist and its scripts stay there, so an installed copy holds none of them.
 
 The engine reaches the public marketplace from a GitHub Actions workflow in
-`.github/workflows/publish.yml`. To cut a release, tag `main` with
-`publish-<YYYYMMDD>`, or any other tag starting `publish-`, and push the tag.
-A manual run works too, started against a `publish-` tag, since the
-`publish` environment admits no other ref. Then read the run in the Actions
-tab. A green run makes at most one commit in `SApplefeld/plugins`. That
+`.github/workflows/publish.yml`. Each push to `main` publishes, so landing a
+commit on `main` is cutting a release. A manual run from the Actions tab
+publishes too. Read each run in the Actions tab. A green run makes at most one commit in `SApplefeld/plugins`. That
 commit replaces `plugins/wiki/` and touches nothing else there. When the
 public folder already matches, the run makes no commit and says so.
 
@@ -334,10 +344,10 @@ publish in these cases, among others:
 - A literal line names a plan, the archive, the backlog, a kaizen note, a
   scratch file or a file named `*.test.*`.
 - The commit being published is not `main`'s tip or an ancestor of it. The
-  run ends before it assembles anything. A tag on an older `main` commit
-  passes and republishes that older snapshot. This catches a tag on a commit `main` never reached,
-  not someone who can push one, since the check runs from the tagged commit's
-  own workflow.
+  run ends before it assembles anything. A manual run on a branch or tag at
+  an older `main` commit passes and republishes that older snapshot. This catches a manual
+  run on a branch `main` never reached, not someone who edits the workflow on
+  that branch, since the check runs from the commit's own workflow.
 - A file or a path in the snapshot holds a word from the list kept in the
   repository's `publish` environment, or a file cannot be read as text.
 - The public clone tracks a different number of files under `plugins/wiki/`

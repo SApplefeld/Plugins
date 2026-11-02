@@ -148,7 +148,9 @@ unsupported binary, a corrupt file), do not skip it and do not leave it in
 the inbox: move it anyway and write the same kind of stub summary page,
 recording that its content could not be read, then continue the remaining
 steps for it (index entry, log entry, its own commit). A source is never
-silently dropped and never left in the inbox to be retried forever.
+silently dropped and never left in the inbox to be retried forever, save the
+two kinds step b leaves there: a name its first check skips and a duplicate
+drop.
 
 **b. Move it.** First look at the name itself. kb-move refuses a name
 containing `/`, `\` or `:`, equal to `.` or `..`, or starting with a dash,
@@ -189,8 +191,10 @@ step g names the source by the same handle. If it refuses because
 `sources/<file>` already exists, the file was ingested by an earlier run and
 this is a duplicate drop: do not overwrite, make no commit for it, leave the
 inbox file where it is, note it for the final report, and move on to the
-next source. If it refuses for any other reason, among them a handle that
-matches no file because the file left the inbox after the snapshot, stop
+next source. A duplicate's original is already in `sources/` from an earlier
+run, so its inbox copy stays, and every run names it in its report until a
+person removes it. If it refuses for any other reason, among them a handle
+that matches no file because the file left the inbox after the snapshot, stop
 the run: emit step 5's push-only call so the commits this run already made
 reach origin, then report the refusal. Never work around a refusal.
 
@@ -222,7 +226,8 @@ placeholder if this is its first entry.
 **f. Append this source's `log.md` entry** in the schema's format. One `##`
 heading per run: the run's first entry writes the heading, whether from
 step 1's reconcile or from this step, and each later source appends its
-bullet under the same heading.
+bullet under the same heading. The heading's date is the current date Claude
+Code states in this run's own context.
 
 **g. Commit exactly this source's work, in one commit.** The source goes by
 its handle, the same one step b moved it by, and every other path is named:

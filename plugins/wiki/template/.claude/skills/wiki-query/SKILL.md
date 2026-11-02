@@ -11,6 +11,10 @@ it is worth keeping. CLAUDE.md is the schema; it owns page types, citation
 form, linking, and the index.md and log.md formats. This file owns only the
 query and filing sequence.
 
+A run started with no question has nothing to answer. It prints one line
+saying no question was given, reads no page, writes nothing, commits nothing
+and stops.
+
 ## 1. Read index.md first, always
 
 `index.md` is the catalog: every page, by category, with a one-line summary.
@@ -125,7 +129,16 @@ Then, in one commit:
   synthesis draws on gets a link back to the synthesis, in a sentence stating
   what the relationship is, not a bare link. A page that already links back
   keeps its existing sentence; never add a second link to the same page.
+- A page whose path holds an apostrophe is never named in `-Path`. The
+  apostrophe would end the single quotes `-Path` takes and hand the rest of
+  the path to the shell. Choose a synthesis slug that holds no apostrophe. A
+  page the synthesis draws on whose path holds one may still be read and
+  cited, since reading names no path on a shell line. Give that page no
+  back-link and leave it out of `-Path`. Name it in the answer as a page this
+  run left without a back-link, and list it the same way in the run's `log.md`
+  entry.
 - Append one `## YYYY-MM-DD - query` entry to `log.md` in the schema's format.
+  Its date is the current date Claude Code states in this run's own context.
 - Commit with a single call naming **every** path you touched: the synthesis
   page, every page you added a back-link to, `index.md`, and `log.md`. A
   back-linked page you leave out of `-Path` stays dirty, and reciprocity is

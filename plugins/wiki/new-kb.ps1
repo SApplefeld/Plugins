@@ -43,7 +43,7 @@ Print the templateHash of this engine's template/.claude/ as 64 lowercase
 hexadecimal characters and exit 0, creating nothing.
 
 .EXAMPLE
-pwsh -NoProfile -File ./new-kb.ps1 -Name "Eleos KB" -Path ../eleos-kb
+pwsh -NoProfile -File ./new-kb.ps1 -Name "Acme KB" -Path ../acme-kb
 
 .EXAMPLE
 pwsh -NoProfile -File ./new-kb.ps1 -PrintEngineHash

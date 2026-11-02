@@ -146,14 +146,30 @@ auto-fixes here: an unsourced claim needs a source a human or ingest supplies.
 Flag each, naming the page and the claim.
 
 The staleness horizon only classifies what you flag, never whether to look.
-Read it from CLAUDE.md with an **anchored** match on a line beginning
-`Staleness horizon:`. Do not use a loose match: it reads the schema's nearby
-prose instead of the value and silently disables the read. Get a page's last-change date with
+Read CLAUDE.md with the Read tool and take the value from the one line that
+begins with `Staleness horizon:`. Never take it from a line
+that only mentions the horizon: the schema's nearby prose does, and a value
+read from there silently disables the check. The Grep tool is denied, so
+never call it. Get a page's last-change date with
 `pwsh -NoProfile -File ./.claude/kb-status.ps1 -What PageDate -Path 'wiki/<page>.md'`,
-which prints it as `YYYY-MM-DD`, and measure the horizon back from today. An
+which prints it as `YYYY-MM-DD`, and measure the horizon back from today.
+Today is the current date Claude Code states in this run's own context. An
 unsourced claim on a page whose last change predates the horizon is reported as
 **stale**; every other unsourced claim is reported as **unsourced**. Both are
 flagged; neither is ever auto-fixed.
+
+A `wiki/` page whose path holds an apostrophe is never named in `-Path`, to
+kb-status or to kb-commit. The apostrophe would end the single quotes `-Path`
+takes and hand the rest of the path to the shell. Check each page's path
+before its PageDate call in check 6, and the write pass checks again before
+any fix. Take no PageDate for such a page, and flag each unsourced claim on
+it as **unsourced**. The write pass
+applies no fix to the page itself and drops any fix recorded for it, since an
+edit this run cannot name in `-Path` stays out of its `Lint:` commit and
+reaches git later under another run's subject. A fix to another file that only
+names the page, such as its `index.md` entry, still applies. List the page by
+name in the lint report's `log.md` entry and in the stdout report as a page
+this run left.
 
 ## The write pass
 
@@ -167,7 +183,10 @@ run exactly:
 This run has written nothing since its reconcile step, so any line printed is
 another run's. If it prints any line, stop: write nothing, commit nothing more,
 do not touch `log.md` and do not push. Report that another run went live
-mid-run, naming each path and its minutes, with the counts found. A
+mid-run, naming each path and its minutes, with the counts found. If this run
+made a `Reconcile:` commit, the report also gives the number of files it
+reconciled. That number is the `<n>` in the `Reconcile: <n> files` subject on
+the commit line kb-commit printed. A
 `Reconcile:` commit this run already made stays, and the next run that pushes
 flushes it. If it prints nothing, any dirty path outside `inbox/` is an older
 leftover: commit it under `Reconcile:` exactly as the reconcile step above
@@ -179,6 +198,9 @@ condition its check found: the exact text it replaces for an edit in place, the
 absence it fills for an added index entry, placeholder or return link, and, for
 a fix that removes an entry or redirects a link, both the exact text it replaces
 and that the original target is still missing from disk.
+Before placing any fix, read the path of the page it edits. A `wiki/` page
+whose path holds an apostrophe takes no fix, whatever check recorded it, and
+is listed as a page this run left, as check 6's rule says.
 Re-read a page only to place an edit, and before placing it, check that the
 fix's condition still holds on the page. Never run a check again. A fix whose
 condition no longer holds means another run changed the page or its target
@@ -188,14 +210,18 @@ own line.
 ## The lint report
 
 Append one `## YYYY-MM-DD - lint` entry to `log.md`, in the schema's log
-format, newest at the bottom. The schema allows one `##` heading per run, so
-that entry is the run's only level-two heading. List what was fixed, what is
-flagged, and each fix dropped because its condition no longer held. When any contradictions were found, give them a `### Contradictions`
+format, newest at the bottom. Its date is today's, the current date Claude
+Code states in this run's own context. The schema allows one `##` heading per
+run, so that entry is the run's only level-two heading. List what was fixed,
+what is flagged, each fix dropped because its condition no longer held, and
+each page left because its path holds an apostrophe. When any contradictions were found, give them a `### Contradictions`
 sub-heading nested under the entry, each side with its claim and its citation.
 When every check passes clean, still write the entry and say so in one line: a
 clean run and a run that never happened must be distinguishable in `log.md`.
 Then report to stdout the counts fixed, flagged, and contradictions recorded,
-and whether the push succeeded, the only human-visible signal of a headless run.
+each page left because its path holds an apostrophe, by name, and whether the
+push succeeded. That report is the only human-visible signal of a headless
+run.
 
 ## Commit and push
 

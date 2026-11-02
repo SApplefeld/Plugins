@@ -7,6 +7,9 @@ the next section covers it. The hand path after it is the fallback, for a
 machine without the plugin or an operator who wants each step in view. Follow
 its steps in order.
 
+In this guide `~` means the owning account's profile folder,
+`%USERPROFILE%`, so `~/.claude.json` is `%USERPROFILE%\.claude.json`.
+
 ## What instantiation produces
 
 A KB is a self-contained git repo with its own copy of the engine vendored
@@ -39,14 +42,31 @@ between entities (see the hard invariant at the end). On the owning account:
   configured, the commit fails with git's own message and the script stops.
 - **Claude Code installed and logged in under that account.** The
   schema-specialization session and every scheduled run use it.
+  Sign in to Windows as that account, open PowerShell, and run Claude Code's
+  own installer, `irm https://claude.ai/install.ps1 | iex`. It needs no
+  administrator rights and installs for that account alone, under
+  `%USERPROFILE%\.local\bin`. Open a new PowerShell window and run
+  `claude --version`, which prints a version number. Where PowerShell says
+  `claude` is not recognized, add `%USERPROFILE%\.local\bin` to the
+  account's own PATH, since the walker's registrar looks for `claude` on PATH.
+  Then run `claude` once and follow the browser prompts to log in. The login
+  needs a paid Claude plan, and Claude Code's setup page,
+  https://code.claude.com/docs/en/setup, lists the plans it accepts. A second
+  account takes its own install and its own login, since neither carries
+  across Windows accounts.
 - **For the usual path, the `wiki@applefeld` plugin installed**, from the
-  marketplace the engine [README](../README.md) names.
+  marketplace the engine [README](../README.md) names. The plugin installs
+  under `~/.claude/plugins/`, so each owning account installs it for itself.
 
 ## Usual path: one request
 
 In a Claude Code session on the owning account, ask for a new wiki and say
 what it is for. The skill says wiki where this guide says KB, and the two are
-one thing. The `wiki-new` skill runs these steps:
+one thing. No command is needed. Claude Code reads the description of each
+installed skill and loads the skill a request matches, so a plain request
+such as "make a new wiki for the Acme contracts" reaches `wiki-new`. Typing
+`/` lists the skills, to start one by name. The `wiki-new` skill runs these
+steps:
 
 1. It takes a name and a one-line description from the request, and asks for
    whichever is missing. The name becomes the folder name and the list entry.

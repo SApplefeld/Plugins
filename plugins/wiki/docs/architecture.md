@@ -327,6 +327,34 @@ and it is load-bearing: a headless run cannot answer a permission prompt, so a
 missing allow rule stalls an unattended run and a missing deny rule lets it do
 damage.
 
+**Claude Code reads these rules in a fixed order.** `settings.json` holds an
+`allow` list and a `deny` list, and each rule names a tool and, in
+parentheses, the paths or the command it covers. Claude Code checks the deny
+rules first, then any `ask` rules, which this template has none of, then the
+allow rules, and the first match decides. So no allow rule can carve an
+exception out of a deny. A call that matches no
+rule falls to the permission mode. `defaultMode` names the mode a session
+starts in. Its value `default`, which Claude Code labels Manual, asks a person
+before the first use of each tool that needs approval. `--permission-mode
+default` on a `claude` command line starts that run in the same mode, whatever
+the account's own setting says. A headless run, one started with `claude -p`,
+has no person to ask. In that mode a call that needs approval and that no rule
+allows is refused, and the run carries on without it.
+
+A `Bash(...)` rule matches the text of a command, with `*` standing for any
+text. A rule ending in `:*` is a prefix rule: `Bash(git:*)` matches `git` and
+every command that starts `git` followed by a space, just as `Bash(git *)`
+would. Claude Code splits a chained command at `&&`, `||`, `;`, `|`, `|&`, `&`
+and line breaks. It runs the chain without asking only where every part is
+allowed, and a deny rule refuses the chain where any part matches it. So a
+helper call with `git push` chained after it is refused for its second part.
+`Read`, `Glob` and `Grep` are Claude Code's own file tools, not shell
+commands: `Read` opens one file, `Glob` lists the paths that match a pattern,
+and `Grep` searches the contents of files. No `Bash(...)` rule covers them.
+Claude Code's permissions page, https://code.claude.com/docs/en/permissions,
+and its headless page, https://code.claude.com/docs/en/headless, state these
+rules.
+
 **Three vetted helpers are the agent's only git and move operations.** `kb-move.ps1` is the
 only path into `sources/`: it takes the handle `kb-status.ps1 -What Inbox`
 prints beside an inbox file, which it resolves against the inbox at the call,
@@ -376,6 +404,11 @@ under the allow-list wall even on an account whose own default is to bypass
 permissions, and a shell write to `.claude/` prompts a human rather than
 running. That effect on a bypass-default account is the design and has not
 been observed on a run.
+
+The write denies are written relative to the folder a run starts in, as
+`./sources/**` and the like, so they bind inside the KB only. A write outside
+the KB matches no allow rule either, so a headless run is refused it and an
+interactive session asks first.
 
 **Untrusted input is treated as data.** Ingested documents arrive from third
 parties and may contain text shaped like a command or an assertion that the wiki
@@ -435,6 +468,10 @@ That keeps every other property, including the empty-named one
 `~/.claude/kb-trust-backup.json` first, writes a temporary file beside the
 original and moves it over. It then runs the probe again and succeeds only
 where no warning prints, and a third read must still find the key true.
+Neither that warning line nor `~/.claude.json` is a documented Claude Code
+interface. A release that rewords the line or moves the key leaves the writer
+refusing, under the silent-probe rule below, and opening the KB in Claude
+Code once and accepting the dialog stays the way through.
 
 A silent first probe is not proof of trust on its own. Where the first probe
 prints no warning, the writer reads `~/.claude.json`, once more after 200
@@ -592,9 +629,9 @@ this repository. The marketplace's `wiki` entry points at that folder, so
 published. The manifest, `.claude-plugin/plugin.json`, carries a name and a
 description and no version, so installs follow the published commit.
 
-The job, `.github/workflows/publish.yml`, runs on a pushed tag matching
-`publish-*` and on a manual run, under the repository's `publish`
-environment. It never runs on a push to `main`. Its steps run in this order,
+The job, `.github/workflows/publish.yml`, runs on each push to `main` and on
+a manual run, under the repository's `publish` environment. A manual run may
+name any branch or tag. Its steps run in this order,
 and each failure stops the run before the next step:
 
 1. **On-main check.** `tools/publish/on-main.mjs` runs
@@ -604,8 +641,10 @@ and each failure stops the run before the next step:
    `main` that was never fetched reads as a failure. A `--sha` that is not a
    full 40-character lowercase id is a usage error, exit 2. The full ref name
    is the default because a tag named `origin/main` would otherwise shadow the
-   branch. The check runs from the tagged commit's own workflow, so it stops a
-   tag on a commit `main` never reached and not someone who can push a tag.
+   branch. An older commit of `main` passes, so a manual run on a branch or
+   tag at that commit publishes an older snapshot. The check runs from the commit's own workflow, so it
+   stops a manual run on a branch `main` never reached and not someone who
+   edits the workflow on that branch.
 2. **Assemble.** `tools/publish/assemble.mjs` resolves
    `tools/publish/allowlist.txt` through `git ls-files` and copies each file
    under a temporary folder at its own path. A glob may not resolve under
@@ -626,7 +665,7 @@ and each failure stops the run before the next step:
    snapshot holds, which catches a file the public repository's ignore rules
    would drop.
 5. **Commit and push.** The job commits once as `github-actions[bot]`, naming
-   the source commit's short id and never the tag. A rejected push is rebased
+   the source commit's short id. A rejected push is rebased
    once and pushed again. Where the public folder already matches, the run
    makes no commit and says so.
 
