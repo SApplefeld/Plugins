@@ -29,6 +29,7 @@ import { MAX_ROSTER_PERSONA_NAME_LENGTH } from "../board/roster.ts";
 import { visible } from "../sanitize.ts";
 import { ASK_COUNT_WINDOW_MS, questionOf } from "./ledger.ts";
 import type { AskEntry, LedgerReading } from "./ledger.ts";
+import type { Unposted } from "./binding.ts";
 
 /**
  * Where an entry's ask was posted, resolved by the caller on every render: the sightings module's
@@ -36,6 +37,13 @@ import type { AskEntry, LedgerReading } from "./ledger.ts";
  * not yet known.
  */
 export type AskLink = (entry: Pick<AskEntry, "question">, persona: string) => string | null;
+
+/**
+ * Why an entry's ask record holds no message id, resolved by the caller on every
+ * render from the ask records it holds: the reason the record carries, or null where the message
+ * posted or no post has been tried yet.
+ */
+export type AskUnposted = (entry: Pick<AskEntry, "id">, persona: string) => Unposted | null;
 
 /** The card's name where Discord draws a message's first line, inline beside the bot's own name,
  * and again at the largest heading Discord offers, for the two reasons the sibling cards' comments
@@ -62,6 +70,14 @@ const NO_LEDGER = "no ledger";
 
 /** What a proceeding ask's second sub-bullet opens with, ahead of the worker's recommendation. */
 const PROCEEDING_ON = "proceeding on:";
+
+/** What an ask's line carries when its record holds no message id. Each form says only what the
+ * record proves: a refusal means nothing is in the thread, while a post with no readable id may
+ * be there. Fixed broker text, so it takes no escape. */
+const NOT_POSTED = "not posted";
+const REFUSED_FOR_CONTENT = "refused for its content";
+const NO_MESSAGE_ID = "no message id";
+const REASON_NOT_RECORDED = "reason not recorded";
 
 /** What the thread message's recommendation line opens with. */
 const RECOMMENDATION = "recommendation:";
@@ -343,16 +359,37 @@ export function openAsks(ledgers: readonly LedgerReading[]): OpenAsk[] {
   return all.sort((left, right) => key(left) - key(right));
 }
 
+/** The marker for an ask whose record holds no message id, naming why where that is known. */
+function unpostedMarker(unposted: Unposted): string {
+  switch (unposted.reason) {
+    case "refused":
+      return `${NOT_POSTED}, ${REFUSED_FOR_CONTENT}`;
+    case "no-id":
+      return NO_MESSAGE_ID;
+    case "unknown":
+      return `${NO_MESSAGE_ID}, ${REASON_NOT_RECORDED}`;
+  }
+}
+
 /**
- * One ask's lines: its heading, its age, its link where one is known and, where this is the first
- * line drawn for a persona whose ledger file is stale, how old that file is; then a sub-bullet with
- * the question, and for a proceeding ask a second with what the worker is proceeding on.
+ * One ask's lines: its heading, its age, a marker where its record holds no message id, its
+ * link where one is known and, where this is the first line drawn for a persona whose ledger file is
+ * stale, how old that file is; then a sub-bullet with the question, and for a proceeding ask a second
+ * with what the worker is proceeding on. An ask whose message posted draws no marker, so its line is
+ * the same bytes whatever the asks beside it carry.
  */
-function askLines(ask: OpenAsk, link: string | null, stale: number | null, now: number): string[] {
+function askLines(
+  ask: OpenAsk,
+  link: string | null,
+  unposted: Unposted | null,
+  stale: number | null,
+  now: number,
+): string[] {
   const parts = [heading(ask.persona, ask.entry)];
   // Drawn from when the ask opened: the lines draw oldest
   // opened first, and the age beside each is what makes that order legible.
   if (ask.entry.openedAt !== null) parts.push(heartbeat(Math.max(now - ask.entry.openedAt, 0)));
+  if (unposted !== null) parts.push(unpostedMarker(unposted));
   if (link !== null) parts.push(link);
   if (stale !== null) parts.push(`ledger ${span(stale)} old`);
   const lines = [
@@ -408,6 +445,7 @@ function footerLine(ledgers: readonly LedgerReading[]): string {
 export function renderDecisionsCard(
   ledgers: readonly LedgerReading[],
   links: AskLink,
+  unposted: AskUnposted,
   now: number,
 ): string {
   const lines: string[] = [PREVIEW, TITLE];
@@ -458,7 +496,7 @@ export function renderDecisionsCard(
   for (const ask of asks) {
     const ledger = ledgers.find((held) => held.name === ask.persona);
     const stale = ledger !== undefined && !marked.has(ask.persona) ? staleAge(ledger) : null;
-    const drawn = askLines(ask, links(ask.entry, ask.persona), stale, now);
+    const drawn = askLines(ask, links(ask.entry, ask.persona), unposted(ask.entry, ask.persona), stale, now);
     if (!fits(drawn)) return stop();
     marked.add(ask.persona);
     lines.push(...drawn);

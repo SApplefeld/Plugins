@@ -56,7 +56,7 @@ import {
   renderClosedMessage,
   renderDecisionsCard,
 } from "./card.ts";
-import type { AskLink, OpenAsk } from "./card.ts";
+import type { AskLink, AskUnposted, OpenAsk } from "./card.ts";
 import { MAX_ASK_RECORDS, askAtMessage, askKey, capAskRecords } from "./binding.ts";
 import type { AskRecord, DecisionsCardBinding } from "./binding.ts";
 import { MAX_ASKS_PER_LIST, questionOf } from "./ledger.ts";
@@ -315,6 +315,17 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
     options.onBind?.({ messageId, threadId });
   }
 
+  /**
+   * Why an ask's record holds no message id, read from the map as it stands when the card is
+   * drawn, which is before the pass posts: null for an ask the map does not hold yet or whose
+   * message posted, and the reason its record keeps otherwise, `unknown` where it keeps none.
+   */
+  const unposted: AskUnposted = (entry, persona) => {
+    const record = asks.get(askKey(persona, entry.id));
+    if (record === undefined || record.messageId !== null) return null;
+    return record.unposted ?? { reason: "unknown" };
+  };
+
   function keep(record: AskRecord): void {
     asks.set(askKey(record.persona, record.id), record);
     dirty = true;
@@ -468,11 +479,13 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
    * included; the next pass starts over from the oldest ask still missing.
    *
    * A message Discord refuses with one of `CONTENT_REFUSAL_CODES` is refused for what it says, so it
-   * never counts against the post route: the ask is kept with no message id and the refused text as
-   * its body, with one line naming the persona, the ask id and the code and no ask text. It is never
-   * posted again, and the posting ends for this pass as any failed post ends it, so its parts post
-   * on the next pass and its close lands under the last part, or marks it closed with no edit where
-   * it has none. Any other refusal counts on the route and leaves the ask to be posted again.
+   * never counts against the post route: the ask is kept with no message id, the refused text as its
+   * body and the refusal with its code as the reason the card draws, with one line naming the
+   * persona, the ask id and the code and no ask text. It is never posted again, and the posting ends
+   * for this pass as any failed post ends it, so its parts post on the next pass and its close lands
+   * under the last part, or marks it closed with no edit where it has none. Any other refusal counts
+   * on the route and leaves the ask to be posted again. A post that lands with no readable id is kept
+   * with that as its reason, and is not posted again either.
    *
    * A map holding `MAX_ASK_RECORDS` open asks posts nothing: the cap could only make room by
    * dropping an open record, and the ask that record named would then be posted again on the next
@@ -517,6 +530,7 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
           persona: ask.persona,
           id: ask.entry.id,
           messageId: null,
+          unposted: { reason: "refused", code: outcome.code },
           body: text,
           briefed: false,
           tailIds: [],
@@ -532,10 +546,14 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
       }
       posting.posted += 1;
       held += 1;
+      const landed = outcome.value.messageId;
       keep({
         persona: ask.persona,
         id: ask.entry.id,
-        messageId: outcome.value.messageId,
+        messageId: landed,
+        // A post that landed with no readable id keeps why, for the card's marker. A record whose
+        // message posted carries no reason.
+        ...(landed === null ? { unposted: { reason: "no-id" } as const } : {}),
         body: text,
         briefed: false,
         tailIds: [],
@@ -726,7 +744,7 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
     roster = new Set(ledgers.map((ledger) => ledger.name));
     lastReadings = ledgers;
     const links = options.links();
-    const card = renderDecisionsCard(ledgers, links, at);
+    const card = renderDecisionsCard(ledgers, links, unposted, at);
 
     // Creation first, and it is not held back by anything else: a card is worth far more than an
     // empty channel.

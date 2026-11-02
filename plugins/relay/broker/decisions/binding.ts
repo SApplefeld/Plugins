@@ -55,8 +55,10 @@ export const MAX_ASK_RECORDS = 256;
  * indentation under 250 more. The tail adds at most `MAX_BRIEF_PARTS` snowflakes of 20 digits, each
  * with its quotes, its comma and its line's indentation, and the key, under 150 bytes. The kept
  * recommendation is at most 240 code points and the kept question at most 200 UTF-16 units, so
- * even as six-byte escapes they add under 2,700 bytes with their keys: one record under 14,800
- * bytes, and the cap's worth of them under 3.8 MB. A file past this cap is one something else wrote.
+ * even as six-byte escapes they add under 2,700 bytes with their keys. A record with no message id
+ * writes `null` in the snowflake's place and adds its unposted reason: the key, the reason word, a
+ * code of at most six digits and their indentation, under 100 bytes. One record under 14,900
+ * bytes, and the cap's worth of them under 3.9 MB. A file past this cap is one something else wrote.
  */
 export const MAX_ASKS_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -65,6 +67,22 @@ export const MAX_ASKS_FILE_BYTES = 4 * 1024 * 1024;
  * format change and starts with none, rather than as corruption.
  */
 export const ASKS_FORMAT_VERSION = 2;
+
+/** The widest Discord JSON error code a stored refusal reason carries: six digits. The thread writes
+ * only the codes in thread.ts's `CONTENT_REFUSAL_CODES`, so this bounds what the file can hold
+ * rather than what the thread writes. */
+const MAX_REFUSAL_CODE = 999_999;
+
+/**
+ * Why an ask's own message has no id. The thread writes one of two: Discord refused the message for
+ * its content, with the JSON error code the refusal carried, or the post landed with no readable id.
+ * The loader reads `unknown` on a record with no message id whose file carries neither, which is
+ * every such record written before the reason was.
+ */
+export type Unposted =
+  | { reason: "refused"; code: number }
+  | { reason: "no-id" }
+  | { reason: "unknown" };
 
 /** One ask this card has posted into its thread. */
 export type AskRecord = {
@@ -78,6 +96,11 @@ export type AskRecord = {
    * and its close is marked with no edit to make when no part follows.
    */
   messageId: string | null;
+  /**
+   * Why `messageId` is null, which the card draws on the ask's line. Carried by every record with a
+   * null message id that the thread wrote or the loader read, and by no record whose message posted.
+   */
+  unposted?: Unposted;
   /**
    * The text of the message a close edits, which the close edits back to with the outcome line under
    * it: the last part's message once one is posted, and the ask's own message until then. Kept here
@@ -177,6 +200,30 @@ function isDrawnText(value: unknown): value is string {
 }
 
 /**
+ * The reason out of the file for a record with no message id. Absent, it is a file written before
+ * the reason was, and reads `unknown`. One that is neither written reason, or a refusal whose code is
+ * not a positive integer of at most six digits, reads `unknown` too, rather than refusing the record:
+ * a refused record would post its ask a second time, and one refused for its content would meet the
+ * same refusal again, while an unknown reason costs only the marker's detail.
+ */
+function unpostedOf(value: unknown): Unposted {
+  if (isRecord(value)) {
+    if (value.reason === "no-id") return { reason: "no-id" };
+    const code = value.code;
+    if (
+      value.reason === "refused" &&
+      typeof code === "number" &&
+      Number.isInteger(code) &&
+      code > 0 &&
+      code <= MAX_REFUSAL_CODE
+    ) {
+      return { reason: "refused", code };
+    }
+  }
+  return { reason: "unknown" };
+}
+
+/**
  * One record out of the file, or null where it is not one. The message id and each tail id are
  * interpolated into a token-bearing request path on the edit that closes the ask, so each is
  * normalized and checked as the thread binding's identifiers are, and a record naming something
@@ -210,10 +257,13 @@ function recordOf(value: unknown): AskRecord | null {
     ...(isDrawnText(value.question) ? { question: value.question } : {}),
   };
   if (value.messageId === null) {
-    return { persona, id, messageId: null, body, briefed, tailIds, ...shown, openedAt, closedAt };
+    const unposted = unpostedOf(value.unposted);
+    return { persona, id, messageId: null, unposted, body, briefed, tailIds, ...shown, openedAt, closedAt };
   }
   const messageId = snowflakeOf(value.messageId);
   if (messageId === null) return null;
+  // A reason beside a message id that checks out is dropped: the id is what a close edits, and a
+  // posted message draws no marker.
   return { persona, id, messageId, body, briefed, tailIds, ...shown, openedAt, closedAt };
 }
 
