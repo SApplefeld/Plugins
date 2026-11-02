@@ -17,7 +17,9 @@
 //
 // Nothing here logs, so no path or file name can reach the log from this module; the router
 // records the session and the cause from what it is returned. No reason sentence names the path
-// either, since the relay shows the model the sentence and the model already holds the path.
+// either, since the relay shows the model the sentence and the model already holds the path. The
+// router appends the session's own start directory to the `outside` reason, a directory the
+// session already holds, and never to the log.
 import path from "node:path";
 import { absoluteLocalPath } from "../intake.ts";
 import { TEXT_EXTENSIONS, TYPED_EXTENSIONS, reducedName } from "./attachments.ts";

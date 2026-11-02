@@ -25,7 +25,7 @@ import { crossSessionDelivery } from "../tail.ts";
 import type { EchoMemory, EchoSlot, PeerTraffic, PromptSource } from "../tail.ts";
 import type { AttachmentMode } from "./attachments.ts";
 import { REPLY_FILE_REASONS, readReplyFile } from "./reply-file.ts";
-import type { ReplyFile, ReplyFileSystem } from "./reply-file.ts";
+import type { ReplyFile, ReplyFileCause, ReplyFileSystem } from "./reply-file.ts";
 import type { ThreadWriter } from "./writer.ts";
 import type { CallOutcome } from "../discord/transport.ts";
 import type { TalkFile, TalkInput, TalkTap } from "../web/talk.ts";
@@ -490,15 +490,16 @@ function isTaskNotification(text: string): boolean {
 
 /**
  * Why a reply could not be posted, in the terms the relay reports back to Claude. `file-refused`
- * carries the sentence from `REPLY_FILE_REASONS`, which the relay prints to the model verbatim, and
- * means nothing was posted.
+ * means nothing was posted. Its `reason` is the sentence from `REPLY_FILE_REASONS`, which the relay
+ * prints to the model verbatim, with the session's recorded start directory appended for `outside`
+ * alone. Its `cause` is the bare cause word, which is what a log line carries in place of the reason.
  */
 export type ReplyResult =
   | { status: "sent" }
   | { status: "no-session" }
   | { status: "no-thread" }
   | { status: "failed"; error: string }
-  | { status: "file-refused"; reason: string };
+  | { status: "file-refused"; reason: string; cause: ReplyFileCause };
 
 /**
  * What a mirror post carries: the operator's console prompt, or the turn's final assistant reply.
@@ -665,7 +666,8 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   // post is authenticated by rather than something to write down.
   //
   // The located session carries its recorded working directory, which the reply tool reads a named
-  // file under. It is an instruction to open a directory and is never logged or rendered here.
+  // file under. It is an instruction to open a directory and is never logged or rendered here. The
+  // one place it leaves is an `outside` refusal's reason, returned to the session that owns it.
   function locate(
     processToken: string,
   ):
@@ -1260,13 +1262,16 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       const located = locate(processToken);
       // Rebuilt rather than passed along, so the session `locate` resolved for the log line below
       // stays here: this result is serialized back to the relay and read by the model, and the
-      // relay is told why a reply did not land, never what the broker knows about the session.
+      // relay is told why a reply did not land, never what the broker knows about the session,
+      // save the session's own start directory on an `outside` refusal below.
       if ("status" in located) return { status: located.status };
 
       // The file, read and bounded before anything renders or posts, so a refusal is never a
       // half-posted reply: the model is told the cause and sends once more with the argument
       // fixed. The log carries the session and the cause and never the path, which is the
-      // model's own words about the session's disk.
+      // model's own words about the session's disk. The model's reason for `outside` names the
+      // session's own recorded start directory, which the session already holds, so it can pick a
+      // path that passes; no other cause names a directory, and the log never does.
       let attachment: ReplyFile | undefined;
       if (file !== undefined) {
         const read =
@@ -1282,7 +1287,13 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
               });
         if (read.refused !== null) {
           log(`routing: the reply from session ${located.sessionId} was refused its file: ${read.refused}`);
-          return { status: "file-refused", reason: REPLY_FILE_REASONS[read.refused] };
+          // The workdir is never null on `outside`, since the reader refuses a missing one first;
+          // the null check only narrows the type.
+          const reason =
+            read.refused === "outside" && located.workdir !== null
+              ? `${REPLY_FILE_REASONS.outside}; the directory tested against is ${located.workdir}`
+              : REPLY_FILE_REASONS[read.refused];
+          return { status: "file-refused", reason, cause: read.refused };
         }
         attachment = read.file;
       }

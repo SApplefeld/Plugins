@@ -63,7 +63,8 @@ export function replyToolResult(status: ReplyStatus, reason?: string): CallToolR
   }
   if (status === "file-refused") {
     // The broker's sentence for why, carried as written, since it names what to fix and never the
-    // path. Without one the model is still told the file was not attached and nothing posted.
+    // file's path, only the session's own start directory where the file lies outside it. Without
+    // one the model is still told the file was not attached and nothing posted.
     const text =
       typeof reason === "string"
         ? `Not sent: the file was not attached: ${reason}. Nothing was posted.`

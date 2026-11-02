@@ -13,8 +13,8 @@
 //     body: {"text": "...", "file": "<absolute path>"}, the file optional and left off when none
 //     -> 200 {"status": "sent" | "no-session" | "no-thread" | "failed" | "file-refused"}, with the
 //        head written before the run starts and a newline heartbeat every REPLY_HEARTBEAT_MS until
-//        it resolves. A file-refused body carries the "reason" sentence the relay shows the model,
-//        and means nothing was posted.
+//        it resolves. A file-refused body carries the "reason" sentence the relay shows the model
+//        and the "cause" word it was refused for, and means nothing was posted.
 //        The outcome rides the body alone, because the status line is on the wire long before the
 //        outcome is known; the heartbeats are insignificant leading whitespace to the JSON parser
 //        at the other end, and they are what the relay's idle timer measures instead of run length.
@@ -364,13 +364,15 @@ export function createRelayRoutes(
       // the run finished, because the relay's ceiling tells the model not to send the message
       // again: this line is the only place a reply that failed after its caller left is ever
       // reported, to anyone. The status and its cause are the whole of it, the way every line here
-      // carries cause and never the message. A refused file's reason names no path either.
+      // carries cause and never the message. A refused file is logged by its cause word and never
+      // its reason, since the reason names the session's own directory for `outside`, which this
+      // line must never print.
       if (response.writableEnded || response.destroyed) {
         const cause =
           result.status === "failed"
             ? `: ${result.error}`
             : result.status === "file-refused"
-              ? `: ${result.reason}`
+              ? `: ${result.cause}`
               : "";
         log(
           `relay: a ${route} run settled ${result.status} after its caller had closed the ` +
