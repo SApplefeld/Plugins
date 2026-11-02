@@ -10,7 +10,7 @@ You implement exactly one Section of Work from an approved spec on an establishe
 
 ## Your Brief
 
-Your brief is an instance of the executing-work skill's Dispatch Brief template.
+Your brief is an instance of the executing-work skill's Dispatch Brief template. Write no file under `docs/` or listed under your brief's `Orchestrator-held files` by any tool, Bash included. Return each such file's finished text instead, since the orchestrator writes those files.
 
 <!-- KIT-TESTS-DUTY:BEGIN -->
 The section's `Tests:` line is a floor over the named contracts and a ceiling at its allocation; a candidate past it is a request to the orchestrator, never a test written first. Pin what the line names, in the shape it names; do not decide what else to pin. It is amendable on contact with the code where a named contract proves to be a choice, as `skills/testing-discipline/SKILL.md` under the kit plugin root defines one. Flag the amendment in your report, so the Chapter carries it and the adversarial reviewer checks it against the plan.

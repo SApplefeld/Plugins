@@ -6159,7 +6159,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 0, 1 and 2 of the section loop and the rules for delegating to subagents. It owns closing the previous boundary, confirming a section's approach, the Dispatch Brief template and tier routing, the capacity reading, the implementer status and escalation ladder, awaiting a dispatched agent and stopping one before replacing it, the evidence check of step 2 and its promises check, and the orchestrator's delegation rules, the disjoint-files rule and scout banding among them. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 0 to 2 tell a session to read it before a section opens and before any implementer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: c3.C001 and c3.C002 rewritten to their passages as they now read, and F001 to F005 added under the plan's letter F for the inline start-of-work statement, the brief's `Verify:` field and step 2's instrument run. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: R007, c2.C095, B002, R009, T166 and Z001 rewritten to their passages as they now read, defining the stall raise, naming the four statuses, pointing the self-surfacing gate at its definition, naming the files that hold step 3's roster, step 4 and the dispatch table, and making the promise check field required. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_opus-default-tier_spec_v1.md` section 1 on 2026-10-29, which made opus the default tier: c2.C096, R007 and R009 rewritten to their passages as they now read, and c2.C095's reason amended. Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30: c2.C020's key narrowed to three tiers, c2.C095 and c2.C096 retired with the haiku field, and AI001 added under the plan's letter AI for the stale-line reading. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30: c2.C065 rewritten to its passage as it now reads, and AK001 added under the plan's letter AK for the probe wrapper clause. Amended by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 (AO001 to AO003 below).
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: c3.C001 and c3.C002 rewritten to their passages as they now read, and F001 to F005 added under the plan's letter F for the inline start-of-work statement, the brief's `Verify:` field and step 2's instrument run. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: R007, c2.C095, B002, R009, T166 and Z001 rewritten to their passages as they now read, defining the stall raise, naming the four statuses, pointing the self-surfacing gate at its definition, naming the files that hold step 3's roster, step 4 and the dispatch table, and making the promise check field required. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_opus-default-tier_spec_v1.md` section 1 on 2026-10-29, which made opus the default tier: c2.C096, R007 and R009 rewritten to their passages as they now read, and c2.C095's reason amended. Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30: c2.C020's key narrowed to three tiers, c2.C095 and c2.C096 retired with the haiku field, and AI001 added under the plan's letter AI for the stale-line reading. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30: c2.C065 rewritten to its passage as it now reads, and AK001 added under the plan's letter AK for the probe wrapper clause. Amended by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 (AO001 to AO003 below). Amended by `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1: c2.C015, c2.C017 and c4.C092 rewritten to their passages as they now read, and AP001 added under the plan's letter AP for the brief's held-files field, and every other `source:` line keeps the line it was read at.
 
 ### I019
 - key: Title the reference file carrying steps 0, 1 and 2 of the section loop and the rules for delegating to subagents `Implementing a Section`.
@@ -6294,25 +6294,27 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: On the dispatch path the entries ride into the brief, and an inline section has only the grep.
 
 ### c2.C015
-- key: Run any section that writes under `docs/` in the main thread.
+- key: Run a section that writes only under `docs/` in the main thread, and dispatch one naming a `docs/` file beside other files with each such file under the brief's `Orchestrator-held files`.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:19
-- provenance: 682a1f7 2026-07-17, a kaizen note after dispatched docs sections were blocked mid-run by the docs-write-guard; RED/GREEN baseline-tested at install.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:11
+- provenance: 682a1f7 2026-07-17, a kaizen note after dispatched docs sections were blocked mid-run by the docs-write-guard; RED/GREEN baseline-tested at install. Split into the docs-only and the mixed case by `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1, from kit issues 753, 798, 841, 840, 718 and 438.
 - verdict: rewrite
-- landed: 3a09c25 section 4
-- reason: The rule, the draft-and-return allowance and the recording mechanics stay; only the guard-and-entanglement reason sentence leaves (A027). A file a subagent wrote anyway is step 3's incident class, and the writer tier for review is line 361's.
+- landed: 3a09c25 section 4; `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1
+- reason: The rule, the draft-and-return allowance and the recording mechanics stay; only the guard-and-entanglement reason sentence leaves (A027). A file a subagent wrote anyway is step 3's incident class, and the writer tier for review is line 361's. A mixed section sent inline would lose its tier for one `docs/` row, so it stays dispatched and its `docs/` files ride the brief's held-files field (AP001).
 - proposed: Delete the sentence "The docs-write-guard denies any non-curator subagent ... (voice, structure, cross-references)" and keep the rest of the bullet as written.
 - baseline-test: yes
-- passage: **A section that writes under `docs/` goes to the main thread whatever its tier.**
+- passage: **A section that writes only under `docs/` goes to the main thread whatever its tier.**
+- passage: A section naming a `docs/` file beside other files is dispatched, each such file listed under the brief's `Orchestrator-held files`.
 
 ### c2.C017
-- key: Let an implementer draft doc prose and return it in its final message, but perform the `docs/` write yourself in the main thread.
+- key: Let an implementer draft prose for any `docs/` file and return it in its final message, but perform the `docs/` write yourself in the main thread.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:19
-- provenance: 682a1f7 2026-07-17.
-- verdict: keep
-- reason: The permissive half that keeps drafting dispatchable; survives A027 unchanged.
-- passage: An implementer may return drafted prose in its final message, but the main thread writes it.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:11
+- provenance: 682a1f7 2026-07-17. Widened to any `docs/` file by `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1
+- reason: The permissive half that keeps drafting dispatchable, widened to any `docs/` file so it is also the return route for a held file in a dispatched section (AP001).
+- passage: An implementer may return drafted prose for any `docs/` file in its final message, but the main thread writes it.
 
 ### c2.C018
 - key: Record `Locus: inline` under the section's `Model:` line so the routing override is visible up front.
@@ -7427,7 +7429,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c4.C091
 - key: Do not try to widen an agent's file scope in brief text where a PreToolUse guard keys on agent type.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:182
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:185
 - provenance: 51ffe14 2026-08-03, a kaizen note from a round spent discovering the docs-write-guard's denial; the general rule was written because the docs routing instance (682a1f7) alone had not taught the class.
 - verdict: rewrite
 - landed: 3a09c25 section 4
@@ -7437,13 +7439,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Where a PreToolUse guard keys on agent type, widening the agent's file scope in the brief leaves the write blocked.
 
 ### c4.C092
-- key: Route around a mechanical guard at dispatch time: send an agent type the guard admits, keep the guarded write in the main thread, or have the agent return the text in its report for the main thread to place.
+- key: Route around a mechanical guard at dispatch time: send an agent type the guard admits, or keep the guarded write in the main thread.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:182
-- provenance: 51ffe14 2026-08-03.
-- verdict: keep
-- reason: The general rule whose standing instance is step 1's docs routing; both link to each other and neither is a copy.
-- passage: Route around it at dispatch time: send an agent type the guard admits, keep the guarded write in the main thread, or have the agent return the text for the main thread to place.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:185
+- provenance: 51ffe14 2026-08-03. Narrowed by `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1, which cut the return-the-text option.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1
+- reason: The general rule whose standing instances are step 1's docs routing and the brief's held-files field (AP001); each links to the other and neither is a copy. The field now states the return-the-text option for the guard it exists for, and a guarded write kept in the main thread still covers it for any other guard.
+- passage: Route around it at dispatch time: send an agent type the guard admits, or keep the guarded write in the main thread.
 
 ### c4.C093
 - key: Treat a brief's read-only instruction as a request rather than a control when the agent type is not on the guard's roster.
@@ -7989,6 +7992,18 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
 - reason: Brainstorming step 12 names the surface a fable reason and defines it by pointing at the security-reviewer trigger in `review.md` (AO003 and C118 under that ledger), so the line takes AO002's reading.
 - passage: or that touches a security-sensitive surface as brainstorming step 12 defines it, whatever the body says.
+
+### AP001
+- key: Brief every `docs/` path a section's Files in scope names under `Orchestrator-held files`, whose finished text the agent returns and writes by no tool.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:18
+- provenance: `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1, from kit issues 753, 798, 841, 840, 718 and 438, where an implementer dispatched on a section naming a `docs/` file was refused by the docs-write guard or reached for a shell write it does not read.
+- verdict: keep
+- landed: `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1
+- reason: The guard cannot read a brief (c4.C091), so the bar reaches the agent as a field it reads before its first write, and the four implementer charters state the same bar. A required element takes a structural slot in the template it fills, per the writing-skills rule-forms table.
+- passage: - Orchestrator-held files, when Files in scope names a docs/ path: each
+- passage: such path, its finished text returned in the final message and written
+- passage: by no tool
 
 ## plugins/grimoire/skills/executing-work/references/review.md
 
