@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's brainstorming skill: it governs the collaborative design conversation that precedes any new feature, project, or non-trivial change, and it ends by producing a written spec in `docs/plans/` that the executing-work skill runs on. It owns these moments: the pre-design memory and backlog recall, the scope check that splits an oversized request into sub-project specs, the one-question-at-a-time design dialog, the offer of the design council at a hard fork, the contract-surface scout sweep that derives files in scope, the plan sketch, the spec write and its indexing, the spec self-review with its blind read and plan review, the choice of commit model, the per-section model tier and locus assignment, the `Tests:` and document-review lines, the Fable-usage rules, and the frozen spec format and header contract. A session loads it as a `named-trigger`: the frontmatter says to use it when the operator wants to think through a problem before building, or on any substantial new effort without an existing spec, with phrases like "let's think through", "help me design", or "spec this out".
 
-Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: C151 rewritten to its passage as it now reads, C152's key reworded, and F001 to F005 added under the plan's letter F for the `Verify:` line, the write-time run and the catalog check. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C024, C034, C045, C046, C055, C072, C095, C097, C104, C164 and C180 rewritten to their passages as they now read. They point the intake routes at the doctrine bullet that letters them, the capacity reading, the Workflow route and the external engine at the files that hold them, and the scout band at the file now holding it, state when `## Operator Verification` is owed, and cut restatements to pay. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19, which put the altitude interview into the authoring loop: C177 and C181 rewritten to their passages as they now read, and AB001 to AB005 added under the plan's letter AB for the interview, its three sources, step 3's first question, step 12's `Method:` sentence and the template's `Method:` line. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 3 on 2026-10-19, which held step 5's option costs to the doctrine's measured figures (AB006 below). Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 2 on 2026-10-24, which has step 1 read the direction ledgers and step 9 write the `Serves:` line: C177 and C181 rewritten to their passages as they now read, and DB001 to DB004 added under the plan's letters DB for the ledger read, the line's form, the plan serving none and the template's line. Its review round 1 on 2026-10-25 rewrote DB001 and DB004 to their passages as they now read, the directory's path left to the role skill and the template defaulting to `Serves: none`, rewrote C181 to match, and corrected the source lines of C177 and C181. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 3 on 2026-10-25, which has step 9 write the plan brief after `## Intent`: DB005 added under the plan's letters DB for that write. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_opus-default-tier_spec_v1.md` section 1 on 2026-10-29, which made opus the default tier: C065, C071, C115, C116, C117 and A001 rewritten to their passages as they now read, C118's reason amended, and C114 retired with the haiku bullet. Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30, which closed the sonnet band to a listed case and barred haiku: C065, C071, C115, C116, C117, C128 and A001 rewritten to their passages as they now read, and AI001 added under the plan's letter AI for the haiku sentence. Amended by `docs/plans/claude-kit_brainstorm-approval_spec_v1.md` section 1 on 2026-10-31, which has step 9 write the `## Dispatch Authorization` section from the operator's sketch or recap approval: AL001 added under the plan's letter AL for the new paragraph, so every `source:` line at this document's line 32 or later moved down two lines. Its fix round 1 on the same day rewrote AL001 to its passage as it now reads, placing the heading, requiring a warranted channel, pointing the section's form at curating-docs and holding an unshipped spec for the operator's word where the one re-ask gets no yes.
+Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` section 1 on 2026-09-19 (C174 to C181 below) and section 4 on 2026-09-19 (C182 below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (`W` entries below). Amended by `docs/plans/claude-kit_jev-coverage-check_spec_v1.md` section 3 on 2026-09-21 (C183 below). Amended by `docs/plans/claude-kit_prose-register_spec_v1.md` section 4 on 2026-09-22 (`P` entries below). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `64340c18` with its fix round at `6f26f01a`, so every live entry's `passage:` line quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_short-titles_spec_v1.md` section 1 on 2026-10-05 (D001 below). Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (C114, C115 and C116 below, amended in place for the widened haiku band). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 3: C065, C071, C114, C116, C117, C118 and C131 rewritten to their passages as they now read, C119 retired, and A001 added under the plan's letter A for the step 10 item. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: C151 rewritten to its passage as it now reads, C152's key reworded, and F001 to F005 added under the plan's letter F for the `Verify:` line, the write-time run and the catalog check. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 2 on 2026-10-17: C024, C034, C045, C046, C055, C072, C095, C097, C104, C164 and C180 rewritten to their passages as they now read. They point the intake routes at the doctrine bullet that letters them, the capacity reading, the Workflow route and the external engine at the files that hold them, and the scout band at the file now holding it, state when `## Operator Verification` is owed, and cut restatements to pay. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19, which put the altitude interview into the authoring loop: C177 and C181 rewritten to their passages as they now read, and AB001 to AB005 added under the plan's letter AB for the interview, its three sources, step 3's first question, step 12's `Method:` sentence and the template's `Method:` line. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 3 on 2026-10-19, which held step 5's option costs to the doctrine's measured figures (AB006 below). Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 2 on 2026-10-24, which has step 1 read the direction ledgers and step 9 write the `Serves:` line: C177 and C181 rewritten to their passages as they now read, and DB001 to DB004 added under the plan's letters DB for the ledger read, the line's form, the plan serving none and the template's line. Its review round 1 on 2026-10-25 rewrote DB001 and DB004 to their passages as they now read, the directory's path left to the role skill and the template defaulting to `Serves: none`, rewrote C181 to match, and corrected the source lines of C177 and C181. Amended by `docs/plans/claude-kit_direction-and-brief_spec_v1.md` section 3 on 2026-10-25, which has step 9 write the plan brief after `## Intent`: DB005 added under the plan's letters DB for that write. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_opus-default-tier_spec_v1.md` section 1 on 2026-10-29, which made opus the default tier: C065, C071, C115, C116, C117 and A001 rewritten to their passages as they now read, C118's reason amended, and C114 retired with the haiku bullet. Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30, which closed the sonnet band to a listed case and barred haiku: C065, C071, C115, C116, C117, C128 and A001 rewritten to their passages as they now read, and AI001 added under the plan's letter AI for the haiku sentence. Amended by `docs/plans/claude-kit_brainstorm-approval_spec_v1.md` section 1 on 2026-10-31, which has step 9 write the `## Dispatch Authorization` section from the operator's sketch or recap approval: AL001 added under the plan's letter AL for the new paragraph, so every `source:` line at this document's line 32 or later moved down two lines. Its fix round 1 on the same day rewrote AL001 to its passage as it now reads, placing the heading, requiring a warranted channel, pointing the section's form at curating-docs and holding an unshipped spec for the operator's word where the one re-ask gets no yes. Amended by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 (AO001 to AO004 below), so every `source:` line at this document's line 55 or later moved up three lines.
 
 ### C001
 - key: Explore the problem space in conversation with the operator, then capture the agreement as a spec for executing-work to run.
@@ -241,7 +241,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Ask route (c) intake gaps one at a time inside this conversation rather than in the batched form used mid-run and at close-out.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:16
-- provenance: e872098 2026-08-18, the intake-gap-check plan: a review Major found the doctrine's "asked, batched" and this step both claiming route (c), and brainstorming was scoped to the design conversation; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names the doctrine bullet that letters the routes by its file and bold lead.
+- provenance: e872098 2026-08-18, the intake-gap-check plan: a review Major found the doctrine's "asked, batched" and this step both claiming route (c), and brainstorming was scoped to the design conversation; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17.
 - verdict: rewrite
 - reason: This is the sentence that records the intentional split, so removing it re-opens the contest the review closed. The sentence names the doctrine bullet by its file and bold lead because the routes are lettered there and nowhere on this page, and C026's routes (a) and (b) and step 8's route (a) and (b) items read against it.
 - passage: This is how route (c) of `operating-instructions/SKILL.md`'s "Enumerate the gaps at intake, ask selectively, declare the rest" bullet is asked here, not batched as at mid-run and close-out.
@@ -339,7 +339,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Lower the bar to offer the council, never the bar to run.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:22
-- provenance: dc87c38 2026-06-28, a deliberate lowering of the offer bar; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which cut the lead restating the lowered bar.
+- provenance: dc87c38 2026-06-28, a deliberate lowering of the offer bar; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17.
 - verdict: rewrite
 - landed: 16c5e61 section 28
 - reason: Real but minor contest with the council's "Offered only at genuine forks"; this later, deliberate rule at the offer's owner wins, and the council's envelope line is the side to bring current. Flipped from keep to rewrite at section 28's close: C033's retire took the sentence this one's opening 'So' referred back to, so the conjunction leaves and the sentence opens with a capital, and the sentence was respelled to stand as landed. Landed as the proposal below. The lead "Err toward offering" restated the lowered offer bar the rest of the sentence states, and was cut to pay for that section's pointers.
@@ -448,7 +448,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Band the scout and state its return contract per `executing-work/references/implementing.md`'s "Band the scout by question shape, and state its return contract".
 - class: pointer
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:24
-- provenance: 83b81ac 2026-08-19; the plan directed a pointer at executing-work's banding rather than a restatement; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which names the file now holding the bullet.
+- provenance: 83b81ac 2026-08-19; the plan directed a pointer at executing-work's banding rather than a restatement; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17.
 - verdict: rewrite
 - reason: Already the pointer at the owner the ownership map names for scouts. The pointer names `executing-work/references/implementing.md`, which holds the bullet since the skill-compaction-fit plan moved it out of `SKILL.md`, so a reader no longer takes a second hop through the skill's contents table.
 - passage: Band it and state its return contract per `executing-work/references/implementing.md`'s "Band the scout by question shape, and state its return contract", on the Explore subagent carrying that band's explicit model override.
@@ -544,7 +544,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Write the spec to `docs/plans/<project>_spec_v1.md`, incrementing the version where the name exists, and never overwriting a prior version.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:28
-- provenance: f8c0649 2026-06-10, founding text; curating-docs became the owner of the plan doc's name at b49a47b 2026-06-19 and 662e5e3 2026-08-01; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which compressed the version sentence.
+- provenance: f8c0649 2026-06-10, founding text; curating-docs became the owner of the plan doc's name at b49a47b 2026-06-19 and 662e5e3 2026-08-01; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17.
 - verdict: rewrite
 - landed: 16c5e61 section 28
 - reason: The instance with the content type filled as `spec`, sitting where the spec is written (662e5e3: a pointer only works in the skill loaded at the moment of the act); the three patterns agree once `spec` fills the slot. Flipped from keep to rewrite at section 28's close: Standing Brief Amendment 1 names this sentence's plan-file name form and orders it current to the doctrine's landed form (`<project>_<content-type>_v<n>.md`, the form `plugins/grimoire/skills/curating-docs/references/templates.md` states and the doctrine's plan-doc bullet points at), against this entry's own reason that `spec` filling the slot is right at the site where a spec is written, which the operator's decision batch holds as the question of the amendment's reach over a keep-held restatement, so the sentence was respelled to stand as landed. Landed as the proposal below. The version sentence was compressed to pay for that section's pointers, its claim unchanged.
@@ -643,15 +643,15 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: Where a definition resists both forms, ask what a reader would do differently if the line were deleted: nothing marks decoration, and behavior you did not intend marks the defect.
 
 ### C065
-- key: Read the spec once with fresh eyes before handing it to executing-work and fix inline: placeholders, contradicting sections, two-way-readable requirements, scope that drifted past the goal, and a `Model:` of sonnet or fable whose body names no reason.
+- key: Read the spec once before handing it to executing-work and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways, a `Model:` of haiku, sonnet or fable whose body names no reason for that tier, and a haiku or sonnet line on a section whose body names a fable reason or that touches a security-sensitive surface.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:36
-- provenance: 830ff28 2026-06-18, the spec self-review ported from session mining; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, which added the Model: item to the defect list; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, which names sonnet in place of opus once opus became the default; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, which tests sonnet against the listed cases.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
+- provenance: 830ff28 2026-06-18; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30; amended in place by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 on the 2026-10-30 ruling.
 - verdict: rewrite
 - reason: Names the defect classes and the timing; the doctrine's check-your-own-plan sentence is the principle, and no gate reads a spec for placeholders. The Model: item has its own claim and reason (A001).
 - proposed: **Spec self-review.** Before handing the spec to executing-work, read it once and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways and a `Model:` of opus or fable whose body names no reason, with no second inline pass.
-- passage: **Spec self-review.** Before handing the spec to executing-work, read it once and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways and a `Model:` of sonnet whose body cites no listed case or of fable whose body names no reason, with no second inline pass.
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
+- passage: **Spec self-review.** Before handing the spec to executing-work, read it once and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways, a `Model:` of haiku, sonnet or fable whose body names no reason for that tier, and a haiku or sonnet line on a section whose body names a fable reason or that touches a security-sensitive surface, with no second inline pass.
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
 
 ### C066
 - key: Check that every surface the step 7 sweep returned appears in some section's Files in scope or under `## Out of Scope`, and place any that appears in neither before the spec ships.
@@ -709,19 +709,19 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 ### C071
 - key: Give the inline pass no second inline pass: fix and move on.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:36
-- provenance: e872098 2026-08-18, the intake-gap-check plan's fresh read; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, whose edit to the sentence this entry quotes extended its defect list; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, whose edit to the same sentence names sonnet in place of opus; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, whose edit to the same sentence tests sonnet against the listed cases.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
+- provenance: e872098 2026-08-18, the intake-gap-check plan's fresh read; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30; amended in place by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 on the 2026-10-30 ruling.
 - verdict: rewrite
 - reason: Bounds the inline pass so the blind read, not a second self-read, is what catches the gaps the session filled.
 - proposed: **Spec self-review.** Before handing the spec to executing-work, read it once and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways and a `Model:` of opus or fable whose body names no reason, with no second inline pass.
-- passage: **Spec self-review.** Before handing the spec to executing-work, read it once and fix inline placeholders, contradictions, scope drift past the goal, requirements readable two ways and a `Model:` of sonnet whose body cites no listed case or of fable whose body names no reason, with no second inline pass.
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
+- passage: with no second inline pass.
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
 
 ### C072
 - key: Run the blind read that follows the inline pass; it is separate and not optional.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:30
-- provenance: e872098 2026-08-18; its review found the first dispatch would have been refused by the reader's charter, which is why the dispatch is now fixed in words; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17, which dropped a word from the sentence.
+- provenance: e872098 2026-08-18; its review found the first dispatch would have been refused by the reader's charter, which is why the dispatch is now fixed in words; amended in place by docs/plans/claude-kit_skill-terms-defined_spec_v1.md section 2 2026-10-17.
 - verdict: rewrite
 - landed: 16c5e61 section 28
 - reason: No hook dispatches the reader; the trivial-spec skip is the rule's own carve-out. Flipped from keep to rewrite at section 28's close: C073's retire took the because-clause after this sentence's comma, so the comma becomes a period; the round's blind lens found the keep standing on a changed sentence, so the sentence was respelled to stand as landed. Landed as the proposal below. The sentence lost its "it" to pay for that section's pointers, its claim unchanged.
@@ -1141,7 +1141,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Let tier pick the model and briefability pick the locus (dispatch versus main thread).
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:37
-- provenance: b510edc 2026-07-01, which split model tier from locus and added implementer-fable.
+- provenance: b510edc 2026-07-01.
 - verdict: keep
 - reason: The headline that names the two axes before the tier list; C121 carries the mechanic and C129 folds into it (A035).
 - passage: Tier picks the model. Briefability picks the locus (dispatch versus main thread).
@@ -1150,50 +1150,49 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Default well-bounded work on an established shape, with a clear contract, single-responsibility scope, low integration risk and a self-surfacing gate, to haiku, only where the section text names both a sibling file and the gate, never to a security-sensitive surface.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:47
-- provenance: 20cf885 2026-07-03, the haiku tier added as cost structure ahead of a heavy-usage week, tracked as a provisional experiment; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which widened the band from cloning one sibling to following a named sibling pattern; its finishing pass added the security-surface clause; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, which made the bullet the default for such work and cut the named-sibling list item; retired by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, on the operator's ruling of 2026-10-29 recorded under that plan's Intent.
+- provenance: 20cf885 2026-07-03, the haiku tier added as cost structure ahead of a heavy-usage week, tracked as a provisional experiment; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10; its finishing pass added the security-surface clause; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; retired by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, on the operator's ruling of 2026-10-29 recorded under that plan's Intent.
 - verdict: retire
 - reason: No rubric assigns haiku. The work the bullet took lands on the sonnet exception, whose body names the self-surfacing gate, says the section holds no judgment call and names a sibling file to follow where one exists (C116), or else on the opus default (C117). The haiku charter, its dispatch-table row and its brief field stay for a trial plan that names the tier, and a haiku-versus-sonnet trial result that disagrees reopens the retirement as a plan of its own. The architect's reading of the seven-day dispatch list counted 35 fable, 99 opus, 41 sonnet and 0 haiku implementer dispatches.
 - proposed: **haiku:** default for well-bounded work on an established shape: a clear contract, single-responsibility scope, low integration risk and a self-surfacing gate, a build or existing test that fails loudly on wrong output. New procs, services, mappings, DTOs, tests, CRUD surfaces, renames, sweeps. Assign it only where the section text names both a sibling file and the gate, and never to a security-sensitive surface. A sibling is a file, never a style skill's convention.
 - landed: `docs/plans/claude-kit_opus-default-tier_spec_v1.md` section 1
 
 ### C115
-- key: Keep `sonnet` off any security-sensitive surface, whatever case the section cites.
+- key: Keep `sonnet` off any security-sensitive surface, which is a fable reason, whatever reason the section names.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:49
-- provenance: 20cf885 2026-07-03, installed with the haiku tier as where a failed haiku assignment lands; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which moved the fallback into the sonnet bullet and added the file-shape bound; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, which turned the fallback into the exclusions of the sonnet exception; narrowed in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, whose closed list of cases replaced the judgment-call exclusion.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:52
+- provenance: 20cf885 2026-07-03; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29; narrowed in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30; amended in place by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 on the 2026-10-30 ruling.
 - verdict: rewrite
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
-- reason: A listed case names what a sonnet section is, and this bar holds over every case, so a security-sensitive section lands on the opus default (C117) however its case reads. The compress proposals are taste (A039).
-- passage: Never on a security-sensitive surface.
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
+- reason: This bar holds over every reason the author names, since a security-sensitive surface is a fable reason (C118) and a sonnet line there would name two tiers at once. The compress proposals are taste (A039).
+- passage: Never on a security-sensitive surface, which is a fable reason.
 
 ### C116
-- key: Assign sonnet only where the section body cites one case from the closed list that follows, a list closed at no cases that grows only on the operator's word on a warranted channel, recorded by a plan with its date.
+- key: Assign sonnet only where the plan's author names in the section body the specific reason sonnet is preferred over opus for that section.
 - class: mechanic
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:49
-- provenance: 9e124f7 2026-06-11, the original sonnet band; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10, which moved the sibling-pattern examples to the haiku bullet; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, which made the bullet the default and cut the word mechanical; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, which made the bullet an exception stated against what it excludes and took in the retired haiku bullet's gate and sibling (C114); amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, on the operator's ruling of that date to open the list at no cases.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:52
+- provenance: 9e124f7 2026-06-11; amended in place by docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md section 2 2026-10-10; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, on the operator's ruling of that date; amended in place by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 on the 2026-10-30 ruling.
 - verdict: rewrite
-- reason: The exception to the opus default (C117) is a case the operator named, never a reason the author argues, since the inline-dispatch trial's five cases counted the sonnet arm's confirmed Critical-plus-Major total at six against the opus arm's three. No case is measured yet, so the list is empty, and the doctrine's writer-tier bullet owns who extends it (AI001 under the operating-instructions ledger). The inline case takes C124's specific rule, so the two do not contend (A040).
+- reason: A cheaper tier is an exception to the opus default (C117) the author earns per section, since the author sees what suits it and a standing list would ban every case it omits (AO001 under the operating-instructions ledger). The inline case takes C124's specific rule (A040).
 - proposed: **sonnet:** default for well-bounded work with a clear contract and low integration risk whose section leaves the sibling or gate unnamed, spans more file shapes than its sibling, or holds a judgment call.
-- passage: **sonnet:** only where the body cites one case from the closed list below. Never on a security-sensitive surface.
-- passage: The sonnet list is closed at no cases. A case joins it only on my word on a warranted channel, and the plan recording it here adds its date.
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
+- passage: **sonnet:** only where the plan's author names in the body the specific reason sonnet is preferred over opus.
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
 
 ### C117
-- key: Land every dispatched section on opus unless its body names the fable reason or cites a sonnet case.
+- key: Land every dispatched section on opus unless its body names the fable reason or the author's reason for a lower tier.
 - class: mechanic
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:50
-- provenance: 9e124f7 2026-06-11, the original opus band; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, which made the tier reason-bearing and replaced the moderate-complexity description; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, which made opus the default on the operator's ruling of 2026-10-29 recorded under that plan's Intent; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, which states the default against the two exceptions alone.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:53
+- provenance: 9e124f7 2026-06-11; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30; amended in place by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 on the 2026-10-30 ruling.
 - verdict: rewrite
-- reason: Opus is the tier a section lands on when its body names neither a listed sonnet case (C116) nor the fable reason (C118), so the plan reviewer checks those two bands against the text, and step 10's self-review fixes a sonnet or fable Model: line the body does not support (A001). The inline-dispatch trial's five cases counted confirmed Critical-plus-Major defects unique to one arm at sonnet 3 and opus 0. The architect's reading of the seven-day dispatch list counted 35 fable, 99 opus, 41 sonnet and 0 haiku implementer dispatches.
+- reason: Opus is the tier a section lands on when its body names neither the author's reason for a lower tier (AO001, C116) nor the fable reason (C118), so the plan reviewer checks those bands against the text, and step 10's self-review fixes a `Model:` line the body does not support (A001). The inline-dispatch trial's five cases counted confirmed Critical-plus-Major defects unique to one arm at sonnet 3 and opus 0.
 - proposed: **opus:** only where the body names coordination, refactor seam, performance-sensitive path or ambiguity. A section naming none is sonnet.
-- passage: **opus:** the default. Every dispatched section lands here unless its body names the fable reason or cites a sonnet case.
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
+- passage: **opus:** the default. Every dispatched section lands here unless its body names the fable reason or the author's reason for a lower tier.
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
 
 ### C118
 - key: Assign fable only where the section body names novel logic, a security-sensitive surface, a cross-cutting seam or subtle correctness.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:50
-- provenance: abe0481 2026-07-02, the fable-metering close that reconciled the fable tier's wording with the override contract; the tier itself dates from b510edc; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, which made the tier reason-bearing and cut the strongest-model phrase; reason amended by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, once opus became the default and sonnet the reason-bearing tier below it.
+- provenance: abe0481 2026-07-02, the fable-metering close that reconciled the fable tier's wording with the override contract; the tier itself dates from b510edc; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; reason amended by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29.
 - verdict: rewrite
 - reason: The top band follows the sonnet bullet's rule (C116): the body names the reason or the section is not fable. With 53d9040 the tier is a model choice and never a spend decision, and the implementer-fable charter carries what the strongest model is.
 - proposed: **fable:** only where the body names novel logic, security-sensitive surface, cross-cutting seam or subtle correctness.
@@ -1223,7 +1222,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Give a section that cannot be briefed a `Locus: inline` line beneath its `Model:` line.
 - class: mechanic
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:42
-- provenance: c2114e9 2026-08-01, the line that replaced the decorated tier value.
+- provenance: c2114e9 2026-08-01.
 - verdict: rewrite
 - landed: 16c5e61 section 28
 - reason: Absorbs C129's "at any tier" so the briefability-decides-locus mechanic is stated once with its two failure cases (A035). Lands at line 42 as 'A section that cannot be briefed at any tier (the spec itself is likely to evolve in contact with the code, or the section is so small the brief would cost more than the work) carries `Locus: inline` beneath its `Model:` line.', C129's 'at any tier' folded in, and C129's clause gone from line 46. Its landing respelled C128's keep sentence; C128 records the flip.
@@ -1266,7 +1265,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 ### C125
 - key: Question rather than write the combination of `fable` plus `inline`.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:44
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:56
 - provenance: c2114e9 2026-08-01, the corollary of C124 and the Fable-led-session-is-for-design rule.
 - verdict: rewrite
 - landed: 16c5e61 section 28
@@ -1290,7 +1289,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Keep the `Model:` value a bare token and put the reasoning in the section body.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:44
-- provenance: c2114e9 2026-08-01, the authoring rule for the value the engine parses.
+- provenance: c2114e9 2026-08-01.
 - verdict: rewrite
 - landed: 16c5e61 section 28
 - reason: The instruction stays in the skill loaded at writing time (662e5e3's reasoning); curating-docs owns the values, and C126's rationale leaves (A054). Flipped from keep to rewrite at section 28's close: C125's recast of line 44 dropped the tail ', where a reader wants it anyway' after this sentence's last clause, so the sentence ends at 'section body'; the round's blind lens found the keep standing on a changed sentence, so the sentence was respelled to stand as landed. Landed as the proposal below.
@@ -1298,15 +1297,15 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: `Model:` is a bare token naming the model that runs, with the reasoning in the section body, so an inline section on the execution session is `Model: opus`.
 
 ### C128
-- key: Give a section sonnet only if its spec is precise enough for an implementer with no conversation context to build it from the section text alone.
+- key: Give a section sonnet or haiku only if its spec is precise enough for an implementer with no conversation context to build it from the section text alone.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:59
-- provenance: 9e124f7 2026-06-11, the briefability test; d66c58d 2026-08-23 last reworded the line; `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30 named sonnet, the one cheap tier a plan may write.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:58
+- provenance: 9e124f7 2026-06-11, the briefability test; d66c58d 2026-08-23 last reworded the line; `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30; amended in place by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1.
 - verdict: rewrite
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
 - reason: The test and its remedy (C130) are one rule with two moves; compression is taste (A056, A057). Flipped from keep to rewrite at section 28's close: C129's fold into C121 took the clause after this sentence's semicolon, so the semicolon becomes a period, and the sentence was respelled to stand as landed. Landed as the proposal below.
 - proposed: A section only earns a cheap tier if its spec is precise enough that an implementer with no conversation context can build it from the section text alone.
-- passage: A section earns sonnet only if an implementer without the conversation could build it from the section text alone.
+- passage: A section earns sonnet or haiku only if an implementer without the conversation could build it from the section text alone.
 
 ### C129
 - key: Use the same briefability test to decide locus, and give `Locus: inline` to a section that fails it at any tier.
@@ -1322,7 +1321,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Write the section to that briefable standard, or assign it a higher tier.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:46
-- provenance: 9e124f7 2026-06-11, the remedy when the briefability test fails.
+- provenance: 9e124f7 2026-06-11.
 - verdict: keep
 - reason: The remedy is not the test restated; neither states the other (A056).
 - passage: Write to that standard or assign a higher tier.
@@ -1331,7 +1330,7 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Leave upgrades after a failed attempt or an environment fault to executing-work, which never downgrades a section's tier mid-effort and may pick a fix writer below it.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:54
-- provenance: 9e124f7 2026-06-11 installed upgrade-only; d66c58d 2026-08-23 added the environment-fault trigger and assigned which upgrade to executing-work after three Fable reviewers wedged for 4.7 hours; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, which read the bar as a section's tier, pointed it at findings.md's fix writer, and cut the planning-time sentence; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, which bounds that fix writer at opus.
+- provenance: 9e124f7 2026-06-11 installed upgrade-only; d66c58d 2026-08-23 added the environment-fault trigger and assigned which upgrade to executing-work after three Fable reviewers wedged for 4.7 hours; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30.
 - verdict: rewrite
 - reason: The boundary is who moves a tier: executing-work upgrades it and never downgrades the section's tier, which the review round keys on. Findings.md's fix writer rule (A001 under the executing-work ledger's findings.md heading) picks a writer for one fix round and leaves the section's tier where it is. Downgrade is barred because it silently lowers the review a section earned (A057).
 - proposed: Executing-work owns upgrades after a failed attempt or an environment fault, and never downgrades a section's tier mid-effort. Its `references/findings.md` may pick a fix writer below a fable section, never below opus.
@@ -1870,15 +1869,15 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: The title takes the doctrine's heading form, main words capitalized. It carries no prefix, since its pull request adds one.
 
 ### A001
-- key: Fix a `Model:` of sonnet whose body cites no listed case, or of fable whose body names no reason, during the spec self-review.
+- key: Fix a `Model:` of haiku, sonnet or fable whose body names no reason for that tier during the spec self-review.
 - class: rule
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:36
-- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13, the item added when the rubric made opus and fable reason-bearing tiers; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29, which made opus the default and sonnet and fable the reason-bearing tiers; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, which tests sonnet against the listed cases.
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
+- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 3 2026-10-13; amended in place by docs/plans/claude-kit_opus-default-tier_spec_v1.md section 1 2026-10-29; amended in place by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30; amended in place by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 on the 2026-10-30 ruling.
 - verdict: rewrite
-- reason: Sonnet is assigned only on a listed case (C116) and fable only on its reason (C118), opus being the default (C117), and the plan reviewer reads each section as a sonnet-tier implementer would, so a tier the body does not support is a defect the author closes before handoff, not one a fallback clause absorbs. The architect's reading of the seven-day dispatch list counted 35 fable, 99 opus, 41 sonnet and 0 haiku implementer dispatches.
+- reason: Haiku and sonnet are assigned only on the author's named reason (AO001, C116) and fable only on its reason (C118), opus being the default (C117), so a tier the body does not support is a defect the author closes before handoff, not one a fallback clause absorbs.
 - proposed: requirements readable two ways and a `Model:` of opus or fable whose body names no reason, with no second inline pass.
-- passage: requirements readable two ways and a `Model:` of sonnet whose body cites no listed case or of fable whose body names no reason, with no second inline pass.
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
+- passage: a `Model:` of haiku, sonnet or fable whose body names no reason for that tier,
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
 
 ### F001
 - key: Give every section a `Verify:` line after `Tests:` stating how it is shown complete, by each catalog row it runs with its argument, or `none, because <why>`.
@@ -2081,10 +2080,12 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - key: Assign `haiku` to no section and dispatch `implementer-haiku` from no plan, a trial plan included, keeping the token in the machine contract for the parser alone.
 - class: rule
 - source: plugins/grimoire/skills/brainstorming/SKILL.md:55
-- provenance: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, on the operator's rulings of 2026-10-30 recorded under that plan's Intent; it replaces the sentence that left the tier to a trial plan after C114's retirement.
-- verdict: keep
-- landed: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1
-- reason: The haiku-versus-sonnet trial counted haiku 5 against sonnet 6 confirmed defects while haiku broke its brief's bars in six of six runs, and the doctrine's writer-tier bullet bars the tier under every plan (AI001 under the operating-instructions ledger). The token's four values belong to the external engine's parser, so `haiku` stays in the contract.
+- provenance: `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 2026-10-30, on the operator's rulings of 2026-10-30 recorded under that plan's Intent; it replaces the sentence that left the tier to a trial plan after C114's retirement; retired by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 on the 2026-10-30 ruling.
+- verdict: retire
+- superseded-by: AO001
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
+- reason: The haiku band admits the tier on the author's named reason (AO001), so the paragraph barring it is cut.
+- proposed: Delete the paragraph that opens "`haiku` writes no section."
 - passage: `haiku` writes no section. No plan dispatches `implementer-haiku`, a trial plan included. The token stays in the machine contract for the parser alone.
 
 ### AL001
@@ -2104,3 +2105,43 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - landed: `docs/plans/claude-kit_brainstorm-approval_spec_v1.md` section 1 fix round 19
 - reason: A worker's brainstormed plan shipped its section reading "None yet" and reached the operator for a second approval, holding the three plans stacked behind it, as plan 845's `## Intent` records. Step 8 already requires the operator's approval of the sketch and every later recap, so step 9 is where the author who heard that word writes it down. The approval counts only on a warranted channel, the coordinator skill's closed list, so a participant's yes in a relay thread is never recorded as the operator's. The heading's placement and the section's form, by reference with no words quoted, are the curating-docs skill's (J001 under that ledger), so this step names the placement for a writer and points at the owner for the rest. The architect seat's own case stays with the architect skill's delegation grant. The relayed case is admitted on the operator's decision 6 of 2026-10-31, relayed by the coordinator persona from its channel and recorded as relayed, by reference, in plan 845's Intent: an approval he gave another persona reaches the author in the peer-sessions relay form (B003 under that ledger), trusted as the relaying persona's report. A design ruling relayed the same way goes under the Intent's Rulings on the same ground where it rules on a fork in the plan's own design, raised by the plan's author, the bound the peer-sessions blocker paragraph states, so the question is not put to him twice, and an act inside the stop-for-a-yes test is no such fork and goes where that paragraph sends it, to the delegated seat's relay for its three acts inside the plan it names, or to his yes on a warranted channel.
 - passage: Write `## Dispatch Authorization` here too, above `## Sections of Work`, from my approval of the sketch or recap in step 8. That approval counts only on a warranted channel, from my keyboard or an operator-class or unclassed relay event. It counts as well where I gave it to another persona on that persona's warranted channel and that persona's record, or the coordinator's, relays it to you in the `peer-sessions` skill's relay form. The section records it by reference as the `curating-docs` skill defines it: me, the date, the channel, the relaying persona and the relay's record where one relayed it, and the sessions covered. A design ruling relayed the same way goes under the Intent's Rulings by reference, naming the relaying persona and the relay's record, and is not asked again. It stands where it rules on a fork in the plan's own design, raised by the plan's author, as the `peer-sessions` skill's blocker paragraph bounds it, and an act inside the stop-for-a-yes test is no such fork and goes where that paragraph sends it. Where the recap has had no yes, it goes back to me once to ask for one. The spec ships after that yes, never with the section reading as pending, and without it stays unshipped while the session holds for my word. A spec the architect seat writes keeps its delegation grant, as the architect skill states.
+
+### AO001
+- key: Assign haiku only where the plan's author names in the body the specific reason it is preferred over opus, never on a security-sensitive surface.
+- class: mechanic
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:51
+- provenance: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1, on the operator's ruling of 2026-10-30 under that plan's Intent.
+- verdict: keep
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
+- reason: The band takes the sonnet band's form (C116, C115), and the doctrine's writer-tier bullet names the author (AO001 under the operating-instructions ledger).
+- passage: **haiku:** only where the plan's author names in the body the specific reason haiku is preferred over opus. Never on a security-sensitive surface, which is a fable reason.
+
+### AO002
+- key: Fix a haiku or sonnet `Model:` on a section whose body names a fable reason during the spec self-review.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
+- provenance: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1.
+- verdict: keep
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
+- reason: A lower line on a section whose body names a fable reason names two tiers at once (C118), whatever reason its body gives for the lower tier, and executing-work reads it as opus (AO002 under that ledger).
+- passage: and a haiku or sonnet line on a section whose body names a fable reason
+
+### AO003
+- key: Read a security-sensitive surface as any surface executing-work's security-reviewer trigger names, and also every guard, every hook and every security document.
+- class: mechanic
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:54
+- provenance: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1.
+- verdict: keep
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
+- reason: The bands (AO001, C115, C118) and executing-work's dispatch row (AO003 under that ledger) turn on the term, so it is defined once beside the bands. It points at the trigger `executing-work/references/review.md` already routes the security reviewer on, widens that trigger's allow-or-deny hook to every hook, and adds every guard and every security document, which the trigger does not name.
+- passage: A security-sensitive surface is any surface `executing-work/references/review.md`'s security-reviewer trigger names. It also covers every guard, every hook and every security document, such as `docs/security-model.md`.
+
+### AO004
+- key: Fix a haiku or sonnet `Model:` on a section that touches a security-sensitive surface during the spec self-review.
+- class: rule
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
+- provenance: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1.
+- verdict: keep
+- landed: `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1
+- reason: Such a surface is a fable reason (AO003, C118), so the line takes AO002's fix.
+- passage: or that touches a security-sensitive surface,

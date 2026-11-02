@@ -1,6 +1,6 @@
 ---
 name: implementer-sonnet
-description: "Scoped implementation agent, Sonnet tier, the exception to the opus default. Use to implement a single Section of Work from an approved spec only where its body cites a case on the brainstorming rubric's closed list of sonnet cases, a list the operator alone extends, never on a security-sensitive surface. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
+description: "Scoped implementation agent, Sonnet tier, an exception to the opus default. Use to implement a single Section of Work from an approved spec only where its body names the plan author's specific reason sonnet is preferred over opus for that section, never on a security-sensitive surface. Dispatch with a brief built from the executing-work skill's Dispatch Brief template. Escalates ambiguity rather than guessing."
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 effort: medium
