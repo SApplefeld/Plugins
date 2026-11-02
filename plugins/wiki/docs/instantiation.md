@@ -158,8 +158,12 @@ it from a trusted parent. There are two ways to establish it:
   The script takes the key from that line and nowhere else, refuses it unless
   it names this folder, and sets `hasTrustDialogAccepted: true` under it. It
   then runs the probe again and exits 0 only where the second probe prints no
-  such line. A folder already trusted prints no line, so nothing is written.
-  The two probes are two small model calls. The script refuses a folder whose
+  such line. A folder already trusted prints no line. The script then reads
+  `~/.claude.json` and reports the folder already trusted, writing nothing,
+  only where it finds this folder's entry holding
+  `hasTrustDialogAccepted: true`. A silent probe with no such entry is a
+  refusal, with one `kb-trust:` line saying so. The two probes are two small
+  model calls. The script refuses a folder whose
   `.claude/settings.json` holds no `permissions.allow` entry, since the probe
   there stays silent whatever the trust.
 

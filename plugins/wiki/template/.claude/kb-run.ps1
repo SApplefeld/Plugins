@@ -110,8 +110,9 @@ function Get-InnerError {
 
 # Stops the child and every process it started, such as node under a claude.cmd
 # shim. taskkill /T walks the tree on both PowerShell editions; Windows
-# PowerShell's .NET has no tree-aware Process.Kill. Its output is read and
-# discarded so it never reaches the wrapper's stdout.
+# PowerShell's .NET has no tree-aware Process.Kill. Its output is read
+# asynchronously and discarded, so it never reaches the wrapper's stdout and a
+# taskkill that hangs ends at the ten-second wait rather than at a read.
 function Stop-ProcessTree {
     param([System.Diagnostics.Process]$Process)
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -123,7 +124,7 @@ function Stop-ProcessTree {
     $psi.RedirectStandardError = $true
     $killer = [System.Diagnostics.Process]::Start($psi)
     $null = $killer.StandardError.ReadToEndAsync()
-    $null = $killer.StandardOutput.ReadToEnd()
+    $null = $killer.StandardOutput.ReadToEndAsync()
     [void]$killer.WaitForExit(10000)
     if (-not $Process.WaitForExit(5000)) {
         # taskkill could not stop it; stop the child itself so the wrapper's

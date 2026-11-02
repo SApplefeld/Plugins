@@ -72,13 +72,27 @@ knowledge base with no remote named origin nothing is pushed: the call prints
 "kb-commit: no remote named 'origin'; nothing pushed." on stdout and exits 0,
 since a local-only knowledge base is the ordinary case.
 
-Git's terminal prompt, Git Credential Manager's prompt and ssh's prompts are
-turned off for the push, so a missing credential
-fails the push. It waits at most 300 seconds, or the whole number of seconds
-from 1 to 99999 that KB_PUSH_TIMEOUT_SECONDS holds, and any other value in that
-variable stops the run before anything is staged. Past the bound the git
-process tree is stopped while git runs, and the run exits 1 with one line
-naming the bound. A process git started that outlives git is not reached.
+Git's terminal prompt and Git Credential Manager's prompt are turned off for
+the push, so a missing credential fails the push. ssh runs in batch mode, with
+its prompts turned off too, only where the account or the repository
+configures no ssh command of its own (GIT_SSH_COMMAND, GIT_SSH or
+core.sshCommand); where one is configured it is used as configured, and the
+bound below ends any prompt it makes. The push waits at most 300 seconds, or
+the whole number of seconds from 1 to 99999 that KB_PUSH_TIMEOUT_SECONDS holds,
+and any other value in that variable stops the run before anything is staged.
+The core.sshCommand read before the push takes the same bound of its own. The
+push's git process runs inside a kill-on-close Windows job object, which every
+process git starts after its assignment joins whatever its parent link, so one
+terminate call ends them all. A process git starts in the moment before the
+helper assigns git to the job is outside the job, and where the assignment
+fails the helper stops git alone, so a process git started by then can outlive
+the run. Past the bound while git runs, the job is terminated and the run
+exits 1 with one line naming the bound. Where git finished inside the bound
+and a process it started still held its output past the bound, that process is
+stopped with the job's processes, git's output is passed through, the run ends
+on git's own exit code, and one stderr line says a process git started held
+its output. The job is made before anything is staged, so a job that cannot be
+made stops the run with nothing committed.
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path 'sources/report.pdf|wiki/report-summary.md|index.md|log.md' -Message 'Ingest report.pdf' -Push
@@ -182,41 +196,192 @@ function ConvertTo-CommandLineArgument {
     return $builder.ToString()
 }
 
-# Stops a running git process and the processes it started, such as ssh, a remote
-# helper or a credential helper. taskkill /T walks the tree on both PowerShell
-# editions; Windows PowerShell's .NET has no tree-aware Process.Kill. Its output
-# is read and discarded so it never reaches this script's stdout.
-function Stop-GitProcessTree {
-    param([System.Diagnostics.Process]$Process)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = Join-Path $env:SystemRoot 'System32\taskkill.exe'
-    $psi.Arguments = "/PID $($Process.Id) /T /F"
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $killer = [System.Diagnostics.Process]::Start($psi)
-    $null = $killer.StandardError.ReadToEndAsync()
-    $null = $killer.StandardOutput.ReadToEnd()
-    [void]$killer.WaitForExit(10000)
-    if (-not $Process.WaitForExit(5000)) {
-        # taskkill could not stop it; stop the git process itself so this run
-        # does not end with it still pushing.
-        $Process.Kill()
+# The kill-on-close job object the push's git process runs in. Each call returns
+# a Win32 error code, 0 on success, so a failure is reported and never thrown.
+# The job is made with no security attributes, so its handle is not inheritable
+# and no child ever holds it. 0x2000 is JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, and
+# 9 is JobObjectExtendedLimitInformation. Terminate ends every process in the
+# job in one call, whatever each one's parent link, which a walk of parent pids,
+# such as a tree kill makes, cannot promise. The type is compiled once per session and
+# carries its own namespace, so it loads beside the other helpers' copies in
+# one session. kb-walk.ps1 and kb-run.ps1 carry the same class under theirs.
+$script:jobObjectSource = @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace KbCommit
+{
+    public static class JobObject
+    {
+        #region Native Structures
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicLimitInformation
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoCounters
+        {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ExtendedLimitInformation
+        {
+            public BasicLimitInformation BasicLimitInformation;
+            public IoCounters IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        #endregion
+
+        #region Native Methods
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateJobObjectW(IntPtr jobAttributes, string name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimitInformation info, uint length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        #endregion
+
+        #region Public Methods
+
+        public static int CreateKillOnClose(out IntPtr job)
+        {
+            // Create the job.
+            job = CreateJobObjectW(IntPtr.Zero, null);
+            if (job == IntPtr.Zero)
+            {
+                return Marshal.GetLastWin32Error();
+            }
+
+            // Set kill on close, closing the job again where the limit is refused.
+            ExtendedLimitInformation info = new ExtendedLimitInformation();
+            info.BasicLimitInformation.LimitFlags = 0x2000;
+            if (!SetInformationJobObject(job, 9, ref info, (uint)Marshal.SizeOf(typeof(ExtendedLimitInformation))))
+            {
+                int error = Marshal.GetLastWin32Error();
+                CloseHandle(job);
+                job = IntPtr.Zero;
+                return error;
+            }
+            return 0;
+        }
+
+        public static int Assign(IntPtr job, IntPtr process)
+        {
+            return AssignProcessToJobObject(job, process) ? 0 : Marshal.GetLastWin32Error();
+        }
+
+        public static int Terminate(IntPtr job)
+        {
+            return TerminateJobObject(job, 1) ? 0 : Marshal.GetLastWin32Error();
+        }
+
+        public static void Close(IntPtr job)
+        {
+            CloseHandle(job);
+        }
+
+        #endregion
     }
 }
+'@
 
-# Runs git push with every prompt turned off and a time bound, then passes its
-# output through and stops the run on a failed exit. An unattended run has no one
-# to answer a terminal, credential-manager or ssh prompt, so each is told not to
-# ask; the variables are set on the git process alone, never on this script's
-# environment. Past the bound the git process tree is stopped while git runs and
-# the run exits 1 with one line naming the bound, and git's own output is not
-# passed through.
+# Compiles the job type where this session has not, and makes the job, or stops
+# the run with one line naming what failed. A push whose bound could not end
+# every process it starts is the push the bound exists to prevent, so the run
+# stops here, before anything is staged, rather than proceed without the job.
+function New-KillOnCloseJob {
+    try {
+        if (-not ('KbCommit.JobObject' -as [type])) {
+            Add-Type -TypeDefinition $script:jobObjectSource -Language CSharp
+        }
+    } catch {
+        $firstLine = @($_.Exception.Message -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })[0]
+        Stop-WithReason "compiling the kill-on-close job object helper for the push failed: $firstLine; nothing was staged."
+    }
+    $job = [IntPtr]::Zero
+    $jobError = [KbCommit.JobObject]::CreateKillOnClose([ref]$job)
+    if ($jobError -ne 0) {
+        Stop-WithReason "creating the kill-on-close job object for the push failed with Win32 error $jobError; nothing was staged."
+    }
+    return $job
+}
+
+# Ends every process in the job, git and whatever it started wherever its
+# parent link points, then waits for git's exit and for its streams, which
+# close once their last holder has died, for at most the drain. Returns whether
+# the streams closed. Where the terminate call fails, the line names the error
+# and nothing is waited on, since nothing has ended; closing the job as the run
+# ends still ends its processes.
+function Stop-JobProcesses {
+    param([System.Diagnostics.Process]$Process, [System.Threading.Tasks.Task[]]$Streams)
+    $terminateError = [KbCommit.JobObject]::Terminate($script:job)
+    if ($terminateError -ne 0) {
+        [Console]::Error.WriteLine("kb-commit: terminating the kill-on-close job object failed with Win32 error $terminateError; closing it as the run ends stops its processes.")
+        return $false
+    }
+    $Process.WaitForExit()
+    return [System.Threading.Tasks.Task]::WaitAll($Streams, $script:streamDrainSeconds * 1000)
+}
+
+# Runs git push with every prompt turned off and a time bound, inside the run's
+# kill-on-close job, then passes its output through and stops the run on a
+# failed exit. An unattended run has no one to answer a terminal or
+# credential-manager prompt, so each is told not to ask; the variables are set
+# on the git process alone, never on this script's environment. With
+# -BatchSsh, ssh is told not to ask either, through the batch-mode
+# GIT_SSH_COMMAND; the caller leaves it off where the account or the
+# repository configures an ssh command of its own, which git then uses.
+#
+# With -LocalRead the call is a git read that reaches no remote, named by
+# -Action: its stdout is withheld, its stderr passed through, and its exit code
+# returned rather than read as a failure, and its lines say nothing of a remote.
+#
+# Two timeouts are told apart. Where git itself runs past the bound, the job is
+# terminated, the run exits 1 with one line naming the bound, and git's own
+# output is not passed through. Where git exited inside the bound and its
+# streams are still open when the bound runs out, a process git started holds
+# its output: the job is terminated, which ends that process, git's output is
+# passed through, one stderr line says what held it, and the run goes on to
+# git's own exit code, since the push did finish and a failure line here would
+# have the walker record a landed push as one that did not land.
 function Invoke-BoundedPush {
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
-        [Parameter(Mandatory)][string]$FailReason
+        [string]$FailReason,
+        [string]$Action = 'git push',
+        [switch]$BatchSsh,
+        [switch]$LocalRead
     )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $script:gitExe
@@ -229,28 +394,81 @@ function Invoke-BoundedPush {
     $psi.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
     $psi.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
     $psi.EnvironmentVariables['GCM_INTERACTIVE'] = 'never'
-    $psi.EnvironmentVariables['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+    if ($BatchSsh) {
+        $psi.EnvironmentVariables['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+    }
     $process = [System.Diagnostics.Process]::Start($psi)
+    # Only git's own handle is assigned, so the job reaches git and every
+    # process it starts from here on, and never this script. A process git
+    # started in the moment before the assignment is outside the job. A git
+    # that has already exited has nothing to contain, so its result stands.
+    $assignError = [KbCommit.JobObject]::Assign($script:job, $process.Handle)
+    if ($assignError -ne 0 -and -not $process.HasExited) {
+        # Git can exit between the check and the kill, which then throws; the
+        # line below still names the failed assignment.
+        try { $process.Kill() } catch { }
+        if ($LocalRead) {
+            Stop-WithReason "assigning $Action to the kill-on-close job object failed with Win32 error $assignError; git was stopped."
+        }
+        Stop-WithReason "assigning $Action to the kill-on-close job object failed with Win32 error $assignError; git was stopped, and whether it reached the remote is unknown."
+    }
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
+    $streams = [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
     $deadline = [DateTime]::UtcNow.AddSeconds($script:pushTimeoutSeconds)
-    $finished = $process.WaitForExit($script:pushTimeoutSeconds * 1000)
-    if ($finished) {
-        # The streams close when every process holding them ends, which can be
-        # after git itself, so they share what is left of the same bound.
-        $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
-        $finished = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), $remaining)
+    if (-not $process.WaitForExit($script:pushTimeoutSeconds * 1000)) {
+        $null = Stop-JobProcesses $process $streams
+        if ($LocalRead) {
+            Stop-WithReason "$Action did not finish within the push bound of $script:pushTimeoutSeconds seconds."
+        }
+        Stop-WithReason "$Action did not finish within the push bound of $script:pushTimeoutSeconds seconds; whether it reached the remote is unknown."
     }
-    if (-not $finished) {
-        Stop-GitProcessTree $process
-        Stop-WithReason "git push did not finish within the push bound of $script:pushTimeoutSeconds seconds; whether it reached the remote is unknown."
+    # The streams close when every process holding them ends, which can be
+    # after git itself, so they share what is left of the same bound. The wait
+    # is never shorter than the drain, so a git that exits near the bound
+    # still has its own output read before a holder is named.
+    $remaining = [int][Math]::Max($script:streamDrainSeconds * 1000, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+    $held = -not [System.Threading.Tasks.Task]::WaitAll($streams, $remaining)
+    $drained = $true
+    if ($held) {
+        $drained = Stop-JobProcesses $process $streams
     }
     $process.WaitForExit()
-    [Console]::Out.Write($stdoutTask.Result)
-    [Console]::Error.Write($stderrTask.Result)
+    if ($drained) {
+        if (-not $LocalRead) { [Console]::Out.Write($stdoutTask.Result) }
+        [Console]::Error.Write($stderrTask.Result)
+    }
+    if ($held) {
+        $holder = "a process git started held its output past the push bound of $script:pushTimeoutSeconds seconds"
+        if ($drained) {
+            [Console]::Error.WriteLine("kb-commit: $holder and was stopped with the job's processes.")
+        } else {
+            [Console]::Error.WriteLine("kb-commit: $holder and was not stopped with the job's processes, so git's output is not passed through.")
+        }
+    }
+    if ($LocalRead) {
+        return $process.ExitCode
+    }
     if ($process.ExitCode -ne 0) {
         Stop-WithReason $FailReason
     }
+}
+
+# Whether the account or the repository configures an ssh command of its own:
+# GIT_SSH_COMMAND or GIT_SSH in this script's environment, which git inherits,
+# or core.sshCommand in any config scope git reads in the repository. git takes
+# GIT_SSH_COMMAND over core.sshCommand over GIT_SSH, so a batch-mode
+# GIT_SSH_COMMAND set on the push would silence each of them, a deploy key's
+# among them. The config is read through the push's runner, under its bound and
+# inside its job. Exit 1 is git's answer for an unset key; any other exit stops
+# the run.
+function Test-SshCommandConfigured {
+    param([Parameter(Mandatory)][string]$Repository)
+    if (-not [string]::IsNullOrEmpty($env:GIT_SSH_COMMAND) -or -not [string]::IsNullOrEmpty($env:GIT_SSH)) { return $true }
+    $readExit = Invoke-BoundedPush -Arguments @('-C', $Repository, 'config', '--get', 'core.sshCommand') -Action 'git config --get core.sshCommand' -LocalRead
+    if ($readExit -eq 0) { return $true }
+    if ($readExit -eq 1) { return $false }
+    Stop-WithReason "git config --get core.sshCommand failed with exit $readExit."
 }
 
 # The repo root is the parent of the .claude/ directory this script lives in.
@@ -466,9 +684,14 @@ if ($cleanMessage.Length -gt 2000) {
 
 # The push's time bound: 300 seconds, or KB_PUSH_TIMEOUT_SECONDS where set, so a
 # test can drive the timeout quickly. It is read before anything is staged, so a
-# bad value stops the run with nothing committed.
+# bad value stops the run with nothing committed. The drain is how long the
+# push's streams are waited on after the job is terminated, which ends every
+# process holding them, so it is short and fixed. The job is made with -Push
+# before anything is staged and closed as the run's last act.
 $script:pushTimeoutSeconds = 300
+$script:streamDrainSeconds = 5
 $script:gitExe = $null
+$script:job = [IntPtr]::Zero
 if ($Push) {
     $timeoutOverride = $env:KB_PUSH_TIMEOUT_SECONDS
     if (-not [string]::IsNullOrEmpty($timeoutOverride)) {
@@ -488,22 +711,28 @@ if (-not $PSCmdlet.ShouldProcess($repoRoot, 'Stage, commit, and optionally push'
     exit 0
 }
 
-# --literal-pathspecs on the handle and reconcile routes: a name the helper
-# read from disk holding [ ] or * stages that file alone, never a sibling the
-# pattern would match. A person's plain -Path stages as it always has.
-if ($sourceHandleSet -or $reconcileSet) {
-    $addArgs = @('-C', $repoRoot, '--literal-pathspecs', 'add', '--') + $paths
-} else {
-    $addArgs = @('-C', $repoRoot, 'add', '--') + $paths
-}
-Invoke-GitOrStop -Arguments $addArgs -FailReason 'git add failed.'
-
-& git -C $repoRoot diff --cached --quiet
-$hasStagedChanges = ($LASTEXITCODE -ne 0)
-
 $messageFile = $null
 $hooksDir    = $null
 try {
+    # With -Push, the job the push runs in is made before anything is staged,
+    # so a job that cannot be made stops the run with nothing committed.
+    if ($Push) {
+        $script:job = New-KillOnCloseJob
+    }
+
+    # --literal-pathspecs on the handle and reconcile routes: a name the helper
+    # read from disk holding [ ] or * stages that file alone, never a sibling
+    # the pattern would match. A person's plain -Path stages as it always has.
+    if ($sourceHandleSet -or $reconcileSet) {
+        $addArgs = @('-C', $repoRoot, '--literal-pathspecs', 'add', '--') + $paths
+    } else {
+        $addArgs = @('-C', $repoRoot, 'add', '--') + $paths
+    }
+    Invoke-GitOrStop -Arguments $addArgs -FailReason 'git add failed.'
+
+    & git -C $repoRoot diff --cached --quiet
+    $hasStagedChanges = ($LASTEXITCODE -ne 0)
+
     # An empty hooks directory means neither the commit nor the push can execute a
     # repo-planted hook such as .git/hooks/pre-commit or .git/hooks/pre-push.
     $hooksDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
@@ -534,11 +763,17 @@ try {
             # that is the ordinary local-first case, not a failure.
             Write-Output "kb-commit: no remote named 'origin'; nothing pushed."
         } else {
+            # ssh's batch mode is set only where no ssh command is configured,
+            # so a configured one stands.
+            $batchSsh = -not (Test-SshCommandConfigured -Repository $repoRoot)
             $pushArgs = @('-C', $repoRoot, '-c', "core.hooksPath=$hooksDir", 'push', 'origin', 'HEAD')
-            Invoke-BoundedPush -Arguments $pushArgs -FailReason 'git push origin HEAD failed.'
+            Invoke-BoundedPush -Arguments $pushArgs -FailReason 'git push origin HEAD failed.' -BatchSsh:$batchSsh
         }
     }
 } finally {
+    # Closing the job's handle ends every process still in it, so nothing the
+    # push started outlives this run, however the run ends.
+    if ($script:job -ne [IntPtr]::Zero) { [KbCommit.JobObject]::Close($script:job) }
     if ($messageFile -and (Test-Path -LiteralPath $messageFile)) {
         Remove-Item -LiteralPath $messageFile -Force
     }

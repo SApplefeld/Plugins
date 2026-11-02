@@ -17,7 +17,11 @@ at least one allow entry, Claude Code prints one stderr line opening
 nowhere else, refuses it unless it names this folder, writes
 hasTrustDialogAccepted: true under it, runs the probe again, and exits 0 only
 where the second probe prints no such line. Where the first probe prints no
-such line the folder is already trusted and nothing is written.
+such line, the script reads ~/.claude.json, trying once more after 200
+milliseconds where the read fails, and reports the folder already trusted,
+writing nothing, only where a projects key naming this folder holds
+hasTrustDialogAccepted: true. A silent probe with no such entry, or with the
+file absent or not readable as JSON, is a refusal.
 
 A folder whose .claude/settings.json is absent or holds no permissions.allow
 entry is refused before any probe, since a silent probe there proves nothing.
@@ -35,9 +39,13 @@ read through the move runs under Claude Code's own lock on the file, the
 directory ~/.claude.json.lock, so a live session's save neither erases the key
 nor is erased by it. Where another writer holds that lock for 10 seconds the
 script exits 1 with "kb-trust: ~/.claude.json is held by another writer",
-changing nothing. Once the lock is taken, the clock is read before the backup,
-before the move and after each blocked move: at 3 seconds the script exits 1
-with the file unchanged.
+changing nothing. A lock refused for access, as one being deleted is, is
+waited on the same 10 seconds, and a directory still standing there then takes
+that line. A file standing at the lock's path, or a lock that fails for any
+other reason, refuses at once, and every lock refusal but the held line names
+the Windows error code. Once the lock is taken, the clock is read before the
+backup, before the move and after each blocked move: at 3 seconds the script
+exits 1 with the file unchanged.
 After the second probe a third read of the file must still hold the key true. This
 script adds, removes and edits no permission rule anywhere; it only marks the
 folder trusted, which makes the folder's own .claude/settings.json allow
@@ -46,7 +54,8 @@ entries live.
 ~/ is the USERPROFILE environment variable, read at each run. Every refusal is
 one stderr line, "kb-trust: <reason>", with exit 1; a refusal after the first
 probe carries that probe's first stderr line, with control, basic-plane format, tag and
-separator characters removed.
+separator characters removed. A refusal while the script holds the lock
+removes the lock first, and a removal that fails is named in the same line.
 
 .PARAMETER Path
 The knowledge base folder, absolute, on a local drive letter.
@@ -66,12 +75,28 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Text.Json
 # CreateDirectoryW fails where the directory exists, which makes one call a
 # lock; .NET's CreateDirectory and New-Item each succeed on an existing one.
-Add-Type -Namespace KbTrust -Name NativeMethods -MemberDefinition '[DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool CreateDirectoryW(string lpPathName, IntPtr lpSecurityAttributes);'
+# CreateLock returns 0 where it created the directory, else the call's Win32
+# error, read inside the same C# call so that no other call overwrites it.
+Add-Type -Namespace KbTrust -Name NativeMethods -MemberDefinition '[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool CreateDirectoryW(string lpPathName, IntPtr lpSecurityAttributes); public static int CreateLock(string path) { return CreateDirectoryW(path, IntPtr.Zero) ? 0 : Marshal.GetLastWin32Error(); }'
+
+# True from the moment this run creates the lock until it removes it.
+$lockTaken = $false
 
 # Writes a single-line reason to stderr and stops with exit code 1, so a refusal
-# is legible to the calling session without a PowerShell stack trace.
+# is legible to the calling session without a PowerShell stack trace. A refusal
+# while this run holds the lock removes the lock before the line is written,
+# and a removal that fails is named in that same line, so a refusal is always
+# one line.
 function Stop-WithReason {
     param([string]$Reason)
+    if ($script:lockTaken) {
+        $script:lockTaken = $false
+        try {
+            [System.IO.Directory]::Delete($script:lockPath)
+        } catch {
+            $Reason = "$Reason; the lock $(ConvertTo-SafeText $script:lockPath) could not be removed: $(ConvertTo-SafeText $_.Exception.GetBaseException().Message)"
+        }
+    }
     [Console]::Error.WriteLine("kb-trust: $Reason")
     exit 1
 }
@@ -166,6 +191,7 @@ function Invoke-Probe {
     # whatever stream this script inherited.
     $psi.RedirectStandardInput = $true
     $process = $null
+    $probeClock = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $process = [System.Diagnostics.Process]::Start($psi)
     } catch {
@@ -179,8 +205,19 @@ function Invoke-Probe {
             $process.Kill($true)
             Stop-WithReason "the probe did not finish within $probeBudgetSeconds seconds; its process tree was stopped."
         }
-        $process.WaitForExit()
-        [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdout, $stderr))
+        # The streams close only when every process holding them has exited, so
+        # a grandchild that outlives the probe would hold this wait open. It
+        # takes what remains of the budget from the probe's start, and never
+        # less than ten seconds.
+        $streamMilliseconds = [Math]::Max(10000, [int]($probeBudgetSeconds * 1000 - $probeClock.Elapsed.TotalMilliseconds))
+        $streams = [System.Threading.Tasks.Task[]]@($stdout, $stderr)
+        if (-not [System.Threading.Tasks.Task]::WaitAll($streams, $streamMilliseconds)) {
+            # The probe has exited, so the tree kill reaches only the processes
+            # still under it through a live parent; one whose own parent has
+            # exited is outside its reach, and the line says so.
+            try { $process.Kill($true) } catch { }
+            Stop-WithReason "the probe exited but its output streams did not close within $([int]($streamMilliseconds / 1000)) seconds; the processes still under it were stopped, and a process it started whose parent had exited may still hold them."
+        }
         return [pscustomobject]@{ ExitCode = $process.ExitCode; Stdout = $stdout.Result; Stderr = $stderr.Result }
     } finally {
         $process.Dispose()
@@ -253,12 +290,51 @@ if ($found.Count -eq 0) {
 }
 $claudePath = $found[0].Source
 
-# --- The first probe: silence means trusted already, a warning names the key.
+# --- The first probe: a warning names the key; silence is read as trusted
+# already only where ~/.claude.json holds a projects key naming this folder,
+# compared as the warning's key is below, with hasTrustDialogAccepted true. The
+# read takes no lock, so one that fails is tried once more after 200
+# milliseconds, in case it met a save in progress.
 $first = Invoke-Probe $claudePath $kbRoot
 $warnings = @(Get-WarningLines $first.Stderr)
 if ($warnings.Count -eq 0) {
     if ($first.ExitCode -ne 0) {
         Stop-WithReason "the probe failed without naming a trust key ($(Get-ProbeSummary $first))"
+    }
+    if (-not [System.IO.File]::Exists($claudeConfig)) {
+        Stop-WithReason "the probe printed no warning, yet $claudeConfig does not exist, so the folder's trust could not be confirmed and nothing was written"
+    }
+    $silentRoot = $null
+    foreach ($attempt in 1, 2) {
+        try {
+            $silentRoot = [System.Text.Json.Nodes.JsonNode]::Parse([System.IO.File]::ReadAllText($claudeConfig))
+            break
+        } catch {
+            if ($attempt -eq 2) {
+                Stop-WithReason "the probe printed no warning, yet $claudeConfig could not be read as JSON, so the folder's trust could not be confirmed and nothing was written"
+            }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    $trustedEntry = $false
+    # Assigned inside the if, not from it: an if used as a value emits through
+    # the pipeline, which unrolls a JsonObject into its key-value pairs.
+    $silentProjects = $null
+    if ($silentRoot -is [System.Text.Json.Nodes.JsonObject]) { $silentProjects = $silentRoot['projects'] }
+    if ($silentProjects -is [System.Text.Json.Nodes.JsonObject]) {
+        foreach ($pair in $silentProjects) {
+            if (-not [regex]::IsMatch($pair.Key, '\A[A-Za-z]:[\\/]')) { continue }
+            try {
+                $namesFolder = [string]::Equals((ConvertTo-NormalPath $pair.Key), $kbRoot, [StringComparison]::OrdinalIgnoreCase)
+                $trustedEntry = $namesFolder -and ($pair.Value['hasTrustDialogAccepted'].ToJsonString() -ceq 'true')
+            } catch {
+                $trustedEntry = $false
+            }
+            if ($trustedEntry) { break }
+        }
+    }
+    if (-not $trustedEntry) {
+        Stop-WithReason "the probe printed no warning, yet $claudeConfig holds no projects entry for $kbRoot with hasTrustDialogAccepted true, so nothing was written"
     }
     Write-Output "kb-trust: $kbRoot is already trusted; nothing written."
     exit 0
@@ -296,16 +372,26 @@ if (-not $keyNamesFolder) {
 # Claude Code judges a lock stale, short of one file call that itself stalls.
 $lockPath = "$claudeConfig.lock"
 $lockClock = [System.Diagnostics.Stopwatch]::StartNew()
-while (-not [KbTrust.NativeMethods]::CreateDirectoryW($lockPath, [IntPtr]::Zero)) {
+$lockError = [KbTrust.NativeMethods]::CreateLock($lockPath)
+while ($lockError -ne 0) {
+    # 183 is ERROR_ALREADY_EXISTS, a directory or a file at the path. 5 is
+    # ERROR_ACCESS_DENIED, which a lock directory being deleted returns until
+    # its last handle closes. Waiting can clear those two and no other.
+    if (@(183, 5) -notcontains $lockError) {
+        Stop-WithReason "the lock $(ConvertTo-SafeText $lockPath) could not be created (Windows error $lockError), so nothing was written"
+    }
     if ([System.IO.File]::Exists($lockPath) -or ($lockClock.Elapsed.TotalSeconds -ge 10)) {
         if ([System.IO.Directory]::Exists($lockPath)) { Stop-WithReason "~/.claude.json is held by another writer" }
-        Stop-WithReason "the lock $(ConvertTo-SafeText $lockPath) could not be created, so nothing was written"
+        Stop-WithReason "the lock $(ConvertTo-SafeText $lockPath) could not be created (Windows error $lockError), so nothing was written"
     }
     Start-Sleep -Milliseconds 100
+    $lockError = [KbTrust.NativeMethods]::CreateLock($lockPath)
 }
 $lockClock.Restart()
+$lockTaken = $true
 # Entered only once this run has created the lock, so the finally removes a
-# lock of this run's own and never one it found held.
+# lock of this run's own and never one it found held. A refusal inside removes
+# the lock itself, in Stop-WithReason, so the finally finds nothing to remove.
 try {
     if (-not [System.IO.File]::Exists($claudeConfig)) {
         Stop-WithReason "$claudeConfig does not exist; run Claude Code once on this account first"
@@ -387,11 +473,14 @@ try {
         }
     }
 } finally {
-    try {
-        [System.IO.Directory]::Delete($lockPath)
-    } catch {
-        [Console]::Error.WriteLine("kb-trust: the lock $(ConvertTo-SafeText $lockPath) could not be removed: $(ConvertTo-SafeText $_.Exception.GetBaseException().Message)")
-        exit 1
+    if ($lockTaken) {
+        $lockTaken = $false
+        try {
+            [System.IO.Directory]::Delete($lockPath)
+        } catch {
+            [Console]::Error.WriteLine("kb-trust: the lock $(ConvertTo-SafeText $lockPath) could not be removed: $(ConvertTo-SafeText $_.Exception.GetBaseException().Message)")
+            exit 1
+        }
     }
 }
 

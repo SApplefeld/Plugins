@@ -19,7 +19,9 @@ that kb-move.ps1 stamps a file planted two days back so it reads as live at
 age 0, and that the four writing skills emit the Live read exactly, ingest and
 lint twice each and query and merge once, with no -Minutes, ingest's last read
 inside step 4b before its move, lint's last inside its write pass and merge's
-inside its live check.
+inside its live check. It also checks that a child outliving the test's own
+run bound reads TimedOut and has its process tree stopped, so a hung child
+fails a check instead of hanging the suite.
 
 Each refusal check reads the refusal's own text, so it fails when a different
 rule refuses first. The test sets GIT_CONFIG_GLOBAL to an empty file and
@@ -97,8 +99,35 @@ function ConvertTo-CommandLineArgument {
     return $builder.ToString()
 }
 
-# Runs a program and captures its exit code, stdout and stderr as text.
-function Invoke-Captured {
+# Every process this test starts, so the finally block can stop any still running.
+$script:started = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
+
+# Stops a process this test started and every process still under it, by its
+# PID; a process whose parent has already exited is outside taskkill's walk.
+# taskkill's output is read asynchronously and discarded, so its ten-second
+# wait is the bound.
+function Stop-StartedTree {
+    param([System.Diagnostics.Process]$Process)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    $psi.Arguments = "/PID $($Process.Id) /T /F"
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $killer = [System.Diagnostics.Process]::Start($psi)
+    try {
+        $null = $killer.StandardError.ReadToEndAsync()
+        $null = $killer.StandardOutput.ReadToEndAsync()
+        [void]$killer.WaitForExit(10000)
+        if (-not $Process.WaitForExit(5000)) { try { $Process.Kill() } catch { } }
+    } finally {
+        $killer.Dispose()
+    }
+}
+
+# Starts a program with its stdout and stderr read asynchronously.
+function Start-Captured {
     param([string]$FilePath, [string[]]$Arguments)
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
@@ -107,18 +136,48 @@ function Invoke-Captured {
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    $startedAt = [DateTime]::UtcNow
     $process = [System.Diagnostics.Process]::Start($psi)
-    $stderrTask = $process.StandardError.ReadToEndAsync()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $process.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $process.ExitCode; Stdout = $stdout; Stderr = $stderrTask.Result }
+    $script:started.Add($process)
+    return [pscustomobject]@{
+        Process   = $process
+        StartedAt = $startedAt
+        Stdout    = $process.StandardOutput.ReadToEndAsync()
+        Stderr    = $process.StandardError.ReadToEndAsync()
+    }
+}
+
+# Waits for a started program and both its streams, for at most the timeout
+# counted from its start. Past the timeout the program's tree is stopped and the
+# result reads TimedOut, with no exit code, so a check that reads it fails.
+function Wait-Captured {
+    param($Run, [int]$TimeoutSeconds = 120)
+    $deadline = $Run.StartedAt.AddSeconds($TimeoutSeconds)
+    $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+    $finished = $Run.Process.WaitForExit($remaining)
+    if ($finished) {
+        $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+        $finished = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($Run.Stdout, $Run.Stderr), $remaining)
+    }
+    if (-not $finished) {
+        Stop-StartedTree $Run.Process
+        return [pscustomobject]@{ ExitCode = $null; Stdout = ''; Stderr = ''; TimedOut = $true }
+    }
+    return [pscustomobject]@{ ExitCode = $Run.Process.ExitCode; Stdout = $Run.Stdout.Result; Stderr = $Run.Stderr.Result; TimedOut = $false }
+}
+
+# Runs a program and captures its exit code, stdout and stderr as text, for at
+# most the timeout.
+function Invoke-Captured {
+    param([string]$FilePath, [string[]]$Arguments, [int]$TimeoutSeconds = 120)
+    return Wait-Captured (Start-Captured $FilePath $Arguments) $TimeoutSeconds
 }
 
 # Runs git in the test KB with line-ending conversion off and a fixed identity.
 function Invoke-Git {
     param([string[]]$Arguments)
     $result = Invoke-Captured 'git' (@('-C', $script:kb, '-c', 'core.autocrlf=false', '-c', 'user.name=gate test', '-c', 'user.email=gate@test.invalid') + $Arguments)
-    if ($result.ExitCode -ne 0) { throw "git $($Arguments -join ' ') failed: $($result.Stderr)" }
+    if ($result.TimedOut -or $result.ExitCode -ne 0) { throw "git $($Arguments -join ' ') failed: $($result.Stderr)" }
     return $result.Stdout
 }
 
@@ -299,7 +358,34 @@ try {
         }
         Test-Check "$($skill[0]) emits the exact Live command $($skill[1]) time(s), its last read at the step that needs it, and never passes -Minutes" $passed
     }
+
+    # --- The helper's own bound. A child that outlives a short bound reads
+    # TimedOut, and its tree is stopped: the child and the grandchild it waits
+    # on, each matched by its process id and creation time. The control is the
+    # filter seeing that grandchild running under the child before the bound.
+    $boundClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $run = Start-Captured $script:psExe @('-NoProfile', '-Command', "& '$($script:psExe)' -NoProfile -Command 'Start-Sleep -Seconds 60'")
+    $grandchild = @()
+    while ($grandchild.Count -eq 0 -and -not $run.Process.HasExited -and $boundClock.Elapsed.TotalSeconds -lt 20) {
+        $grandchild = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($run.Process.Id)")
+        if ($grandchild.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+    }
+    $bounded = Wait-Captured $run 25
+    $boundClock.Stop()
+    $alive = @()
+    for ($i = 0; $i -lt 10; $i++) {
+        $alive = @($grandchild | Where-Object { $g = $_; @(Get-CimInstance Win32_Process -Filter "ProcessId = $($g.ProcessId)" | Where-Object { $_.CreationDate -eq $g.CreationDate }).Count -gt 0 })
+        if ($alive.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    $boundPassed = $bounded.TimedOut -and ($null -eq $bounded.ExitCode) -and ($boundClock.Elapsed.TotalSeconds -lt 45) -and $run.Process.HasExited -and ($grandchild.Count -ge 1) -and ($alive.Count -eq 0)
+    Test-Check 'a child that sleeps past a 25-second bound under Invoke-Captured reads TimedOut with no exit code inside 45 seconds, and the child and the grandchild it waits on are gone within five seconds after, where the filter saw that grandchild running first' $boundPassed
+    if (-not $boundPassed) { Write-Host "  timed out $($bounded.TimedOut), elapsed $([math]::Round($boundClock.Elapsed.TotalSeconds, 1)) s, child exited $($run.Process.HasExited), grandchildren seen $($grandchild.Count), alive $($alive.Count)" }
+    foreach ($g in $alive) { Stop-Process -Id $g.ProcessId -Force -ErrorAction SilentlyContinue }
 } finally {
+    foreach ($process in $script:started) {
+        if (-not $process.HasExited) { Stop-StartedTree $process }
+    }
     Remove-Item -LiteralPath Env:GIT_CONFIG_GLOBAL -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath Env:GIT_CONFIG_NOSYSTEM -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $work) {

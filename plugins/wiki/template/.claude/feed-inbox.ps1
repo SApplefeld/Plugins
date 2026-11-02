@@ -33,26 +33,39 @@ call runs with core.hooksPath set to an empty directory, so no hook in a clone
 can execute.
 
 No git call can wait on a person. Each runs with GIT_TERMINAL_PROMPT=0 and
-GCM_INTERACTIVE=never, so neither git nor Git Credential Manager prompts, and
-with GIT_SSH_COMMAND set to ssh in batch mode with a 30-second connect timeout
-and keep-alives, which replaces any core.sshCommand. Each git call has a bound
-by kind. A first fetch, into a clone that has no refs/feed/head yet, takes the
-first-fetch bound of 1800 seconds, because it transfers the whole branch history
-and git keeps nothing of a stopped fetch. Every later fetch takes the
-later-fetch bound of 300 seconds, and every other git call the local bound of 60
-seconds.
+GCM_INTERACTIVE=never, so neither git nor Git Credential Manager prompts. A
+fetch also runs with GIT_SSH_COMMAND set to ssh in batch mode with a 30-second
+connect timeout and keep-alives, unless the account or the clone configures
+its own ssh command (GIT_SSH_COMMAND, GIT_SSH or core.sshCommand), which is
+then used as configured, and the fetch's bound ends any prompt it makes. Each
+git call has a bound by kind. A first fetch, into a clone that has no
+refs/feed/head yet, takes the first-fetch bound of 1800 seconds, because it
+transfers the whole branch history and git keeps nothing of a stopped fetch.
+Every later fetch takes the later-fetch bound of 300 seconds, and every other
+git call the local bound of 60 seconds.
 
 A run also holds a budget of 50 minutes from its start, which the walker,
 kb-walk.ps1, shortens through FEED_INBOX_RUN_SECONDS where less of its pass
 remains. Each git call waits for its bound or for what is left of the budget, whichever
-is shorter. A call past that wait has its process tree stopped, and the run
-exits 1 before writing that file, with one line naming the source and either
-the run budget or the kind of bound that stopped it. A git call due after the
-budget is spent is never started, and the run exits 1 the same way. So no git
-process the feeder starts outlives its run. The walker starts the feeder inside
-its kill-on-close job, so ending the walker's task ends any fetch with it. A
-feeder run by hand and ended by hand ends only pwsh, and a git fetch it
-started can run on after that.
+is shorter. Once git has exited, its output is read for at least five seconds,
+and a call whose job is stopped waits up to five seconds more for its output,
+so a call can end that much past the budget. Every git process the run starts
+runs inside one kill-on-close Windows job object, which every process git
+starts after its assignment joins whatever its parent link. A process git
+starts in the moment before the feeder assigns git to the job is outside the
+job, and where the assignment fails the feeder stops git alone, so a process
+git started by then can outlive the run.
+A call past its wait has the job terminated, which ends git and all of
+them in one call, and the run exits 1 before writing that file, with one line
+naming the source and either the run budget or the kind of bound that stopped
+it. Where git finished inside its wait and a process it started still held
+its output past the wait, that process is stopped the same way, one warning
+line says so, and the run goes on with git's own result. A git call due after
+the budget is spent is never started, and the run exits 1 the same way. The
+job is made before the first git call and closed as the run's last act, and
+closing it ends whatever is still in it, so no process in the job outlives
+the run, however the run ends, a feeder run by hand and ended by hand
+included. A job that cannot be made stops the run before any git call.
 
 The environment variable FEED_INBOX_GIT_TIMEOUT_SECONDS replaces all three
 bounds, and FEED_INBOX_RUN_SECONDS replaces the budget. Each is a whole number
@@ -351,45 +364,189 @@ function ConvertTo-CommandLineArgument {
     return $builder.ToString()
 }
 
-# Stops a git process and every process it started, such as ssh, a remote
-# helper or a credential helper. taskkill /T walks the tree on both PowerShell
-# editions; Windows PowerShell's .NET has no tree-aware Process.Kill. Its output
-# is read and discarded so it never reaches the feeder's stdout.
-function Stop-GitProcessTree {
-    param([System.Diagnostics.Process]$Process)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = Join-Path $env:SystemRoot 'System32\taskkill.exe'
-    $psi.Arguments = "/PID $($Process.Id) /T /F"
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $killer = [System.Diagnostics.Process]::Start($psi)
-    $null = $killer.StandardError.ReadToEndAsync()
-    $null = $killer.StandardOutput.ReadToEnd()
-    [void]$killer.WaitForExit(10000)
-    if (-not $Process.WaitForExit(5000)) {
-        # taskkill could not stop it; stop the git process itself so the run's
-        # exit does not leave it holding the clone.
-        $Process.Kill()
+# The kill-on-close job object every git process of the run runs in. Each call
+# returns a Win32 error code, 0 on success, so a failure is reported and never
+# thrown. The job is made with no security attributes, so its handle is not
+# inheritable and no child ever holds it. 0x2000 is
+# JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, and 9 is JobObjectExtendedLimitInformation.
+# Terminate ends every process in the job in one call, whatever each one's
+# parent link, which a walk of parent pids, such as a tree kill makes, cannot promise. The type
+# is compiled once per session and carries its own namespace, so it loads
+# beside the other helpers' copies in one session. kb-walk.ps1 and kb-run.ps1
+# carry the same class under theirs.
+$script:jobObjectSource = @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace FeedInbox
+{
+    public static class JobObject
+    {
+        #region Native Structures
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BasicLimitInformation
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IoCounters
+        {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ExtendedLimitInformation
+        {
+            public BasicLimitInformation BasicLimitInformation;
+            public IoCounters IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryUsed;
+            public UIntPtr PeakJobMemoryUsed;
+        }
+
+        #endregion
+
+        #region Native Methods
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateJobObjectW(IntPtr jobAttributes, string name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimitInformation info, uint length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        #endregion
+
+        #region Public Methods
+
+        public static int CreateKillOnClose(out IntPtr job)
+        {
+            // Create the job.
+            job = CreateJobObjectW(IntPtr.Zero, null);
+            if (job == IntPtr.Zero)
+            {
+                return Marshal.GetLastWin32Error();
+            }
+
+            // Set kill on close, closing the job again where the limit is refused.
+            ExtendedLimitInformation info = new ExtendedLimitInformation();
+            info.BasicLimitInformation.LimitFlags = 0x2000;
+            if (!SetInformationJobObject(job, 9, ref info, (uint)Marshal.SizeOf(typeof(ExtendedLimitInformation))))
+            {
+                int error = Marshal.GetLastWin32Error();
+                CloseHandle(job);
+                job = IntPtr.Zero;
+                return error;
+            }
+            return 0;
+        }
+
+        public static int Assign(IntPtr job, IntPtr process)
+        {
+            return AssignProcessToJobObject(job, process) ? 0 : Marshal.GetLastWin32Error();
+        }
+
+        public static int Terminate(IntPtr job)
+        {
+            return TerminateJobObject(job, 1) ? 0 : Marshal.GetLastWin32Error();
+        }
+
+        public static void Close(IntPtr job)
+        {
+            CloseHandle(job);
+        }
+
+        #endregion
     }
 }
+'@
 
-# Runs git with hooks neutralized, prompts disabled and a time bound, and returns
-# its exit code, its stdout as raw bytes, and its stderr as text. Stdout is
-# captured as bytes because a blob must reach inbox/ byte for byte and a path
-# listing is UTF-8, neither of which PowerShell's native-command pipeline
-# preserves on 5.1. Both streams are read asynchronously, so a child that fills
-# one pipe cannot deadlock the other read, and the wait stays bounded. The wait
-# is the call's bound by kind or what is left of the run budget, whichever is
-# shorter. Past it the process tree is stopped and the run exits 1 with one line
-# naming the action and whichever of the two stopped it. With no budget left,
-# the call is not started and the run exits 1 the same way.
+# Compiles the job type where this session has not, and makes the job, or stops
+# the run with one line naming what failed. A fetch whose bound could not end
+# every process it starts is the fetch the bound exists to prevent, so the run
+# stops here, before any git call, rather than proceed without the job.
+function New-KillOnCloseJob {
+    try {
+        if (-not ('FeedInbox.JobObject' -as [type])) {
+            Add-Type -TypeDefinition $script:jobObjectSource -Language CSharp
+        }
+    } catch {
+        Stop-WithReason "compiling the kill-on-close job object helper failed: $(Get-FirstLine $_.Exception.Message); nothing was fetched or written."
+    }
+    $job = [IntPtr]::Zero
+    $jobError = [FeedInbox.JobObject]::CreateKillOnClose([ref]$job)
+    if ($jobError -ne 0) {
+        Stop-WithReason "creating the kill-on-close job object failed with Win32 error $jobError; nothing was fetched or written."
+    }
+    return $job
+}
+
+# Ends every process in the job, git and whatever it started wherever its
+# parent link points, then waits for git's exit and for its streams, which
+# close once their last holder has died, for at most the drain. Returns whether
+# the streams closed. Where the terminate call fails, the line names the error
+# and nothing is waited on, since nothing has ended; closing the job as the run
+# ends still ends its processes.
+function Stop-JobProcesses {
+    param([System.Diagnostics.Process]$Process, [System.Threading.Tasks.Task[]]$Streams)
+    $terminateError = [FeedInbox.JobObject]::Terminate($script:job)
+    if ($terminateError -ne 0) {
+        [Console]::Error.WriteLine("feed-inbox: terminating the kill-on-close job object failed with Win32 error $terminateError; closing it as the run ends stops its processes.")
+        return $false
+    }
+    $Process.WaitForExit()
+    return [System.Threading.Tasks.Task]::WaitAll($Streams, $script:streamDrainSeconds * 1000)
+}
+
+# Runs git with hooks neutralized, prompts disabled and a time bound, inside the
+# run's kill-on-close job, and returns its exit code, its stdout as raw bytes,
+# and its stderr as text. Stdout is captured as bytes because a blob must reach
+# inbox/ byte for byte and a path listing is UTF-8, neither of which
+# PowerShell's native-command pipeline preserves on 5.1. Both streams are read
+# asynchronously, so a child that fills one pipe cannot deadlock the other
+# read, and the wait stays bounded. The wait is the call's bound by kind or
+# what is left of the run budget, whichever is shorter. With no budget left,
+# the call is not started and the run exits 1 with one line naming the action.
+#
+# Two timeouts are told apart. Where git itself runs past the wait, the job is
+# terminated and the run exits 1 with one line naming the action and whichever
+# of the bound and the budget stopped it. Where git exited inside the wait and
+# its streams are still open when the wait runs out, a process git started
+# holds its output: the job is terminated, which ends that process, one warning
+# line says what held it, and git's own result is returned, since the call did
+# finish. Where that process is outside the job and still holds the output
+# after the terminate, the output cannot be read whole, and the run exits 1
+# saying so.
 function Invoke-Git {
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
         [Parameter(Mandatory)][string]$Action,
-        [ValidateSet('first-fetch', 'later-fetch', 'local')][string]$Bound = 'local'
+        [ValidateSet('first-fetch', 'later-fetch', 'local')][string]$Bound = 'local',
+        [switch]$BatchSsh
     )
     $budgetLeft = ($script:runDeadline - [DateTime]::UtcNow).TotalSeconds
     if ($budgetLeft -le 0) {
@@ -409,28 +566,49 @@ function Invoke-Git {
     $psi.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
     # No git call may wait on a person: an unattended run has no one to answer,
     # and a credential helper such as Git Credential Manager would block on its
-    # own prompt until the bound.
+    # own prompt until the bound. With -BatchSsh, ssh is told not to ask either;
+    # the caller leaves it off where the account or the clone configures an ssh
+    # command of its own, which git then uses.
     $psi.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
     $psi.EnvironmentVariables['GCM_INTERACTIVE'] = 'never'
-    $psi.EnvironmentVariables['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+    if ($BatchSsh) {
+        $psi.EnvironmentVariables['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+    }
     $process = [System.Diagnostics.Process]::Start($psi)
+    # Only git's own handle is assigned, so the job reaches git and every
+    # process it starts from here on, and never the feeder. A process git
+    # started in the moment before the assignment is outside the job. A git
+    # that has already exited has nothing to contain, so its result stands.
+    $assignError = [FeedInbox.JobObject]::Assign($script:job, $process.Handle)
+    if ($assignError -ne 0 -and -not $process.HasExited) {
+        # Git can exit between the check and the kill, which then throws; the
+        # line below still names the failed assignment.
+        try { $process.Kill() } catch { }
+        Stop-WithReason "${Action}: assigning git to the kill-on-close job object failed with Win32 error $assignError; the git process was stopped."
+    }
     $buffer = New-Object System.IO.MemoryStream
     $stdoutTask = $process.StandardOutput.BaseStream.CopyToAsync($buffer)
     $stderrTask = $process.StandardError.ReadToEndAsync()
+    $streams = [System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
     $deadline = [DateTime]::UtcNow.AddSeconds($waitSeconds)
-    $finished = $process.WaitForExit($waitSeconds * 1000)
-    if ($finished) {
-        # The streams close when every process holding them ends, which can be
-        # after git itself, so they share what is left of the same bound.
-        $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
-        $finished = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), $remaining)
-    }
-    if (-not $finished) {
-        Stop-GitProcessTree $process
+    if (-not $process.WaitForExit($waitSeconds * 1000)) {
+        $null = Stop-JobProcesses $process $streams
         if ($budgetCapped) {
             Stop-WithReason "$Action did not finish before the run budget of $script:runBudgetSeconds seconds ran out; the git process was stopped."
         }
         Stop-WithReason "$Action did not finish within the $Bound bound of $waitSeconds seconds; the git process was stopped."
+    }
+    # The streams close when every process holding them ends, which can be
+    # after git itself, so they share what is left of the same bound. The wait
+    # is never shorter than the drain, so a git that exits near the wait's end
+    # still has its own output read before a holder is named.
+    $remaining = [int][Math]::Max($script:streamDrainSeconds * 1000, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+    if (-not [System.Threading.Tasks.Task]::WaitAll($streams, $remaining)) {
+        $holder = "${Action}: a process git started held its output past the wait of $waitSeconds seconds"
+        if (-not (Stop-JobProcesses $process $streams)) {
+            Stop-WithReason "$holder and was not stopped with the job's processes, so git's output could not be read whole."
+        }
+        Write-FeedWarning "$holder and was stopped with the job's processes."
     }
     $process.WaitForExit()
     return [pscustomobject]@{
@@ -438,6 +616,24 @@ function Invoke-Git {
         Stdout   = $buffer.ToArray()
         Stderr   = $stderrTask.Result
     }
+}
+
+# Whether the account or the clone configures an ssh command of its own:
+# GIT_SSH_COMMAND or GIT_SSH in the feeder's environment, which git inherits,
+# or core.sshCommand in any config scope git reads for the clone. git takes
+# GIT_SSH_COMMAND over core.sshCommand over GIT_SSH, so a batch-mode
+# GIT_SSH_COMMAND set on the fetch would silence each of them, a deploy key's
+# among them. The config is read through Invoke-Git, under the local bound and
+# inside the run's job. Exit 1 is git's answer for an unset key; any other exit
+# stops the run with one line naming the source.
+function Test-SshCommandConfigured {
+    param([Parameter(Mandatory)][string]$Clone, [Parameter(Mandatory)][string]$SourceName)
+    if (-not [string]::IsNullOrEmpty($env:GIT_SSH_COMMAND) -or -not [string]::IsNullOrEmpty($env:GIT_SSH)) { return $true }
+    $action = "reading core.sshCommand for source '$SourceName'"
+    $result = Invoke-Git -Arguments @("--git-dir=$Clone", 'config', '--get', 'core.sshCommand') -Action $action
+    if ($result.ExitCode -eq 0) { return $true }
+    if ($result.ExitCode -eq 1) { return $false }
+    Stop-WithReason "$action failed: $(Get-FirstLine $result.Stderr)"
 }
 
 # The first non-empty line of git's stderr, for a one-line refusal.
@@ -497,6 +693,12 @@ if (-not [string]::IsNullOrEmpty($budgetOverride)) {
     $script:runBudgetSeconds = [int]$budgetOverride
 }
 $script:runDeadline = [DateTime]::UtcNow.AddSeconds($script:runBudgetSeconds)
+
+# The drain is how long a git call's streams are waited on after the job is
+# terminated, which ends every process holding them, so it is short and fixed.
+# The job is made before the first git call and closed as the run's last act.
+$script:streamDrainSeconds = 5
+$script:job = [IntPtr]::Zero
 
 # The largest blob fed, 25 MB.
 $maxBlobBytes = 25MB
@@ -659,6 +861,10 @@ try {
     $script:hooksDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
     New-Item -ItemType Directory -Path $script:hooksDir -WhatIf:$false | Out-Null
 
+    # The job every git call runs in, made before the first of them, so a job
+    # that cannot be made stops the run with nothing fetched or written.
+    $script:job = New-KillOnCloseJob
+
     # 5. Create and fetch every clone before writing anything, so one bad source
     # fails the run with inbox/ untouched. The URL is passed after --, so it can
     # never be read as an option.
@@ -688,7 +894,10 @@ try {
         $refspec = "+refs/heads/$($source.Branch):refs/feed/head"
         $action = "fetching branch '$($source.Branch)' of source '$($source.Name)' from $($source.ShownUrl)"
         $fetchBound = if ($firstFetch) { 'first-fetch' } else { 'later-fetch' }
-        $result = Invoke-Git -Arguments @("--git-dir=$clone", '-c', 'transfer.fsckObjects=true', 'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', $source.Url, $refspec) -Action $action -Bound $fetchBound
+        # ssh's batch mode is set only where no ssh command is configured, so
+        # a configured one stands.
+        $batchSsh = -not (Test-SshCommandConfigured -Clone $clone -SourceName $source.Name)
+        $result = Invoke-Git -Arguments @("--git-dir=$clone", '-c', 'transfer.fsckObjects=true', 'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', $source.Url, $refspec) -Action $action -Bound $fetchBound -BatchSsh:$batchSsh
         if ($result.ExitCode -ne 0) {
             Stop-WithReason "$action failed: $(Get-FirstLine $result.Stderr)"
         }
@@ -907,6 +1116,9 @@ try {
         $fed++
     }
 } finally {
+    # Closing the job's handle ends every process still in it, so nothing a git
+    # call started outlives this run, before the lock is released.
+    if ($script:job -ne [IntPtr]::Zero) { [FeedInbox.JobObject]::Close($script:job) }
     if ($script:hooksDir -and (Test-Path -LiteralPath $script:hooksDir)) {
         Remove-Item -LiteralPath $script:hooksDir -Recurse -Force -WhatIf:$false
     }

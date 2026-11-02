@@ -40,7 +40,11 @@ move, so two writers never both read and check the same list. The file
 stays and holds nothing; only the open handle is the lock, so the operating
 system releases it when a writer ends, however it ends. A writer waits up to
 10 seconds for the lock, and for a reader holding the list open at its move,
-then refuses with "the list is held by another writer". List, Get and Root
+then refuses with "the list is held by another writer". A move refused for
+access is waited on the same way, since a reader holding the list causes one;
+at the 10 seconds, where no other process holds the list open and one more
+move is refused, it refuses with "access to the wiki list at <path> was denied
+at its move". List, Get and Root
 take no lock and never wait on it. Each write builds the whole document in a temporary file
 in the list's folder and moves it over the list, so a writer killed at any
 point leaves the previous list whole and at most a stray *.tmp file there,
@@ -181,14 +185,28 @@ function Get-JsonString {
 $heldReason = 'the list is held by another writer'
 $writeClock = $null
 
-# True where an exception, unwrapped, is a sharing or lock violation, or with
-# -Denied an access denial, which a move over a file a reader holds open meets.
+# True where an exception, unwrapped, is a sharing or lock violation.
 function Test-HeldError {
-    param([Exception]$Exception, [switch]$Denied)
+    param([Exception]$Exception)
     $inner = $Exception.GetBaseException()
-    if ($Denied -and $inner -is [System.UnauthorizedAccessException]) { return $true }
     # 32 is ERROR_SHARING_VIOLATION and 33 ERROR_LOCK_VIOLATION.
     return ($inner -is [System.IO.IOException]) -and (@(32, 33) -contains ($inner.HResult -band 0xFFFF))
+}
+
+# True where another process holds the list open. A move over a file another
+# process holds open is refused as an access denial, the same exception a list
+# that cannot be replaced at all raises, so the two are told apart here: an
+# open of the list that shares nothing fails with a sharing violation only
+# while another handle is open on it. The open, where it succeeds, is closed at
+# once. A reader opening the list in that moment fails, so the probe runs only
+# at a denied writer's bound, never on each retry.
+function Test-ListHeld {
+    try {
+        [System.IO.File]::Open($listPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None).Dispose()
+        return $false
+    } catch {
+        return (Test-HeldError $_.Exception)
+    }
 }
 
 # Opens registry.lock with no sharing, retrying while another writer holds it
@@ -292,10 +310,29 @@ function Write-WikiList {
                 [System.IO.File]::Move($tempPath, $listPath, $true)
                 break
             } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
-                if (-not (Test-HeldError $_.Exception -Denied)) {
-                    Stop-WithReason "the wiki list at $listPath could not be replaced, so nothing changed: $($_.Exception.GetBaseException().Message)"
+                $moveError = $_.Exception.GetBaseException()
+                $denied = $moveError -is [System.UnauthorizedAccessException]
+                if (-not $denied -and -not (Test-HeldError $_.Exception)) {
+                    Stop-WithReason "the wiki list at $listPath could not be replaced, so nothing changed: $($moveError.Message)"
                 }
-                if ($script:writeClock.Elapsed.TotalSeconds -ge 10) { Stop-WithReason $heldReason }
+                # A denial is waited on like a hold, since a reader holding the
+                # list causes one. At the bound a denied move whose list no
+                # process holds takes one more move, and a denial there is the
+                # list's own.
+                if ($script:writeClock.Elapsed.TotalSeconds -ge 10) {
+                    if (-not $denied -or (Test-ListHeld)) { Stop-WithReason $heldReason }
+                    try {
+                        [System.IO.File]::Move($tempPath, $listPath, $true)
+                        break
+                    } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+                        $lastError = $_.Exception.GetBaseException()
+                        if ((Test-HeldError $_.Exception) -or (Test-ListHeld)) { Stop-WithReason $heldReason }
+                        if ($lastError -isnot [System.UnauthorizedAccessException]) {
+                            Stop-WithReason "the wiki list at $listPath could not be replaced, so nothing changed: $($lastError.Message)"
+                        }
+                        Stop-WithReason "access to the wiki list at $listPath was denied at its move, so nothing changed"
+                    }
+                }
                 Start-Sleep -Milliseconds 100
             }
         }

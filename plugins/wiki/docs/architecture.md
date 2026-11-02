@@ -17,7 +17,7 @@ preserve.
 
 The engine repo (this one) contains the `template/` tree, nine scripts at
 its root, four plugin-level skills separate from the four vendored into each
-KB, a `SessionStart` hook, eleven tests, a plugin
+KB, a `SessionStart` hook, twelve tests, a plugin
 manifest, and this `docs/` library. `new-kb.ps1` copies the template.
 `kb-create.ps1` creates a KB, `kb-trust.ps1` trusts it and `kb-registry.ps1`
 lists it. `kb-drop.ps1` writes one file into a listed KB's `inbox/`, the only
@@ -32,7 +32,9 @@ action runs `Start-InstalledWikiWalk.ps1`, and that launcher reads the install
 record through `installed-plugin-functions.ps1` and runs the installed
 walker. `tests/Test-KbRegistry.ps1` drives the list script, and
 `tests/Test-KbCreate.ps1` drives creation, trust and the commit helper's
-no-remote case against a stub in place of `claude`. `tests/Test-KbStructure.ps1` checks a KB's structure
+no-remote case against a stub in place of `claude`. `tests/Test-KbTrust.ps1`
+drives the trust writer against a throwaway profile and a stub in place of
+`claude`. `tests/Test-KbStructure.ps1` checks a KB's structure
 and permission allowlist. `tests/Test-FeedInbox.ps1` drives the feeder against
 a throwaway repository and KB. `tests/Test-ReconcileGate.ps1` drives the status
 helper's liveness read and the move helper's stamp against a throwaway KB, and
@@ -41,6 +43,8 @@ drives the run wrapper against a stub in place of `claude`.
 `tests/Test-KbMove.ps1` drives the handle routes of the status, move and
 commit helpers and `kb-commit.ps1 -Reconcile` against a throwaway KB, and
 checks that the three helpers' copies of the handle function are byte-equal.
+It also drives the move helper's refusals of a symbolic link and of a stamp
+or a move that throws.
 `tests/Test-KbWalk.ps1` drives the walker over throwaway KBs with the same kind
 of stub, and `tests/Test-WalkLauncher.ps1` drives the launcher against a
 temporary install and the registrar under `-WhatIf`. `tests/Test-KbDrop.ps1`
@@ -121,7 +125,12 @@ gathers a name, a description and an optional remote URL, then runs
 `kb-create.ps1`, which runs five steps in order, each a separate process:
 
 1. `kb-registry.ps1 Init -Root <root>`, only where the account has no list
-   yet.
+   yet. A relative root is resolved against the run's current location first,
+   so the list always holds an absolute root. Two first runs on an account with
+   no list can both reach Init, and the list's lock lets one through.
+   The other reads the refusal "a wiki list already exists" as the winner's
+   list, checks its root and its own name against that list, and goes on from
+   step 2.
 2. `new-kb.ps1`: the template copied to `<root>\<name>`, the version mark
    written, the first commit made.
 3. `kb-trust.ps1`: the folder trusted, as the trust gate below describes.
@@ -129,7 +138,15 @@ gathers a name, a description and an optional remote URL, then runs
    was given.
 5. `kb-registry.ps1 Add`: the KB listed.
 
-Each step's refusal stops the run with that step's own stderr line. A stop
+Every script and git process the run starts runs inside one kill-on-close
+job object, made before the list is read, so a create killed partway ends
+every process it started. A job that cannot be made stops the run before
+anything is read or copied. Each script waits at most 900 seconds, and each
+git call at step 4 waits at most the push bound of 300 seconds or the value
+of `KB_PUSH_TIMEOUT_SECONDS`.
+
+Each step's refusal stops the run with that step's own stderr line, and a
+step that succeeds passes none of its script's stderr through. A stop
 after the copy names the folder for the operator to remove, and a stop from
 the trust step on also names the trust entry it may have left. The skill then
 fills the three `CUSTOMIZE` blocks from the description and commits
@@ -146,7 +163,13 @@ listed KB, and holding every file a new KB holds except the version mark
 `.claude/engine.json` and the merge skill, so a KB made before either existed
 can still be listed, and the walker's engine update brings it the merge skill. A writer holds
 `registry.lock`, a sibling file opened with no sharing, from its read of the
-list through its move, so two writers never act on the same read. Each write
+list through its move, so two writers never act on the same read. A writer
+waits up to 10 seconds for the lock, and for a reader holding the list open
+at its move, then refuses with "the list is held by another writer". A move
+refused for access is waited on the same way, since a reader holding the list
+causes one. Where no other process holds the list at 10 seconds and one more
+move is refused for access, the writer names the denial and the list's path
+instead. Each write
 goes to a temporary file in the same folder and moves over the list, so a
 killed writer leaves the previous list whole. Readers take no lock. `List`
 prints one tab-separated line per KB: name, folder, the first eight
@@ -271,7 +294,7 @@ wrapper, so the agent cannot start one. The wrapper bounds its `claude` child
 with a budget of 6900 seconds, which `KB_RUN_SECONDS` replaces as a whole number
 of seconds from 1 to 99999. Any other value exits 1 with one stderr line before
 `claude` starts. Past the budget it stops the child's whole process tree with
-`taskkill` and exits 1. The child runs inside a Windows job object created with
+`taskkill`, waiting at most ten seconds for `taskkill` itself, and exits 1. The child runs inside a Windows job object created with
 kill-on-close, which the wrapper alone holds, so when the wrapper ends, however
 it ends, the operating system ends every process still in the job. That covers
 a process `taskkill` missed and one the child left running after a normal exit.
@@ -311,8 +334,11 @@ or a bare inbox file name from a person at the keyboard. It refuses a handle
 matching no file or more than one, refuses a name
 containing a separator or leading dash, refuses to overwrite an existing source
 (so a re-dropped file is a refusal, not a silent loss), confirms the resolved
-paths stay inside the repo and clear of `.git/` and `.claude/`, then sets the
-file's last-write time to now and moves it. `kb-commit.ps1` is the only path
+paths stay inside the repo and clear of `.git/` and `.claude/`, and refuses an
+inbox file that is a reparse point, such as a symbolic link or a junction. It
+then sets the file's last-write time to now and moves it. A stamp or a move
+that throws ends in one `kb-move:` line, with the file left in `inbox/`.
+`kb-commit.ps1` is the only path
 that commits: it accepts only
 bar-delimited repo-relative paths under `sources/` or `wiki/` or exactly
 `index.md`/`log.md`, a source by `-SourceHandle`, whose `Ingest:` subject it
@@ -323,6 +349,12 @@ empty `core.hooksPath` so a repo-planted git hook cannot execute, and pushes
 only to a remote named `origin`, only with `-Push`. On the `-SourceHandle` and
 `-Reconcile` routes it hands git `--literal-pathspecs`, so a name holding `[`
 or `*` stages that file alone, while a plain `-Path` reaches git as a pathspec.
+Its push runs under a time bound inside a kill-on-close Windows job object it
+makes before staging, so a timeout ends git and every process git started in
+one call. `kb-create.ps1`'s first push and every git call the feeder makes run
+the same way. Each of the three sets a batch-mode ssh command only where the
+account or the repository configures no ssh command of its own, and residual 9
+of [threat-model.md](threat-model.md) states what the bound ends.
 `kb-status.ps1` is the only
 git read: it reports the working tree's porcelain status, unpushed commits, a
 page's last-change date, the inbox or sources listing with a handle beside
@@ -404,15 +436,29 @@ That keeps every other property, including the empty-named one
 original and moves it over. It then runs the probe again and succeeds only
 where no warning prints, and a third read must still find the key true.
 
+A silent first probe is not proof of trust on its own. Where the first probe
+prints no warning, the writer reads `~/.claude.json`, once more after 200
+milliseconds where the read fails. It reports the folder already trusted,
+writing nothing, only where a `projects` key naming this folder holds
+`hasTrustDialogAccepted: true`. A silent probe with no such entry, or with the
+file absent or not readable as JSON, is a refusal. Each probe waits at most
+300 seconds, and its output streams at most what remains of that, never less
+than 10 seconds.
+
 The read through the move runs under Claude Code's own lock on the file, the
 folder `~/.claude.json.lock`, which the writer creates with a call that fails
 where it exists and removes only where it created it. A live session takes
 the same lock for each save, so neither erases the other's change. The writer
 never holds the lock across a probe, since each probe is a Claude Code process
 that takes it too. It waits up to 10 seconds for a held lock and then refuses,
-changing nothing. Once it holds the lock it reads its clock before the backup,
+changing nothing. A lock refused for access, as one being deleted is, takes
+the same wait. A file standing at the lock's path, or a lock that fails with
+any other Windows error, refuses at once with the error code in the line.
+Once it holds the lock it reads its clock before the backup,
 before the move and after each blocked move, and refuses at 3 seconds, well
-inside the 10 second age at which Claude Code treats the lock as stale.
+inside the 10 second age at which Claude Code treats the lock as stale. A
+refusal while it holds the lock removes the lock first, and a removal that
+fails is named in the same one line.
 Opening Claude Code in the KB once and accepting the dialog remains the hand
 path.
 

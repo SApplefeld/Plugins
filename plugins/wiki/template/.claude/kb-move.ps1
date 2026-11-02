@@ -13,9 +13,14 @@ destination resolve to locations inside the repo and outside .git/ and
 keeps the time the file arrived with, so
 without the stamp a source dropped days ago would read as stale to
 `kb-status.ps1 -What Live` in the gap before the first page write; with it the
-arrival counts as a touch. sources/ is immutable, so an existing destination is
-never overwritten. On success the destination path, relative to the repo root,
-is written to stdout.
+arrival counts as a touch. An inbox file that is a reparse point, a symbolic
+link or a junction among them, is refused before the stamp, so no symbolic
+link's or junction's target has its time written. A hard link is not a reparse
+point and is not refused by that check. A stamp that throws, a denied
+write-attributes right among the causes, is refused with its one-line reason
+and the file stays in inbox/, and so is a move that throws after the stamp.
+sources/ is immutable, so an existing destination is never overwritten. On
+success the destination path, relative to the repo root, is written to stdout.
 
 .PARAMETER Name
 The bare file name of the item in inbox/ to move. It must be a plain leaf
@@ -171,13 +176,40 @@ foreach ($full in @($srcFull, $destFull)) {
     }
 }
 
+# A reparse point in inbox/, a symbolic link or a junction among them, is
+# refused before anything writes to it, since a time set through such a link
+# can land on a target outside the repo. A hard link is not a reparse point and
+# is not refused by this check. The file's own attributes are read,
+# never its target's, and a read that throws, a file gone or locked since the
+# existence check among the causes, ends as the one-line reason.
+try {
+    $attributes = [System.IO.File]::GetAttributes($srcFull)
+} catch {
+    Stop-WithReason ("could not read the attributes of inbox/$Name, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+}
+if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    Stop-WithReason "inbox/$Name is a reparse point, such as a symbolic link; only a plain file is moved."
+}
+
 $destRelative = "sources/$Name"
 
 if ($PSCmdlet.ShouldProcess($destRelative, 'Move file from inbox/ to sources/')) {
     # The stamp comes first, so a stamp that fails leaves the file in inbox/
     # and the refusal true; a move on one volume keeps the time it carries.
-    [System.IO.File]::SetLastWriteTimeUtc($srcFull, [DateTime]::UtcNow)
-    Move-Item -LiteralPath $srcFull -Destination $destFull
+    # A stamp that throws, a denied write-attributes right among the causes,
+    # ends as the one-line reason and never as a stack trace. So does a move
+    # that throws, such as a source another process holds open, a denied
+    # delete, or a destination that appeared since the check above.
+    try {
+        [System.IO.File]::SetLastWriteTimeUtc($srcFull, [DateTime]::UtcNow)
+    } catch {
+        Stop-WithReason ("could not set the last-write time of inbox/$Name, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+    }
+    try {
+        Move-Item -LiteralPath $srcFull -Destination $destFull -ErrorAction Stop
+    } catch {
+        Stop-WithReason ("could not move inbox/$Name to sources/, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+    }
     Write-Output $destRelative
 }
 

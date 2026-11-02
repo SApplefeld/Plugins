@@ -14,8 +14,9 @@ names, -WhatIf, hook neutralization against a planted hook, the failure paths
 (bad URL, refused URL forms, invalid config, missing config), and the template
 allow-list. A second upstream covers shell-metacharacter mapping, the '..' and
 25 MB refusals, UTF-32 BE, selection order across two sources, the KB lock, the
-stale-temp sweep, and the git timeouts and the run budget, driven by a sleeping
-upload-pack hook.
+stale-temp sweep, the git timeouts and the run budget, driven by a sleeping
+upload-pack hook, and a sleeper a fake ssh on the PATH leaves holding the
+fetch's stderr after git exits, ended with the run's kill-on-close job.
 
 The feeder keeps private clones under
 %LOCALAPPDATA%\llm-wiki-feed\<kb-name>-<path hash>. The test KBs are named
@@ -74,8 +75,35 @@ function ConvertTo-CommandLineArgument {
     return $builder.ToString()
 }
 
-# Runs a program and captures its exit code, stdout and stderr as text.
-function Invoke-Captured {
+# Every process this test starts, so the finally block can stop any still running.
+$script:started = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
+
+# Stops a process this test started and every process still under it, by its
+# PID; a process whose parent has already exited is outside taskkill's walk.
+# taskkill's output is read asynchronously and discarded, so its ten-second
+# wait is the bound.
+function Stop-StartedTree {
+    param([System.Diagnostics.Process]$Process)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    $psi.Arguments = "/PID $($Process.Id) /T /F"
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $killer = [System.Diagnostics.Process]::Start($psi)
+    try {
+        $null = $killer.StandardError.ReadToEndAsync()
+        $null = $killer.StandardOutput.ReadToEndAsync()
+        [void]$killer.WaitForExit(10000)
+        if (-not $Process.WaitForExit(5000)) { try { $Process.Kill() } catch { } }
+    } finally {
+        $killer.Dispose()
+    }
+}
+
+# Starts a program with its stdout and stderr read asynchronously.
+function Start-Captured {
     param([string]$FilePath, [string[]]$Arguments)
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
@@ -84,11 +112,41 @@ function Invoke-Captured {
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    $startedAt = [DateTime]::UtcNow
     $process = [System.Diagnostics.Process]::Start($psi)
-    $stderrTask = $process.StandardError.ReadToEndAsync()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $process.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $process.ExitCode; Stdout = $stdout; Stderr = $stderrTask.Result }
+    $script:started.Add($process)
+    return [pscustomobject]@{
+        Process   = $process
+        StartedAt = $startedAt
+        Stdout    = $process.StandardOutput.ReadToEndAsync()
+        Stderr    = $process.StandardError.ReadToEndAsync()
+    }
+}
+
+# Waits for a started program and both its streams, for at most the timeout
+# counted from its start. Past the timeout the program's tree is stopped and the
+# result reads TimedOut, with no exit code, so a check that reads it fails.
+function Wait-Captured {
+    param($Run, [int]$TimeoutSeconds = 120)
+    $deadline = $Run.StartedAt.AddSeconds($TimeoutSeconds)
+    $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+    $finished = $Run.Process.WaitForExit($remaining)
+    if ($finished) {
+        $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+        $finished = [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($Run.Stdout, $Run.Stderr), $remaining)
+    }
+    if (-not $finished) {
+        Stop-StartedTree $Run.Process
+        return [pscustomobject]@{ ExitCode = $null; Stdout = ''; Stderr = ''; TimedOut = $true }
+    }
+    return [pscustomobject]@{ ExitCode = $Run.Process.ExitCode; Stdout = $Run.Stdout.Result; Stderr = $Run.Stderr.Result; TimedOut = $false }
+}
+
+# Runs a program and captures its exit code, stdout and stderr as text, for at
+# most the timeout.
+function Invoke-Captured {
+    param([string]$FilePath, [string[]]$Arguments, [int]$TimeoutSeconds = 120)
+    return Wait-Captured (Start-Captured $FilePath $Arguments) $TimeoutSeconds
 }
 
 # Runs git in the upstream repo with line-ending conversion off, so each blob is
@@ -96,7 +154,7 @@ function Invoke-Captured {
 function Invoke-Upstream {
     param([string[]]$Arguments)
     $result = Invoke-Captured 'git' (@('-C', $script:upstream, '-c', 'core.autocrlf=false', '-c', 'user.name=feed test', '-c', 'user.email=feed@test.invalid') + $Arguments)
-    if ($result.ExitCode -ne 0) { throw "upstream git $($Arguments -join ' ') failed: $($result.Stderr)" }
+    if ($result.TimedOut -or $result.ExitCode -ne 0) { throw "upstream git $($Arguments -join ' ') failed: $($result.Stderr)" }
     return $result.Stdout.Trim()
 }
 
@@ -125,7 +183,7 @@ function New-TestKb {
     New-Item -ItemType Directory -Path $Path | Out-Null
     Get-ChildItem -LiteralPath (Join-Path $script:engineRoot 'template') -Force | Copy-Item -Destination $Path -Recurse -Force
     $result = Invoke-Captured 'git' @('-C', $Path, 'init', '-q', '-b', 'main')
-    if ($result.ExitCode -ne 0) { throw "git init failed for $Path" }
+    if ($result.TimedOut -or $result.ExitCode -ne 0) { throw "git init failed for $Path" }
 }
 
 function Set-FeedConfig {
@@ -136,6 +194,54 @@ function Set-FeedConfig {
 function Invoke-Feeder {
     param([string]$Kb, [string[]]$Extra = @())
     return Invoke-Captured $script:psExe (@('-NoProfile', '-File', (Join-Path $Kb '.claude\feed-inbox.ps1')) + $Extra)
+}
+
+# The processes whose command line carries the marker.
+function Get-MarkedProcess {
+    param([string]$Marker)
+    return ,@(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($Marker) })
+}
+
+# Runs the feeder while polling the process list, and returns its exit code and
+# streams with the most marked processes one poll saw while it ran: the control
+# that an empty poll after the run can see such a process. A feeder still
+# running after 60 seconds is stopped and returned with TimedOut set, which
+# fails the check that reads it.
+function Invoke-FeederWatched {
+    param([string]$Kb, [string]$Marker)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $script:psExe
+    $psi.Arguments = (@(@('-NoProfile', '-File', (Join-Path $Kb '.claude\feed-inbox.ps1')) | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' ')
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    # An ssh command the account already set would run in place of the fake
+    # ssh on PATH, so the feeder starts without either variable.
+    $null = $psi.Environment.Remove('GIT_SSH')
+    $null = $psi.Environment.Remove('GIT_SSH_COMMAND')
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $seen = 0
+    $timedOut = $false
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $process.WaitForExit(100)) {
+        $seen = [Math]::Max($seen, (Get-MarkedProcess $Marker).Count)
+        if ($watch.Elapsed.TotalSeconds -ge 60) {
+            $timedOut = $true
+            Stop-StartedTree $process
+            break
+        }
+    }
+    # The streams close once their last holder exits; past the bound the tree
+    # is stopped and the result reads TimedOut with no exit code.
+    if (-not [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), 60000)) {
+        Stop-StartedTree $process
+        return [pscustomobject]@{ ExitCode = $null; Stdout = ''; Stderr = ''; SeenRunning = $seen; TimedOut = $true }
+    }
+    $exitCode = if ($process.HasExited) { $process.ExitCode } else { $null }
+    return [pscustomobject]@{ ExitCode = $exitCode; Stdout = $stdoutTask.Result; Stderr = $stderrTask.Result; SeenRunning = $seen; TimedOut = $timedOut }
 }
 
 # Splits stdout into its non-empty lines.
@@ -354,7 +460,7 @@ try {
     $badUrl = ConvertTo-Json (Join-Path $work 'no-such-repo')
     Set-FeedConfig $kb2 "{ `"sources`": [ $($goodSource.Replace('"up"', '"good"')), { `"name`": `"bad`", `"url`": $badUrl, `"branch`": `"main`", `"include`": [`"**/*.md`"] } ] }"
     $r = Invoke-Feeder $kb2
-    Test-Check 'a bad URL exits non-zero' ($r.ExitCode -ne 0)
+    Test-Check 'a bad URL exits non-zero' ((-not $r.TimedOut) -and ($r.ExitCode -ne 0))
     Test-Check 'a bad URL is refused by the fetch, in one stderr line naming the source' ((@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match "^feed-inbox: fetching branch 'main' of source 'bad' from .*no-such-repo failed: "))
     Test-Check 'a bad URL after a good source writes nothing to inbox/' (@(Get-Names $inbox2).Count -eq 0)
     Test-Check 'the good source was fetched before the failure (fetch-all-first)' (Test-Path -LiteralPath (Join-Path $cloneBase2 'good\refs\feed\head'))
@@ -382,7 +488,7 @@ try {
     foreach ($case in $configCases) {
         Set-FeedConfig $kb2 $case.Json
         $r = Invoke-Feeder $kb2
-        Test-Check "config with $($case.Label) is refused by validation, nothing written" (($r.ExitCode -ne 0) -and ($r.Stderr -match $case.Expect) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and (@(Get-Names $inbox2).Count -eq 0))
+        Test-Check "config with $($case.Label) is refused by validation, nothing written" ((-not $r.TimedOut) -and ($r.ExitCode -ne 0) -and ($r.Stderr -match $case.Expect) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and (@(Get-Names $inbox2).Count -eq 0))
         if ($case.Label -like '*with a password') {
             Test-Check 'the password refusal does not echo the password' (($r.Stderr + $r.Stdout) -notmatch 'hunter2')
         }
@@ -393,7 +499,7 @@ try {
     # name redacted.
     Set-FeedConfig $kb2 "{ `"sources`": [ { `"name`": `"sshsrc`", `"url`": `"ssh://feeduser@127.0.0.1:1/x.git`", `"branch`": `"main`", `"include`": [`"*`"] } ] }"
     $r = Invoke-Feeder $kb2
-    Test-Check 'an ssh:// URL is accepted and fails at the fetch, in one stderr line naming the source' (($r.ExitCode -ne 0) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match "^feed-inbox: fetching branch 'main' of source 'sshsrc' from ") -and (@(Get-Names $inbox2).Count -eq 0))
+    Test-Check 'an ssh:// URL is accepted and fails at the fetch, in one stderr line naming the source' ((-not $r.TimedOut) -and ($r.ExitCode -ne 0) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match "^feed-inbox: fetching branch 'main' of source 'sshsrc' from ") -and (@(Get-Names $inbox2).Count -eq 0))
     Test-Check 'the fetch-failure line redacts the URL userinfo' (($r.Stderr -notmatch 'feeduser') -and ($r.Stderr -match '127\.0\.0\.1'))
 
     # --- The template grants the feeder no allow rule, so the KB agent cannot run it.
@@ -544,7 +650,7 @@ try {
         Remove-Item -LiteralPath Env:GIT_CONFIG_GLOBAL -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath Env:FEED_INBOX_GIT_TIMEOUT_SECONDS -ErrorAction SilentlyContinue
     }
-    Test-Check 'a fetch that outlives the git timeout exits non-zero inside the bound, in one stderr line naming the source, nothing written' (($r.ExitCode -ne 0) -and ($elapsed -lt 30) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match "source 'slow'") -and (@(Get-Names $inbox5).Count -eq 0))
+    Test-Check 'a fetch that outlives the git timeout exits non-zero inside the bound, in one stderr line naming the source, nothing written' ((-not $r.TimedOut) -and ($r.ExitCode -ne 0) -and ($elapsed -lt 30) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match "source 'slow'") -and (@(Get-Names $inbox5).Count -eq 0))
     # The override replaces every bound alike, so only the bound's kind in the
     # line shows the feeder chose the first-fetch bound for a clone never fetched.
     Test-Check 'the timeout line names the first-fetch bound for a clone that has never completed a fetch' ($r.Stderr -match '\bfirst-fetch bound\b')
@@ -566,12 +672,13 @@ try {
     Test-Check 'a fetch that outlives the run budget exits non-zero in one stderr line naming the run budget, nothing written' (($r.ExitCode -eq 1) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match 'run budget') -and ($r.Stderr -match "source 'slow'") -and (@(Get-Names $inbox5).Count -eq 0))
     Test-Check 'a run stopped by its 5-second budget ends near the budget, well before the 30-second per-call bound' (($elapsed -ge 4) -and ($elapsed -lt 20))
 
-    # Waits for any process running the hang hook to end, and returns those that
-    # have not. A leftover is this test's own process tree.
+    # Waits up to five seconds for any process carrying the marker to end, and
+    # returns those that have not. A leftover is this test's own process tree.
     function Get-HangLeftover {
+        param([string]$Marker = $hangMarker)
         $found = @()
         for ($i = 0; $i -lt 10; $i++) {
-            $found = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($hangMarker) })
+            $found = Get-MarkedProcess $Marker
             if ($found.Count -eq 0) { break }
             Start-Sleep -Milliseconds 500
         }
@@ -602,7 +709,49 @@ try {
     $leftover = Get-HangLeftover
     Test-Check 'the timed-out later fetch was stopped, so no process runs the hang hook' ($leftover.Count -eq 0)
     foreach ($p in $leftover) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+
+    # A process git started that holds git's output after git exits. A fake
+    # ssh, first on the PATH the feeder and its git inherit, serves the source
+    # as an ssh-form URL: git runs the feeder's ssh command through sh, which
+    # finds this ssh by PATH. The fake ignores the host and options, backgrounds
+    # a sleeper with stdin and stdout on /dev/null and stderr inherited, which
+    # is the fetch's own stderr, and then runs upload-pack on the upstream. Git
+    # waits only on upload-pack, so the fetch finishes at once while the
+    # sleeper holds its stderr, and the feeder's wait runs out on the stream,
+    # not on git. The sleeper names the marker on its own command line, since
+    # a one-command subshell becomes a bare sleep. A new upstream commit gives
+    # the fetch something to transfer.
+    Write-UpstreamFile 'aa/a5.md' (Get-Utf8Bytes "a5`n")
+    $null = Invoke-Upstream @('add', '-A')
+    $null = Invoke-Upstream @('commit', '-q', '-m', 'add a5')
+    $upstreamHead = Invoke-Upstream @('rev-parse', 'HEAD')
+    $holdMarker = "hold-$runId"
+    $sshDir = Join-Path $work 'fake-ssh'
+    New-Item -ItemType Directory -Path $sshDir | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $sshDir 'ssh'), "#!/bin/sh`nsh -c 'sleep 40; :' '$holdMarker' </dev/null >/dev/null &`nexec git upload-pack '$($script:upstream -replace '\\', '/')'`n")
+    Set-FeedConfig $kb5 "{ `"sources`": [ { `"name`": `"slow`", `"url`": `"fakehost:upstream2`", `"branch`": `"main`", `"include`": [`"aa/*.md`"] } ] }"
+    $savedPath = $env:PATH
+    $env:PATH = "$sshDir;$savedPath"
+    $env:FEED_INBOX_GIT_TIMEOUT_SECONDS = '5'
+    try {
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        $r = Invoke-FeederWatched $kb5 $holdMarker
+        $elapsed = $watch.Elapsed.TotalSeconds
+    } finally {
+        $env:PATH = $savedPath
+        Remove-Item -LiteralPath Env:FEED_INBOX_GIT_TIMEOUT_SECONDS -ErrorAction SilentlyContinue
+    }
+    $fetched = (Invoke-Captured 'git' @("--git-dir=$(Join-Path $cloneBase5 'slow')", 'rev-parse', 'refs/feed/head')).Stdout.Trim()
+    $leftover = Get-HangLeftover $holdMarker
+    $heldLines = @(Get-Lines $r.Stderr | Where-Object { $_ -match '^feed-inbox: warning: .*held its output' })
+    $holdPassed = (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($elapsed -lt 30) -and ($fetched -ceq $upstreamHead) -and ($heldLines.Count -eq 1) -and ($leftover.Count -eq 0) -and ($r.SeenRunning -ge 1)
+    Test-Check 'a sleeper git''s ssh starts that holds the fetch''s stderr after git exits is stopped with the run''s job: the run exits 0 inside the sleeper''s 40 seconds with refs/feed/head at the upstream tip, one stderr warning says a process git started held its output, and no process carrying the sleeper''s marker runs within five seconds of the run''s end, where the same filter saw one while it ran' $holdPassed
+    if (-not $holdPassed) { Write-Host "  timed out $($r.TimedOut), elapsed $([math]::Round($elapsed, 1)) s, exit $($r.ExitCode), fetched $fetched, upstream $upstreamHead, held lines $($heldLines.Count), marked processes seen while running $($r.SeenRunning), leftover $($leftover.Count) ($(@($leftover | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.CommandLine)" }) -join '; ')), stderr: $($r.Stderr.Trim())" }
+    foreach ($p in $leftover) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
 } finally {
+    foreach ($process in $script:started) {
+        if (-not $process.HasExited) { Stop-StartedTree $process }
+    }
     foreach ($dir in @($work, $cloneBase, $cloneBase2, $cloneBase3, $cloneBase4, $cloneBase5)) {
         if ($dir -and (Test-Path -LiteralPath $dir)) {
             Remove-Item -LiteralPath $dir -Recurse -Force

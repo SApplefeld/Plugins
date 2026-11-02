@@ -61,7 +61,7 @@ pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Porcelain
 pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Unpushed
 
 .EXAMPLE
-pwsh -NoProfile -File ./.claude/kb-status.ps1 -What PageDate -Path "wiki/acme-corp.md"
+pwsh -NoProfile -File ./.claude/kb-status.ps1 -What PageDate -Path 'wiki/acme-corp.md'
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox

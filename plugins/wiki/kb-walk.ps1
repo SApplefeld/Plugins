@@ -129,10 +129,13 @@ A captured child's streams are drained for 5 seconds after it ends; a process
 it left that still holds them then is ended with the job's processes, the log
 says so, and the child's own exit code stands.
 Every git call the walker makes runs with GIT_TERMINAL_PROMPT=0,
-GCM_INTERACTIVE=never, ssh in batch mode, an http stall bound of 1000 bytes a
+GCM_INTERACTIVE=never, an http stall bound of 1000 bytes a
 second over 60 seconds, and core.hooksPath set to a fresh
 empty folder, no-hooks beside the pass files, so no git call waits on a person
-and no hook a wiki holds can run.
+and no hook a wiki holds can run. A fetch or push also runs ssh in batch mode,
+only where the account or the wiki configures no ssh command of its own
+(GIT_SSH_COMMAND, GIT_SSH or core.sshCommand); where one is configured it is
+used as configured, and the pass budget ends any prompt it makes.
 
 Each pass writes %LOCALAPPDATA%\llm-wiki\walk-status.json whole through a
 temporary file: startedAt, finishedAt, engineHash, wikis as one object per
@@ -712,19 +715,44 @@ function Invoke-Child {
 
 # Runs git in a wiki with no prompt possible and no hook runnable, and its
 # output captured. The guards are the feeder's: GIT_TERMINAL_PROMPT and
-# GCM_INTERACTIVE stop git and the credential manager asking, ssh runs in batch
-# mode with a connect timeout, and core.hooksPath names an empty directory.
+# GCM_INTERACTIVE stop git and the credential manager asking, with -BatchSsh
+# ssh runs in batch mode with a connect timeout, and core.hooksPath names an
+# empty directory. A fetch or push passes -BatchSsh only where the account or
+# the wiki configures no ssh command of its own, so a configured one stands.
 # The http stall bound ends a fetch or push over HTTPS that moves under 1000
 # bytes a second for 60 seconds, as the ssh keepalive does over ssh.
 function Invoke-Git {
-    param([string]$WikiPath, [string[]]$Arguments, [switch]$Required)
+    param([string]$WikiPath, [string[]]$Arguments, [switch]$Required, [switch]$BatchSsh)
     $environment = @{
         'GIT_TERMINAL_PROMPT' = '0'
         'GCM_INTERACTIVE'     = 'never'
-        'GIT_SSH_COMMAND'     = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+    }
+    if ($BatchSsh) {
+        $environment['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
     }
     $guards = @('-C', $WikiPath, '-c', "core.hooksPath=$script:hooksDir") + $script:gitStallBound
     return Invoke-Child 'git' ($guards + $Arguments) $WikiPath $environment -Capture -Required:$Required -Utf8
+}
+
+# Whether a fetch or push in the wiki may take the batch-mode ssh command: only
+# where the walker's environment holds neither GIT_SSH_COMMAND nor GIT_SSH,
+# which git inherits, and git reads no core.sshCommand for the wiki from any
+# config scope. git takes GIT_SSH_COMMAND over core.sshCommand over GIT_SSH, so
+# setting the first would silence an ssh command the account or the wiki
+# configured, a deploy key's among them. The config is read under the pass
+# budget, as the call it guards is. Returns Allowed, or Failed holding the read's
+# result where it timed out or ended in an exit other than 0 or 1, exit 1 being
+# git's answer for an unset key, for the caller to record as its step's failure.
+function Get-SshBatchDecision {
+    param([string]$WikiPath)
+    if (-not [string]::IsNullOrEmpty($env:GIT_SSH_COMMAND) -or -not [string]::IsNullOrEmpty($env:GIT_SSH)) {
+        return [pscustomobject]@{ Allowed = $false; Failed = $null }
+    }
+    $read = Invoke-Git $WikiPath @('config', '--get', 'core.sshCommand')
+    if ($read.TimedOut -or ($read.ExitCode -ne 0 -and $read.ExitCode -ne 1)) {
+        return [pscustomobject]@{ Allowed = $false; Failed = $read }
+    }
+    return [pscustomobject]@{ Allowed = ($read.ExitCode -eq 1); Failed = $null }
 }
 
 # True where a captured stdout's first non-empty line starts with the child's
@@ -1047,7 +1075,12 @@ function Invoke-PullStep {
         Add-Step $Wiki 'pull' 'skipped' 'no origin' $startedAt
         return $true
     }
-    $fetched = Invoke-Git $WikiPath @('fetch', 'origin')
+    $ssh = Get-SshBatchDecision $WikiPath
+    if ($null -ne $ssh.Failed) {
+        Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $ssh.Failed 'git config --get core.sshCommand') $startedAt
+        return $true
+    }
+    $fetched = Invoke-Git $WikiPath @('fetch', 'origin') -BatchSsh:($ssh.Allowed)
     if ($fetched.TimedOut -or $fetched.ExitCode -ne 0) {
         Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $fetched 'git fetch origin') $startedAt
         return $true
@@ -1270,7 +1303,12 @@ function Invoke-PushStep {
         }
         $pushArguments = @('push', 'origin', 'HEAD')
     }
-    $pushed = Invoke-Git $WikiPath $pushArguments
+    $ssh = Get-SshBatchDecision $WikiPath
+    if ($null -ne $ssh.Failed) {
+        Add-Step $Wiki 'push' 'failed' (Get-ChildNote $ssh.Failed 'git config --get core.sshCommand') $startedAt
+        return
+    }
+    $pushed = Invoke-Git $WikiPath $pushArguments -BatchSsh:($ssh.Allowed)
     if ($pushed.TimedOut -or $pushed.ExitCode -ne 0) {
         Add-Step $Wiki 'push' 'failed' (Get-ChildNote $pushed 'git push') $startedAt
         return

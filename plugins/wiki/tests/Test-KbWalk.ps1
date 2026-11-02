@@ -57,8 +57,9 @@ origin whose own origin/main then conflicts and runs the stub, and in one
 with no origin whose ingest and lint then run and whose update's deferral
 on that merge is cleared in the same pass; a merge left in progress whose
 abort git refuses for a stale index.lock, recorded pull failed with no later
-step run; a URL's user name and password in a child's error text replaced by
-*** in the status, the log and stdout, a password holding an escape
+step run; a fetch through the ssh command GIT_SSH names, with the walker's
+batch-mode GIT_SSH_COMMAND left off; a URL's user name and password in a
+child's error text replaced by *** in the status, the log and stdout, a password holding an escape
 character included; a standing
 conflict kept listed when the next pass's pull is refused for budget, in a
 pass whose wiki-owned status script leaves a process holding its stdout,
@@ -1551,6 +1552,35 @@ try {
     $r = Invoke-Walker @{ 'KB_WALK_SECONDS' = '130' } -TimeoutSeconds 240
     $status = Read-Status
     Test-Check 'an ingest child stopped at the pass budget reads failed for the stop, and the line it printed before the stop reached the walker''s stdout' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Get-Step $status 'pi' 'ingest').StartsWith('failed: kb-run.ps1 -Operation Ingest did not finish within the remaining budget', [StringComparison]::Ordinal)) -and (@(Get-Lines $r.Stdout) -ccontains $stoppedLine))
+
+    # --- An ssh command the account configured stands for the pull's fetch.
+    # yod's origin is an ssh-form address and GIT_SSH in the walker's
+    # environment names a fake ssh, so git reaches origin through the fake only
+    # where the walker leaves its batch-mode GIT_SSH_COMMAND off, since git
+    # takes that over GIT_SSH. The fake writes its environment to a file and
+    # serves the bare remote with git upload-pack. Named ssh, it is read by git
+    # as OpenSSH, so git starts no probe of it first. The file's other lines
+    # are the control that the absent GIT_SSH_COMMAND line is not an empty read.
+    $yodBare = Join-Path $remotesDir 'yod.git'
+    $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $yodBare)
+    $yod = New-Wiki 'yod'
+    $null = Invoke-Git $yod @('remote', 'add', 'origin', $yodBare)
+    $null = Invoke-Git $yod @('push', '-q', '-u', 'origin', 'main')
+    $null = Invoke-Git $yod @('remote', 'set-url', 'origin', 'fakehost:yod.git')
+    $yodSshDir = Join-Path $work 'fake-ssh'
+    New-Item -ItemType Directory -Path $yodSshDir -Force | Out-Null
+    $yodSsh = Join-Path $yodSshDir 'ssh'
+    $yodEnvFile = Join-Path $work 'yod-fetch-env.txt'
+    [System.IO.File]::WriteAllText($yodSsh, "#!/bin/sh`nenv > '$($yodEnvFile -replace '\\', '/')'`nexec git upload-pack '$($yodBare -replace '\\', '/')'`n", (New-Object System.Text.UTF8Encoding($false)))
+    Set-List @('yod')
+    Set-State -LastLintAt @{ yod = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker @{ 'GIT_SSH' = $yodSsh; 'GIT_SSH_COMMAND' = $null }
+    $status = Read-Status
+    $yodEnv = @(if (Test-Path -LiteralPath $yodEnvFile) { [System.IO.File]::ReadAllLines($yodEnvFile) })
+    $yodSshCommand = @($yodEnv | Where-Object { $_.StartsWith('GIT_SSH_COMMAND=', [StringComparison]::Ordinal) })
+    Test-Check 'with GIT_SSH set in the walker''s environment, the pull''s fetch runs with no GIT_SSH_COMMAND: git reaches origin through the GIT_SSH fake, whose environment holds no GIT_SSH_COMMAND line, and the pull reads ran: up to date' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($yodEnv.Count -gt 0) -and ($yodSshCommand.Count -eq 0) -and ((Get-Step $status 'yod' 'pull') -ceq 'ran: up to date'))
+    if ($yodEnv.Count -eq 0 -or $yodSshCommand.Count -ne 0) { Write-Host "  pull: $(Get-Step $status 'yod' 'pull'), environment lines $($yodEnv.Count), GIT_SSH_COMMAND lines $($yodSshCommand.Count)" }
 
     # --- Bullet 5: the budget cursor. The budget sits just above the walker's
     # 120-second floor for starting a wiki, so the first wiki starts and its
