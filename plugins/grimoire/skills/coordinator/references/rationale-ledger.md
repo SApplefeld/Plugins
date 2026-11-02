@@ -4297,7 +4297,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O014
 - key: On a fleet that names an architect, send a record turning on a design decision to the architect's name from the seat's priming with its repository, tell the operator it was routed, and read `fleet_status` before calling it routed, reporting an architect row with no live claim as undelivered and a reply with no such row as unconfirmed.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:99
+- source: plugins/grimoire/skills/coordinator/SKILL.md:101
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the plugin README's inbox gates, under which `agentic_say` accepts a record to a persona no session holds.
 - verdict: keep
 - landed: f6a78f91 section 2
@@ -4317,7 +4317,7 @@ Extracted at `6bc07fb`: lines 1-38 (`skills.coordinator.c1.md`); lines 39-66 (`s
 ### O016
 - key: Answer the liaison seat's status ask with the fleet's state in plain words sent to the liaison's name from the seat's priming, reading `fleet_status` for it, and close the record.
 - class: rule
-- source: plugins/grimoire/skills/coordinator/SKILL.md:103
+- source: plugins/grimoire/skills/coordinator/SKILL.md:105
 - provenance: docs/plans/claude-kit_persona-priming-takes-the-role_spec_v1.md section 2 2026-10-13, under the ruling that moved the coordinator persona's remaining seat conduct out of its launch literal in `plugins/personas/bin/supervise-holder.sh` and into this skill; the liaison skill, under which the liaison asks this seat for the fleet's state on behalf of the people in its thread.
 - verdict: keep
 - landed: f6a78f91 section 2
