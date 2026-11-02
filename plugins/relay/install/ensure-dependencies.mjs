@@ -752,11 +752,12 @@ function removeFromRoot(root, folder, notify) {
 function appendLog(file, level, message) {
   if (!file) return;
   try {
-    // The class broker/sanitize.ts's isInvisible strips, plus U+0085, U+2028 and U+2029, which a
-    // log reader may take as line breaks. Inlined because this file cannot import TypeScript;
-    // broker/startup-crash.mjs carries the same class.
+    // The class broker/sanitize.ts's isInvisible strips, the Arabic letter mark U+061C among its
+    // bidirectional controls, plus U+0085, U+2028 and U+2029, which a log reader may take as line
+    // breaks. Inlined because this file cannot import TypeScript; broker/startup-crash.mjs carries
+    // the same class.
     const clean = message.replace(
-      /[\u0000-\u001f\u007f\u0085\u00ad\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}]/gu,
+      /[\u0000-\u001f\u007f\u0085\u00ad\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufe00-\ufe0f\ufeff\u{e0000}-\u{e007f}]/gu,
       " ",
     );
     appendFileSync(file, `${new Date().toISOString()} [${level}] ${TOOL}: ${clean}\n`, "utf8");

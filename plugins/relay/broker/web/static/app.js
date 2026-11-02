@@ -1803,21 +1803,29 @@
 
   /**
    * The code points the broker strips from a line before its ring copy, `isInvisible` in
-   * `broker/sanitize.ts`: C0 but the tab, DEL, the soft hyphen, the zero-width family and the bidi
-   * marks, the bidi embeddings and isolates, the word joiner family, the variation selectors, the
+   * `broker/sanitize.ts`: C0 but the tab, DEL, the soft hyphen, the Arabic letter mark, the
+   * zero-width family and the bidi marks, the bidi embeddings and isolates, the word joiner family, the variation selectors, the
    * byte order mark and the tag block. A phone's emoji keyboard adds a variation selector to many
    * emoji, so the typed words and the ring's copy differ until both pass through this.
    */
   function invisibleCode(code) {
-    return (code <= 0x1f && code !== 0x09) || code === 0x7f || code === 0x00ad ||
+    return (code <= 0x1f && code !== 0x09) || code === 0x7f || code === 0x00ad || code === 0x061c ||
       (code >= 0x200b && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) ||
       (code >= 0x2060 && code <= 0x2064) || (code >= 0x2066 && code <= 0x2069) ||
       (code >= 0xfe00 && code <= 0xfe0f) || code === 0xfeff || (code >= 0xe0000 && code <= 0xe007f);
   }
 
-  /** A line's words as the match compares them: the invisible class gone and the ends trimmed. */
+  /**
+   * A line's words as the match compares them: the invisible class gone and the ends trimmed. The
+   * three odd line breaks U+0085, U+2028 and U+2029 go too, because the broker turns each into a
+   * newline before the ring copy and the newline goes here as a control, so the typed line must lose
+   * them as well or it never pairs with its copy.
+   */
   function matchWords(text) {
-    return Array.from(text).filter((character) => !invisibleCode(character.codePointAt(0))).join("").trim();
+    return Array.from(text).filter((character) => {
+      const code = character.codePointAt(0);
+      return !invisibleCode(code) && code !== 0x85 && code !== 0x2028 && code !== 0x2029;
+    }).join("").trim();
   }
 
   /**

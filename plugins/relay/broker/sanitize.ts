@@ -46,6 +46,32 @@ export const MAX_PEER_NAME_LENGTH = 120;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
 
 /**
+ * The three line breaks Discord draws as a line that the newline model does not name: the next-line
+ * character U+0085, the line separator U+2028 and the paragraph separator U+2029.
+ *
+ * The two strips read them here, so the lines a pass counts are the lines Discord draws:
+ * `withoutInvisible` makes each a newline and `visible` makes each a space, and the renderer's
+ * `newlinesOnly` reads the same class for the text it normalizes itself. `oneLine` and
+ * `UNSAFE_IN_AUTHOR` below, the talk page's `matchWords` and the three log-line classes name the
+ * same three by hand, so a change here reaches them too. Two of the three
+ * are line terminators to JavaScript's own multiline `^`, and the third is not, so a reader left to
+ * meet them raw would hold two disagreeing readings of where a line ends before Discord is consulted.
+ *
+ * Substitution rather than stripping, because these characters carry the author's paragraphing:
+ * dropped, two sentences meet mid-line, which changes what the message says.
+ *
+ * Written as an escape and two Unicode categories rather than as the characters, which is
+ * `isInvisible`'s own rule and holds here for a sharper reason: a literal break character in source is
+ * invisible to review, and two of these three would end the source line they were written on. The two
+ * categories have one member each, the separators named above, so the class is exact rather than
+ * broad.
+ *
+ * The pattern carries the global flag for `replace`, so a caller using `test` or `exec` must reset
+ * `lastIndex` or build its own non-global copy.
+ */
+export const ODD_BREAKS = /[\x85\p{Zl}\p{Zp}]/gu;
+
+/**
  * Strips control characters, trims, and caps length.
  *
  * This is the storage guarantee and nothing more: the result is bounded and free of escape
@@ -60,12 +86,12 @@ export function clean(value: string): string {
 /**
  * Code points that can reorder or hide text with no visual trace.
  *
- * The class covers C0 but the tab, DEL, the soft hyphen, the bidirectional overrides and isolates,
- * the zero-width family, the word joiner, the variation selectors, the byte order mark, and the
- * Unicode tag block, which encodes a full hidden copy of ASCII that renders as nothing at all and is
- * the standard way text is smuggled past a reader. It is a class of what renders as nothing on every
- * surface, the rule `docs/security-model.md` states for it, not of what is merely unusual: a
- * homoglyph, a right-to-left script, and an emoji are all legible and all stay.
+ * The class covers C0 but the tab, DEL, the soft hyphen, the Arabic letter mark, the bidirectional
+ * overrides and isolates, the zero-width family, the word joiner, the variation selectors, the byte
+ * order mark, and the Unicode tag block, which encodes a full hidden copy of ASCII that renders as
+ * nothing at all and is the standard way text is smuggled past a reader. It is a class of what
+ * renders as nothing on every surface, the rule `docs/security-model.md` states for it, not of what
+ * is merely unusual: a homoglyph, a right-to-left script, and an emoji are all legible and all stay.
  *
  * The tab is outside it because it has a width on every surface: a Discord message inside a fence
  * and outside one, a terminal, and the text the model reads. It moves the next character along the
@@ -88,6 +114,9 @@ export function isInvisible(code: number): boolean {
     code === 0x7f ||
     // Soft hyphen: renders as nothing until a line break falls on it.
     code === 0x00ad ||
+    // Arabic letter mark: a bidirectional control outside the two ranges below, which steers the
+    // order of the right-to-left text around it and draws as nothing.
+    code === 0x061c ||
     (code >= 0x200b && code <= 0x200f) ||
     (code >= 0x202a && code <= 0x202e) ||
     (code >= 0x2060 && code <= 0x2064) ||
@@ -104,10 +133,15 @@ export function isInvisible(code: number): boolean {
  *
  * Line by line, because the newline is itself in the C0 range: one pass over the whole string would
  * silently join a multi-line message into a single line, which changes what the text says.
+ *
+ * Every break is a newline before the lines are read: a carriage return, with or without the line
+ * feed behind it, and each of the three `ODD_BREAKS`, so a line here is a line Discord draws and a
+ * pass that reads line starts downstream sees every one of them.
  */
 export function withoutInvisible(value: string): string {
   return value
     .replace(/\r\n?/g, "\n")
+    .replace(ODD_BREAKS, "\n")
     .split("\n")
     .map((line) => [...line].filter((character) => !isInvisible(character.codePointAt(0) ?? 0)).join(""))
     .join("\n");
@@ -121,10 +155,21 @@ export function withoutInvisible(value: string): string {
  * in-line cuts are among them: the splitter's hard cut, and the chatter wrap that keeps that cut out
  * of reach. Both budget in UTF-16 units and both land the cut here, on a code point, which is the
  * only pairing that both fits a bound and encodes.
+ *
+ * Walks the string one code point at a time and stops at the limit, rather than spreading the whole
+ * of it: a paste the size of the paste cap is cut to a few hundred code points here, and spreading
+ * it would build an array the length of the paste to read the first few entries. A string that fits
+ * is returned as the same instance.
  */
 export function sliceCodePoints(value: string, limit: number): string {
-  const characters = [...value];
-  return characters.length <= limit ? value : characters.slice(0, limit).join("");
+  let end = 0;
+  let kept = 0;
+  for (const character of value) {
+    if (kept >= limit) return value.slice(0, end);
+    end += character.length;
+    kept += 1;
+  }
+  return value;
 }
 
 /**
@@ -187,13 +232,16 @@ export function cleanWellFormed(value: string): string | null {
  * Strips the invisible reordering characters and collapses runs of whitespace to one space.
  *
  * For a title or a card field, which are single-line by construction, so a tab there draws as the
- * one space a run of spaces does. The class itself is shared with the path that carries text to the
- * model, so the two cannot come to disagree about which characters are allowed to be invisible.
+ * one space a run of spaces does, and so does each of the three `ODD_BREAKS`: Discord would draw a
+ * line at one, and a field that is one line by construction carries no line. The class itself is
+ * shared with the path that carries text to the model, so the two cannot come to disagree about
+ * which characters are allowed to be invisible.
  */
 export function visible(value: string): string {
   return [...value]
     .filter((character) => !isInvisible(character.codePointAt(0) ?? 0))
     .join("")
+    .replace(ODD_BREAKS, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

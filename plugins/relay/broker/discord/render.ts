@@ -5,7 +5,7 @@
 // at the render site, rather than at intake: intake owns storage safety (bounded, no control
 // characters) and the renderer owns display safety. Suppressing pings is the transport's half of
 // the same job, via `allowed_mentions`.
-import { fit, sliceCodePoints, visible, withoutInvisible } from "../sanitize.ts";
+import { ODD_BREAKS, fit, sliceCodePoints, visible, withoutInvisible } from "../sanitize.ts";
 // Re-exported for the callers that already read `fit` from the render site. The implementation
 // lives in `../sanitize.ts` so the storage layer can reach it without importing this module.
 export { fit } from "../sanitize.ts";
@@ -672,7 +672,16 @@ const ATTRIBUTION_OPENERS = new RegExp(
 // Where the fence is, is `scanFences` below, and it is the same reading the splitter uses to
 // re-open an interrupted block. One model, deliberately: a second one beside it could disagree with
 // it, and the disagreement would be an unescaped chip in a region one of them thought was code.
-const CHIPS = /[<>]/g;
+//
+// One escape pair, or one bare bracket, the token shape `PIPE` reads with, because whether a bracket
+// is already escaped is decided by how many backslashes stand in front of it. Read left to right in
+// pairs, an odd run hands its last backslash to the bracket, which arrives as the escape the author
+// wrote, and an even run leaves the bracket bare, which takes one backslash of its own. So an
+// author's `\<` is not turned into a literal backslash beside a live bracket, and running the escape
+// over its own output changes nothing. Written as this alternation rather than as a run of
+// backslashes followed by a bracket for the reason `PIPE` gives: the alternation reads a long run of
+// backslashes once, where the run form backtracks over it from every backslash.
+const CHIPS = /\\[\s\S]|[<>]/g;
 
 /**
  * The cap on a mirrored prompt, in code points. Beyond it the prompt is shortened and says so.
@@ -1875,11 +1884,10 @@ function peerCapped(text: string): string {
  * The opening line of a body, which is what a one-line rendering of it carries.
  *
  * The line breaks are normalized before the split, so this reads a line the way the client that will
- * draw it reads one. Three break characters end a line for Discord without ending one for this file:
- * none is in the invisible class, so the strip above passes them through, and none is whitespace to
- * the escape's own collapse, so nothing downstream folds them away either. Read without the
- * normalization, "the opening line" is the opening several lines, and every one of them past the
- * first is drawn with no marker in front of it.
+ * draw it reads one. Three break characters end a line for Discord, and the strip above already
+ * makes each a newline; `newlinesOnly` here is this file's own line model rather than a fact held
+ * about the sanitizer's order of steps. Read without the normalization, "the opening line" is the
+ * opening several lines, and every one of them past the first is drawn with no marker in front of it.
  *
  * That matters wherever a one-line rendering is drawn outside the register's other covers: the brief
  * forms, which draw this line and nothing else, and the oversized form's teaser, which is the one
@@ -2153,27 +2161,6 @@ function fenceAfter(state: string | null, chunk: string): string | null {
 }
 
 /**
- * The break characters that end a line for a client without ending one for this file.
- *
- * The next line, the line separator, and the paragraph separator. All three are legible break
- * characters rather than invisible ones, so `withoutInvisible` passes them through, and all three
- * reach Discord as themselves. What that costs the chatter register is exact: one line as this file
- * counts lines can be several lines as the client draws them, and every drawn line past the first
- * carries no subtext marker, which is peer text at reading size under a chatter header.
- *
- * Two of the three are line terminators to JavaScript's own multiline `^`, and the third is not, so
- * leaving them alone would give this file two disagreeing readings of where a line ends before
- * Discord is even consulted.
- *
- * Written as an escape and two Unicode categories rather than as the characters, which is
- * `isInvisible`'s own rule and holds here for a sharper reason: a literal break character in source is
- * invisible to review, and two of these three would end the source line they were written on. The two
- * categories have one member each, the separators named above, so the class is exact rather than
- * broad.
- */
-const ODD_BREAKS = /[\x85\p{Zl}\p{Zp}]/gu;
-
-/**
  * A body whose every line break is a newline.
  *
  * The one line model for chatter, established before anything reads a line rather than taught to
@@ -2181,6 +2168,11 @@ const ODD_BREAKS = /[\x85\p{Zl}\p{Zp}]/gu;
  * attribution escape, the marking, and the splitter. Widening each of their readings would be four
  * chances to widen three of them, and a break one pass sees and another does not is a drawn line with
  * no marker on it. Normalizing once leaves each of them reading `\n` and reading it correctly.
+ *
+ * The break class is the sanitizer's `ODD_BREAKS`, the next line, the line separator and the
+ * paragraph separator, which `withoutInvisible` already reads as newlines: every chatter body reaches
+ * here through that strip, so this pass finds nothing left to replace, and it stays as the one line
+ * model this file states for itself rather than a fact held about the sanitizer's order of steps.
  *
  * Substitution rather than stripping, because these characters carry the peer's paragraphing: dropped,
  * two sentences meet mid-line, which changes what the message says.
@@ -2284,21 +2276,20 @@ function withoutPipes(value: string): string {
  *
  * Reads every whitespace character but the line break behind the marker, as `ATTRIBUTION_OPENERS`,
  * `SUBTEXT_OPENER` and `HEADING_OPENER` do, so the four line-leading guards agree on what may sit
- * between the start of a line and its marker. Those three read only text that has passed through
- * `newlinesOnly`, which makes every break a newline, so the next-line reading below is this
- * guard's alone.
+ * between the start of a line and its marker.
  *
- * Also opens a line after the next-line character, written \x85. Discord ends a line there, and
- * it is the one break the `ODD_BREAKS` rule names that JavaScript's multiline `^` does not start
- * a line after; the line and paragraph separators already end a line for `^`. The alternation
- * captures the character so the escape keeps it.
+ * A line starts where the multiline `^` starts one. Every path into `withoutChips` has passed the
+ * text through `withoutInvisible` or `newlinesOnly`, each of which makes every one of the sanitizer's
+ * `ODD_BREAKS` a newline, so the next-line character, the one break `^` does not start a line after,
+ * never reaches this pattern as itself. The empty first group keeps the replacement's shape, which
+ * writes the line start back in front of the captured space.
  *
  * The space run stops at \r, \u2028 and \u2029, the break characters `^` already starts a line at
  * and `LINE_SPACE` also admits. A break inside the run is itself a line start, which the next match
  * position reads, so stopping there changes no output and keeps the scan linear. A run that read
  * through them would rescan the rest of a long run of separators from every one of them.
  */
-const QUOTE_OPENER = new RegExp(`(^|\\x85)((?:(?![\\r\\u2028\\u2029])${LINE_SPACE})*)>`, "gm");
+const QUOTE_OPENER = new RegExp(`(^)((?:(?![\\r\\u2028\\u2029])${LINE_SPACE})*)>`, "gm");
 
 /**
  * Neutralizes the chip and quote syntax outside fenced code blocks, leaves the inside of one as it
@@ -2320,8 +2311,10 @@ const QUOTE_OPENER = new RegExp(`(^|\\x85)((?:(?![\\r\\u2028\\u2029])${LINE_SPAC
  * that was about to stop being one.
  */
 function withoutChips(value: string): string {
+  // A one-character token is a bare bracket and takes a backslash; an escape pair passes through.
+  const escapeChip = (token: string): string => (token.length === 1 ? `\\${token}` : token);
   const escaped = scanFences(null, value)
-    .runs.map((run) => (run.fenced ? run.text : run.text.replace(CHIPS, (character) => `\\${character}`)))
+    .runs.map((run) => (run.fenced ? run.text : run.text.replace(CHIPS, escapeChip)))
     .join("");
   // The line-leading pass runs second and over everything, where it finds only the markers the
   // first pass left inside fences: one already escaped is preceded by its backslash rather than by
