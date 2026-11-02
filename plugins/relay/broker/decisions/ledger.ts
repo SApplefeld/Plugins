@@ -106,8 +106,36 @@ export function cut(text: string, limit: number): string {
   return [...text.slice(0, limit * 2)].slice(0, limit).join("");
 }
 
+/**
+ * The `? Recommend:` segment of a worker's ask line, read the way the plugin's own matcher reads it
+ * (`ASK_MARKER_LINE` in `./ask.ts`): in any case, with any whitespace between the question mark and
+ * the word. The ledger's `question` holds the worker's line whole, mark aside, and `recommend` the
+ * segment after it, so every reader that draws the two apart cuts here.
+ */
+export const RECOMMEND_SEGMENT = /\?\s*Recommend:/i;
+
+/** The question alone: the worker's line cut at its recommendation segment with the question mark
+ * kept, or whole where it carries none. The one cut the decisions card and the web views share. */
+export function questionOf(question: string): string {
+  const match = RECOMMEND_SEGMENT.exec(question);
+  return match === null ? question : question.slice(0, match.index + 1);
+}
+
+/** A cut that shows itself: the text whole where it fits in `limit` code points, else its first
+ * `limit - 1` and the ellipsis `fit` in `../sanitize.ts` writes, so a reader sees the line goes on. */
+export function markedCut(text: string, limit: number): string {
+  const kept = cut(text, limit + 1);
+  return [...kept].length <= limit ? kept : `${cut(text, limit - 1)}…`;
+}
+
 function textField(value: unknown): string | null {
   return typeof value === "string" ? cut(value, MAX_ASK_FIELD_LENGTH) : null;
+}
+
+/** A field the operator reads as prose. Ids, paths and states keep the plain prefix, since a mark
+ * added to one would change what it matches. */
+function proseField(value: unknown): string | null {
+  return typeof value === "string" ? markedCut(value, MAX_ASK_FIELD_LENGTH) : null;
 }
 
 function numberField(value: unknown): number | null {
@@ -117,7 +145,7 @@ function numberField(value: unknown): number | null {
 function entryOf(value: unknown): Readonly<AskEntry> | null {
   if (!isRecord(value)) return null;
   const id = textField(value.id);
-  const question = textField(value.question);
+  const question = proseField(value.question);
   if (id === null || question === null) return null;
   return Object.freeze({
     id,
@@ -125,7 +153,7 @@ function entryOf(value: unknown): Readonly<AskEntry> | null {
     planPath: textField(value.planPath),
     entryTitle: textField(value.entryTitle),
     question,
-    recommend: textField(value.recommend),
+    recommend: proseField(value.recommend),
     opener: textField(value.opener),
     blocking: typeof value.blocking === "boolean" ? value.blocking : null,
     openedAt: numberField(value.openedAt),

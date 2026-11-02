@@ -106,7 +106,7 @@ import { createSiblingPoller } from "./web/siblings.ts";
 import type { SiblingPoller } from "./web/siblings.ts";
 import { createTalkRing } from "./web/talk.ts";
 import type { TalkTap } from "./web/talk.ts";
-import { DEFAULT_THRESHOLDS } from "./web/views.ts";
+import { DEFAULT_THRESHOLDS, blockedReasons } from "./web/views.ts";
 import { openWatermarks, watermarksFileFor, withMarks } from "./web/watermarks.ts";
 import type {
   QuestionAlert,
@@ -2661,8 +2661,9 @@ export async function startBroker(
     webPass = pass;
     // The operator's marks sit beside the registry snapshot, and the views take them with each reading.
     const marks = openWatermarks(watermarksFileFor(config.stateFile), note);
-    // The merge drops a done mark whose ask the ledger reading shows closed before it hands the marks on.
-    const readings = () => withMarks(pass.readings(), marks);
+    // The merge drops a handled mark whose ask the ledger reading shows closed, or whose blocked entry
+    // the queues reading no longer shows blocked for the same reason, before it hands the marks on.
+    const readings = () => withMarks(pass.readings(), marks, blockedReasons);
     // The ask page's thread link takes the two lookups the talk view takes, through the same closures.
     registerViewHandlers(webServer.register, readings, {
       threadFor: (sessionId) => threadFor(sessionId),
@@ -2711,12 +2712,14 @@ export async function startBroker(
           inbound === null ? Promise.resolve("no-session") : inbound.answerWeb(lineage, login, text),
         log: logger,
       });
-      // The Needs-me page's Agree and batch Agree. An Agree is a line to the asking persona's session
-      // through the same seam the composer's line takes, so it reaches a session as the operator's word.
+      // The pages' Agree, batch Agree, Correct and Dismiss. Each is a line to the item's session through
+      // the same seam the composer's line takes, so it reaches a session as the operator's word, and a
+      // delivered one writes its handled mark to the store the views read.
       registerAgreeHandlers(webServer.register, {
         source: readings,
         deliverWeb: (lineage, login, text, files) =>
           inbound === null ? Promise.resolve("no-session") : inbound.deliverWeb(lineage, login, text, files),
+        marks,
         log: logger,
       });
       // A held question and an open permission, answered from the page through the desks' own

@@ -27,7 +27,7 @@ import {
 } from "../discord/render.ts";
 import { MAX_ROSTER_PERSONA_NAME_LENGTH } from "../board/roster.ts";
 import { visible } from "../sanitize.ts";
-import { ASK_COUNT_WINDOW_MS } from "./ledger.ts";
+import { ASK_COUNT_WINDOW_MS, questionOf } from "./ledger.ts";
 import type { AskEntry, LedgerReading } from "./ledger.ts";
 
 /**
@@ -154,21 +154,6 @@ export const STALE_LEDGER_MS = 10 * 60 * 1000;
  * points renders whole under N times this.
  */
 const MAX_ESCAPE_EXPANSION = 2;
-
-/**
- * The `? Recommend:` segment of a worker's ask line, read the way the plugin's own matcher reads it
- * (`ASK_MARKER_LINE` in `./ask.ts`): in any case, with any whitespace between the question mark and
- * the word. The ledger's `question` holds the worker's line whole, mark aside, and `recommend` the
- * segment after it, so the card cuts here to draw the two apart.
- */
-const RECOMMEND_SEGMENT = /\?\s*Recommend:/i;
-
-/** The question alone: the worker's line cut at its recommendation segment with the question mark
- * kept, or whole where it carries none. */
-export function questionOf(question: string): string {
-  const match = RECOMMEND_SEGMENT.exec(question);
-  return match === null ? question : question.slice(0, match.index + 1);
-}
 
 /** Whether an entry carries a decision brief that draws any message: a string with at least one
  * line left once escaped, so a brief the escape strips to nothing draws none. The one test of it,

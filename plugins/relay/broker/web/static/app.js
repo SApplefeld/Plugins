@@ -1952,43 +1952,8 @@
     }
   }
 
-  /** The key the Needs-me page leaves a Correct draft under, for the talk page to take. */
-  const DRAFT_KEY = "channels.talk-draft";
-  /** How long a Correct draft waits for the talk page: an older one is dropped unread. */
-  const DRAFT_MAX_AGE_MS = 60 * 1000;
   /** The key the Needs-me page keeps the touched asks under. */
   const TOUCHED_KEY = "channels.needs-me.touched";
-
-  /**
-   * Takes the draft a Correct press left in this tab's storage into the composer, once: only where
-   * it was left for this page's lineage within the last minute, and it is removed whether or not it was used. Nothing in the
-   * address supplies a draft. It is only placed in the box: nothing is sent until the operator sends.
-   */
-  function takeDraft() {
-    const store = tabStorage();
-    if (store === null) return;
-    try {
-      const held = store.getItem(DRAFT_KEY);
-      if (held === null) return;
-      store.removeItem(DRAFT_KEY);
-      const left = JSON.parse(held);
-      const fresh = left !== null && typeof left === "object" && typeof left.at === "number" && Date.now() - left.at <= DRAFT_MAX_AGE_MS;
-      if (fresh && left.lineage === talkLineage() && typeof left.draft === "string") talk.draft = left.draft.slice(0, 4000);
-    } catch (error) {
-      // A store or a held value that cannot be read leaves the composer empty.
-    }
-  }
-
-  /** Leaves a draft for the talk page of one lineage, on a Correct press; a store that refuses leaves none. */
-  function leaveDraft(lineage, draft) {
-    const store = tabStorage();
-    if (store === null) return;
-    try {
-      store.setItem(DRAFT_KEY, JSON.stringify({ lineage, draft, at: Date.now() }));
-    } catch (error) {
-      // No draft is carried; the talk page opens with an empty composer.
-    }
-  }
 
   /** Reads the plan's title and section count once, for the heading card; a failed read leaves the card out. */
   async function loadTalkPlan() {
@@ -2425,9 +2390,12 @@
     return Object.prototype.hasOwnProperty.call(KIND_WORDS, line.kind) ? KIND_WORDS[line.kind] : txt(line.kind);
   }
 
-  function talkLine(line, lineage, now) {
-    const mine = line.kind === "inbound" && line.senderClass === "operator";
-    const box = h("div", "msg" + (mine ? " mine" : ""));
+  /**
+   * A talk line's head: its author, its time, and its class where a participant wrote it, so a
+   * participant who took the operator's name still reads as one. The talk page and an item's Context
+   * both draw it.
+   */
+  function talkHead(line, lineage, now) {
     const at = num(line.at);
     const head = h("div", "msg-head");
     const who = talkLabel(line, lineage);
@@ -2436,7 +2404,13 @@
     if (Object.prototype.hasOwnProperty.call(KIND_WORDS, line.kind) && KIND_WORDS[line.kind] !== who) head.append(" · " + KIND_WORDS[line.kind]);
     if (Object.prototype.hasOwnProperty.call(RECEIPT_WORDS, line.receipt)) head.append(" · " + RECEIPT_WORDS[line.receipt]);
     if (typeof line.echo === "string") head.append(" · " + line.echo);
-    box.append(head);
+    return head;
+  }
+
+  function talkLine(line, lineage, now) {
+    const mine = line.kind === "inbound" && line.senderClass === "operator";
+    const box = h("div", "msg" + (mine ? " mine" : ""));
+    box.append(talkHead(line, lineage, now));
     const files = list(line.files).filter((file) => file !== null && typeof file === "object");
     // A line of files alone draws no empty bubble above them.
     if (txt(line.text) !== "" || files.length === 0) box.append(h("div", "bubble", txt(line.text)));
@@ -2624,20 +2598,49 @@
     { id: "blocking", words: "Blocking first" },
   ];
 
-  /** What the broker's answer to an Agree means, in the operator's words. */
-  const AGREE_WORDS = {
-    delivered: "agreed, sent to the session",
-    "no-session": "no live session, ask left open",
-    ended: "that session has ended, ask left open",
-    "no-thread": "the session has no Discord thread yet, ask left open",
-    "no-channel": "the session is not connected to the broker, ask left open",
-    rate: "too many lines in the last minute, ask left open",
+  /**
+   * What the broker's answer to an act means, in the operator's words: the router's word for the line,
+   * or the broker's reason for sending none. `actWords` reads `delivered` as the act's own word with the
+   * session it went to, and a blocked run's `changed` as its own.
+   */
+  const ACT_WORDS = {
+    "no-session": "no live session, left open",
+    ended: "that session has ended, left open",
+    "no-thread": "the session has no Discord thread yet, left open",
+    "no-channel": "the session is not connected to the broker, left open",
+    rate: "too many lines in the last minute, left open",
+    empty: "the line was empty, so nothing was sent, left open",
+    "unknown-file": "a file the line named is no longer held, so nothing was sent, left open",
     closed: "already closed",
-    "already-agreed": "already agreed",
+    "already-acted": "already acted on from a page",
     "no-recommendation": "no recommendation to agree to",
     changed: "the recommendation changed since you read it, read it again",
     "refused: blocking": "refused: blocking, answer this one yourself",
   };
+
+  /** The word a delivered line reads, by the act that sent it. */
+  const DELIVERED_WORDS = { agree: "agreed", correct: "corrected", dismiss: "dismissed" };
+
+  /** Each act's name, for the words beside an item whose answer could not be read. */
+  const ACT_NAMES = { agree: "Agree", correct: "Correct", dismiss: "Dismiss" };
+
+  /** A blocked run's `changed`: the reason the page drew is no longer the block's. */
+  const BLOCK_CHANGED_WORDS = "the block's reason changed since you read it, read it again";
+
+  /**
+   * A Needs me headline is cut at this many code points, an ellipsis marking the cut, and the whole
+   * text is in the item's Context. Two upstream readers cut a text with no mark before it reaches the
+   * page. The broker's ledger reader keeps 1,000 code points of an ask's stored question, which is
+   * `<question>? Recommend: <recommend>`: a cut in the Recommend tail goes with the segment the views
+   * drop, and a cut in the question itself leaves a question longer than this bound. The persona
+   * plugin keeps 300 UTF-16 units of a session's `BLOCKED:` line for a blocked run's reason. A bound
+   * under both makes every such text end in the ellipsis here.
+   */
+  const HEADLINE_POINTS = 200;
+
+  /** The conversation kinds a Context draws from the session's talk ring, and how many of the newest. */
+  const CONTEXT_KINDS = ["reply", "mirror", "prompt", "inbound"];
+  const CONTEXT_LINES = 5;
 
   /** The most items one batch carries where the view names no cap; the view's `maxBatch` is the broker's own bound. */
   const DEFAULT_MAX_BATCH = 64;
@@ -2649,11 +2652,22 @@
   }
 
   /**
-   * What the Needs-me page holds between polls: the order chosen, the asks the operator pressed Agree
-   * or Correct on in this tab, kept in its session storage (the batch leaves these alone), the words beside each ask
-   * from its last Agree, and whether an Agree is out.
+   * What the Needs-me and ask pages hold between polls: the order chosen; the asks the operator acted
+   * on in this tab, kept in its session storage, which the batch leaves alone; the words beside each
+   * item from its last act; whether an act is out, and the items it is out for; each item whose line
+   * was delivered, with the reading it was drawn from, which a newer reading replaces; the Correct box
+   * open, by its item's key, with its draft; and each open Context, by its item's key.
    */
-  const needsMe = { sort: "kind", touched: loadTouched(), statuses: new Map(), acting: false };
+  const needsMe = {
+    sort: "kind",
+    touched: loadTouched(),
+    statuses: new Map(),
+    acting: false,
+    out: new Set(),
+    delivered: new Map(),
+    correct: null,
+    context: new Map(),
+  };
 
   /** The asks touched so far in this tab, read from its session storage; an unreadable store gives an empty set. */
   function loadTouched() {
@@ -2684,8 +2698,16 @@
     return JSON.stringify([item.repo, item.askId]);
   }
 
-  function agreeWords(status) {
-    return Object.prototype.hasOwnProperty.call(AGREE_WORDS, status) ? AGREE_WORDS[status] : "the broker answered " + status + ", ask left open";
+  /** The key any item's page state is held under: an ask's `needsKey`, a blocked run's lineage and queue entry. */
+  function itemKey(item) {
+    return item.kind === "blocked" ? JSON.stringify([item.repo, "blocked", txt(item.entryId)]) : needsKey(item);
+  }
+
+  /** The words beside an item once its act is answered; a status the table lacks is named as the broker said it. */
+  function actWords(status, act, item) {
+    if (status === "delivered") return DELIVERED_WORDS[act] + ", sent to " + txt(item.repo);
+    if (status === "changed" && item.kind === "blocked") return BLOCK_CHANGED_WORDS;
+    return Object.prototype.hasOwnProperty.call(ACT_WORDS, status) ? ACT_WORDS[status] : "the broker answered " + status + ", left open";
   }
 
   /** The items of one group, each an object. */
@@ -2721,7 +2743,12 @@
     return item.kind === "ask" && txt(item.repo) !== "" && txt(item.askId) !== "" && txt(item.recommend).trim() !== "";
   }
 
-  /** Posts to an Agree route, or the ask page's Done, and answers its JSON; a refusal or a broken answer throws with the words for it. */
+  /** Whether a delivered line hides the item from this reading: the reading it was drawn from when the answer came. */
+  function deliveredIn(view, item) {
+    return needsMe.delivered.get(itemKey(item)) === view;
+  }
+
+  /** Posts to an act route and answers its JSON; a refusal or a broken answer throws with the words for it. */
   async function postAgree(name, body, timeoutMs) {
     let response;
     try {
@@ -2768,31 +2795,89 @@
     return { askId: item.askId, repo: item.repo, recommend: txt(item.recommend) };
   }
 
-  /** The words beside an ask whose Agree could not be confirmed: the broker may or may not have sent it. */
-  function unconfirmed(error) {
-    return (error instanceof Unreadable ? error.message : "no answer") + ", so the Agree is not confirmed";
+  /** The words beside an item whose act could not be confirmed: the broker may or may not have sent it. */
+  function unconfirmed(error, act) {
+    return (error instanceof Unreadable ? error.message : "no answer") + ", so the " + ACT_NAMES[act] + " is not confirmed";
   }
 
-  /** Agrees to one ask. One Agree at a time: the `acting` flag refuses a second while one is out. */
-  async function sendAgree(item) {
-    if (needsMe.acting) return;
-    const key = needsKey(item);
-    touch(key);
+  /**
+   * Sends one act on one item and draws the broker's word beside it. One act at a time: the `acting`
+   * flag refuses a second while one is out, and every act button is disabled until the answer. The item
+   * takes the acting highlight and reads `sending` at once. A delivered line takes the item off the
+   * reading it was drawn from, so it leaves the list on that redraw and the next reading decides again;
+   * any other answer, or none, leaves it with the broker's word and its buttons live. A `changed` reads
+   * the view again, so the item shows the text the broker now holds. Answers whether it was delivered.
+   */
+  async function sendAct(item, act, body) {
+    if (needsMe.acting) return false;
+    const key = itemKey(item);
+    if (item.kind === "ask") touch(key);
     needsMe.acting = true;
+    needsMe.out.add(key);
     needsMe.statuses.set(key, "sending");
     redrawNeeds();
-    let changed = false;
+    let status = null;
     try {
-      const answer = await postAgree("agree", agreeBody(item), TIMEOUT_MS);
-      changed = txt(answer.status) === "changed";
-      needsMe.statuses.set(key, agreeWords(txt(answer.status)));
+      const answer = await postAgree(act, body, TIMEOUT_MS);
+      status = txt(answer.status);
+      needsMe.statuses.set(key, actWords(status, act, item));
     } catch (error) {
-      needsMe.statuses.set(key, unconfirmed(error));
+      needsMe.statuses.set(key, unconfirmed(error, act));
     } finally {
       needsMe.acting = false;
-      if (changed) await refreshView();
+      needsMe.out.delete(key);
+      if (status === "delivered") {
+        if (lastView !== null) needsMe.delivered.set(key, lastView);
+        if (needsMe.correct !== null && needsMe.correct.key === key) needsMe.correct = null;
+      }
+      if (status === "changed") await refreshView();
       else redrawNeeds();
     }
+    return status === "delivered";
+  }
+
+  /** Agrees to one ask on the recommendation this page drew. */
+  function sendAgree(item) {
+    return sendAct(item, "agree", agreeBody(item));
+  }
+
+  /** Dismisses one item: an ask by its id, a blocked run by its queue entry and the text the view gave it, which the broker matches byte for byte. */
+  function sendDismiss(item) {
+    const body =
+      item.kind === "blocked"
+        ? { kind: "blocked", repo: item.repo, entryId: item.entryId, reason: txt(item.text) }
+        : { kind: "ask", askId: item.askId, repo: item.repo };
+    return sendAct(item, "dismiss", body);
+  }
+
+  /** Opens the Correct box under one ask, closing any other, and puts the caret in it. */
+  function openCorrect(item) {
+    const key = itemKey(item);
+    if (needsMe.correct === null || needsMe.correct.key !== key) needsMe.correct = { key, draft: "" };
+    redrawNeeds();
+    const field = document.getElementById("correct-text");
+    if (field !== null) field.focus();
+  }
+
+  /** Closes the Correct box and drops its draft. */
+  function closeCorrect() {
+    needsMe.correct = null;
+    redrawNeeds();
+  }
+
+  /**
+   * Sends the Correct box's words for its ask. The broker builds the line from the ask's id, its
+   * question and these words, so the page composes none. A line not delivered keeps the box and the
+   * draft, with the caret back in it.
+   */
+  async function sendCorrect(item) {
+    const held = needsMe.correct;
+    if (held === null || held.key !== itemKey(item)) return;
+    const words = held.draft.trim();
+    if (words === "") return;
+    const sent = await sendAct(item, "correct", { askId: item.askId, repo: item.repo, words });
+    const field = sent ? null : document.getElementById("correct-text");
+    if (field !== null) field.focus();
   }
 
   /** Agrees to the untouched asks in the order drawn, the first `cap`, and shows the broker's word beside each. */
@@ -2801,6 +2886,7 @@
     if (needsMe.acting || sent.length === 0) return;
     for (const item of sent) {
       touch(needsKey(item));
+      needsMe.out.add(needsKey(item));
       needsMe.statuses.set(needsKey(item), "sending");
     }
     needsMe.acting = true;
@@ -2813,23 +2899,170 @@
         const result = results[at];
         const status = result !== null && typeof result === "object" ? txt(result.status) : null;
         if (status === "changed") changed = true;
-        needsMe.statuses.set(needsKey(item), status !== null ? agreeWords(status) : "no answer for this one, so the Agree is not confirmed");
+        if (status === "delivered" && lastView !== null) needsMe.delivered.set(needsKey(item), lastView);
+        needsMe.statuses.set(needsKey(item), status !== null ? actWords(status, "agree", item) : "no answer for this one, so the Agree is not confirmed");
       });
     } catch (error) {
-      for (const item of sent) needsMe.statuses.set(needsKey(item), unconfirmed(error));
+      for (const item of sent) needsMe.statuses.set(needsKey(item), unconfirmed(error, "agree"));
     } finally {
       needsMe.acting = false;
+      for (const item of sent) needsMe.out.delete(needsKey(item));
       if (changed) await refreshView();
       else redrawNeeds();
     }
   }
 
-  /** The page the Correct link opens: the asking session's talk page. The press leaves the draft in the tab's storage. */
-  function correctHref(item) {
-    return "/talk?lineage=" + encodeURIComponent(item.repo);
+  /** The ask view a Context reads for an ask: route text plus the encoded repo and id. */
+  function contextAskUrl(item) {
+    return "/web/ask?repo=" + encodeURIComponent(item.repo) + "&id=" + encodeURIComponent(item.askId);
   }
 
-  /** One item: who and how long, what it says, what is recommended, and for an ask Agree and Correct with the broker's last word. */
+  /** The talk view a Context reads for any item: route text plus the encoded repo, the whole ring. */
+  function contextTalkUrl(item) {
+    return "/web/talk?lineage=" + encodeURIComponent(item.repo);
+  }
+
+  /** The newest `CONTEXT_LINES` lines of the four conversation kinds, at or after the item opened, or of any time where it names none. */
+  function contextLines(view, item) {
+    const from = parse(item.openedAt);
+    return objects(isObject(view) ? view.lines : null)
+      .filter((line) => CONTEXT_KINDS.indexOf(line.kind) >= 0 && (from === null || (num(line.at) !== null && line.at >= from)))
+      .slice(-CONTEXT_LINES);
+  }
+
+  /**
+   * Opens an item's Context, or closes it. Opening reads, once, the ask view where `withAsk` holds for an
+   * ask, and the session's talk view, then draws them; a read that fails draws one line for it. Nothing
+   * reads them again until the operator closes and opens it, and the poll never does. An answer that
+   * lands after the Context closed, or after it was opened again, is dropped.
+   */
+  async function toggleContext(item, withAsk) {
+    const key = itemKey(item);
+    if (needsMe.context.has(key)) {
+      needsMe.context.delete(key);
+      redrawNeeds();
+      return;
+    }
+    const held = { loading: true, ask: null, lines: null, failure: null };
+    needsMe.context.set(key, held);
+    redrawNeeds();
+    const reads = await Promise.allSettled([
+      withAsk && item.kind === "ask" ? fetchView(contextAskUrl(item)) : Promise.resolve(null),
+      fetchView(contextTalkUrl(item)),
+    ]);
+    if (needsMe.context.get(key) !== held) return;
+    held.loading = false;
+    if (reads[0].status === "fulfilled" && isObject(reads[0].value)) held.ask = reads[0].value;
+    if (reads[1].status === "fulfilled") held.lines = contextLines(reads[1].value, item);
+    const failed = reads.find((read) => read.status === "rejected");
+    if (failed !== undefined) held.failure = failed.reason instanceof Unreadable ? failed.reason.message : "the reading could not be fetched";
+    redrawNeeds();
+  }
+
+  /** A full-size act button, its words set as text, disabled while any act is out. */
+  function actButton(cls, words, focusKey, onClick) {
+    const button = h("button", cls, words);
+    button.type = "button";
+    button.disabled = needsMe.acting;
+    button.dataset.focusKey = focusKey;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  /** The Context disclosure's button, closed by default; whether it is open is read from `needsMe.context`. */
+  function contextButton(item, key, withAsk) {
+    const open = needsMe.context.has(key);
+    const button = h("button", open ? "nm-context on" : "nm-context", "Context");
+    button.type = "button";
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.dataset.focusKey = "context|" + key;
+    button.addEventListener("click", () => toggleContext(item, withAsk));
+    return button;
+  }
+
+  /**
+   * An open Context: the whole text where the headline was cut, then for an ask its brief, plan path and
+   * thread link, then the session's lines, each under the talk page's own head and then its text. Every
+   * string is the view's and goes in as text, and the thread link is drawn only where it is Discord's,
+   * the ask page's own rule.
+   */
+  function contextPanel(item, held, cut, now) {
+    const panel = h("div", "nm-context-body");
+    if (cut) panel.append(h("div", "nm-whole", txt(item.text)));
+    if (held.loading) {
+      panel.append(h("div", "meta", "reading"));
+      return panel;
+    }
+    const ask = held.ask;
+    if (ask !== null) {
+      if (txt(ask.brief).trim() !== "") panel.append(h("div", "meta", "Brief"), h("div", "ask-brief", txt(ask.brief)));
+      if (txt(ask.planPath) !== "") panel.append(h("div", "meta", "Plan"), h("div", "mono", txt(ask.planPath)));
+      const thread = txt(ask.thread);
+      if (thread.indexOf(DISCORD_PREFIX) === 0) panel.append(link("ask-thread", thread, "Open the thread"));
+    }
+    if (held.lines !== null) {
+      if (held.lines.length === 0) panel.append(h("div", "meta", "No lines from the session since this opened."));
+      for (const line of held.lines) {
+        const row = h("div", "nm-line");
+        row.append(talkHead(line, txt(item.repo), now), h("div", null, txt(line.text)));
+        panel.append(row);
+      }
+    }
+    if (held.failure !== null) panel.append(h("div", "meta nm-context-failed", "The context could not be read: " + held.failure + "."));
+    return panel;
+  }
+
+  /**
+   * The Correct box under an ask: the question quoted as text, a box of three rows bounded at the talk
+   * composer's 4000, then Send and Cancel. Enter is a new line, and Ctrl or Cmd with Enter sends. The
+   * draft lives in `needsMe.correct`, so a redraw puts the typed text back.
+   */
+  function correctBox(item, key) {
+    const held = needsMe.correct;
+    const box = h("div", "nm-correct-box");
+    box.append(h("div", "nm-quote", txt(item.text)));
+    const caption = h("label", "sr", "Your words to " + txt(item.repo) + " on this ask");
+    caption.htmlFor = "correct-text";
+    const field = h("textarea", "nm-words");
+    field.id = "correct-text";
+    field.rows = 3;
+    field.maxLength = 4000;
+    field.placeholder = "Your words";
+    field.value = held.draft;
+    field.disabled = needsMe.acting;
+    field.dataset.focusKey = "correct-text|" + key;
+    const send = actButton("nm-send", "Send", "correct-send|" + key, () => sendCorrect(item));
+    send.disabled = needsMe.acting || held.draft.trim() === "";
+    field.addEventListener("input", () => {
+      held.draft = field.value;
+      send.disabled = needsMe.acting || field.value.trim() === "";
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+        event.preventDefault();
+        sendCorrect(item);
+      }
+    });
+    const row = h("div", "nm-controls");
+    row.append(send, actButton("nm-cancel", "Cancel", "correct-cancel|" + key, () => closeCorrect()));
+    box.append(caption, field, row, h("div", "meta", "Ctrl or Cmd with Enter sends."));
+    return box;
+  }
+
+  /** The broker's last word beside an item, read out as a status. */
+  function statusLine(words) {
+    const status = h("div", "meta nm-status", words);
+    status.setAttribute("role", "status");
+    return status;
+  }
+
+  /**
+   * One item: who and how long, its headline, what is recommended, then the acts its kind can take with
+   * the broker's last word and, where open, the Correct box and the Context. An ask takes Agree where it
+   * carries a recommendation, Correct and Dismiss. A blocked run takes Dismiss alone, since it carries no
+   * recommendation and its session is stopped. Any other kind, a hands item among them, is a reading of
+   * a true condition and takes none.
+   */
   function needsItem(item, now) {
     const box = h("div", "nm-item");
     const anchor = askKey(item);
@@ -2840,53 +3073,60 @@
     if (item.kind === "blocked") who.append(" ", h("span", "tag", "blocked"));
     else if (item.kind === "ask" && item.blocking === true) who.append(" ", h("span", "tag", "blocking"));
     head.append(who, h("span", "nm-age", opened === null ? "" : span(now - opened)));
+    const headline = cutPoints(txt(item.text), HEADLINE_POINTS);
     // An ask's question opens its own page; any other item's text is plain.
     const href = askHrefOf(item);
-    box.append(head, href !== null ? link("nm-text", href, txt(item.text)) : h("div", "nm-text", txt(item.text)));
+    box.append(head, href !== null ? link("nm-text", href, headline) : h("div", "nm-text", headline));
     if (txt(item.recommend) !== "") box.append(h("div", "rec", "Recommends: " + txt(item.recommend)));
-    if (item.kind !== "ask" || txt(item.repo) === "") return box;
+    if ((item.kind !== "ask" && item.kind !== "blocked") || txt(item.repo) === "") return box;
 
-    const key = needsKey(item);
+    const key = itemKey(item);
+    if (needsMe.out.has(key)) box.classList.add("nm-acting");
+    // An item's page state is keyed on its id, so an item the view gives no id takes no act and no Context.
+    const named = txt(item.kind === "blocked" ? item.entryId : item.askId) !== "";
     const controls = h("div", "nm-controls");
-    if (agreeable(item)) {
-      const agreeButton = h("button", "nm-agree", "Agree");
-      agreeButton.type = "button";
-      agreeButton.disabled = needsMe.acting;
-      agreeButton.dataset.focusKey = "agree|" + key;
-      agreeButton.addEventListener("click", () => sendAgree(item));
-      controls.append(agreeButton);
+    if (item.kind === "blocked") {
+      if (named) controls.append(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => sendDismiss(item)));
+    } else if (named) {
+      if (agreeable(item)) controls.append(actButton("nm-agree", "Agree", "agree|" + key, () => sendAgree(item)));
+      controls.append(actButton("nm-correct", "Correct", "correct|" + key, () => openCorrect(item)));
+      controls.append(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => sendDismiss(item)));
+      if (txt(item.recommend).trim() === "") controls.append(h("span", "meta", "no recommendation to agree to"));
     }
-    const correct = link("nm-correct", correctHref(item), "Correct");
-    correct.dataset.focusKey = "correct|" + key;
-    // The press is what makes the ask touched; the link itself opens the talk page.
-    correct.addEventListener("click", () => {
-      touch(key);
-      leaveDraft(item.repo, 'Correction on "' + txt(item.text) + '": ');
-    });
-    controls.append(correct);
-    if (txt(item.recommend).trim() === "") controls.append(h("span", "meta", "no recommendation to agree to"));
+    if (named) controls.append(contextButton(item, key, true));
     box.append(controls);
+    if (item.kind === "ask" && needsMe.correct !== null && needsMe.correct.key === key) box.append(correctBox(item, key));
     const words = needsMe.statuses.get(key);
-    if (words !== undefined) {
-      const status = h("div", "meta nm-status", words);
-      status.setAttribute("role", "status");
-      box.append(status);
-    }
+    if (words !== undefined) box.append(statusLine(words));
+    const context = named ? needsMe.context.get(key) : undefined;
+    if (context !== undefined) box.append(contextPanel(item, context, headline !== txt(item.text), now));
     return box;
   }
 
-  /** One group: its label with a count and an optional note, then its items in the chosen order, or a line saying there are none. */
+  /** What stands where a delivered item was until the next reading: the act's word and the session it went to. */
+  function deliveredLine(item) {
+    const line = h("div", "nm-item nm-sent", needsMe.statuses.get(itemKey(item)) ?? "");
+    line.setAttribute("role", "status");
+    return line;
+  }
+
+  /**
+   * One group: its label with a count and an optional note, then its items in the chosen order, or a
+   * line saying there are none. An item whose line was delivered from this reading is out of the count,
+   * and its words stand in its place.
+   */
   function needsGroup(view, name, words, note, now, attn) {
     const items = sortedItems(groupItems(view, name));
+    const open = items.filter((item) => !deliveredIn(view, item));
     const section = h("section", "section");
     section.setAttribute("aria-label", words);
     const head = h("div", "section-head");
-    head.append(label(words + " · " + items.length, "h2"));
+    head.append(label(words + " · " + open.length, "h2"));
     if (note) head.append(h("div", "meta", note));
     section.append(head);
-    const card = h("div", attn && items.length > 0 ? "card attn" : "card");
+    const card = h("div", attn && open.length > 0 ? "card attn" : "card");
     if (items.length === 0) card.append(h("div", "nm-none", "Nothing here."));
-    for (const item of items) card.append(needsItem(item, now));
+    for (const item of items) card.append(deliveredIn(view, item) ? deliveredLine(item) : needsItem(item, now));
     section.append(card);
     return section;
   }
@@ -2894,7 +3134,13 @@
   function renderNeedsMe(view) {
     const out = h("div", "nm");
     const now = nowOf(view);
-    const all = ["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name));
+    // A delivered item's hide holds for the reading it was drawn from alone, so a newer reading decides again.
+    for (const [key, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(key);
+    // An item's words and Context go with the item, so a key no item in this reading holds is dropped.
+    const held = new Set(["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name)).map(itemKey));
+    for (const key of needsMe.statuses.keys()) if (!held.has(key)) needsMe.statuses.delete(key);
+    for (const key of needsMe.context.keys()) if (!held.has(key)) needsMe.context.delete(key);
+    const all = ["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name)).filter((item) => !deliveredIn(view, item));
     const dated = all.map((item) => parse(item.openedAt)).filter((at) => at !== null);
 
     const top = h("div", "top");
@@ -2974,16 +3220,19 @@
 
   /**
    * One ask: who asked and how long ago, the question, the recommendation, the brief, the plan, the
-   * thread, then Agree, Answer and Done. Agree and Answer are the Needs me page's Agree and Correct,
-   * with the same body, words and touched mark, so the batch there skips an ask answered here.
+   * thread, then Agree, Answer and Dismiss with a Context of the session's lines. They are the Needs me
+   * page's acts, with the same bodies, words, touched mark and inline Correct box, so the batch there
+   * skips an ask answered here. A handled ask, one whose line a page delivered, draws the act and its
+   * time in place of the buttons, since every other page hides it until its session closes or raises it.
    */
   function renderAsk(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
-    // The ask in the Needs me item's shape, so the shared Agree and touched mark key it the same way.
-    const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), text: txt(view.question), recommend: view.recommend };
-    // The re-raise the page drew, which Done sends so its mark records the version of the ask that was seen.
-    const drawn = { reraisedAt: typeof view.reraisedAt === "string" ? view.reraisedAt : null };
+    // The ask in the Needs me item's shape, so the shared acts and the touched mark key it the same way.
+    const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), text: txt(view.question), recommend: view.recommend, openedAt: view.openedAt };
+    const key = itemKey(item);
+    // A delivered ask's hide holds for the reading it was drawn from alone, as on the Needs me page.
+    for (const [held, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(held);
 
     const top = h("div", "top");
     top.append(back("/", "Standup"));
@@ -2996,7 +3245,7 @@
     if (opened !== null) top.append(h("p", "sub", "asked " + span(now - opened) + " ago"));
     out.append(top);
 
-    const ask = h("section", "card pad section ask-card");
+    const ask = h("section", needsMe.out.has(key) ? "card pad section ask-card nm-acting" : "card pad section ask-card");
     ask.setAttribute("aria-label", "Ask");
     ask.append(h("div", "ask-question", item.text));
     if (txt(item.recommend) !== "") ask.append(h("div", "rec", "Recommends: " + txt(item.recommend)));
@@ -3016,91 +3265,37 @@
     if (thread.indexOf(DISCORD_PREFIX) === 0) where.append(link("ask-thread", thread, "Open the thread"));
     if (where.childNodes.length > 0) out.append(where);
 
-    const key = needsKey(item);
-    const controls = h("div", "nm-controls ask-controls");
-    if (agreeable(item)) {
-      const agreeButton = h("button", "nm-agree", "Agree");
-      agreeButton.type = "button";
-      agreeButton.disabled = needsMe.acting;
-      agreeButton.dataset.focusKey = "agree|" + key;
-      agreeButton.addEventListener("click", () => sendAgree(item));
-      controls.append(agreeButton);
-    }
-    const answer = link("nm-correct", correctHref(item), "Answer");
-    answer.dataset.focusKey = "answer|" + key;
-    answer.addEventListener("click", () => {
-      touch(key);
-      leaveDraft(item.repo, 'Answer on "' + item.text + '": ');
-    });
-    controls.append(answer);
-    const done = h("button", "nm-correct", "Done");
-    done.type = "button";
-    done.dataset.focusKey = "done|" + key;
-    if (view.done === true) {
-      // Marked done: the other pages hide the ask until the persona closes it or asks again.
-      done.disabled = true;
-      controls.append(done);
-      const at = parse(view.doneAt);
-      if (at !== null) controls.append(h("span", "meta", "marked done " + dayClock(at, now)));
-    } else {
-      done.disabled = askDone.sendingKey === key;
-      done.addEventListener("click", () => sendDone(item, drawn));
-      controls.append(done);
-    }
-    out.append(controls);
-    // A Done's line belongs to its own ask, and goes for good once a reading draws that ask done.
-    if (askDone.statusKey === key && view.done === true) {
-      askDone.statusKey = null;
-      askDone.status = null;
-    }
-    if (askDone.status !== null && askDone.statusKey === key) {
-      const status = h("div", "meta nm-status", askDone.status);
-      status.setAttribute("role", "status");
-      out.append(status);
-    }
-    if (txt(item.recommend).trim() === "") out.append(h("div", "meta", "no recommendation to agree to"));
     const words = needsMe.statuses.get(key);
-    if (words !== undefined) {
-      const status = h("div", "meta nm-status", words);
-      status.setAttribute("role", "status");
-      out.append(status);
+    if (view.handled === true) {
+      // Handled: the other pages hide the ask until the persona closes it or asks again.
+      const at = parse(view.handledAt);
+      const how = txt(view.how);
+      out.append(statusLine((how === "" ? "Handled" : "Handled, " + how) + " from a page" + (at === null ? "" : " at " + dayClock(at, now)) + "."));
+    } else if (deliveredIn(view, item)) {
+      // Delivered from this reading: the buttons go, and the next reading carries the handled mark.
+      out.append(statusLine(words ?? ""));
+    } else {
+      const acts = h("div", "ask-acts");
+      const controls = h("div", "nm-controls ask-controls");
+      // An ask's page state is keyed on its id, so a view with none takes no act and no Context, as on Needs me.
+      if (item.askId !== "") {
+        if (agreeable(item)) controls.append(actButton("nm-agree", "Agree", "agree|" + key, () => sendAgree(item)));
+        controls.append(actButton("nm-correct", "Answer", "answer|" + key, () => openCorrect(item)));
+        controls.append(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => sendDismiss(item)));
+        // The page draws the brief, plan and thread above, so its Context reads the session's lines alone.
+        controls.append(contextButton(item, key, false));
+      }
+      acts.append(controls);
+      if (txt(item.recommend).trim() === "") acts.append(h("div", "meta", "no recommendation to agree to"));
+      if (needsMe.correct !== null && needsMe.correct.key === key) acts.append(correctBox(item, key));
+      if (words !== undefined) acts.append(statusLine(words));
+      const context = item.askId !== "" ? needsMe.context.get(key) : undefined;
+      if (context !== undefined) acts.append(contextPanel(item, context, false, now));
+      out.append(acts);
     }
 
     out.append(sources(view, ["roster", "ledger", "registry"]));
     return out;
-  }
-
-  /** The ask page's Done post: the ask whose post is out, and the ask and words its last failure left. */
-  const askDone = { sendingKey: null, statusKey: null, status: null };
-
-  /**
-   * Marks the ask done: one post at a time, then the page reads its view again, so the button reads Done
-   * with the mark's time without a reload. A refusal or no answer leaves the button live with one line
-   * saying so, and a post that landed under a refresh that did not says that instead.
-   */
-  async function sendDone(item, drawn) {
-    if (askDone.sendingKey !== null) return;
-    const key = needsKey(item);
-    askDone.sendingKey = key;
-    askDone.status = null;
-    redrawNeeds();
-    try {
-      // The ask and the re-raise the page drew, so the broker marks only the version the operator saw.
-      const body = { repo: item.repo, askId: item.askId, reraisedAt: drawn.reraisedAt };
-      await postAgree("done", body, TIMEOUT_MS);
-      // Until a new reading draws the ask as done, the page says the mark landed.
-      askDone.statusKey = key;
-      askDone.status = "Marked done. The page shows it on its next refresh.";
-    } catch (error) {
-      askDone.statusKey = key;
-      askDone.status =
-        error instanceof Unreadable && error.status === 409
-          ? "Not marked done: the ask was raised again since this page drew it. Read it again."
-          : "Not marked done: " + (error instanceof Unreadable ? error.message : "the broker did not answer") + ".";
-    } finally {
-      askDone.sendingKey = null;
-      await refreshView();
-    }
   }
 
   /** What the ask page draws where the broker holds no such open ask: a line saying so, and no button to act on it. */
@@ -3176,10 +3371,10 @@
     return selection !== null && !selection.isCollapsed && selection.containsNode(app, true) ? selection : null;
   }
 
-  /** A line being typed in the talk or the Steer composer: a redraw would move the caret to its end mid-word. */
+  /** A line being typed in the talk, the Steer or the Correct box: a redraw would move the caret to its end mid-word. */
   function composing() {
     const active = document.activeElement;
-    return active !== null && (active.id === "talk-compose" || active.id === "steer-text") && active.value !== "";
+    return active !== null && (active.id === "talk-compose" || active.id === "steer-text" || active.id === "correct-text") && active.value !== "";
   }
 
   /** Whether the not-open line is what the page shows, so a later failed poll leaves it in place. */
@@ -3199,9 +3394,6 @@
     lastView = null;
     goneDrawn = true;
     notice.hidden = true;
-    // A Done line belongs to the ask that was drawn, so it goes with it.
-    askDone.statusKey = null;
-    askDone.status = null;
   }
 
   async function fetchView(url) {
@@ -3353,10 +3545,7 @@
       app.replaceChildren(h("p", "muted", empty[document.body.dataset.page] ?? "No repo named in the address."));
       return;
     }
-    if (document.body.dataset.page === "talk") {
-      takeDraft();
-      loadTalkPlan();
-    }
+    if (document.body.dataset.page === "talk") loadTalkPlan();
     poll();
   }
 

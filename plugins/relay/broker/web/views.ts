@@ -20,6 +20,7 @@ import type { PersonaQueue, QueueEntry, QueuePlanReading } from "../board/queues
 import type { RosterPersona } from "../board/roster.ts";
 import { personaStatus } from "../board/status.ts";
 import type { PersonaStatus, StatusWord } from "../board/status.ts";
+import { questionOf } from "../decisions/ledger.ts";
 import type { AskEntry, LedgerReading } from "../decisions/ledger.ts";
 import { DEFAULT_EXITED_AFTER_MS, DEFAULT_IDLE_AFTER_MS } from "../discord/config.ts";
 import { deriveSurfaceState, toView } from "../discord/state.ts";
@@ -34,8 +35,8 @@ import { headingOf } from "./direction.ts";
 import type { DirectionReading, Heading } from "./direction.ts";
 import type { InstalledRelease } from "./plugins.ts";
 import { SHARED_ROW_CAP } from "./rollout.ts";
-import { EMPTY_MARKS, doneHides, doneKey, planMarkKey } from "./watermarks.ts";
-import type { Marks } from "./watermarks.ts";
+import { EMPTY_MARKS, blockedHandledKey, blockedHides, handledHides, handledKey, planMarkKey } from "./watermarks.ts";
+import type { BlockedReasons, HandledHow, Marks } from "./watermarks.ts";
 
 /** The sources a view draws from, in the order `asOf` and `held` list them. */
 export const SOURCES = ["registry", "roster", "queues", "plans", "ledger", "events", "usage", "rollout", "plugins", "direction"] as const;
@@ -201,6 +202,8 @@ export type Item = {
   openedAt: string | null;
   planPath: string | null;
   askId: string | null;
+  /** The queue entry's id on a blocked item, so a Dismiss can name the entry; null on an ask and a hands item. */
+  entryId: string | null;
 };
 
 export type Worker = {
@@ -298,9 +301,13 @@ export type AskView = {
   planPath: string | null;
   brief: string | null;
   thread: string | null;
-  /** Whether a done mark hides the ask on every other page, and when it was set; the ask page still draws it. */
-  done: boolean;
-  doneAt: string | null;
+  /**
+   * Whether a handled mark hides the ask on every other page, when its line was delivered, and which
+   * act sent it; the ask page still draws the ask. The time and the act are null where no mark hides it.
+   */
+  handled: boolean;
+  handledAt: string | null;
+  how: HandledHow | null;
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -591,9 +598,9 @@ type Repo = {
   queue: PersonaQueue | null;
   heartbeatAt: number | null;
   status: PersonaStatus | null;
-  /** Every open ask the persona's ledger lists, a done one included; only the ask page reads it. */
+  /** Every open ask the persona's ledger lists, a handled one included; only the ask page reads it. */
   open: readonly AskEntry[];
-  /** The open asks no done mark hides: what every list and count of asks reads. */
+  /** The open asks no handled mark hides: what every list and count of asks reads. */
   asks: readonly AskEntry[];
   record: SessionRecord | null;
   state: RepoState;
@@ -610,8 +617,8 @@ function fleet(readings: Readings): Repo[] {
     const queue = held?.queue ?? null;
     const status = queue === null ? null : (statuses.get(queue) ?? null);
     const open = readings.ledger.value?.find((item) => item.name === persona.name)?.open ?? [];
-    const done = (readings.marks ?? EMPTY_MARKS).done;
-    const asks = open.filter((ask) => !doneHides(done.get(doneKey(persona.name, ask.id)), ask));
+    const handled = (readings.marks ?? EMPTY_MARKS).handled;
+    const asks = open.filter((ask) => !handledHides(handled.get(handledKey(persona.name, ask.id)), ask));
     const heartbeatAt = held?.heartbeatAt ?? null;
     return {
       persona,
@@ -798,17 +805,19 @@ function relativeUnder(workdir: string, file: string): string | null {
   return relative.split(path.sep).join("/");
 }
 
+/** An ask as an item. The text is the question cut at its recommendation segment, which the item carries apart. */
 function askItem(repo: Repo, ask: AskEntry): Item {
   const file = askPlanFile(repo.persona.workdir, ask);
   return {
     kind: "ask",
     repo: repo.persona.name,
-    text: ask.question,
+    text: questionOf(ask.question),
     recommend: ask.recommend,
     blocking: ask.blocking === true,
     openedAt: iso(ask.openedAt),
     planPath: file === null ? null : relativeUnder(repo.persona.workdir, file),
     askId: ask.id,
+    entryId: null,
   };
 }
 
@@ -833,20 +842,50 @@ function blockEventAt(
 
 type BlockedEntry = { repo: string; title: string; reason: string | null; item: Item };
 
+/** The text a blocked entry's item draws: the reason `personaStatus` carries, or the fallback sentence. */
+function blockedText(status: { reason: string | null }): string {
+  return status.reason ?? BLOCKED_FALLBACK_TEXT;
+}
+
+const blockedMemo = new WeakMap<ReadonlyMap<PersonaQueue, PersonaStatus>, BlockedReasons>();
+
+/**
+ * Every blocked queue entry in the readings, by persona name and entry id, with the text its item
+ * draws: the one reading of the blocked rule that the merge of the handled marks and the Dismiss route
+ * share with `blockedEntries`. Built once per statuses reading. Null where the queues have never been read.
+ */
+export function blockedReasons(readings: Pick<Readings, "queues" | "events" | "now">): BlockedReasons {
+  if (readings.queues.value === null) return null;
+  const statuses = statusesOf(readings.queues.value, readings.events.value, readings.now);
+  const held = blockedMemo.get(statuses);
+  if (held !== undefined) return held;
+  const byRepo = new Map<string, ReadonlyMap<string, string>>();
+  for (const [queue, status] of statuses) {
+    byRepo.set(queue.name, new Map(status.entries.filter(isBlocked).map((entry) => [entry.id, blockedText(entry)])));
+  }
+  blockedMemo.set(statuses, byRepo);
+  return byRepo;
+}
+
 /**
  * The blocked queue entries of one repo, each with the item that stands for it. An entry is blocked
  * where `personaStatus` gives it the word blocked, and the reason is the one `personaStatus` carries
- * for it, so the item and the card cannot disagree. The block's start is the kit event's time where
- * one names the plan, else the time the pass first saw the entry blocked, else null.
+ * for it, so the item and the card cannot disagree. An entry a handled mark hides, by the text its item
+ * draws, is left out, and the hands item derived from it with it; the repo's state still reads the
+ * status word. The block's start is the kit event's time where one names the plan, else the time the
+ * pass first saw the entry blocked, else null.
  */
 function blockedEntries(readings: Readings, repo: Repo): BlockedEntry[] {
   if (repo.queue === null || repo.status === null) return [];
   const queue = repo.queue;
   const events = readings.events.value ?? initialEventState();
   const entries = new Map(queue.entries.map((entry) => [entry.id, entry]));
+  const handled = (readings.marks ?? EMPTY_MARKS).handled;
   const found: BlockedEntry[] = [];
   for (const status of repo.status.entries) {
     if (!isBlocked(status)) continue;
+    const text = blockedText(status);
+    if (blockedHides(handled.get(blockedHandledKey(repo.persona.name, status.id)), text)) continue;
     const reading = queue.readings.get(status.id);
     const at =
       blockEventAt(events, queue.workdir, reading) ??
@@ -859,12 +898,13 @@ function blockedEntries(readings: Readings, repo: Repo): BlockedEntry[] {
       item: {
         kind: "blocked",
         repo: repo.persona.name,
-        text: status.reason ?? BLOCKED_FALLBACK_TEXT,
+        text,
         recommend: null,
         blocking: true,
         openedAt: iso(at),
         planPath: reading === undefined ? null : planRelative(reading),
         askId: null,
+        entryId: status.id,
       },
     });
   }
@@ -885,6 +925,7 @@ function handsItems(readings: Readings, repos: readonly Repo[]): Item[] {
         openedAt: blocked.item.openedAt,
         planPath: null,
         askId: null,
+        entryId: null,
       });
     }
   }
@@ -900,6 +941,7 @@ function handsItems(readings: Readings, repos: readonly Repo[]): Item[] {
       openedAt: iso(account.fetchedAt),
       planPath: null,
       askId: null,
+      entryId: null,
     });
   }
   return items;
@@ -1342,12 +1384,12 @@ export function askView(
   const ask = repo.open.find((candidate) => candidate.id === askId);
   if (ask === undefined) return null;
   const item = askItem(repo, ask);
-  const mark = (readings.marks ?? EMPTY_MARKS).done.get(doneKey(repo.persona.name, ask.id));
-  const done = doneHides(mark, ask);
+  const mark = (readings.marks ?? EMPTY_MARKS).handled.get(handledKey(repo.persona.name, ask.id));
+  const handled = mark?.kind === "ask" && handledHides(mark, ask) ? mark : null;
   return {
     repo: repo.persona.name,
     askId: ask.id,
-    question: ask.question,
+    question: item.text,
     recommend: ask.recommend,
     blocking: item.blocking,
     openedAt: item.openedAt,
@@ -1356,8 +1398,9 @@ export function askView(
     planPath: item.planPath,
     brief: ask.brief,
     thread: repo.record === null ? null : threadLink(repo.record.sessionId),
-    done,
-    doneAt: done && mark !== undefined ? iso(mark.markedAt) : null,
+    handled: handled !== null,
+    handledAt: handled === null ? null : iso(handled.markedAt),
+    how: handled === null ? null : handled.how,
     asOf: asOf(readings),
     held: readings.held,
   };

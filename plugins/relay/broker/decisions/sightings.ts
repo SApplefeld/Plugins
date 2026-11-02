@@ -4,9 +4,10 @@
 // The persona plugin keeps an ask's `question` but not the message it was asked in, so the link is
 // a join. The outbound router shows this module every reply once its text is on the session's
 // thread, and each question in it, read by the plugin's own rule, is kept as a sighting with the
-// reply's message. A sighting holds its question as the ledger holds it, cut to the same length,
-// then whitespace-folded. A ledger entry links to the message of the newest sighting equal to its
-// `question` once that is folded too, and to its session's thread where none is. The sightings live
+// reply's message. A sighting holds its question as the ledger holds it, cut by the same
+// `markedCut` with its ellipsis, then whitespace-folded. A ledger entry links to the message of
+// the newest sighting equal to its `question` once that is folded too, and to its session's
+// thread where none is. The sightings live
 // in memory alone, so after a restart an older ask links to its thread until the worker posts the
 // line again.
 //
@@ -15,7 +16,7 @@
 // are posted in. The session and the guild are read through seams on every call, since both change
 // as sessions restart and the gateway caches its channel.
 import { askQuestions } from "./ask.ts";
-import { MAX_ASK_FIELD_LENGTH, cut } from "./ledger.ts";
+import { MAX_ASK_FIELD_LENGTH, markedCut } from "./ledger.ts";
 import type { AskEntry } from "./ledger.ts";
 import { jumpLink } from "../discord/links.ts";
 import type { OutboundAskTap } from "../routing/outbound.ts";
@@ -32,7 +33,7 @@ const TEMPLATE_PLACEHOLDER = /<[^<>]+>/;
 
 /** One marked line as it was seen: what it asks, the message it landed in, and when. */
 export type Sighting = {
-  /** The question, cut to the ledger's field length and whitespace-folded. */
+  /** The question, cut as the ledger cuts it, ellipsis included, and whitespace-folded. */
   capture: string;
   /** The reply's last message, which holds or follows the line. */
   messageId: string;
@@ -81,7 +82,7 @@ export function createSightings(options: SightingsOptions): Sightings {
     const keys = new Set<string>();
     for (const question of askQuestions(text)) {
       if (TEMPLATE_PLACEHOLDER.test(question)) continue;
-      keys.add(fold(cut(question, MAX_ASK_FIELD_LENGTH)));
+      keys.add(fold(markedCut(question, MAX_ASK_FIELD_LENGTH)));
     }
     if (keys.size === 0) return;
     const ring = seen.get(sessionId) ?? [];

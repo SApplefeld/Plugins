@@ -1471,6 +1471,10 @@ button.chip {
 .nm-sort-button,
 .nm-agree,
 .nm-correct,
+.nm-dismiss,
+.nm-context,
+.nm-send,
+.nm-cancel,
 .nm-batch-button {
   min-height: 44px;
   min-width: 44px;
@@ -1490,6 +1494,7 @@ button.chip {
 
 .nm-sort-button.on,
 .nm-agree,
+.nm-send,
 .nm-batch-button {
   border-color: var(--ink);
   background: var(--ink);
@@ -1497,6 +1502,7 @@ button.chip {
 }
 
 .nm-agree:disabled,
+.nm-send:disabled,
 .nm-batch-button:disabled {
   border-color: var(--line-strong);
   background: var(--track);
@@ -1570,7 +1576,9 @@ a.nm-text {
   padding: 4px 0 8px;
 }
 
-.nm-correct:disabled {
+.nm-correct:disabled,
+.nm-dismiss:disabled,
+.nm-cancel:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -1581,6 +1589,81 @@ a.nm-text {
   align-items: center;
   gap: 8px;
   padding-top: 4px;
+}
+
+/* An item whose act is out: tinted and edged in blue until the broker answers. */
+.nm-acting {
+  background: var(--blue-tint);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+/* What stands where a delivered item was, until the next reading. */
+.nm-sent {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.nm-context.on {
+  border-color: var(--ink);
+}
+
+/* The Context disclosure's body: the item's whole text, the ask's brief and plan, and the session's lines. */
+.nm-context-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.nm-whole,
+.nm-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The inline Correct box: the question quoted, the operator's words, then Send and Cancel. */
+.nm-correct-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.nm-quote {
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.nm-words {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.nm-words:disabled {
+  background: var(--track);
+  color: var(--muted);
+}
+
+.ask-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .nm-none {

@@ -1,6 +1,9 @@
-// The web surface's three marks the operator sets: a per-repo "caught up" time, a per-plan "seen"
-// snapshot of the plan's status and chapter count, and a per-ask "done" mark that hides an open ask on
-// the pages until the persona closes it or raises it again. They live in one file, `web-watermarks.json`, in the
+// The web surface's three marks: two the operator sets, a per-repo "caught up" time and a per-plan
+// "seen" snapshot of the plan's status and chapter count, and a per-item "handled" mark the act
+// routes write when an Agree, Correct or Dismiss line from the pages was delivered to the item's
+// session. A handled mark
+// hides an open ask until the persona closes it or raises it again, and a blocked queue entry while
+// it still reads blocked for the same reason. They live in one file, `web-watermarks.json`, in the
 // directory of the broker's state file, written whole through `writeSnapshot`, the same
 // temp-and-rename the registry snapshot uses, so a crash mid-write leaves the previous file intact.
 //
@@ -8,10 +11,12 @@
 // to a copy and committed to memory only after the file write succeeded, so memory never runs ahead of
 // the disk: a failed write throws and leaves both as they were.
 //
-// A file that is missing, unreadable, not the expected version or not JSON opens as an empty store. A
-// missing file is the first run and says nothing. Any other cause is logged once, by fixed sentence,
-// and the next write replaces the file; what the file held is not recovered. An entry inside a readable
-// file that does not validate is dropped alone and the rest stand.
+// A file that is missing, unreadable, of no version this store reads, or not JSON opens as an empty
+// store. A missing file is the first run and says nothing. Any other cause is logged once, by fixed
+// sentence, and the next write replaces the file; what the file held is not recovered. An entry inside
+// a readable file that does not validate is dropped alone and the rest stand. A version 1 file, written
+// before the handled list, holds a `done` list instead: each of its marks hid an ask with no line sent,
+// and it reads as a handled ask mark whose `how` is `dismissed`. Every write is the current version.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { writeSnapshot } from "../persistence.ts";
@@ -22,42 +27,90 @@ import { foldRootName } from "./config.ts";
 /** The file's name, beside `broker-state.json`. */
 export const WATERMARKS_FILE_NAME = "web-watermarks.json";
 
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
+
+/** The version written before the handled list existed, whose `done` list this store still reads. */
+const DONE_LIST_VERSION = 1;
 
 /** What the operator saw of one plan: when, and the two values a later look is compared against. */
 export type PlanMark = { root: string; path: string; seenAt: number; status: string; chapters: number };
 
-/**
- * One ask the operator marked done on the page: its persona's roster name, its ledger id, the
- * `openedAt` it carried when marked (null where the ledger gave none), the `reraisedAt` the page drew
- * (null where the ask had never been raised again), and when the operator tapped, which is for display.
- */
-export type DoneMark = { repo: string; askId: string; openedAt: number | null; seenRaise: number | null; markedAt: number };
+/** Which act's delivered line set a handled mark. */
+export type HandledHow = "agreed" | "corrected" | "dismissed";
 
-/** The marks a view reads: caught-up times by roster name, seen snapshots by `planMarkKey`, and done marks by `doneKey`. */
+const HOWS: ReadonlySet<string> = new Set<HandledHow>(["agreed", "corrected", "dismissed"]);
+
+/**
+ * An open ask whose line was delivered: its persona's roster name, its ledger id, the `openedAt` it
+ * carried when marked (null where the ledger gave none), the `reraisedAt` of the reading the line was
+ * composed from (null where the ask had never been raised again), when the line was delivered, which
+ * is for display, and which act sent it.
+ */
+export type AskHandledMark = {
+  kind: "ask";
+  repo: string;
+  askId: string;
+  openedAt: number | null;
+  seenRaise: number | null;
+  markedAt: number;
+  how: HandledHow;
+};
+
+/**
+ * A blocked queue entry whose Dismiss line was delivered: its persona's roster name, the entry's id,
+ * the block's text as the blocked item drew it, the fallback sentence included, when the line was
+ * delivered, and which act sent it.
+ */
+export type BlockedHandledMark = { kind: "blocked"; repo: string; entryId: string; reason: string; markedAt: number; how: HandledHow };
+
+export type HandledMark = AskHandledMark | BlockedHandledMark;
+
+/** The marks a view reads: caught-up times by roster name, seen snapshots by `planMarkKey`, and handled marks by `handledKey` or `blockedHandledKey`. */
 export type Marks = {
   repos: ReadonlyMap<string, number>;
   plans: ReadonlyMap<string, PlanMark>;
-  done: ReadonlyMap<string, DoneMark>;
+  handled: ReadonlyMap<string, HandledMark>;
 };
 
-export const EMPTY_MARKS: Marks = { repos: new Map(), plans: new Map(), done: new Map() };
+export const EMPTY_MARKS: Marks = { repos: new Map(), plans: new Map(), handled: new Map() };
 
-/** The key a done mark is held under: the persona's name and the ask's id, since ids are the ledger's per persona. */
-export function doneKey(repo: string, askId: string): string {
+/** The key an ask's handled mark is held under: the persona's name and the ask's id, since ids are the ledger's per persona. */
+export function handledKey(repo: string, askId: string): string {
   return JSON.stringify([repo, askId]);
 }
 
+/** The key a blocked entry's handled mark is held under: three parts where an ask's key has two, so the two never collide. */
+export function blockedHandledKey(repo: string, entryId: string): string {
+  return JSON.stringify([repo, "blocked", entryId]);
+}
+
+/** The key a handled mark is held under, by its kind. */
+function keyOf(mark: HandledMark): string {
+  return mark.kind === "ask" ? handledKey(mark.repo, mark.askId) : blockedHandledKey(mark.repo, mark.entryId);
+}
+
 /**
- * Whether a done mark hides this open ask: the mark carries the ask's `openedAt`, which the ledger keeps
- * across a re-raise, and the ledger shows no re-raise the mark did not see. A re-raise is the persona
- * asking again, so the ask returns. No clock is compared, so the tap's time decides nothing.
+ * Whether a handled mark hides this open ask: the mark carries the ask's `openedAt`, which the ledger
+ * keeps across a re-raise, and the ledger shows no re-raise the mark did not see. A re-raise is the
+ * persona asking again, so the ask returns. No clock is compared, so the delivery's time decides nothing.
  */
-export function doneHides(mark: DoneMark | undefined, ask: { openedAt: number | null; reraisedAt: number | null }): boolean {
-  if (mark === undefined || mark.openedAt !== ask.openedAt) return false;
+export function handledHides(mark: HandledMark | undefined, ask: { openedAt: number | null; reraisedAt: number | null }): boolean {
+  if (mark === undefined || mark.kind !== "ask" || mark.openedAt !== ask.openedAt) return false;
   if (ask.reraisedAt === null) return true;
   return mark.seenRaise !== null && ask.reraisedAt <= mark.seenRaise;
 }
+
+/** Whether a handled mark hides a blocked entry whose item draws `reason`: the block the line dismissed, by its text. */
+export function blockedHides(mark: HandledMark | undefined, reason: string): boolean {
+  return mark !== undefined && mark.kind === "blocked" && mark.reason === reason;
+}
+
+/**
+ * The blocked queue entries a reading holds, by persona name and then entry id, each with the text its
+ * blocked item draws. A persona whose queue the reading does not hold is absent; null where the queues
+ * have never been read. Built by `blockedReasons` in `./views.ts`, the one reading of the blocked rule.
+ */
+export type BlockedReasons = ReadonlyMap<string, ReadonlyMap<string, string>> | null;
 
 /** The key a plan's seen mark is held under: the root's folded name and the plan's relative path. */
 export function planMarkKey(root: string, relativePath: string): string {
@@ -71,16 +124,17 @@ export type WatermarkStore = {
   caughtUp: (repo: string, at: number) => void;
   /** Sets a plan's seen mark. Throws if the file cannot be written, and then changes nothing. */
   seen: (root: string, relativePath: string, snapshot: { status: string; chapters: number }, at: number) => void;
-  /** Sets an ask's done mark, replacing any earlier one. Throws if the file cannot be written, and then changes nothing. */
-  markDone: (mark: DoneMark) => void;
+  /** Sets an item's handled mark, replacing any earlier one. Throws if the file cannot be written, and then changes nothing. */
+  markHandled: (mark: HandledMark) => void;
   /**
-   * Drops each done mark whose ask the ledger reading shows closed. A persona the reading does not cover,
-   * one off the roster among them, or whose reading cannot answer, keeps its marks:
-   * one with no ledger, no good file read, or an open list at the reader's cap, since an ask missing
-   * there may still be open. Never throws: a write that fails is logged once, is not retried on the same
-   * reading, and the marks stand.
+   * Drops each ask's handled mark whose ask the ledger reading shows closed, and each blocked entry's
+   * whose entry the queues reading shows no longer blocked, or blocked for another reason. A persona
+   * the reading does not cover, one off the roster among them, or whose ledger reading cannot answer,
+   * keeps its marks: one with no ledger, no good file read, or an open list at the reader's cap, since
+   * an ask missing there may still be open. Never throws: a write that fails is logged once, is not
+   * retried on the same readings, and the marks stand.
    */
-  pruneDone: (ledger: readonly LedgerReading[] | null) => void;
+  pruneHandled: (ledger: readonly LedgerReading[] | null, blocked: BlockedReasons) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -101,10 +155,10 @@ function parseMarks(text: string): Marks | null {
   } catch {
     return null;
   }
-  if (!isRecord(parsed) || parsed.version !== FORMAT_VERSION) return null;
+  if (!isRecord(parsed) || (parsed.version !== FORMAT_VERSION && parsed.version !== DONE_LIST_VERSION)) return null;
   const repos = new Map<string, number>();
   const plans = new Map<string, PlanMark>();
-  const done = new Map<string, DoneMark>();
+  const handled = new Map<string, HandledMark>();
   for (const item of Array.isArray(parsed.repos) ? (parsed.repos as unknown[]) : []) {
     if (!isRecord(item) || typeof item.name !== "string") continue;
     const at = timeOf(item.caughtUpAt);
@@ -118,17 +172,54 @@ function parseMarks(text: string): Marks | null {
     if (typeof chapters !== "number" || !Number.isInteger(chapters) || chapters < 0 || at === null) continue;
     plans.set(planMarkKey(root, planPath), { root, path: planPath, seenAt: at, status, chapters });
   }
-  // A file written before the done list existed has none, and reads with an empty one.
-  for (const item of Array.isArray(parsed.done) ? (parsed.done as unknown[]) : []) {
-    if (!isRecord(item) || typeof item.repo !== "string" || typeof item.askId !== "string") continue;
-    const markedAt = timeOf(item.markedAt);
-    const openedAt = item.openedAt === null ? null : timeOf(item.openedAt);
-    const seenRaise = item.seenRaise === null || item.seenRaise === undefined ? null : timeOf(item.seenRaise);
-    if (markedAt === null || (item.openedAt !== null && openedAt === null)) continue;
-    if (item.seenRaise !== null && item.seenRaise !== undefined && seenRaise === null) continue;
-    done.set(doneKey(item.repo, item.askId), { repo: item.repo, askId: item.askId, openedAt, seenRaise, markedAt });
+  // A version 1 file's `done` list, or none where it was written before that list existed, reads as
+  // dismissed asks; a current file's `handled` list carries each mark's kind and act.
+  const listed = parsed.version === DONE_LIST_VERSION ? parsed.done : parsed.handled;
+  for (const item of Array.isArray(listed) ? (listed as unknown[]) : []) {
+    const mark = parsed.version === DONE_LIST_VERSION ? askMarkOf(item, "dismissed") : handledMarkOf(item);
+    if (mark !== null) handled.set(keyOf(mark), mark);
   }
-  return { repos, plans, done };
+  return { repos, plans, handled };
+}
+
+/** An ask's handled mark out of a file's entry, or null where the entry does not validate. */
+function askMarkOf(item: unknown, how: HandledHow): AskHandledMark | null {
+  if (!isRecord(item) || typeof item.repo !== "string" || typeof item.askId !== "string") return null;
+  const markedAt = timeOf(item.markedAt);
+  const openedAt = item.openedAt === null ? null : timeOf(item.openedAt);
+  const seenRaise = item.seenRaise === null || item.seenRaise === undefined ? null : timeOf(item.seenRaise);
+  if (markedAt === null || (item.openedAt !== null && openedAt === null)) return null;
+  if (item.seenRaise !== null && item.seenRaise !== undefined && seenRaise === null) return null;
+  return { kind: "ask", repo: item.repo, askId: item.askId, openedAt, seenRaise, markedAt, how };
+}
+
+/** A current file's handled mark of either kind, or null where the entry does not validate. */
+function handledMarkOf(item: unknown): HandledMark | null {
+  if (!isRecord(item) || typeof item.how !== "string" || !HOWS.has(item.how)) return null;
+  const how = item.how as HandledHow;
+  if (item.kind === "ask") return askMarkOf(item, how);
+  if (item.kind !== "blocked") return null;
+  const { repo, entryId, reason } = item;
+  const markedAt = timeOf(item.markedAt);
+  if (typeof repo !== "string" || typeof entryId !== "string" || typeof reason !== "string" || markedAt === null) return null;
+  return { kind: "blocked", repo, entryId, reason, markedAt, how };
+}
+
+/** A handled mark as the file holds it, its times as ISO strings. */
+function savedMark(mark: HandledMark): Record<string, unknown> {
+  const markedAt = new Date(mark.markedAt).toISOString();
+  if (mark.kind === "blocked") {
+    return { kind: mark.kind, repo: mark.repo, entryId: mark.entryId, reason: mark.reason, markedAt, how: mark.how };
+  }
+  return {
+    kind: mark.kind,
+    repo: mark.repo,
+    askId: mark.askId,
+    openedAt: mark.openedAt === null ? null : new Date(mark.openedAt).toISOString(),
+    seenRaise: mark.seenRaise === null ? null : new Date(mark.seenRaise).toISOString(),
+    markedAt,
+    how: mark.how,
+  };
 }
 
 function serialize(marks: Marks): string {
@@ -143,13 +234,7 @@ function serialize(marks: Marks): string {
         status: mark.status,
         chapters: mark.chapters,
       })),
-      done: [...marks.done.values()].map((mark) => ({
-        repo: mark.repo,
-        askId: mark.askId,
-        openedAt: mark.openedAt === null ? null : new Date(mark.openedAt).toISOString(),
-        seenRaise: mark.seenRaise === null ? null : new Date(mark.seenRaise).toISOString(),
-        markedAt: new Date(mark.markedAt).toISOString(),
-      })),
+      handled: [...marks.handled.values()].map(savedMark),
     },
     null,
     2,
@@ -166,16 +251,36 @@ function answers(reading: LedgerReading): boolean {
 }
 
 /**
- * The readings a view is drawn from, with the operator's marks merged in: the merge first drops the done
- * marks of asks the ledger no longer lists open, then carries the marks as they stand. The one merge the
- * broker and the tests share.
+ * The readings a view is drawn from, with the operator's marks merged in: the merge first drops the
+ * handled marks of asks the ledger no longer lists open and of entries `blocked` no longer reads as
+ * blocked for the mark's reason, then carries the marks as they stand. `blocked` is `blockedReasons`
+ * from `./views.ts`, handed in so this module needs no import of the views. The one merge the broker
+ * and the tests share.
  */
 export function withMarks<T extends { ledger: { value: readonly LedgerReading[] | null } }>(
   base: T,
   store: WatermarkStore,
+  blocked: (base: T) => BlockedReasons,
 ): T & { marks: Marks } {
-  store.pruneDone(base.ledger.value);
+  store.pruneHandled(base.ledger.value, blocked(base));
   return { ...base, marks: store.marks() };
+}
+
+/**
+ * Whether a handled mark still stands against the readings: an ask's while the ledger cannot say the
+ * ask closed, a blocked entry's while the queues reading cannot say the block ended or changed.
+ */
+function stands(
+  mark: HandledMark,
+  covered: ReadonlyMap<string, LedgerReading> | null,
+  blocked: BlockedReasons,
+): boolean {
+  if (mark.kind === "blocked") {
+    const entries = blocked?.get(mark.repo);
+    return entries === undefined || entries.get(mark.entryId) === mark.reason;
+  }
+  const reading = covered?.get(mark.repo);
+  return reading === undefined || !answers(reading) || reading.open.some((ask) => ask.id === mark.askId);
 }
 
 /** The file for a broker whose state file is `stateFile`. */
@@ -205,8 +310,8 @@ export function openWatermarks(file: string, log: (message: string) => void = ()
     current = next;
   }
 
-  /** The ledger reading whose prune last failed to write, so the same reading is not written again. */
-  let failedOn: readonly LedgerReading[] | null = null;
+  /** The readings whose prune last failed to write, so the same readings are not written again. */
+  let failedOn: { ledger: readonly LedgerReading[] | null; blocked: BlockedReasons } | null = null;
 
   return {
     marks: () => current,
@@ -217,26 +322,25 @@ export function openWatermarks(file: string, log: (message: string) => void = ()
       const mark: PlanMark = { root, path: relativePath, seenAt: at, ...snapshot };
       commit({ ...current, plans: new Map(current.plans).set(planMarkKey(root, relativePath), mark) });
     },
-    markDone(mark) {
-      commit({ ...current, done: new Map(current.done).set(doneKey(mark.repo, mark.askId), mark) });
+    markHandled(mark) {
+      commit({ ...current, handled: new Map(current.handled).set(keyOf(mark), mark) });
     },
-    pruneDone(ledger) {
-      // A reading that failed to write is not retried until the next pass brings a new one.
-      if (ledger === null || current.done.size === 0 || ledger === failedOn) return;
-      const covered = new Map(ledger.map((reading) => [reading.name, reading]));
-      const kept = new Map<string, DoneMark>();
-      for (const [key, mark] of current.done) {
-        const reading = covered.get(mark.repo);
-        const keep = reading === undefined || !answers(reading) || reading.open.some((ask) => ask.id === mark.askId);
-        if (keep) kept.set(key, mark);
+    pruneHandled(ledger, blocked) {
+      if (current.handled.size === 0) return;
+      // Readings that failed to write are not retried until the next pass brings new ones.
+      if (failedOn !== null && failedOn.ledger === ledger && failedOn.blocked === blocked) return;
+      const covered = ledger === null ? null : new Map(ledger.map((reading) => [reading.name, reading]));
+      const kept = new Map<string, HandledMark>();
+      for (const [key, mark] of current.handled) {
+        if (stands(mark, covered, blocked)) kept.set(key, mark);
       }
-      if (kept.size === current.done.size) return;
+      if (kept.size === current.handled.size) return;
       try {
-        commit({ ...current, done: kept });
+        commit({ ...current, handled: kept });
         failedOn = null;
       } catch {
-        if (failedOn === null) log("web watermarks: a closed ask's done mark could not be dropped, so the file keeps it");
-        failedOn = ledger;
+        if (failedOn === null) log("web watermarks: a closed item's handled mark could not be dropped, so the file keeps it");
+        failedOn = { ledger, blocked };
       }
     },
   };
