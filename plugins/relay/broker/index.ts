@@ -80,7 +80,7 @@ import {
 } from "./security/permission.ts";
 import type { PermissionDesk } from "./security/permission.ts";
 import { loadSenderGate } from "./security/senders.ts";
-import { createQuestionDesk } from "./question-desk.ts";
+import { createQuestionDesk, recommendedAnswer } from "./question-desk.ts";
 import { RESOLVE_LITERAL, loadWebConfig, resolveWebBind, webBindLabel } from "./web/config.ts";
 import type { WebConfig, WebConfigContext } from "./web/config.ts";
 import { createTailscaleIdentity, tailnetAddressAsync } from "./web/identity.ts";
@@ -2295,7 +2295,22 @@ export async function startBroker(
       // The typed-answer seam. A message posted while this session's question is held answers that
       // question whole, in the operator's own words, instead of reaching the model as steering it
       // could only queue against a session parked inside the tool call.
-      questions: { answerTyped: questionDesk.answerTyped },
+      // The held alert's recommended choice is what an operator's thumbs-up on that alert submits
+      // through the same seam, read by the message the reaction sat on.
+      questions: {
+        answerTyped: questionDesk.answerTyped,
+        recommendedAt: (sessionId, messageId) => recommendedAnswer(questionDesk.heldFor(sessionId), messageId),
+      },
+      // The ask a reaction sat on, read off the decisions card's own records: its card message or a
+      // part of its brief, in the card's thread. Null with no card, which is a broker that posts no ask.
+      asks: {
+        forMessage: (threadId, messageId) => {
+          const found = decisionsCard?.askAt(threadId, messageId) ?? null;
+          return found === null
+            ? null
+            : { id: found.id, question: found.question, recommend: found.recommend, lineage: found.persona };
+        },
+      },
       threadFor: (sessionId) => surface.threadFor(sessionId),
       writer: steeringWriter,
       // The mode, caps, judge and journal. The router builds the gate, whose timers deliver into
@@ -2386,6 +2401,16 @@ export async function startBroker(
         return router.deliver(message);
       },
       onInteraction: (interaction) => interactions.deliver(interaction),
+      // The reaction seams. The roster is the one `router.react` classes a reactor by, asked here
+      // first so the gateway reads nothing about a reaction from an account it does not name, and
+      // a removal cancels a held addition through the router before any read.
+      reactions: {
+        onReaction: (reaction) => {
+          router.react(reaction);
+        },
+        admits: (senderId) => gate.classOf(senderId) !== null,
+        withdraw: (reaction) => router.withdraw(reaction),
+      },
       // The other half of the writes that announce themselves: the keeper reconciles which cards
       // are pinned, and this removes the system message Discord writes into the channel behind
       // each pin.

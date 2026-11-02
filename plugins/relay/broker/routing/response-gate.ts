@@ -47,7 +47,7 @@ import type { JevFetch } from "../jev/client.ts";
 import { rotate } from "../log.ts";
 import { writeSnapshot } from "../persistence.ts";
 import type { RepeatLogSurface } from "../repeat-log.ts";
-import { sliceCodePoints } from "../sanitize.ts";
+import { fit, oneLine, sliceCodePoints } from "../sanitize.ts";
 import type { SenderClass } from "../security/senders.ts";
 import type { RelayEvent } from "./relays.ts";
 
@@ -67,6 +67,19 @@ export type ResponseGateMode = "off" | "shadow" | "live";
  * buffer delivers early rather than grow past what the pipe will carry.
  */
 export const MAX_EVENT_UNITS = 64 * 1024;
+
+/**
+ * The earlier message a reply pointed at, as the event quotes it: its author's display name as the
+ * gateway's `authorName` gives it, its own creation time in epoch ms, and its text, or `gone` where
+ * that message was deleted or could not be read. The router holds the text bounded and already in
+ * `quotedText`'s form, and the render applies `quotedText` again, which changes nothing it already
+ * made, so every reader of the buffer gets the same cut whoever built the quote. Like a message's own
+ * text it is the writer's words and carries no standing.
+ */
+export type Quote = { kind: "message"; author: string; at: number; text: string } | { kind: "gone" };
+
+/** The most code points a quoted text contributes to its closing line or tag, the ellipsis included. */
+export const MAX_QUOTE_CODE_POINTS = 200;
 
 /** One admitted message as the buffer holds it: what its delivered line and the event read. */
 export type BufferedMessage = {
@@ -98,6 +111,13 @@ export type BufferedMessage = {
    * Text may be empty where this is present: a message of files alone is still a message.
    */
   attachments?: readonly string[];
+  /**
+   * The message this one replied to. Absent where it replied to none, so a message that is no
+   * reply is held, persisted and delivered exactly as one always was, and a buffers file an older
+   * broker wrote reads the same. Set by the router from the gateway's reading of the reply link,
+   * never from anything in the text.
+   */
+  quote?: Quote;
 };
 
 /**
@@ -321,8 +341,39 @@ export function lowestClass(messages: readonly BufferedMessage[]): SenderClass {
  * Its width is fixed, which `overBudget` below relies on.
  */
 export function restartLine(oldestAt: number): string {
-  const since = new Date(oldestAt).toISOString().replace(/\.\d{3}Z$/, "Z");
-  return `Lines held across a broker restart follow, the oldest held since ${since}.`;
+  return `Lines held across a broker restart follow, the oldest held since ${utcSecond(oldestAt)}.`;
+}
+
+/** An epoch-ms time as the broker's own lines name one: ISO 8601 in UTC, to the second. */
+export function utcSecond(ms: number): string {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * A quoted text as its closing line or tag carries it: made one line by `oneLine`, so it can neither
+ * start a line of the event nor leave the double quotes it is set in, then cut by `fit`, which ends
+ * a cut in an ellipsis and holds both the code-point and the UTF-16 bound. Both steps leave a text
+ * they already made unchanged, so the router holds a quote in this form and the render applies it
+ * again, and every reader of the buffer gets the same cut whoever built the quote.
+ */
+export function quotedText(text: string): string {
+  return fit(oneLine(text), MAX_QUOTE_CODE_POINTS);
+}
+
+/**
+ * The line a single message's text closes with when it replied to an earlier message, after a
+ * blank line and after the files line where both come. It is text a writer could have typed, which
+ * the relay's instructions say, so it carries no standing of its own.
+ */
+export function quoteLine(quote: Quote): string {
+  if (quote.kind === "gone") return "(Replying to a message that is no longer available.)";
+  return `(Replying to ${quote.author} at ${utcSecond(quote.at)}: "${quotedText(quote.text)}")`;
+}
+
+/** The tag a gathered line ends with when its message replied to one, after any attachments tag. */
+export function quoteTag(quote: Quote): string {
+  if (quote.kind === "gone") return "[replying to a message that is no longer available]";
+  return `[replying to ${quote.author} at ${utcSecond(quote.at)}: "${quotedText(quote.text)}"]`;
 }
 
 /**
@@ -356,6 +407,10 @@ export function closingLine(count: number): string {
  * field is absent where there are none. The text names them without a path: the ungated shape
  * closes with `closingLine` after a blank line, and the attributed shape ends each line that had
  * files with their numbers in that field, as ` [attachments 1, 2]`, counted across the whole event.
+ *
+ * A message that replied to an earlier one carries it the same two ways: the ungated shape closes
+ * with `quoteLine`, on the line after the files line where both come, and the attributed shape ends
+ * the line with `quoteTag`, after the attachments tag where both come.
  */
 export function bufferedEvent(
   chatId: string,
@@ -366,9 +421,12 @@ export function bufferedEvent(
   const paths = messages.flatMap((message) => message.attachments ?? []);
   const files = paths.length === 0 ? {} : { attachments: paths };
   if (messages.length === 1 && restoredAt === undefined) {
+    const closings: string[] = [];
+    if (paths.length > 0) closings.push(closingLine(paths.length));
+    if (newest.quote !== undefined) closings.push(quoteLine(newest.quote));
     let text = newest.text;
-    if (paths.length > 0) {
-      const closing = closingLine(paths.length);
+    if (closings.length > 0) {
+      const closing = closings.join("\n");
       text = text === "" ? closing : `${text}\n\n${closing}`;
     }
     return {
@@ -383,12 +441,16 @@ export function bufferedEvent(
   let numbered = 0;
   const lines = messages.map((message) => {
     const line = bufferedLine(message);
+    const tags: string[] = [];
     const count = message.attachments?.length ?? 0;
-    if (count === 0) return line;
-    const numbers = Array.from({ length: count }, () => String((numbered += 1)));
-    const tag = `[attachments ${numbers.join(", ")}]`;
+    if (count > 0) {
+      const numbers = Array.from({ length: count }, () => String((numbered += 1)));
+      tags.push(`[attachments ${numbers.join(", ")}]`);
+    }
+    if (message.quote !== undefined) tags.push(quoteTag(message.quote));
+    if (tags.length === 0) return line;
     // A line of files alone already ends in the space after its prefix.
-    return message.text === "" ? `${line}${tag}` : `${line} ${tag}`;
+    return message.text === "" ? `${line}${tags.join(" ")}` : `${line} ${tags.join(" ")}`;
   });
   if (restoredAt !== undefined) lines.unshift(restartLine(restoredAt));
   return {
@@ -408,14 +470,18 @@ export function bufferedEvent(
  * length, plus the newline that ends the line. Measured as a restored delivery whether or not the
  * buffer is one. The restart line is a fixed width, and reserving it on every buffer is what lets a
  * buffer held under the cap be persisted, restored and delivered under it with the line in front.
- * The measure is the whole event, its `attachments` list included, and a list past
+ * The measure is the whole event, its `attachments` list and every quote tag included, and a list past
  * `MAX_EVENT_ATTACHMENTS` is over the budget too, since the relay would drop it. Exported for the
  * buffers file's reader, which bounds an entry by this and by nothing else, and for the router,
  * which delivers a paste inline only where the message carrying it passes.
  *
  * The attributed shape measured here is never shorter than the ungated shape of the same single
- * message: the restart line and the `<author> (<class>): ` prefix it adds outweigh the closing
- * line and blank line it drops. So a lone message that passes here fits the pipe in either shape.
+ * message: the restart line and the `<author> (<class>): ` prefix it adds outweigh what the ungated
+ * shape spends in its place, the closing lines with the blank line and line breaks that set them
+ * off where the attributed shape spends the tags with their leading spaces. The quote line is the
+ * quote tag's own length, or one character longer in its gone form, so a quote widens that
+ * difference by its line breaks and that one character at most. So a lone message that passes here
+ * fits the pipe in either shape.
  */
 export function overBudget(chatId: string, messages: readonly BufferedMessage[]): boolean {
   const event = bufferedEvent(chatId, messages, 0);
@@ -646,7 +712,11 @@ export function createResponseGate(options: ResponseGateOptions): ResponseGate {
     if (options.persist === undefined || closed) return;
     const buffers: HeldBuffer[] = [];
     for (const [threadId, buffer] of held) {
-      if (buffer.messages.some((message) => SECRET_SCREEN.test(bufferedLine(message)))) {
+      // A quoted text rides the file beside the line, so it is screened beside the line.
+      const screened = (message: BufferedMessage): boolean =>
+        SECRET_SCREEN.test(bufferedLine(message)) ||
+        (message.quote?.kind === "message" && SECRET_SCREEN.test(message.quote.text));
+      if (buffer.messages.some(screened)) {
         if (!buffer.screenedLogged) {
           buffer.screenedLogged = true;
           log(

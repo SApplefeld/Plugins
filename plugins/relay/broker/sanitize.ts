@@ -199,6 +199,20 @@ export function visible(value: string): string {
 }
 
 /**
+ * Text another author wrote, made one line for a line the broker writes around it: each control
+ * character and line break made a space, runs of whitespace made one space, the ends trimmed, and
+ * each double quote made a single quote, so text set inside one pair of double quotes can neither
+ * leave them nor start a line.
+ */
+export function oneLine(text: string): string {
+  return text
+    .replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/"/g, "'");
+}
+
+/**
  * Truncates to a length in code points, never in UTF-16 units: cutting an astral-plane character
  * in half leaves a lone surrogate, which is not valid UTF-8 for the request body. The cut is marked
  * with an ellipsis paid for out of the limit, so what comes back is inside the bound and says it is

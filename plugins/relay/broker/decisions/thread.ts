@@ -43,10 +43,12 @@ import { createBudget } from "../discord/budget.ts";
 import type { Budget } from "../discord/budget.ts";
 import type { CallOutcome, DiscordTransport, ThreadMessenger } from "../discord/transport.ts";
 import { createRepeatLog } from "../repeat-log.ts";
+import { MAX_QUOTE_CODE_POINTS } from "../routing/response-gate.ts";
 import type { RepeatLogSurface } from "../repeat-log.ts";
 import { fit, visible } from "../sanitize.ts";
 import {
   MAX_ASK_BODY_LENGTH,
+  drawnRecommendation,
   hasBrief,
   openAsks,
   renderAskMessage,
@@ -55,9 +57,9 @@ import {
   renderDecisionsCard,
 } from "./card.ts";
 import type { AskLink, OpenAsk } from "./card.ts";
-import { MAX_ASK_RECORDS, askKey, capAskRecords } from "./binding.ts";
+import { MAX_ASK_RECORDS, askAtMessage, askKey, capAskRecords } from "./binding.ts";
 import type { AskRecord, DecisionsCardBinding } from "./binding.ts";
-import { MAX_ASKS_PER_LIST } from "./ledger.ts";
+import { MAX_ASKS_PER_LIST, questionOf } from "./ledger.ts";
 import type { LedgerReading } from "./ledger.ts";
 
 /**
@@ -185,6 +187,19 @@ export type DecisionsCard = {
    * identifier held is dropped rather than kept against a message that is not there.
    */
   cardMessage: () => string | null;
+  /**
+   * The open ask the message `messageId` in thread `threadId` was posted for, its card message or
+   * one of its brief's parts, with the persona it is read from, its stored question and its
+   * recommendation as they stood when the ask's thread message was posted, both kept on the ask's
+   * record, the recommendation null where that message showed none and the question the last
+   * pass's reading's where an older record kept none. Null where the thread is
+   * not this card's, where no record names the message, and where the last reading does not carry
+   * the ask among its open entries.
+   */
+  askAt: (
+    threadId: string,
+    messageId: string,
+  ) => { persona: string; id: string; question: string; recommend: string | null } | null;
 };
 
 /**
@@ -292,6 +307,8 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
   let dirty = false;
   // The personas the last pass's readings named, which is the roster the cap evicts against.
   let roster: ReadonlySet<string> = new Set();
+  // The last pass's ledger readings, which is where an ask's stored question is read back from.
+  let lastReadings: readonly LedgerReading[] = [];
 
   function bound(): void {
     if (messageId === null) return;
@@ -522,6 +539,12 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
         body: text,
         briefed: false,
         tailIds: [],
+        ...(ask.entry.recommend === null || ask.entry.recommend === ""
+          ? {}
+          : { recommend: drawnRecommendation(ask.entry.recommend) }),
+        // Cut to what a reaction's line can quote, so the kept question stays inside the file's
+        // byte budget; the line's own cut then cuts nothing further.
+        question: fit(questionOf(ask.entry.question), MAX_QUOTE_CODE_POINTS),
         openedAt: ask.entry.openedAt,
         closedAt: null,
       });
@@ -701,6 +724,7 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
     const at = now();
     const ledgers = options.ledgers();
     roster = new Set(ledgers.map((ledger) => ledger.name));
+    lastReadings = ledgers;
     const links = options.links();
     const card = renderDecisionsCard(ledgers, links, at);
 
@@ -774,6 +798,25 @@ export function createDecisionsCard(options: DecisionsCardOptions): DecisionsCar
     tick,
 
     cardMessage: () => messageId,
+
+    askAt: (thread, message) => {
+      if (threadId === null || thread !== threadId) return null;
+      const record = askAtMessage(asks.values(), message);
+      if (record === null) return null;
+      const ledger = lastReadings.find((reading) => reading.name === record.persona);
+      // Open asks alone: a closed ask's card asks nothing, so a reaction on it is a plain line.
+      const entry = ledger?.open.find((held) => held.id === record.id);
+      if (entry === undefined) return null;
+      // The question and recommendation the message showed, never the ledger's current ones: the
+      // message is not edited when the entry changes under the same id. A record written before the
+      // question was kept falls back to the entry's.
+      return {
+        persona: record.persona,
+        id: record.id,
+        question: record.question ?? entry.question,
+        recommend: record.recommend ?? null,
+      };
+    },
 
     start: () => {
       if (timer !== null) return;

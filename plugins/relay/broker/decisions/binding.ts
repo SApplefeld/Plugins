@@ -53,9 +53,10 @@ export const MAX_ASK_RECORDS = 256;
  * character as a six-byte escape, so an id costs up to 6,000 bytes. That is 5,397 + 6,000 + 300
  * bytes of text, with the snowflake, the two stamps, the brief flag, the keys and the pretty print's
  * indentation under 250 more. The tail adds at most `MAX_BRIEF_PARTS` snowflakes of 20 digits, each
- * with its quotes, its comma and its line's indentation, and the key, under 150 bytes: one record
- * under 12,100 bytes, and the cap's worth of them under 3.1 MB. A file past this cap is one
- * something else wrote.
+ * with its quotes, its comma and its line's indentation, and the key, under 150 bytes. The kept
+ * recommendation is at most 240 code points and the kept question at most 200 UTF-16 units, so
+ * even as six-byte escapes they add under 2,700 bytes with their keys: one record under 14,800
+ * bytes, and the cap's worth of them under 3.8 MB. A file past this cap is one something else wrote.
  */
 export const MAX_ASKS_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -98,11 +99,35 @@ export type AskRecord = {
    * the one at the tail's length. A file written before the tail reads empty.
    */
   tailIds: string[];
+  /**
+   * The recommendation as the ask's own message drew it, markdown escapes taken back out, and absent
+   * where that message showed none or the record was written before the field. A reaction's line
+   * quotes this and never the ledger's current entry, which can change under the same id while the
+   * posted message does not.
+   */
+  recommend?: string;
+  /**
+   * The entry's question as it stood when the ask's own message was drawn, absent where the record
+   * was written before the field. A reaction's line names this question, for the same reason it
+   * quotes `recommend`, and an older record falls back to the ledger's current entry.
+   */
+  question?: string;
   /** The entry's `openedAt`, which orders a departed persona's records when the cap drops one. */
   openedAt: number | null;
   /** When this card saw the ask closed and edited its message, or null while it is open. */
   closedAt: number | null;
 };
+
+/**
+ * The record whose ask the thread message `messageId` belongs to: the ask's own message, or one of
+ * the messages its decision brief was posted as. Null where no record names that message.
+ */
+export function askAtMessage(records: Iterable<AskRecord>, messageId: string): AskRecord | null {
+  for (const record of records) {
+    if (record.messageId === messageId || record.tailIds.includes(messageId)) return record;
+  }
+  return null;
+}
 
 /** What names an ask across the map: its persona and its id, keyed as the ledger reader keys its
  * slots, since two personas' ledgers can carry the same id for two different asks. */
@@ -146,6 +171,11 @@ function tailOf(value: unknown): string[] | undefined {
   return ids;
 }
 
+/** A text this card could have drawn: a non-empty, well-formed string inside the message ceiling. */
+function isDrawnText(value: unknown): value is string {
+  return typeof value === "string" && value !== "" && value.length <= MAX_ASK_BODY_LENGTH && isWellFormed(value);
+}
+
 /**
  * One record out of the file, or null where it is not one. The message id and each tail id are
  * interpolated into a token-bearing request path on the edit that closes the ask, so each is
@@ -173,12 +203,18 @@ function recordOf(value: unknown): AskRecord | null {
   const briefed = value.briefed === true;
   const tailIds = tailOf(value.tailIds);
   if (tailIds === undefined) return null;
+  // A recommendation or question that is absent or not one this card could have drawn reads as
+  // none, so the line names nothing the message may not have shown.
+  const shown = {
+    ...(isDrawnText(value.recommend) ? { recommend: value.recommend } : {}),
+    ...(isDrawnText(value.question) ? { question: value.question } : {}),
+  };
   if (value.messageId === null) {
-    return { persona, id, messageId: null, body, briefed, tailIds, openedAt, closedAt };
+    return { persona, id, messageId: null, body, briefed, tailIds, ...shown, openedAt, closedAt };
   }
   const messageId = snowflakeOf(value.messageId);
   if (messageId === null) return null;
-  return { persona, id, messageId, body, briefed, tailIds, openedAt, closedAt };
+  return { persona, id, messageId, body, briefed, tailIds, ...shown, openedAt, closedAt };
 }
 
 export type LoadAskRecordsOptions = {

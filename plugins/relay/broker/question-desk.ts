@@ -16,11 +16,13 @@
 // Log lines carry session IDs, counts, and states; never a question, an option, or an answer.
 import { randomBytes } from "node:crypto";
 import type { ServerResponse } from "node:http";
+import { MAX_QUESTION_LENGTH, inertText } from "./discord/render.ts";
 import type { AskedQuestion } from "./discord/render.ts";
+import { RECOMMEND_SEGMENT } from "./decisions/ledger.ts";
 import { createRepeatLog } from "./repeat-log.ts";
 import type { RepeatLogSurface } from "./repeat-log.ts";
 import { MAX_INBOUND_TEXT_LENGTH } from "./routing/inbound.ts";
-import { sliceCodePoints, withoutInvisible } from "./sanitize.ts";
+import { fit, sliceCodePoints, withoutInvisible } from "./sanitize.ts";
 import { questionDigest } from "./tail.ts";
 
 /**
@@ -424,6 +426,27 @@ export const QUESTION_DESK_REPEAT_LOG: RepeatLogSurface<[]> = {
     `question desk: ${reason} occurred ${String(suppressed)} more time(s) in the last ` +
     `${String(REPEAT_WINDOW_MS)}ms`,
 };
+
+/**
+ * The recommended choice of the held ask whose alert is the message `messageId`, read off its
+ * stored question's `Recommend:` segment and trimmed, or null. Null where no held entry's alert is
+ * that message, where the ask holds more than one question, since one choice cannot answer several,
+ * where the question carries no recommendation or an empty one, and where the alert drew the
+ * question cut: the alert draws it through `fit(inertText(question), MAX_QUESTION_LENGTH)`, and a
+ * recommendation past that cut, or one the cut splits, is one the operator never saw. What an
+ * operator's thumbs-up on the alert submits as the typed answer.
+ */
+export function recommendedAnswer(entries: readonly QuestionEntryView[], messageId: string): string | null {
+  const entry = entries.find((held) => held.alert?.messageId === messageId);
+  if (entry === undefined || entry.questions.length !== 1) return null;
+  const question = entry.questions[0]?.question ?? "";
+  const drawn = inertText(question);
+  if (fit(drawn, MAX_QUESTION_LENGTH) !== drawn) return null;
+  const match = RECOMMEND_SEGMENT.exec(question);
+  if (match === null) return null;
+  const choice = question.slice(match.index + match[0].length).trim();
+  return choice === "" ? null : choice;
+}
 
 export function createQuestionDesk(options: QuestionDeskOptions): QuestionDesk {
   const log = options.log ?? ((): void => {});

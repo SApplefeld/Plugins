@@ -287,6 +287,12 @@ export type PermissionDesk = {
    */
   resolve: (threadId: string, verdict: Verdict, nonce: string | null) => boolean;
   /**
+   * The request whose prompt is the message `messageId` in thread `threadId`, while that prompt is
+   * still open, or null. What a reaction on the prompt names, read by the message it sat on.
+   * Optional so a stand-in desk that never posts a prompt can leave it out.
+   */
+  requestAt?: (threadId: string, messageId: string) => string | null;
+  /**
    * Settles when the writes an answered request leaves in the thread have been attempted. Held for
    * a caller that has to observe them, which is a test: nothing in the running broker waits on a
    * verdict's cosmetics.
@@ -706,6 +712,13 @@ export function createPermissionDesk(options: PermissionDeskOptions): Permission
         }
       }
       return true;
+    },
+
+    requestAt(threadId, messageId) {
+      for (const entry of open.values()) {
+        if (entry.threadId === threadId && entry.messageId === messageId) return entry.requestId;
+      }
+      return null;
     },
 
     resolve(threadId, verdict, nonce) {

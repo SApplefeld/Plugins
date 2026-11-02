@@ -43,7 +43,7 @@ import { pipeline } from "node:stream/promises";
 import { MAX_ASKS_PER_LIST, MAX_ASK_FIELD_LENGTH, questionOf } from "../decisions/ledger.ts";
 import type { AskEntry } from "../decisions/ledger.ts";
 import type { Logger } from "../log.ts";
-import { fit } from "../sanitize.ts";
+import { fit, oneLine } from "../sanitize.ts";
 import { foldRootName } from "./config.ts";
 import type { WebConfig } from "./config.ts";
 import type { TailnetPeer, WebIdentity } from "./identity.ts";
@@ -1103,19 +1103,6 @@ export type ActStatus =
   | "refused: blocking";
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
-
-/**
- * Text a worker wrote, made one line for a line the broker sends: each control character and line
- * break made a space, runs of space made one, the ends trimmed, and each double quote made a single
- * quote, so text set inside one pair of double quotes can neither leave them nor start a line.
- */
-function oneLine(text: string): string {
-  return text
-    .replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/"/g, "'");
-}
 
 /**
  * A question, a reason or an item's id as a line quotes it: one line, cut with `fit` to

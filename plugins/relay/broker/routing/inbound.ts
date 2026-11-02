@@ -31,7 +31,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { inertBlock, renderPageLine } from "../discord/render.ts";
 import type { CallOutcome } from "../discord/transport.ts";
-import { boundedAuthor, clean, withoutInvisible } from "../sanitize.ts";
+import { questionOf } from "../decisions/ledger.ts";
+import { boundedAuthor, clean, oneLine, withoutInvisible } from "../sanitize.ts";
 import { parseVerdict } from "../security/permission.ts";
 import type { PermissionDesk } from "../security/permission.ts";
 import { SNOWFLAKE } from "../security/senders.ts";
@@ -48,13 +49,16 @@ import {
   bufferedEvent,
   createResponseGate,
   overBudget,
+  quotedText,
   saveHeldBuffers,
+  utcSecond,
 } from "./response-gate.ts";
 import type {
   BufferDelivery,
   BufferedMessage,
   HeldBuffer,
   JournalRow,
+  Quote,
   ResponseGate,
   ResponseGateJudge,
   ResponseGateMode,
@@ -109,7 +113,129 @@ export type InboundMessage = {
    * file it refuses is named back to the thread.
    */
   attachments: readonly InboundAttachment[];
+  /**
+   * The earlier message this one replied to, read by the gateway from the reply link: its author's
+   * name as `authorName` gives it, its own creation time and its text as Discord gave it, or `gone`
+   * where that message was deleted or could not be read. Absent where the message replied to none.
+   * The text is untrusted data exactly as `text` is, and is bounded the same way before it is held.
+   */
+  repliedTo?: Quote;
 };
+
+/** Whether a reaction was put on a message or taken off it. */
+export type ReactionAction = "added" | "removed";
+
+/**
+ * A reaction read off the Discord gateway, reduced to what routing needs. Every string in it is
+ * untrusted data, as a message's text is, and reaches a session only inside a line the broker
+ * composes around it.
+ */
+export type InboundReaction = {
+  /** The thread the reacted-on message sits in. */
+  threadId: string;
+  /** The reacted-on message's own Discord id: the key the ask lookup and the two desks read. */
+  messageId: string;
+  /** The reactor's Discord user id. The allowlist over it is the only authority for anything here. */
+  senderId: string;
+  /** The reactor's display name, bounded by the gateway's `authorName`. A label, never a key. */
+  author: string;
+  /** The emoji as Discord names it: the character itself for a standard emoji, `:name:` for a custom one. */
+  emoji: string;
+  action: ReactionAction;
+  /**
+   * The reacted-on message: its author's name as `authorName` gives it, its own creation time in
+   * epoch ms, its text as Discord gave it, and whether this bot's own user wrote it. Null where the
+   * gateway could not read it.
+   */
+  target: { author: string; at: number; text: string; own: boolean } | null;
+  /**
+   * When the gateway listener took the reaction off the connection, in epoch ms, stamped before any
+   * read. The hold counts from it, so the time a read takes is spent out of the hold and never
+   * added to it.
+   */
+  arrivedAt: number;
+};
+
+/**
+ * What a removal is matched to its addition by: the thread, the message, the reactor and the emoji,
+ * each readable off the gateway's event with no read at all.
+ */
+export type ReactionKey = Pick<InboundReaction, "threadId" | "messageId" | "senderId" | "emoji">;
+
+/**
+ * How long a reaction is held before it is acted on or handed to a session, so a reaction taken off
+ * again inside it, a swipe undone or a thumbs-up withdrawn, costs nothing at all.
+ */
+export const REACTION_HOLD_MS = 30_000;
+
+/**
+ * Most reactions one hold takes. A reaction past it is dropped, and logged once for the hold, so a
+ * burst of reactions in one thread holds a bounded list in memory.
+ */
+export const MAX_HELD_REACTIONS = 50;
+
+/**
+ * The prefix of the id a reaction's line carries. A line under one names no message of its own in
+ * the thread, so the receipt tracker is never told of it and the talk ring is given no receipt key.
+ */
+export const REACTION_ID_PREFIX = "reaction-";
+
+/**
+ * Whether an emoji is Discord's thumbs-up, in any of its skin tones. A custom emoji is never one,
+ * whatever it is named, since the gateway names it `:name:`.
+ */
+export function isThumbsUp(emoji: string): boolean {
+  return /^\u{1F44D}[\u{1F3FB}-\u{1F3FF}]?$/u.test(emoji);
+}
+
+/** An ask a reacted-on message belongs to, as the ask lookup names it. */
+export type ReactedAsk = {
+  /** The ask's id in its persona's ledger. */
+  id: string;
+  /** The stored question, its recommendation segment not yet stripped. */
+  question: string;
+  /**
+   * The recommendation as the ask's message in the decisions thread drew it, whole or cut as that
+   * message cut it, or null where the ask's entry carries none.
+   */
+  recommend: string | null;
+  /** The persona that raised it, which is the lineage its live session carries. */
+  lineage: string;
+};
+
+/**
+ * The line a reaction becomes, in the bracketed forms the relay's instructions state: on an ask's
+ * card or one of its brief parts, the ask by id and question, with the recommendation its card
+ * drew where it drew one; on a message that was read, its author, time and an excerpt; otherwise
+ * the unreadable form. Every untrusted string in it is bounded as typed text is and made one line,
+ * so none can leave its quote marks or start a line. Each is then cut by `quotedText` except the
+ * recommendation, which the decisions-thread message already held to
+ * `MAX_MESSAGE_RECOMMEND_LENGTH` and which a second cut would misquote. The names are the
+ * gateway's `authorName`, as a quotation's author is.
+ */
+export function reactionText(
+  reaction: Pick<InboundReaction, "emoji" | "action" | "target">,
+  ask: Pick<ReactedAsk, "id" | "question" | "recommend"> | null,
+): string {
+  const emoji = quotedText(reaction.emoji);
+  const verb = reaction.action === "added" ? "added on" : "removed from";
+  if (ask !== null) {
+    const question = quotedText(bounded(questionOf(ask.question)).text);
+    const recommending =
+      ask.recommend === null || ask.recommend === ""
+        ? ""
+        : // Already cut by the decisions-thread message's own bound, so it is collapsed to one line
+          // and quoted with no second cut, which would misquote what that message showed.
+          ` recommending "${oneLine(bounded(ask.recommend).text)}"`;
+    return `[reaction ${emoji} ${verb} ask "${quotedText(ask.id)}": "${question}"${recommending}]`;
+  }
+  const target = reaction.target;
+  if (target === null) return `[reaction ${emoji} ${verb} a message that could not be read]`;
+  return (
+    `[reaction ${emoji} ${verb} ${target.author}'s message at ${utcSecond(target.at)}: ` +
+    `"${quotedText(bounded(target.text).text)}"]`
+  );
+}
 
 /**
  * Ceiling on the text handed to a session, in code points. It matches Discord's own maximum
@@ -230,6 +356,15 @@ function bounded(text: string): { text: string; truncated: boolean } {
   };
 }
 
+/**
+ * A reply's referenced message as the buffer holds it: its text bounded as typed text is, then made
+ * one line and cut by `quotedText`, so the buffer and its file hold no more of another author's
+ * words than the session reads, and its name as the gateway bounded it.
+ */
+function heldQuote(quote: Quote): Quote {
+  return quote.kind === "gone" ? quote : { ...quote, text: quotedText(bounded(quote.text).text) };
+}
+
 /** The two thread commands that put the bot in a voice channel and take it out. */
 export type VoiceCommand = "on" | "off";
 
@@ -326,7 +461,10 @@ export type ResponseGateSettings = {
    * neither read nor touched.
    */
   buffers?: { file: string; graceMs: number };
-  /** Injected so a test fires the age cap and the quiet window without sleeping. */
+  /**
+   * Injected so a test fires the age cap, the quiet window and the reaction hold without sleeping.
+   * The reaction hold takes these whatever the mode, `off` included.
+   */
   setTimer?: (callback: () => void, ms: number) => NodeJS.Timeout;
   clearTimer?: (timer: NodeJS.Timeout) => void;
 };
@@ -346,7 +484,20 @@ export type InboundRouterOptions = {
   questions: {
     /** True when this text answered the session's held question, and is therefore spent. */
     answerTyped: (sessionId: string, response: string) => boolean;
+    /**
+     * The recommended choice of the session's held question where `messageId` is that question's
+     * alert and its stored question carries a recommendation, else null. Read by an operator's
+     * thumbs-up on that alert. Absent, no thumbs-up answers a question.
+     */
+    recommendedAt?: (sessionId: string, messageId: string) => string | null;
   };
+  /**
+   * The ask a message in the broker's decisions thread belongs to, by the message's id: the ask's
+   * own card or one of its brief parts. Read for a reaction's line, and for the session a reaction
+   * in the decisions thread reaches, which no session's thread binding names. Absent, no reaction
+   * names an ask.
+   */
+  asks?: { forMessage: (threadId: string, messageId: string) => ReactedAsk | null };
   /** The thread bound to a session, as the Discord surface currently holds it. */
   threadFor: (sessionId: string) => string | null;
   /** Writes a notice back into the thread a message could not be delivered from. */
@@ -428,6 +579,24 @@ export type InboundRouterOptions = {
 export type InboundRouter = {
   /** Routes one gateway message. Never throws: a failed notice is logged, not propagated. */
   deliver: (message: InboundMessage) => Promise<void>;
+  /**
+   * Takes one gateway reaction into a hold, after the sender gate classes its reactor. An
+   * operator's thumbs-up holds alone, keyed by its thread and the message it sits on, and every
+   * other reaction takes its thread's shared hold. A hold flushes `REACTION_HOLD_MS` after the
+   * arrival of the first reaction it took, at once where that time has already passed. A removal
+   * matching a held addition cancels both. At the flush an operator's thumbs-up on an open permission prompt
+   * or on the held question's alert is spent as that verdict or answer, and every other reaction
+   * becomes a line in the reactor's name, handed to the thread's session or, in the decisions
+   * thread, to the session of the ask's persona. Never throws.
+   */
+  react: (reaction: InboundReaction) => void;
+  /**
+   * Cancels the held addition a removal names, by the same account, the same emoji and the same
+   * message, and answers whether one was held. Synchronous and reading nothing, so the gateway
+   * asks it the moment a removal arrives. Where it answers false the removal travels on to `react`
+   * for its withdrawal line.
+   */
+  withdraw: (reaction: ReactionKey) => boolean;
   /**
    * Hands a line the operator typed on the web page to the live session carrying `lineage`, as an
    * operator's message. The caller has already established that `login` is an admitted operator:
@@ -527,7 +696,9 @@ function savedPath(file: string, root: string | null, sessionId: string): boolea
  * than the relay's pipe will carry, is null. A file path that is not one the intake writes under
  * `root` and the entry's own session folder is dropped, counted in `dropped`, and its message
  * kept, since the words beside it are still the operator's; a message of files alone keeps its
- * line even where every path was dropped.
+ * line even where every path was dropped. A `quote` field this broker would not have written is
+ * dropped and counted the same way, its message kept: the quotation is context beside the words,
+ * and the message reads as itself without it.
  *
  * The list is bounded by that event budget and not by the size cap: the cap is a knob a config
  * edit lowers at a restart, which is the moment this reads, and an entry the gate held under the
@@ -540,7 +711,7 @@ function heldBufferOf(
   value: unknown,
   now: number,
   root: string | null,
-  dropped: { paths: number },
+  dropped: { paths: number; quotes: number },
 ): HeldBuffer | null {
   if (!isRecord(value)) return null;
   if (typeof value.threadId !== "string" || typeof value.sessionId !== "string") return null;
@@ -581,6 +752,9 @@ function heldBufferOf(
     if (text === "" && files.length === 0) return null;
     const kept = files.filter((file) => savedPath(file, root, sessionId));
     dropped.paths += files.length - kept.length;
+    // Absent on a message that replied to none, which is every message an older broker wrote.
+    const quote = entry.quote === undefined ? undefined : heldQuoteOf(entry.quote);
+    if (quote === null) dropped.quotes += 1;
     messages.push({
       id,
       senderId,
@@ -589,12 +763,34 @@ function heldBufferOf(
       text,
       truncated: entry.truncated,
       ...(kept.length === 0 ? {} : { attachments: kept }),
+      ...(quote === undefined || quote === null ? {} : { quote }),
     });
   }
   // The gate's own budget check, restart line and paths included: an entry it would not have held
   // whole.
   if (overBudget(threadId, messages)) return null;
   return { threadId, sessionId, oldestAt: Math.min(oldestAt, now), messages };
+}
+
+/**
+ * One message's `quote` field read back from the buffers file, or null where it is not a shape
+ * this broker writes: the gone marker, or an author, a non-negative time a `Date` holds and a text.
+ * A time past the latest a `Date` holds is refused with the rest, since the render names the time
+ * through one and would throw. The author is bounded again by `boundedAuthor` and refused where
+ * nothing is left, as a message's own name is, and the text as the router holds it: by `bounded`,
+ * as typed text is on the wire, then by `quotedText`. An empty text stands, since a referenced
+ * message of files alone quotes as nothing.
+ */
+function heldQuoteOf(value: unknown): Quote | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === "gone") return { kind: "gone" };
+  if (value.kind !== "message") return null;
+  const { author, at, text } = value;
+  if (typeof author !== "string" || typeof text !== "string") return null;
+  if (typeof at !== "number" || at < 0 || Number.isNaN(new Date(at).getTime())) return null;
+  const name = boundedAuthor(author);
+  if (name === "") return null;
+  return { kind: "message", author: name, at, text: quotedText(bounded(text).text) };
 }
 
 /**
@@ -652,7 +848,7 @@ export function loadHeldBuffers(
   const threads = new Set<string>();
   const now = options.now();
   const root = options.attachmentsRoot ?? null;
-  const dropped = { paths: 0 };
+  const dropped = { paths: 0, quotes: 0 };
   for (const entry of parsed.buffers as unknown[]) {
     const buffer = heldBufferOf(entry, now, root, dropped);
     // A thread holds one buffer, so a second entry for it is not something this broker wrote.
@@ -669,6 +865,13 @@ export function loadHeldBuffers(
       `routing: the held buffers at ${file} name ${String(dropped.paths)} attachment paths ` +
         "outside their session's attachments folder, or with no folder configured, which are " +
         "dropped and their messages kept",
+    );
+  }
+  // Counted and never shown: a quote is a writer's words.
+  if (dropped.quotes > 0) {
+    options.log(
+      `routing: the held buffers at ${file} hold ${String(dropped.quotes)} quotes this broker would ` +
+        "not have written, which are dropped and their messages kept",
     );
   }
   return buffers;
@@ -1295,7 +1498,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * does not exist.
    */
   function markDelivered(threadId: string, messageId: string, at: number): void {
-    if (messageId.startsWith(UNPOSTED_WEB_ID_PREFIX)) return;
+    if (messageId.startsWith(UNPOSTED_WEB_ID_PREFIX) || messageId.startsWith(REACTION_ID_PREFIX)) return;
     options.receipts?.delivered(threadId, messageId, at);
   }
 
@@ -1319,8 +1522,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
           return link === null ? [] : [link];
         }),
         // The thread message the tracker stages this line under. A web line whose post failed has
-        // none, so its receipt reads null rather than the stage of a message that does not exist.
-        tracked: buffered.id.startsWith(UNPOSTED_WEB_ID_PREFIX) ? null : { threadId, messageId: buffered.id },
+        // none, and neither has a reaction's line, which already sits in the thread as the
+        // reaction, so its receipt reads null rather than the stage of a message that does not exist.
+        tracked:
+          buffered.id.startsWith(UNPOSTED_WEB_ID_PREFIX) || buffered.id.startsWith(REACTION_ID_PREFIX)
+            ? null
+            : { threadId, messageId: buffered.id },
       });
     } catch {
       log(`routing: the talk tap could not take a line for session ${record.sessionId}`);
@@ -1405,6 +1612,245 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
   // the same millisecond still carry distinct ids into the gate's buffer and the journal.
   let unposted = 0;
 
+  // The reaction hold's timers: the response gate's own seam, read whatever the mode, so a test
+  // fires the hold without sleeping. The default does not hold the process open, since a held
+  // reaction lives in memory alone and is no reason for a broker asked to stop to wait.
+  const setHoldTimer =
+    settings?.setTimer ??
+    ((callback: () => void, ms: number): NodeJS.Timeout => setTimeout(callback, ms).unref());
+  const clearHoldTimer = settings?.clearTimer ?? clearTimeout;
+  // The open holds. Each thread's shared hold is keyed by the thread the reactions were placed in,
+  // and each operator's thumbs-up holds alone, keyed by its thread and the message it sits on. A
+  // hold carries the reactions it took, in arrival order, each with the class the roster gave its
+  // reactor, the timer that flushes it, and whether it has refused a reaction past its cap.
+  type ReactionHold = {
+    threadId: string;
+    timer: NodeJS.Timeout | null;
+    held: Array<{ reaction: InboundReaction; senderClass: SenderClass }>;
+    capped: boolean;
+  };
+  const sharedHolds = new Map<string, ReactionHold>();
+  const thumbsUpHolds = new Map<string, ReactionHold>();
+  const thumbsUpKey = (threadId: string, messageId: string): string => `${threadId} ${messageId}`;
+  // Numbers the reaction ids this process hands out, since one flush names several lines in the
+  // same millisecond and the gate's buffer, its file and the journal key a line by its id.
+  let reactionLines = 0;
+
+  /**
+   * Cancels the held addition `key` names, by the same account, the same emoji and the same
+   * message, in the thread's shared hold or in the hold of the message's thumbs-up. A thumbs-up's
+   * hold left with nothing in it is cleared, since it holds nothing else.
+   */
+  function withdrawHeld(key: ReactionKey): boolean {
+    const places: Array<[Map<string, ReactionHold>, string]> = [
+      [sharedHolds, key.threadId],
+      [thumbsUpHolds, thumbsUpKey(key.threadId, key.messageId)],
+    ];
+    for (const [holds, name] of places) {
+      const open = holds.get(name);
+      if (open === undefined) continue;
+      const index = open.held.findIndex(
+        ({ reaction: held }) =>
+          held.action === "added" &&
+          held.senderId === key.senderId &&
+          held.emoji === key.emoji &&
+          held.messageId === key.messageId,
+      );
+      if (index === -1) continue;
+      open.held.splice(index, 1);
+      if (holds === thumbsUpHolds && open.held.length === 0) {
+        if (open.timer !== null) clearHoldTimer(open.timer);
+        holds.delete(name);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Puts one classed reaction into a hold. A removal matching an addition a hold still takes
+   * cancels it, and neither reaches anything. An operator's thumbs-up takes the hold of the message
+   * it sits on, and every other reaction its thread's shared hold. A reaction joins the hold open
+   * for it, which it does not extend, or opens one that flushes `REACTION_HOLD_MS` after the
+   * reaction's arrival at the gateway, at once where its reads have already spent that.
+   */
+  function holdReaction(reaction: InboundReaction, senderClass: SenderClass): void {
+    if (reaction.action === "removed" && withdrawHeld(reaction)) return;
+    const alone = reaction.action === "added" && senderClass === "operator" && isThumbsUp(reaction.emoji);
+    const holds = alone ? thumbsUpHolds : sharedHolds;
+    const name = alone ? thumbsUpKey(reaction.threadId, reaction.messageId) : reaction.threadId;
+    const threadId = reaction.threadId;
+    const open = holds.get(name);
+    if (open !== undefined) {
+      if (open.held.length >= MAX_HELD_REACTIONS) {
+        if (!open.capped) {
+          open.capped = true;
+          log(
+            `routing: a reaction hold in thread ${threadId} is full at ${String(MAX_HELD_REACTIONS)}, ` +
+              "dropping what joins it",
+          );
+        }
+        return;
+      }
+      open.held.push({ reaction, senderClass });
+      return;
+    }
+    const hold: ReactionHold = { threadId, timer: null, held: [{ reaction, senderClass }], capped: false };
+    holds.set(name, hold);
+    const flush = (): void => {
+      // A hold cleared or already flushed is no longer the one under its name.
+      if (holds.get(name) !== hold) return;
+      holds.delete(name);
+      void flushReactions(hold).catch((error: unknown) => {
+        log(`routing: flushing the reactions held in thread ${threadId} failed: ${String(error)}`);
+      });
+    };
+    const left = reaction.arrivedAt + REACTION_HOLD_MS - now();
+    if (left <= 0) {
+      flush();
+      return;
+    }
+    hold.timer = setHoldTimer(flush, left);
+  }
+
+  /**
+   * An operator's thumbs-up spent as the verdict or the answer the message it sat on asks for, read
+   * by that message and never by recency: an open permission prompt in the thread whose message it
+   * is, resolved as allowed through the typed verdict's own call and its no-nonce reasoning, or else
+   * the held question whose alert it is, answered with that question's recommended choice through
+   * the typed answer's seam. A thumbs-up on a held question with no recommendation answers nothing.
+   * Shown to the talk ring as the typed verdict and answer are, and handed to no session. False for
+   * every other reaction, which bypasses both, and for a thumbs-up neither desk takes.
+   */
+  function spentAsVerdict(
+    threadId: string,
+    reaction: InboundReaction,
+    senderClass: SenderClass,
+    record: SessionRecord | null,
+    line: BufferedMessage,
+  ): boolean {
+    if (reaction.action !== "added" || senderClass !== "operator" || !isThumbsUp(reaction.emoji)) return false;
+    const requestId = options.permissions.requestAt?.(threadId, reaction.messageId) ?? null;
+    if (requestId !== null && options.permissions.resolve(threadId, { requestId, behavior: "allow" }, null)) {
+      log(
+        `routing: permission request ${requestId} in thread ${threadId} was allowed by a reaction, ` +
+          `a thumbs-up from ${reaction.senderId} on message ${reaction.messageId}`,
+      );
+      if (record !== null) tapTalk(record, threadId, line);
+      return true;
+    }
+    if (record === null) return false;
+    const choice = options.questions.recommendedAt?.(record.sessionId, reaction.messageId) ?? null;
+    if (choice === null || !options.questions.answerTyped(record.sessionId, choice)) return false;
+    log(
+      `routing: session ${record.sessionId}'s held question was answered by a reaction, ` +
+        `a thumbs-up from ${reaction.senderId} on message ${reaction.messageId}`,
+    );
+    tapTalk(record, threadId, line);
+    return true;
+  }
+
+  /**
+   * Flushes one hold, a thread's shared hold and a thumbs-up's alike. Each reaction becomes a line
+   * under an id of its own, in the reactor's name and class, after the verdict reading has had it.
+   * A line goes to the session holding the thread, or, in a thread no session holds, to the live
+   * session of the persona whose ask the reacted-on message belongs to, found by lineage as a page
+   * line is. A reaction with neither, or whose session has ended or is over its rate ceiling, is
+   * dropped and logged, and one whose handling throws is logged and the rest still go. The lines
+   * bound for one session take one hand-over together.
+   */
+  async function flushReactions(hold: ReactionHold): Promise<void> {
+    const threadId = hold.threadId;
+    const records = options.registry.list();
+    const holder = sessionForThread(records, options.threadFor, threadId);
+    const outgoing = new Map<
+      string,
+      { record: SessionRecord; threadId: string; lines: Array<{ line: BufferedMessage; own: boolean }> }
+    >();
+    for (const { reaction, senderClass } of hold.held) {
+      try {
+        const ask = options.asks?.forMessage(threadId, reaction.messageId) ?? null;
+        reactionLines += 1;
+        const line: BufferedMessage = {
+          id: `${REACTION_ID_PREFIX}${String(now())}-${String(reactionLines)}`,
+          senderId: reaction.senderId,
+          author: reaction.author,
+          senderClass,
+          text: reactionText(reaction, ask),
+          truncated: false,
+        };
+        if (spentAsVerdict(threadId, reaction, senderClass, holder, line)) continue;
+        let record = holder;
+        let to = threadId;
+        if (record === null) {
+          const live = ask === null ? null : liveByLineage(records, ask.lineage);
+          const bound = live === null ? null : options.threadFor(live.sessionId);
+          if (live === null || bound === null) {
+            log(`routing: dropped a reaction in thread ${threadId}, which reaches no live session`);
+            continue;
+          }
+          record = live;
+          to = bound;
+        }
+        if (record.state === "ended") {
+          log(`routing: dropped a reaction for the ended session ${record.sessionId}`);
+          continue;
+        }
+        if (!withinRate(record.sessionId)) {
+          log(`routing: session ${record.sessionId} is over its inbound rate ceiling, dropping a reaction`);
+          continue;
+        }
+        const group = outgoing.get(record.sessionId) ?? { record, threadId: to, lines: [] };
+        group.lines.push({ line, own: reaction.target?.own === true });
+        outgoing.set(record.sessionId, group);
+      } catch (error) {
+        log(`routing: a reaction held in thread ${threadId} could not be handled: ${String(error)}`);
+      }
+    }
+    for (const group of outgoing.values()) await handOverReactions(group.record, group.threadId, group.lines);
+  }
+
+  /**
+   * Hands one session its flushed reaction lines, in the thread's turn, as a message is handed
+   * over. Off the gate they go down at once as one event of those lines alone. On the live gate
+   * each joins the thread's buffer as a message does. A group holding a reaction on this bot's own
+   * message takes the reply trigger once, on its last line, which delivers the buffer at once with
+   * the whole group, and a group holding none rides the next delivery.
+   * The receipt tracker is told nothing of a reaction's line.
+   */
+  async function handOverReactions(
+    record: SessionRecord,
+    threadId: string,
+    lines: ReadonlyArray<{ line: BufferedMessage; own: boolean }>,
+  ): Promise<void> {
+    const { after } = await inTurn(threadId, () => {
+      const messages = lines.map(({ line }) => line);
+      if (gate === null || simulated) {
+        // Shadow: each line joins the simulated buffer as a message does, and is journaled there.
+        for (const { line, own } of lines) {
+          gate?.admit(threadId, record.sessionId, line, { mentionsBot: false, repliesToBot: own });
+        }
+        const written = handOver(record, threadId, bufferedEvent(threadId, messages), messages.length);
+        return {
+          after: written.then((taken) => {
+            if (taken) for (const message of messages) tapTalk(record, threadId, message);
+          }),
+        };
+      }
+      // The group takes the reply trigger once, on its last line, so reactions on several of this
+      // bot's messages in one hold are one delivery and not one each.
+      const anyOwn = lines.some(({ own }) => own);
+      const deliveries = lines.flatMap(({ line }, index) =>
+        gate.admit(threadId, record.sessionId, line, {
+          mentionsBot: false,
+          repliesToBot: index === lines.length - 1 && anyOwn,
+        }),
+      );
+      return { after: handOverBuffers(record, threadId, deliveries) };
+    });
+    await after;
+  }
+
   return {
     async deliver(message) {
       // Everything this broker writes into a thread arrives back over the same gateway. Without
@@ -1456,6 +1902,7 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
         senderClass,
         text,
         truncated,
+        ...(message.repliedTo === undefined ? {} : { quote: heldQuote(message.repliedTo) }),
       };
 
       // A verdict that names a request this thread has open is consumed as a verdict and nothing
@@ -1663,6 +2110,21 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
       await after;
     },
 
+    react(reaction) {
+      // The sender gate, as a message's author meets it: a reactor the roster does not name is
+      // refused before anything else reads the reaction.
+      const senderClass = options.gate.classOf(reaction.senderId);
+      if (senderClass === null) {
+        log(`routing: refused a reaction from ${reaction.senderId}, who is not the allowed sender`);
+        return;
+      }
+      holdReaction(reaction, senderClass);
+    },
+
+    withdraw(reaction) {
+      return withdrawHeld(reaction);
+    },
+
     async deliverWeb(lineage, login, text, fileIds) {
       // The session is found by lineage, never by thread: the page names the persona it is open on,
       // and the thread is read off the session that carries it. An ended newest record is told
@@ -1868,8 +2330,12 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     close() {
       // No notice for these drops: the broker is shutting down, and a post from a process on its
       // way out is one it may not be there to finish. What was held is in the file, for the next
-      // start to restore.
+      // start to restore. A held reaction lives in memory alone and goes with the process.
       gate?.close();
+      for (const holds of [sharedHolds, thumbsUpHolds]) {
+        for (const open of holds.values()) if (open.timer !== null) clearHoldTimer(open.timer);
+        holds.clear();
+      }
     },
 
     relayAttached(processToken) {

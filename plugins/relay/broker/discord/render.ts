@@ -1043,7 +1043,7 @@ export function renderHarnessNotice(fields: HarnessErrorFields, timeZone?: strin
  * The cut is left to `fit`'s ellipsis rather than labelled, because nothing here is approved from
  * a partial view: the notice only sends the operator to the console, where the whole question is.
  */
-const MAX_QUESTION_LENGTH = 500;
+export const MAX_QUESTION_LENGTH = 500;
 const MAX_QUESTION_HEADER_LENGTH = 100;
 export const MAX_OPTION_LABEL_LENGTH = 100;
 

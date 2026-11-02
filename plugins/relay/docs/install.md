@@ -26,6 +26,9 @@ takes down one machine rather than all of them.
    The voice, off unless `CHANNEL_VOICE=on`, also uses the **Guild Voice States** intent, which is
    not privileged: there is nothing to enable here, and the broker requests it only while the voice
    is on. It is how the broker sees which voice channel you are sitting in.
+   The broker always requests the **Guild Message Reactions** intent, which is not privileged
+   either, so nothing is enabled for it: it is how a reaction you place in one of the broker's
+   threads reaches a session.
 4. Under **OAuth2 > URL Generator**, select the `bot` scope and these permissions: View Channels,
    Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message
    History, Add Reactions. Add Reactions carries the stage marks on each person's message: without

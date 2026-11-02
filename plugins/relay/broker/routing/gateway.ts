@@ -12,14 +12,24 @@
 // (inbound.ts). The one decision made here is the delete, because it belongs to a message that
 // reaches no session at all: it is a system message this bot wrote, and the facts it turns on are
 // the library's own.
-import { ChannelType, Client, Events, GatewayIntentBits, MessageType } from "discord.js";
-import type { InternalDiscordGatewayAdapterCreator } from "discord.js";
+import { ChannelType, Client, Events, GatewayIntentBits, MessageReferenceType, MessageType, Partials } from "discord.js";
+import type {
+  InternalDiscordGatewayAdapterCreator,
+  Message,
+  MessageReaction,
+  OmitPartialGroupDMChannel,
+  PartialMessageReaction,
+  PartialUser,
+  User,
+} from "discord.js";
 import { describe } from "../discord/rest.ts";
 import { boundedAuthor } from "../sanitize.ts";
 import type { CallOutcome } from "../discord/transport.ts";
 import type { InboundAttachment } from "./attachments.ts";
-import type { InboundMessage } from "./inbound.ts";
+import { REACTION_HOLD_MS } from "./inbound.ts";
+import type { InboundMessage, InboundReaction, ReactionAction, ReactionKey } from "./inbound.ts";
 import type { InboundInteraction } from "./interactions.ts";
+import type { Quote } from "./response-gate.ts";
 
 export type MessageSource = {
   start: () => Promise<void>;
@@ -81,13 +91,15 @@ export function voiceChannelOf(
  * The gateway intents this broker requests. Guilds gives the client its channel cache, which is what
  * makes a thread's parent readable without a REST call per message. MessageContent is privileged and
  * must be enabled on the application, or every message arrives with an empty body and the channel
- * looks silently dead. GuildVoiceStates is requested only with the voice on: it fills the
- * voice-state cache that says which channel an operator sits in.
+ * looks silently dead. GuildMessageReactions delivers the reactions added to and removed from
+ * messages in the guild, and is not privileged. GuildVoiceStates is requested only with the voice
+ * on: it fills the voice-state cache that says which channel an operator sits in.
  */
 export function gatewayIntents(voice: boolean): GatewayIntentBits[] {
   const intents = [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent,
   ];
   if (voice) intents.push(GatewayIntentBits.GuildVoiceStates);
@@ -239,6 +251,61 @@ export function attachmentsOf(
   }));
 }
 
+/** The part of a library message its reply link is read from. */
+export type ReplyLink = {
+  type: MessageType;
+  reference: { messageId: string | undefined; type: MessageReferenceType | undefined } | null;
+  channel: {
+    messages: {
+      cache: {
+        get: (id: string) =>
+          | {
+              partial: boolean;
+              createdTimestamp: number;
+              content: string;
+              author: { id: string; globalName: string | null; username: string };
+              member: { nickname: string | null } | null;
+            }
+          | undefined;
+      };
+    };
+  };
+};
+
+/**
+ * The message a reply points at, as routing quotes it, or null for a message that is no reply.
+ *
+ * A reply is Discord's reply type with a reference naming a message and not typed a forward. The
+ * reference's type is optional on the wire and the library passes it on as it arrives, so a
+ * reference with no type is a reply's. A forward names a message too and is no reply to it, and a
+ * system notice such as a pin carries a reference to the message it is about, so neither is quoted.
+ * The read is the channel's message cache alone, where the library puts the referenced message
+ * whenever Discord sends it with the reply, and a reply it did not come with reads as gone. It is
+ * never a fetch: the library's fetch falls back to a REST call with its full retry budget, and a
+ * wait of that length would hold the reply, and every message routing takes after it, behind a read
+ * the quote does not need. A message the cache does not hold, or holds only partly, is the gone
+ * marker, so a deleted message reads as gone and the reply still reaches routing. The author is
+ * named by `authorName`, as a message's own author is.
+ */
+export function repliedToOf(message: ReplyLink): Quote | null {
+  const reference = message.reference;
+  if (message.type !== MessageType.Reply || reference === null) return null;
+  if (reference.type === MessageReferenceType.Forward || reference.messageId === undefined) return null;
+  const referenced = message.channel.messages.cache.get(reference.messageId);
+  if (referenced === undefined || referenced.partial) return { kind: "gone" };
+  return {
+    kind: "message",
+    author: authorName({
+      id: referenced.author.id,
+      nickname: referenced.member?.nickname ?? null,
+      globalName: referenced.author.globalName,
+      username: referenced.author.username,
+    }),
+    at: referenced.createdTimestamp,
+    text: referenced.content,
+  };
+}
+
 /** Distinct unexpected system message types one connection names before it goes quiet. */
 const MAX_REPORTED_TYPES = 16;
 
@@ -349,6 +416,12 @@ export type GatewayOptions = {
    */
   onInteraction?: (interaction: InboundInteraction) => Promise<void>;
   /**
+   * The routing seams a reaction added or removed in a thread this broker owns reaches. Optional
+   * for the reason `onInteraction` is: a broker that wires none registers no reaction handler at
+   * all.
+   */
+  reactions?: ReactionRouting;
+  /**
    * Deletes a message in the host's channel. Spent on one thing, append-only where what it
    * describes is reconciled: the system message Discord writes whenever this bot pins, so the
    * channel fills with notices about pins that are no longer held.
@@ -359,10 +432,23 @@ export type GatewayOptions = {
   log?: (message: string) => void;
 };
 
-export function createGatewayMessageSource(options: GatewayOptions): MessageSource {
-  const log = options.log ?? ((): void => {});
-  const client = new Client({ intents: gatewayIntents(options.voice === true) });
+/** What the message handler reads besides the message: the routing seams and this bot's own user. */
+export type MessageListenerOptions = Pick<GatewayOptions, "channelId" | "onMessage" | "deleteMessage"> & {
+  /** This bot's own user, and null while the connection has not identified yet. */
+  selfId: () => string | null;
+  log: (message: string) => void;
+};
 
+/**
+ * The connection's `MessageCreate` handler. Every message takes one decision and is then handed to
+ * what that decision names, so the paths out of here are the ones `classifyMessage` allows and
+ * there is no other. A delivered message reaches `onMessage` in the turn it arrived, since nothing
+ * on the way is awaited, so a thread's messages reach routing in the order Discord sent them.
+ */
+export function createMessageListener(
+  options: MessageListenerOptions,
+): (message: OmitPartialGroupDMChannel<Message>) => void {
+  const log = options.log;
   const cleanNotice = createSystemNoticeCleaner({
     deleteMessage: options.deleteMessage,
     log,
@@ -370,12 +456,10 @@ export function createGatewayMessageSource(options: GatewayOptions): MessageSour
   });
   const reportUnexpectedSystem = createUnexpectedSystemReport(log);
 
-  client.on(Events.MessageCreate, (message) => {
-    // Every message takes one decision and is then handed to what that decision names, so the paths
-    // out of here are the ones `classifyMessage` allows and there is no other.
+  return (message) => {
     const channel = message.channel;
     const inThread = channel.isThread();
-    const selfId = client.user?.id ?? null;
+    const selfId = options.selfId();
     const decision = classifyMessage(
       {
         channelId: message.channelId,
@@ -407,6 +491,9 @@ export function createGatewayMessageSource(options: GatewayOptions): MessageSour
       // pinged them, and leaves it null where that message is gone.
       repliedToAuthorId: message.mentions.repliedUser?.id ?? null,
     });
+    // A bot's message is dropped by routing before anything reads a quotation, so its reply link
+    // is not read at all.
+    const repliedTo = message.author.bot ? null : repliedToOf(message);
     void options
       .onMessage({
         threadId: message.channelId,
@@ -428,11 +515,250 @@ export function createGatewayMessageSource(options: GatewayOptions): MessageSour
         repliesToBot: addressed.repliesToBot,
         text: message.content,
         attachments: attachmentsOf(message.attachments.values()),
+        ...(repliedTo === null ? {} : { repliedTo }),
       })
       .catch((error: unknown) => {
         log(`gateway: routing an inbound message failed: ${describe(error)}`);
       });
+  };
+}
+
+/**
+ * A reaction's emoji as the line names it: the character itself for a standard emoji, and
+ * `:name:` for a custom one. Null where the library reports no name, which no line can name.
+ */
+export function emojiName(emoji: { id: string | null; name: string | null }): string | null {
+  if (emoji.name === null || emoji.name === "") return null;
+  return emoji.id === null ? emoji.name : `:${emoji.name}:`;
+}
+
+/** The routing seams a reaction reaches. */
+export type ReactionRouting = {
+  /** Hands routing one reaction fact, once its reads are done. */
+  onReaction: (reaction: InboundReaction) => void;
+  /**
+   * Whether the sender roster names this account, asked with the reactor's id before anything about
+   * the reaction is read.
+   */
+  admits: (senderId: string) => boolean;
+  /**
+   * Cancels the held addition a removal names, answering whether routing held one. Synchronous, so a
+   * removal is matched the moment it arrives.
+   */
+  withdraw: (reaction: ReactionKey) => boolean;
+};
+
+/** What the reaction handlers read besides the reaction: the routing seams and this bot's own user. */
+export type ReactionListenerOptions = Pick<GatewayOptions, "channelId"> &
+  ReactionRouting & {
+    /** This bot's own user, and null while the connection has not identified yet. */
+    selfId: () => string | null;
+    /** The clock a reaction's arrival is stamped from. `Date.now` unless a test drives one. */
+    now?: () => number;
+    log: (message: string) => void;
+  };
+
+/**
+ * The connection's handler for a reaction added and a reaction removed, one function told
+ * which of the two it is.
+ *
+ * The message handler's two gates come first, a thread whose parent is this host's channel and
+ * then this bot's own user: the receipt tracker's stage marks are this bot's reactions, and they
+ * are dropped here before anything is read, so they never come back as a line. Then the sender
+ * roster, asked with the reactor's id alone: an account it does not name is dropped and logged
+ * before anything is read. A reaction from any other bot is dropped once its user is known. A
+ * reaction from before the connection has identified cannot be told from this bot's own, and is
+ * dropped too. The arrival time is stamped before any read, and the hold counts from it.
+ *
+ * A removal is matched to its addition with no read at all, by thread, reactor, emoji and message.
+ * An addition still waiting on its reads here, and still inside its `REACTION_HOLD_MS` hold from
+ * its arrival, is marked cancelled, and its fact is discarded when they finish. One routing already
+ * holds is cancelled through routing's `withdraw`. Either way the removal goes no further. Past the
+ * hold, or with nothing to cancel, a removal travels on behind its addition for its withdrawal
+ * line, and it never fetches the message it sat on: the message is named where the library's
+ * cache holds it whole, and is unreadable otherwise.
+ *
+ * The reactor, and the message an addition sits on, are read from the library's cache where it
+ * holds them whole, and fetched only where it holds a partial. A reactor that cannot be read is
+ * dropped and logged, since routing cannot class an account it cannot name, and a message that
+ * cannot be read is handed on as unreadable and logged. The fetch can wait out the library's retry
+ * budget, so each thread's reactions run behind a tail of their own: a thread's reactions reach
+ * routing in the order Discord sent them, and a slow read holds back only the later reactions in
+ * its thread and never a message, which takes no part in this tail.
+ */
+export function createReactionListener(
+  options: ReactionListenerOptions,
+): (
+  reaction: MessageReaction | PartialMessageReaction,
+  user: User | PartialUser,
+  action: ReactionAction,
+) => void {
+  const log = options.log;
+  const now = options.now ?? Date.now;
+  // The tail of each thread's reactions, gone from the map once nothing waits behind it.
+  const tails = new Map<string, Promise<void>>();
+  // The additions still in each thread's tail, waiting on their reads, each with its arrival time
+  // and marked once a removal cancels it. Gone from the map once the thread has none.
+  type Pending = { key: ReactionKey; arrivedAt: number; cancelled: boolean };
+  const pending = new Map<string, Pending[]>();
+
+  function settledPending(threadId: string, entry: Pending): void {
+    const waiting = (pending.get(threadId) ?? []).filter((held) => held !== entry);
+    if (waiting.length === 0) pending.delete(threadId);
+    else pending.set(threadId, waiting);
+  }
+
+  async function factOf(
+    reaction: MessageReaction | PartialMessageReaction,
+    user: User | PartialUser,
+    action: ReactionAction,
+    emoji: string,
+    arrivedAt: number,
+    selfId: string,
+  ): Promise<InboundReaction | null> {
+    const threadId = reaction.message.channelId;
+    let reactor: User;
+    try {
+      reactor = user.partial ? await user.fetch() : user;
+    } catch {
+      log(`gateway: a reaction in thread ${threadId} was dropped, its user could not be read`);
+      return null;
+    }
+    if (reactor.bot) return null;
+    let target: Message | null = null;
+    if (!reaction.message.partial) {
+      target = reaction.message;
+    } else if (action === "added") {
+      try {
+        target = await reaction.message.fetch();
+      } catch {
+        log(`gateway: the message a reaction in thread ${threadId} sits on could not be read`);
+      }
+    }
+    const member = reaction.message.guild?.members.cache.get(reactor.id) ?? null;
+    return {
+      threadId,
+      messageId: reaction.message.id,
+      senderId: reactor.id,
+      author: authorName({
+        id: reactor.id,
+        nickname: member?.nickname ?? null,
+        globalName: reactor.globalName,
+        username: reactor.username,
+      }),
+      emoji,
+      action,
+      target:
+        target === null
+          ? null
+          : {
+              author: authorName({
+                id: target.author.id,
+                nickname: target.member?.nickname ?? null,
+                globalName: target.author.globalName,
+                username: target.author.username,
+              }),
+              at: target.createdTimestamp,
+              text: target.content,
+              own: target.author.id === selfId,
+            },
+      arrivedAt,
+    };
+  }
+
+  return (reaction, user, action) => {
+    const arrivedAt = now();
+    const channel = reaction.message.channel;
+    if (!channel.isThread() || channel.parentId !== options.channelId) return;
+    const selfId = options.selfId();
+    if (selfId === null || user.id === selfId) return;
+    // A partial user carries its id, so the roster is asked before anything is read.
+    if (!options.admits(user.id)) {
+      log(`gateway: a reaction from ${user.id} was dropped, the sender roster does not name that account`);
+      return;
+    }
+    const threadId = reaction.message.channelId;
+    const emoji = emojiName(reaction.emoji);
+    if (emoji === null) {
+      log(`gateway: a reaction in thread ${threadId} was dropped, its emoji carries no name`);
+      return;
+    }
+    const key: ReactionKey = { threadId, messageId: reaction.message.id, senderId: user.id, emoji };
+    if (action === "removed") {
+      const waiting = pending
+        .get(threadId)
+        ?.find(
+          // Inside the addition's hold alone: a removal after it travels on behind the addition and
+          // leaves as the withdrawal line, as one routing no longer holds does.
+          (held) =>
+            !held.cancelled &&
+            arrivedAt - held.arrivedAt < REACTION_HOLD_MS &&
+            held.key.senderId === key.senderId &&
+            held.key.emoji === key.emoji &&
+            held.key.messageId === key.messageId,
+        );
+      if (waiting !== undefined) {
+        waiting.cancelled = true;
+        return;
+      }
+      if (options.withdraw(key)) return;
+    }
+    const added = action === "added" ? { key, arrivedAt, cancelled: false } : null;
+    if (added !== null) pending.set(threadId, [...(pending.get(threadId) ?? []), added]);
+    const turn = (tails.get(threadId) ?? Promise.resolve())
+      .then(async () => {
+        try {
+          // An addition cancelled before its turn is read no further.
+          const fact =
+            added?.cancelled === true ? null : await factOf(reaction, user, action, emoji, arrivedAt, selfId);
+          if (fact !== null && added?.cancelled !== true) options.onReaction(fact);
+        } finally {
+          // Nothing runs between the hand-on above and this line, so a removal arriving after it
+          // finds the addition in routing's hold.
+          if (added !== null) settledPending(threadId, added);
+        }
+      })
+      .catch((error: unknown) => {
+        log(`gateway: routing a reaction failed: ${describe(error)}`);
+      });
+    tails.set(threadId, turn);
+    void turn.then(() => {
+      if (tails.get(threadId) === turn) tails.delete(threadId);
+    });
+  };
+}
+
+export function createGatewayMessageSource(options: GatewayOptions): MessageSource {
+  const log = options.log ?? ((): void => {});
+  // The message, reaction and user partials let a reaction on a message this connection has not
+  // cached, or from a user it has not cached, still arrive, to be read by the reaction handler.
+  const client = new Client({
+    intents: gatewayIntents(options.voice === true),
+    partials: [Partials.Message, Partials.Reaction, Partials.User],
   });
+
+  client.on(
+    Events.MessageCreate,
+    createMessageListener({
+      channelId: options.channelId,
+      onMessage: options.onMessage,
+      deleteMessage: options.deleteMessage,
+      selfId: () => client.user?.id ?? null,
+      log,
+    }),
+  );
+
+  const reactions = options.reactions;
+  if (reactions !== undefined) {
+    const react = createReactionListener({
+      channelId: options.channelId,
+      ...reactions,
+      selfId: () => client.user?.id ?? null,
+      log,
+    });
+    client.on(Events.MessageReactionAdd, (reaction, user) => react(reaction, user, "added"));
+    client.on(Events.MessageReactionRemove, (reaction, user) => react(reaction, user, "removed"));
+  }
 
   client.on(Events.InteractionCreate, (interaction) => {
     const onInteraction = options.onInteraction;

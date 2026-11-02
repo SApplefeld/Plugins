@@ -90,7 +90,23 @@ export const MAX_RECOMMEND_LENGTH = 80;
  * `fitMessage` gives the question what is left after them, then the recommendation.
  */
 const MAX_MESSAGE_QUESTION_LENGTH = 1_200;
-const MAX_MESSAGE_RECOMMEND_LENGTH = 240;
+export const MAX_MESSAGE_RECOMMEND_LENGTH = 240;
+
+/**
+ * A recommendation as an ask's thread message draws it, with that draw's markdown escapes taken
+ * back out: whole where the message showed it whole, and the part the message kept, with its
+ * ellipsis, where the message cut it. Every backslash the escape writes opens a pair with the
+ * character it escapes, so each pair reads back as that character, and a backslash the cut left
+ * without its character goes with the character.
+ */
+export function drawnRecommendation(recommend: string): string {
+  return messageRecommendation(recommend).replace(/\\(.)/gsu, "$1");
+}
+
+/** A recommendation as an ask's thread message draws it: escaped, then held to its bound. */
+function messageRecommendation(recommend: string): string {
+  return inertField(recommend, MAX_MESSAGE_RECOMMEND_LENGTH);
+}
 
 /**
  * Room for one line of a decision brief on a thread message, a bound on the escaped text as the
@@ -472,7 +488,7 @@ function fitMessage(persona: string, entry: Readonly<AskEntry>, link: string | n
   const recommendation =
     entry.recommend === null || entry.recommend === ""
       ? null
-      : `${RECOMMENDATION} ${inertField(entry.recommend, MAX_MESSAGE_RECOMMEND_LENGTH)}`;
+      : `${RECOMMENDATION} ${messageRecommendation(entry.recommend)}`;
   const rest = [recommendation, link].filter((line): line is string => line !== null);
   // `spent` charges each line with the newline that joins it on, and a message of n lines carries
   // n - 1 of them, so the room left is the ceiling less every other line's cost, the question's own
