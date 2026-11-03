@@ -28,8 +28,8 @@
 // The steps, and what each catches:
 //   1 versions   the build on disk, and the build this session is running.
 //   2 types      the declarations the new build writes beside a plugin it loads
-//                from a folder, read off a probe plugin made in the scratch
-//                folder.
+//                from a folder under its plugin-dir watch, read off a probe
+//                plugin made in the scratch folder.
 //   3 diff       what changed in that interface, and which changed names the
 //                plugin's own hooks read.
 //   4 compile    the hooks against the new types, with a control file the
@@ -309,7 +309,7 @@ export function runChild(file, args, opts = {}) {
 // The child environment for a step. Every step but step 2's probe run inherits
 // this process's environment unchanged: the plugin loads with no flag from
 // Claude Code 2.1.287. Step 2 copies it, sets CLAUDE_CONFIG_DIR and drops the
-// login keys.
+// login keys, and sets CLAUDE_CODE_PLUGIN_DIR_WATCH to 1.
 function childEnv() {
   return { ...process.env };
 }
@@ -830,16 +830,17 @@ export function pre(flags) {
   }
 
   // --- Step 2. Regenerate the types on the new build. ---
-  // The engine writes the declarations beside any plugin it loads from a
-  // folder. The probe is the smallest plugin it loads: a manifest, a hooks.json
-  // naming one module, and a module whose register attaches one hook. A probe
-  // the engine does not load writes nothing. The config directory is an empty
-  // one inside the scratch folder, so the run finds no stored login and no
-  // installed plugin: the engine answers "Not logged in" and exits 1, having
-  // already written the files. So once the run spawned and did not time out,
-  // the step passes on the two files alone, and the exit code and the run's
-  // first output line are evidence. The emptied scratch folder is what keeps
-  // an earlier run's files from reading as this build's.
+  // On 2.1.314 the engine writes the declarations beside a watched plugin it
+  // loads from a folder. The probe is the smallest plugin it loads: a
+  // manifest, a hooks.json naming one module, and a module whose register
+  // attaches one hook. A probe the engine does not load writes nothing. The
+  // config directory is an empty one inside the scratch folder, so the run
+  // finds no stored login and no installed plugin: the engine answers "Not
+  // logged in" and exits 1, having already written the files. So once the run
+  // spawned and did not time out, the step passes on the two files alone, and
+  // the exit code and the run's first output line are evidence. The emptied
+  // scratch folder is what keeps an earlier run's files from reading as this
+  // build's.
   const probeDir = path.join(scratch, 'types-probe');
   const configDir = path.join(scratch, 'config');
   fs.mkdirSync(path.join(probeDir, '.claude-plugin'), { recursive: true });
@@ -848,18 +849,22 @@ export function pre(flags) {
   fs.writeFileSync(path.join(probeDir, '.claude-plugin', 'plugin.json'), '{"name":"upgrade-check-types-probe"}');
   fs.writeFileSync(path.join(probeDir, 'hooks', 'hooks.json'), '{"modules":["./register.js"]}');
   fs.writeFileSync(path.join(probeDir, 'hooks', 'register.js'), "export function register(on) { on('session.start', async ($, e, next) => next(e)) }\n");
-  const probeCommand = 'env ' + PROBE_LOGIN_KEYS.map((key) => '-u ' + key).join(' ') + ' CLAUDE_CONFIG_DIR="' + configDir + '" claude -p "/version" --plugin-dir "' + probeDir + '"';
+  const probeCommand = 'env ' + PROBE_LOGIN_KEYS.map((key) => '-u ' + key).join(' ') + ' CLAUDE_CONFIG_DIR="' + configDir + '" CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude -p "/version" --plugin-dir "' + probeDir + '"';
   // A login carried in the environment would log the run in despite the empty
   // config directory, and a logged-in run sends "/version" to the model, so
   // the probe's environment drops the three Anthropic login keys. The other
   // steps keep theirs. A cloud-provider login, such as Bedrock, Vertex or
   // Foundry, is not dropped, and docs/backlog.md carries that gap.
-  const probeEnv = { ...childEnv(), CLAUDE_CONFIG_DIR: configDir };
+  // On 2.1.314 the engine lays the declarations only beside a --plugin-dir
+  // plugin its plugin-dir watch covers, and a headless -p run watches none
+  // unless CLAUDE_CODE_PLUGIN_DIR_WATCH is 1, so the probe's environment
+  // sets it.
+  const probeEnv = { ...childEnv(), CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_PLUGIN_DIR_WATCH: '1' };
   for (const key of Object.keys(probeEnv)) {
     if (PROBE_LOGIN_KEYS.includes(key.toUpperCase())) delete probeEnv[key];
   }
   const typesRun = runClaude(['-p', '/version', '--plugin-dir', probeDir], { cwd: scratch, env: probeEnv });
-  // The engine writes the declarations as two files: the interface, and the
+  // The steps read two of the files the engine writes: the interface, and the
   // built-in tools' tables that fill its BuiltinToolInputs and
   // BuiltinToolResults. Steps 3 and 4 read the two joined in the committed
   // single-file shape, the tables after the interfaces they fill.
