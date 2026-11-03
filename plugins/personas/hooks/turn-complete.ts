@@ -484,9 +484,10 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // channel-origin would otherwise post the nudge's answer.
   // A mid-turn re-prompt turn carries the operator's thread words, so its
   // answer is backfilled too, on its own flag, which survives a subagent's
-  // completion as the channel flag does.
+  // completion as the channel flag does. A re-prompt answer empty after
+  // trimming is the turn ending with nothing left, so nothing is sent.
   let submittedReplyBackstop = false;
-  if (!skipped && sess.isOwner && completesGateTurn && (currentTurnIsChannelOrigin() || currentTurnIsReprompt()) && !replyCalledThisTurn() && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
+  if (!skipped && sess.isOwner && completesGateTurn && (currentTurnIsChannelOrigin() || currentTurnIsReprompt()) && !(currentTurnIsReprompt() && answerScrubbed.trim() === "") && !replyCalledThisTurn() && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
     try {
       await toolCall({ tool: "mcp__plugin_relay_channel-relay__reply", message: answerScrubbed });
       sess.state.decisions.push({

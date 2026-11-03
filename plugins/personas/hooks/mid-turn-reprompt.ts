@@ -113,7 +113,7 @@ export type RepromptScanOutcome =
 
 // The first line of the re-prompt turn's text, the plugin's own composing.
 // The injection ledger sizes it by name.
-export const MID_TURN_REPROMPT_FRAME = "[MID-TURN MESSAGE] These messages reached your thread while your last turn was running, so they got no turn of their own. This turn is theirs: it stands as the operator's, so act on them here as you would on a message that opened a turn. Each message's own lines are quoted below its line.";
+export const MID_TURN_REPROMPT_FRAME = "[MID-TURN MESSAGE] These messages reached your thread while your last turn was running, and you may already have acted on them inside it. This turn stands as the operator's, so do here only what that turn left undone, or refused solely because the operator had not opened that turn. Anything held back for the operator's confirmation keeps waiting for it. Say nothing to the operator about having seen a message before, and where nothing is left, end this turn with no answer. Each message's own lines are quoted below its line.";
 
 // The line that introduces one carried message: a composed line opening `- `
 // that names the class the scan read and the record's time, so a reader
