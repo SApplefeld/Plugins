@@ -18,6 +18,14 @@
   --red-tint: #fbe9e9;
   --track: #e9e7e2;
   --mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  /* The spacing steps inside the overview's, Needs me's, worker page's and plan page's cards. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  /* The height of a bounded panel on a wide screen: the rollout card and the repo list. The dormant strip
+     takes half of it. The Needs you list and each Needs me group are bounded by the screen's height less
+     their page's own lines instead. */
+  --panel-h: 25vh;
 }
 
 * {
@@ -276,6 +284,39 @@ h1 {
   color: var(--muted);
 }
 
+/* A section's header on the overview, Needs me, worker and plan pages: the name and count in small
+   capitals with a rule beneath, and whatever follows the name pushed to the row's right. The
+   "Recommends" label takes the same type, so one rule sets the size of both. */
+.card-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.card-h-title,
+.rec-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card-h-title + * {
+  margin-left: auto;
+}
+
+/* The header's rule stands in for the top border of the row or line drawn straight under it. */
+.card-h + .need-list > .need-row:first-child,
+.card-h + .empty,
+.card-h + .ro-full > .ro-line:first-child,
+.card-h + .ro-foot {
+  border-top: 0;
+}
+
 .section {
   display: flex;
   flex-direction: column;
@@ -319,10 +360,7 @@ h1 {
 
 /* Needs you */
 .band-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px 6px;
+  padding: var(--space-3) var(--space-3) var(--space-1);
 }
 
 .need-list {
@@ -333,8 +371,8 @@ h1 {
 .need-row {
   display: grid;
   grid-template-columns: 84px minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 9px 12px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   min-height: 44px;
   border-top: 1px solid var(--line);
   color: var(--ink);
@@ -368,7 +406,25 @@ a.need-row:hover {
   margin-right: 6px;
 }
 
+/* A recommendation on its own line with space above: "Recommends" in the header's label type, then the text beside it. */
 .rec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rec-text {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* A chapter's "Next:" line on the plan page, a muted line under the chapter's title. */
+.chapter-next {
   display: block;
   font-size: 12px;
   color: var(--muted);
@@ -405,10 +461,20 @@ a.need-row:hover {
   gap: 8px;
 }
 
+/* On a phone the standup's two columns, the repo list and the Needs me groups' row draw no box of their
+   own, so their sections, cards and rows stack as one column. */
+.standup-cols,
+.standup-main,
+.standup-side,
+.repo-list,
+.nm-groups {
+  display: contents;
+}
+
 .repo-card {
   display: flex;
   flex-direction: column;
-  padding: 0 12px 12px;
+  padding: 0 var(--space-3) var(--space-3);
   min-height: 44px;
 }
 
@@ -546,8 +612,8 @@ a.row:hover {
 .dormant {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--space-2);
+  padding: var(--space-3);
 }
 
 .chips {
@@ -606,9 +672,9 @@ a.health-band:hover {
 .plan-row {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr) 12px;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: start;
-  padding: 12px;
+  padding: var(--space-3);
   min-height: 44px;
   border-bottom: 1px solid var(--line);
   color: var(--ink);
@@ -668,22 +734,7 @@ a.plan-row:hover {
 .worker {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.worker-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.worker-head .who {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
+  gap: var(--space-2);
 }
 
 /* Plan page */
@@ -698,19 +749,81 @@ a.plan-row:hover {
   margin: 0;
   font-size: 15px;
   line-height: 1.4;
+}
+
+/* Markdown drawn as blocks, by markdown.js: the ask's question and brief, the plan's goal and brief
+   cells, and a Context's whole text. A line break inside a paragraph stays a break, as the personas
+   write for Discord, and runs of spaces collapse outside code. Blocks take a small gap, with none
+   above the first or below the last, so a one-paragraph text sits as it did. */
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) > * {
+  margin: 6px 0;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) > :first-child {
+  margin-top: 0;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) > :last-child {
+  margin-bottom: 0;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) :is(h3, h4, h5) {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) h3 {
+  font-size: 1.1em;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) h4 {
+  font-size: 1em;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) h5 {
+  font-size: 0.95em;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) :is(ul, ol) {
+  padding-left: 1.4em;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) pre {
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
   white-space: pre-wrap;
+}
+
+:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) code {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 0.95em;
+}
+
+.md-subtext {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .brief {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .brief-grid {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
-  gap: 6px 10px;
+  gap: var(--space-2) var(--space-3);
   font-size: 13px;
 }
 
@@ -752,7 +865,7 @@ a.plan-row:hover {
   padding: 0;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
-  gap: 6px 8px;
+  gap: var(--space-2);
   font-size: 13px;
   align-items: start;
 }
@@ -825,7 +938,6 @@ a.plan-row:hover {
   min-width: 0;
 }
 
-.worker-head h2,
 .hole-head h3 {
   margin: 0;
   font-size: 14px;
@@ -1022,21 +1134,17 @@ a.plan-row:hover {
     display: flex;
   }
 
-  .need-list {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
+  /* The Needs you rows stack at full width, each on a fixed persona column, so every question starts at one x. */
   .need-row {
-    grid-template-columns: auto auto auto;
+    grid-template-columns: 12ch minmax(0, 1fr) auto;
+    align-content: center;
     border-top: 0;
-    gap: 8px;
-    padding: 6px 16px;
-    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) 16px;
   }
 
   .band-head {
-    padding: 10px 16px 0;
+    padding: var(--space-3) 16px var(--space-1);
   }
 
   .cols {
@@ -1046,14 +1154,93 @@ a.plan-row:hover {
     align-items: start;
   }
 
-  .repos {
+  /* The standup's needs and direction on the left, its workers on the right. */
+  .standup-cols {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 14px;
     align-items: start;
   }
 
-  .repos .full {
-    grid-column: 1 / -1;
+  .standup-main,
+  .standup-side {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .repo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* A card keeps its full height and the panel scrolls, rather than the bounded column squeezing it. */
+  .repo-list > * {
+    flex-shrink: 0;
+  }
+
+  /* A long list scrolls inside its own bounded panel, so the page holds every section in one screen. The
+     panel's header stays in view while its rows scroll beneath. */
+  /* The panel is the positioning context too, so a visually hidden .sr span inside it is clipped with the
+     rows rather than placed against the page, where it would stretch the page past the screen. */
+  .panel {
+    position: relative;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  /* The bounds hold only on a screen at least 600 px tall. On a shorter one, such as a phone held
+     sideways, a bound would leave each panel a sliver, so the panels take their full height and the
+     page scrolls whole. */
+  @media (min-height: 600px) {
+    .panel {
+      max-height: var(--panel-h);
+    }
+
+    /* The left column is as tall as the screen less the page's own lines above and below, about 240 px.
+       The heading and rollout cards keep their height, and the Needs you list, its first child, takes
+       what is left, never less than 120 px. */
+    .standup-main {
+      max-height: calc(100vh - 240px);
+    }
+
+    .chips.panel {
+      max-height: calc(var(--panel-h) / 2);
+    }
+
+    /* Each Needs me group is as tall as the screen less the page's own lines: the title block, the sort
+       bar, a group's header, the batch bar and the source line, about 420 px. */
+    .nm-groups .panel {
+      max-height: calc(100vh - 420px);
+    }
+  }
+
+  .standup-main > * {
+    flex-shrink: 0;
+  }
+
+  .standup-main > .panel:first-child {
+    flex-shrink: 1;
+    min-height: 120px;
+    max-height: none;
+  }
+
+  /* The Needs me groups sit side by side, each scrolling in its own panel. */
+  .nm-groups {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .panel > .card-h {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--card);
   }
 
   .health-cols {
@@ -1513,8 +1700,8 @@ button.chip {
 .nm-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
+  gap: var(--space-1);
+  padding: var(--space-3);
   min-width: 0;
 }
 
@@ -1555,14 +1742,10 @@ a.nm-text {
 
 .ask-question {
   font-size: 16px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .ask-brief {
   font-size: 14px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .ask-where {
@@ -1574,6 +1757,35 @@ a.nm-text {
 
 .ask-controls {
   padding: 4px 0 8px;
+}
+
+/* The ask page's step row: Previous, the ask's place in the Needs me order, then Next. */
+.ask-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ask-step-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.ask-step-link.off {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ask-step-count {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .nm-correct:disabled,
@@ -1620,7 +1832,6 @@ a.nm-text {
   min-width: 0;
 }
 
-.nm-whole,
 .nm-line {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1711,14 +1922,7 @@ a.nm-text {
 .heading-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.heading-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .heading-by {
@@ -1768,12 +1972,7 @@ a.nm-text {
 
 /* Rollout: the sandbox card, the repo page's card, the Needs-me group and the toast they share. */
 .ro-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 4px 12px;
-  flex-wrap: wrap;
-  padding: 10px 12px 6px;
+  padding: var(--space-3) var(--space-3) var(--space-1);
 }
 
 .ro-sub {
@@ -1789,8 +1988,8 @@ a.nm-text {
 .ro-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--line);
   font-size: 13px;
   align-items: baseline;
@@ -1810,7 +2009,7 @@ a.nm-text {
 }
 
 .ro-foot {
-  padding: 6px 12px 8px;
+  padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--line);
   font-size: 12px;
   color: var(--muted);
@@ -1822,7 +2021,7 @@ a.nm-text {
 }
 
 .ro-flow {
-  padding: 4px 12px;
+  padding: var(--space-1) var(--space-3);
   font-size: 13px;
 }
 
@@ -1833,7 +2032,7 @@ a.nm-text {
 .ro-repo {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .ro-repo .ro-head,
@@ -1844,8 +2043,6 @@ a.nm-text {
 
 .ro-repo .ro-head {
   padding-top: 0;
-  padding-bottom: 0;
-  align-items: center;
 }
 
 .ro-repo .ro-foot {
@@ -1865,7 +2062,7 @@ a.nm-text {
 .ro-commits {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
-  gap: 4px 8px;
+  gap: var(--space-1) var(--space-2);
   font-size: 13px;
   align-items: baseline;
 }
@@ -1923,8 +2120,8 @@ a.nm-text {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--space-2);
+  padding: var(--space-3);
   font-size: 13px;
   min-width: 0;
 }

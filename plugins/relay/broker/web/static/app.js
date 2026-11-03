@@ -1,10 +1,12 @@
-// The web surface's pages: one script for all seven. Each page names itself in `<body data-page>`,
-// fetches its view and the siblings reading from the broker every five seconds and draws them again.
+// The web surface's pages: one script for all seven, loaded after markdown.js, whose renderer it
+// calls. Each page names itself in `<body data-page>`, fetches its view and the siblings reading
+// from the broker every five seconds and draws them again.
 // The page holds no state the broker does not, apart from which session list is expanded.
 //
 // Render rule: every string in a view was written by a session or a person and is hostile to the
-// page. View text goes in through `textContent` or `append` of a string, never as markup, and a link
-// is fixed route text plus `encodeURIComponent` of a view value. Nothing here builds HTML.
+// page. View text goes in through `textContent`, `append` of a string, or the text nodes
+// `markdown.js`'s renderer builds inside its fixed elements, never as markup, and a link is fixed
+// route text plus `encodeURIComponent` of a view value. Nothing here builds HTML.
 "use strict";
 
 (function () {
@@ -47,6 +49,17 @@
     const element = document.createElement(tag);
     if (cls) element.className = cls;
     if (text !== undefined && text !== null) element.textContent = text;
+    return element;
+  }
+
+  /**
+   * An element with fixed classes holding a persona's text drawn as markdown blocks, through
+   * `markdown.js`'s renderer over `document`, so every byte of the text reaches the page as a text
+   * node and never as markup.
+   */
+  function md(tag, cls, text) {
+    const element = h(tag, cls);
+    element.append(...window.markdownBlocks(txt(text), document));
     return element;
   }
 
@@ -159,6 +172,29 @@
 
   function label(text, tag) {
     return h(tag || "h2", "label", text);
+  }
+
+  /**
+   * A section's header on the overview, Needs me, worker, plan and ask pages: the name, then " · " and the
+   * count where one is given, as one small uppercase heading in a row with a rule beneath. A node the
+   * caller appends after the heading sits at the row's right. The health page keeps `label`.
+   */
+  function cardHead(text, count, tag, id) {
+    const head = h("div", "card-h");
+    const title = h(tag || "h2", "card-h-title", count === null || count === undefined ? text : text + " · " + count);
+    if (id) title.id = id;
+    head.append(title);
+    return head;
+  }
+
+  /**
+   * A recommendation on its own line: "Recommends" in the header's label style, then the text beside it,
+   * set as text. A hidden ": " between the two keeps the read-aloud and copied form "Recommends: <text>".
+   */
+  function recRow(text) {
+    const row = h("div", "rec");
+    row.append(h("span", "rec-label", "Recommends"), h("span", "sr", ": "), h("span", "rec-text", text));
+    return row;
   }
 
   function dot(kind) {
@@ -359,10 +395,7 @@
     if (!isObject(heading)) return null;
     const card = h("section", "card pad heading-card");
     card.setAttribute("aria-labelledby", "direction-heading");
-    const head = h("div", "heading-head");
-    const title = label("Heading · " + txt(onRepo ? view.name : view.sandbox));
-    title.id = "direction-heading";
-    head.append(title);
+    const head = cardHead("Heading · " + txt(onRepo ? view.name : view.sandbox), null, "h2", "direction-heading");
     const date = txt(heading.date) === "" ? null : tagDay(heading.date);
     if (onRepo) {
       if (date !== null) head.append(h("div", "heading-by", "set by you · " + date));
@@ -601,7 +634,8 @@
     const summary = view.rollout;
     if (!isObject(summary)) return null;
     const now = nowOf(view);
-    const card = h("section", "card ro-card");
+    const card = h("section", "card ro-card panel");
+    card.dataset.panel = "rollout";
     card.setAttribute("aria-labelledby", "rollout-heading");
     const rows = objects(summary.rows);
     const waiting = rows.filter((row) => num(row.toRollOut) > 0);
@@ -610,10 +644,8 @@
 
     // The count names clients only where every row waiting is a client branch; a publish row is a repository, so a mix reads "waiting" alone.
     const count = num(summary.waiting) ?? waiting.length + publishing.length;
-    const head = h("div", "ro-head");
-    const heading = label(held ? "Rollout" : "Rollout · " + (publishing.length === 0 ? plural(count, "client", "clients") : count) + " waiting");
-    heading.id = "rollout-heading";
-    head.append(heading);
+    const head = cardHead("Rollout", held ? null : (publishing.length === 0 ? plural(count, "client", "clients") : count) + " waiting", "h2", "rollout-heading");
+    head.classList.add("ro-head");
     const oldest = dayOf(summary.oldestAt, now);
     if (held) head.append(h("div", "ro-sub held", "tags unread"));
     else head.append(h("div", "ro-sub", plural(num(summary.changes) ?? 0, "change", "changes") + (oldest === null ? "" : ", oldest " + oldest)));
@@ -690,10 +722,8 @@
     const now = nowOf(view);
     const card = h("section", "card pad attn ro-repo");
     card.setAttribute("aria-labelledby", "rollout-heading");
-    const head = h("div", "ro-head");
-    const heading = label("Rollout");
-    heading.id = "rollout-heading";
-    head.append(heading);
+    const head = cardHead("Rollout", null, "h2", "rollout-heading");
+    head.classList.add("ro-head");
     const held = rolloutHeld(view);
     if (held) head.append(h("div", "ro-sub held", "tags unread"));
     else head.append(h("div", "ro-tag", txt(row.lastTag) === "" ? "no rollout tag yet" : txt(row.lastTag)));
@@ -732,10 +762,8 @@
     const now = nowOf(view);
     const card = h("section", "card pad attn ro-repo");
     card.setAttribute("aria-labelledby", "rollout-heading");
-    const head = h("div", "ro-head");
-    const heading = label("Rollout");
-    heading.id = "rollout-heading";
-    head.append(heading);
+    const head = cardHead("Rollout", null, "h2", "rollout-heading");
+    head.classList.add("ro-head");
     const held = rolloutHeld(view);
     if (held) head.append(h("div", "ro-sub held", "tags unread"));
     else head.append(h("div", "ro-tag", txt(row.lastTag)));
@@ -780,11 +808,10 @@
     if (!held && rows.length === 0 && publishing.length === 0) return null;
     const section = h("section", "section");
     section.setAttribute("aria-label", "Roll out");
-    const head = h("div", "section-head");
     const count = publishing.length === 0 ? plural(rows.length, "client", "clients") : rows.length + publishing.length + " waiting";
-    head.append(label("Roll out · " + (held ? "tags unread" : count), "h2"));
-    section.append(head);
-    const card = h("div", "card");
+    section.append(cardHead("Roll out", held ? "tags unread" : count, "h2"));
+    const card = h("div", "card panel");
+    card.dataset.panel = "rollout";
     if (held) card.append(h("div", "nm-none", "tags unread"));
     else {
       for (const row of rows) {
@@ -862,11 +889,11 @@
     const href = askHrefOf(item);
     const row = href !== null ? link("need-row", href) : item.repo ? link("need-row", repoHref(item.repo)) : h("div", "need-row");
     row.append(h("span", "who", item.repo ? item.repo : "Hands"));
-    const middle = h("span");
+    const middle = h("div");
     if (item.kind === "blocked") middle.append(h("span", "tag", "blocked"));
     else if (item.kind === "ask" && item.blocking) middle.append(h("span", "tag", "blocking"));
     middle.append(txt(item.text));
-    if (item.recommend) middle.append(h("span", "rec", "Recommends: " + item.recommend));
+    if (item.recommend) middle.append(recRow(item.recommend));
     row.append(middle);
     const opened = parse(item.openedAt);
     row.append(h("span", "age", opened === null ? "" : span(now - opened)));
@@ -956,19 +983,27 @@
     const nav = h("nav", "toplinks");
     nav.setAttribute("aria-label", "Shortcuts");
     nav.append(
-      link("alert", "/needs-me", "Needs me · " + needs.length),
+      link("alert", "/needs-me", "Needs me · " + needs.length + (needs.length === 1 ? " item" : " items")),
       link("", "/health", num(health.expected) === null ? "All sessions" : "All " + health.expected + " sessions"),
     );
     top.append(nav);
     out.append(top);
 
-    const band = h("section", "card attn");
+    // On a wide screen the needs and the direction take the left column and the workers the right, so the
+    // standup fits one screen; on a phone neither column draws a box, and the sections stack as one.
+    const cols = h("div", "standup-cols");
+    const main = h("div", "standup-main");
+    const side = h("div", "standup-side");
+    cols.append(main, side);
+    out.append(cols);
+
+    const band = h("section", "card attn panel");
+    band.dataset.panel = "needs";
     band.id = "needs";
     band.setAttribute("aria-labelledby", "needs-heading");
-    const head = h("div", "band-head");
-    const heading = label("Needs you · " + needs.length);
-    heading.id = "needs-heading";
-    head.append(dot("amber"), heading);
+    const head = cardHead("Needs you", needs.length + (needs.length === 1 ? " item" : " items"), "h2", "needs-heading");
+    head.classList.add("band-head");
+    head.prepend(dot("amber"));
     band.append(head);
     if (needs.length === 0) band.append(h("div", "empty", "Nothing needs you right now."));
     else {
@@ -976,44 +1011,51 @@
       for (const item of needs) rows.append(needRow(item, now));
       band.append(rows);
     }
-    out.append(band);
+    main.append(band);
     const headingBand = headingCard(view, false);
-    if (headingBand !== null) out.append(headingBand);
+    if (headingBand !== null) main.append(headingBand);
     const rolloutBand = rolloutCard(view);
-    if (rolloutBand !== null) out.append(rolloutBand);
+    if (rolloutBand !== null) main.append(rolloutBand);
 
+    // The rollup counts workers, so each chip names its unit, as "2 workers asking" or "1 worker idle".
     const counts = h("div", "rollup");
     for (const state of ["asking", "blocked", "stalled", "working", "idle", "dormant"]) {
       const n = repos.filter((repo) => repo.state === state).length;
       if (n === 0) continue;
       const item = h("span");
-      item.append(h("b", CARD_STATES.indexOf(state) >= 0 ? "alert" : "", String(n)), " " + state);
+      item.append(h("b", CARD_STATES.indexOf(state) >= 0 ? "alert" : "", String(n)), (n === 1 ? " worker " : " workers ") + state);
       counts.append(item);
     }
-    out.append(counts);
+    if (counts.firstChild !== null) side.append(cardHead("Workers", null, "h2"));
+    side.append(counts);
 
     const stack = h("section", "repos");
     stack.setAttribute("aria-label", "Repos");
     // A repo with an ask or a blocked item in the band needs the operator and draws as a card; every other
     // repo draws as a row, or as a chip in the dormant box.
     const needy = new Set(needs.filter((item) => item.kind === "ask" || item.kind === "blocked").map((item) => item.repo));
+    // The cards and rows share one wrapper, a bounded panel on a wide screen and no box of its own on a phone.
+    const repoList = h("div", "repo-list panel");
+    repoList.dataset.panel = "repos";
     for (const repo of repos.filter((candidate) => needy.has(candidate.name))) {
-      stack.append(repoCard(repo, needs, now));
+      repoList.append(repoCard(repo, needs, now));
     }
     const active = repos.filter((candidate) => !needy.has(candidate.name) && candidate.state !== "dormant");
     if (active.length > 0) {
-      const group = h("div", "card full");
+      const group = h("div", "card");
       const rows = h("div", "rows");
       for (const repo of active) rows.append(repoRow(repo, now));
       group.append(rows);
-      stack.append(group);
+      repoList.append(group);
     }
+    if (repoList.firstChild !== null) stack.append(repoList);
     const dormant = repos.filter((candidate) => !needy.has(candidate.name) && candidate.state === "dormant");
     if (dormant.length > 0) {
-      const box = h("section", "card dormant full");
-      const top2 = h("div", "section-head");
-      top2.append(label("Dormant · " + dormant.length, "h2"), h("div", "meta", "tap to open"));
-      const chips = h("div", "chips");
+      const box = h("section", "card dormant");
+      const top2 = cardHead("Dormant", dormant.length, "h2");
+      top2.append(h("div", "meta", "tap to open"));
+      const chips = h("div", "chips panel");
+      chips.dataset.panel = "dormant";
       for (const repo of dormant) {
         const chip = link("chip", repoHref(repo.name), txt(repo.name));
         const at = parse(repo.worker ? repo.worker.lastTurnAt : null) ?? parse(repo.lastDoneAt);
@@ -1024,16 +1066,15 @@
       box.append(top2, chips, h("div", "note", "dormant = on the roster, idle past 24h, queue empty"));
       stack.append(box);
     }
-    out.append(stack);
+    side.append(stack);
 
     const band2 = link("card health-band", "/health");
-    const bandHead = h("div", "repo-head");
-    const bandTitle = h("div", "repo-name");
+    const bandHead = cardHead("Health", null, "span");
     const clear = num(health.expected) !== null && num(health.holes) === 0 && num(health.hands) === 0 && num(health.held) === 0;
     // Nothing expected is nothing to call healthy, so "0 of 0 reporting" draws the neutral dot.
     const idle = num(health.expected) === 0 && clear;
-    bandTitle.append(dot(idle ? "hollow" : clear ? "green" : "amber"), h("span", "label", "Health"));
-    bandHead.append(bandTitle, chevron());
+    bandHead.prepend(dot(idle ? "hollow" : clear ? "green" : "amber"));
+    bandHead.append(chevron());
     const line = h("div", "line");
     if (num(health.expected) === null) line.append("no reading yet");
     else {
@@ -1043,7 +1084,8 @@
       if (num(health.held) > 0) line.append(" · " + health.held + (health.held === 1 ? " source held" : " sources held"));
     }
     band2.append(bandHead, line);
-    out.append(band2, sources(view, ["roster", "queues", "plans", "ledger", "events", "registry", "usage", "rollout"]));
+    side.append(band2);
+    out.append(sources(view, ["roster", "queues", "plans", "ledger", "events", "registry", "usage", "rollout"]));
     return out;
   }
 
@@ -1120,16 +1162,22 @@
 
     const cols = h("div", "repo-cols");
     const left = h("div", "stack");
-    const headingBox = headingCard(view, true);
-    if (headingBox !== null) left.append(headingBox);
-    // A repository ships one way, so at most one of the two slots holds a row.
-    const rolloutBox = rolloutRepoCard(view) ?? publishRepoCard(view);
-    if (rolloutBox !== null) left.append(rolloutBox);
+
+    const queued = list(view.upNext);
+    const nextSection = h("section", "section");
+    nextSection.append(cardHead("Up next", queued.length));
+    if (queued.length === 0) nextSection.append(h("div", "card pad muted", "Nothing is queued."));
+    else {
+      const card = h("div", "card");
+      for (const plan of queued) card.append(planRow(plan, now, true));
+      nextSection.append(card);
+    }
+    left.append(nextSection);
 
     const changed = list(view.changed);
     const changedSection = h("section", "section");
     changedSection.append(
-      label((since === null ? "Changed in the last 24 hours" : "Changed since " + dayClock(since, now)) + (view.changed === null ? "" : " · " + changed.length)),
+      cardHead(since === null ? "Changed in the last 24 hours" : "Changed since " + dayClock(since, now), view.changed === null ? null : changed.length),
     );
     if (view.changed === null) changedSection.append(h("div", "card pad muted", "No plans were swept for this repo."));
     else if (changed.length === 0) changedSection.append(h("div", "card pad muted", "Nothing has changed."));
@@ -1140,23 +1188,18 @@
     }
     left.append(changedSection);
 
-    const queued = list(view.upNext);
-    const nextSection = h("section", "section");
-    nextSection.append(label("Up next · " + queued.length));
-    if (queued.length === 0) nextSection.append(h("div", "card pad muted", "Nothing is queued."));
-    else {
-      const card = h("div", "card");
-      for (const plan of queued) card.append(planRow(plan, now, true));
-      nextSection.append(card);
-    }
-    left.append(nextSection);
+    // The worker page leads with what is queued, then what changed, then the Heading and Rollout cards.
+    // A repository ships one way, so at most one of the two slots holds a row.
+    const headingBox = headingCard(view, true);
+    if (headingBox !== null) left.append(headingBox);
+    const rolloutBox = rolloutRepoCard(view) ?? publishRepoCard(view);
+    if (rolloutBox !== null) left.append(rolloutBox);
 
     const worker = view.worker || {};
     const box = h("section", "card pad worker");
-    const head = h("div", "worker-head");
-    const who = h("div", "who");
-    who.append(dot(worker.surfaceState === "working" ? "blue" : "hollow"), h("h2", null, txt(worker.lineage || view.name) + ": Worker"));
-    head.append(who, h("div", "meta", (worker.surfaceState || "no session") + " · " + leaseWords(worker)));
+    const head = cardHead(txt(worker.lineage || view.name) + ": Worker", null, "h2");
+    head.prepend(dot(worker.surfaceState === "working" ? "blue" : "hollow"));
+    head.append(h("div", "meta", (worker.surfaceState || "no session") + " · " + leaseWords(worker)));
     const turn = parse(worker.lastTurnAt);
     box.append(head, h("div", "meta", turn === null ? "No turn recorded." : "Last turn " + dayClock(turn, now) + ", " + span(now - turn) + " ago."));
     // The worker's talk page, where its lineage is known; the plan page carries no lineage and links nowhere.
@@ -1200,7 +1243,7 @@
   function briefGrid(parts) {
     const grid = h("div", "brief-grid");
     for (const part of parts) {
-      grid.append(h("div", "brief-label" + (part.label === ASSUMES_LABEL ? " assumes" : ""), part.label), h("div", "brief-text", part.text));
+      grid.append(h("div", "brief-label" + (part.label === ASSUMES_LABEL ? " assumes" : ""), part.label), md("div", "brief-text", part.text));
     }
     return grid;
   }
@@ -1246,14 +1289,14 @@
     if (brief !== null) out.append(brief);
     else {
       const goal = h("section", "card pad section");
-      goal.append(label("Goal"), h("p", "goal", view.goal ? view.goal : "This plan has no Goal section."));
+      goal.append(cardHead("Goal"), md("div", "goal", txt(view.goal).trim() !== "" ? view.goal : "This plan has no Goal section."));
       out.append(goal);
     }
 
     const asks = list(view.openAsks);
     if (asks.length > 0) {
       const box = h("section", "section");
-      box.append(label("Open asks · " + asks.length));
+      box.append(cardHead("Open asks", asks.length));
       const card = h("div", "card");
       for (const ask of asks) {
         const item = h("div", "ask");
@@ -1261,7 +1304,7 @@
         if (ask.blocking) text.append(h("span", "tag", "blocking"));
         text.append(txt(ask.text));
         item.append(text);
-        if (ask.recommend) item.append(h("div", "rec", "Recommends: " + ask.recommend));
+        if (ask.recommend) item.append(recRow(ask.recommend));
         const opened = parse(ask.openedAt);
         if (opened !== null) item.append(h("div", "meta", "asked " + span(now - opened) + " ago"));
         card.append(item);
@@ -1271,7 +1314,7 @@
     }
 
     const progress = h("section", "card pad section");
-    progress.append(label("Progress"));
+    progress.append(cardHead("Progress"));
     if (sections.length === 0) progress.append(h("div", "meta", "This plan lists no sections."));
     else {
       const steps = h("ul", "steps");
@@ -1290,13 +1333,13 @@
     }
     if (view.next) progress.append(h("div", "next-line", "Next: " + view.next));
     if (chapters.length > 0) {
-      progress.append(label("Chapters · " + chapters.length, "h3"));
+      progress.append(cardHead("Chapters", chapters.length, "h3"));
       const steps = h("ul", "steps");
       for (const chapter of chapters) {
         const item = h("li");
         item.append(mark("done", "closed"));
         const body = h("span", null, "Chapter " + chapter.number + ": " + txt(chapter.completed));
-        if (chapter.next) body.append(h("span", "rec", "Next: " + chapter.next));
+        if (chapter.next) body.append(h("span", "chapter-next", "Next: " + chapter.next));
         item.append(body);
         steps.append(item);
       }
@@ -2996,14 +3039,14 @@
    */
   function contextPanel(item, held, cut, now) {
     const panel = h("div", "nm-context-body");
-    if (cut) panel.append(h("div", "nm-whole", txt(item.text)));
+    if (cut) panel.append(md("div", "nm-whole", item.text));
     if (held.loading) {
       panel.append(h("div", "meta", "reading"));
       return panel;
     }
     const ask = held.ask;
     if (ask !== null) {
-      if (txt(ask.brief).trim() !== "") panel.append(h("div", "meta", "Brief"), h("div", "ask-brief", txt(ask.brief)));
+      if (txt(ask.brief).trim() !== "") panel.append(h("div", "meta", "Brief"), md("div", "ask-brief", ask.brief));
       if (txt(ask.planPath) !== "") panel.append(h("div", "meta", "Plan"), h("div", "mono", txt(ask.planPath)));
       const thread = txt(ask.thread);
       if (thread.indexOf(DISCORD_PREFIX) === 0) panel.append(link("ask-thread", thread, "Open the thread"));
@@ -3085,7 +3128,7 @@
     // An ask's question opens its own page; any other item's text is plain.
     const href = askHrefOf(item);
     box.append(head, href !== null ? link("nm-text", href, headline) : h("div", "nm-text", headline));
-    if (txt(item.recommend) !== "") box.append(h("div", "rec", "Recommends: " + txt(item.recommend)));
+    if (txt(item.recommend) !== "") box.append(recRow(txt(item.recommend)));
     if ((item.kind !== "ask" && item.kind !== "blocked") || txt(item.repo) === "") return box;
 
     const key = itemKey(item);
@@ -3128,11 +3171,11 @@
     const open = items.filter((item) => !deliveredIn(view, item));
     const section = h("section", "section");
     section.setAttribute("aria-label", words);
-    const head = h("div", "section-head");
-    head.append(label(words + " · " + open.length, "h2"));
+    const head = cardHead(words, open.length, "h2");
     if (note) head.append(h("div", "meta", note));
     section.append(head);
-    const card = h("div", attn && open.length > 0 ? "card attn" : "card");
+    const card = h("div", attn && open.length > 0 ? "card attn panel" : "card panel");
+    card.dataset.panel = name;
     if (items.length === 0) card.append(h("div", "nm-none", "Nothing here."));
     for (const item of items) card.append(deliveredIn(view, item) ? deliveredLine(item) : needsItem(item, now));
     section.append(card);
@@ -3177,12 +3220,18 @@
     }
     out.append(sorts);
 
+    // On a wide screen the groups sit side by side, each scrolling in its own panel, so the page fits one
+    // screen; on a phone the wrapper draws no box and the groups stack.
     const rolloutNeeds = rolloutGroup(view);
-    out.append(
+    const groups = h("div", "nm-groups");
+    groups.append(
       needsGroup(view, "blocked", "Blocked on you", null, now, true),
       needsGroup(view, "ask", "Asks", "each proceeds on its recommendation", now, false),
       ...(rolloutNeeds === null ? [] : [rolloutNeeds]),
       needsGroup(view, "hands", "Your hands", null, now, false),
+    );
+    out.append(
+      groups,
       sources(view, ["roster", "queues", "ledger", "events", "registry", "usage", "rollout"]),
     );
 
@@ -3226,12 +3275,80 @@
     return params === null ? null : "/web/ask?repo=" + encodeURIComponent(params.repo) + "&id=" + encodeURIComponent(params.id);
   }
 
+  /** The Needs me reading the ask page steps through, taken once per pass beside the ask's own; null until one arrives. */
+  let askNeeds = null;
+
+  /** The step row's ends and count from the last Needs me reading that held the ask on this page, by the ask's key. */
+  let askStepHeld = null;
+
+  /**
+   * The row that steps to the previous and next ask: the Needs me page's Asks in its default order,
+   * the current ask found by its repo and id, and "n of N" between the two links. An end with nowhere
+   * to go is a disabled mark, never a link. Once a reading has held the ask, a later one that does not,
+   * as after Agree or Dismiss here, draws the row that reading gave with its count, and an end whose
+   * ask the current list no longer holds is a disabled mark. An ask no reading on this page has held,
+   * one handled elsewhere before the page opened, reads "not in the open list", with Previous to
+   * the list's first ask and Next to its last. Nothing is drawn until a
+   * reading has arrived, or where neither the list nor the remembered row has an ask.
+   */
+  function askStep(item) {
+    if (askNeeds === null) return null;
+    const asks = sortedItems(groupItems(askNeeds, "ask")).filter((one) => askHrefOf(one) !== null);
+    const key = itemKey(item);
+    const at = asks.findIndex((one) => itemKey(one) === key);
+    let place;
+    if (at >= 0) {
+      place = { key, previous: at > 0 ? asks[at - 1] : null, next: at < asks.length - 1 ? asks[at + 1] : null, count: at + 1 + " of " + asks.length };
+      askStepHeld = place;
+    } else if (askStepHeld !== null && askStepHeld.key === key) {
+      // An end whose ask has left the list since the row was held is disabled; the count stays as held.
+      const kept = (other) => (other !== null && asks.some((one) => itemKey(one) === itemKey(other)) ? other : null);
+      place = { key, previous: kept(askStepHeld.previous), next: kept(askStepHeld.next), count: askStepHeld.count };
+    } else if (asks.length > 0) {
+      place = { key, previous: asks[0], next: asks[asks.length - 1], count: "not in the open list" };
+    } else {
+      return null;
+    }
+    // Each end is a link to its ask's page through `askHrefOf`, or a disabled mark where there is none.
+    const end = (other, words, rel) => {
+      if (other === null) {
+        const mark = h("span", "ask-step-link off", words);
+        mark.setAttribute("aria-disabled", "true");
+        return mark;
+      }
+      const anchor = link("ask-step-link", askHrefOf(other), words);
+      anchor.rel = rel;
+      return anchor;
+    };
+    const row = h("nav", "ask-step");
+    row.setAttribute("aria-label", "Asks");
+    row.append(end(place.previous, "‹ Previous", "prev"), h("span", "ask-step-count", place.count), end(place.next, "Next ›", "next"));
+    return row;
+  }
+
+  /**
+   * Left and Right step the ask page to the previous and next ask, where that link is live. A key
+   * pressed in a field, the Answer box among them, or held with Alt, Ctrl, Meta or Shift stays the
+   * browser's, so typing and its shortcuts never leave the page.
+   */
+  function stepKey(event) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const active = document.activeElement;
+    if (active !== null && (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
+    const target = app.querySelector(event.key === "ArrowLeft" ? '.ask-step a[rel="prev"]' : '.ask-step a[rel="next"]');
+    if (target === null) return;
+    event.preventDefault();
+    location.assign(target.href);
+  }
+
   /**
    * One ask: who asked and how long ago, the question, the recommendation, the brief, the plan, the
-   * thread, then Agree, Answer and Dismiss with a Context of the session's lines. They are the Needs me
-   * page's acts, with the same bodies, words, touched mark and inline Correct box, so the batch there
-   * skips an ask answered here. A handled ask, one whose line a page delivered, draws the act and its
-   * time in place of the buttons, since every other page hides it until its session closes or raises it.
+   * thread, the step to the previous and next ask, then Agree, Answer and Dismiss with a Context of
+   * the session's lines. They are the Needs me page's acts, with the same bodies, words, touched mark
+   * and inline Correct box, so the batch there skips an ask answered here. A handled ask, one whose
+   * line a page delivered, draws the act and its time in place of the buttons, since every other page
+   * hides it until its session closes or raises it.
    */
   function renderAsk(view) {
     const out = document.createDocumentFragment();
@@ -3255,14 +3372,14 @@
 
     const ask = h("section", needsMe.out.has(key) ? "card pad section ask-card nm-acting" : "card pad section ask-card");
     ask.setAttribute("aria-label", "Ask");
-    ask.append(h("div", "ask-question", item.text));
-    if (txt(item.recommend) !== "") ask.append(h("div", "rec", "Recommends: " + txt(item.recommend)));
+    ask.append(md("div", "ask-question", item.text));
+    if (txt(item.recommend) !== "") ask.append(recRow(txt(item.recommend)));
     out.append(ask);
 
     if (txt(view.brief).trim() !== "") {
       const brief = h("section", "card pad section");
       brief.setAttribute("aria-label", "Brief");
-      brief.append(label("Brief"), h("div", "ask-brief", txt(view.brief)));
+      brief.append(cardHead("Brief"), md("div", "ask-brief", view.brief));
       out.append(brief);
     }
 
@@ -3272,6 +3389,10 @@
     const thread = txt(view.thread);
     if (thread.indexOf(DISCORD_PREFIX) === 0) where.append(link("ask-thread", thread, "Open the thread"));
     if (where.childNodes.length > 0) out.append(where);
+
+    // The step row stands above the acts whichever way the ask reads, so after an act it still offers Next.
+    const step = askStep(item);
+    if (step !== null) out.append(step);
 
     const words = needsMe.statuses.get(key);
     if (view.handled === true) {
@@ -3352,6 +3473,9 @@
     // A page that follows its newest content stays at the foot when the reader was there, and starts there.
     const follow = page.follow === true && (lastView === null || window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80);
     const drawn = page.render(view);
+    // A bounded panel scrolls inside itself and a redraw builds it new, so each panel's place is read by its key
+    // before the swap and set again after.
+    const scrolled = new Map(Array.from(app.querySelectorAll("[data-panel]"), (panel) => [panel.dataset.panel, panel.scrollTop]));
     // The sibling rail sits above every page's own top bar, from the broker's last poll of the siblings.
     const rail = sandboxRail(siblingsView);
     if (rail !== null) drawn.prepend(rail);
@@ -3366,6 +3490,7 @@
     }
     app.replaceChildren(drawn);
     goneDrawn = false;
+    for (const panel of app.querySelectorAll("[data-panel]")) panel.scrollTop = scrolled.get(panel.dataset.panel) ?? 0;
     if (follow) window.scrollTo(0, document.documentElement.scrollHeight);
     if (focused) {
       const again = Array.from(app.querySelectorAll("[data-focus-key]")).find((control) => control.dataset.focusKey === focused);
@@ -3492,10 +3617,23 @@
     }
   }
 
+  /**
+   * The ask page's Needs me reading beside its own, once per pass, which its step row orders by. A
+   * failure here is not the page's: the last reading stays, and the ask's own fetch decides the notice.
+   */
+  async function fetchNeeds() {
+    if (document.body.dataset.page !== "ask") return;
+    try {
+      askNeeds = await fetchView("/web/needs-me");
+    } catch (error) {
+      // Kept as it was: a step row that cannot refresh keeps the last order rather than vanishing.
+    }
+  }
+
   async function poll() {
     let failure = null;
     try {
-      const [view] = await Promise.all([fetchView(page.url()), fetchSiblings()]);
+      const [view] = await Promise.all([fetchView(page.url()), fetchSiblings(), fetchNeeds()]);
       try {
         const selection = selected();
         let shown = view;
@@ -3554,6 +3692,7 @@
       return;
     }
     if (document.body.dataset.page === "talk") loadTalkPlan();
+    if (document.body.dataset.page === "ask") document.addEventListener("keydown", stepKey);
     poll();
   }
 
