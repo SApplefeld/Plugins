@@ -217,8 +217,11 @@ pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name '<file-in-inbox>'
 pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message '<msg>' [-Push]
 ```
 
-`kb-move.ps1` is the only path into `sources/`. It refuses to overwrite an
-existing source, so a re-dropped file is a refusal, not a silent loss.
+`kb-move.ps1` is the only path into `sources/`, and it never overwrites an
+existing source. A re-dropped file whose bytes match the source of the same
+name is removed from `inbox/`, since its original is already in `sources/`.
+A file of different content under a name `sources/` already holds is
+refused and stays in `inbox/` for a person to rename.
 
 `kb-commit.ps1` stages exactly the paths you name and nothing else. Separate
 them with a vertical bar, which Windows forbids in a file name, and use no

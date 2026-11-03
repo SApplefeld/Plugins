@@ -44,7 +44,10 @@ drives the run wrapper against a stub in place of `claude`.
 commit helpers and `kb-commit.ps1 -Reconcile` against a throwaway KB, and
 checks that the three helpers' copies of the handle function are byte-equal.
 It also drives the move helper's refusals of a symbolic link and of a stamp
-or a move that throws.
+or a move that throws, and its answer to a name `sources/` already holds: an
+identical inbox copy deleted, a copy of different content refused, and
+nothing deleted under `-WhatIf`. Its `-MoveScript` parameter runs the checks
+against another copy of the move helper, such as one from an earlier commit.
 `tests/Test-KbWalk.ps1` drives the walker over throwaway KBs with the same kind
 of stub, and `tests/Test-WalkLauncher.ps1` drives the launcher against a
 temporary install and the registrar under `-WhatIf`. `tests/Test-KbDrop.ps1`
@@ -360,12 +363,16 @@ only path into `sources/`: it takes the handle `kb-status.ps1 -What Inbox`
 prints beside an inbox file, which it resolves against the inbox at the call,
 or a bare inbox file name from a person at the keyboard. It refuses a handle
 matching no file or more than one, refuses a name
-containing a separator or leading dash, refuses to overwrite an existing source
-(so a re-dropped file is a refusal, not a silent loss), confirms the resolved
-paths stay inside the repo and clear of `.git/` and `.claude/`, and refuses an
-inbox file that is a reparse point, such as a symbolic link or a junction. It
-then sets the file's last-write time to now and moves it. A stamp or a move
-that throws ends in one `kb-move:` line, with the file left in `inbox/`.
+containing a separator or leading dash, never overwrites an existing source,
+confirms the resolved paths stay inside the repo and clear of `.git/` and
+`.claude/`, and refuses an inbox file that is a reparse point, such as a
+symbolic link or a junction. It then sets the file's last-write time to now
+and moves it. Where `sources/` already holds the name, it compares the two
+files byte for byte instead: it removes an identical inbox copy and prints
+`duplicate: sources/<name>`, and it refuses a copy of different content,
+which stays in `inbox/` for a person to rename. A stamp, a move, a compare or
+a delete that throws ends in one `kb-move:` line, with the file left in
+`inbox/`.
 `kb-commit.ps1` is the only path
 that commits: it accepts only
 bar-delimited repo-relative paths under `sources/` or `wiki/` or exactly

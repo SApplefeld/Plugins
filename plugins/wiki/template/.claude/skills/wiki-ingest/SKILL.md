@@ -149,8 +149,11 @@ the inbox: move it anyway and write the same kind of stub summary page,
 recording that its content could not be read, then continue the remaining
 steps for it (index entry, log entry, its own commit). A source is never
 silently dropped and never left in the inbox to be retried forever, save the
-two kinds step b leaves there: a name its first check skips and a duplicate
-drop.
+two kinds step b leaves there: a name its first check skips and a new
+document under a name `sources/` already holds. Where step b removes a
+duplicate or leaves a file under a taken name, that source ends there, with
+no stub page. A file step b refuses for any other reason stops the run
+instead, and stays in the inbox until a person acts on the refusal.
 
 **b. Move it.** First look at the name itself. kb-move refuses a name
 containing `/`, `\` or `:`, equal to `.` or `..`, or starting with a dash,
@@ -187,13 +190,16 @@ the quote.
 
 On success it prints the destination path, `sources/<file>`. Read that line
 to learn where the file went, and never copy it onto a later command line;
-step g names the source by the same handle. If it refuses because
-`sources/<file>` already exists, the file was ingested by an earlier run and
-this is a duplicate drop: do not overwrite, make no commit for it, leave the
-inbox file where it is, note it for the final report, and move on to the
-next source. A duplicate's original is already in `sources/` from an earlier
-run, so its inbox copy stays, and every run names it in its report until a
-person removes it. If it refuses for any other reason, among them a handle
+step g names the source by the same handle. If it prints
+`duplicate: sources/<file>` instead, an earlier run ingested this file and
+the inbox copy held the same bytes, so kb-move removed it from the inbox:
+make no commit for it, count it for the final report, and move on to the
+next source. If its refusal line opens `kb-move: sources/<file> already
+exists with different content`, this is a new document under a name `sources/` already
+holds, and `sources/` is never overwritten: make no commit for it, leave the
+inbox file where it is, note it for the final report as a file a person
+must rename, and move on to the next source. If it refuses for any other
+reason, among them a handle
 that matches no file because the file left the inbox after the snapshot, stop
 the run: emit step 5's push-only call so the commits this run already made
 reach origin, then report the refusal. Never work around a refusal.
@@ -261,9 +267,9 @@ One push per run. A run that stopped at step 1 or step 4b because another run
 is live makes no push at all, whatever it committed: the rest of this step
 does not apply to it. `-Push` pushes even when its own call had nothing to
 commit, so an earlier source's commit never strands locally. If the run
-made commits, counting step 1's, but ended without one (a duplicate-drop
-or skipped last source, or any other early stop), still push, with a call that
-stages nothing new:
+made commits, counting step 1's, but ended without one (a last source that
+was a removed duplicate, left under a taken name or skipped, or any other
+early stop), still push, with a call that stages nothing new:
 
     pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path 'log.md' -Message 'Ingest: push pending commits' -Push
 
@@ -295,6 +301,8 @@ copy text out of the document into a message.
 
 End the run by reporting: how many orphans step 1 reconciled, how many
 sources were processed, how many commits were made, anything skipped for a
-bad name (naming the file and that a human must rename it), anything else
+bad name (naming the file and that a human must rename it), how many
+duplicates kb-move removed, each file left under a name `sources/` already
+holds (naming the file and that a human must rename it), anything else
 that was refused or could not be read, and whether the push succeeded. In
 a headless run this text is the only signal a human ever sees.

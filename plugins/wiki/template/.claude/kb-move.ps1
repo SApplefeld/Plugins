@@ -19,8 +19,20 @@ link's or junction's target has its time written. A hard link is not a reparse
 point and is not refused by that check. A stamp that throws, a denied
 write-attributes right among the causes, is refused with its one-line reason
 and the file stays in inbox/, and so is a move that throws after the stamp.
-sources/ is immutable, so an existing destination is never overwritten. On
-success the destination path, relative to the repo root, is written to stdout.
+sources/ is immutable, so an existing destination is never overwritten. Where
+sources/<name> already exists, the two files are compared byte for byte: their
+lengths first, then, where the lengths agree, their SHA-256 digests over
+read-only streams. The compare runs after the reparse-point check, so an inbox
+file that is a reparse point when checked is refused before any read; the
+check is on the path, not on an open handle. Equal digests mean an earlier run
+ingested this file: the inbox copy is deleted, a read-only attribute cleared
+first, `duplicate: sources/<name>` is written to stdout and the exit code is
+0, with no stamp and nothing written to the destination; under -WhatIf nothing
+is deleted. Unequal lengths or digests are a new document under a taken name,
+refused with one line saying so, and a person renames the inbox file. A read
+that throws on either file is refused with its one-line reason and the file
+stays in inbox/. On a successful move the destination path, relative to the
+repo root, is written to stdout.
 
 .PARAMETER Name
 The bare file name of the item in inbox/ to move. It must be a plain leaf
@@ -94,6 +106,25 @@ function Get-NameHandle {
     return -join ($digest[0..5] | ForEach-Object { $_.ToString('x2') })
 }
 
+# The SHA-256 digest of a file's bytes as lowercase hexadecimal, read over a
+# stream opened for reading only and shared for reading, so the file's bytes
+# and last-write time are never touched. A read that throws propagates to the
+# caller, which turns it into the one-line reason. The open sits inside the
+# try, so the hasher is disposed on every path, a throwing open included.
+function Get-FileDigest {
+    param([string]$Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+        $digest = $sha.ComputeHash($stream)
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $sha.Dispose()
+    }
+    return -join ($digest | ForEach-Object { $_.ToString('x2') })
+}
+
 # The repo root is the parent of the .claude/ directory this script lives in.
 $repoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).ProviderPath
 
@@ -149,9 +180,6 @@ $sourcesPath = Join-Path (Join-Path $repoRoot 'sources') $Name
 if (-not (Test-Path -LiteralPath $inboxPath -PathType Leaf)) {
     Stop-WithReason "inbox/$Name does not exist or is not a file."
 }
-if (Test-Path -LiteralPath $sourcesPath) {
-    Stop-WithReason "sources/$Name already exists; sources/ is immutable and is never overwritten."
-}
 
 # Defence in depth: confirm the fully resolved origin and destination stay
 # inside the repo and clear of .git/ and .claude/, comparing the normalized
@@ -193,7 +221,83 @@ if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
 
 $destRelative = "sources/$Name"
 
-if ($PSCmdlet.ShouldProcess($destRelative, 'Move file from inbox/ to sources/')) {
+# sources/ is immutable, so an existing destination is never overwritten.
+# Where it exists, the inbox file and the source are compared byte for byte:
+# their lengths first, so two files of different sizes are told apart with
+# no read of either, then their SHA-256 digests, each read over a read-only
+# stream, so the destination's bytes and last-write time stay as they are.
+# The compare sits after the reparse-point check, so an inbox file that is a
+# reparse point when checked is refused before any read; that check is on the
+# path, not on an open handle. Equal digests mean an earlier run ingested
+# this file, and the inbox copy is deleted inside the gate below. Unequal
+# lengths or digests are a new document under a taken name, refused so a
+# person renames the inbox file. A length or content read that throws on
+# either file ends as the one-line reason and the file stays in inbox/.
+$isDuplicate = $false
+# The one refusal sentence the ingest skill reads, set once and used at both
+# the length site and the digest site, so the two cannot drift apart.
+$differentContentReason = "$destRelative already exists with different content; sources/ is immutable and is never overwritten, so a person renames the inbox file."
+if (Test-Path -LiteralPath $sourcesPath) {
+    try {
+        $inboxLength = [System.IO.FileInfo]::new($srcFull).Length
+    } catch {
+        Stop-WithReason ("could not read inbox/$Name to compare it with $destRelative, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+    }
+    try {
+        $sourceLength = [System.IO.FileInfo]::new($destFull).Length
+    } catch {
+        Stop-WithReason ("could not read $destRelative to compare it with inbox/$Name, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+    }
+    if ($inboxLength -ne $sourceLength) {
+        Stop-WithReason $differentContentReason
+    }
+    try {
+        $inboxDigest = Get-FileDigest $srcFull
+    } catch {
+        Stop-WithReason ("could not read inbox/$Name to compare it with $destRelative, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+    }
+    try {
+        $sourceDigest = Get-FileDigest $destFull
+    } catch {
+        Stop-WithReason ("could not read $destRelative to compare it with inbox/$Name, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+    }
+    if ($inboxDigest -cne $sourceDigest) {
+        Stop-WithReason $differentContentReason
+    }
+    $isDuplicate = $true
+}
+
+# One gate covers both outcomes, so -WhatIf deletes nothing and moves nothing.
+# The gate's target is the file the action touches: the inbox copy for a
+# delete, the destination for a move, so a -WhatIf line names the right one.
+$target = if ($isDuplicate) { "inbox/$Name" } else { $destRelative }
+$action = if ($isDuplicate) { 'Delete the byte-identical duplicate' } else { 'Move file from inbox/ to sources/' }
+
+if ($PSCmdlet.ShouldProcess($target, $action)) {
+    # A duplicate takes no stamp: the source already carries its own time, and
+    # the delete uses the same path the move uses, through File.Delete, which
+    # removes no folder and never prompts. A read-only attribute, read at the
+    # reparse check above, is cleared first, so a read-only duplicate leaves
+    # the inbox too. A clear or delete that throws, a file another process
+    # holds open among the causes, ends as the one-line reason and the copy
+    # stays in inbox/, with a read-only attribute the clear removed put back.
+    if ($isDuplicate) {
+        try {
+            if (($attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
+                [System.IO.File]::SetAttributes($srcFull, ($attributes -bxor [System.IO.FileAttributes]::ReadOnly))
+            }
+            [System.IO.File]::Delete($srcFull)
+        } catch {
+            $deleteReason = ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim()
+            if (($attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0 -and [System.IO.File]::Exists($srcFull)) {
+                # Best effort: the refusal below is the outcome either way.
+                try { [System.IO.File]::SetAttributes($srcFull, $attributes) } catch { }
+            }
+            Stop-WithReason ("could not delete the duplicate inbox/$Name, so it stays in inbox/: " + $deleteReason)
+        }
+        Write-Output "duplicate: $destRelative"
+        exit 0
+    }
     # The stamp comes first, so a stamp that fails leaves the file in inbox/
     # and the refusal true; a move on one volume keeps the time it carries.
     # A stamp that throws, a denied write-attributes right among the causes,
