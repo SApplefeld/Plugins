@@ -223,7 +223,7 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - provenance: 9909bf2 2026-08-28, the prune's second bound ("a prune and never an edit").
 - verdict: retire
 - landed: f5d48d7 section 24
-- reason: merged under row 1116 (Coordinator prune of stale entries). The owner's text is the coordinator skill's prune paragraph, "It removes the file whole and never edits a peer's entry".
+- reason: merged under row 1116 (Coordinator prune of stale entries). The owner's text is the coordinator skill's prune paragraph, "It removes the file whole, never editing a peer's entry".
 - passage: It prunes the file whole and never edits a line.
 
 ### c1.C021
@@ -233,7 +233,7 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - provenance: 9909bf2 2026-08-28, "What the two readings buy is refusal rather than corroboration" shipped with the armed prune.
 - verdict: retire
 - landed: f5d48d7 section 24
-- reason: merged under row 1116. The owner's text is the coordinator skill's roster diff, "A key matching two or more roster rows resolves to present rather than exited, and one matching no row is a candidate the heartbeat reading below decides", and its heartbeat leg, "An unknown entry is not pruned".
+- reason: merged under row 1116. The owner's text is the coordinator skill's roster diff, "A key matching two or more roster rows resolves to present rather than exited", and its heartbeat leg, "An unknown entry rides the board as unknown, never pruned".
 - proposed: (via A040) Keep the leave-in-place rule and the no-single-reading bound; replace the enumeration of the three roster outcomes with a pointer at the coordinator runbook's readings.
 - baseline-test: yes
 - passage: An unresolved, ambiguous or unknown state leaves the file in place, and no single reading licenses a prune.
@@ -257,7 +257,7 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 - provenance: 9909bf2 2026-08-28, a code-confirmed defect: the prune's bound where nothing stamps the heartbeat was "stated rather than met at a pass".
 - verdict: retire
 - landed: f5d48d7 section 24
-- reason: merged under row 1116. The owner's text is the coordinator skill's heartbeat leg, "An absent `Heartbeat:` line, the takeover's `none`, an unparseable stamp, a stamp in the future and a stamp not past `Started:` all read as unknown", together with "An unknown entry is not pruned".
+- reason: merged under row 1116. The owner's text is the coordinator skill's heartbeat leg, "An absent `Heartbeat:` line, the takeover's `none`, an unparseable stamp, a future stamp and one not past `Started:` all read as unknown", together with "An unknown entry rides the board as unknown, never pruned".
 - proposed: Two sentences: where no heartbeat-stamping hook is installed no entry is ever pruned and the registry accretes; a pass never invents a staleness test to clear it.
 - baseline-test: yes
 - passage: Without a heartbeat-stamping hook no entry is ever pruned and the registry accretes. A pass never invents a staleness test to clear it.
