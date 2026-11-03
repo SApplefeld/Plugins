@@ -95,7 +95,8 @@
 // The vault is seeded at session start. index.ts reads the five environment
 // names, the three files under the home's .claude directory and each path in
 // the credentialFiles setting, and hands the values and texts to seedVault,
-// which keeps every value it finds through keepSecret: one of eight characters
+// which keeps every value it finds but the session's own id through
+// keepSecret: one of eight characters
 // or more is hidden everywhere for the rest of the session, a shorter one only
 // in the tool call that restored it. A file that is missing or could not be
 // read, a JSON file that does not parse, a home directory that could not be
@@ -999,12 +1000,16 @@ function envValues(text: string): string[] {
 // null where its read failed. An entry with a `skip` line, a missing file
 // that is not optional, a failed read and a JSON file that does not parse
 // each seed nothing and add one log line, which names the path and never the
-// text, since a parse error quotes the text it stopped on. Returns those
-// lines for index.ts to log.
-export function seedVault(env: readonly PromiseSettledResult<unknown>[], files: readonly (SeedFile & { text: string | null | undefined })[]): string[] {
-  const values: string[] = [];
+// text, since a parse error quotes the text it stopped on. A value equal to
+// ownId, the session's own id at its start, trimmed and in any case, is never
+// kept, since the harness prints that id on every transcript line; each
+// source that carried it, the environment name in envNames at its read's
+// index or the file's path, logs one line, never the value. A value that
+// only contains the id is kept. Returns those lines for index.ts to log.
+export function seedVault(env: readonly PromiseSettledResult<unknown>[], files: readonly (SeedFile & { text: string | null | undefined })[], ownId?: string, envNames: readonly string[] = []): string[] {
+  const values: [string, string][] = [];
   const logs: string[] = [];
-  for (const r of env) if (r.status === "fulfilled" && typeof r.value === "string") values.push(r.value);
+  env.forEach((r, i) => { if (r.status === "fulfilled" && typeof r.value === "string") values.push([r.value, envNames[i] ?? "an environment value"]); });
   for (const f of files) {
     if (f.skip !== undefined) {
       logs.push(f.skip);
@@ -1013,9 +1018,9 @@ export function seedVault(env: readonly PromiseSettledResult<unknown>[], files: 
     } else if (f.text === null) {
       logs.push(`redactor: ${f.path} could not be read, so it seeds nothing`);
     } else if (f.kind === "env") {
-      values.push(...envValues(f.text));
+      for (const v of envValues(f.text)) values.push([v, f.path]);
     } else if (f.kind === "whole") {
-      values.push(f.text);
+      values.push([f.text, f.path]);
     } else {
       const found: string[] = [];
       try {
@@ -1024,9 +1029,17 @@ export function seedVault(env: readonly PromiseSettledResult<unknown>[], files: 
         logs.push(`redactor: ${f.path} is not valid JSON, so it seeds nothing`);
         continue;
       }
-      values.push(...found);
+      for (const v of found) values.push([v, f.path]);
     }
   }
-  for (const v of values) if (v.trim() !== "") keepSecret(v.trim());
+  const own = ownId?.trim().toLowerCase() || undefined;
+  const carriers = new Set<string>();
+  for (const [v, source] of values) {
+    const kept = v.trim();
+    if (kept === "") continue;
+    if (own !== undefined && kept.toLowerCase() === own) carriers.add(source);
+    else keepSecret(kept);
+  }
+  for (const source of carriers) logs.push(`redactor: ${source} carried the session id, which is not kept`);
   return logs;
 }

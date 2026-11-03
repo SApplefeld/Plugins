@@ -4441,11 +4441,17 @@ export const register: Register = async (on, options) => {
         $.ui.log(`redactor: restore entry '${entry}' dropped: ${reason}`);
       }
       try {
+        const envNames = ["TYPESAFE_API_KEY", "ANTHROPIC_API_KEY", "GH_TOKEN", "GITHUB_TOKEN", "DEEPGRAM_API_KEY"];
         const env = await Promise.allSettled([$.env.get("TYPESAFE_API_KEY"), $.env.get("ANTHROPIC_API_KEY"), $.env.get("GH_TOKEN"), $.env.get("GITHUB_TOKEN"), $.env.get("DEEPGRAM_API_KEY")]);
+        // The session's own id, which the vault never keeps: $.session.id(),
+        // else the environment's CLAUDE_CODE_SESSION_ID, else none. A blank
+        // answer counts as none.
+        const idOf = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v : undefined);
+        const ownId = idOf(await (async () => $.session.id())().catch(() => undefined)) ?? idOf(await (async () => $.env.get("CLAUDE_CODE_SESSION_ID"))().catch(() => undefined));
         const home = await (async () => hostOf($).getHome())().catch(() => undefined);
         const read = async (f: SeedFile) => (f.skip || !(await $.fs.exists(f.path)) ? undefined : String(await $.fs.read(f.path)));
         const files = await Promise.all(seedFiles(home, cfg.credentialFiles).map(async (f) => ({ ...f, text: await read(f).catch(() => null) })));
-        for (const line of seedVault(env, files)) $.ui.log(line);
+        for (const line of seedVault(env, files, ownId, envNames)) $.ui.log(line);
       } catch {
         try { $.ui.log("redactor: the session-start seed failed"); } catch { /* non-fatal */ }
       }
