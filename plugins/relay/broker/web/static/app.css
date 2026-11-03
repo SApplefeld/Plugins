@@ -59,8 +59,10 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+/* The page widens with the window up to 2000 px, so a wider browser gives the columns room. Past that, lines would
+   run too long to read, so the page centres with margins. */
 .page {
-  max-width: 1180px;
+  max-width: 2000px;
   margin: 0 auto;
   padding: 12px 16px 24px;
   display: flex;
@@ -406,13 +408,18 @@ a.need-row:hover {
   margin-right: 6px;
 }
 
-/* A recommendation on its own line with space above: "Recommends" in the header's label type, then the text beside it. */
+/* A recommendation on its own line with space above: "Recommends" in the header's label type, then the text beside it.
+   It sits on the page's own shade inside the white card, so it reads as the card's lower half rather than more
+   of the question. */
 .rec {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 var(--space-2);
   margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 6px;
+  background: var(--bg);
   font-size: 12px;
   color: var(--muted);
 }
