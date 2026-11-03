@@ -777,11 +777,13 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
 // a shutdown read while a turn is open stays in the mailbox for the first
 // idle tick's pass. Then the orphan sweeper's findings file, where the
 // orphanSweepFindings option names one and the mailbox pass delivered no
-// shutdown: every unacknowledged finding is delivered as one labelled turn
-// where no turn is open, after which the tick ends the same way; while a
-// turn is open the findings stay for the first idle tick's pass. Then the
-// box notices file, where the boxNotices option names one and neither pass
-// above delivered, drained the same way under its own label. The cost
+// shutdown: the unacknowledged findings, up to the drain's per-turn bounds,
+// with any sweep-fault or sweep-stale record built from its status file or
+// that file's absence, are delivered as one labelled turn where no turn is
+// open, after which the tick ends the same way; while a turn is open the
+// records stay for the first idle tick's pass. Then the box notices file,
+// where the boxNotices option names one and neither pass above delivered,
+// drained the same way under its own label. The cost
 // bookkeeping stays in the idle part, below
 // the fleet block: its persist is the bare store write whose throw the
 // fleet's tick-failure reading reports, and its sweep collects stale

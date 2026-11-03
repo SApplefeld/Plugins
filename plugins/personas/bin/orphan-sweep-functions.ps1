@@ -7,7 +7,7 @@
 # Nothing here reads the process table, writes a file or touches a process. The functions take
 # rows shaped as Win32_Process reports them (ProcessId, ParentProcessId, Name, CreationDate as a
 # DateTime, CommandLine, KernelModeTime and UserModeTime in 100-nanosecond units) and return data.
-# The sweeper reports and stops nothing. Runs under Windows PowerShell 5.1.
+# Every live read and every process end lives in the wrapper. Runs under Windows PowerShell 5.1.
 
 # The images the rule names, by Name without the .exe suffix: the script and tool runtimes a tool
 # call starts. Every other image, claude.exe and env.exe among them, is outside the rule.
@@ -140,6 +140,43 @@ function Select-OrphanRoots {
 
 <#
 .SYNOPSIS
+Returns the pids of a flagged tree that the allowlist spares, each with the reason.
+
+.DESCRIPTION
+The allowlist clause of Select-OrphanRoots judges a root alone, and the walk takes in every
+descendant whatever its command line, so a keeper started under a flagged root sits in its tree.
+A member is spared on the clause's own comparison: an -Allowlist entry's match equals the file
+name of one token of its CommandLine. A member whose ParentProcessId names a spared member is
+spared too. -Tree lists the pids breadth-first, root first, as Select-OrphanRoots returns them, so
+each member's parent is judged before it. -RowsById maps each pid to the row the sweep read.
+
+Returns a hashtable of pid to a reason naming the allowlist; a pid absent from it is not spared.
+#>
+function Get-OrphanAllowlistedIds {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Tree,
+        [Parameter(Mandatory)][hashtable]$RowsById,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Allowlist
+    )
+    $allowSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $Allowlist) { [void]$allowSet.Add([string]$entry.match) }
+    $spared = @{}
+    foreach ($id in $Tree) {
+        $id = [int]$id
+        $row = $RowsById[$id]
+        if ($null -eq $row) { continue }
+        foreach ($name in (Get-OrphanTokenNames -CommandLine $row.CommandLine)) {
+            if ($allowSet.Contains($name)) { $spared[$id] = 'allowlisted: a command-line token is on the allowlist'; break }
+        }
+        if (-not $spared.ContainsKey($id) -and $spared.ContainsKey([int]$row.ParentProcessId)) {
+            $spared[$id] = 'allowlisted: below an allowlisted process in the tree'
+        }
+    }
+    return $spared
+}
+
+<#
+.SYNOPSIS
 Returns the id the sweeper gives a process: its pid and its CreationDate's DateTime.Ticks.
 
 .DESCRIPTION
@@ -153,24 +190,50 @@ function Get-OrphanId {
 
 <#
 .SYNOPSIS
-Splits the flagged roots into those to write and carries the seen set forward.
+Parses a seen entry's stamp, the ISO 8601 round-trip text Update-OrphanSeen writes, back to a DateTime.
+#>
+function ConvertFrom-OrphanStamp {
+    param([Parameter(Mandatory)][string]$Text)
+    return [DateTime]::Parse($Text, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+}
+
+<#
+.SYNOPSIS
+Splits the flagged roots into those to write, those due a repeat notice and those overdue an end,
+and carries the seen set forward.
 
 .DESCRIPTION
--Seen is a hashtable keyed by id whose values carry lastSeen. A root whose id is already in it is
-not written again. The returned set keeps a prior entry only while a live row still carries its id,
-so an entry whose process is gone, or whose pid now names a later process, is dropped and the set
-stays the size of the live orphan set. Every root flagged now is in the returned set with lastSeen
-set to -Now.
+-Seen is a hashtable keyed by id whose values are hashtables shaped
+  @{ firstSeen; lastSeen; lastNoticed; notices; cpuSeconds; ends; lastEnded }
+each stamp ISO 8601 round-trip text, the last two absent until the wrapper records an end attempt.
+A root whose id is already in it is not written again. The returned set keeps a prior entry only
+while a live row still carries its id, so an entry whose process is gone, or whose pid now names a
+later process, is dropped and the set stays the size of the live orphan set. Every root flagged now
+is in the returned set with lastSeen set to -Now.
 
-Returns a hashtable: Write is the array of roots not seen before, in the order given; Seen is the
-new hashtable of id to @{ lastSeen = <ISO 8601> }.
+A root reported before, one whose prior entry carries firstSeen, is due a repeat notice once
+-RepeatHours have passed since lastNoticed; its entry then takes notices plus one, lastNoticed set
+to -Now and cpuSeconds set to the tree's figure now. It is overdue an end where -EndAfterHours is
+given and that many hours have passed since firstSeen, or since lastEnded where the entry carries
+one. A root not reported before, or whose entry lacks firstSeen as entries written before the field
+existed do, takes -Now as firstSeen and lastNoticed with notices 0 and the tree's cpuSeconds, so it
+is neither due nor overdue this sweep, so a root this sweep records for the first time is never
+ended in it. The seen file is the record of earlier reports, so an entry written there by hand
+can still make a root overdue with no earlier report.
+
+Returns a hashtable: Write is the array of roots not seen before, in the order given; Repeat is the
+array of PSCustomObjects for the roots due a notice, each Root, Notice (the count after this one),
+CpuSecondsSinceNotice and NoticeHours; Overdue is the array of roots due an end, empty where
+-EndAfterHours is not given; Seen is the new hashtable of id to entry.
 #>
 function Update-OrphanSeen {
     param(
         [Parameter(Mandatory)][hashtable]$Seen,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Roots,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
-        [Parameter(Mandatory)][DateTime]$Now
+        [Parameter(Mandatory)][DateTime]$Now,
+        [double]$RepeatHours = 1,
+        [Nullable[double]]$EndAfterHours = $null
     )
     $liveIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
     foreach ($row in $Rows) {
@@ -181,11 +244,48 @@ function Update-OrphanSeen {
         if ($liveIds.Contains([string]$key)) { $next[[string]$key] = $Seen[$key] }
     }
     $write = New-Object 'System.Collections.Generic.List[object]'
+    $repeat = New-Object 'System.Collections.Generic.List[object]'
+    $overdue = New-Object 'System.Collections.Generic.List[object]'
+    $nowUtc = $Now.ToUniversalTime()
     $stamp = $Now.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
     foreach ($root in $Roots) {
         $id = Get-OrphanId -Row $root.Row
-        if (-not $Seen.ContainsKey($id)) { $write.Add($root) }
-        $next[$id] = @{ lastSeen = $stamp }
+        $cpu = [double]$root.CpuSeconds
+        $prior = $null
+        if ($Seen.ContainsKey($id)) { $prior = $Seen[$id] } else { $write.Add($root) }
+        $entry = @{}
+        if ($null -ne $prior) { foreach ($k in $prior.Keys) { $entry[[string]$k] = $prior[$k] } }
+        $reported = $null -ne $prior -and $prior.ContainsKey('firstSeen') -and -not [string]::IsNullOrEmpty([string]$prior['firstSeen'])
+        if (-not $reported) {
+            $entry['firstSeen'] = $stamp
+            $entry['lastNoticed'] = $stamp
+            $entry['notices'] = 0
+            $entry['cpuSeconds'] = $cpu
+        } else {
+            $noticedText = [string]$entry['lastNoticed']
+            if ([string]::IsNullOrEmpty($noticedText)) { $noticedText = [string]$entry['firstSeen'] }
+            $sinceNotice = ($nowUtc - (ConvertFrom-OrphanStamp -Text $noticedText).ToUniversalTime()).TotalHours
+            if ($sinceNotice -ge $RepeatHours) {
+                $notice = [int]$entry['notices'] + 1
+                $repeat.Add([pscustomobject]@{
+                    Root                  = $root
+                    Notice                = $notice
+                    CpuSecondsSinceNotice = $cpu - [double]$entry['cpuSeconds']
+                    NoticeHours           = $sinceNotice
+                })
+                $entry['notices'] = $notice
+                $entry['lastNoticed'] = $stamp
+                $entry['cpuSeconds'] = $cpu
+            }
+            if ($null -ne $EndAfterHours) {
+                $sinceText = [string]$entry['firstSeen']
+                if (-not [string]::IsNullOrEmpty([string]$entry['lastEnded'])) { $sinceText = [string]$entry['lastEnded'] }
+                $sinceHours = ($nowUtc - (ConvertFrom-OrphanStamp -Text $sinceText).ToUniversalTime()).TotalHours
+                if ($sinceHours -ge $EndAfterHours) { $overdue.Add($root) }
+            }
+        }
+        $entry['lastSeen'] = $stamp
+        $next[$id] = $entry
     }
-    return @{ Write = $write.ToArray(); Seen = $next }
+    return @{ Write = $write.ToArray(); Repeat = $repeat.ToArray(); Overdue = $overdue.ToArray(); Seen = $next }
 }

@@ -6,8 +6,8 @@
 // decision brief and writes it onto the ask entry and the commons record; the
 // pair drain, which drafts the [PAIR DRAFTS] block a decay scan owes; the
 // pass over the supervisor's mailbox; and the passes over the orphan
-// sweeper's findings file and the box notices file. hooks/index.ts holds the
-// wiring: the
+// sweeper's status and findings files and the box notices file.
+// hooks/index.ts holds the wiring: the
 // deps each call takes, the session object these functions read and write,
 // the fork watches among its fields, the fork and completion model requests,
 // whose scrub test-personas/redactor-module-test.mjs reads from that file,
@@ -42,7 +42,7 @@ import { BLOCK_WITHHELD, scrubText } from "./redactor";
 import type { SessionState } from "./session-state";
 import { parseSupervisorMailboxLine, personaStoreId, supervisorAckPathOf } from "./store-files";
 import { noteStretchWritten } from "./stretch-distillation";
-import { boundedText, safeErrorText } from "./text";
+import { boundedText, safeErrorText, stripBom } from "./text";
 
 // The session fields the drains read and write, which the session object in
 // hooks/index.ts satisfies.
@@ -751,7 +751,13 @@ export async function drainSupervisorMailbox(
 // .seen.json appended. The sweeper is the findings file's only writer and
 // this plugin the ack file's. A finding is a JSON object whose id is a
 // non-empty string; every other field is the sweeper's and passes through as
-// data.
+// data. The sweeper also writes the status file, the findings path with
+// .status.json appended, as the last act of each sweep and before it exits
+// on a fault: one JSON object holding `at`, the sweep's time as ISO 8601
+// text, and `exit`, its exit code, with `fault` naming what failed on a
+// nonzero exit. The pass reads the status into the sweep-fault and
+// sweep-stale records below, which ride the same batch and ack lines as the
+// findings.
 //
 // Any process under the account may append one JSON line per notice to the
 // file the boxNotices option names, the wiki walker among them, so that file
@@ -766,8 +772,9 @@ export async function drainSupervisorMailbox(
 // One record file's drain: the prefix of the decision actions it logs, the
 // noun its decisions name the records by, the turn label, the two bounds,
 // whether a record needs a text, whether a record the redactor withholds is
-// held back alone rather than failing its whole batch, and the submit that
-// opens its turn.
+// held back alone rather than failing its whole batch, the submit that opens
+// its turn, and, where the drain has one, the reader of the records that go
+// ahead of the file's own on every pass.
 interface RecordDrain {
   action: string;
   noun: string;
@@ -777,6 +784,7 @@ interface RecordDrain {
   requireText: boolean;
   holdWithheld: boolean;
   submit: (expectedTurns: ExpectedTurn[], lines: string[]) => Promise<SubmitOutcome>;
+  lead?: () => Promise<{ id: string; line: string }[]>;
 }
 
 // One record file line read as a record, or the reason it is not one. The
@@ -807,9 +815,63 @@ const ORPHAN_SWEEP_TEXT_MAX = 40_000;
 const BOX_NOTICES_MAX = 20;
 const BOX_NOTICES_TEXT_MAX = 40_000;
 
-// One controller tick's pass over the findings file: drainRecordFile under
-// the orphan_sweep_ actions and the [ORPHAN SWEEP] label. The turn's text and
-// its submit are submitOrphanSweep's, in hooks/index.ts.
+// How old the newest status may be before the pass reports the sweep as
+// stalled: four of the scheduled task's fifteen-minute fires.
+const ORPHAN_SWEEP_STALE_MS = 60 * 60 * 1000;
+
+// The hour holding the instant `ms`, as ISO 8601 text cut after the hour,
+// such as 2026-10-21T10, in UTC.
+const orphanSweepHourOf = (ms: number): string => new Date(Math.floor(ms / 3_600_000) * 3_600_000).toISOString().slice(0, 13);
+
+// The records one status reading makes, as finding-shaped lines, each built
+// by JSON.stringify so the turn quotes and scrubs it as it does a finding.
+// The ids are what makes the ack file's dedupe post each once: a nonzero
+// exit is sweep-fault-<the status's hour>, so a failing sweep is delivered at
+// most once an hour; a status older than ORPHAN_SWEEP_STALE_MS is
+// sweep-stale-<its at>, so a stall is delivered once and a later stall after
+// a fresh status again; no status file is sweep-stale-none, delivered once
+// per ack file; and a status that cannot be read, does not parse, or names
+// no readable `at` or numeric `exit` is sweep-fault-unreadable-<the tick's
+// hour>. A stale record goes ahead of a fault record from the same status.
+// The fault text is file data, held to the plugin's free-text bound. Nothing
+// here throws.
+async function readOrphanSweepStatus(deps: DrainsDeps, statusPath: string, now: number): Promise<{ id: string; line: string }[]> {
+  const recordOf = (fields: { id: string } & Record<string, unknown>): { id: string; line: string } =>
+    ({ id: fields.id, line: JSON.stringify(fields) });
+  const unreadable = (fault: string) =>
+    [recordOf({ id: `sweep-fault-unreadable-${orphanSweepHourOf(now)}`, kind: "sweep-fault", at: null, exit: null, fault })];
+  let statusText: string;
+  try {
+    if (!(await deps.host.fileExists(statusPath))) return [recordOf({ id: "sweep-stale-none", kind: "sweep-stale", at: null })];
+    statusText = String(await deps.host.readFile(statusPath));
+  } catch {
+    return unreadable("the sweep's status file could not be read");
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(stripBom(statusText)); } catch { return unreadable("the sweep's status file is not JSON"); }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return unreadable("the sweep's status file is not a JSON object");
+  const status = parsed as Record<string, unknown>;
+  const at = status.at;
+  // The sweeper writes `at` with seven fractional digits; the parse reads
+  // the first three, the milliseconds a Date holds.
+  const atMs = typeof at === "string" ? Date.parse(at.replace(/(\.\d{3})\d+/, "$1")) : NaN;
+  if (typeof at !== "string" || !Number.isFinite(atMs)) return unreadable("the sweep's status file names no readable time");
+  if (typeof status.exit !== "number") return unreadable("the sweep's status file names no exit code");
+  const records: { id: string; line: string }[] = [];
+  if (now - atMs > ORPHAN_SWEEP_STALE_MS) records.push(recordOf({ id: `sweep-stale-${at}`, kind: "sweep-stale", at }));
+  if (status.exit !== 0) {
+    const fault = typeof status.fault === "string" ? boundedText(status.fault) : null;
+    records.push(recordOf({ id: `sweep-fault-${orphanSweepHourOf(atMs)}`, kind: "sweep-fault", at, exit: status.exit, fault }));
+  }
+  return records;
+}
+
+// One controller tick's pass over the status and findings files:
+// drainRecordFile under the orphan_sweep_ actions and the [ORPHAN SWEEP]
+// label, with the status's records as its lead, read first on every pass,
+// findings or none, and going ahead of the file's findings under the same ack
+// rule and bounds. The turn's text and its submit are submitOrphanSweep's, in
+// hooks/index.ts.
 export async function drainOrphanSweep(
   deps: DrainsDeps,
   findingsPath: string,
@@ -826,6 +888,7 @@ export async function drainOrphanSweep(
     requireText: false,
     holdWithheld: false,
     submit: deps.submitOrphanSweep,
+    lead: () => readOrphanSweepStatus(deps, `${findingsPath}.status.json`, Date.now()),
   }, findingsPath, expectedTurns, skipped, turnOpen);
 }
 
@@ -870,8 +933,12 @@ export async function drainBoxNotices(
 // one. A drain that holds withheld records back gives a record the redactor
 // withholds one failed line and no delivered line, and leaves it out of the
 // turn. A line that is not a record is never acknowledged, and is logged once
-// per session under the key `skipped` holds. A missing, empty or unreadable
-// record file is a pass that does nothing. Nothing here throws.
+// per session under the key `skipped` holds. A drain's lead records, where it
+// has a lead, go ahead of the file's records and are any of them below. A
+// missing or empty record file is a pass that delivers only the lead's
+// records, and one with none of those does nothing, its ack file unread. A
+// record file that cannot be read is a pass that does nothing. Nothing here
+// throws.
 async function drainRecordFile(
   deps: DrainsDeps,
   drain: RecordDrain,
@@ -881,14 +948,15 @@ async function drainRecordFile(
   turnOpen: () => boolean,
 ): Promise<{ delivered: boolean; logged: boolean }> {
   const outcome = { delivered: false, logged: false };
-  let recordsText: string;
+  const leadRecords = drain.lead ? await drain.lead() : [];
+  let recordsText = "";
   let ackText = "";
   const ackPath = `${recordsPath}.ack.jsonl`;
   try {
-    if (!(await deps.host.fileExists(recordsPath))) return outcome;
-    recordsText = String(await deps.host.readFile(recordsPath));
-    // An empty record file is the healthy steady state, and needs no ack read.
-    if (recordsText.trim() === "") return outcome;
+    if (await deps.host.fileExists(recordsPath)) recordsText = String(await deps.host.readFile(recordsPath));
+    // No lead records beside an empty or missing record file is the healthy
+    // steady state, and needs no ack read.
+    if (leadRecords.length === 0 && recordsText.trim() === "") return outcome;
     if (await deps.host.fileExists(ackPath)) ackText = String(await deps.host.readFile(ackPath));
   } catch {
     return outcome;
@@ -908,6 +976,11 @@ async function drainRecordFile(
   const lines = recordsText.split("\n");
   if (!recordsText.endsWith("\n")) lines.pop();
   const records: { id: string; line: string }[] = [];
+  for (const rec of leadRecords) {
+    if (handled.has(rec.id)) continue;
+    handled.add(rec.id);
+    records.push(rec);
+  }
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (line.trim() === "") continue;

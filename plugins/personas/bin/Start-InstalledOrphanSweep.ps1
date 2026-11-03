@@ -1,23 +1,25 @@
 # Runs the installed personas plugin's orphan sweeper. This is the script the KitOrphanSweep task
 # runs when bin/Register-OrphanSweepTask.ps1 was run with -LauncherRoot, under Windows PowerShell 5.1:
 #
-#   powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File <LauncherRoot>\Start-InstalledOrphanSweep.ps1 -FindingsPath <path> -ConfigDir <folder>
+#   powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File <LauncherRoot>\Start-InstalledOrphanSweep.ps1 -FindingsPath <path> -ConfigDir <folder> [-EndAfterHours <n>] [-RepeatHours <n>]
 #
 # Registration copies this file and bin/installed-plugin-functions.ps1, which it dot-sources for the
 # record lookup, into the launcher root, a folder outside the plugin cache, so the task's action
 # names one path that no plugin update moves. At each fire the script reads the installed plugin's
 # record from installed_plugins.json, checks that the version's bin folder holds orphan-sweep.ps1,
 # orphan-sweep-functions.ps1 and orphan-sweep-allowlist.json, runs that orphan-sweep.ps1 with
-# -FindingsPath, and exits with its exit code, so the task's last result is the sweep's.
+# -FindingsPath, and with -EndAfterHours and -RepeatHours where the action named them, and exits with
+# its exit code, so the task's last result is the sweep's.
 #
 # The sweeper runs from the folder the install record names, with no snapshot: a sweep takes
 # seconds, so no update moves its files under it, and it reads the allowlist the installed version
 # ships.
 #
 # A refusal (a missing shared functions file, an unreadable or missing record, a version folder
-# missing a sweeper file) is one line in <LauncherRoot>\orphan-sweep-launcher.log and exit 1, since a
-# scheduled task gives stderr no console and a silent 0 would read as a clean sweep. A fire that
-# runs the sweeper writes no line here; the sweeper reports through its own exit code and files.
+# missing a sweeper file, a sweeper call that raises an error) is one line in
+# <LauncherRoot>\orphan-sweep-launcher.log and exit 1, since a scheduled task gives stderr no console
+# and a silent 0 would read as a clean sweep. A fire whose sweeper returns, whatever its exit code,
+# writes no line here; the sweeper reports through its own exit code and files.
 [CmdletBinding()]
 param(
     # Handed to the sweeper as given; the sweeper refuses an empty one with exit 1.
@@ -27,7 +29,13 @@ param(
     [string]$PluginId = 'personas@applefeld',
     # The Claude Code configuration folder holding plugins\installed_plugins.json. CLAUDE_CONFIG_DIR
     # overrides it for Claude Code itself, so it overrides it here too.
-    [string]$ConfigDir
+    [string]$ConfigDir,
+    # Each is handed to the sweeper only where this script was given it, so an action that names
+    # neither leaves the sweeper report-only.
+    [ValidateRange(0, [double]::MaxValue)]
+    [double]$EndAfterHours,
+    [ValidateRange(0, [double]::MaxValue)]
+    [double]$RepeatHours
 )
 
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -91,5 +99,16 @@ if ($missing.Count -gt 0) {
 }
 
 $global:LASTEXITCODE = 0
-& (Join-Path $binDir 'orphan-sweep.ps1') -FindingsPath $FindingsPath
+$sweepArgs = @{}
+foreach ($name in 'EndAfterHours', 'RepeatHours') {
+    if ($PSBoundParameters.ContainsKey($name)) { $sweepArgs[$name] = $PSBoundParameters[$name] }
+}
+# A sweeper that cannot take a forwarded switch, an older version, raises a binding error that ends
+# only this statement, so it is caught and refused here rather than left to exit 0. A terminating
+# error from a sweeper that started is caught the same way, so it too leaves a line.
+try {
+    & (Join-Path $binDir 'orphan-sweep.ps1') -FindingsPath $FindingsPath @sweepArgs
+} catch {
+    Stop-LauncherWithError "the sweeper at '$binDir' raised an error: $($_.Exception.Message)"
+}
 exit $LASTEXITCODE

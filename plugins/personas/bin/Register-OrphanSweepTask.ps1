@@ -1,12 +1,14 @@
 # Registers the KitOrphanSweep scheduled task, which runs orphan-sweep.ps1 every fifteen minutes.
 #
 #   .\bin\Register-OrphanSweepTask.ps1 -FindingsPath <path> [-SweeperPath <path> | -LauncherRoot <path>]
-#       [-User <name>] [-Start] [-Remove] [-WhatIf]
+#       [-EndAfterHours <n>] [-RepeatHours <n>] [-User <name>] [-Start] [-Remove] [-WhatIf]
 #
 # The task runs Windows PowerShell 5.1, by its System32 path, on orphan-sweep.ps1 with
 # -FindingsPath <path>. The sweeper reads the process table, appends findings to that file and
-# rewrites the seen file beside it, creating their folder if it is missing; it stops no process,
-# and the session's drain reads the findings file. The operator registers the task
+# rewrites the seen file beside it, creating their folder if it is missing, and writes the status
+# file beside them wherever that folder exists. It
+# ends a reported process tree only where the action carries -EndAfterHours, as below, and the
+# session's drain reads the findings and status files. The operator registers the task
 # by running this script from an elevated session. Nothing else registers it.
 #
 # -FindingsPath is required: it is the file the sweeper appends to and the file the personas
@@ -26,6 +28,12 @@
 # inside the personas plugin folder this script runs from, and so is -SweeperPath beside
 # -LauncherRoot, since the two name different actions. -WhatIf prints the copy it would make and
 # makes none.
+#
+# -EndAfterHours and -RepeatHours are handed to the sweeper on the action's command line, each only
+# when this script is given it. Left off, the action carries neither, the sweeper stays report-only
+# and repeats its notice at its own default. -EndAfterHours is the switch that lets the sweeper end a
+# reported process tree, so it is the operator's to name. The sweeper's header states the rule, and
+# a re-registration without it turns the end back off. Zero is allowed for both.
 #
 # The task's only trigger is a one-time trigger at the registration moment, repeating every fifteen
 # minutes with no end; Get-OrphanSweepTaskDefinition says why.
@@ -49,6 +57,10 @@ param(
     [Parameter(Mandatory)][string]$FindingsPath,
     [string]$SweeperPath,
     [string]$LauncherRoot,
+    [ValidateRange(0, [double]::MaxValue)]
+    [double]$EndAfterHours,
+    [ValidateRange(0, [double]::MaxValue)]
+    [double]$RepeatHours,
     [string]$User = [Security.Principal.WindowsIdentity]::GetCurrent().Name,
     [switch]$Start,
     [switch]$Remove,
@@ -104,14 +116,21 @@ so -WhatIf can print what they built. The powershell.exe path is pinned rather t
 since an unqualified -Execute resolves by PATH search at every boot, and a task with no loaded
 profile can get that wrong. ScriptPath is the file the action runs with -FindingsPath: the sweeper
 itself, or the launcher in -LauncherRoot that runs the installed one. A non-empty ConfigDir is
-appended as the launcher's -ConfigDir; the sweeper route passes none.
+appended as the launcher's -ConfigDir; the sweeper route passes none. EndAfterHours and RepeatHours
+are appended as -EndAfterHours and -RepeatHours only where the caller bound them, tested by
+ContainsKey since zero is a value, and formatted under the invariant culture so 1.5 never reads 1,5.
+The definition's EndAfterHours field is that text, or $null where the switch is off.
 #>
 function Get-OrphanSweepTaskDefinition {
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$FindingsPath,
         [Parameter(Mandatory)][string]$User,
-        [string]$ConfigDir
+        [string]$ConfigDir,
+        [ValidateRange(0, [double]::MaxValue)]
+        [double]$EndAfterHours,
+        [ValidateRange(0, [double]::MaxValue)]
+        [double]$RepeatHours
     )
 
     if ([string]::IsNullOrEmpty($env:SystemRoot)) {
@@ -132,6 +151,15 @@ function Get-OrphanSweepTaskDefinition {
         # as itself.
         if ($ConfigDir.EndsWith('\')) { $ConfigDir += '\' }
         $argumentString += " -ConfigDir `"$ConfigDir`""
+    }
+    $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+    $endAfterText = $null
+    if ($PSBoundParameters.ContainsKey('EndAfterHours')) {
+        $endAfterText = $EndAfterHours.ToString('R', $invariant)
+        $argumentString += " -EndAfterHours $endAfterText"
+    }
+    if ($PSBoundParameters.ContainsKey('RepeatHours')) {
+        $argumentString += " -RepeatHours $($RepeatHours.ToString('R', $invariant))"
     }
     $action = New-ScheduledTaskAction -Execute $psExe -Argument $argumentString
 
@@ -160,6 +188,7 @@ function Get-OrphanSweepTaskDefinition {
         Trigger   = $trigger
         Principal = $principal
         Settings  = $settings
+        EndAfterHours = $endAfterText
     }
 }
 
@@ -179,6 +208,7 @@ function Write-OrphanSweepTaskDefinition {
     param([Parameter(Mandatory)]$Definition)
     Write-Output "task $($Definition.TaskName)"
     Write-Output "  action: $($Definition.Action.Execute) $($Definition.Action.Arguments)"
+    Write-Output "  endAfterHours: $(if ($null -eq $Definition.EndAfterHours) { 'off' } else { $Definition.EndAfterHours })"
     Write-Output "  trigger: $($Definition.Trigger.CimClass.CimClassName)"
     Write-Output "  startBoundary: $($Definition.Trigger.StartBoundary)"
     Write-Output "  repetitionInterval: $($Definition.Trigger.Repetition.Interval)"
@@ -270,6 +300,10 @@ function Register-OrphanSweepTask {
         [string]$LauncherRoot,
         [Parameter(Mandatory)][string]$FindingsPath,
         [Parameter(Mandatory)][string]$User,
+        [ValidateRange(0, [double]::MaxValue)]
+        [double]$EndAfterHours,
+        [ValidateRange(0, [double]::MaxValue)]
+        [double]$RepeatHours,
         [switch]$Start,
         [switch]$Remove,
         [switch]$WhatIf,
@@ -314,7 +348,12 @@ function Register-OrphanSweepTask {
         if ([string]::IsNullOrWhiteSpace($configDir)) { $configDir = Join-Path $env:USERPROFILE '.claude' }
         $configDir = [IO.Path]::GetFullPath($configDir)
     }
-    $definition = Get-OrphanSweepTaskDefinition -ScriptPath $scriptPath -FindingsPath $FindingsPath -User $User -ConfigDir $configDir
+    # Only a switch this call was given reaches the builder, so an unbound one stays off in the action.
+    $switchArgs = @{}
+    foreach ($name in 'EndAfterHours', 'RepeatHours') {
+        if ($PSBoundParameters.ContainsKey($name)) { $switchArgs[$name] = $PSBoundParameters[$name] }
+    }
+    $definition = Get-OrphanSweepTaskDefinition -ScriptPath $scriptPath -FindingsPath $FindingsPath -User $User -ConfigDir $configDir @switchArgs
     if ($WhatIf) {
         Write-OrphanSweepTaskDefinition -Definition $definition
         if (-not [string]::IsNullOrEmpty($LauncherRoot)) {
@@ -376,8 +415,12 @@ if ($MyInvocation.InvocationName -ne '.') {
         } catch {
             throw "Register-OrphanSweepTask: -FindingsPath '$FindingsPath' could not be resolved: $($_.Exception.Message)"
         }
+        $switchArgs = @{}
+        foreach ($name in 'EndAfterHours', 'RepeatHours') {
+            if ($PSBoundParameters.ContainsKey($name)) { $switchArgs[$name] = $PSBoundParameters[$name] }
+        }
         Register-OrphanSweepTask -SweeperPath $sweeperResolved -LauncherRoot $launcherRootResolved `
-            -FindingsPath $findingsResolved -User $User -Start:$Start -Remove:$Remove -WhatIf:$WhatIf
+            -FindingsPath $findingsResolved -User $User -Start:$Start -Remove:$Remove -WhatIf:$WhatIf @switchArgs
     } catch {
         # Console.Error.WriteLine, not Write-Error: Write-Error under $ErrorActionPreference =
         # 'Stop' raises a terminating error of its own, which skips the exit 1 below. The message
