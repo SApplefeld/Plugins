@@ -8,16 +8,16 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
 
    **The same open writes the section's promises file, `.kit/scratch/<plan-slug>/promises-section-<n>.json`.** It holds one `{ id, promise }` entry per acceptance bullet and per sentence naming a behavior the section builds. A dispatched implementer runs it through the brief's `Promise check:` field.
 
-   - **A section that writes only under `docs/` goes to the main thread whatever its tier.** Record `Locus: inline` under the `Model:` line, which keeps the bare tier the section earned. A section naming a `docs/` file beside other files is dispatched, each such file listed under the brief's `Orchestrator-held files`. An implementer may return drafted prose for any `docs/` file in its final message, but the main thread writes it.
+   - **A section that writes only under `docs/` goes to the main thread whatever its tier.** Record `Locus: inline` under the `Model:` line, which keeps the bare tier the section earned. A section mixing `docs/` and other files is dispatched, its `docs/` files under the brief's `Orchestrator-held files`. The `dispatch-docs` guard refuses an implementer brief listing a `docs/` file under Files in scope. An implementer may return drafted prose for any `docs/` file in its final message, but the main thread writes it.
    - **Tier `haiku` / `sonnet` / `opus` / `fable`:** dispatch `implementer-<tier>`, `implementer-haiku` included, with a brief built from the Dispatch Brief template. A `Model: haiku` or `Model: sonnet` line whose body names no reason for that tier under brainstorming step 12 is read as `opus`. So is any haiku or sonnet line on a section whose body names a fable reason or that touches a security-sensitive surface as brainstorming step 12 defines it, whatever the body says. Amend it to `opus` on the plan's branch at the section open, record the drift in the Chapter, and dispatch `implementer-opus`.
 
      ```
      Dispatch Brief (all REQUIRED unless marked):
      - Spec path + section name
-     - Files in scope
-     - Orchestrator-held files, when Files in scope names a docs/ path: each
-       such path, its finished text returned in the final message and written
-       by no tool
+     - Files in scope: one path per line, none under docs/
+     - Orchestrator-held files, when the section names docs/ paths: each
+       path, its finished text returned in the final message and written by
+       no tool
      - Acceptance criteria (verifiable)
      - Rich references: the section's References: line when the spec has one,
        plus any mockup, rubric, or reference implementation its acceptance
@@ -182,7 +182,7 @@ A subagent loads the skill catalog and, where the machine's CLAUDE.md imports it
 
 **Stagger concurrent sections.** Advance them offset: one being briefed, one implementing, one in review. Run steps 4 through 8 for a section the moment a round's step 4 ends with nothing blocking its close, which is a fixes-then-re-review cycle clearing at its final round's adjudication, and never batched with siblings. A step 8 close reached while siblings are in flight appends an interim board entry beside its Chapter, carrying the closure-drought rule's content list.
 
-**A brief grants nothing a mechanical guard denies.** Where a PreToolUse guard keys on agent type, widening the agent's file scope in the brief leaves the write blocked. Route around it at dispatch time: send an agent type the guard admits, or keep the guarded write in the main thread. Step 1's `docs/` routing override and the brief's `Orchestrator-held files` field are this rule's standing instances.
+**A brief grants nothing a mechanical guard denies.** Route around it at dispatch time: send an agent type the guard admits, or keep the guarded write in the main thread. The `dispatch-docs` guard refuses an implementer brief listing a `docs/` file under Files in scope.
 
 **A brief forbids nothing the guard does not govern.** `readonly-agent` binds only the types its own classifier names. So a scout dispatched as Explore or general-purpose, or a Workflow `agent()` call naming no `agentType`, carries Bash the guard never reads, and its brief's read-only instruction is a request, not a control. Bracket every read-only-intent dispatch under an ungoverned type with `git status --porcelain` before dispatch and again at return, any delta taking step 3's round-bracket incident path. The named types are instances, not the boundary, so a type you cannot place as governed gets the bracket.
 

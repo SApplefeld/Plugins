@@ -206,11 +206,13 @@ import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore
 import { formatterHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
 import { childEnvOf, gitHooksPathOf } from "./spawn";
 import { newSpawnTypes, recordSpawnType, spawnLogLine, spawnTypeOf, type SpawnTypes } from "./spawn-types";
-// The eight deny guards: the four the kit's command hooks held, ported, the
-// shared-state guard, the git commit gate, the em-dash guard and the test-hang
-// gate beside them, and the path host their tree reads go through.
+// The nine deny guards: the four the kit's command hooks held, ported, the
+// shared-state guard, the git commit gate, the em-dash guard, the test-hang
+// gate and the dispatch-docs guard beside them, and the path host their tree
+// reads go through.
 import { pathOpsOf, readonlyAgentGuard, type LexHost } from "./guards/readonly-agent";
 import { docsWriteGuard } from "./guards/docs-write";
+import { dispatchDocsGuard } from "./guards/dispatch-docs";
 import { prDocsGuard } from "./guards/pr-docs";
 import { GIT_ENV_REDIRECTS, mergedPrPushGuard } from "./guards/merged-pr-push";
 import { sharedStateGuard } from "./guards/shared-state";
@@ -802,13 +804,14 @@ async function guardWindowsOf(dp: any): Promise<boolean> {
   }
 }
 
-// The module's own before guards for one call, the eight deny guards, built
+// The module's own before guards for one call, the nine deny guards, built
 // over the hook-bound `$` for hostOf's reason. They run beside the guards
 // runner.ts holds registered, in the same runBefore pass, after those.
 function moduleBeforeGuards(dp: any): BeforeGuard[] {
   const lexHost = () => guardLexHostOf(dp);
   return [
     docsWriteGuard({ lexHost }),
+    dispatchDocsGuard({}),
     prDocsGuard({ lexHost }),
     mergedPrPushGuard({
       windows: () => guardWindowsOf(dp),
