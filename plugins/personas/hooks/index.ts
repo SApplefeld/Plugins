@@ -5023,6 +5023,10 @@ export const register: Register = async (on, options) => {
         "The architect's answer: where the session owning the architect persona addresses a persona whose owner sent the architect a record " +
         "that is delivered or answered, the record is stamped as the answer to it, and is delivered as the architect's even if the architect resolves that record with agentic_resolve after sending it. " +
         "A target this session owns is refused, because an owner does not message itself. " +
+        "A target whose name differs only in case from a persona a live session owns, where no live session owns the name as given, " +
+        "is refused naming that persona, and nothing is written: send to it under its exact name. " +
+        "A target no live session owns is still written, and the result reads Message written to rather than Message sent to owner of: " +
+        "it says no live session owns the persona and the record waits pending until a session owning that persona drains it. " +
         "The owner sees the message on its next quiet tick, or as its running turn ends, and each further waiting message follows as the " +
         "previous delivery turn ends. urgent: true breaks into a running turn instead and takes that turn's own " +
         "answer as the reply. What a sent record does between those two moments, and what the sender reads back afterwards, is stated in " +
@@ -5058,10 +5062,13 @@ export const register: Register = async (on, options) => {
         "calls this to poll for replies to its messages. With persona, the target is that persona, under the rule agentic_say uses at send: " +
         "the session holding the coordinator persona may read any persona, a session holding a reader claim on a persona may read it, " +
         "a session owning a named persona may read any other persona, and a persona this session owns is refused. " +
-        "Returns {inbox: [{id, from, at, text, kind, status, reply?, deferred?, turnRunningMs?, outcome?, note?, resolvedAt?, answersRecord?}], asks: [{id, at, nodeId, question, status}], workdir?}: workdir is the target persona's live owner's launch directory, where its own store file sits. " +
+        "Returns {inbox: [{id, from, at, text, kind, status, reply?, deferred?, turnRunningMs?, outcome?, note?, resolvedAt?, answersRecord?, answerRecords?: [{id, at, status, text}]}], asks: [{id, at, nodeId, question, status}], workdir?}: workdir is the target persona's live owner's launch directory, where its own store file sits. " +
         "A pending record carries deferred: true and turnRunningMs while the owner is inside a turn: it waits for that turn to end, or breaks into it once it has waited past the break-in bound, which a record labelled COORDINATOR, or WORKER under the architect persona, at delivery never does. " +
         "A record delivered on its wait alone is never replied to: it stays delivered until the owner resolves it. " +
         "A resolved record carries outcome (done or declined), note and resolvedAt. " +
+        "A skipped record carries note, naming why delivery refused it. " +
+        "Where this session owns a named persona other than default, answerRecords lists, ordered by at, every record in the inbox of the alphabetically first such persona stamped as the answer to the returned record, " +
+        "which is how the architect's answer reads at once rather than at the turn boundary that delivers it; it is absent where none answers. " +
         "Answer an open ask with agentic_say(text, answers: <ask id>).",
       inputSchema: {
         type: "object",

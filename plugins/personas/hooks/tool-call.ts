@@ -2157,6 +2157,35 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         return { deny: `no open ask '${answers}'; open asks: ${openIds.length ? openIds.join(", ") : "(none)"}` };
       }
     }
+    // A target whose name differs from a live persona's only in ASCII case
+    // is a misaddressed send: the record would key under a persona nothing
+    // drains while the sender reads the result as delivery. The claims are
+    // read once here, after the reach gate, whose own reading stands. The
+    // matched name is a claim's resource, store data, but it equals the
+    // target under the fold of A-Z alone, so it carries no character the
+    // target did not pass the name rule with, and it is spliced as the
+    // target is.
+    const targetResource = `persona:${persona}`;
+    const liveClaims = await readAllClaims(commonsStore(), sess.staleAfterMs);
+    // A live claim under the exact name is the target itself, so a case
+    // variant also live beside it refuses nothing.
+    const exactLive = liveClaims.some((c) => c.resource === targetResource);
+    const caseMatch = exactLive ? undefined : liveClaims.find((c) => c.resource.startsWith("persona:") && c.resource !== targetResource && asciiLower(c.resource) === asciiLower(targetResource));
+    if (caseMatch !== undefined) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `agentic_say cannot address '${persona}': the name differs only in case from '${caseMatch.resource.slice("persona:".length)}', which a live session owns; send to that persona under its exact name.` };
+    }
+    // The reach gate tests the writer's standing and nothing about the
+    // target, so a record to a persona no live session owns is written and
+    // waits for that persona's next drain. The holder read agentic_inbox
+    // makes for its deferred view says whether one holds the target now, so
+    // the result below can say the record waits rather than read as
+    // delivery. A failed read leaves the result as it is for an owned
+    // target, as agentic_inbox leaves its deferred view off.
+    let targetOwned = true;
+    try {
+      targetOwned = await readHolderMeta(commonsStore(), targetResource, sess.staleAfterMs) !== null;
+    } catch { /* commons read failed; the result reads as for an owned target */ }
     // Write the inbox record
     const seq = await getHighestInboxSeq(commonsStore(), persona, sess.mySessionId) + 1;
     const id = await writeInboxRecord(commonsStore(), persona, sess.mySessionId, seq, text, "say", answers, urgent, sendGround.answersRecord);
@@ -2178,6 +2207,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       // the entry stands in memory, so the first write that is not refused
       // carries it.
       try { await persist(); } catch { /* persist could not read or write the store; the entry waits in memory */ }
+    }
+    if (!targetOwned) {
+      return { result: `Message written to ${persona} (id: ${id}, pending: no live session owns '${persona}', so the record waits until a session owning that persona drains it; agentic_inbox on '${persona}' reads its state)` };
     }
     return { result: `Message sent to owner of ${persona} (id: ${id}${urgent ? ", urgent: delivered inside the owner's running turn if one is in flight" : ", delivered on the owner's next quiet tick or as its running turn ends, each further waiting message following as the previous delivery turn ends, or, unless it is labelled COORDINATOR or WORKER under the architect persona at delivery, into a turn already running once it has waited past the break-in bound; a delivery on the wait alone is not replied to, and the owner closes the record with agentic_resolve"})` };
   }
@@ -2226,27 +2258,54 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       const holder = await readHolderMeta(commonsStore(), `persona:${persona}`, sess.staleAfterMs);
       if (holder) { ownerTurnStartedAt = holder.turnStartedAt; ownerWorkdir = holder.workdir; }
     } catch { /* commons read failed; report records without the deferred view */ }
-    // Attach replies to records, and the deferred view to pending ones. The
-    // readAt stamp below is for the window roll and not the reader, so the
-    // result leaves it out and a stamped record reads as it did unstamped.
+    // The answers to the caller's records, read from the inbox of the named
+    // persona this session owns and no other: the architect's answer leg
+    // stamps answersRecord on the record it writes there, and the sender
+    // reads that record here at once rather than at the turn boundary that
+    // delivers it. The persona is the session's own ownership under the
+    // claims, as agentic_resolve's push reads it, never the tool's persona
+    // argument, so a session that merely reads or reaches a persona lists
+    // no inbox but its own. A session owning only the default persona, or
+    // none, gets no field, and so does one whose own name fails the name
+    // rule, since that name is store data on its way into a key. A failed
+    // read leaves the field off every record.
+    const answersById = new Map<string, { id: string; at: number; status: InboxRecord["status"]; text: string }[]>();
+    try {
+      const ownPersona = senderPersonaOf(await readAllClaims(commonsStore(), sess.staleAfterMs), sess.mySessionId);
+      if (ownPersona !== null && ownPersona !== "default" && personaNameProblem(ownPersona) === null) {
+        for (const answer of await listInboxRecords(commonsStore(), ownPersona)) {
+          if (typeof answer.answersRecord !== "string" || answer.answersRecord === "") continue;
+          const list = answersById.get(answer.answersRecord) ?? [];
+          list.push({ id: answer.id, at: answer.at, status: answer.status, text: answer.text });
+          answersById.set(answer.answersRecord, list);
+        }
+        for (const list of answersById.values()) list.sort((a, b) => a.at - b.at);
+      }
+    } catch { /* commons read failed; report records without their answers */ }
+    // Attach replies to records, the answers to answered ones, and the
+    // deferred view to pending ones. The readAt stamp below is for the
+    // window roll and not the reader, so the result leaves it out and a
+    // stamped record reads as it did unstamped.
     const withReplies = await Promise.all(myRecords.map(async (rec) => {
       const reply = await readReplyRecord(commonsStore(), persona, rec.id);
       const shown: InboxRecord = { ...rec };
       delete shown.readAt;
-      const base = reply ? { ...shown, reply: reply.text } : shown;
+      const answerRecords = answersById.get(rec.id);
+      const base = { ...(reply ? { ...shown, reply: reply.text } : shown), ...(answerRecords === undefined ? {} : { answerRecords }) };
       if (rec.status === "pending" && ownerTurnStartedAt !== null) {
         return { ...base, deferred: true, turnRunningMs: Math.max(0, Date.now() - ownerTurnStartedAt) };
       }
       return base;
     }));
     const result = JSON.stringify({ inbox: withReplies, asks: openAsks, ...(ownerWorkdir !== null ? { workdir: ownerWorkdir } : {}) }, null, 2);
-    // A resolved record this call returned is stamped readAt, which lets the
-    // owner's window roll take it: until then the roll keeps it, so the
-    // resolution waits for its sender rather than rolling unread. The file's
-    // one-writer rule holds: this session wrote the record, so the sender
-    // stamps its own record here, and the owner alone advances its status.
-    // Each stamp re-reads the record and writes only where it is still
-    // resolved and unstamped. Three owner writes can land between a read and
+    // A resolved or skipped record this call returned is stamped readAt,
+    // which lets the owner's window roll take it: until then the roll keeps
+    // it, so the resolution or the skip's note waits for its sender rather
+    // than rolling unread. The file's one-writer rule holds: this session
+    // wrote the record, so the sender stamps its own record here, and the
+    // owner alone advances its status. Each stamp re-reads the record and
+    // writes only where it is still closed the same way and unstamped.
+    // Three owner writes can land between a read and
     // a set. The owner's reply filing reads and re-sets a resolved record and
     // can drop a stamp written between its read and its set; the record then
     // waits for the next call or the TTL sweep. The owner's agentic_resolve
@@ -2262,12 +2321,13 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     let stampsTried = 0;
     let stampFailures = 0;
     let firstStampError: unknown = undefined;
+    const stampable = (status: InboxRecord["status"]): boolean => status === "resolved" || status === "skipped";
     for (const rec of myRecords) {
-      if (rec.status !== "resolved" || rec.readAt !== undefined || !rec.key) continue;
+      if (!stampable(rec.status) || rec.readAt !== undefined || !rec.key) continue;
       stampsTried++;
       try {
         const again = parseStoreRecord<InboxRecord>(await store.get(rec.key));
-        if (again !== null && again.status === "resolved" && again.readAt === undefined) {
+        if (again !== null && again.status === rec.status && again.readAt === undefined) {
           again.readAt = Date.now();
           await store.set(rec.key, again);
         }
@@ -2281,7 +2341,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         timestamp: Date.now(),
         loop: "worker",
         action: "inbox_read_stamp_failed",
-        detail: `readAt not written on ${stampFailures} of ${stampsTried} resolved records to '${persona}': ${boundedText(safeErrorText(firstStampError))}`,
+        detail: `readAt not written on ${stampFailures} of ${stampsTried} resolved or skipped records to '${persona}': ${boundedText(safeErrorText(firstStampError))}`,
       });
       // Attempted rather than depended on: the stamp is for the roll, so a
       // refused persist leaves the line in memory for the next write.

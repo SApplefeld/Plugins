@@ -527,6 +527,14 @@ export async function drainInbox(ctx: TickContext): Promise<boolean> {
   return drain;
 }
 
+// The sentence a record the drain refuses carries as its `note`, one per
+// reason class, in the plugin's own words: the sender reads it through its
+// own agentic_inbox, and the store takes no copy of the record's text, the
+// writer's persona name or the decision line's detail.
+const SKIP_NOTE_NO_CLAIM = "Skipped at delivery: the writer held no live claim reaching this persona.";
+const SKIP_NOTE_BAD_NAME = "Skipped at delivery: the writer's persona name failed the delivery bracket rule.";
+const SKIP_NOTE_BAD_RECORD = "Skipped at delivery: the record's id or text failed the record rule.";
+
 export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
   const { withdrawFollowUpsOffered, recordFailedDelivery, sess, turnIsOpen, coordinatorPersona, architectPersona } = ctx;
   // D3: drain operator inbox (one record per call, owner only).
@@ -582,6 +590,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
           });
         } else if ("refused" in answerGround || answerProblem !== null) {
           answer.status = "skipped";
+          answer.note = "refused" in answerGround ? SKIP_NOTE_BAD_NAME : SKIP_NOTE_BAD_RECORD;
           await store.set(answer.key, { ...answer });
           sess.state.decisions.push("refused" in answerGround && answerGround.refused === "bad_name"
             ? {
@@ -695,7 +704,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
     // once `status` is "skipped" it drops out of `pending` above on the
     // next `listInboxRecords` read, so the record costs one line total.
     for (const rec of withoutClaim) {
-      await store.set(rec.key, { ...rec, status: "skipped" });
+      await store.set(rec.key, { ...rec, status: "skipped", note: SKIP_NOTE_NO_CLAIM });
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",
@@ -704,7 +713,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
       });
     }
     for (const { rec, persona: writerPersona, problem } of badName) {
-      await store.set(rec.key, { ...rec, status: "skipped" });
+      await store.set(rec.key, { ...rec, status: "skipped", note: SKIP_NOTE_BAD_NAME });
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",
@@ -713,7 +722,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
       });
     }
     for (const { rec, problem } of badRecord) {
-      await store.set(rec.key, { ...rec, status: "skipped" });
+      await store.set(rec.key, { ...rec, status: "skipped", note: SKIP_NOTE_BAD_RECORD });
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",

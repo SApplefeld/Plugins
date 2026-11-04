@@ -14,7 +14,8 @@
 //
 // Writer: the reader session writes inbox records and its own floor key. The
 // owner advances status. The reader's agentic_inbox re-sets its own resolved
-// inbox record with readAt. The owner's TTL sweep deletes a writer's floor key.
+// or skipped inbox record with readAt. The owner's TTL sweep deletes a
+// writer's floor key.
 // Reader: the reader session calls agentic_inbox to read replies.
 
 // --- Types ---
@@ -40,11 +41,11 @@ export interface InboxRecord {
   turnId?: string; // set by owner on turn.start after delivery
   resolvedAt?: number; // set by the owner's agentic_resolve, with the two below
   outcome?: InboxOutcome;
-  note?: string;
+  note?: string; // the owner's agentic_resolve note, or on a skipped record the drain's one sentence naming why it refused the record
   answersRecord?: string; // set on the answer leg alone: agentic_say stamps the first well-formed record the target owner sent the architect that is still delivered or answered, and agentic_resolve's note push stamps the record it resolved
   noteSentAs?: string; // set by the owner's agentic_resolve on the record it resolved: the id of the record that carried its note to the sender's persona
   resolutionOf?: string; // set by agentic_resolve on the record it pushes: the id of the resolved record whose note it carries
-  readAt?: number; // set by the sender's own agentic_inbox on a resolved record it returned; lets enforceChannelWindow roll the record
+  readAt?: number; // set by the sender's own agentic_inbox on a resolved or skipped record it returned; lets enforceChannelWindow roll the record
 }
 
 export interface ReplyRecord {
@@ -545,23 +546,25 @@ export async function sweepExpiredRecords(
  * by the owner start's reconcile, which expires an open record no ledger
  * entry names, while a closed ask record ages out on its TTL through
  * `sweepExpiredRecords` above); it
- * covers `inbox:` records that are `"skipped"`, or `"resolved"` and carrying
- * `readAt` or `noteSentAs`, and every `reply:` record except one whose inbox
- * record is kept, combined and ordered oldest-first, keeping the newest
- * `windowSize` and rolling the rest. A `pending` record is live work the
- * drain has not consumed yet, and a `delivered` or `answered` record is an
- * open steer whose state the sender still reads. A `resolved` record with
- * neither `readAt` nor `noteSentAs` holds a resolution its sender has not
- * read through agentic_inbox and that no pushed record carried to it. All
- * three stay in the store whatever the window, and so does their reply; the
+ * covers `inbox:` records that are `"skipped"` and carrying `readAt`, or
+ * `"resolved"` and carrying `readAt` or `noteSentAs`, and every `reply:`
+ * record except one whose inbox record is kept, combined and ordered
+ * oldest-first, keeping the newest `windowSize` and rolling the rest. A
+ * `pending` record is live work the drain has not consumed yet, and a
+ * `delivered` or `answered` record is an open steer whose state the sender
+ * still reads. A `resolved` record with neither `readAt` nor `noteSentAs`
+ * holds a resolution its sender has not read through agentic_inbox and that
+ * no pushed record carried to it, and a `skipped` record with no `readAt`
+ * holds a refusal and its note the sender has not read the same way. All
+ * four stay in the store whatever the window, and so does their reply; the
  * TTL sweep is the bound on those. The sweep ages a record by the latest of
  * `at`, `deliveredAt` and `resolvedAt`, so a kept resolution leaves the store
  * at the first sweep after one TTL from its resolve, as an open steer leaves
- * at the first sweep after one TTL from its delivery. The share of the
+ * at the first sweep after one TTL from its delivery, and a kept skipped
+ * record at the first sweep after one TTL from its write. The share of the
  * store's 4 MiB ceiling these kept records take is not measured. Every other
- * reply, whether its record is
- * `skipped`, gone, or `resolved` with `readAt` or `noteSentAs`, enters the
- * window on its own age, so it can
+ * reply, whether its record is `skipped` with `readAt`, gone, or `resolved`
+ * with `readAt` or `noteSentAs`, enters the window on its own age, so it can
  * roll on a different cadence from its record.
  * A writer's floor key (`SEQ_PREFIX`) is never read or rolled here: it holds
  * the writer's highest sequence number, which must outlive the records it
@@ -576,8 +579,9 @@ export async function enforceChannelWindow(
 ): Promise<number> {
   const allInbox = await listInboxRecords(store, persona);
   const unreadResolution = (r: InboxRecord): boolean => r.status === "resolved" && r.readAt === undefined && r.noteSentAs === undefined;
-  const inbox = allInbox.filter((r) => r.status === "skipped" || (r.status === "resolved" && !unreadResolution(r)));
-  const keptIds = new Set(allInbox.filter((r) => r.status === "delivered" || r.status === "answered" || unreadResolution(r)).map((r) => r.id));
+  const unreadSkip = (r: InboxRecord): boolean => r.status === "skipped" && r.readAt === undefined;
+  const inbox = allInbox.filter((r) => (r.status === "skipped" && !unreadSkip(r)) || (r.status === "resolved" && !unreadResolution(r)));
+  const keptIds = new Set(allInbox.filter((r) => r.status === "delivered" || r.status === "answered" || unreadResolution(r) || unreadSkip(r)).map((r) => r.id));
   const keys = await store.keys();
   const replyPrefix = `${REPLY_PREFIX}${persona}:`;
   const combined: { key: string; at: number; kind: "inbox" | "reply"; record: unknown }[] = inbox.map((r) => ({
