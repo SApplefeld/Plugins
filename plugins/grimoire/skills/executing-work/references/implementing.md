@@ -164,7 +164,7 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
 
    **A tree-mutating probe is exclusive.** Run one under the doctrine's rule for it in Tests and Their Blind Spots, awaiting or TaskStopping every subagent first. When the state under test is already committed, run it in a separate worktree, which needs no exclusivity.
 
-   **Then run the promises check before step 3:** `node <plugin-root>/scripts/kit-jev-check.js promises .kit/scratch/<plan-slug>/promises-section-<n>.json <the section's changed source files> --record .kit/scratch/<plan-slug>/promises-section-<n>.record.json`. Re-read each promise over 0.6 against the code, then fix it or record one `Decisions / Surprises:` line. After a fix, re-run once without `--record`. Step 3 dispatches whatever the reading, and no reading enters a review brief. A `not checked` or `not configured` line is recorded as printed and never retried into a pass.
+   **Then run the promises check before step 3:** `node <plugin-root>/scripts/kit-jev-check.js promises .kit/scratch/<plan-slug>/promises-section-<n>.json <the section's changed source files> --record .kit/scratch/<plan-slug>/promises-section-<n>.record.json`. Re-read each promise over 0.6 against the code, then fix it or record one `Decisions / Surprises:` line. After a fix, re-run once without `--record`. Step 3 dispatches whatever the reading, and no reading enters a review brief. Where `not checked (code too long)` prints, run once more with `--base <the section's base ref>`, recording both lines. Any other `not checked` or `not configured` line, the re-run's included, is recorded as printed and never retried.
 
 ## Delegating to Subagents
 

@@ -4714,14 +4714,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - reason: This pass has no section, so its pathspec has none, and the exclusions are executing-work's own; both older entries are superseded by this one. Superseded at `aff63fa` by T024 (the finishing merge; the verdict before it was keep).
 
 ### S074
-- key: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec, with the fable model override.
+- key: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec, carrying the `Trace target:` line executing-work's review reference gives it.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:56
-- provenance: f8c0649 2026-06-10 for the whole-changeset dispatch, d156f46 2026-07-31 for the unconditional fable override; 55c5abc 2026-09-09 changed the line elsewhere; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 moved the fable override and the capacity reading into step 3's cleared and uncleared cases.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:102
+- provenance: f8c0649 2026-06-10 for the whole-changeset dispatch, d156f46 2026-07-31 for the unconditional fable override; 55c5abc 2026-09-09 changed the line elsewhere; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 moved the fable override and the capacity reading into step 3's cleared and uncleared cases; docs/plans/claude-kit_finishing-reads-behavior_spec_v1.md section 2 2026-11-04 added the trace line on kit issue 420.
 - verdict: rewrite
-- reason: Line 12's rows and the cases after this sentence own the tier; this owns which agent and what scope.
-- proposed: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec.
-- passage: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec.
+- reason: Line 12's rows and the cases after this sentence own the tier; this owns which agent, what scope and the trace line.
+- proposed: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec, carrying the `Trace target:` line `executing-work/references/review.md` gives it.
+- passage: Dispatch the `adversarial-reviewer` agent over the entire changeset against the spec, carrying the `Trace target:` line `executing-work/references/review.md` gives it.
 - landed: 22dcfd78 section 2
 
 ### S075
@@ -5140,7 +5140,7 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 ### S117
 - key: Give a `mistake` with no basis the tag's default stop.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:62
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:120
 - provenance: dd5e568 2026-08-24, a run-stopping tag names the basis it rests on; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1.
 - verdict: rewrite
 - landed: dc7cdfb3 section 1
@@ -5148,25 +5148,30 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: A `mistake` means the code may be wrong, and one with no basis takes the tag's default stop.
 
 ### S118
-- key: Clear a surviving `mistake` without a stop only where its remedy is doc wording alone and the as-built read shows the code right and the doc wrong, and fix it; a remedy reaching code, the spec or a recorded decision, or one the read leaves unsettled, stops for the operator before the PR.
+- key: Sort a surviving `mistake` by the behavior its remedy changes, clear an in-scope code remedy only under a pull request, and stop for the operator on any other remedy.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:62
-- provenance: b9c7f85 2026-06-14 and f758743 2026-06-23 for the true-blocker stop, dd5e568 2026-08-24 conditioned it on the pre-change read; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:120
+- provenance: b9c7f85 2026-06-14 and f758743 2026-06-23 for the true-blocker stop, dd5e568 2026-08-24 conditioned it on the pre-change read; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1; rewritten 2026-11-04 by the finishing-reads-behavior plan, section 2, on kit issues 758 and 761.
 - verdict: rewrite
 - landed: dc7cdfb3 section 1
-- reason: The stop guards a possible code defect reaching the PR on a docs-only reconciliation, so it stays the default and holds wherever the remedy reaches code, the spec or a recorded decision, or the read cannot settle which side is wrong. A wording-only remedy the as-built read confirms reaches neither, so stopping it only delays a fix the session can verify itself (evidence #325 and #373). Drift routing is finishing-work's under the ownership map.
-- passage: It clears doc wording alone, where your as-built read shows the code right and the doc wrong.
-- passage: A remedy reaching code, the spec or a recorded decision, or unsettled, stops for me before the PR.
+- reason: The stop guards a possible code defect, so it stays the default. Sorting by where a remedy lands stopped a one-word comment fix (issue 761) and an in-scope restoration of a rule `docs/architecture.md` states (issue 758). Only the orchestrator's as-built read can judge what a remedy changes. Only a pull request's approval gives a cleared code remedy its yes, so the other models keep the stop. A reader acts on a user-visible string, so it outranks wording. Drift routing is finishing-work's under the ownership map.
+- passage: The test reads the behavior a remedy changes, not the file it lands in.
+- passage: A remedy changing only a doc, comment or message describing behavior your as-built read shows correct clears as wording, wherever it lands.
+- passage: A user-visible string whose change would alter what its reader does is behavior, by the doctrine's litmus under Style, and takes the code route over the wording clearance.
+- passage: A code remedy clears only where a pull request carries the report and three hold: it sits inside a section's `Files in scope:`, it restores a rule a recorded decision or a document under `docs/` already states, and the targeted lane over its delta is green with your as-built read showing no behavior change.
+- passage: It is a flagged bonus, and my approval of the pull request stands as the yes.
+- passage: Under Review-Only and Commit-and-Push no pull request opens, so the code clearance is withheld.
+- passage: Any other code remedy stops for me. So does a remedy changing the spec or a recorded decision.
 
 ### S119
-- key: Record every remedy with its receipt, and each `deviation` with no stop, in the final Chapter and on the surface that carries the report: the PR description, the Review-Only walkthrough, or under Commit-and-Push the close-out status.
+- key: Record every remedy with its receipt, each flagged bonus with its one-line undo, and each `deviation` with no stop, in the final Chapter and on the surface that carries the report: the PR description, the Review-Only walkthrough, or under Commit-and-Push the close-out status.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:62
-- provenance: f758743 2026-06-23, documentation for PRs; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1; rewritten 2026-10-19 by the finishing-rules-drift plan, section 1, naming the cleared remedy's surface per commit model.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:120
+- provenance: f758743 2026-06-23, documentation for PRs; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1; rewritten 2026-10-19 by the finishing-rules-drift plan, section 1, naming the cleared remedy's surface per commit model; rewritten 2026-11-04 by the finishing-reads-behavior plan, section 2.
 - verdict: rewrite
 - landed: dc7cdfb3 section 1
 - reason: A deviation is a deliberate as-built choice; recording without stopping is what lets a deviation-only effort flow through a long run.
-- passage: Record every remedy with its receipt, and each `deviation` with no stop, in the final Chapter and on the surface that carries the report: the PR description, the Review-Only walkthrough, or under Commit-and-Push the close-out status.
+- passage: Record every remedy with its receipt, each flagged bonus with its one-line undo, and each `deviation` with no stop, in the final Chapter and on the surface that carries the report: the PR description, the Review-Only walkthrough, or under Commit-and-Push the close-out status.
 
 ### S120
 - key: Never silently reconcile: a surviving `mistake` stops the run unless the remedy test clears it.
@@ -5175,7 +5180,7 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - provenance: f758743 2026-06-23, the first limb of the bold sentence; 55c5abc 2026-09-09 renumbered the step; rewritten 2026-10-18 by the finishing-pass-rules plan, section 1.
 - verdict: rewrite
 - landed: dc7cdfb3 section 1
-- reason: The bar every reconciliation lands on: the stop is the default, and only the wording-only remedy S118 bounds is cleared without one.
+- reason: The bar every reconciliation lands on: the stop is the default, and only a remedy S118 bounds is cleared without one.
 - passage: **Never silently reconcile: a surviving `mistake` stops unless the remedy test clears it.**
 
 ### S121
@@ -6862,14 +6867,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - flag: stale
 
 ### W001
-- key: Dispatch both advisory lenses in one `agent()` wave with step 3's adversarial lens, each at its own row's model.
+- key: Dispatch both advisory lenses in one `agent()` wave with step 3's adversarial lens, each at its own row's model and carrying the `Trace target:` line executing-work's review reference gives it.
 - class: mechanic
-- source: plugins/grimoire/skills/finishing-work/SKILL.md
-- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 named each dispatch's model and the reach of the reading and compensation, landed at 0517ce00 section 1; its finishing pass 2026-10-13 dropped the reach sentence to fit the corpus cap after the #603 merge, since the preamble's dispatch paragraph and the Compensating paragraph already confine both to the Fable-aimed dispatches.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:88
+- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 named each dispatch's model and the reach of the reading and compensation, landed at 0517ce00 section 1; its finishing pass 2026-10-13 dropped the reach sentence to fit the corpus cap after the #603 merge, since the preamble's dispatch paragraph and the Compensating paragraph already confine both to the Fable-aimed dispatches; docs/plans/claude-kit_finishing-reads-behavior_spec_v1.md section 2 2026-11-04 added the `Trace target:` clause on kit issue 420.
 - verdict: rewrite
-- reason: The plan's Approach puts every lens of a round in one `agent()` wave so the orchestrator reads the round together, and the preamble already licensed steps 2 and 3 in parallel. The wave mixes models, the advisory lenses on Opus and the adversarial lens on Fable, so the step names each dispatch's row; the preamble says which dispatches the capacity reading and compensation reach.
+- reason: The plan's Approach puts every lens of a round in one `agent()` wave so the orchestrator reads the round together, and the preamble already licensed steps 2 and 3 in parallel. The wave mixes models, the advisory lenses on Opus and the adversarial lens on Fable, so the step names each dispatch's row; the preamble says which dispatches the capacity reading and compensation reach. The lens charters expect a `Trace target:` line, so the clause points at `executing-work/references/review.md`'s rule.
 - proposed: Send them in one `agent()` wave with step 3's adversarial lens, each at its own row's model.
-- passage: Send them in one `agent()` wave with step 3's adversarial lens, each at its own row's model.
+- passage: Send them in one `agent()` wave with step 3's adversarial lens, each at its own row's model and carrying the `Trace target:` line `executing-work/references/review.md` gives it.
 - landed: 194f099b finishing
 
 ### W002
@@ -7033,15 +7038,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Each body header takes the doctrine's heading form, and the body takes the prose register.
 
 ### B001
-- key: Before the final adversarial review, write a promises file holding one entry per Goal sentence, run the promises check against it over the changeset's source files, re-read each promise over 0.6, and quote its `jev promises:` line on the final Chapter's `Gate:` line. Where that line reads `not checked (code too long)`, run the check once per section over its in-scope source files intersected with the changeset listing, quote each section's line, re-read only a promise every scored section doubts over 0.6, and record a section with no such file, or still not checked, as such.
+- key: Before the final adversarial review, write a promises file holding one entry per Goal sentence, run the promises check against it over the changeset's source files, re-read each promise over 0.6, and quote its `jev promises:` line on the final Chapter's `Gate:` line. Where that line reads `not checked (code too long)`, run once more with `--base <base ref>`, quote both lines, and record the re-run's `not checked` line as printed, never retried.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:96
-- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 ran the promise check before the review's waiver as well as before its dispatch; rewritten 2026-10-18 by the finishing-pass-rules plan, section 2.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:102
+- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13 ran the promise check before the review's waiver as well as before its dispatch; rewritten 2026-10-18 by the finishing-pass-rules plan, section 2. Amended by `docs/plans/claude-kit_finishing-reads-behavior_spec_v1.md` section 1, 2026-11-04: one `--base` re-run replaces the per-section fallback.
 - verdict: rewrite
 - landed: 549de22b section 3
-- reason: The section checks read each section's own promises, and only a reading over the Goal asks whether the sections together built what the plan set out to. Quoting the closing line leaves the reading in the record whatever it said, so a not-checked run is visible rather than silent. The checker refuses an over-long changeset (#582), so the per-section run plus the goal read keep a reading in the record.
+- reason: The section checks read each section's own promises, and only a reading over the Goal asks whether the sections together built what the plan set out to. Quoting the closing line leaves the reading in the record whatever it said, so a not-checked run is visible rather than silent. The checker refuses an over-long changeset (#582). The per-section fallback refused the same way wherever one large file sat in every section's set (#712, #869), so the re-run sends each file's changed regions, which are what the promises are about.
 - proposed: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line.
-- passage: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line. Where `not checked (code too long)` prints, run the file per section over its `Files in scope:` source files intersected with the changeset listing, quoting each line. Re-read a promise only where every scored section doubts it over 0.6, since one section's fulfilment scores low elsewhere. A section with no such file, or still `not checked`, is recorded so and never retried. Step 4's goal read stands whatever printed. Each section's `Verify:` results on its Chapter's `Gate:` line are the acceptance its run confirms.
+- passage: Before this dispatch or its waiver, write `.kit/scratch/<plan-slug>/promises-goal.json`, one entry per Goal sentence, and run `node <plugin-root>/scripts/kit-jev-check.js promises <that file> <the changeset's source files>`. Re-read each promise over 0.6 as executing-work's step 2 does, and quote its `jev promises:` line on the final Chapter's `Gate:` line. Where `not checked (code too long)` prints, run once more with `--base <base ref>`, which sends only each file's changed regions, and quote both on the `Gate:` line. The re-run's `not checked` line is recorded as printed and never retried. Step 4's goal read stands whatever printed. Each section's `Verify:` results on its Chapter's `Gate:` line are the acceptance its run confirms.
 - landed: 22dcfd78 section 2
 - landed: b68e8cce section 2
 

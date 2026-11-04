@@ -19,6 +19,16 @@
 // doubt. Nothing else rides: not the questions file's path, not a record,
 // not any environment value.
 //
+// THE BASE. `--base <ref>` sends each source file's changed regions against
+// that ref in place of its text, under a header naming the ref, and omits a
+// file with no change. jev-gather.js states the read. A ref git cannot
+// resolve, a ref opening with `-`, a file outside a repository, or a git read
+// that fails is a usage refusal, and no file is sent whole in its place. A
+// file git diffs as binary stops the run at `not checked (binary file)` with
+// the path on stderr, and a run where no file has a changed region reads
+// `not checked (no changed regions)`. The cap applies to the regions' sum as
+// it does to whole files.
+//
 // THE SCREENS. The gatherer refuses a credential or settings file by name
 // before reading it, and the run stops at `not checked (screened file)` with
 // the path on stderr and never its content. The client refuses a body
@@ -26,7 +36,7 @@
 // nothing itself.
 //
 // ALL OR NOTHING. The arguments, the questions file, any `--against` record
-// and the source files are read before the config, and a screened or
+// and the source files are read before the config, and a screened, binary or
 // unreadable source stops the run there. The config is read before the length
 // check, so a machine with no config reads `not configured` whatever the
 // readable files hold. The code is checked before the send, and code past
@@ -44,10 +54,11 @@
 // characters>`, ranked on the value as printed to two decimals, ties in
 // questions-file order. The closing line is the only stdout line that opens
 // with `jev promises:`. The not-checked reason is the client's, or this
-// tool's own `code too long` or `screened file`. A usage refusal (a missing
-// verb or path, an unknown flag, a questions file or record that cannot be
-// used, a source file that cannot be read) is one line on stderr naming the
-// usage, exit 1, and sends nothing.
+// tool's own `code too long`, `screened file`, `binary file` or `no changed
+// regions`. A usage refusal (a missing verb or path, an unknown flag, a
+// questions file or record that cannot be used, a source file that cannot be
+// read, a base that cannot be read) is one line on stderr naming the usage,
+// exit 1, and sends nothing.
 //
 // THE RECORD AND THE DELTA. `--record <path>` writes `{ model, at, answers }`
 // after a checked run and only then, `answers` mapping each id to its raw
@@ -79,17 +90,18 @@ const MAX_CODE_CHARS = 120000;
 // A promise's text on its report line is cut to this many characters.
 const PROMISE_LINE_CHARS = 80;
 
-const USAGE = 'usage: node kit-jev-check.js promises <questions.json> <file>... [--record <path>] [--against <path>]';
+const USAGE = 'usage: node kit-jev-check.js promises <questions.json> <file>... [--record <path>] [--against <path>] [--base <ref>]';
 
 const CLOSING_SENTENCE = 'Doubt is a pointer to re-read the promise against the code, never a finding.';
 
 // --------------------------------------------------------------- arguments --
 
-const FLAGS = new Set(['--record', '--against']);
+const FLAGS = new Set(['--record', '--against', '--base']);
 
-// The arguments after the verb as `{ questionsPath, sources, record, against }`
-// or a described refusal. A flag takes the next argument as its path, and an
-// argument opening with `--` is never a path.
+// The arguments after the verb as `{ questionsPath, sources, record, against,
+// base }` or a described refusal. A flag takes the next argument as its path,
+// or as its ref for `--base`, and an argument opening with `--` is never
+// either.
 function parseArgs(args) {
     const positional = [];
     const flags = {};
@@ -102,7 +114,7 @@ function parseArgs(args) {
         if (!FLAGS.has(arg)) return { ok: false, detail: `unknown flag ${arg}` };
         if (Object.hasOwn(flags, arg)) return { ok: false, detail: `${arg} is given twice` };
         const value = args[i + 1];
-        if (value === undefined || value.startsWith('--')) return { ok: false, detail: `${arg} takes a path` };
+        if (value === undefined || value.startsWith('--')) return { ok: false, detail: `${arg} takes a ${arg === '--base' ? 'ref' : 'path'}` };
         flags[arg] = value;
         i += 1;
     }
@@ -113,7 +125,8 @@ function parseArgs(args) {
         questionsPath: positional[0],
         sources: positional.slice(1),
         record: flags['--record'],
-        against: flags['--against']
+        against: flags['--against'],
+        base: flags['--base']
     };
 }
 
@@ -307,11 +320,12 @@ async function promises(args) {
         against = record.answers;
     }
 
-    const gathered = gatherCode(parsed.sources);
+    const gathered = gatherCode(parsed.sources, parsed.base);
     if (!gathered.ok) {
-        if (gathered.reason !== 'screened file') return refuseUsage(`the source file could not be read: ${gathered.path}`);
-        process.stderr.write(`kit-jev-check: screened file ${gathered.path}\n`);
-        return notChecked('screened file');
+        if (gathered.reason === 'base refused') return refuseUsage(gathered.detail);
+        if (gathered.reason === 'unreadable file') return refuseUsage(`the source file could not be read: ${gathered.path}`);
+        process.stderr.write(`kit-jev-check: ${gathered.reason} ${gathered.path}\n`);
+        return notChecked(gathered.reason);
     }
 
     // The config is read once here, for the header's model name, and a config
@@ -322,6 +336,7 @@ async function promises(args) {
     const config = loadJevConfig();
     if (!config.ok) return notChecked(configRefusalReason(config));
 
+    if (parsed.base !== undefined && gathered.files === 0) return notChecked('no changed regions');
     if (gathered.code.length > MAX_CODE_CHARS) return notChecked('code too long');
 
     const answer = await askJev({ code: gathered.code }, questionsFor(questions.entries), TIMEOUT_MS, RETRY_DELAYS_MS);

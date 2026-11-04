@@ -7868,16 +7868,16 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: - Promise check: the promises file's path and the command `node <root>/scripts/kit-jev-check.js promises <that file> <your changed source files>`, run before you report, with its closing line and every promise over 0.6 carried in the report
 
 ### B003
-- key: Before step 3, run the promises check with --record, re-read each promise over 0.6, fix it or record one Decisions / Surprises line, re-run once after a fix without --record, and dispatch the reviewers whatever the reading.
+- key: Before step 3, run the promises check with --record, re-read each promise over 0.6, fix it or record one Decisions / Surprises line, re-run once after a fix without --record, run once more with --base where the code is too long, and dispatch the reviewers whatever the reading.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:164
-- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:167
+- provenance: `docs/plans/claude-kit_jev-code-checks_spec_v1.md` section 3, 2026-10-01, on the operator's frame of that date and rulings 1 and 2 under its Intent. Amended by `docs/plans/claude-kit_finishing-reads-behavior_spec_v1.md` section 1, 2026-11-04: the `--base` re-run.
 - verdict: keep
 - landed: 549de22b section 3
-- reason: The operator asked for a cheap first reading that sends the session back over its own acceptance criteria before the slower reviewers run, as advice and never a gate. The 0.6 line is the operator's ruled hand-off point, and every promise over it is re-read because the check costs seconds. A reading that reached a reviewer would pre-judge the review, so none does.
+- reason: The operator asked for a cheap first reading that sends the session back over its own acceptance criteria before the slower reviewers run, as advice and never a gate. The 0.6 line is the operator's ruled hand-off point, and every promise over it is re-read because the check costs seconds. A reading that reached a reviewer would pre-judge the review, so none does. A section touching a file too large to send whole printed `not checked (code too long)` at every run (#712), so one re-run sends each file's changed regions against the section's base, and a second refusal is final because nothing smaller is left to send.
 - passage: **Then run the promises check before step 3:** `node <plugin-root>/scripts/kit-jev-check.js promises .kit/scratch/<plan-slug>/promises-section-<n>.json <the section's changed source files> --record .kit/scratch/<plan-slug>/promises-section-<n>.record.json`.
 - passage: Re-read each promise over 0.6 against the code, then fix it or record one `Decisions / Surprises:` line. After a fix, re-run once without `--record`.
-- passage: Step 3 dispatches whatever the reading, and no reading enters a review brief. A `not checked` or `not configured` line is recorded as printed and never retried into a pass.
+- passage: Step 3 dispatches whatever the reading, and no reading enters a review brief. Where `not checked (code too long)` prints, run once more with `--base <the section's base ref>`, recording both lines. Any other `not checked` or `not configured` line, the re-run's included, is recorded as printed and never retried.
 
 ### F001
 - key: On an inline section, write the brief's start-of-work statement beside the add-decision line at the section open.
