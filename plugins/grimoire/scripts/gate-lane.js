@@ -35,6 +35,20 @@
 // field missing or of the wrong kind makes the map unreadable, and a rung
 // outside the four does too, the reason then naming the rung.
 //
+// An optional `contention` list names the repository's contention lane, each
+// entry `{ test, reason }`, its test a file under test/contention/, outside the
+// main gate's glob. One line follows the layer lines on every verdict:
+//
+//   contention lane: node --test --test-timeout=1800000 --test-concurrency=1 <tests>
+//                                     the listed tests sorted, run serially
+//   contention lane: empty            the list names no test
+//   contention lane: none named       the map has no `contention` key
+//
+// An entry with a field missing or of the wrong kind makes the map unreadable,
+// and an entry whose test is not a plain path under test/contention/ does too,
+// the reason then naming the test. An absent or unreadable map prints no
+// contention line.
+//
 // The lane gate's own inputs, the map, this script and the map's pin test, are
 // whole whatever the map says, ahead of its `whole` list, so no edit to the map
 // can size the gate that checks it. A path any `whole` entry holds is whole,
@@ -117,6 +131,10 @@ const LANE_NAME = { tests: /^test\/[A-Za-z0-9._/-]+$/, suites: /^test-personas\/
 // nobody has timed.
 const RUNGS = ['in-process', 'database', 'process', 'end-to-end'];
 const UNMEASURED = 'unmeasured';
+// The contention lane's folder, outside the main gate's glob test/*.test.js,
+// and its runner, one test at a time since its members must not share the box.
+const CONTENTION_DIR = 'test/contention/';
+const CONTENTION_RUN = NODE_TEST + ' --test-concurrency=1';
 // The files that decide every lane, held whole ahead of the map they would size.
 const SELF = ['test/gate-lanes.json', 'plugins/grimoire/scripts/gate-lane.js', 'test/gate-lanes.test.js'];
 
@@ -132,6 +150,11 @@ function localDate(d) {
 
 function holds(entry, relPath) {
     return entry.endsWith('/') ? relPath.startsWith(entry) : relPath === entry;
+}
+
+// The contention lane's tests sorted, each once, or null where the map has no `contention` key.
+function contentionOf(map) {
+    return map.contention === undefined ? null : [...new Set(map.contention.map((c) => c.test))].sort();
 }
 
 // The record rule over the text of runs.jsonl, or null where there is no file.
@@ -189,6 +212,7 @@ function placePath(map, relPath) {
 function classify({ map, mapProblem, changes, recordText, now, exists }) {
     if (map === null) return { lane: 'whole', reason: mapProblem || 'no map', places: [], tests: [], suites: [] };
     const layerList = map.layers || [];
+    const contention = contentionOf(map);
     const places = changes.map((p) => ({ path: p, place: placePath(map, p) }));
     const reasons = [];
     const record = recordProblem(recordText, now);
@@ -200,7 +224,7 @@ function classify({ map, mapProblem, changes, recordText, now, exists }) {
     }
     const whole = () => {
         const more = reasons.length > 1 ? ', and ' + (reasons.length - 1) + ' more' : '';
-        return { lane: 'whole', reason: reasons[0] + more, places, tests: [], suites: [], layers: layerList };
+        return { lane: 'whole', reason: reasons[0] + more, places, tests: [], suites: [], layers: layerList, contention };
     };
     if (reasons.length > 0) return whole();
     const tests = new Set(map.always.map((a) => a.test));
@@ -231,7 +255,7 @@ function classify({ map, mapProblem, changes, recordText, now, exists }) {
     }
     if (reasons.length > 0) return whole();
     const present = (list) => [...list].filter((f) => exists(f)).sort();
-    return { lane: 'targeted', places, tests: present(tests), suites: present(suites), layers: layerList };
+    return { lane: 'targeted', places, tests: present(tests), suites: present(suites), layers: layerList, contention };
 }
 
 // The printed report, one string per line. Every repository-supplied value
@@ -245,6 +269,15 @@ function render(result) {
     for (const l of result.layers || []) {
         const cost = l.clock === UNMEASURED ? 'cost: ' + UNMEASURED : 'clock ' + l.clock + 's';
         lines.push('layer ' + safePath(l.rung) + ': ' + safePath(l.name) + ', ' + l.tests + ' tests, ' + cost + ', pinned ' + safePath(l.pinned));
+    }
+    // The contention lane follows the layers wherever a map was read, so a
+    // result with no `contention` field, the absent or unreadable map's, prints
+    // none. Its tests are screened as every map string is.
+    if (result.contention !== undefined) {
+        const form = result.contention === null ? 'none named'
+            : result.contention.length === 0 ? 'empty'
+                : CONTENTION_RUN + ' ' + result.contention.map((t) => safePath(t)).join(' ');
+        lines.push('contention lane: ' + form);
     }
     for (const { path: p, place } of result.places) {
         if (place.kind === 'row') lines.push(safePath(p) + ': row ' + safePath(place.entry));
@@ -317,7 +350,8 @@ function validMap(m) {
         && records(m.always, ['test', 'reason'])
         && records(m.whole, ['path', 'reason'])
         && (m.unread === undefined || records(m.unread, ['path', 'reason']))
-        && (m.layers === undefined || layers(m.layers));
+        && (m.layers === undefined || layers(m.layers))
+        && (m.contention === undefined || records(m.contention, ['test', 'reason']));
 }
 
 // The map at <repo>/test/gate-lanes.json as { map, mapProblem }, map null where
@@ -332,6 +366,11 @@ function readMap(repo) {
     // named. The reason is screened where it is printed, as every map string is.
     const stray = (parsed.layers || []).find((l) => !RUNGS.includes(l.rung));
     if (stray) return { map: null, mapProblem: 'map unreadable: layer rung ' + JSON.stringify(stray.rung) + ' is not one of ' + RUNGS.join(', ') };
+    // A well-shaped contention entry whose test is not a plain path under the
+    // folder is refused with the test named, screened where it is printed.
+    const misplaced = (parsed.contention || []).find((c) => !LANE_NAME.tests.test(c.test)
+        || !c.test.startsWith(CONTENTION_DIR) || c.test.split('/').some((s) => s === '' || s === '.' || s === '..'));
+    if (misplaced) return { map: null, mapProblem: 'map unreadable: contention entry ' + misplaced.test + ' is not a file under ' + CONTENTION_DIR };
     return { map: parsed, mapProblem: null };
 }
 
@@ -368,7 +407,7 @@ function main(argv) {
         runs = readContained(mainCheckout, RUNS_FILE, MAX_RUNS_BYTES);
     } catch (err) {
         const reason = stage + ': ' + String(err && err.message ? err.message : err);
-        process.stdout.write(render({ lane: 'whole', reason, places: [], tests: [], suites: [], layers: map.layers }).join('\n') + '\n');
+        process.stdout.write(render({ lane: 'whole', reason, places: [], tests: [], suites: [], layers: map.layers, contention: contentionOf(map) }).join('\n') + '\n');
         return 0;
     }
 

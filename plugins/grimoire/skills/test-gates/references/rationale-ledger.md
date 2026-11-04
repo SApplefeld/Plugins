@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit-wide authority on what a test suite costs to consult and what it detects. It owns these moments: mapping a repository's test layers by run cost; choosing which lane runs at a fix round, a section close, a push, a merge, finishing, and a handoff; discriminating a red from a flake; recording, pinning and comparing wall-clock, fixture-time and contention figures, including the pre-suite check of the box and the gate line's test ledger; and auditing a suite with mutation testing. It states no runnable commands, since a repo's lane invocations are per-repo facts held in that project's memory tier. Load class: named-trigger, per its own frontmatter description, which lists the acts and events that call it (choosing a lane, running the finishing gate, reading a red or a wall-clock figure, recording the gate line, mapping layers, auditing a suite).
 
-Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md`, which moved the lanes, the red protocol and the clock and box here from `testing-discipline`. The entries keyed `C`, `X`, `A`, `B` and `AE` moved from the testing-discipline ledger with their ids and history, each with a provenance line naming the move and its source line re-read in this file. Claim ids are unique only under their heading, so an id a moved entry names in its reason or provenance resolves under the testing-discipline heading unless this ledger holds it. The `AG` entries are that section's new text. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30, which added the mutation audit's hang-limit sentence (AK001 below).
+Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md`, which moved the lanes, the red protocol and the clock and box here from `testing-discipline`. The entries keyed `C`, `X`, `A`, `B` and `AE` moved from the testing-discipline ledger with their ids and history, each with a provenance line naming the move and its source line re-read in this file. Claim ids are unique only under their heading, so an id a moved entry names in its reason or provenance resolves under the testing-discipline heading unless this ledger holds it. The `AG` entries are that section's new text. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30, which added the mutation audit's hang-limit sentence (AK001 below). Amended by `docs/plans/claude-kit_lane-contention-key_spec_v1.md` section 2 on 2026-11-04, which added C077 to C081 below and amended C039, C041, C045 and C047 in place.
 
 ### C001
 - key: Read a repo's actual lane and suite commands from that project's memory tier wherever this skill names a lane.
@@ -60,8 +60,8 @@ Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gat
 - source: plugins/grimoire/skills/test-gates/SKILL.md:19
 - provenance: a321af3 2026-08-30 (the moment) and 9784239 2026-08-30 (the one-moment reading), gate-cadence plan; `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3, 2026-10-17, on the operator's ruling that day. Moved to this ledger from the testing-discipline ledger by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` on 2026-10-27, when its sentence moved unchanged from `testing-discipline` to `test-gates`.
 - verdict: keep
-- reason: Pinned phrase on both copies; the doctrine names the moments, this skill the mechanics, finishing-work the run inside its pass.
-- passage: **The whole gate** is the full suite. The finishing gate runs at finishing, before the plan's handoff, on the lane the lane script prints from the repository's lane map, `test/gate-lanes.json` in the kit. The script is `scripts/gate-lane.js` under the kit plugin root. It prints `lane: whole` where the map cannot bound the delta or the daily gate below has no fresh green run, and its header lists each case.
+- reason: Pinned phrase on both copies; the doctrine names the moments, this skill the mechanics, finishing-work the run inside its pass. Amended on 2026-11-04 by section 2 of docs/plans/claude-kit_lane-contention-key_spec_v1.md, which cut the pointer at the script's header to pay for C077 and C078 in the same bullet.
+- passage: **The whole gate** is the full suite. The finishing gate runs at finishing, before the plan's handoff, on the lane the lane script prints from the repository's lane map, `test/gate-lanes.json` in the kit. The script is `scripts/gate-lane.js` under the kit plugin root. It prints `lane: whole` where the map cannot bound the delta or the daily gate below has no fresh green run.
 
 ### C041
 - key: Treat finishing's own run as the handoff gate, pay it once per plan, and take the targeted lane over every change after it; the run that ends green is the one paid, and a trunk red's fix comes in on the targeted lane.
@@ -70,8 +70,9 @@ Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gat
 - provenance: 9784239 2026-08-30, gate-cadence Section 6: a reader took "at finishing, before the plan's handoff" as two moments. `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 1 added the once-per-plan and ends-green sentences, and `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 the trunk-red one, both 2026-10-06 on operator rulings. `docs/plans/claude-kit_gate-sized-to-delta_spec_v1.md` section 3 cut the gloss and the trunk-red pointer's lane clause, 2026-10-17. Moved to this ledger from the testing-discipline ledger by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` on 2026-10-27, when its sentence moved unchanged from `testing-discipline` to `test-gates`.
 - verdict: rewrite
 - landed: 4520e999 section 2, with its fix round at ec9371b8
-- reason: The parity test asserts this sentence on this skill; the doctrine's sentence was left as approved because it reads correctly under this gloss. The once-per-plan sentence is pinned alike on this skill and both doctrine copies. A red the trunk carries too is fixed on its own pull request, so re-running the gate after it would buy the second run the one-gate rule removed. The re-run takes a fresh report, so a fix touching a `whole` path sends it whole.
-- passage: Finishing and the handoff are one moment. A plan pays one green finishing run, and every change after it takes the targeted lane over its own delta. The one finishing gate is the run that ends green, so a red of the plan's own is fixed and the gate re-run on a fresh lane-script report. A red the integration branch's head carries too is the trunk's, and the base-head bullet below routes its fix. A gate whose only reds are the trunk's is the one paid once each of them is fixed or has become a spec.
+- reason: The parity test asserts this sentence on this skill; the doctrine's sentence was left as approved because it reads correctly under this gloss. The once-per-plan sentence is pinned alike on this skill and both doctrine copies. A red the trunk carries too is fixed on its own pull request, so re-running the gate after it would buy the second run the one-gate rule removed. The re-run takes a fresh report, so a fix touching a `whole` path sends it whole. Amended on 2026-11-04 by section 2 of docs/plans/claude-kit_lane-contention-key_spec_v1.md, which set C077 and C078 between the re-run sentence and the trunk-red sentence, so the passage now quotes the two runs on either side of them.
+- passage: Finishing and the handoff are one moment. A plan pays one green finishing run, and every change after it takes the targeted lane over its own delta. The one finishing gate is the run that ends green, so a red of the plan's own is fixed and the gate re-run on a fresh lane-script report.
+- passage: A red the integration branch's head carries too is the trunk's, and the base-head bullet below routes its fix. A gate whose only reds are the trunk's is the one paid once each of them is fixed or has become a spec.
 
 ### C044
 - key: Run the whole gate on a merge only where a code file conflicted or both sides changed one, reading each side's changed files against the merge base, and take the targeted lane over the files either side changed on any other merge.
@@ -88,8 +89,8 @@ Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gat
 - source: plugins/grimoire/skills/test-gates/SKILL.md:20
 - provenance: 27ac5d7 2026-08-27, the testing-discipline plan's Section 4 (the memq type-lock test's subject was the machine-global tier, so a sibling's write was indistinguishable from the rival under test); line reworded at a321af3. Moved to this ledger from the testing-discipline ledger by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` on 2026-10-27, when its sentence moved unchanged from `testing-discipline` to `test-gates`.
 - verdict: keep
-- reason: The only definition of the lane's membership in the kit; the finishing pass and the qa-verifier run the lane but read its membership from here.
-- passage: **The contention lane** holds the tests whose subject is genuinely machine-shared state (a machine-global tier, a real shared lock), each saying so in its own text.
+- reason: The only definition of the lane's membership in the kit; the finishing pass and the qa-verifier run the lane but read its membership from here. Amended on 2026-11-04 by section 2 of docs/plans/claude-kit_lane-contention-key_spec_v1.md, which cut the parenthetical example to pay for C079 to C081 in the same bullet; this sentence states what makes a test a member, and the lane map's `contention` key lists the members (C079).
+- passage: **The contention lane** holds the tests whose subject is genuinely machine-shared state, each saying so in its own text.
 
 ### C046
 - key: Run the contention lane serially, beside the finishing gate or any whole gate, and at a section close whenever that delta touched machine-shared state.
@@ -106,8 +107,8 @@ Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gat
 - source: plugins/grimoire/skills/test-gates/SKILL.md:20
 - provenance: 27ac5d7 2026-08-27, from the evening where every red was a contention flake re-run rather than moved. Moved to this ledger from the testing-discipline ledger by section 1 of `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` on 2026-10-27, when its sentence moved unchanged from `testing-discipline` to `test-gates`.
 - verdict: keep
-- reason: The repair the lane exists for; without it the main gate is retried until green, which is the incident.
-- passage: A main-gate test that needs the box to itself moves here, which is the fix, rather than the main gate being retried until it passes.
+- reason: The repair the lane exists for; without it the main gate is retried until green, which is the incident. Amended on 2026-11-04 by section 2 of docs/plans/claude-kit_lane-contention-key_spec_v1.md, which cut the "which is the fix" aside to pay for C079 to C081 in the same bullet; the move still reads as the repair against the retry.
+- passage: A main-gate test that needs the box to itself moves here rather than the main gate being retried until it passes.
 - flag: weak-reason
 
 ### C054
@@ -274,6 +275,51 @@ Created on 2026-10-27 by section 1 of `docs/plans/claude-kit_test-budget-and-gat
 - verdict: keep
 - reason: Pinned on this bullet as the rule's boundary rather than its reason; no machinery replaces the reading and the incident recurs on every shared box.
 - passage: The poll is a sample, never a clearance. It cannot see in-process agent fan-out, which spawns no engine, and it cannot see a neighbor that starts after the sample and before the suite. A clean poll is a basis for starting and never proof the box is empty. A machine-state sentence leaving the session names the poll and its age, or says "not polled this turn".
+
+### C077
+- key: Run a finishing-gate red's files alone to green after its fix, before the gate re-runs.
+- class: rule
+- source: plugins/grimoire/skills/test-gates/SKILL.md:19
+- provenance: section 2 of `docs/plans/claude-kit_lane-contention-key_spec_v1.md` 2026-11-04, from kit issue 541 (2026-10-08), as that plan's `## Intent` records it.
+- verdict: keep
+- reason: After a whole-gate red was fixed, the next whole run surfaced a second red the first had hidden, and a third whole run was needed. A run of the red files alone takes seconds and shows every red those files still hold, so the re-run that follows is the one that ends green. The rule sits beside the re-run sentence C041 quotes, since both govern the moment between a red and the re-run.
+- passage: A fix to a finishing-gate red runs the red files alone to green before the gate re-runs. Each whole run otherwise surfaces one hidden red at a time.
+
+### C078
+- key: Take the targeted lane the lane map's `always` list names, plus the tests of each script that loads a changed input, at a fix round or a section close, where the delta's only whole per-path lines read `is the lane gate's own input`.
+- class: rule
+- source: plugins/grimoire/skills/test-gates/SKILL.md:19
+- provenance: section 2 of `docs/plans/claude-kit_lane-contention-key_spec_v1.md` 2026-11-04, from kit issue 749 (2026-10-23), where a one-line restore of the lane map went whole and the coordinator ruled the targeted lane by hand, as that plan's `## Intent` records it.
+- verdict: keep
+- reason: The script reads the map, the script itself and the map's pin test as whole whatever the map says, printing `<path> is the lane gate's own input` (`plugins/grimoire/scripts/gate-lane.js`, the `SELF` check), so it cannot size such a delta. The doctrine's gate bullet gives a fix round and a section close the targeted lane whatever the delta touched, so the skill names which one. The `always` list holds the map's own pin, `test/gate-lanes.test.js`. It misses the tests of another script that loads an input, as `plugins/grimoire/scripts/gate-ledger.js` loads `readMap` from `gate-lane.js`, so the lane adds them. The script does not print that lane under the own-input reason, since that plan's Out of Scope leaves the printing to plan 885's design.
+- passage: A delta whose only whole per-path lines read `is the lane gate's own input` takes, at a fix round or a section close, the targeted lane the map's `always` list names, plus the tests of each script that loads a changed input. That list holds the map's own pin, the test that checks those inputs.
+
+### C079
+- key: List the contention lane's tests in the lane map's `contention` key, each a file under `test/contention/`.
+- class: mechanic
+- source: plugins/grimoire/skills/test-gates/SKILL.md:20
+- provenance: section 2 of `docs/plans/claude-kit_lane-contention-key_spec_v1.md` 2026-11-04, from kit issue 398 (2026-09-11), where nothing told an empty lane from a lane nobody built; section 1 of that plan added the key and the script's refusal.
+- verdict: keep
+- reason: Whether a repository's lane is empty is a fact of that repository, and a skill shipped to every repository cannot hold it, so the lane map the script already reads holds it. A test under `test/contention/` sits outside the main gate's glob `test/*.test.js`, so it never runs beside the suite it must not share the box with. The script refuses an entry outside that folder as an unreadable map.
+- passage: The lane map's `contention` key lists its tests, each under `test/contention/`, outside the main gate's glob.
+
+### C080
+- key: Carry the lane script's `contention lane:` line, its serial command, `empty` or `none named`, into the finishing brief, or state there that the repository defines no lane where none prints.
+- class: mechanic
+- source: plugins/grimoire/skills/test-gates/SKILL.md:20
+- provenance: section 2 of `docs/plans/claude-kit_lane-contention-key_spec_v1.md` 2026-11-04, from kit issue 398 (2026-09-11); section 1 of that plan made `gate-lane.js report` print the line on every verdict.
+- verdict: keep
+- reason: The finishing brief carries the lane's command or says the repository defines none, and the qa-verifier takes the command from the brief, never from the repository (finishing-work's step 1, "brief carries the contention lane's own command, or states that this repo defines none"). A printed line lets the brief copy the lane from the instrument rather than from memory. The three forms tell a lane with members from an empty one, and an empty one from a map that never named the lane.
+- passage: The lane script prints the lane's serial command, `empty` where the key names none, or `none named` where the map has no key. The finishing brief carries that line, or states that the repository defines no lane where none prints.
+
+### C081
+- key: Read the kit's own contention lane as empty.
+- class: rationale-example
+- source: plugins/grimoire/skills/test-gates/SKILL.md:20
+- provenance: section 2 of `docs/plans/claude-kit_lane-contention-key_spec_v1.md` 2026-11-04; section 1 of that plan wrote `"contention": []` into `test/gate-lanes.json`.
+- verdict: keep
+- reason: The kit has no contention member, and `test/memory-database-install.test.js` stays in the main gate under the one-heavy-process rule, as `docs/architecture.md` states beside the `test/` folder. Naming the kit's reading lets a kit session tell the empty lane from a missing one without running the script.
+- passage: The kit's own map reads empty.
 
 ### X001
 - key: File a red seen under overlap that passes on a solo re-run to the kaizen inbox as a note naming which suite cannot share the box with what, whatever repository the suite belongs to.
