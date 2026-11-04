@@ -2801,6 +2801,30 @@ function readBodyFile(file) {
     return text.replace(/\r\n?/g, '\n').replace(/\n$/, '');
 }
 
+// A write verb's body with the record's own heading taken off its head. The
+// host holds `# <name>`, a blank line and the text in the one body column, and
+// `get` prints that column, so a body read with `get`, edited and written back
+// opens with the heading the verb is about to compose. The first line, where
+// its trimmed text is exactly `# <name>`, is dropped with the blank lines after
+// it, and nothing else is: a heading naming another record, or this record's
+// heading on a later line, is the author's text and is stored as given. A body
+// that was the heading alone comes back blank, for the verb's blank-body gate.
+// `dropped` says whether a line went, for the one stderr line the verb prints
+// after its success line.
+function withoutOwnHeading(body, name) {
+    const lines = body.split('\n');
+    if (lines[0].trim() !== '# ' + name) return { body, dropped: false };
+    let at = 1;
+    while (at < lines.length && lines[at].trim() === '') at++;
+    return { body: lines.slice(at).join('\n'), dropped: true };
+}
+function noteOwnHeadingDropped(dropped) {
+    if (dropped) {
+        process.stderr.write("memq: the body opened with the record's own heading, which the store"
+            + ' holds once; it was dropped\n');
+    }
+}
+
 // Coarse age for find lines: minutes under an hour, hours under two days,
 // days beyond. Coarse units keep repeated runs byte-identical except at a
 // unit boundary.
@@ -4306,7 +4330,8 @@ function anchorRootReal(root) {
 // causes behind 'unreadable' it hit, and the walk is the only thing that
 // knows. Reporting it from here is what keeps that answer out of a second
 // walk of the same path. `rootWord` names the root in those words, the
-// project root unless a caller resolving against the store root says so.
+// project root unless a caller says otherwise: the anchor verb passes the
+// root's own path, so its refusal says which tree it looked in.
 function anchorEntryState(rootReal, entry, meter, rootWord) {
     const walked = anchorEntryWalk(rootReal, entry, rootWord);
     if (walked.full === undefined) return walked;
@@ -9605,10 +9630,14 @@ function cmdTouch(argv, options) {
 // writes is one the reader reads as fresh at the moment it is written rather
 // than one it was always going to call unreadable. What is added here is
 // words, since a caller who typed `../x` learns nothing from being told the
-// entry is not one an anchor may name. `rootWord` is the root those words
-// name, the project root or, for a store-relative anchor, the store root.
-function anchorPathSha(rootReal, given, rootWord) {
+// entry is not one an anchor may name. `rootWord` is the root the grammar's
+// words name, the project root or, for a store-relative anchor, the store
+// root. `rootShown` is the root as the verb's lines print it, and where it is
+// given the walk's words name the root by it, since a path the walk did not
+// find is only a fact about the tree it walked.
+function anchorPathSha(rootReal, given, rootWord, rootShown) {
     const rootName = typeof rootWord === 'string' ? rootWord : 'project root';
+    const walkName = typeof rootShown === 'string' ? 'root ' + rootShown : rootName;
     if (!isAnchorPath(given)) {
         const fault = path.isAbsolute(given) || /^[A-Za-z]:/.test(given)
             ? 'an anchor path is relative to the ' + rootName + ', so an absolute path names'
@@ -9629,7 +9658,7 @@ function anchorPathSha(rootReal, given, rootWord) {
     }
     // The recorded sha is null here because nothing is being compared: the
     // walk's own hash of the file is what this verb is for.
-    const got = anchorEntryState(rootReal, { path: given, sha: null }, null, rootName);
+    const got = anchorEntryState(rootReal, { path: given, sha: null }, null, walkName);
     if (got.current === null) return { refusal: anchorRefusalText(given, got.reason) };
     return { sha: got.current };
 }
@@ -9768,7 +9797,14 @@ function cmdAnchor(argv, options) {
         return;
     }
 
-    const computed = anchorComputed(rootReal, given, 'project root');
+    // The root as the verb's lines name it. Inside a linked worktree that root
+    // is the main checkout rather than the tree the shell stands in, which
+    // anchorRoot records as the design, so the lines say so: a file the
+    // worktree holds and the main checkout does not is refused here, and the
+    // refusal has to name the tree that was read.
+    const rootShown = shownPath(root)
+        + (worktreeMainRoot(cwd) !== null ? ' (the main checkout; this shell is in a linked worktree)' : '');
+    const computed = anchorComputed(rootReal, given, 'project root', rootShown);
     if (computed === null) return;
     // A record this run wrote is held in its pending directory for the
     // engine, and the host row of that name is not it, so the verb refuses
@@ -9777,7 +9813,7 @@ function cmdAnchor(argv, options) {
     // key: the host answers whether it holds the name, so no record file is
     // read.
     if (pendingHoldsRefusal(cwd, name, 'anchor')) return;
-    anchorThrough('project', { projectKey: projectKey(cwd) }, name, ' in the project tier', computed, '', opts,
+    anchorThrough('project', { projectKey: projectKey(cwd) }, name, ' in the project tier', computed, rootShown, '', opts,
         prune ? { rootReal, rootWord: 'project root' } : null);
 }
 
@@ -9803,7 +9839,7 @@ function cmdAnchor(argv, options) {
 // two anchor calls on one record at one moment can lose one's entries;
 // re-running declares them again. The host answers refused with no
 // description for a name it no longer holds, the "no such memory" answer.
-function anchorThrough(tier, store, name, where, computed, tierNote, opts, prune) {
+function anchorThrough(tier, store, name, where, computed, rootShown, tierNote, opts, prune) {
     const shown = '\'' + sanitize(name, NAME_CAP) + '\'' + where;
     const read = memoryDatabase.readRecord({ tier, ...store, name }, { config: opts.config, deps: opts.deps });
     if (!read.ok) {
@@ -9913,9 +9949,11 @@ function anchorThrough(tier, store, name, where, computed, tierNote, opts, prune
     // a fact about a result rather than the result. The line on stdout reads
     // as one statement about the present, and it is not: an entry carried
     // over from the record was hashed whenever it was last anchored, and this
-    // run says nothing about whether that file still holds those bytes.
+    // run says nothing about whether that file still holds those bytes. The
+    // line names the root the paths were hashed against, `rootShown`, since
+    // one path names a different file under each tree a shell can stand in.
     const carried = merged.filter((e) => e.carried).map((e) => anchorShown(e.path));
-    process.stderr.write('memq: hashed now: ' + (computed.length > 0 ? computed.map((e) => e.path).join(', ') : 'nothing')
+    process.stderr.write('memq: hashed now against ' + rootShown + ': ' + (computed.length > 0 ? computed.map((e) => e.path).join(', ') : 'nothing')
         + (carried.length > 0
             ? '; carried from the record at the hash it already held: ' + carried.join(', ')
             : '')
@@ -9938,14 +9976,15 @@ function anchorShown(entryPath) {
 // Every path judged against one root and hashed, as the entries to merge, or
 // null having printed every refusal. Each refusal is collected rather than
 // the first one returned: a caller who named four paths and mistyped two of
-// them fixes both on one re-run. `rootWord` names the root the refusals
-// speak of.
+// them fixes both on one re-run. `rootWord` names the root the grammar's
+// refusals speak of, and `rootShown` the root the walk's refusals name by
+// its path, as `anchorPathSha` takes them.
 //
 // `admits`, where a caller passes one, is a further rule over a path the
 // grammar admits, asked before that path is walked or hashed, and its
 // refusal joins the same collection. The grammar's refusal wins for a path
 // the grammar refuses, since its words name the fault the caller can fix.
-function anchorComputed(rootReal, given, rootWord, admits) {
+function anchorComputed(rootReal, given, rootWord, rootShown, admits) {
     const computed = [];
     const seen = new Map();
     const refusals = [];
@@ -9954,7 +9993,7 @@ function anchorComputed(rootReal, given, rootWord, admits) {
             refusals.push(anchorRefusalText(one, STORE_ANCHOR_ROOT_FAULT));
             continue;
         }
-        const got = anchorPathSha(rootReal, one, rootWord);
+        const got = anchorPathSha(rootReal, one, rootWord, rootShown);
         if (got.refusal !== undefined) {
             refusals.push(got.refusal);
             continue;
@@ -10039,9 +10078,10 @@ function anchorOperator(name, file, given, opts, prune) {
     // An anchor's hash rides the record to the store's remote, so only a
     // file that syncs already may be anchored, which `isStoreAnchorPath`
     // judges before the path is walked or hashed.
-    const computed = anchorComputed(rootReal, given, 'store root', isStoreAnchorPath);
+    const rootShown = shownPath(root);
+    const computed = anchorComputed(rootReal, given, 'store root', rootShown, isStoreAnchorPath);
     if (computed === null) return;
-    anchorThrough('operator', {}, name, where, computed, ' (operator tier)', opts,
+    anchorThrough('operator', {}, name, where, computed, rootShown, ' (operator tier)', opts,
         prune ? { rootReal, rootWord: 'store root', admits: isStoreAnchorPath } : null);
 }
 
@@ -12541,6 +12581,10 @@ async function cmdAddType(argv, options) {
         body = readBodyFile(bodyFile);
         if (body === null) return;
     }
+    // A body opening with the heading the record is composed under below holds
+    // it once, withoutOwnHeading's rule, ahead of the blank gate and the cap.
+    let headingDropped = false;
+    if (body !== undefined) ({ body, dropped: headingDropped } = withoutOwnHeading(body, name));
 
     const stored = body === undefined ? description : body;
     // A record whose body holds no text is refused, and the check reads the
@@ -12609,7 +12653,10 @@ async function cmdAddType(argv, options) {
     const answered = memoryDatabase.writeThrough(memoryDatabase.recordEntry({
         tier: 'type', typeName: type, name, ...fields
     }), { config: opts.config, deps: opts.deps, probed });
-    if (reportUndelivered(answered, 'the record \'' + shown + '\'' + typeWhere)) return;
+    if (reportUndelivered(answered, 'the record \'' + shown + '\'' + typeWhere)) {
+        if (answered.state === 'queued') noteOwnHeadingDropped(headingDropped);
+        return;
+    }
     if (answered.answer.status === 'refused') {
         // Two refusals the host answers. An update with no record to land on
         // comes back with no description; a create over a name the store
@@ -12631,6 +12678,7 @@ async function cmdAddType(argv, options) {
     if (update) {
         process.stdout.write('updated ' + shown + ' in type ' + sanitize(type, TYPE_CAP)
             + (repair ? ' (body ' + stored.length + ' chars)' : '') + '\n');
+        noteOwnHeadingDropped(headingDropped);
         return;
     }
     warnUnregisteredTags(tags, 'recorded');
@@ -12643,6 +12691,7 @@ async function cmdAddType(argv, options) {
         + ' (body ' + stored.length + ' chars'
         + (supersedes === undefined ? '' : ', superseding ' + sanitize(supersedes, NAME_CAP))
         + (replace ? ', replaced' : '') + ')\n');
+    noteOwnHeadingDropped(headingDropped);
     if (replace) keptListsNote(name, lists, ' --type=' + sanitize(type, TYPE_CAP) + ' --confirm-shared');
     // The record landed either way; what the note says is what it landed
     // without. It prints on the create path alone: `--update` returned above,
@@ -12930,6 +12979,9 @@ async function cmdAddOperator(argv, options) {
         body = readBodyFile(bodyFile);
         if (body === null) return;
     }
+    // add-type's drop of the record's own heading, at add-type's point.
+    let headingDropped = false;
+    if (body !== undefined) ({ body, dropped: headingDropped } = withoutOwnHeading(body, name));
 
     const stored = body === undefined ? description : body;
     // A record whose body holds no text is refused, add-type's rule and its
@@ -12984,7 +13036,10 @@ async function cmdAddOperator(argv, options) {
     const answered = memoryDatabase.writeThrough(memoryDatabase.recordEntry({
         tier: 'operator', name, ...fields
     }), { config: opts.config, deps: opts.deps, probed });
-    if (reportUndelivered(answered, 'the record \'' + shown + '\'' + opWhere)) return;
+    if (reportUndelivered(answered, 'the record \'' + shown + '\'' + opWhere)) {
+        if (answered.state === 'queued') noteOwnHeadingDropped(headingDropped);
+        return;
+    }
     if (answered.answer.status === 'refused') {
         if (update) {
             process.stderr.write('memq: the memory database holds no record named \'' + shown + '\''
@@ -13002,6 +13057,7 @@ async function cmdAddOperator(argv, options) {
     if (update) {
         process.stdout.write('updated ' + shown + ' in the operator tier'
             + (repair ? ' (body ' + stored.length + ' chars)' : '') + '\n');
+        noteOwnHeadingDropped(headingDropped);
         return;
     }
     warnUnregisteredTags(tags, 'recorded');
@@ -13013,6 +13069,7 @@ async function cmdAddOperator(argv, options) {
         + ' (body ' + stored.length + ' chars'
         + (supersedes === undefined ? '' : ', superseding ' + sanitize(supersedes, NAME_CAP))
         + (replace ? ', replaced' : '') + ')\n');
+    noteOwnHeadingDropped(headingDropped);
     if (replace) keptListsNote(name, lists, ' --operator --confirm-shared');
     // A replace states the machine scope empty where no --machine rode with
     // it, which clears a scope the record carried. This client never read the
@@ -13199,6 +13256,9 @@ async function cmdPut(argv, options) {
         body = readBodyFile(bodyFile);
         if (body === null) return;
     }
+    // add-type's drop of the record's own heading, ahead of the blank gate.
+    let headingDropped;
+    ({ body, dropped: headingDropped } = withoutOwnHeading(body, name));
     if (body.trim() === '') {
         return refuseValue('the body holds no text, so there is nothing to record');
     }
@@ -13245,7 +13305,7 @@ async function cmdPut(argv, options) {
                 + ' put writes the run\'s pending file, which the engine adjudicates by file; drop'
                 + ' --replace');
         }
-        putPending(cwd, pendingDir, name, file, content);
+        if (putPending(cwd, pendingDir, name, file, content)) noteOwnHeadingDropped(headingDropped);
         return;
     }
     // The record as mem.usp_PutRecord takes it: the prose under its heading as
@@ -13286,7 +13346,10 @@ async function cmdPut(argv, options) {
         author: author !== undefined ? author : (replace ? authorValue() : null),
         replace
     }), { config: opts.config, deps: opts.deps });
-    if (reportUndelivered(answered, 'the record \'' + shown + '\'' + where)) return;
+    if (reportUndelivered(answered, 'the record \'' + shown + '\'' + where)) {
+        if (answered.state === 'queued') noteOwnHeadingDropped(headingDropped);
+        return;
+    }
     if (answered.answer.status === 'refused') {
         // A name the store already holds, which put writes over only with
         // --replace. The opening is the duplicate signal a caller reads, and
@@ -13301,6 +13364,7 @@ async function cmdPut(argv, options) {
     }
     process.stdout.write('stored ' + shown + where + ' (body ' + body.length + ' chars'
         + (replace ? ', replaced' : '') + ')\n');
+    noteOwnHeadingDropped(headingDropped);
     if (replace) keptListsNote(name, lists, '');
     // The body is embedded through the configured endpoint in the same call,
     // so a record is searchable by meaning as soon as it is stored. An
@@ -13325,7 +13389,7 @@ async function cmdPut(argv, options) {
 // is a create, and the exclusive open is what excludes a concurrent writer
 // of the same name. The project tier's names are the memory database's and
 // are not asked here; the engine's promotion is where a pending name meets
-// them.
+// them. True where the file was written and its path printed.
 function putPending(cwd, pendingDir, name, file, content) {
     const pendingWhere = ' in the pending tier';
     const target = path.join(pendingDir, file);
@@ -13349,6 +13413,7 @@ function putPending(cwd, pendingDir, name, file, content) {
         return;
     }
     process.stdout.write(shownPath(target) + '\n');
+    return true;
 }
 
 // memq delete-type / memq delete-operator: retire one shared-tier record the

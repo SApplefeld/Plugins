@@ -409,9 +409,9 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 72ddd3e 2026-09-01, which made the stamp land in the pinned tier so the record actually served is the one whose decay clock moves.
 - verdict: rewrite
 - landed: d2c43f1 section 22
-- reason: Which tier's clock moves is what a session weighs before running `get` on a shadowed name, and no other line states the pinned-tier bound, so the bound stays as a clause. The Applied stamps section keeps the semantics.
+- reason: Which tier's clock moves is what a session weighs before running `get` on a shadowed name. The Applied stamps section keeps the semantics. Amended on 2026-11-04 by section 1 of docs/archive/claude-kit_memq-round-trips-whole_spec_v1.md, which cut the pinned-tier clause.
 - proposed: (via A044) Cut the get row's stamp sentence to "appends a read stamp in the tier it served, the pinned tier under a flag".
-- passage: Appends a read stamp in the tier it served, the tier a flag names under a flag.
+- passage: A read stamp lands in the tier served, and `--no-stamp` writes none.
 
 ### c1.C041
 - key: Expect `get` to follow the body with one `anchors:` line per anchor and one `triggers:` line per declared trigger.
@@ -529,8 +529,8 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - provenance: 426bf68 2026-08-26, the memory-anchors-and-frontmatter-guard plan.
 - verdict: rewrite
 - landed: 859d3e25 section 2
-- reason: The row is the verb's reference entry and the anchors section at line 184 owns its semantics whole; the row's usage and one-line what stay. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep. Amended on 2026-10-12 by section 2 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which added `--prune-missing`.
-- passage: Record which files a project memory is about, at the bytes they hold now: a list of `<path>@<sha>` entries, merged into any existing list with fresh hashes. `--prune-missing` first drops each carried entry whose file is gone, the repair for a renamed or deleted file, and lets the call name no path.
+- reason: The row is the verb's reference entry and the anchors section at line 184 owns its semantics whole; the row's usage and one-line what stay. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep. Amended on 2026-10-12 by section 2 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which added `--prune-missing`. Amended on 2026-11-04 by section 2 of docs/archive/claude-kit_memq-round-trips-whole_spec_v1.md, which named the root and widened the row.
+- passage: Record which files a memory is about, at their current bytes, as `<path>@<sha>` entries merged into any existing list. Its lines name the root the paths were hashed against. `--prune-missing` first drops each carried entry whose file is gone, repairing a renamed or deleted file, and lets the call omit paths.
 
 ### c1.C053
 - key: Never type a 40-hex hash by hand for an anchor; let `memq anchor` compute it.
