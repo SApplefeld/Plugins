@@ -1916,13 +1916,14 @@ Extracted at `6bc07fb`: whole document (`skills.brainstorming.SKILL.md`). Amende
 - passage: Every section's `Verify:` line names rows `docs/verification.md` holds, or the none form.
 
 ### F005
-- key: Seed a missing catalog by curating-docs' create path.
+- key: Seed a missing catalog by curating-docs' create path, then repair each fault `scripts/plan-contract.js` names in the spec before the blind read.
 - class: pointer
-- source: plugins/grimoire/skills/brainstorming/SKILL.md:38
-- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."
+- source: plugins/grimoire/skills/brainstorming/SKILL.md:40
+- provenance: docs/plans/claude-kit_verification-instrument_spec_v1.md section 1 2026-10-17, stage 2 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 2: "Every section names its verification instrument before it is built."; amended in place by docs/plans/claude-kit_plan-contract-fails-loud_spec_v1.md section 2 2026-11-04, the checker run added after the seed.
 - verdict: keep
 - reason: curating-docs owns the `docs/` skeletons and the create path step 9 runs, so the seed is stated there (F001 under the curating-docs SKILL.md heading) and this sentence points at it.
 - passage: A missing catalog or row is added by curating-docs' create path.
+- passage: Then repair each fault `scripts/plan-contract.js` under the kit plugin root names in the spec, before the blind read.
 
 ### AB001
 - key: Interview the ask before any design question, asking why until the answer is a constraint the kit's tools cannot change or cannot practically change, and design for the point just inside it, the why chain being the product.

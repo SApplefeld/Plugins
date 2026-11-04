@@ -62,4 +62,4 @@ The Delta output sits after every line the Chapter heading's machine contract re
 
 Every measured figure a Chapter records carries its moment in the form the moment-pin bullet of `skills/test-gates/SKILL.md` under the kit plugin root states. The deep evidence behind a figure keeps the home that bullet gives it, and the Chapter cites it rather than restating it.
 
-The Chapter heading and its `Completed:`/`Next:` lines are a machine contract external tooling reads. `curating-docs/SKILL.md`'s machine contract section gives their frozen shape and the values that register a section complete.
+The Chapter heading and its `Completed:`/`Next:` lines are a machine contract external tooling reads, frozen in `curating-docs/SKILL.md`. After the Chapter is written and before its commit, run the plan through `scripts/plan-contract.js` under the kit plugin root, and repair each fault it names.

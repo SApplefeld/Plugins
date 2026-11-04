@@ -72,10 +72,10 @@ A plan doc's header and structure are not just kit convention. An external engin
 | Section model line | `Model: <value>`, the first one following a section heading | must be exactly `haiku`, `sonnet`, `opus`, or `fable`, trimmed and case-insensitive. Anything else, including a decorated value like `fable (inline)` or a trailing rationale, silently dispatches at a default sonnet model with no error. Whether a section is dispatched or built in the main thread rides on its own `Locus:` line. No consumer parses that line, precisely so the tier value can stay a bare token |
 | `## Chapters` heading | the literal text `Chapters` on a `##` line | bounds the block, and also marks where the approval-scoped fingerprint stops. Renaming it makes that fingerprint cover the whole document, so every ordinary Chapter append then reads as approval drift |
 | Chapter heading | `### Chapter N` (only the word and the number are parsed; a trailing ` - <date>` is convention, not contract) inside `## Chapters` | N is one or more digits |
-| Chapter completed line | `Completed: <value>`, the first one in the Chapter | must start with the section number followed by a period or a space, or equal the section title exactly, case-sensitive and never a substring. Anything else leaves the section permanently open. Check an existing Chapter against these three forms before assuming it registers. A phrasing like `Completed: Section 1, <title>` matches none of them |
+| Chapter completed line | `Completed: <value>`, the first one in the Chapter | must start with the section number followed by a period or a space, or equal the section title exactly, case-sensitive and never a substring. Anything else leaves the section permanently open. `scripts/plan-contract.js` reads the rows that bind the document and names each fault. A phrasing like `Completed: Section 1, <title>` matches none of them |
 | Chapter next line | `Next: <value>`, the first one in the Chapter | free-form |
 
-A `Status:` value with text after `Complete` still reads complete to the session-start push and the personas plugin's documentation check, so write the value exactly.
+A `Status:` value with text after `Complete` still reads complete to the session-start push and the personas plugin's documentation check, so write the value exactly. `scripts/plan-contract.js` refuses one with trailing text in a spec.
 
 The Spec Format in `skills/brainstorming/SKILL.md` and the Chapter format in `skills/executing-work/references/closing.md` instance these rows.
 

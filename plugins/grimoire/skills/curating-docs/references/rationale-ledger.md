@@ -388,12 +388,13 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 ### C037
 - key: Write `Status: <value>` above the first `##` heading, and use exactly `Complete` with no trailing text for a plan to read as terminal.
 - class: mechanic
-- source: plugins/grimoire/skills/curating-docs/SKILL.md:73
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:67
 - provenance: 662e5e3 2026-08-01 for the terminality rule; 897d921 2026-08-29, the plan-lifecycle plan, added `Ready` after two finished drafts headed `Draft` went unseen by every recovery surface.
 - verdict: keep
 - reason: kit-plan-lib.js classifyPlanStatus and session-start.js read the value and nothing writes it, so the exact-value duty is still the author's. The skeleton and brainstorming restate the values by design because 897d921 found "readers and no producer".
 - passage: must equal `Complete` exactly, whole string and case-insensitive, for the plan to read as terminal. `Complete (archived)` or any other trailing text does not terminate.
 - passage: A plan headed `Complete (archived)` or with any other text after `Complete` still reads complete to the session-start push and the Stop hook's docs-hygiene check, so write the value exactly.
+- passage: `scripts/plan-contract.js` refuses one with trailing text in a spec.
 
 ### C038
 - key: Write `Commit Model: <value>` above the first `##` heading, opening with `Commit-and-Push`, `Branch-and-PR`, or `Review-Only`.
@@ -486,13 +487,13 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - passage: must start with the section number followed by a period or a space, or equal the section title exactly, case-sensitive and never a substring. Anything else leaves the section permanently open.
 
 ### C048
-- key: Check an existing Chapter's `Completed:` line against the three accepted forms before assuming it registers.
+- key: Read a Chapter's `Completed:` line, with every other contract row that binds the document, through `scripts/plan-contract.js`, which names each fault.
 - class: rule
-- source: plugins/grimoire/skills/curating-docs/SKILL.md:81
-- provenance: 662e5e3 2026-08-01, same incident as C047.
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:75
+- provenance: 662e5e3 2026-08-01, same incident as C047; amended in place by docs/plans/claude-kit_plan-contract-fails-loud_spec_v1.md section 2 2026-11-04, the checker replacing the hand check.
 - verdict: keep
 - reason: The near-miss example is the incident's shape and the class recurred on 2026-09-03, so the example is what a session checks against and stays in the cell.
-- passage: Check an existing Chapter against these three forms before assuming it registers. A phrasing like `Completed: Section 1, <title>` matches none of them
+- passage: `scripts/plan-contract.js` reads the rows that bind the document and names each fault. A phrasing like `Completed: Section 1, <title>` matches none of them
 
 ### C049
 - key: Write the Chapter's `Next: <value>` line with a free-form value; the first one in the Chapter is read.

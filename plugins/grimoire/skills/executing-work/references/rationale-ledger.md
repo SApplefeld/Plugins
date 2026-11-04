@@ -11663,13 +11663,13 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Delta: <the moment-pin for the reading below, since its output carries no machine or contention of its own; then what `node <plugin-root>/scripts/kit-size.js report --repo <the project's root>` prints, quoted whole and exactly in a fenced block below this line>
 
 ### c4.C132
-- key: Read `curating-docs/SKILL.md`'s machine contract section for the frozen shape of the Chapter heading and its `Completed:`/`Next:` lines and which values register a section complete.
+- key: Read the Chapter heading's frozen contract in `curating-docs/SKILL.md`, and after the Chapter is written and before its commit run the plan through `scripts/plan-contract.js`, repairing each fault it names.
 - class: pointer
-- source: plugins/grimoire/skills/executing-work/references/closing.md:67
-- provenance: 662e5e3 2026-08-01, fleet section 6: an external engine parses every plan doc and the pointer sits in the skill loaded at the moment a Chapter is written.
+- source: plugins/grimoire/skills/executing-work/references/closing.md:65
+- provenance: 662e5e3 2026-08-01, fleet section 6: an external engine parses every plan doc and the pointer sits in the skill loaded at the moment a Chapter is written; amended in place by docs/plans/claude-kit_plan-contract-fails-loud_spec_v1.md section 2 2026-11-04, the pointer shortened to one clause and the checker run added.
 - verdict: keep
 - reason: No finding; it is the pointer the template's contract lines rely on.
-- passage: The Chapter heading and its `Completed:`/`Next:` lines are a machine contract external tooling reads. `curating-docs/SKILL.md`'s machine contract section gives their frozen shape and the values that register a section complete.
+- passage: The Chapter heading and its `Completed:`/`Next:` lines are a machine contract external tooling reads, frozen in `curating-docs/SKILL.md`. After the Chapter is written and before its commit, run the plan through `scripts/plan-contract.js` under the kit plugin root, and repair each fault it names.
 
 ### c4.C136
 - key: Perform the staged-list read (`git diff --cached --name-only`) as the only thing between staging the plan doc and committing it, under Commit-and-Push where the whole gate ran.
