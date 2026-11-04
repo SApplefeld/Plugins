@@ -497,13 +497,14 @@ Extracted at `6bc07fb`: whole document (`skills.consult.SKILL.md`). Re-extracted
 - passage: The kit has no in-context advisor, and the consult is its escalation instrument.
 
 ### R010
-- key: Convene a consult on a second failed attempt at the same problem, whatever the attempt's shape.
+- key: Convene a consult on a second failed attempt at the same problem, whatever the attempt's shape, and on a rule-text section's second failed round even where its Criticals repeat a class.
 - class: rule
 - source: plugins/grimoire/skills/consult/SKILL.md:14
-- provenance: 9f1ed1b 2026-09-09 added the design stop shape; 1d9c467 installed the trigger and fb5d4fe 2026-09-07 the seesaw shape. goal-fit section 3 2026-09-19 moved the design stop out of this bullet into its own bullet (e), so the shapes this key reaches are the implementation round, the debugging hypothesis, the review round and the seesaw.
-- verdict: keep
-- reason: The HEAD form of C010; the skill owns the shapes and the charter's description names the trigger only as its own match surface.
-- passage: **(a) A second failed attempt at the same problem**, whatever its shape, a review seesaw's second reversal of one passage's fix included.
+- provenance: 9f1ed1b 2026-09-09 added the design stop shape; 1d9c467 installed the trigger and fb5d4fe 2026-09-07 the seesaw shape. goal-fit section 3 2026-09-19 moved the design stop out of this bullet into its own bullet (e), so the shapes this key reaches are the implementation round, the debugging hypothesis, the review round and the seesaw. docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 added the rule-text floor.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1
+- reason: The HEAD form of C010; the skill owns the shapes and the charter's description names the trigger only as its own match surface. The rule-text clause answers issue 372, a rule-text section whose second failed round read to the ladder as a repeated class, since every seam in rule text states a reachable input, so it takes the consult instead.
+- passage: **(a) A second failed attempt at the same problem**, whatever its shape, a review seesaw's second reversal of one passage's fix included. A second failed review round whose Criticals repeat a class goes to executing-work's tier-escalation ladder instead. A section whose deliverable is rule text, a sentence in a skill, a charter or the doctrine, takes this consult at its second failed round, never the ladder's repeated-class exit. Every seam in rule text states a reachable input, so its rounds' Criticals read as a repeated class.
 
 ### R011
 - key: Carry the design stop as its own floor bullet, and let executing-work's step 4 convene the judge it names instead of the `consultant`.

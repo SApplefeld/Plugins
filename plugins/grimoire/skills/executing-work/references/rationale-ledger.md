@@ -5537,11 +5537,12 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 ### W003
 - key: Owe no review round for a fix delta whose every hunk changes prose alone, whatever finding it dispositions, a claim held to the behavior bar included; such a delta takes step 5's below-bar author re-read, read against the quoted clause where the claim was held to the behavior bar.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/SKILL.md:575
-- provenance: the operator's ruling of 2026-09-20 on the architect persona's relay thread, landed by the claim-class amendment of that date: prose findings are advisory in the way security findings are, fixed when needed or at the end, because holding them to an immediate fix bred the review loop `docs/backlog.md` items 21 and 22 recorded.
-- verdict: keep
-- reason: A claims class closes on a mechanical check, never on more rounds (operator-tier memory `claims-sections-need-more-review-rounds-than-code-sections`). Tests never exercise prose, so a round over a prose delta can only return more prose findings. The author re-read keeps the delta read before it reaches main. The backstop's exempt-fix clause keys on this one.
-- passage: A fix delta whose every hunk changes prose alone owes no round under the bar, whatever finding it dispositions. Prose is a comment, a header, a docstring, a README or `docs/` sentence, a test's title or because-string, a test instrument's stated reach, or a rule's sentence in a skill or charter. Such a delta takes step 5's below-bar author re-read, recorded in the Chapter like the close pass's, and for a claim held to the behavior bar the re-read checks the sentence against the clause or pointer the finding named.
+- source: plugins/grimoire/skills/executing-work/references/findings.md:67
+- provenance: the operator's ruling of 2026-09-20 on the architect persona's relay thread, landed by the claim-class amendment of that date: prose findings are advisory in the way security findings are, fixed when needed or at the end, because holding them to an immediate fix bred the review loop `docs/backlog.md` items 21 and 22 recorded. docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 pointed the prose list at the claim-class region.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1
+- reason: A claims class closes on a mechanical check, never on more rounds (operator-tier memory `claims-sections-need-more-review-rounds-than-code-sections`). Tests never exercise prose, so a round over a prose delta can only return more prose findings. The author re-read keeps the delta read before it reaches main. The backstop's exempt-fix clause keys on this one. The prose list points at the claim-class region above rather than restating that region's surfaces, a cut paying for the words the fold exits of issues 530, 776 and 510 added.
+- passage: A fix delta whose every hunk changes prose alone owes no round under the bar, whatever finding it dispositions. Prose is a surface the claim-class region's first paragraph lists, a README or `docs/` sentence, or a rule's sentence in a skill or charter. Such a delta takes step 5's below-bar author re-read, recorded in the Chapter like the close pass's, and for a claim held to the behavior bar the re-read checks the sentence against the clause or pointer the finding named.
 
 ### W004
 - key: Owe a round besides whenever the fix delta's subject is something the area's tests are liable to route around rather than exercise, that judgment reading over hunks that change what runs, so a prose-only delta sits below it by construction.
@@ -7619,11 +7620,12 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### R012
 - key: Escalate the tier where any finding class repeats across the two rounds.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:148
-- provenance: 8095fde 2026-08-02.
-- verdict: keep
-- reason: Carries c2.C121; a repeating class means the implementer is missing something and the tier is the lever.
-- passage: A repeating finding class, NEEDS_CONTEXT twice on the same question included, means the implementer is missing something, so escalate.
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:151
+- provenance: 8095fde 2026-08-02. docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 added the rule-text exception.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1
+- reason: Carries c2.C121; a repeating class means the implementer is missing something and the tier is the lever. The rule-text exception answers issue 372 and the operator's yes of 2026-11-04, since every seam in rule text states a reachable input, so a rule-text section's rounds read as a repeated class.
+- passage: A repeating finding class, NEEDS_CONTEXT twice on the same question included, means the implementer is missing something, so escalate, save in a rule-text section, which takes the consult's trigger (a).
 
 ### R013
 - key: Where no class repeats, spend no bump: convene a consult on the spec's premise, carrying the claim under doubt and both rounds' findings.
@@ -7656,11 +7658,12 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### R016
 - key: Treat NEEDS_CONTEXT twice on the same question as the repeating class by definition, this being the intra-section form of step 4's recurrence rule.
 - class: rationale-example
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:148
-- provenance: 8095fde 2026-08-02.
-- verdict: keep
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:151
+- provenance: 8095fde 2026-08-02. docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 added the rule-text exception.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1
 - reason: Carries c2.C156; it settles how the fork reads a NEEDS_CONTEXT pair, which the comparison of Criticals alone would not decide.
-- passage: A repeating finding class, NEEDS_CONTEXT twice on the same question included, means the implementer is missing something, so escalate.
+- passage: A repeating finding class, NEEDS_CONTEXT twice on the same question included, means the implementer is missing something, so escalate, save in a rule-text section, which takes the consult's trigger (a).
 
 ### R017
 - key: In a Fable-led session, take the escalated section over in the main thread.
@@ -8968,7 +8971,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries step 4 of the section loop. It owns addressing a review's findings: the Minor list and close pass, the advisory disposition, the claim-class region, provenance and the held-finding judge, the add-decision line and the design stop, the review-round backstop, the loop's end condition, the recurrence and adoption triggers, the fix-delta bar, the close gate and the out-of-scope route. Load class: `plan-run` - the main file's contents table and its skeleton line for step 4 tell a session to read it when a review returns and before any fix.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below).
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1 on 2026-11-04 (`AR` entries below, and S080 and E007 rewritten in place).
 
 ### I023
 - key: Title the reference file carrying step 4 of the section loop `Addressing Review Findings`.
@@ -9088,7 +9091,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c3.C140
 - key: Fold a surface into this section when it lands in a file in the same directory as one the section changed, needs no acceptance criterion the section does not already carry, and the gate you are about to run covers it.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/findings.md:83
+- source: plugins/grimoire/skills/executing-work/references/findings.md:89
 - provenance: 61b9f52 2026-08-19, the fold predicate made decidable at adjudication rather than by feel.
 - verdict: keep
 - reason: No finding.
@@ -9210,7 +9213,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c3.C155
 - key: Route a surface out of this plan when it serves another goal, primarily as a handoff spec or prompt written now to the bar the doctrine's found-work rule sets.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/findings.md:85
+- source: plugins/grimoire/skills/executing-work/references/findings.md:91
 - provenance: 61b9f52 2026-08-19, correcting the approved spec, which sent every different-goal surface to the backlog against the doctrine's ranking.
 - verdict: keep
 - reason: A pointer at the doctrine's bar stating the route's form; the probes compose with the blocker set and the kaizen rule rather than exposing a gap here (A083 to A087).
@@ -9320,11 +9323,12 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### S080
 - key: Convene a consult on an owed Major's second reversal on one passage and adopt its ruling to close that passage.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/findings.md:63
-- provenance: fb5d4fe 2026-09-07; line touched by abfa98d 2026-09-09.
-- verdict: keep
-- reason: The consult skill's trigger (a) stated at the moment it fires; the seesaw otherwise has no exit.
-- passage: An owed Major's second reversal on one passage, round N+2 undoing N+1's change to N's fix, or an `APPROACH:` paragraph naming a cause, is the consult skill's trigger (a). The consult rules before any fix round, and its adopted ruling closes the passage or sets that round's form, after the design stop's ruling where the reversing fix fired one.
+- source: plugins/grimoire/skills/executing-work/references/findings.md:67
+- provenance: fb5d4fe 2026-09-07; line touched by abfa98d 2026-09-09. docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 added the rule-text clause.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1
+- reason: The consult skill's trigger (a) stated at the moment it fires; the seesaw otherwise has no exit. The rule-text clause answers issue 372, a rule-text section whose second failed round read to the ladder as a repeated class, since every seam in rule text states a reachable input, so it takes the consult instead.
+- passage: An owed Major's second reversal on one passage, round N+2 undoing N+1's change to N's fix, or an `APPROACH:` paragraph naming a cause, is the consult skill's trigger (a), as is a rule-text section's second failed round. The consult rules before any fix round, and its adopted ruling closes the passage or sets that round's form, after the design stop's ruling where the reversing fix fired one.
 
 ### S081
 - key: Where a reversing Major's fix fired the design stop, convene that stop first and run the consult after its ruling rather than beside it.
@@ -10887,11 +10891,12 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### E007
 - key: Treat an `APPROACH:` paragraph naming a cause as the consult skill's trigger (a), the consult ruling before any fix round and its adopted ruling setting that round's form.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/findings.md:65
-- provenance: docs/plans/claude-kit_review-convergence_spec_v1.md section 1 2026-10-16, stage 1 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 3: "Review converges or stops."
-- verdict: keep
-- reason: Findings that share a cause in the approach are a second failed attempt at the same problem, which is what trigger (a) names, so the consultant rules on the change of approach before another fix round spends effort on the old one. It shares the second-reversal sentence (S080) because both are that one trigger.
-- passage: An owed Major's second reversal on one passage, round N+2 undoing N+1's change to N's fix, or an `APPROACH:` paragraph naming a cause, is the consult skill's trigger (a). The consult rules before any fix round, and its adopted ruling closes the passage or sets that round's form, after the design stop's ruling where the reversing fix fired one.
+- source: plugins/grimoire/skills/executing-work/references/findings.md:67
+- provenance: docs/plans/claude-kit_review-convergence_spec_v1.md section 1 2026-10-16, stage 1 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 3: "Review converges or stops." docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 added the rule-text clause.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1
+- reason: Findings that share a cause in the approach are a second failed attempt at the same problem, which is what trigger (a) names, so the consultant rules on the change of approach before another fix round spends effort on the old one. It shares the second-reversal sentence (S080) because both are that one trigger. The rule-text clause answers issue 372, a rule-text section whose second failed round read to the ladder as a repeated class, since every seam in rule text states a reachable input, so it takes the consult instead.
+- passage: An owed Major's second reversal on one passage, round N+2 undoing N+1's change to N's fix, or an `APPROACH:` paragraph naming a cause, is the consult skill's trigger (a), as is a rule-text section's second failed round. The consult rules before any fix round, and its adopted ruling closes the passage or sets that round's form, after the design stop's ruling where the reversing fix fired one.
 
 ### E008
 - key: Count a finding naming a class and its sites as one finding at adjudication and in the provenance count, cover every site it names in its fix round, and name in the Chapter any site the fix leaves.
@@ -10965,6 +10970,26 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: A fix round is where an unbudgeted test is most likely to arrive, and a defect that happened is the one case where the test's value is already shown. The fix writer's charter says a candidate past the allocation is never a test written first, so the brief states the exception, or the writer meets a rule the round cannot satisfy. Brainstorming step 12 owns the reserve and testing-discipline states the rule.
 - passage: Brainstorming step 12 owns the reserve.
 - passage: The regression test for a defect that happened draws without asking, and the fix round's brief states that exception to its fix writer, so the writer does not meet the charter's "never a test written first".
+
+### AR001
+- key: Before any fold or append, grep `docs/plans/*.md` for the surface, and leave it to another plan whose Goal or section bullet already specifies its change, not merely its file.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/findings.md:87
+- provenance: docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 added the sibling-plan check.
+- verdict: keep
+- landed: 8d428221 section 1
+- reason: The sibling-plan grep answers issue 452, a mechanism built twice because no sibling plan was checked before the surface was routed. It keys on the change, not the file, since many open plans list a shared file such as `test/size-budget.json`.
+- passage: Before any fold or append, grep the surface's path or name over `docs/plans/*.md`. A surface whose change another plan's Goal or section bullet already specifies, not merely its file, is that plan's, so it routes out to that plan, named in the Chapter.
+
+### AR002
+- key: Fold a prose-only fix, a registry row the section's change makes owed, or the ledger entry quoting a passage the section changed, wherever its file sits, on the fold bullet's other two conditions.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/findings.md:89
+- provenance: docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md section 1 2026-11-04 added the three exits.
+- verdict: keep
+- landed: 8d428221 section 1
+- reason: The exits answer issue 530, a one-line comment outside the changed directories, issue 776, the lane row owed in `test/gate-lanes.json`, and issue 510, the ledger entry a skill edit makes stale, each owed by the change itself wherever its file sits.
+- passage: Three surfaces also fold wherever the file sits, on the other two conditions: a fix whose every hunk changes prose alone, a row the section's change makes owed in a registry file the repository's gates read, such as `test/gate-lanes.json`, and the entry in a skill's `references/rationale-ledger.md` quoting a passage the section changed.
 
 ## plugins/grimoire/skills/executing-work/references/closing.md
 

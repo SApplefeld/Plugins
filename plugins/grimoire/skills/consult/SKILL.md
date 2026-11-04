@@ -11,7 +11,7 @@ One read-only fresh judge, the `consultant`, rules on one question the session c
 
 Stuck sessions feel almost done, not stuck, so the triggers are a counted floor a re-reader can recognize.
 
-- **(a) A second failed attempt at the same problem**, whatever its shape, a review seesaw's second reversal of one passage's fix included. A second failed review round whose Criticals repeat a class goes to executing-work's tier-escalation ladder instead.
+- **(a) A second failed attempt at the same problem**, whatever its shape, a review seesaw's second reversal of one passage's fix included. A second failed review round whose Criticals repeat a class goes to executing-work's tier-escalation ladder instead. A section whose deliverable is rule text, a sentence in a skill, a charter or the doctrine, takes this consult at its second failed round, never the ladder's repeated-class exit. Every seam in rule text states a reachable input, so its rounds' Criticals read as a repeated class.
 - **(b) Any BLOCKED that turns on a decision.** Consult first, and send the operator only the preference, cost or risk-appetite fork that survives, ruling attached. An external dependency only the operator can satisfy, or an act the stop-for-a-yes rule gates and no proceed-ahead covers, goes straight up. Executing-work's review-round backstop names a substitution for this trigger: a design stop's own ruling stands in for the consult and for nothing else this trigger orders, on the conditions its step 4 backstop paragraph states.
 - **(c) A systematic-debugging dead end**, before the stop-and-report.
 - **(d) The general license:** a hard-to-reverse or load-bearing decision the spec does not cover, where you would otherwise be guessing.
