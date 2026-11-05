@@ -6917,7 +6917,7 @@ export const register: Register = async (on, options) => {
         openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),
         writeMemoryRecord: (text, meta) => writeMemoryRecord($, text, meta),
         kitInstallPathOf: () => kitInstallPathOf($),
-        recognitionAsk: (tool, command, mode, budget) => recognitionAsk($, tool, command, mode, budget),
+        recognitionAsk: (tool, input, mode, budget) => recognitionAsk($, tool, input, mode, budget),
         pushDeliveryLine: (lines, ground, rec, waited) => {
           lines.push(deliveryText(ground, rec.id, rec.text, { mark: waited ? "waited" : "urgent" }));
         },

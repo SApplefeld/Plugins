@@ -237,7 +237,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // skips a get memq refuses. A memq touch --applied in the same command
   // is the outcome's other input, kept with the tier it stamps, since it
   // counts only for a candidate shown from that tier; a touch memq refuses
-  // stamps nothing and is skipped the same way.
+  // stamps nothing and is skipped the same way. This reader hands over the
+  // bare command, so a script write's text, which names a get without running
+  // one, never counts here.
   const shellCommand = shellCommandOf(e.tool, (e as { command?: unknown }).command);
   const fetches = memqGetsOf(shellCommand);
   for (const g of fetches) if (g.tier !== "refused") sess.recallGetNames.add(g.name.toLowerCase());
@@ -2960,10 +2962,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // it unawaited where no nudge ran, as on a call a plugin raised, since
   // no pointer of this call waits on it. A failed ask settles as no
   // answer, so it never silences a pointer. It reads the call and never
-  // the result.
+  // the result, handed the call's whole input, so a script write is matched
+  // as a shell command is.
   let recognitionAsked: Promise<void> | null = null;
   const askRecognition = inSubagent ? undefined : (): Promise<void> => {
-    recognitionAsked ??= recognitionAsk(e.tool, (e as { command?: unknown }).command, jevMode, hookBudget).catch(() => undefined);
+    recognitionAsked ??= recognitionAsk(e.tool, e, jevMode, hookBudget).catch(() => undefined);
     return recognitionAsked;
   };
 
@@ -2980,7 +2983,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // ends before the ask can answer.
   if (askRecognition !== undefined) {
     if (recognitionAsked !== null) await recognitionAsked;
-    else void recognitionAsk(e.tool, (e as { command?: unknown }).command, jevMode, { live: false, remainingMs: () => Infinity }).catch(() => undefined);
+    else void recognitionAsk(e.tool, e, jevMode, { live: false, remainingMs: () => Infinity }).catch(() => undefined);
   }
 
   // The rerun window a live pass opened: a main-loop call the model made

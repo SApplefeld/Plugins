@@ -7,7 +7,8 @@
 //
 // Two indexes come from one snapshot. The first holds every `cmd:` trigger the
 // rows declare, in the nudge's tiers, matched against a Bash or PowerShell
-// command by the nudge's containment rule; the memory-recognition question
+// command, or the text a Write, Edit or MultiEdit puts in a shell script, by the nudge's
+// containment rule; the memory-recognition question
 // is asked live over it, and a record answered skip has its `cmd:` hits
 // withheld from the tool-call nudge (nudgeHitsWithheld). The second,
 // nudgeIndexOf's, holds every trigger kind and file anchor a row declares,
@@ -32,8 +33,8 @@
 
 import { STRICT_SEAT } from "./guards/agent-class";
 
-// Characters of command text one match runs over, the nudge's command match
-// included.
+// Characters of command text one match runs over, a script write's text and
+// the nudge's command match included.
 // A longer command is read as its head and its tail joined by a line break,
 // which no trigger pattern can carry, so the join cannot spell a match
 // neither end holds.
@@ -151,13 +152,59 @@ export function foldCommandText(text: string): string {
   return (text.slice(0, half) + "\n" + text.slice(text.length - half)).toLowerCase();
 }
 
-// The command text a tool call carries for a `cmd:` match, as
-// nudgeCommandText reads it: the `command` of a tool named bash or powershell in any case,
-// and "" for every other tool, so a `command` key on a non-shell tool's input
-// is never read as a shell line.
-export function shellCommandOf(tool: unknown, command: unknown): string {
-  if (typeof tool !== "string" || !/^(bash|powershell)$/i.test(tool)) return "";
-  return typeof command === "string" ? command : "";
+// The tools whose call runs a shell line, named in any case.
+const SHELL_TOOL_NAME = /^(bash|powershell)$/i;
+
+// The extensions of a shell script, compared without case with the last
+// extension of the path a Write, Edit or MultiEdit names. A write to such a
+// path is read for a `cmd:` match as a command is, by the question's matcher
+// and the nudge alike. The list is closed, so a write to any other file,
+// prose and other languages' scripts among them, is never read as a shell
+// line.
+export const RECOGNITION_SCRIPT_EXTENSIONS: readonly string[] = [".sh", ".bash", ".zsh", ".ps1", ".cmd", ".bat"];
+
+// A path's last extension, lowercased: its last segment from the last dot,
+// and "" where that segment holds no dot past its first character.
+function lastExtensionOf(path: string): string {
+  const base = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(dot).toLowerCase() : "";
+}
+
+// The text a Write, Edit or MultiEdit puts in a file whose `file_path` ends in
+// an extension on RECOGNITION_SCRIPT_EXTENSIONS: a Write's `content`, an
+// Edit's `new_string`, or a MultiEdit's edits' `new_string` values joined by a
+// line break, which no pattern can carry, so a pattern split across two edits
+// does not match. "" for any other path or tool, and a field that is not a
+// string gives nothing.
+function scriptWriteText(tool: string, input: Record<string, unknown>): string {
+  const path = input.file_path;
+  if (typeof path !== "string" || !RECOGNITION_SCRIPT_EXTENSIONS.includes(lastExtensionOf(path))) return "";
+  if (/^write$/i.test(tool)) return typeof input.content === "string" ? input.content : "";
+  if (/^edit$/i.test(tool)) return typeof input.new_string === "string" ? input.new_string : "";
+  if (!/^multiedit$/i.test(tool) || !Array.isArray(input.edits)) return "";
+  const texts: string[] = [];
+  for (const edit of input.edits) {
+    const fields = nudgeObject(edit);
+    if (fields !== null && typeof fields.new_string === "string") texts.push(fields.new_string);
+  }
+  return texts.join("\n");
+}
+
+// The text a tool call carries for a `cmd:` match, as nudgeCommandText reads
+// it: the `command` of a Bash or PowerShell call, the text a script write puts
+// on disk (scriptWriteText), and "" for every other call, so a `command` key
+// on a non-shell tool's input is never read as a shell line. `input` is the
+// call's tool input; a string is read as a shell call's command itself, the
+// form a reader of the command alone hands over.
+export function shellCommandOf(tool: unknown, input: unknown): string {
+  if (typeof tool !== "string") return "";
+  const fields = nudgeObject(input);
+  if (SHELL_TOOL_NAME.test(tool)) {
+    if (typeof input === "string") return input;
+    return fields !== null && typeof fields.command === "string" ? fields.command : "";
+  }
+  return fields === null ? "" : scriptWriteText(tool, fields);
 }
 
 // Whether a row's name names a record, memq's isMemoryFilename over the name
@@ -282,10 +329,11 @@ export function recognitionIndexOf(text: string, scope: RecognitionScope): Recog
 // takes. Every trigger walked is charged against RECOGNITION_OPS_MAX, a
 // record's triggers past its first hit included, as the nudge charges each
 // candidate, and the walk stops once the budget is spent, keeping every match
-// found before it, the record it stopped inside included. A tool other than
-// Bash or PowerShell matches nothing.
-export function recognitionMatches(index: RecognitionIndex, tool: unknown, command: unknown): RecognitionMatch[] {
-  const text = foldCommandText(shellCommandOf(tool, command));
+// found before it, the record it stopped inside included. The call's text is
+// shellCommandOf's over its tool input, so a call other than a Bash or
+// PowerShell call or a script write matches nothing.
+export function recognitionMatches(index: RecognitionIndex, tool: unknown, input: unknown): RecognitionMatch[] {
+  const text = foldCommandText(shellCommandOf(tool, input));
   if (text === "") return [];
   const out: RecognitionMatch[] = [];
   const seen = new Set<string>();
@@ -509,12 +557,15 @@ export type NudgeHit = {
 
 // What one boundary is matched against, each folded for comparison: a call's
 // command, failure output, skills, agent types, tool and paths; a prompt's
-// text; a started subagent's id and agent types.
+// text; a started subagent's id and agent types. `commandWritten` holds where
+// `command` is the text a script write puts on disk rather than a shell
+// call's command.
 export type NudgeSubjects = {
   boundary: NudgeBoundary;
   boundaryClass: "tool" | "prompt" | "dispatch";
   recipient: string;
   command: string;
+  commandWritten: boolean;
   failure: string;
   prompt: string;
   skills: string[];
@@ -819,11 +870,10 @@ export function nudgeStrictSeat(payload: NudgePayload): boolean {
   return nudgeStartedAgents(payload).some((type) => STRICT_SEAT.test(type));
 }
 
-// The command a Bash or PowerShell call runs, "" for any other tool.
+// The command a Bash or PowerShell call runs, or the text a script write puts
+// on disk, through shellCommandOf, and "" for any other call.
 function nudgeCommandText(payload: NudgePayload): string {
-  if (typeof payload.tool_name !== "string" || !/^(bash|powershell)$/i.test(payload.tool_name)) return "";
-  const input = nudgeObject(payload.tool_input);
-  return input !== null && typeof input.command === "string" ? input.command : "";
+  return shellCommandOf(payload.tool_name, nudgeObject(payload.tool_input));
 }
 
 function nudgeBoundaryClass(boundary: NudgeBoundary): "tool" | "prompt" | "dispatch" {
@@ -839,6 +889,7 @@ export function nudgeSubjectsOf(payload: NudgePayload, boundary: NudgeBoundary):
     boundaryClass: nudgeBoundaryClass(boundary),
     recipient: "",
     command: "",
+    commandWritten: false,
     failure: "",
     prompt: "",
     skills: [],
@@ -847,9 +898,11 @@ export function nudgeSubjectsOf(payload: NudgePayload, boundary: NudgeBoundary):
     paths: [],
   };
   if (boundary === "PreToolUse") {
+    const command = nudgeCommandText(payload);
     return {
       ...empty,
-      command: nudgeFoldText(nudgeCommandText(payload), RECOGNITION_TEXT_CAP),
+      command: nudgeFoldText(command, RECOGNITION_TEXT_CAP),
+      commandWritten: command !== "" && !SHELL_TOOL_NAME.test(payload.tool_name as string),
       skills: nudgeInvokedSkills(payload).map(nudgeFoldName),
       agents: nudgeDispatchedAgents(payload).map(nudgeFoldName),
       tool: nudgeFoldName(typeof payload.tool_name === "string" ? payload.tool_name : ""),
@@ -1060,7 +1113,8 @@ function nudgeMatchesTrigger(trigger: { type: string; pattern: string }, subject
     return subjects.prompt.indexOf(pattern) !== -1 ? "this prompt's text carries it" : null;
   }
   if (trigger.type === "cmd") {
-    return subjects.command.indexOf(pattern) !== -1 ? "this call's command text carries it" : null;
+    if (subjects.command.indexOf(pattern) === -1) return null;
+    return subjects.commandWritten ? "the script this call writes carries it" : "this call's command text carries it";
   }
   if (trigger.type === "err") {
     return subjects.failure.indexOf(pattern) !== -1 ? "this call's failure output carries it" : null;

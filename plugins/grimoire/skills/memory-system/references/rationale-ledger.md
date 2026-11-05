@@ -3992,13 +3992,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - proposed: Delete the sentence from "It is the sibling" to "nothing to drift"; the ledger entry for C003 holds the reason.
 
 ### c4.C004
-- key: Use only six trigger types: `cmd:` against a Bash command, `err:` against failed output, `skill:`, `agent:`, `tool:`, and `glob:` against a path.
+- key: Use only six trigger types: `cmd:` against a Bash command or a script a Write, Edit or MultiEdit writes, `err:` against failed output, `skill:`, `agent:`, `tool:`, and `glob:` against a path.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:213
 - provenance: 0d1e610 2026-08-30, the six types installed with the field (cmd, err, skill, agent, tool, glob).
 - verdict: keep
 - reason: memq refuses a seventh type (TRIGGER_TYPES at scripts/memq.js:467) but its refusal names the types and not their subjects; what each type is matched against is knowledge only this sentence carries, and an author cannot choose a type without it.
-- passage: Six types, and the type is what says how the pattern is read: `cmd:<pattern>` against a Bash command, `err:<pattern>` against a failed call's output, `skill:<name>` for a skill invocation, `agent:<type>` for an agent dispatch, `tool:<name>` for a tool name, and `glob:<path-glob>` for a path.
+- passage: Six types, each saying how its pattern is read: `cmd:<pattern>` against a Bash command and the text a Write, Edit or MultiEdit puts in a `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd` or `.bat` script, a closed list, `err:<pattern>` against a failed call's output, `skill:<name>` for a skill invocation, `agent:<type>` for an agent dispatch, `tool:<name>` for a tool name, and `glob:<path-glob>` for a path.
 
 ### c4.C005
 - key: Store the pattern verbatim, leaving what a pattern means against a running session to the surface that matches.

@@ -377,8 +377,10 @@ export function recognitionScopeRetry(deps: RecallDeps): void {
 }
 
 // The after side of one main-loop tool call: where a minute has passed since
-// the last check, a new one starts; then the command is matched against the
-// index as it stands, and memory-recognition is asked live, through liveAsk
+// the last check, a new one starts; then the call's tool input is matched
+// against the index as it stands, through recognitionMatches, which reads a
+// Bash or PowerShell call's command and a script write's text, and
+// memory-recognition is asked live, through liveAsk
 // with the question named live at this one site, of each matched record not
 // yet asked about this session. The asks fire together, and each opens its
 // record's nudge_acted window as it fires, whatever it then answers. A
@@ -388,10 +390,10 @@ export function recognitionScopeRetry(deps: RecallDeps): void {
 // joins the session's recognitionSkipped, and a record answered otherwise,
 // or whose ask ran out its hold or failed, joins nothing. `mode` off checks
 // nothing, asks nothing and writes nothing, liveAsk's rule.
-export async function recognitionAsk(deps: RecallDeps, tool: unknown, command: unknown, mode: string, budget: HookBudget): Promise<void> {
+export async function recognitionAsk(deps: RecallDeps, tool: unknown, input: unknown, mode: string, budget: HookBudget): Promise<void> {
   if (mode !== "shadow") return;
   if (Date.now() - deps.session.recognition.checkedAt >= RECOGNITION_CHECK_EVERY_MS) startRecognitionLoad(deps, false);
-  const matched = recognitionMatches(deps.session.recognition.index, tool, command);
+  const matched = recognitionMatches(deps.session.recognition.index, tool, input);
   // Read before this call's own asks start, so it waits on other calls' asks
   // alone.
   const waits = new Set<Promise<void>>();
