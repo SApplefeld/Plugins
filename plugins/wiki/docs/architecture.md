@@ -115,7 +115,10 @@ and with each CRLF read as LF. It also holds `source`, the installed plugin's
 version or the engine checkout's short commit, and `copiedAt`, the time
 `new-kb.ps1` wrote it. The walker's engine update rewrites the file holding
 `templateHash` alone, so two machines that update one KB to one engine write
-the same bytes, and their pulls merge without a conflict. The hash names
+the same bytes, and their pulls merge without a conflict and pass the
+walker's engine-change stop, which lets a pulled file under `.claude/` land
+only where it is byte for byte the installed engine's own or an
+`engine.json` naming the installed engine's hash. The hash names
 the vendored machinery only, never the schema or the content, and
 `new-kb.ps1 -PrintEngineHash` prints the engine's current value to compare
 against. The file sits under `.claude/`, which the agent cannot write.
@@ -512,7 +515,10 @@ One scheduled task per Windows account, `wiki-walk`, runs the walker,
 `kb-walk.ps1`, every hour. A run of it is a pass. The pass takes the lock
 `%LOCALAPPDATA%\llm-wiki\walk.lock`, so two passes never overlap, reads the
 account's wiki list, and visits each listed KB in turn, starting after the KB
-the last pass ended on, so a long KB cannot starve the rest. For each KB it
+the last pass ended on, so a long KB cannot starve the rest. The pass writes
+its state, `walk-state.json` beside the lock, after each KB it visits as well
+as at its end, so a pass cut short keeps every visited KB's place, lint stamp
+and deferral. For each KB it
 takes seven steps: trust, engine update, pull, feed, ingest, lint and push.
 
 - **Trust** reads the KB's entry in the running account's `~/.claude.json` and
@@ -522,6 +528,18 @@ takes seven steps: trust, engine update, pull, feed, ingest, lint and push.
   copies the engine's `template/.claude/` over the KB's, keeping `feed.json`
   and any file the engine does not ship, and commits. A KB with a live uncommitted file, or a merge left in progress, is recorded `deferred` and updated on a later pass.
 - **Pull** first aborts any merge left in progress, then fetches `origin` and merges `origin/main` where the KB has a remote.
+  Before any merge it reads the paths the fetched `origin/main` changes, and
+  a change under `.claude/`, to a file named `CLAUDE.md` or `CLAUDE.local.md`
+  at any depth, or to the root `.mcp.json` stops the pull with reason
+  `engine change`. So does a path whose first segment is shaped like a
+  Windows short name, such as `CLAUDE~1/`, or holding a `CLAUDE~` short name at
+  any depth. Nothing lands, no model run starts, and the KB is
+  stuck. The stop keeps no pass count and clears when a later pull lands:
+  once a session or a person brings the KB's `HEAD` to hold the change, or
+  once the two machines' engines match again. A pulled file is exempt where it
+  sits at the exact path and spelling the installed engine ships under
+  `.claude/` and is byte-identical to the installed engine's own, compared as
+  blob ids. So is an `engine.json` naming the installed engine's hash.
   A conflict runs the merge skill, except one on `.claude/settings.json`,
   which starts no model run. A merge the skill does not finish, as where a
   conflicted path is outside what it may join, is aborted and the KB recorded
@@ -531,7 +549,13 @@ takes seven steps: trust, engine update, pull, feed, ingest, lint and push.
 - **Ingest** runs where `inbox/` holds a file other than `.gitkeep`.
 - **Lint** runs where the KB's last successful lint is absent or more than
   seven days old. It is stamped done only where the run exits 0 and a `Lint:`
-  commit landed.
+  commit landed. A lint that fails, or ends with no `Lint:` commit, three times
+  in a row is held for a day after its last attempt and reads
+  `skipped: held after 3 failed lints`, as a stuck KB's merge run is held.
+  A recorded attempt time later than now holds nothing, so a bad clock or a
+  hand edit cannot hold the lint for longer than a day. A lint that reaches no
+  verdict, live, lock held, refused for budget or after a failed engine
+  update, counts nothing.
 - **Push** pushes where `origin` exists and the remote lacks a commit, and
   pushes with `-u` where the branch has no upstream yet.
 
@@ -550,7 +574,12 @@ permissions.
 
 The pass holds a budget of 6900 seconds, under the task's 2-hour limit. A KB
 not started before it runs out is recorded `skipped: budget`, and the next pass
-starts with it. Every child the walker starts runs inside a kill-on-close job
+starts with it. No model run starts with under 600 seconds of the budget left,
+a floor `KB_WALK_MODEL_FLOOR_SECONDS` replaces, and a step that floor refuses
+reads `skipped: budget` too. A conflicting merge whose model run that floor
+refuses is aborted and ends the KB's visit, so nothing is fed or pushed over a
+tree diverged from `origin`. The walker's git calls and the feeder keep the
+general floor of 60 seconds. Every child the walker starts runs inside a kill-on-close job
 the walker holds, so ending the task ends every child's tree. Each pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, naming each KB, each step's
 outcome, every failure and every KB still deferred, and appends a block to
@@ -562,7 +591,11 @@ status file is the report.
 
 `register-walk.ps1` copies the launcher, `Start-InstalledWikiWalk.ps1`, into a
 folder outside the plugin cache and registers `wiki-walk` under the task folder
-`\llm-wiki\<domain>.<account>\`. At each start the launcher reads Claude Code's
+`\llm-wiki\<domain>.<account>\`. Where `-User` names another account, the
+registrar requires `-LauncherRoot` and refuses unless that account can read
+the folder. It reads the answer from the folder's access rules, or its nearest
+existing ancestor's, before anything is copied or registered. At each start
+the launcher reads Claude Code's
 install record for `wiki@applefeld`, copies that version's folder to
 `%LOCALAPPDATA%\llm-wiki\runtime\<version>\` where no complete copy exists,
 and runs the copy's walker in its own process. So a plugin update reaches the

@@ -190,18 +190,28 @@ One Windows scheduled task per account, `wiki-walk`, runs the walker,
 list in turn, one at a time. For each it brings the vendored engine files up
 to the installed version, pulls from `origin` where one exists, runs the
 feeder where the KB has sources, runs an ingest where `inbox/` holds a file,
-runs a lint where the last one is a week old, and pushes. Dropping a file into
+runs a lint where the last one is a week old, holding for a day a lint that
+failed or made no `Lint:` commit three passes in a row, and pushes. Dropping a file into
 `inbox/` is the entire hand-off: the next pass ingests it and pushes a commit.
 
 The walker calls a model only where there is work: an ingest with a file
 waiting, a lint that is due, or a pull that conflicts, which a model run joins.
+A pull that would change anything under `.claude/`, a
+`CLAUDE.md` or `CLAUDE.local.md` in any folder, or a root `.mcp.json` lands
+nothing and starts no model run, beside the settings conflict that already
+stops it. So does a path spelled like a Windows short name of one of them,
+such as `CLAUDE~1`. The KB reads `deferred: engine change` and stays stuck
+until its `HEAD` holds the change by hand, or until this machine's engine is
+updated to match. A pulled file under `.claude/` that is byte for byte the
+installed engine's own lands, as when a second machine on the same engine
+pushes its engine update.
 An idle KB costs no model call, so the hourly pass costs nothing on a quiet
 account. Each model run goes through the KB's wrapper, `.claude/kb-run.ps1`,
 which runs headless Claude Code
 (`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default`)
 with the KB folder as its working directory. Every pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, which names each KB, each step's
-outcome, every failure and every KB deferred on a conflict. A stuck wiki also
+outcome, every failure and every deferred KB with its reason. A stuck wiki also
 gets a line in `%LOCALAPPDATA%\llm-wiki\walk-notices.jsonl`, which a persona
 session set to read it posts to the operator's thread. `register-walk.ps1`
 registers the task once per account, and a plugin update reaches the walker

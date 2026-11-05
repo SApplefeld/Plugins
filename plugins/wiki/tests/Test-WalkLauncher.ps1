@@ -27,9 +27,18 @@ install path and a record with a version that cannot name a folder each exit 1 w
 walk-launcher.log and run nothing; the walker's stdout and stderr land in walk-output.log and
 walk-output.err.log; a PATH with no claude runs the walker without -Claude and logs it; and
 register-walk.ps1 -WhatIf and -Remove -WhatIf print their definitions and the task path
-\llm-wiki\<computer>.x\ for -User .\x, create nothing and exit 0,
-with the registrar refusing a PATH without pwsh or claude and a launcher root under a plugin cache.
-It also parses register-walk.ps1 and checks that every Register-ScheduledTask,
+\llm-wiki\<computer>.Guest\ for -User .\Guest, create nothing and exit 0, with -LauncherRoot naming a
+folder the test grants ReadAndExecute on to the Guest account's SID, or to BUILTIN\Guests, of which
+Guest is a direct member, or a missing child of such a folder, whose inheritable rule is honored;
+the registrar refuses -User .\Guest with no -LauncherRoot by one stderr line naming it and no warning,
+a launcher root only the running account can read by one line naming the identities it checked, a
+launcher root whose only grant to Guest is not inheritable by files by that same line, a launcher
+root granting BUILTIN\Guests read and denying Guest by one line naming the deny, a PATH without pwsh
+or claude, and a launcher root under a plugin cache; and as the running account it
+accepts its own folder with no read check. The Guest account exists and resolves on every Windows
+installation while disabled, which is why the cross-account cases run as it. Each granted folder sits
+under the work folder, carries its own access rules rather than inherited ones, and grants the running
+account full control, so the cleanup removes it. It also parses register-walk.ps1 and checks that every Register-ScheduledTask,
 Unregister-ScheduledTask and Copy-Item sits inside an if whose condition calls ShouldProcess, and
 runs that same check on a synthetic script with an unguarded call to show it can fail.
 
@@ -275,6 +284,33 @@ function Write-PluginList {
     Write-Utf8 $script:listPath (ConvertTo-Json -InputObject $list -Depth 8)
 }
 
+# Makes a folder under the work folder whose access rules are its own, not inherited from the work
+# folder: full control for the running account, so the cleanup can remove it, and ReadAndExecute
+# for each identity named, inheritable by folders and files unless -ReadInheritance names other
+# flags. -DenyFor adds a deny of ReadAndExecute, inheritable by folders and files, for that identity.
+# With none named, only the running account can read it.
+function New-GrantedFolder {
+    param(
+        [string]$Name,
+        [Security.Principal.IdentityReference[]]$ReadFor = @(),
+        [System.Security.AccessControl.InheritanceFlags]$ReadInheritance = 'ContainerInherit, ObjectInherit',
+        [Security.Principal.IdentityReference]$DenyFor
+    )
+    $info = [System.IO.Directory]::CreateDirectory((Join-Path $script:granted $Name))
+    $security = [System.IO.FileSystemAclExtensions]::GetAccessControl($info)
+    $security.SetAccessRuleProtection($true, $false)
+    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $security.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($script:currentSid, 'FullControl', $inherit, 'None', 'Allow'))
+    foreach ($identity in $ReadFor) {
+        $security.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($identity, 'ReadAndExecute', $ReadInheritance, 'None', 'Allow'))
+    }
+    if ($null -ne $DenyFor) {
+        $security.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($DenyFor, 'ReadAndExecute', $inherit, 'None', 'Deny'))
+    }
+    [System.IO.FileSystemAclExtensions]::SetAccessControl($info, $security)
+    return $info.FullName
+}
+
 # True when an if condition, read from its parsed form, is one un-negated call to a method named
 # ShouldProcess. A -not or ! around the call makes the condition a unary expression, which is false here.
 function Test-IsShouldProcessCall {
@@ -332,6 +368,8 @@ $script:lockPath = Join-Path $script:walkDir 'walk.lock'
 $script:cwd = Join-Path $work 'cwd'
 $script:installs = Join-Path $work 'installs'
 $script:stubBin = Join-Path $work 'stubbin'
+$script:granted = Join-Path $work 'granted'
+$script:currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
 $script:record = Join-Path $work 'record.txt'
 $script:pwshExe = [Environment]::ProcessPath
 $script:stubClaude = Join-Path $script:stubBin 'claude.cmd'
@@ -339,7 +377,7 @@ $launcherFolder = Split-Path -Parent ([System.IO.Path]::GetFullPath($LauncherPat
 $lock = $null
 
 try {
-    foreach ($folder in @($script:profileDir, $script:local, $script:cwd, $script:installs, $script:stubBin)) {
+    foreach ($folder in @($script:profileDir, $script:local, $script:cwd, $script:installs, $script:stubBin, $script:granted)) {
         [void][System.IO.Directory]::CreateDirectory($folder)
     }
     Write-Utf8 $script:stubClaude "@echo off`r`nexit /b 0`r`n"
@@ -497,34 +535,61 @@ try {
     }
     Test-Check 'a snapshot folder holding only some required files is rebuilt: the stub runs from it and it now holds every required file' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and $records.Count -eq 1 -and $records[0].Root -ieq (Get-Normal $snapshot6) -and $holdsAll -and (-not (Test-Path -LiteralPath (Join-Path $snapshot6 'partial-marker.txt'))))
 
-    # --- register-walk.ps1 -WhatIf and -Remove -WhatIf.
-    $expectedTaskPath = "\llm-wiki\$env:COMPUTERNAME.x\"
+    # --- register-walk.ps1 -WhatIf and -Remove -WhatIf, for another account. The Guest account exists
+    # and resolves on every Windows installation while disabled, so it stands in for that account.
+    $guestSid = ([Security.Principal.NTAccount]"$env:COMPUTERNAME\Guest").Translate([Security.Principal.SecurityIdentifier])
+    $guestsSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-546')
+    $expectedTaskPath = "\llm-wiki\$env:COMPUTERNAME.Guest\"
     $defaultRoot = Join-Path $script:walkDir 'launcher'
-    $expectedLauncher = Join-Path $defaultRoot 'Start-InstalledWikiWalk.ps1'
-    $r = Invoke-Registrar @('-User', '.\x', '-WhatIf')
-    Test-Check 'register-walk.ps1 -User .\x -WhatIf exits 0' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0))
+    $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf')
+    Test-Check 'register-walk.ps1 -User .\Guest -WhatIf with no -LauncherRoot is refused by the launcher-root rule: exit 1, one stderr line naming -LauncherRoot, no warning line' ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and (@(Get-Lines $r.Stderr).Count -eq 1) -and ($r.Stderr -match '-LauncherRoot is required') -and ($r.Stderr -notmatch 'warning:'))
+    Test-Check 'the no-root refusal creates nothing: the default launcher root does not exist afterwards' (-not (Test-Path -LiteralPath $defaultRoot))
+    $guestRoot = New-GrantedFolder 'guest-sid' @($guestSid)
+    $expectedLauncher = Join-Path $guestRoot 'Start-InstalledWikiWalk.ps1'
+    $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $guestRoot)
+    Test-Check 'register-walk.ps1 -User .\Guest -WhatIf with a -LauncherRoot granting ReadAndExecute to the Guest account''s SID exits 0' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0))
     Test-Check '-WhatIf prints the task name wiki-walk' ($r.Stdout -match '(?m)^Task name:\s+wiki-walk\s*$')
-    Test-Check '-WhatIf prints the task path \llm-wiki\<computer>.x\ for -User .\x' (($r.Stdout -match '(?m)^Task path:\s+(.+?)\s*$') -and ($Matches[1] -ieq $expectedTaskPath))
+    Test-Check '-WhatIf prints the task path \llm-wiki\<computer>.Guest\ for -User .\Guest' (($r.Stdout -match '(?m)^Task path:\s+(.+?)\s*$') -and ($Matches[1] -ieq $expectedTaskPath))
     Test-Check '-WhatIf prints the S4U logon type and the Limited run level' (($r.Stdout -match '(?m)^Logon type:\s+S4U\s*$') -and ($r.Stdout -match '(?m)^Run level:\s+Limited\s*$'))
     Test-Check '-WhatIf prints the PT1H repetition interval and the PT2H time limit' (($r.Stdout -match '(?m)^Repeats:\s+PT1H\s*$') -and ($r.Stdout -match '(?m)^Time limit:\s+PT2H\s*$'))
-    Test-Check '-WhatIf prints the launcher path under the default launcher root, inside the action line' (($r.Stdout -match '(?m)^Launcher:\s+(.+?)\s*$') -and ($Matches[1] -ieq $expectedLauncher) -and $r.Stdout.Contains("-File `"$expectedLauncher`""))
+    Test-Check '-WhatIf prints the launcher path under the granted launcher root, inside the action line' (($r.Stdout -match '(?m)^Launcher:\s+(.+?)\s*$') -and ($Matches[1] -ieq $expectedLauncher) -and $r.Stdout.Contains("-File `"$expectedLauncher`""))
     Test-Check '-WhatIf prints the pwsh action with the hidden, non-interactive, bypass flags' ($r.Stdout -match '(?m)^Arguments:\s+-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ')
-    Test-Check '-WhatIf for another account warns on stderr' ($r.Stderr -match 'warning: pwsh')
-    Test-Check '-WhatIf copies nothing: the launcher root does not exist afterwards' (-not (Test-Path -LiteralPath $defaultRoot))
+    Test-Check '-WhatIf copies nothing: the granted folder holds no Start-InstalledWikiWalk.ps1 afterwards' (-not (Test-Path -LiteralPath $expectedLauncher))
     $r = Invoke-Registrar @('-Remove', '-WhatIf')
     Test-Check 'register-walk.ps1 -Remove -WhatIf exits 0 and prints the task it would unregister' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($r.Stdout -match '(?m)^Task name:\s+wiki-walk\s*$') -and ($r.Stdout -match '(?m)^Remove:\s+unregister the scheduled task wiki-walk\s*$'))
-    $r = Invoke-Registrar @('-Remove', '-User', '.\x', '-WhatIf')
-    Test-Check 'register-walk.ps1 -Remove -User .\x -WhatIf exits 0 and prints the task path \llm-wiki\<computer>.x\' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($r.Stdout -match '(?m)^Task path:\s+(.+?)\s*$') -and ($Matches[1] -ieq $expectedTaskPath))
+    $r = Invoke-Registrar @('-Remove', '-User', '.\Guest', '-WhatIf')
+    Test-Check 'register-walk.ps1 -Remove -User .\Guest -WhatIf exits 0 and prints the task path \llm-wiki\<computer>.Guest\' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($r.Stdout -match '(?m)^Task path:\s+(.+?)\s*$') -and ($Matches[1] -ieq $expectedTaskPath))
 
-    # --- The registrar's refusals.
+    # --- The registrar's refusals. The claude and cache refusals fire before the read check, so their
+    # cases keep -User .\x, an account that need not exist.
     # pwsh 7 prepends its own folder to PATH at startup, so no PATH makes the registrar's pwsh refusal fire and the test has no case for it.
     $r = Invoke-Registrar @('-User', '.\x', '-WhatIf') @{ Path = "$(Split-Path -Parent $script:pwshExe);$env:SystemRoot\System32" }
     Test-Check 'the registrar refuses a PATH with no claude by the claude rule: exit 1 and a stderr line naming claude' ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and ($r.Stderr -match 'claude was not found on PATH'))
     $cacheRoot = Join-Path $work 'home\plugins\cache\market\wiki'
     $r = Invoke-Registrar @('-User', '.\x', '-WhatIf', '-LauncherRoot', $cacheRoot)
     Test-Check 'the registrar refuses a launcher root under a plugins\cache folder: exit 1 and a stderr line naming it' ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and ($r.Stderr -match 'plugins\\cache'))
-    $r = Invoke-Registrar @('-User', '.\x', '-WhatIf', '-LauncherRoot', (Split-Path -Parent ([System.IO.Path]::GetFullPath($RegisterPath))))
-    Test-Check 'a launcher root naming the registrar''s own folder is accepted by -WhatIf and prints the launcher beside the registrar' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($r.Stdout -match '(?m)^Launcher:\s+.*Start-InstalledWikiWalk\.ps1\s*$'))
+    $r = Invoke-Registrar @('-WhatIf', '-LauncherRoot', (Split-Path -Parent ([System.IO.Path]::GetFullPath($RegisterPath))))
+    Test-Check 'as the running account, a launcher root naming the registrar''s own folder is accepted by -WhatIf with no read check and prints the launcher beside the registrar' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($r.Stdout -match '(?m)^Launcher:\s+.*Start-InstalledWikiWalk\.ps1\s*$'))
+
+    # --- The read check: which identities' access rules count for another account.
+    $guestsRoot = New-GrantedFolder 'guests-group' @($guestsSid)
+    $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $guestsRoot)
+    Test-Check 'a launcher root granting ReadAndExecute to BUILTIN\Guests, of which Guest is a direct member, is accepted: exit 0' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0))
+    $ownRoot = New-GrantedFolder 'running-account-only' @()
+    $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $ownRoot)
+    $refusals = @(Get-Lines $r.Stderr | Where-Object { $_ -match 'identities checked' })
+    Test-Check 'a launcher root only the running account can read is refused by the read-check rule: exit 1 and one stderr line naming the identities checked, the Guest account and BUILTIN\Guests among them' ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and ($refusals.Count -eq 1) -and ($refusals[0] -match [regex]::Escape("$env:COMPUTERNAME\Guest")) -and ($refusals[0] -match 'BUILTIN\\Guests'))
+    $missingChild = Join-Path $guestRoot 'child\launcher'
+    $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $missingChild)
+    Test-Check 'a missing child of a folder granting inheritable read to Guest is accepted on the ancestor''s rule: exit 0, the launcher printed under the child, and the child not created' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($r.Stdout -match '(?m)^Launcher:\s+(.+?)\s*$') -and ($Matches[1] -ieq (Join-Path $missingChild 'Start-InstalledWikiWalk.ps1')) -and (-not (Test-Path -LiteralPath (Join-Path $guestRoot 'child'))))
+    $noInheritRoot = New-GrantedFolder 'guest-sid-no-inherit' @($guestSid) -ReadInheritance 'None'
+    $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $noInheritRoot)
+    $refusals = @(Get-Lines $r.Stderr | Where-Object { $_ -match 'identities checked' })
+    Test-Check 'an existing launcher root whose only grant to Guest is ReadAndExecute not inheritable by files is refused by the read-check rule, since the copied launcher would not inherit it: exit 1 and one stderr line naming the identities checked' ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and ($refusals.Count -eq 1))
+    $deniedRoot = New-GrantedFolder 'guests-group-guest-denied' @($guestsSid) -DenyFor $guestSid
+    $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $deniedRoot)
+    $refusals = @(Get-Lines $r.Stderr | Where-Object { $_ -match 'a deny rule' })
+    Test-Check 'a launcher root granting BUILTIN\Guests inheritable read and denying the Guest account ReadAndExecute is refused by the deny rule: exit 1 and one stderr line naming the deny for Guest' ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and ($refusals.Count -eq 1) -and ($refusals[0] -match ('deny rule .* for ' + [regex]::Escape("$env:COMPUTERNAME\Guest") + ' removes a read right')))
 
     # --- Registers nothing under -WhatIf: read from the parsed source, not from a run.
     $registerText = [System.IO.File]::ReadAllText($RegisterPath)

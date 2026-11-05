@@ -36,7 +36,10 @@ listed KB in turn, one at a time. For each KB it takes these steps in order:
 5. **Ingest.** Where `inbox/` holds a file other than `.gitkeep`, it runs the
    `wiki-ingest` skill.
 6. **Lint.** Where the KB's last successful lint is absent or more than seven
-   days old, it runs the `wiki-lint` skill.
+   days old, it runs the `wiki-lint` skill. A lint that fails, or makes no
+   `Lint:` commit, on three attempts in a row is held for a day after the last
+   one and reads `skipped: held after 3 failed lints`, and `walk.log` names
+   when the hold ends.
 7. **Push.** Where `origin` exists, it pushes any commit the remote lacks.
 
 A model is called only by a conflicting pull, an ingest with a file waiting,
@@ -132,11 +135,12 @@ tests a different thing than the pass runs.
 Register once per account, from an **elevated** PowerShell (Run as
 administrator), logged in as the account that owns the KBs. Registering a
 task with an S4U principal requires elevation, and without it the registrar
-refuses with a one-line reason. So the owning account must be able to
-elevate. The task still runs with a limited token, so a scheduled run holds
-no administrator rights. An owning account that cannot elevate cannot
-register its walker yet, and the backlog item on registering the walker for
-another account holds that decision. Run the registrar from the engine
+refuses with a one-line reason. The usual route is the owning account
+elevating; the task still runs with a limited token, so a scheduled run holds
+no administrator rights. Where the owning account cannot elevate, an
+administrator registers for it with `-LauncherRoot` naming a folder that
+account can read, which the registrar verifies, as described below. Run the
+registrar from the engine
 checkout or the installed plugin folder, whose path instantiation.md gives
 under "Step 1: create the repo". Look first with `-WhatIf`, which prints the
 definition and registers nothing:
@@ -157,7 +161,22 @@ this computer's account named `kbuser`. The registrar does two things:
 - It copies `Start-InstalledWikiWalk.ps1` and `installed-plugin-functions.ps1`
   into the launcher root, `%LOCALAPPDATA%\llm-wiki\launcher` by default.
   `-LauncherRoot` names another folder, and the registrar refuses one inside
-  the plugin cache, which a plugin update replaces.
+  the plugin cache, which a plugin update replaces. Where `-User` names
+  another account, `-LauncherRoot` is required, and the registrar checks that
+  the account can read it before anything is copied or registered, under
+  `-WhatIf` too: an allow rule must grant ReadAndExecute to the account, to
+  Everyone, to Authenticated Users or to a local group the account is a
+  direct member of. On an existing folder the rule must be inheritable by
+  files, so the copied launcher inherits it. On the nearest existing
+  ancestor, read where the folder does not exist yet, it must be inheritable
+  by folders and files and must not carry NoPropagateInherit, which stops it
+  at the ancestor's direct children. No deny rule for any of those that reaches the
+  launcher may remove a read right. A nested group, a domain group and a
+  local group whose members cannot be listed are not consulted, and a
+  refusal names the identities that were and any group skipped. The
+  registrar checks only the read, so name a folder only that account,
+  SYSTEM and Administrators can write: whoever can write the launcher runs
+  code as the account every hour.
 - It registers `wiki-walk` under the task folder
   `\llm-wiki\<domain>.<account>\`, so each account's task is its own and one
   account's registration never replaces another's. The task's action runs the
@@ -169,8 +188,11 @@ this computer's account named `kbuser`. The registrar does two things:
 The registrar refuses where `pwsh` or `claude` is not on the PATH of the
 account running it. It warns where `-User` names another account, since both
 were found on the registering account's PATH and the task runs as `-User`.
-The default launcher root is also the registering account's own
-`%LOCALAPPDATA%`. So register as the owning account, not for it.
+The default launcher root is the registering account's own `%LOCALAPPDATA%`,
+which another account cannot read, so for another account the registrar
+requires `-LauncherRoot` and refuses to register until that account can read
+it. Register as the owning account where it can elevate, and for it, under a
+folder it can read, where it cannot.
 
 To remove the task, run the same command with `-Remove`, which unregisters
 only the `-User` account's `wiki-walk`:
@@ -230,7 +252,9 @@ pwsh -NoProfile -File ./kb-walk.ps1 -WhatIf
 ```
 
 Observable: one line per listed KB, in the order the next pass visits them.
-`-WhatIf` reads the list, and the walker's state file for the order. It
+`-WhatIf` reads the list, and the walker's state file for the order. Each
+pass rewrites that file after every KB it visits, so a pass the task stops
+partway still starts the next pass after the last KB it visited. It
 takes no lock and writes nothing. A KB missing here is missing from the list, and `kb-registry.ps1
 List` shows what the list holds.
 
@@ -323,8 +347,9 @@ under `%LOCALAPPDATA%\llm-wiki\` for the owning account:
 | File | What it holds | When to read it |
 | --- | --- | --- |
 | `walk-status.json` | The last pass whole: when it started and finished, the engine hash, one entry per KB with its result and each step's outcome and note, every KB still deferred and every failed step | First, after any pass |
+| `walk-state.json` | The walker's memory between passes: the KB the last pass ended on, and per KB its last lint stamp, its count of failed lints and the last failed attempt's time, any standing deferral and its notice fields. Rewritten after each KB a pass visits and at the pass's end | To see where the next pass starts, or why a lint reads held |
 | `walk.log` | One block per pass, a line per step with its seconds, kept across passes and rotated to `walk.log.1` at 5 MB | To see a KB's history over several passes |
-| `walk-notices.jsonl` | One JSON line per notice: in the pass that makes a KB stuck, once a day while it stays stuck, and in the pass that clears it. Each line has `id`, `text`, `source` and `at`. A stuck or still-stuck line adds `paths`, the first 10 conflicted paths. The file is kept across passes and rotated to `walk-notices.jsonl.1` at 1 MB | When the operator's thread reports a stuck KB, or to see which notices a pass wrote |
+| `walk-notices.jsonl` | One JSON line per notice: in the pass that makes a KB stuck, once a day while it stays stuck, and in the pass that clears it. Each line has `id`, `text`, `source` and `at`. A stuck or still-stuck line adds `paths`, the first 10 conflicted paths or paths an engine-change stop refused. The file is kept across passes and rotated to `walk-notices.jsonl.1` at 1 MB | When the operator's thread reports a stuck KB, or to see which notices a pass wrote |
 | `walk-output.log`, `walk-output.err.log` | The walker's console output and that of the feeds, ingests, lints and merges it ran, overwritten at each pass | To read what a model run or the feeder printed |
 | `walk-launcher.log` | One line per launcher refusal, a `WARN` line where `claude` is off PATH or an old snapshot cannot be removed, and an `ERROR` line naming the exit code and the last error line whenever the walker exits non-zero | When `LastTaskResult` is not 0 |
 
@@ -334,12 +359,12 @@ In `walk-status.json`, each KB's `result` is one of `visited`, `untrusted`,
 `skipped` with the note `inbox empty` for ingest and `not due` for lint. A
 step whose outcome is `failed` also appears under `failures`, and the walker
 goes on to the next step or KB as that step allows. The walker exits 1 only
-where it could not read the list, take its lock or write the status file, or where `KB_WALK_SECONDS` holds a value it refuses or `LOCALAPPDATA` is unset.
+where it could not read the list, take its lock or write the status file, or where `KB_WALK_SECONDS` or `KB_WALK_MODEL_FLOOR_SECONDS` holds a value it refuses or `LOCALAPPDATA` is unset.
 
 A pass holds a budget of 6900 seconds, under the task's 2-hour limit. A KB not
 started before the budget runs out reads `skipped: budget`, and the next pass
 starts with it. So a long ingest on one KB delays the rest by a pass at most,
-and never starves them. `KB_WALK_SECONDS` replaces the budget, as a whole number of seconds from 1 to 99999. Any other value stops the walker with exit 1 before it reads the list.
+and never starves them. `KB_WALK_SECONDS` replaces the budget, as a whole number of seconds from 1 to 99999. Any other value stops the walker with exit 1 before it reads the list. No model run, an ingest, a lint or a merge, starts with under 600 seconds of the budget left: the step reads `skipped: budget` and runs on the KB's next visit. A conflicting pull whose merge run that floor refuses is aborted and ends the KB's visit, so nothing is fed or pushed over it, and it counts no pass toward stuck. `KB_WALK_MODEL_FLOOR_SECONDS` replaces that floor in the same form, and any other value stops the walker the same way.
 
 Inside the KB, two durable records remain:
 
@@ -367,8 +392,9 @@ KB was on before the merge, in the form `restore point <hash>`.
 `git reset --hard <hash>`, run as the owning account, returns the KB there,
 and the next pass pulls and merges again.
 
-A conflict outside those paths, under `sources/`, `CLAUDE.md` or `.claude/`,
-is not the model's to join. The merge run starts, joins nothing and commits nothing, the walker aborts the merge, and
+A conflict outside those paths, such as one under `sources/` or on an engine
+file under `.claude/` that the engine-change stop below lets through, is not
+the model's to join. The merge run starts, joins nothing and commits nothing, the walker aborts the merge, and
 the KB reads `deferred: conflict` with the conflicted paths. The KB's other
 steps are skipped that pass. The walker attempts the pull again every pass, so
 a fix pushed upstream lands on its own. A KB deferred three passes running is
@@ -378,9 +404,30 @@ holding the deny list, starts no model run at all, since a conflicted settings
 file voids the deny list while a model reads third-party text. Such a KB is
 stuck from its first pass.
 
+A pull whose fetched commits change anything under `.claude/`, a file named
+`CLAUDE.md` or `CLAUDE.local.md` at any depth, or the root `.mcp.json` is
+stopped before any merge, conflict or none. So is one changing a path whose
+first segment is shaped like a Windows short name, such as `CLAUDE~1/`, or
+holding a `CLAUDE~` short name at any depth. The KB reads
+`deferred: engine change` with the changed paths that stopped it. Nothing
+lands, no model run starts, the KB's other steps are skipped that pass, and
+it is stuck from that pass. One class of pulled file is exempt: a file under
+`.claude/` that is byte for byte the installed engine's own, or an
+`engine.json` naming the installed engine's hash, which is what a second
+machine on the same engine pushes after its own engine update. A KB two
+machines share is therefore held only while their engines differ, and the
+stop clears on its own once the two engines match again, whichever machine
+updates. To clear
+it by hand, read the change as the owning account and, where it is wanted,
+bring the KB's `HEAD` to hold it: `git merge --ff-only origin/main` in the
+KB where the pull was a fast-forward, or a merge you make and commit where
+it was not. The next pass reads the pull `ran: up to date`, removes the
+entry and, where a notice was written, appends a cleared line.
+
 Every deferred KB is listed under `deferred` in `walk-status.json`, with its
-reason, its conflicted paths, how many passes it has been deferred and whether
-it is stuck, until a pass clears it. To clear one by hand, resolve the
+reason, its conflicted paths or the paths a stop refused, how many passes a
+conflict has been deferred and whether the KB is stuck, until a pass clears
+it. To clear a conflict by hand, resolve the
 conflict in the KB as the owning account, commit and push. The next pass
 reads the pull clean and removes the entry. Where the KB was stuck and a notice was written, that pass also appends a cleared line to `walk-notices.jsonl`.
 
@@ -405,7 +452,9 @@ question again before it writes, so a session that starts editing mid-run
 makes the run stop with nothing written. A lint that stops that way leaves no
 `Lint:` commit, and the walker stamps a lint done only where a `Lint:` commit
 landed, so a stopped lint is tried again next pass rather than waiting a
-week. While you edit a KB by hand, its passes defer until thirty minutes
+week. A stopped lint counts as a failed attempt, even one stopped because you
+started editing. Three in a row hold it for a day, as the pass's lint step
+says. While you edit a KB by hand, its passes defer until thirty minutes
 after your last save.
 
 The check cannot separate a session and a run that each make their last check
@@ -556,12 +605,13 @@ and each account's walker reads only that account's wiki list.
 | A push or fetch passes with a warning that "a process git started held its output" | Git finished, but a process it started, such as a credential or ssh helper, kept git's output open until the bound | The run's result is git's own, so a push that passed did land. The line says whether that process was stopped with the helper's job. A warning on every run costs up to the rest of the bound each time, so find the helper as the owning account. |
 | A commit or create run stops with "KB_PUSH_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 99999." | The account's `KB_PUSH_TIMEOUT_SECONDS` holds a value outside that range. `kb-commit.ps1` checks it on every `-Push` call, even on a wiki with no remote, so the run stops before staging | Set the variable to a whole number from 1 to 99999, or remove it to take the 300-second default. |
 | A KB reads `deferred: conflict` | A pull conflicted where the model may not join it, or the merge run could not finish | The `deferred` list names the paths. Resolve the conflict in the KB as the owning account, commit and push. "Conflicting pulls" above has the detail. |
-| The operator's thread says a wiki is stuck | A pull from `origin` conflicted on three passes in a row, or on `.claude/settings.json` from its first pass, and the model merge did not join it | Ask a session on the owning account to resolve the conflict in the wiki, naming the paths in the notice record's `paths` field. The field holds the first 10 paths, and the KB's entry under `deferred` in `walk-status.json` lists them all. The field is an addition to the line, so a reader that ignores it still reads the line. Where a merge had landed, the pass's block in `walk.log` names its restore point. The walker writes the notice to `walk-notices.jsonl` and repeats it once a day. A pass whose pull lands writes a cleared line carrying the pull's note, which names the restore point where a merge landed. |
+| A KB reads `deferred: engine change` | A pull from `origin` would change a path under `.claude/`, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, the root `.mcp.json`, or a path holding a Windows short name such as `CLAUDE~1`, that is not the installed engine's own bytes | The `deferred` list names the paths. Read the change as the owning account and, where it is wanted, bring the KB's `HEAD` to hold it: `git merge --ff-only origin/main` in the KB, or a merge you make. Where this machine runs an older engine than the machine that pushed, update this machine's plugin instead and the stop clears on its own. "Conflicting pulls" above has the detail. |
+| The operator's thread says a wiki is stuck | A pull from `origin` conflicted on three passes in a row, or on `.claude/settings.json` from its first pass, and the model merge did not join it; or a pull would change a path under `.claude/`, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, or the root `.mcp.json`, which the walker stops before any merge | Ask a session on the owning account to resolve the conflict in the wiki, naming the paths in the notice record's `paths` field. The field holds the first 10 paths, and the KB's entry under `deferred` in `walk-status.json` lists them all. The field is an addition to the line, so a reader that ignores it still reads the line. Where a merge had landed, the pass's block in `walk.log` names its restore point. The walker writes the notice to `walk-notices.jsonl` and repeats it once a day. A pass whose pull lands writes a cleared line carrying the pull's note, which names the restore point where a merge landed. For an engine-change stop, ask the session to read the change and bring the KB's `HEAD` to hold it by hand, or update the stuck machine's plugin where it runs the older engine. |
 | A step reads `deferred: live` pass after pass | Something other than a run is writing a file outside `inbox/`, such as an editor that saves as you type | `pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Live` in the KB lists each path and its minutes. Close the editor, and the step runs thirty minutes after the last write. |
 | A step reads `failed: git identity unset` | The owning account has no git identity | Set `git config --global user.name` and `user.email` as that account. |
 | A KB reads `skipped: budget` every pass | One KB's runs take the pass's whole 6900-second budget | Read `walk.log` for the step's seconds. A large backfill settles once the inbox drains. |
 | A file sits in `inbox/` forever | A name `kb-move.ps1` refuses, such as a leading dash, a colon or a slash, a file it refuses as a reparse point, such as a symbolic link, or a file whose name `sources/` already holds with different content | The run's report in `walk-output.log` names the file. A person renames it to a plain leaf name not already in `sources/`, or replaces a link with a plain copy of the file, and it ingests on the next pass. A byte-for-byte duplicate of a file already in `sources/` does not stay: the next pass removes it from `inbox/` and its report counts it. A run that stops on a handle matching no file met a file that left the inbox after the run listed it, and the next pass lists the inbox afresh. |
 | The feed reads `failed` | A refused config, such as an HTTPS or password URL or a bad glob, an unreachable remote, or an S4U run that cannot reach the SSH key | Run `pwsh -NoProfile -File .\.claude\feed-inbox.ps1 -WhatIf` by hand as the owning account and read the one-line reason on stderr. |
-| `LastTaskResult` is not 0 | The launcher refused, or the walker could not read the list, take its lock or write the status, or `KB_WALK_SECONDS` holds a value the walker refuses | Read the last lines of `walk-launcher.log`, which name the reason or the walker's exit code and last error line. |
+| `LastTaskResult` is not 0 | The launcher refused, or the walker could not read the list, take its lock or write the status, or `KB_WALK_SECONDS` or `KB_WALK_MODEL_FLOOR_SECONDS` holds a value the walker refuses | Read the last lines of `walk-launcher.log`, which name the reason or the walker's exit code and last error line. |
 | A source is in `sources/` but has no wiki page | A run crashed after moving the file and before committing, or inside `kb-commit.ps1` after staging it | `git status --porcelain` shows the file untracked, or staged with `A` in its first column. The first ingest after its files have gone untouched for thirty minutes finishes it in its reconcile step. Where more than one source is staged, every ingest stops and reports them: commit them by hand or unstage all but one, as the owning account. Otherwise no action is needed unless it persists. |
 | An ingest, lint or query stops pass after pass with "a path outside the reconcile set is already staged" | A path other than a `wiki/` page, `index.md` or `log.md` sits staged, such as a file a person staged by hand, or, for lint and query, a source an interrupted ingest commit left staged. `kb-commit.ps1 -Reconcile` refuses rather than commit it uncounted | The line names the count and the first such path. Commit or unstage that path as the owning account, and the next pass reconciles. |

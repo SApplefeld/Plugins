@@ -26,13 +26,35 @@ wiki skipped; the lint gate both ways on the seven-day stamp, the due lint's
 model output carrying the wrapper's lock-held prefix on a later line and the
 lint still recorded `run`; a due lint whose run made only a Reconcile: commit,
 and one whose run made none, each recorded skipped: no Lint: commit with no
-stamp; a fast-forward
+stamp; a due lint with no Lint: commit on three passes in a row counting
+lintFailures to 3, its fourth pass inside the day held as skipped: held
+after 3 failed lints with no stub call and the log naming when the hold ends,
+a fifth pass with the last attempt 25 hours back calling the stub again and
+counting 4, and a sixth pass a day on whose lint commits under Lint: stamped
+with both fields gone, and a seventh with the count at 3 and the last
+attempt a year ahead calling the stub; a due ingest under a
+KB_WALK_MODEL_FLOOR_SECONDS over
+the remaining budget skipped for budget with no stub call while its pull and
+push run; a fast-forward
 pull with no stub call, a conflicting pull joined by the stub and pushed with
-its note naming the restore point, and
+its note naming the restore point, a
+conflicting pull whose merge run the model-run floor refuses after the fetch,
+aborted with no later step, deferral or count, and
 a conflicting pull the stub leaves, aborted and deferred across two passes
 with the pass count rising, then joined on a third and its count cleared,
 a conflict on .claude/settings.json deferred with no stub call at all and
-stuck from its first pass, and a wiki whose conflict the stub never joins
+stuck from its first pass; a fetched commit changing wiki/page.md alone
+fast-forwarded, one changing .claude/feed.json alone and one changing
+CLAUDE.md alone each stopped before any merge with HEAD as before, no stub
+call and the wiki deferred with reason engine change, that path and stuck
+true, the stop cleared on the pass after HEAD is brought to the fetched
+commit by hand, which reads up to date, one changing .claude/settings.json,
+a shipped engine file, to bytes other than the installed engine's and one
+renaming CLAUDE.md to wiki/notes.md each stopped the same way on that one
+path, .claude/settings.json and CLAUDE.md, one adding wiki/CLAUDE.md
+stopped the same way on that path, and a fetched commit restoring one
+shipped engine file to the installed engine's bytes fast-forwarded with no
+stop; and a wiki whose conflict the stub never joins
 driven through three deferred passes to stuck, its fourth pass fetching a
 commit origin gained meanwhile, starting no stub and naming when the run is
 held until, and a fifth pass a day after the
@@ -66,13 +88,22 @@ pass whose wiki-owned status script leaves a process holding its stdout,
 which the walker drains for 5 seconds and then ends; an ingest stopped at the
 pass budget whose printed line still reaches the walker's stdout; the budget
 cursor across two passes, with a
-lint left under the 60-second child floor skipped for budget; a second
-walker refused by the lock; and the walker killed while its stub sleeps,
-leaving no stub process in the process list.
+lint left under the 60-second child floor skipped for budget, these budget
+cases setting KB_WALK_MODEL_FLOOR_SECONDS to 60 so their first model run
+starts; a second
+walker refused by the lock; and the walker killed while its stub sleeps in
+the third of three wikis, leaving no stub process in the process list and a
+state whose cursor names the second wiki, holding the second wiki's lint
+stamp from that pass and the first wiki, made stuck in that pass, with its
+notice fields as they stood before the pass, so the next pass appends its
+stuck record.
 
 The notices file, walk-notices.jsonl beside the status file, is checked by id
 and text as well, and stuck and still-stuck records by their paths field: the
 settings-file conflict's stuck record on its first pass with no pass count; the
+engine-change stop's stuck record counting 1 path and naming none, with the
+path in its paths field, and its cleared record with no paths field on the
+pass after HEAD is brought up by hand; the
 stuck record on the third pass of a conflict the stub never joins, none on the
 first two and none on the fourth, inside the day; a still-stuck record on the
 fifth pass with the last notice 25 hours back; a cleared record with the
@@ -280,9 +311,11 @@ function Test-StubRecorded {
     }
 }
 
-# Waits up to 20 seconds for the stub to record itself, and returns whether it did.
+# Waits up to 20 seconds, or the seconds named, for the stub to record itself,
+# and returns whether it did.
 function Wait-StubRecorded {
-    $pollEnd = [DateTime]::UtcNow.AddSeconds(20)
+    param([int]$Seconds = 20)
+    $pollEnd = [DateTime]::UtcNow.AddSeconds($Seconds)
     while (-not (Test-StubRecorded) -and [DateTime]::UtcNow -lt $pollEnd) { Start-Sleep -Milliseconds 200 }
     return (Test-StubRecorded)
 }
@@ -525,13 +558,14 @@ function Test-NoticePaths {
 }
 
 # The environment every walker run gets: the test's own account folders, no
-# budget override, and a stub that exits 0 at once, overlaid with the case's values.
+# budget or model-run floor override, and a stub that exits 0 at once, overlaid with the case's values.
 function Get-RunEnvironment {
     param([hashtable]$Overlay = @{})
     $environment = @{
         'LOCALAPPDATA'         = $localDir
         'USERPROFILE'          = $profileDir
         'KB_WALK_SECONDS'      = $null
+        'KB_WALK_MODEL_FLOOR_SECONDS' = $null
         'KB_RUN_SECONDS'       = $null
         'KBWALK_STUB_SLEEP'    = '0'
         'KBWALK_STUB_MODE'     = 'leave'
@@ -703,6 +737,90 @@ try {
     $state = Read-State
     Test-Check 'a due lint that exits 0 with no commit at all gets its one Lint call, reads lint skipped: no Lint: commit with HEAD as before, and keeps its old stamp' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $san) -and ($records[0].Args -ceq $lintArgs) -and ((Invoke-Git $san @('rev-parse', 'HEAD')).Trim() -ceq $sanHeadBefore) -and ((Get-Step $status 'san' 'lint') -ceq 'skipped: no Lint: commit') -and ((Get-StampText $state['wikis']['san']['lastLintAt']) -ceq $eightDaysAgo))
 
+    # The lint hold. aleph's due lint makes no Lint: commit on three passes in
+    # a row, so its state counts lintFailures 1, 2 and 3. Its stamp stays
+    # eight days old, so the fourth pass, inside the day, is held by the hold
+    # and not by the seven-day gate: it starts no stub, records skipped: held
+    # after 3 failed lints, and the log names the time the hold ends, a day
+    # after the third run started. With that start moved 25 hours back, a
+    # fifth pass runs the stub again and counts a fourth failure; with it
+    # moved back again, a sixth pass whose stub commits under Lint: is stamped
+    # and clears both fields.
+    $aleph = New-Wiki 'aleph'
+    Set-List @('aleph')
+    Set-State -LastLintAt @{ aleph = $eightDaysAgo }
+    $alephPassesOk = $true
+    foreach ($pass in 1..3) {
+        Clear-Stub
+        $r = Invoke-Walker
+        $records = @(Get-StubRecords)
+        $status = Read-Status
+        $state = Read-State
+        $alephPassOk = (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $aleph) -and ($records[0].Args -ceq $lintArgs) -and ((Get-Step $status 'aleph' 'lint') -ceq 'skipped: no Lint: commit') -and ($state['wikis']['aleph']['lintFailures'] -eq $pass)
+        if (-not $alephPassOk) { Write-Host "aleph pass $pass off its expected shape" }
+        $alephPassesOk = $alephPassesOk -and $alephPassOk
+    }
+    $alephAttempt = [DateTime]::MinValue
+    $alephAttempted = [DateTime]::TryParseExact((Get-StampText $state['wikis']['aleph']['lastLintAttemptAt']), 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$alephAttempt)
+    $alephHeldUntil = $alephAttempt.ToUniversalTime().AddHours(24).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    Test-Check 'a due lint with no Lint: commit on three passes in a row calls the stub once a pass and counts lintFailures 1, 2 and 3, and a fourth pass inside the day starts no stub, records skipped: held after 3 failed lints, and the log names the time the hold ends' ($alephPassesOk -and $alephAttempted -and (-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'aleph' 'lint') -ceq 'skipped: held after 3 failed lints') -and ([System.IO.File]::ReadAllText($walkLog).Contains("aleph lint has failed 3 times in a row, so its run is held until $alephHeldUntil")))
+    $state = Read-State
+    $state['wikis']['aleph']['lastLintAttemptAt'] = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $state -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Clear-Stub
+    $r = Invoke-Walker
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $state = Read-State
+    Test-Check 'with the last failed lint''s start 25 hours back, the held lint''s fifth pass calls the stub with Lint again, reads skipped: no Lint: commit, and counts lintFailures 4' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $aleph) -and ($records[0].Args -ceq $lintArgs) -and ((Get-Step $status 'aleph' 'lint') -ceq 'skipped: no Lint: commit') -and ($state['wikis']['aleph']['lintFailures'] -eq 4))
+    $state['wikis']['aleph']['lastLintAttemptAt'] = [DateTime]::UtcNow.AddHours(-25).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $state -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Clear-Stub
+    $r = Invoke-Walker @{ 'KBWALK_STUB_LINT' = 'commit' }
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $state = Read-State
+    $alephStamp = [DateTime]::MinValue
+    $alephStamped = [DateTime]::TryParseExact((Get-StampText $state['wikis']['aleph']['lastLintAt']), 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$alephStamp)
+    Test-Check 'a held lint''s run a day on that commits under Lint: reads lint ran with a fresh lastLintAt, and its state holds neither lintFailures nor lastLintAttemptAt' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Args -ceq $lintArgs) -and ((Get-Step $status 'aleph' 'lint') -ceq 'ran') -and $alephStamped -and ($alephStamp.ToUniversalTime() -gt [DateTime]::UtcNow.AddMinutes(-5)) -and (-not $state['wikis']['aleph'].ContainsKey('lintFailures')) -and (-not $state['wikis']['aleph'].ContainsKey('lastLintAttemptAt')))
+
+    # A last failed lint's start a year ahead names no run that started, so
+    # it reads as absent and holds nothing. aleph's stamp is moved eight days
+    # back, so the seven-day gate passes it and only the hold could keep the
+    # stub from running.
+    $state['wikis']['aleph']['lastLintAt'] = $eightDaysAgo
+    $state['wikis']['aleph']['lintFailures'] = 3
+    $state['wikis']['aleph']['lastLintAttemptAt'] = [DateTime]::UtcNow.AddDays(365).ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    [System.IO.File]::WriteAllText($statePath, (ConvertTo-Json -InputObject $state -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+    Clear-Stub
+    $r = Invoke-Walker
+    $records = @(Get-StubRecords)
+    $status = Read-Status
+    $state = Read-State
+    Test-Check 'a due lint counting 3 failures whose last attempt reads a year ahead is not held: it calls the stub with Lint, reads skipped: no Lint: commit, and counts lintFailures 4' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ($records.Count -eq 1) -and ($records[0].Cwd -ieq $aleph) -and ($records[0].Args -ceq $lintArgs) -and ((Get-Step $status 'aleph' 'lint') -ceq 'skipped: no Lint: commit') -and ($state['wikis']['aleph']['lintFailures'] -eq 4))
+
+    # The model-run floor. bet's inbox holds a file, so its ingest is due.
+    # KB_WALK_MODEL_FLOOR_SECONDS 99999 sits over the whole 6900-second budget,
+    # while the 60-second child floor and the 120-second floor for starting a
+    # wiki sit far under what is left, so only the model-run floor can refuse:
+    # the ingest reads skipped: budget with no stub call, while the pull's
+    # fetch, diff and fast-forward and the push's upstream read still run.
+    $betBare = Join-Path $remotesDir 'bet.git'
+    $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $betBare)
+    $bet = New-Wiki 'bet'
+    $null = Invoke-Git $bet @('remote', 'add', 'origin', $betBare)
+    $null = Invoke-Git $bet @('push', '-q', '-u', 'origin', 'main')
+    [System.IO.File]::WriteAllText((Join-Path $bet 'inbox\drop.md'), "bet note`n")
+    Set-List @('bet')
+    Set-State -LastLintAt @{ bet = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker @{ 'KB_WALK_MODEL_FLOOR_SECONDS' = '99999' }
+    $status = Read-Status
+    Test-Check 'with KB_WALK_MODEL_FLOOR_SECONDS over the remaining budget and the budget far over the 60-second child floor, a due ingest reads skipped: budget with no stub call, while the same pass''s pull reads ran: up to date, its push skipped: nothing to push, and no failure is listed' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'bet' 'ingest') -ceq 'skipped: budget') -and ((Get-Step $status 'bet' 'pull') -ceq 'ran: up to date') -and ((Get-Step $status 'bet' 'push') -ceq 'skipped: nothing to push') -and (@($status['failures']).Count -eq 0))
+
     # --- Bullet 3: a wiki with an origin. The bare remote is seeded from the
     # wiki, and a second clone makes the remote's changes.
     $bare = Join-Path $remotesDir 'epsilon.git'
@@ -757,6 +875,26 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $epsilon 'wiki\page.md'), $localText)
     $null = Invoke-Git $epsilon @('commit', '-q', '-a', '-m', 'Local edit two')
     $headBefore = (Invoke-Git $epsilon @('rev-parse', 'HEAD')).Trim()
+
+    # The same conflict met first at the model-run floor. epsilon's local
+    # commit is unpushed, so a push over the diverged tree would fail. The
+    # floor of 99999 sits over the whole 6900-second budget, while the
+    # 60-second child floor and the 120-second floor for starting a wiki sit
+    # far under what is left, so only the merge run's model-run floor can
+    # refuse; the fetched origin/main moving to the remote's head shows the
+    # pull got past its fetch to the merge. The refusal reaches no verdict,
+    # so the merge is aborted, the visit ends with no later step, and the
+    # count, the last run time and the deferral stay absent.
+    $epsilonFetchedBefore = (Invoke-Git $epsilon @('rev-parse', 'refs/remotes/origin/main')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker @{ 'KB_WALK_MODEL_FLOOR_SECONDS' = '99999' }
+    $status = Read-Status
+    $state = Read-State
+    $epsilonStatus = Get-WikiStatus $status 'epsilon'
+    $epsilonFetched = (Invoke-Git $epsilon @('rev-parse', 'refs/remotes/origin/main')).Trim()
+    $mergeHeadGone = (Invoke-Captured 'git' @('-C', $epsilon, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).ExitCode -ne 0
+    Test-Check 'a conflicting pull whose merge run the model-run floor refuses after the fetch reads skipped: budget with no stub call, aborts the merge with HEAD as before, records no feed, ingest, lint or push, lists no deferral or failure, keeps the result visited, and leaves the state with no conflictPasses or lastMergeRunAt' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'epsilon' 'pull') -ceq 'skipped: budget') -and ($epsilonFetched -cne $epsilonFetchedBefore) -and ($epsilonFetched -ceq (Invoke-Git $bare @('rev-parse', 'main')).Trim()) -and $mergeHeadGone -and ((Invoke-Git $epsilon @('rev-parse', 'HEAD')).Trim() -ceq $headBefore) -and (-not $epsilonStatus['steps'].ContainsKey('feed')) -and (-not $epsilonStatus['steps'].ContainsKey('ingest')) -and (-not $epsilonStatus['steps'].ContainsKey('lint')) -and (-not $epsilonStatus['steps'].ContainsKey('push')) -and (@(@($status['deferred']) | Where-Object { $_['name'] -ceq 'epsilon' }).Count -eq 0) -and (@($status['failures']).Count -eq 0) -and ($epsilonStatus['result'] -ceq 'visited') -and (-not $state['wikis']['epsilon'].ContainsKey('conflictPasses')) -and (-not $state['wikis']['epsilon'].ContainsKey('lastMergeRunAt')))
+
     Clear-Stub
     $r = Invoke-Walker
     $records = @(Get-StubRecords)
@@ -787,18 +925,25 @@ try {
     Test-Check 'a third pass whose stub joins the page lands the merge with the restore point the pre-merge HEAD, lists nothing under deferred, pushes, and drops the count and the last run time from the state' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 1) -and ((Get-Step $status 'epsilon' 'pull') -ceq "ran: merged by model, restore point $epsilonHeadBefore") -and ($parents[1] -ceq $epsilonHeadBefore) -and ((Get-Step $status 'epsilon' 'push') -ceq 'ran') -and (@(Get-Deferred $status).Count -eq 0) -and (-not $state['wikis']['epsilon'].ContainsKey('conflictPasses')) -and (-not $state['wikis']['epsilon'].ContainsKey('lastMergeRunAt')) -and (-not $state['wikis']['epsilon'].ContainsKey('deferred')))
 
     # A conflict on the settings file is a person's: both sides change
-    # .claude/settings.json, and the pass defers without a stub call.
+    # .claude/settings.json, and the pass defers without a stub call. The
+    # shared base commit carries a trailing line the engine's file lacks, the
+    # other side puts the engine's exact bytes back, and lambda's own HEAD
+    # changes that line another way: the fetched blob is the installed
+    # engine's, so the engine-change stop passes the pull to the merge, and
+    # the merge conflicts on the settings file.
     $lambdaBare = Join-Path $remotesDir 'lambda.git'
     $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $lambdaBare)
     $lambda = New-Wiki 'lambda'
+    $settingsText = [System.IO.File]::ReadAllText((Join-Path $lambda '.claude\settings.json'))
+    [System.IO.File]::WriteAllText((Join-Path $lambda '.claude\settings.json'), ($settingsText + "// base side`n"))
+    $null = Invoke-Git $lambda @('commit', '-q', '-a', '-m', 'Base settings')
     $null = Invoke-Git $lambda @('remote', 'add', 'origin', $lambdaBare)
     $null = Invoke-Git $lambda @('push', '-q', '-u', 'origin', 'main')
     $lambdaOther = Join-Path $remotesDir 'lambda-other'
     $null = Invoke-Git $remotesDir @('clone', '-q', $lambdaBare, $lambdaOther)
     $null = Invoke-Git $lambdaOther @('config', 'user.name', 'other side')
     $null = Invoke-Git $lambdaOther @('config', 'user.email', 'other@test.invalid')
-    $settingsText = [System.IO.File]::ReadAllText((Join-Path $lambda '.claude\settings.json'))
-    [System.IO.File]::WriteAllText((Join-Path $lambdaOther '.claude\settings.json'), ($settingsText + "// remote side`n"))
+    Copy-Item -LiteralPath (Join-Path $templateDir '.claude\settings.json') -Destination (Join-Path $lambdaOther '.claude\settings.json') -Force
     $null = Invoke-Git $lambdaOther @('commit', '-q', '-a', '-m', 'Remote settings')
     $null = Invoke-Git $lambdaOther @('push', '-q', 'origin', 'main')
     [System.IO.File]::WriteAllText((Join-Path $lambda '.claude\settings.json'), ($settingsText + "// local side`n"))
@@ -817,6 +962,123 @@ try {
     $lambdaStuckText = 'lambda is stuck: its pull from origin conflicts on .claude/settings.json, which no headless run may attempt; a session or a person must resolve the conflict in the wiki, and the walker resumes once a pull lands.'
     Test-Check 'the settings-file conflict appends one stuck record on its first pass, source wiki-walk, its text naming .claude/settings.json and carrying no pass count' (($lambdaNotices.Count -eq 1) -and ([string]$lambdaNotices[0]['id']).StartsWith('lambda:stuck:', [StringComparison]::Ordinal) -and ($lambdaNotices[0]['source'] -ceq 'wiki-walk') -and ($lambdaNotices[0]['text'] -ceq $lambdaStuckText) -and (-not ([string]$lambdaNotices[0]['text']).Contains('passes')))
     Test-Check 'the settings-file stuck record carries a paths field holding exactly .claude/settings.json' (($lambdaNotices.Count -eq 1) -and (Test-NoticePaths $lambdaNotices[0] @('.claude/settings.json')))
+
+    # The guard-rail stop. episemon's origin gains commits a second clone pushes,
+    # each a clean fast-forward for episemon. A page change lands. A change to
+    # .claude/feed.json alone, a file the engine does not ship, stops the pull
+    # before any merge: HEAD stays, no stub runs, and the wiki is deferred
+    # with reason engine change, that path and stuck true, with no pass
+    # count. Bringing episemon's HEAD to the fetched commit by hand clears it on
+    # the next pass, which reads up to date and appends the cleared record.
+    # A change to CLAUDE.md alone then stops the same way.
+    $episemonBare = Join-Path $remotesDir 'episemon.git'
+    $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $episemonBare)
+    $episemon = New-Wiki 'episemon'
+    $null = Invoke-Git $episemon @('remote', 'add', 'origin', $episemonBare)
+    $null = Invoke-Git $episemon @('push', '-q', '-u', 'origin', 'main')
+    $episemonOther = Join-Path $remotesDir 'episemon-other'
+    $null = Invoke-Git $remotesDir @('clone', '-q', $episemonBare, $episemonOther)
+    $null = Invoke-Git $episemonOther @('config', 'user.name', 'other side')
+    $null = Invoke-Git $episemonOther @('config', 'user.email', 'other@test.invalid')
+    [System.IO.File]::WriteAllText((Join-Path $episemonOther 'wiki\page.md'), "a page from the other clone`n")
+    $null = Invoke-Git $episemonOther @('add', '--', 'wiki/page.md')
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-m', 'Remote page')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    Set-List @('episemon')
+    Set-State -LastLintAt @{ episemon = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonRemoteHead = (Invoke-Git $episemonBare @('rev-parse', 'main')).Trim()
+    Test-Check 'a fetched commit changing wiki/page.md alone is fast-forwarded with no stub call and nothing deferred' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonRemoteHead) -and ((Get-Step $status 'episemon' 'pull') -ceq 'ran: fast-forward') -and (@(Get-Deferred $status).Count -eq 0))
+
+    [System.IO.File]::WriteAllText((Join-Path $episemonOther '.claude\feed.json'), "{ `"sources`": [] }`n")
+    $null = Invoke-Git $episemonOther @('add', '--', '.claude/feed.json')
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-m', 'Remote feed')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    $episemonHeadBefore = (Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonStatus = Get-WikiStatus $status 'episemon'
+    $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
+    $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
+    $episemonNotices = @(Get-Notices 'episemon')
+    Test-Check 'a fetched commit changing .claude/feed.json alone, a file the engine does not ship, lands no merge: HEAD as before and no feed.json in the tree, no stub call, the pull deferred: engine change, the wiki listed with that reason, that one path, stuck true and no pass count, its result deferred with no later step, and one stuck record whose text names the wiki and 1 path but not the path, which its paths field holds' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonHeadBefore) -and (-not (Test-Path -LiteralPath (Join-Path $episemon '.claude\feed.json'))) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq '.claude/feed.json') -and ($episemonDeferred[0]['stuck'] -eq $true) -and (-not $episemonDeferred[0].ContainsKey('passes')) -and ($episemonStatus['result'] -ceq 'deferred') -and (-not $episemonStatus['steps'].ContainsKey('feed')) -and (-not $episemonStatus['steps'].ContainsKey('push')) -and ($episemonNotices.Count -eq 1) -and ([string]$episemonNotices[0]['id']).StartsWith('episemon:stuck:', [StringComparison]::Ordinal) -and ([string]$episemonNotices[0]['text']).StartsWith('episemon is stuck: ', [StringComparison]::Ordinal) -and ([string]$episemonNotices[0]['text']).Contains('1 path') -and (-not ([string]$episemonNotices[0]['text']).Contains('feed.json')) -and (Test-NoticePaths $episemonNotices[0] @('.claude/feed.json')))
+
+    # A session or a person brings HEAD to the fetched commit: the next pass
+    # has nothing to bring, reads up to date, and the notice clears.
+    $null = Invoke-Git $episemon @('merge', '-q', '--ff-only', 'origin/main')
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $state = Read-State
+    $episemonNotices = @(Get-Notices 'episemon')
+    Test-Check 'a stopped wiki whose HEAD is brought by hand to the fetched commit reads pull ran: up to date on the next pass, lists nothing deferred, appends one cleared record with no paths field, and its state holds neither noticedStuck nor lastNoticeAt' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'ran: up to date') -and (@(Get-Deferred $status).Count -eq 0) -and ($episemonNotices.Count -eq 2) -and ([string]$episemonNotices[1]['id']).StartsWith('episemon:cleared:', [StringComparison]::Ordinal) -and (-not $episemonNotices[1].ContainsKey('paths')) -and (-not $state['wikis']['episemon'].ContainsKey('noticedStuck')) -and (-not $state['wikis']['episemon'].ContainsKey('lastNoticeAt')) -and (-not $state['wikis']['episemon'].ContainsKey('deferred')))
+
+    $episemonClaudeText = [System.IO.File]::ReadAllText((Join-Path $episemonOther 'CLAUDE.md'))
+    [System.IO.File]::WriteAllText((Join-Path $episemonOther 'CLAUDE.md'), ($episemonClaudeText + "`nA line from the other clone.`n"))
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-a', '-m', 'Remote CLAUDE.md')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    $episemonHeadBefore = (Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonStatus = Get-WikiStatus $status 'episemon'
+    $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
+    $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
+    $episemonNotices = @(Get-Notices 'episemon')
+    Test-Check 'a fetched commit changing CLAUDE.md alone stops the same way: HEAD as before, no stub call, the pull deferred: engine change with the path CLAUDE.md and stuck true, no later step, and a new stuck record carrying that path' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonHeadBefore) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq 'CLAUDE.md') -and ($episemonDeferred[0]['stuck'] -eq $true) -and ($episemonStatus['result'] -ceq 'deferred') -and (-not $episemonStatus['steps'].ContainsKey('push')) -and ($episemonNotices.Count -eq 3) -and ([string]$episemonNotices[2]['id']).StartsWith('episemon:stuck:', [StringComparison]::Ordinal) -and (Test-NoticePaths $episemonNotices[2] @('CLAUDE.md')))
+
+    # A shipped engine file whose fetched bytes differ from the installed
+    # engine's stops on the blob compare: HEAD is brought to the fetched
+    # commit by hand for a clean base, and the other clone appends a line to
+    # .claude/settings.json, a file the engine ships, so the fetched blob
+    # exists and its id differs from the installed file's.
+    $null = Invoke-Git $episemon @('merge', '-q', '--ff-only', 'origin/main')
+    $episemonSettingsText = [System.IO.File]::ReadAllText((Join-Path $episemonOther '.claude\settings.json'))
+    [System.IO.File]::WriteAllText((Join-Path $episemonOther '.claude\settings.json'), ($episemonSettingsText + "// a line from the other clone`n"))
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-a', '-m', 'Remote settings')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    $episemonHeadBefore = (Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
+    $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
+    Test-Check 'a fetched commit changing .claude/settings.json, a file the engine ships, to bytes other than the installed engine''s stops on the differing blob: HEAD as before, no stub call, the pull deferred: engine change with that one path and stuck true' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonHeadBefore) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq '.claude/settings.json') -and ($episemonDeferred[0]['stuck'] -eq $true))
+
+    # A guard rail renamed to an ordinary name with no content change still
+    # stops on the path it leaves: from a clean base again, the other clone
+    # moves CLAUDE.md to wiki/notes.md, and the pull lists CLAUDE.md, which
+    # is always a stop.
+    $null = Invoke-Git $episemon @('merge', '-q', '--ff-only', 'origin/main')
+    $null = Invoke-Git $episemonOther @('mv', 'CLAUDE.md', 'wiki/notes.md')
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-m', 'Remote rename')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    $episemonHeadBefore = (Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
+    $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
+    Test-Check 'a fetched commit renaming CLAUDE.md to wiki/notes.md with no content change stops on the path it leaves: HEAD as before with CLAUDE.md still in the tree, no stub call, the pull deferred: engine change with the path CLAUDE.md alone and stuck true' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonHeadBefore) -and (Test-Path -LiteralPath (Join-Path $episemon 'CLAUDE.md')) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq 'CLAUDE.md') -and ($episemonDeferred[0]['stuck'] -eq $true))
+
+    # A CLAUDE.md below the root is loaded too, so it stops on its last
+    # segment: from a clean base again, the other clone adds wiki/CLAUDE.md,
+    # and the pull lists that path alone.
+    $null = Invoke-Git $episemon @('merge', '-q', '--ff-only', 'origin/main')
+    [System.IO.File]::WriteAllText((Join-Path $episemonOther 'wiki\CLAUDE.md'), "A nested line from the other clone.`n")
+    $null = Invoke-Git $episemonOther @('add', '--', 'wiki/CLAUDE.md')
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-m', 'Remote nested CLAUDE.md')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    $episemonHeadBefore = (Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
+    $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
+    Test-Check 'a fetched commit adding wiki/CLAUDE.md stops on its last segment: HEAD as before with no wiki/CLAUDE.md in the tree, no stub call, the pull deferred: engine change with the path wiki/CLAUDE.md alone and stuck true' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonHeadBefore) -and (-not (Test-Path -LiteralPath (Join-Path $episemon 'wiki\CLAUDE.md'))) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq 'wiki/CLAUDE.md') -and ($episemonDeferred[0]['stuck'] -eq $true))
 
     # The stuck rule. phi's origin and local history disagree on a page and
     # the stub never joins it, so each pass defers it with the count one
@@ -1152,6 +1414,33 @@ try {
     $muTwoMarkBytes = [System.IO.File]::ReadAllBytes((Join-Path $muTwo '.claude\engine.json'))
     $muMarksEqual = ([Convert]::ToBase64String($muMarkBytes)) -ceq ([Convert]::ToBase64String($muTwoMarkBytes))
     Test-Check 'the walker''s engine.json holds templateHash as its only key, with no per-machine field and no time, and the two clones'' marks are byte-identical' (($muTwoMark['templateHash'] -ceq $script:engineHash) -and ($muTwoMark.Keys.Count -eq 1) -and $muMarksEqual)
+
+    # One shipped engine file restored on origin to the installed engine's
+    # bytes. qoppa's own history holds a changed kb-status.ps1 and the other
+    # clone puts the engine's copy back, so the fetched blob is the installed
+    # file's while qoppa's HEAD holds other bytes for it: the exemption reads the
+    # installed file, not HEAD, and the pull lands as a fast-forward.
+    $qoppaBare = Join-Path $remotesDir 'qoppa.git'
+    $null = Invoke-Git $remotesDir @('init', '-q', '--bare', '-b', 'main', $qoppaBare)
+    $qoppa = New-Wiki 'qoppa'
+    [System.IO.File]::AppendAllText((Join-Path $qoppa '.claude\kb-status.ps1'), "`n# a local change to a shipped file`n")
+    $null = Invoke-Git $qoppa @('commit', '-q', '-a', '-m', 'Local change to kb-status.ps1')
+    $null = Invoke-Git $qoppa @('remote', 'add', 'origin', $qoppaBare)
+    $null = Invoke-Git $qoppa @('push', '-q', '-u', 'origin', 'main')
+    $qoppaOther = Join-Path $remotesDir 'qoppa-other'
+    $null = Invoke-Git $remotesDir @('clone', '-q', $qoppaBare, $qoppaOther)
+    $null = Invoke-Git $qoppaOther @('config', 'user.name', 'other side')
+    $null = Invoke-Git $qoppaOther @('config', 'user.email', 'other@test.invalid')
+    Copy-Item -LiteralPath (Join-Path $templateDir '.claude\kb-status.ps1') -Destination (Join-Path $qoppaOther '.claude\kb-status.ps1') -Force
+    $null = Invoke-Git $qoppaOther @('commit', '-q', '-a', '-m', 'Restore the engine''s kb-status.ps1')
+    $null = Invoke-Git $qoppaOther @('push', '-q', 'origin', 'main')
+    Set-List @('qoppa')
+    Set-State -LastLintAt @{ qoppa = $yesterday }
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $qoppaRemoteHead = (Invoke-Git $qoppaBare @('rev-parse', 'main')).Trim()
+    Test-Check 'a fetched commit changing one shipped engine file to the bytes the installed engine holds, in a wiki whose own HEAD holds other bytes for it, is fast-forwarded with no stop, no stub call and nothing deferred' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Invoke-Git $qoppa @('rev-parse', 'HEAD')).Trim() -ceq $qoppaRemoteHead) -and ((Get-Step $status 'qoppa' 'pull') -ceq 'ran: fast-forward') -and (@(Get-Deferred $status).Count -eq 0))
 
     # An engine update commits exactly the files it wrote: a person's staged
     # page and an untracked file under .claude/ stay out of the commit and stay
@@ -1533,7 +1822,9 @@ try {
 
     # A child stopped at the budget still leaves what it printed: the wiki's
     # own kb-run.ps1 is replaced by one that prints a line and sleeps past the
-    # pass budget, so the walker stops its tree at the deadline.
+    # pass budget, so the walker stops its tree at the deadline. The model-run
+    # floor is set to the 60-second child floor, so the ingest under the
+    # 130-second budget still starts.
     $pi = New-Wiki 'pi'
     [System.IO.File]::WriteAllText((Join-Path $pi 'inbox\drop.md'), "pi note`n")
     $stoppedLine = 'pi-run printed this line before the stop'
@@ -1549,7 +1840,7 @@ try {
     Set-List @('pi')
     Set-State -LastLintAt @{ pi = $yesterday }
     Clear-Stub
-    $r = Invoke-Walker @{ 'KB_WALK_SECONDS' = '130' } -TimeoutSeconds 240
+    $r = Invoke-Walker @{ 'KB_WALK_SECONDS' = '130'; 'KB_WALK_MODEL_FLOOR_SECONDS' = '60' } -TimeoutSeconds 240
     $status = Read-Status
     Test-Check 'an ingest child stopped at the pass budget reads failed for the stop, and the line it printed before the stop reached the walker''s stdout' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Get-Step $status 'pi' 'ingest').StartsWith('failed: kb-run.ps1 -Operation Ingest did not finish within the remaining budget', [StringComparison]::Ordinal)) -and (@(Get-Lines $r.Stdout) -ccontains $stoppedLine))
 
@@ -1587,6 +1878,8 @@ try {
     # stub's 75-second ingest leaves under the 60-second floor for starting a
     # child: the first wiki's due lint is skipped for budget rather than started
     # and stopped, the second wiki is skipped, and the next pass starts with it.
+    # The model-run floor is set to the 60-second child floor, so the first
+    # ingest still starts, and the lint's Live read meets the child floor first.
     $iota = New-Wiki 'iota'
     $kappa = New-Wiki 'kappa'
     [System.IO.File]::WriteAllText((Join-Path $iota 'inbox\drop.md'), "iota note`n")
@@ -1594,7 +1887,7 @@ try {
     Set-List @('iota', 'kappa')
     Set-State -LastLintAt @{ iota = $eightDaysAgo; kappa = $yesterday }
     Clear-Stub
-    $r = Invoke-Walker @{ 'KB_WALK_SECONDS' = '132'; 'KBWALK_STUB_SLEEP' = '75' } -TimeoutSeconds 240
+    $r = Invoke-Walker @{ 'KB_WALK_SECONDS' = '132'; 'KB_WALK_MODEL_FLOOR_SECONDS' = '60'; 'KBWALK_STUB_SLEEP' = '75' } -TimeoutSeconds 240
     $records = @(Get-StubRecords)
     $status = Read-Status
     $state = Read-State
@@ -1624,9 +1917,33 @@ try {
     # process object and never by a tree stop, so only the walker's kill-on-close
     # job can end the stub. The process list is read before the kill and must
     # show the sleeping stub, or the later read proves nothing.
+    #
+    # The killed pass visits three wikis, and the state it leaves shows the
+    # write after each visit. episemon's origin still holds the commit adding
+    # wiki/CLAUDE.md that stopped it above, so from a state holding no notice
+    # fields the pass makes it stuck again and collects its stuck notice,
+    # which only the pass's end would append. gimel's own kb-run.ps1 makes a
+    # Lint: commit, so its due lint is stamped with no stub call. iota's
+    # ingest stub then sleeps until the kill. The state read after the kill
+    # names gimel as the cursor and holds its fresh stamp, and episemon's
+    # deferral with noticedStuck and lastNoticeAt as they stood before the
+    # pass, so the next pass appends the stuck record.
+    $gimel = New-Wiki 'gimel'
+    $lintRunLines = @(
+        'git commit -q --allow-empty -m "Lint: gimel check, clean"'
+        'exit $LASTEXITCODE'
+    )
+    [System.IO.File]::WriteAllText((Join-Path $gimel '.claude\kb-run.ps1'), (($lintRunLines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding($false)))
+    # Committed, so the tree is not live and the lint's Live read lets it start.
+    $null = Invoke-Git $gimel @('add', '--', '.claude/kb-run.ps1')
+    $null = Invoke-Git $gimel @('commit', '-q', '-m', 'Committing run')
+    Set-List @('episemon', 'gimel', 'iota')
+    Set-State -LastLintAt @{ episemon = $yesterday; gimel = $eightDaysAgo; iota = $yesterday }
+    $episemonNoticesBefore = @(Get-Notices 'episemon').Count
     Clear-Stub
     $killCase = Start-Walker @{ 'KBWALK_STUB_SLEEP' = '20' }
-    $killStubStarted = Wait-StubRecorded
+    # The stub starts only after two wikis' visits, so its wait is longer.
+    $killStubStarted = Wait-StubRecorded 60
     $script:recordedStubs = @(Get-StubProcesses @($killCase.Process.Id))
     Test-Check 'before the kill, the process list shows the sleeping stub by its command line' ($killStubStarted -and ($script:recordedStubs.Count -ge 1))
     if (-not $killCase.Process.HasExited) { $killCase.Process.Kill() }
@@ -1643,10 +1960,17 @@ try {
     $markerWaitEnd = $stubStartedAt.AddSeconds(24)
     while ([DateTime]::UtcNow -lt $markerWaitEnd) { Start-Sleep -Milliseconds 500 }
     Test-Check 'the orphaned stub''s after-sleep marker never appears, 24 seconds after the stub started' ($killStubStarted -and (-not (Test-Path -LiteralPath $script:afterMarker)))
+    $killState = Read-State
     Stop-LiveRecorded $script:recordedStubs
     Clear-Stub
     $r = Invoke-Walker
     Test-Check 'after the kill the lock is free, so the next pass proceeds and starts the stub' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 1))
+    $gimelStamp = [DateTime]::MinValue
+    $gimelStamped = [DateTime]::TryParseExact((Get-StampText $killState['wikis']['gimel']['lastLintAt']), 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$gimelStamp)
+    $killEpisemon = $killState['wikis']['episemon']
+    $killEpisemonDeferred = ($null -ne $killEpisemon) -and $killEpisemon.ContainsKey('deferred') -and ($killEpisemon['deferred'] -is [System.Collections.IDictionary]) -and ([string]$killEpisemon['deferred']['reason'] -ceq 'engine change')
+    $episemonNotices = @(Get-Notices 'episemon')
+    Test-Check 'the walker killed in its third wiki leaves a state whose cursor names the second, the last wiki visited, holding the second wiki''s lint stamp from that pass, and the first wiki, made stuck in that pass, with its engine change deferral and noticedStuck and lastNoticeAt as they stood before the pass, so the next pass appends its stuck record' (([string]$killState['cursor'] -ceq 'gimel') -and $gimelStamped -and ($gimelStamp.ToUniversalTime() -gt $killCase.StartedAt) -and $killEpisemonDeferred -and (-not $killEpisemon.ContainsKey('noticedStuck')) -and (-not $killEpisemon.ContainsKey('lastNoticeAt')) -and ($episemonNotices.Count -eq $episemonNoticesBefore + 1) -and ([string]$episemonNotices[-1]['id']).StartsWith('episemon:stuck:', [StringComparison]::Ordinal))
 } finally {
     foreach ($process in $script:started) {
         if (-not $process.HasExited) { Stop-StartedTree $process }

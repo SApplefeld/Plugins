@@ -20,9 +20,19 @@ settings start a missed run when the machine is next available and end a run at 
 
 The script refuses where pwsh or claude is not on the PATH of the account it runs as, and warns where
 -User is another account, since both were resolved on this account's PATH and the task runs as -User.
-It refuses a launcher root under a plugins\marketplaces or plugins\cache folder, which a plugin update
-replaces. -LauncherRoot may name the folder this script runs from, in which case no file is copied
-onto itself: an engine checkout registers its own launcher that way.
+Where -User is another account it also requires -LauncherRoot, since the default root sits under this
+account's profile, which the other account cannot read, and it verifies that the account can read the
+named folder before anything is copied or registered, under -WhatIf too. The read is verified from the
+folder's access rules, or from those of its nearest existing ancestor where the folder does not exist
+yet: an allow rule must grant ReadAndExecute to the account, to Everyone, to Authenticated Users or to
+a local group the account is a direct member of, and must reach the copied files: inheritable by
+files where the folder exists, and by folders and files without NoPropagateInherit where an ancestor
+was read. No deny rule for any of those that reaches the launcher may remove a read right. A nested
+group, a domain group and a local group whose members cannot be listed are not consulted, and a
+refusal names the identities that were and any group skipped. It refuses a launcher root under a
+plugins\marketplaces or plugins\cache folder, which a plugin update replaces. -LauncherRoot may
+name the folder this script runs from, in which case no file is copied onto itself: an engine
+checkout registers its own launcher that way.
 
 Without -WhatIf the script requires an elevated session and refuses otherwise. With -WhatIf it prints
 the definition it would register and copies and registers nothing; the copy and the registration both
@@ -35,7 +45,8 @@ as this computer's account of that name. Defaults to the current account.
 
 .PARAMETER LauncherRoot
 The folder the launcher and its functions file are copied into. Defaults to
-%LOCALAPPDATA%\llm-wiki\launcher.
+%LOCALAPPDATA%\llm-wiki\launcher. Required where -User is another account, and then verified readable
+by that account.
 
 .PARAMETER Remove
 Unregisters the -User account's wiki-walk task instead of registering it.
@@ -77,6 +88,134 @@ function Resolve-AbsolutePath {
     param([Parameter(Mandatory)][string]$Path)
     $unresolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     return [System.IO.Path]::GetFullPath($unresolved)
+}
+
+# The identities whose access rules speak for an account, keyed by SID: the account itself, Everyone,
+# Authenticated Users and each local group it is a direct member of. A nested group and a domain
+# group are not consulted, since the registrar holds no password for the account and runs no probe
+# as it, so a refusal names exactly what was. An account that does not resolve to a SID is refused.
+# Returns the identities, keyed by SID, and the names of the local groups whose members could not be
+# listed, which a refusal names as skipped.
+function Get-ConsultedIdentities {
+    param([Parameter(Mandatory)][string]$Account)
+    try {
+        $sid = ([Security.Principal.NTAccount]$Account).Translate([Security.Principal.SecurityIdentifier])
+    } catch {
+        Stop-WithReason "-User '$Account' does not resolve to an account: $($_.Exception.Message)"
+    }
+    $identities = [ordered]@{}
+    $identities[$sid.Value] = $Account
+    $identities['S-1-1-0'] = 'Everyone'
+    $identities['S-1-5-11'] = 'NT AUTHORITY\Authenticated Users'
+    try {
+        $groups = @(Get-LocalGroup)
+    } catch {
+        Stop-WithReason "the local groups could not be listed, so the groups $Account belongs to are unknown: $($_.Exception.Message)"
+    }
+    $skipped = [System.Collections.Generic.List[string]]::new()
+    foreach ($group in $groups) {
+        # A group whose members cannot be listed, such as one holding an orphaned SID, is not consulted,
+        # and is named as skipped.
+        try {
+            $members = @(Get-LocalGroupMember -SID $group.SID -ErrorAction Stop)
+        } catch {
+            $skipped.Add($(if ([string]::IsNullOrEmpty($group.Name)) { $group.SID.Value } else { $group.Name }))
+            continue
+        }
+        if ($members.SID -contains $sid) {
+            # A group SID that does not translate to a name is named by the SID itself.
+            try {
+                $name = $group.SID.Translate([Security.Principal.NTAccount]).Value
+            } catch {
+                $name = $group.SID.Value
+            }
+            $identities[$group.SID.Value] = $name
+        }
+    }
+    return [pscustomobject]@{ Identities = $identities; Skipped = $skipped.ToArray() }
+}
+
+# Refuses unless the account can read the folder, read from the folder's access rules or, where the
+# folder does not exist yet, from those of its nearest existing ancestor. The read holds where an
+# allow rule grants ReadAndExecute, or a right set containing it, to one of the account's consulted
+# identities and no deny rule for any of them that reaches the launcher removes a read right. A rule
+# counts only where it reaches the files copied into the folder, since a copied file holds only the
+# inheritable rules of the folder it lands in. Where the folder exists, an allow rule counts only where
+# it carries ObjectInherit, and a deny rule counts unless it is InheritOnly without ObjectInherit.
+# Where an ancestor was read, an allow rule counts only where it carries ContainerInherit and
+# ObjectInherit, since the new folder holds only what it inherits too, and a deny rule counts where it
+# carries either. On an ancestor, a rule carrying NoPropagateInherit counts as neither, since it stops
+# at the ancestor's direct children: a new folder made there gets it for itself alone, and a file
+# copied into that folder gets nothing. The check is a read and creates nothing, so it runs under
+# -WhatIf too. The task runs as the account, and a launcher it cannot read fails before the launcher
+# writes a line.
+function Assert-AccountCanRead {
+    param([Parameter(Mandatory)][string]$Account, [Parameter(Mandatory)][string]$Folder)
+    $consulted = Get-ConsultedIdentities -Account $Account
+    $identities = $consulted.Identities
+    $readFrom = $Folder
+    $isAncestor = $false
+    while (-not (Test-Path -LiteralPath $readFrom -PathType Container)) {
+        $parent = Split-Path -Parent $readFrom
+        if ([string]::IsNullOrEmpty($parent)) {
+            Stop-WithReason "-LauncherRoot '$Folder' has no existing ancestor folder whose access rules could be read."
+        }
+        $readFrom = $parent
+        $isAncestor = $true
+    }
+    try {
+        $rules = @((Get-Acl -LiteralPath $readFrom).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    } catch {
+        Stop-WithReason "the access rules of '$readFrom' could not be read: $($_.Exception.Message)"
+    }
+    $readRights = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
+    $objectInherit = [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $bothInherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $inheritOnly = [System.Security.AccessControl.PropagationFlags]::InheritOnly
+    $noPropagate = [System.Security.AccessControl.PropagationFlags]::NoPropagateInherit
+    $skippedNote = ''
+    if ($consulted.Skipped.Count -gt 0) {
+        $skippedNote = " Local groups whose members could not be listed, not consulted: $($consulted.Skipped -join ', ')."
+    }
+    $checked = @($identities.Keys | ForEach-Object { "$($identities[$_]) ($_)" }) -join ', '
+    $grantedTo = $null
+    foreach ($rule in $rules) {
+        $sidValue = $rule.IdentityReference.Value
+        if (-not $identities.Contains($sidValue)) { continue }
+        $propagates = ($rule.PropagationFlags -band $noPropagate) -eq 0
+        if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) {
+            # On an ancestor, a propagating deny carrying ObjectInherit reaches the copied files through
+            # the new folder, and that reading is exact. One carrying ContainerInherit alone reaches the
+            # new folder and not the files, and counts on the same conservative side as a folder-only
+            # deny on an existing folder.
+            $reachesLauncher = if ($isAncestor) {
+                $propagates -and (($rule.InheritanceFlags -band $bothInherit) -ne 0)
+            } else {
+                # A deny on the existing folder itself counts on purpose even where it is folder-only
+                # and the copied files would not inherit it, so this reading over-refuses that deny.
+                # That is the conservative side of the rule that no deny for a consulted identity may
+                # remove a read right.
+                -not ((($rule.PropagationFlags -band $inheritOnly) -ne 0) -and (($rule.InheritanceFlags -band $objectInherit) -eq 0))
+            }
+            if ($reachesLauncher -and (($rule.FileSystemRights -band $readRights) -ne 0)) {
+                Stop-WithReason "-LauncherRoot '$Folder' is not readable by ${Account}: a deny rule on '$readFrom' for $($identities[$sidValue]) removes a read right ($($rule.FileSystemRights)). Identities checked: $checked.$skippedNote The task runs as $Account and would fail before the launcher writes a line."
+            }
+            continue
+        }
+        if (($rule.FileSystemRights -band $readRights) -ne $readRights) { continue }
+        $needed = if ($isAncestor) { $bothInherit } else { $objectInherit }
+        if (($rule.InheritanceFlags -band $needed) -ne $needed) { continue }
+        if ($isAncestor -and -not $propagates) { continue }
+        if ($null -eq $grantedTo) { $grantedTo = $identities[$sidValue] }
+    }
+    if ($null -eq $grantedTo) {
+        $where = if ($isAncestor) {
+            "its nearest existing ancestor '$readFrom' carries no allow rule granting ReadAndExecute with ContainerInherit and ObjectInherit and without NoPropagateInherit"
+        } else {
+            "it carries no allow rule granting ReadAndExecute with ObjectInherit, which the copied files would inherit,"
+        }
+        Stop-WithReason "-LauncherRoot '$Folder' is not readable by ${Account}: $where to any of the identities checked: $checked.$skippedNote The task runs as $Account and would fail before the launcher writes a line. Grant that account read on the folder, or name one it can read."
+    }
 }
 
 # $PluginInstallFolderPattern comes from the functions file beside this script, which a registration
@@ -139,6 +278,11 @@ $claudeCmd = Get-Command -Name 'claude' -CommandType Application -ErrorAction Si
 if ($null -eq $claudeCmd) {
     Stop-WithReason "claude was not found on PATH. Claude Code must be installed and logged in under the account the task runs as ($User)."
 }
+# Another account cannot read the default launcher root, which sits under this account's profile, so
+# a registration for it names its own root, verified below once resolved.
+if (-not $isCurrentUser -and [string]::IsNullOrWhiteSpace($LauncherRoot)) {
+    Stop-WithReason "-User names another account ($principalUser), so -LauncherRoot is required: the default launcher root sits under THIS account's %LOCALAPPDATA%, which $principalUser cannot read, and the task would fail before the launcher writes a line. Name a folder $principalUser can read."
+}
 if (-not $isCurrentUser) {
     [Console]::Error.WriteLine("register-walk: warning: pwsh ($($pwshCmd.Source)) and claude ($($claudeCmd.Source)) were resolved on THIS account's PATH, and the task runs as $principalUser, whose install may live elsewhere. Confirm both are installed and Claude Code is logged in for that account.")
 }
@@ -156,6 +300,10 @@ try {
 }
 if (($launcherRootFull.TrimEnd('\', '/') + '\') -match $PluginInstallFolderPattern) {
     Stop-WithReason "-LauncherRoot '$LauncherRoot' sits under a plugins\marketplaces or plugins\cache folder, which a plugin update replaces. Name a folder outside both, such as one under the account's profile."
+}
+# The current account registers into a folder of its own and takes no read check.
+if (-not $isCurrentUser) {
+    Assert-AccountCanRead -Account $principalUser -Folder $launcherRootFull
 }
 foreach ($name in @($script:LauncherName, $script:FunctionsName)) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $name) -PathType Leaf)) {

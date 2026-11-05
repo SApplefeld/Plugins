@@ -17,7 +17,9 @@ the lock held prints one line on stdout and exits 0.
 The pass reads its state file, %LOCALAPPDATA%\llm-wiki\walk-state.json, which
 holds per wiki the last successful lint time and any standing deferral, and a
 cursor naming the wiki the last pass ended on. Wikis are visited in list order
-starting after the cursor, so a long wiki cannot starve the rest. Where no list
+starting after the cursor, so a long wiki cannot starve the rest. The state is
+written whole after each wiki's visit as well as at the pass's end, so a pass
+cut short keeps every visited wiki's cursor, lint stamp and deferral. Where no list
 exists or the list holds no wikis, the pass writes a status with an empty wikis
 array and the note "no wikis listed", and exits 0.
 
@@ -51,8 +53,42 @@ recorded and the pass moving on as each step states:
      --abort, and the log names the wiki; where the MERGE_HEAD read or the
      abort fails, the pull is recorded failed and the wiki's remaining steps
      skip. Then, where a remote named origin exists: git fetch origin, then
-     git merge --ff-only origin/main, else git merge --no-edit origin/main;
-     with no origin the step is skipped and the visit goes on. A conflicting
+     a fast-forward merge of origin/main, else a merge under git's own
+     message for a merge of origin/main into main; with no origin the step
+     is skipped and the visit goes on. After the fetch, origin/main is resolved once to its
+     commit id, and every read and merge below names that id, so a later
+     fetch cannot bring a commit the stop never read. Before any merge, the
+     paths the fetched commit changes against the merge base are read with
+     git diff --no-renames --name-only -z, which is what the merge would
+     bring, a rename listed as the path it leaves and the path it makes;
+     where the id or that read fails or times out the pull is recorded
+     failed and the visit goes on over the unchanged tree, as after a failed
+     fetch. A changed path under .claude/, matched without regard to case,
+     stops the pull: no merge lands and no model run
+     starts, the step records "deferred: engine change" with the stopping
+     paths, and the wiki is stuck from that pass with its remaining steps
+     skipped. So does any changed path whose first segment is shaped like a
+     Windows short name, a ~ followed by a digit as in CLAUDE~1, which may be
+     a second spelling of a guard rail at the wiki's root on disk. So do
+     a changed CLAUDE.md or CLAUDE.local.md at any depth, a root .mcp.json,
+     and any segment shaped like their short name, CLAUDE~ and digits as in
+     wiki/CLAUDE~1.MD, each matched without regard to case and never exempt,
+     since Claude Code loads each such file. A path is exempt only where it
+     is spelled exactly .claude/ plus the relative path of a file the
+     installed engine ships under template/.claude/, as the engine's own
+     update commits it, and the fetched blob is the one that update would
+     commit, compared as blob ids: git rev-parse <id>:<path> against git
+     hash-object --path <path> over the installed file, both run in the wiki
+     so its own attributes and filters apply. .claude/engine.json, spelled
+     so, is exempt where its templateHash is this pass's engine hash, and is
+     a stop where the pass has no engine hash. A deleted path, CLAUDE.md, a
+     file the engine does not ship such as .claude/feed.json, any other case
+     spelling under .claude/, and any differing blob are stops. So two
+     clones of one wiki on one engine exchange their engine-update commits,
+     and a wiki two machines share is held only while their engines differ.
+     The stop keeps no pass count and no daily hold, and clears when a pull
+     next reads ran: once a session or a person brings the wiki's HEAD to hold
+     the change, or the other machine's engine is updated. A conflicting
      merge runs the wiki's kb-run.ps1 -Operation Merge, whose model run joins
      both sides. The merge is resolved where MERGE_HEAD is gone and HEAD moved
      afterward. Any other end state aborts the merge, records "deferred:
@@ -74,7 +110,10 @@ recorded and the pass moving on as each step states:
      A deferred wiki is attempted again every pass and stays in the status's
      deferred list until a pass clears it. Only a pull that reaches its own
      verdict, ran or deferred anew, clears a standing conflict; a pull refused
-     for budget or failed leaves it listed with its reason.
+     for budget or failed leaves it listed with its reason. A pull refused for
+     budget, its merge run at the model-run floor among them, skips the
+     wiki's remaining steps as a deferral does, and changes neither
+     conflictPasses nor lastMergeRunAt.
   4. Feed. Where .claude/feed.json exists, the wiki's feed-inbox.ps1 runs with
      FEED_INBOX_RUN_SECONDS set to the smaller of 3000 and the remaining budget.
   5. Ingest. Where inbox/ holds any file other than .gitkeep, the walker reads
@@ -92,7 +131,18 @@ recorded and the pass moving on as each step states:
      keeping any Reconcile: commit it made, so a moved HEAD alone stamps
      nothing. A run with no Lint: commit records "skipped: no Lint: commit",
      a failed HEAD or log read records the step failed, and either way the
-     lint is tried again next pass.
+     lint is tried again next pass, unless the hold below applies. The
+     wiki's state entry counts the consecutive failed lints, lintFailures,
+     and holds the time the last such run started, lastLintAttemptAt: a run
+     whose kb-run.ps1 child did not exit 0, or that recorded "skipped: no
+     Lint: commit", raises the count and sets the time; a stamp removes both;
+     and a lint that reached no verdict, "deferred: live", "skipped: run lock
+     held", "skipped: budget", "skipped: engine update failed" or a failed
+     HEAD or log read, leaves both as they were. A due lint whose count is 3
+     or more starts no run while lastLintAttemptAt is under 24 hours old, a
+     time later than now reading as absent: it records "skipped: held after
+     3 failed lints", and the log says until when
+     the run is held.
   7. Push. Where origin exists: with an upstream set, git push origin HEAD where
      kb-status.ps1 -What Unpushed prints anything; with none, git push -u origin HEAD.
 
@@ -106,8 +156,14 @@ the scheduled task that runs it. KB_WALK_SECONDS replaces it, as a whole number
 of seconds from 1 to 99999. A wiki is not started with under 120 seconds left,
 and is recorded "skipped: budget" with the cursor stopped before it. No child
 is started with under 60 seconds left: a step that needs one is recorded
-"skipped: budget" instead. A merge abort, and the commit that finishes an
-engine update already copied, run whatever is left, all such calls sharing one
+"skipped: budget" instead. No kb-run.ps1 child, the ingest, lint and merge
+model runs, is started with under 600 seconds left, a floor
+KB_WALK_MODEL_FLOOR_SECONDS replaces as a whole number of seconds from 1 to
+99999: the step is recorded "skipped: budget" as for the 60-second floor, and
+a merge so refused is aborted as that floor's refusal aborts it and ends the
+visit, while the pass's git calls and its other children keep the 60-second
+floor alone. A merge abort, and the commit that finishes an engine update
+already copied, run whatever is left, all such calls sharing one
 deadline 60 seconds past the budget, and each waited for at least 15 seconds
 however late it starts, so none is stopped as it starts. Each
 kb-run.ps1 child runs with KB_RUN_SECONDS set to the remaining budget, so no
@@ -142,24 +198,30 @@ temporary file: startedAt, finishedAt, engineHash, wikis as one object per
 wiki with a result among visited, untrusted, deferred and "skipped: budget",
 and for a visited wiki a steps object whose entries carry an outcome among ran,
 skipped, failed and deferred, a note and the seconds taken; deferred as the
-names still deferred with their reasons, a conflict's paths, its count of
-consecutive deferred passes as passes and whether the wiki is stuck; failures
+names still deferred with their reasons, a conflict's or a stop's paths, a
+conflict's count of consecutive deferred passes as passes and whether the wiki
+is stuck; failures
 as every failed step; and
 a note where the pass has one, such as "no wikis listed" or a kill-on-close
-job that could not be replaced. The walker's own step notes, in the status
+job that could not be replaced. The status is written once, at the pass's
+end, as the pass's report, while the state is written after each visit too.
+The walker's own step notes, in the status
 file and walk.log, have any URL's userinfo replaced by ***, so a remote's
 credentials in git's error text never reach a note. Output from the feed,
 ingest, lint and Merge children is not filtered: it reaches the walker's
 stdout and stderr as the child printed it. walk.log under the same folder takes one block per pass
 and is rotated at 5 MB. The walker exits 0 after a pass, whatever it recorded, and exits 1 only
-where LOCALAPPDATA is unset, KB_WALK_SECONDS is not a whole number of seconds from 1 to 99999,
+where LOCALAPPDATA is unset, KB_WALK_SECONDS or KB_WALK_MODEL_FLOOR_SECONDS is
+not a whole number of seconds from 1 to 99999,
 or it could not read the list, take the lock or write the status.
 
 A wiki that becomes stuck is reported in walk-notices.jsonl beside the status
 file, which a session on the account reads. The walker appends one JSON line
 with id, text, paths on a stuck or still-stuck line, source (the string
 wiki-walk) and at, written before the state
-and the status, and never rewrites a line. A line is written in the pass whose
+and the status, and never rewrites a line. The state written after each visit
+holds each wiki's noticedStuck and lastNoticeAt as they stood before the pass,
+so those two fields still reach the state only once the line is in the file. A line is written in the pass whose
 pull leaves a wiki stuck, in each pass at least 24 hours after the wiki's last
 line while its pull is still deferred, and in the pass whose pull lands after a
 line was written. The wiki's state entry holds noticedStuck and lastNoticeAt
@@ -167,9 +229,10 @@ for this, and a pass whose append fails puts both back as they were, so the
 next pass writes the line. A pull refused for budget or failed writes nothing
 and leaves both as they were. A line's text names the wiki, how many paths
 git found conflicted and the pass count, or for a conflict on
-.claude/settings.json that file alone; it names no other path and never a
-page's content. Its paths field is an array of at most the first 10
-conflicted paths; a cleared line has none. Those names and the cleared line's note are text a
+.claude/settings.json that file alone, or for an engine-change stop how many
+pulled paths stopped it; it names no other path and never a page's content.
+Its paths field is an array of at most the first 10 conflicted or stopping
+paths; a cleared line has none. Those names and the cleared line's note are text a
 remote can steer, so a path's ASCII control characters become spaces as in
 every log line, and each path in the field and the note then has every other
 control character, every basic-plane format character, and every tag, line
@@ -809,17 +872,34 @@ function Invoke-WikiScript {
     return [pscustomobject]@{ ExitCode = $result.ExitCode; TimedOut = $result.TimedOut; Stdout = $result.Stdout; Stderr = $result.Stderr; Leftovers = $result.Leftovers; Missing = $false }
 }
 
-# The templateHash in the .claude/engine.json committed at the wiki's HEAD, as
-# Hash, with the git read kept in Read. The committed mark is read rather than the
-# working-tree file, so an update whose add or commit failed after its copy
-# still reads as differing and is made again. The read runs whatever the
-# budget. Where it exits non-zero, as for a HEAD or a path that is absent, Hash
-# reads unknown; where it timed out, Read says so and Hash reads unknown. The
-# mark is the wiki's own and is read as untrusted: anything but a JSON object
-# holding a 64-character hexadecimal templateHash string reads as unknown.
+# Called before every kb-run.ps1 child, the ingest, lint and merge model runs.
+# A model run is never started with under $modelFloorSeconds of the pass budget
+# left, since one started later is stopped unfinished at the budget: the call
+# throws the OperationCanceledException Invoke-Child throws for its own floor,
+# so the step records skipped: budget and a merge in progress is aborted as
+# for that floor. The pass's git calls and its other children keep
+# $childFloorSeconds alone.
+function Assert-ModelFloor {
+    $remaining = Get-RemainingSeconds
+    if ($remaining -lt $script:modelFloorSeconds) {
+        throw [System.OperationCanceledException]::new("kb-run.ps1 was not started: under $script:modelFloorSeconds seconds of the pass budget are left for a model run.")
+    }
+}
+
+# The templateHash in the .claude/engine.json committed at a revision of the
+# wiki, HEAD unless another is named, as Hash, with the git read kept in Read.
+# The committed mark is read rather than the working-tree file, so an update
+# whose add or commit failed after its copy still reads as differing and is
+# made again. The update step's read runs whatever the budget, with -Required;
+# the pull's read of the fetched mark is refused for budget as its other calls
+# are. Where the read exits non-zero, as for a revision or a path that is
+# absent, Hash reads unknown; where it timed out, Read says so and Hash reads
+# unknown. The mark is the wiki's or the remote's and is read as untrusted:
+# anything but a JSON object holding a 64-character hexadecimal templateHash
+# string reads as unknown.
 function Get-HeadEngineHash {
-    param([string]$WikiPath)
-    $read = Invoke-Git $WikiPath @('show', 'HEAD:.claude/engine.json') -Required
+    param([string]$WikiPath, [string]$Revision = 'HEAD', [switch]$Required)
+    $read = Invoke-Git $WikiPath @('show', "$Revision`:.claude/engine.json") -Required:$Required
     $hash = 'unknown'
     if ((-not $read.TimedOut) -and $read.ExitCode -eq 0) {
         try {
@@ -891,7 +971,7 @@ function Invoke-UpdateStep {
         Add-Step $Wiki 'update' 'failed' 'engine hash unreadable' $startedAt
         return $false
     }
-    $headMark = Get-HeadEngineHash $WikiPath
+    $headMark = Get-HeadEngineHash $WikiPath -Required
     if ($headMark.Read.TimedOut) {
         Add-Step $Wiki 'update' 'failed' (Get-ChildNote $headMark.Read 'git show HEAD:.claude/engine.json') $startedAt
         return $false
@@ -1005,6 +1085,21 @@ function Get-ConflictPasses {
     return 0
 }
 
+# A run-start time from a wiki's state entry, by its field name, or $null
+# where the entry holds none it can read. A time later than now reads as none,
+# since no run started then, so the lint hold outlasts no day.
+function Get-PastStateTime {
+    param($State, [string]$Name)
+    $last = [DateTime]::MinValue
+    if ($State.Contains($Name) -and ($State[$Name] -is [string]) -and
+        [DateTime]::TryParseExact($State[$Name], 'o', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$last)) {
+        $last = $last.ToUniversalTime()
+        if ($last -gt [DateTime]::UtcNow) { return $null }
+        return $last
+    }
+    return $null
+}
+
 # The time the wiki's last model Merge run started, from its state entry, or
 # $null where the entry holds none it can read.
 function Get-LastMergeRunAt {
@@ -1033,6 +1128,95 @@ function Get-MergeNote {
     param([string]$How, [string]$Before)
     if ([string]::IsNullOrEmpty($Before)) { return $How }
     return "$How, restore point $Before"
+}
+
+# The paths among those a pull would bring that may not land unread: each
+# under .claude/ or equal to CLAUDE.md, the wiki's guard rails, less the ones
+# that are the installed engine's own bytes. Both names are matched without
+# regard to case, since the wiki's checkout folds case and a .Claude/ entry in
+# the fetched tree lands in .claude/. A path whose first segment is shaped
+# like a Windows short name, a ~ followed by a digit as in CLAUDE~1, may be a
+# second spelling of a guard rail at the wiki's root on disk, so it is a
+# stop; a page such as wiki/draft~1.md is not. Claude Code also loads a
+# CLAUDE.md or CLAUDE.local.md at any depth and a .mcp.json at the root, so a
+# path whose last segment is either name, a root .mcp.json, and a segment at
+# any depth shaped like their short name, CLAUDE~ and digits with or without
+# an extension as in wiki/CLAUDE~1.MD, all matched without regard to case,
+# are stops that are never exempt. The
+# exemption reads spelling exactly, since a second case spelling of a file
+# is a second index entry: a path is exempt only where it is .claude/ plus
+# the relative path of a file the engine ships under template/.claude/,
+# spelled as the engine's own update commits it, and the fetched blob's id,
+# from git rev-parse, equals the id git hash-object gives the installed file
+# at that path in the wiki, under the wiki's own attributes and filters, so
+# the ids compare bytes git would commit and no captured text stands in for
+# them. .claude/engine.json, spelled so, is exempt where the fetched mark's
+# templateHash is this pass's engine hash, and is a stop where the pass has
+# none. A path the fetched tree lacks, a deletion, is a stop, as is a path
+# the engine does not ship, any other case spelling under .claude/ and any
+# differing blob. Revision is the fetched commit's id, so every read names
+# the commit the merge will take. Returns Stops, the stopping paths as git
+# printed them, or Failed holding the first read that timed out or ended in
+# an exit the read does not define, with What naming it, for the caller to
+# record as the pull's failure.
+function Get-GuardRailStops {
+    param([string]$WikiPath, [string]$Revision, [string[]]$ChangedPaths)
+    $stops = New-Object System.Collections.Generic.List[string]
+
+    # The paths the engine's own update writes, built as it builds them. With
+    # no template folder the set is empty, so every guard-rail path stops.
+    $sourceRoot = Join-Path $script:engineRoot 'template\.claude'
+    $shipped = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    if ([System.IO.Directory]::Exists($sourceRoot)) {
+        foreach ($file in [System.IO.Directory]::GetFiles($sourceRoot, '*', [System.IO.SearchOption]::AllDirectories)) {
+            [void]$shipped.Add('.claude/' + ($file.Substring($sourceRoot.Length).TrimStart('\', '/') -replace '\\', '/'))
+        }
+    }
+    foreach ($path in $ChangedPaths) {
+        if ([regex]::IsMatch($path, '^[^/]*~[0-9]')) {
+            $stops.Add($path)
+            continue
+        }
+        $leaf = $path.Substring($path.LastIndexOf('/') + 1)
+        if ($leaf.Equals('CLAUDE.md', [StringComparison]::OrdinalIgnoreCase) -or $leaf.Equals('CLAUDE.local.md', [StringComparison]::OrdinalIgnoreCase)) {
+            $stops.Add($path)
+            continue
+        }
+        if ($path.Equals('.mcp.json', [StringComparison]::OrdinalIgnoreCase)) {
+            $stops.Add($path)
+            continue
+        }
+        if ([regex]::IsMatch($path, '(^|/)CLAUDE~[0-9]+(\.[^/]*)?(/|$)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+            $stops.Add($path)
+            continue
+        }
+        $underClaude = $path.StartsWith('.claude/', [StringComparison]::OrdinalIgnoreCase)
+        if (-not $underClaude) { continue }
+        if ($path -ceq '.claude/engine.json') {
+            if ($null -ne $script:engineHash) {
+                $mark = Get-HeadEngineHash $WikiPath -Revision $Revision
+                if ($mark.Read.TimedOut) {
+                    return [pscustomobject]@{ Stops = @(); Failed = $mark.Read; What = 'git show origin/main:.claude/engine.json' }
+                }
+                if ($mark.Hash -eq $script:engineHash) { continue }
+            }
+        } elseif ($shipped.Contains($path)) {
+            $fetched = Invoke-Git $WikiPath @('rev-parse', '-q', '--verify', "$Revision`:$path")
+            if ($fetched.TimedOut -or ($fetched.ExitCode -ne 0 -and $fetched.ExitCode -ne 1)) {
+                return [pscustomobject]@{ Stops = @(); Failed = $fetched; What = "git rev-parse origin/main:$(ConvertTo-LogText $path)" }
+            }
+            if ($fetched.ExitCode -eq 0) {
+                $installed = Join-Path $sourceRoot ($path.Substring('.claude/'.Length) -replace '/', '\')
+                $own = Invoke-Git $WikiPath @('hash-object', '--path', $path, '--', $installed)
+                if ($own.TimedOut -or $own.ExitCode -ne 0) {
+                    return [pscustomobject]@{ Stops = @(); Failed = $own; What = "git hash-object --path $(ConvertTo-LogText $path)" }
+                }
+                if ((Get-FirstLine $fetched.Stdout) -ceq (Get-FirstLine $own.Stdout)) { continue }
+            }
+        }
+        $stops.Add($path)
+    }
+    return [pscustomobject]@{ Stops = @($stops); Failed = $null; What = '' }
 }
 
 # Step 3: the pull. Returns $true where the wiki's remaining steps may run.
@@ -1085,8 +1269,49 @@ function Invoke-PullStep {
         Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $fetched 'git fetch origin') $startedAt
         return $true
     }
+
+    # origin/main is resolved once to the fetched commit's id, and every read
+    # and merge below names that id, so a fetch landing between them cannot
+    # bring a commit the guard never read.
+    $resolved = Invoke-Git $WikiPath @('rev-parse', '-q', '--verify', 'origin/main^{commit}')
+    if ($resolved.TimedOut -or $resolved.ExitCode -ne 0) {
+        Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $resolved 'git rev-parse origin/main') $startedAt
+        return $true
+    }
+    $fetchedId = Get-FirstLine $resolved.Stdout
+
+    # What the merge would bring is read before any merge: the paths origin/main
+    # changes against the merge base. A pulled change to the wiki's guard
+    # rails would run as the account at the next step with no reader. A change
+    # under .claude/ lands only where it is the installed engine's own bytes,
+    # and one to a CLAUDE.md or CLAUDE.local.md at any depth or to the root
+    # .mcp.json never lands; otherwise nothing is merged and the wiki is stuck
+    # from this pass, as a settings-file conflict leaves it, until a pull
+    # reads ran. Renames are listed as a deletion and an addition, so a guard
+    # rail renamed to an ordinary name still lists the path it leaves. A read
+    # that fails leaves the tree unchanged, so the visit goes on over it as
+    # after a failed fetch. The paths are the remote's text and reach the
+    # log, the status and a notice only through ConvertTo-LogText, as the
+    # conflicted paths do.
+    $changed = Invoke-Git $WikiPath @('diff', '--no-renames', '--name-only', '-z', "HEAD...$fetchedId")
+    if ($changed.TimedOut -or $changed.ExitCode -ne 0) {
+        Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $changed 'git diff HEAD...origin/main') $startedAt
+        return $true
+    }
+    $guard = Get-GuardRailStops $WikiPath $fetchedId @(($changed.Stdout -split "`0") | Where-Object { $_ -ne '' })
+    if ($null -ne $guard.Failed) {
+        Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $guard.Failed $guard.What) $startedAt
+        return $true
+    }
+    if ($guard.Stops.Count -gt 0) {
+        $paths = @($guard.Stops | ForEach-Object { ConvertTo-LogText $_ })
+        Write-Log "$($Wiki.name) pull would change $($paths -join ', '); a pulled change under .claude/ lands only as the installed engine's own bytes and one to a CLAUDE.md, a CLAUDE.local.md or the root .mcp.json never lands, so no merge lands and the wiki is stuck until a session or a person brings its HEAD to hold the change or the other machine's engine is updated"
+        Add-Step $Wiki 'pull' 'deferred' 'engine change' $startedAt $paths
+        (Get-WikiState $Wiki.name)['deferred']['stuck'] = $true
+        return $false
+    }
     $before = Get-Head $WikiPath
-    $fastForward = Invoke-Git $WikiPath @('merge', '--ff-only', 'origin/main')
+    $fastForward = Invoke-Git $WikiPath @('merge', '--ff-only', $fetchedId)
     if ((-not $fastForward.TimedOut) -and $fastForward.ExitCode -eq 0) {
         $note = if ((Get-Head $WikiPath -Required) -eq $before) { 'up to date' } else { 'fast-forward' }
         Add-PullRan $Wiki $note $startedAt
@@ -1099,7 +1324,9 @@ function Invoke-PullStep {
         Add-Step $Wiki 'pull' 'failed' 'git identity unset' $startedAt
         return $true
     }
-    $merged = Invoke-Git $WikiPath @('merge', '--no-edit', 'origin/main')
+    # The message is git's own for a merge of origin/main into main, which a merge
+    # named by commit id would otherwise replace with the id.
+    $merged = Invoke-Git $WikiPath @('merge', '--no-edit', '-m', "Merge remote-tracking branch 'origin/main'", $fetchedId)
     if ((-not $merged.TimedOut) -and $merged.ExitCode -eq 0) {
         Add-PullRan $Wiki (Get-MergeNote 'merged' $before) $startedAt
         return $true
@@ -1145,6 +1372,7 @@ function Invoke-PullStep {
             # MERGE_HEAD is gone and HEAD moved; any other end state is aborted.
             # The run's start time is kept so a stuck wiki's next run waits a
             # day from it.
+            Assert-ModelFloor
             Write-Log "$($Wiki.name) pull conflicts on $($paths -join ', '); running Merge"
             $runArguments = @('-Operation', 'Merge')
             if (-not [string]::IsNullOrEmpty($Claude)) { $runArguments += @('-Claude', $Claude) }
@@ -1202,11 +1430,13 @@ function Invoke-FeedStep {
 
 # Runs kb-run.ps1 for one operation with the remaining budget, and records it.
 # Returns $true only where the operation ran, never where the wiki's run lock
-# was held and the wrapper did nothing.
+# was held and the wrapper did nothing. The model-run floor refuses the run
+# for budget before it starts.
 function Invoke-RunStep {
     param($Wiki, [string]$WikiPath, [string]$Step, [string]$Operation, [DateTime]$StartedAt)
     $runArguments = @('-Operation', $Operation)
     if (-not [string]::IsNullOrEmpty($Claude)) { $runArguments += @('-Claude', $Claude) }
+    Assert-ModelFloor
     $run = Invoke-WikiScript $WikiPath 'kb-run.ps1' $runArguments @{ 'KB_RUN_SECONDS' = [string][Math]::Max(1, (Get-RemainingSeconds)) } -Capture -Relay
     if ($run.Missing -or $run.TimedOut -or $run.ExitCode -ne 0) {
         $note = Get-ChildNote $run "kb-run.ps1 -Operation $Operation"
@@ -1238,6 +1468,23 @@ function Invoke-IngestStep {
     $null = Invoke-RunStep $Wiki $WikiPath 'ingest' 'Ingest' $startedAt
 }
 
+# The wiki's count of consecutive failed lints, from its state entry. The
+# entry is read as untrusted: anything but a whole number reads as 0.
+function Get-LintFailures {
+    param($State)
+    $failures = 0
+    if ($State.Contains('lintFailures') -and [int]::TryParse([string]$State['lintFailures'], [System.Globalization.NumberStyles]::None, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$failures)) {
+        return $failures
+    }
+    return 0
+}
+
+# The time the wiki's last failed lint run started, through Get-PastStateTime.
+function Get-LastLintAttemptAt {
+    param($State)
+    return (Get-PastStateTime $State 'lastLintAttemptAt')
+}
+
 # Step 6: lint, only on the day it is due, and stamped only where the run
 # made its own Lint: commit. The lint skill ends a run another writer went
 # live in, at its first step or before its write pass, with exit 0 and no
@@ -1246,6 +1493,13 @@ function Invoke-IngestStep {
 # reads the subjects of the commits made after the HEAD read just before the
 # run, and a moved HEAD alone stamps nothing. The subjects are only compared,
 # never written to a note or the log.
+#
+# A lint that failed 3 or more times in a row is held, as a stuck wiki's merge
+# run is: it starts no run until a day after the last failed run started, so a
+# lint that cannot finish costs one run a day rather than one an hour. A run
+# whose child did not exit 0, or that made no Lint: commit, is a failure; a
+# lint that reached no verdict, live, lock held, refused for budget, skipped
+# for a failed engine update or failed on a HEAD or log read, counts nothing.
 function Invoke-LintStep {
     param($Wiki, [string]$WikiPath)
     $startedAt = [DateTime]::UtcNow
@@ -1257,6 +1511,16 @@ function Invoke-LintStep {
         Add-Step $Wiki 'lint' 'skipped' 'not due' $startedAt
         return
     }
+    $failures = Get-LintFailures $state
+    if ($failures -ge 3) {
+        $lastAttempt = Get-LastLintAttemptAt $state
+        if ($null -ne $lastAttempt -and $lastAttempt -gt [DateTime]::UtcNow.AddHours(-24)) {
+            $heldUntil = $lastAttempt.AddHours(24)
+            Write-Log "$($Wiki.name) lint has failed $failures times in a row, so its run is held until $($heldUntil.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture))"
+            Add-Step $Wiki 'lint' 'skipped' 'held after 3 failed lints' $startedAt
+            return
+        }
+    }
     if (-not (Test-QuietTree $Wiki $WikiPath 'lint' $startedAt)) { return }
     $headRead = Invoke-Git $WikiPath @('rev-parse', '--verify', '-q', 'HEAD') -Required
     if ($headRead.TimedOut -or $headRead.ExitCode -ne 0) {
@@ -1264,7 +1528,16 @@ function Invoke-LintStep {
         return
     }
     $before = Get-FirstLine $headRead.Stdout
-    if (-not (Invoke-RunStep $Wiki $WikiPath 'lint' 'Lint' $startedAt)) { return }
+    $attemptedAt = [DateTime]::UtcNow.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    if (-not (Invoke-RunStep $Wiki $WikiPath 'lint' 'Lint' $startedAt)) {
+        # The run step records failed for a child that did not exit 0, and
+        # skipped for a held run lock, which reached no verdict.
+        if ([string]$Wiki.steps['lint']['outcome'] -ceq 'failed') {
+            $state['lintFailures'] = $failures + 1
+            $state['lastLintAttemptAt'] = $attemptedAt
+        }
+        return
+    }
 
     # The run recorded ran; a run with no Lint: commit, or whose commits
     # cannot be read, replaces that record.
@@ -1275,10 +1548,14 @@ function Invoke-LintStep {
     }
     $lintCommits = @(Get-Lines $logged.Stdout | Where-Object { $_.StartsWith('Lint:', [StringComparison]::Ordinal) })
     if ($lintCommits.Count -eq 0) {
+        $state['lintFailures'] = $failures + 1
+        $state['lastLintAttemptAt'] = $attemptedAt
         Add-Step $Wiki 'lint' 'skipped' 'no Lint: commit' $startedAt
         return
     }
     $state['lastLintAt'] = [DateTime]::UtcNow.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    $state.Remove('lintFailures')
+    $state.Remove('lastLintAttemptAt')
 }
 
 # Step 7: the push.
@@ -1404,10 +1681,16 @@ function Add-VisitNotice {
     $passes = Get-ConflictPasses $State
     $now = [DateTime]::UtcNow
     $pathCount = Format-NoticePathCount $paths
+    $engineChange = ([string]$deferral['reason'] -ceq 'engine change')
     if (-not $noticed) {
         if (-not ($deferral.Contains('stuck') -and $deferral['stuck'] -eq $true)) { return }
         $kind = 'stuck'
-        if ($paths -ccontains '.claude/settings.json') {
+        if ($engineChange) {
+            # The stop lands nothing, so the text counts the pulled paths and
+            # names the two ways it clears, with no pass count, since the
+            # stop keeps none.
+            $text = "$($Wiki.name) is stuck: its pull from origin would change $pathCount among .claude/, any CLAUDE.md or CLAUDE.local.md, and the root .mcp.json, which the walker lands only as the installed engine's own bytes under .claude/ and never elsewhere; a session or a person must bring the wiki's HEAD to hold the change or update the other machine's engine, and the walker resumes once a pull lands."
+        } elseif ($paths -ccontains '.claude/settings.json') {
             $text = "$($Wiki.name) is stuck: its pull from origin conflicts on .claude/settings.json, which no headless run may attempt; a session or a person must resolve the conflict in the wiki, and the walker resumes once a pull lands."
         } else {
             $text = "$($Wiki.name) is stuck: its pull from origin has conflicted on $pathCount for $passes passes in a row and the model merge did not join them; the walker fetches every hour and retries the merge once a day; a session must resolve the conflict in the wiki."
@@ -1416,7 +1699,11 @@ function Add-VisitNotice {
         $last = Get-LastNoticeAt $State
         if ($null -ne $last -and $last -gt $now.AddHours(-$script:noticeIntervalHours)) { return }
         $kind = 'still'
-        $text = "$($Wiki.name) is still stuck after $passes passes: its pull from origin conflicts on $pathCount; a session must resolve the conflict in the wiki."
+        if ($engineChange) {
+            $text = "$($Wiki.name) is still stuck: its pull from origin would change $pathCount among .claude/, any CLAUDE.md or CLAUDE.local.md, and the root .mcp.json; a session or a person must bring the wiki's HEAD to hold the change or update the other machine's engine."
+        } else {
+            $text = "$($Wiki.name) is still stuck after $passes passes: its pull from origin conflicts on $pathCount; a session must resolve the conflict in the wiki."
+        }
     }
     $State['noticedStuck'] = $true
     $State['lastNoticeAt'] = $now.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
@@ -1461,10 +1748,18 @@ function Invoke-Visit {
             [pscustomobject]@{ HasOrigin = $origin; Proceed = (Invoke-PullStep $Wiki $wikiPath $origin) }
         }
 
-        # A pull that ends the visit early is a deferred conflict or a failed
-        # merge abort; only the deferral makes the wiki's result deferred.
+        # A pull that ends the visit early is a deferred conflict, an
+        # engine-change stop, a failed merge abort, or a pull refused for
+        # budget. A merge run refused at the model-run floor leaves the tree
+        # diverged from origin, so no later step may commit or push over it,
+        # and a refusal before the merge run leaves every later step the same
+        # or a smaller budget. Only a deferral makes the wiki's result
+        # deferred; a refusal reaches no verdict, so the result stays visited.
         if ($null -ne $pulled -and -not $pulled.Proceed) {
             if ($Wiki.steps.Contains('pull') -and ([string]$Wiki.steps['pull']['outcome'] -ceq 'deferred')) { $Wiki.result = 'deferred' }
+            return
+        }
+        if ($null -eq $pulled -and $Wiki.steps.Contains('pull') -and ([string]$Wiki.steps['pull']['outcome'] -ceq 'skipped') -and ([string]$Wiki.steps['pull']['note'] -ceq 'budget')) {
             return
         }
         $null = Invoke-Budgeted $Wiki 'feed' { Invoke-FeedStep $Wiki $wikiPath }
@@ -1482,13 +1777,14 @@ function Invoke-Visit {
     } finally {
         $pullOutcome = $null
         if ($Wiki.steps.Contains('pull')) { $pullOutcome = [string]$Wiki.steps['pull']['outcome'] }
-        $standingConflict = ($prior -is [System.Collections.IDictionary]) -and ([string]$prior['reason'] -ceq 'conflict')
+        $standingConflict = ($prior -is [System.Collections.IDictionary]) -and (([string]$prior['reason'] -ceq 'conflict') -or ([string]$prior['reason'] -ceq 'engine change'))
 
         # The state holds one deferral per wiki. Where this pass's update,
         # ingest or lint recorded its own, live or merge in progress, and a
-        # standing conflict is carried, the conflict takes the slot: that
-        # step's deferral is found again by the same step next pass, while the
-        # conflict must stay named until a pull resolves it.
+        # standing conflict or engine-change stop is carried, the pull's
+        # deferral takes the slot: that step's deferral is found again by the
+        # same step next pass, while the pull's must stay named until a pull
+        # resolves it.
         if ($standingConflict -and $pullOutcome -cne 'ran' -and $pullOutcome -cne 'deferred') {
             $state['deferred'] = $prior
         }
@@ -1564,6 +1860,39 @@ function Write-Notices {
     }
 }
 
+# Writes the state whole through Write-JsonWhole: the cursor and every wiki's
+# entry. A write that fails is logged and the pass goes on. With
+# -BeforeNotices, as after each visit, each wiki whose notice this pass has
+# collected carries noticedStuck and lastNoticeAt as they stood before the
+# pass, the notice's Prior: its line reaches the notices file only at the
+# pass's end, and a state holding the new fields before that append would lose
+# the notice to a kill between them.
+function Write-StateFile {
+    param([switch]$BeforeNotices)
+    $wikis = $script:stateWikis
+    if ($BeforeNotices -and $script:notices.Count -gt 0) {
+        $wikis = [ordered]@{}
+        foreach ($name in @($script:stateWikis.Keys)) { $wikis[[string]$name] = $script:stateWikis[$name] }
+        foreach ($notice in $script:notices) {
+            $entry = [ordered]@{}
+            foreach ($field in @($notice.State.Keys)) { $entry[[string]$field] = $notice.State[$field] }
+            foreach ($field in @('noticedStuck', 'lastNoticeAt')) {
+                if ($notice.Prior.Contains($field)) {
+                    $entry[$field] = $notice.Prior[$field]
+                } else {
+                    $entry.Remove($field)
+                }
+            }
+            $wikis[[string]$notice.Name] = $entry
+        }
+    }
+    try {
+        Write-JsonWhole $script:statePath ([ordered]@{ cursor = $script:cursor; wikis = $wikis })
+    } catch {
+        Write-Log "the state file could not be written: $(Get-FirstLine (Get-InnerError $_.Exception).Message)"
+    }
+}
+
 # Writes the notices, then the state and the status, the pass-level notes
 # joined into the status's note, and stops the pass with exit 1 where the
 # status cannot be written. The notices go first so the state records a
@@ -1576,8 +1905,11 @@ function Write-PassFiles {
         if ($state.Contains('deferred') -and $state['deferred'] -is [System.Collections.IDictionary]) {
             $entry = [ordered]@{ name = $wiki.name; reason = [string]$state['deferred']['reason'] }
             if ($state['deferred'].Contains('paths')) { $entry['paths'] = @($state['deferred']['paths']) }
-            if ($entry['reason'] -ceq 'conflict') {
-                $entry['passes'] = Get-ConflictPasses $state
+            # A conflict carries its pass count; an engine-change stop keeps
+            # none. Both say whether the wiki is stuck, which the session hook
+            # prints as its stuck suffix.
+            if ($entry['reason'] -ceq 'conflict') { $entry['passes'] = Get-ConflictPasses $state }
+            if (($entry['reason'] -ceq 'conflict') -or ($entry['reason'] -ceq 'engine change')) {
                 $entry['stuck'] = ($state['deferred'].Contains('stuck') -and $state['deferred']['stuck'] -eq $true)
             }
             $deferred.Add($entry)
@@ -1590,11 +1922,7 @@ function Write-PassFiles {
         $script:status['note'] = $notes -join '; '
     }
     Write-Notices
-    try {
-        Write-JsonWhole $script:statePath ([ordered]@{ cursor = $script:cursor; wikis = $script:stateWikis })
-    } catch {
-        Write-Log "the state file could not be written: $(Get-FirstLine (Get-InnerError $_.Exception).Message)"
-    }
+    Write-StateFile
     try {
         Write-JsonWhole $script:statusPath $script:status
     } catch {
@@ -1612,6 +1940,9 @@ $script:job = [IntPtr]::Zero
 # every git call carries. The pass's own reads of the list and the engine are
 # required calls, so a budget under the floor still writes a status.
 $script:childFloorSeconds = 60
+# The fewest seconds of pass budget a kb-run.ps1 child, a model run, is started
+# with. KB_WALK_MODEL_FLOOR_SECONDS replaces it.
+$script:modelFloorSeconds = 600
 # The fewest seconds a required call is waited for, however far past the
 # required calls' shared deadline it starts.
 $script:requiredFloorSeconds = 15
@@ -1675,6 +2006,13 @@ try {
             Stop-WithReason 'KB_WALK_SECONDS must be a whole number of seconds from 1 to 99999.'
         }
         $budgetSeconds = [int]$budgetOverride
+    }
+    $modelFloorOverride = $env:KB_WALK_MODEL_FLOOR_SECONDS
+    if (-not [string]::IsNullOrEmpty($modelFloorOverride)) {
+        if ($modelFloorOverride -notmatch '^[1-9][0-9]{0,4}$') {
+            Stop-WithReason 'KB_WALK_MODEL_FLOOR_SECONDS must be a whole number of seconds from 1 to 99999.'
+        }
+        $script:modelFloorSeconds = [int]$modelFloorOverride
     }
     $passStartedAt = [DateTime]::UtcNow
     $script:deadline = $passStartedAt.AddSeconds($budgetSeconds)
@@ -1831,6 +2169,9 @@ try {
             Add-Step $wiki 'visit' 'failed' (ConvertTo-LogText (Get-FirstLine (Get-InnerError $_.Exception).Message)) $visitStartedAt
         }
         $script:cursor = $wiki.name
+        # The state is written after every visit, so a pass cut short keeps
+        # each visited wiki's cursor, lint stamp and deferral.
+        Write-StateFile -BeforeNotices
         Write-Log "$($wiki.name) $($wiki.result) ($([Math]::Round(([DateTime]::UtcNow - $visitStartedAt).TotalSeconds, 1))s)"
     }
 
