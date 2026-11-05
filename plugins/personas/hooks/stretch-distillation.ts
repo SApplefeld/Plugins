@@ -331,8 +331,12 @@ export function stretchBrief(brief: StretchReply["brief"], banked: readonly stri
 
 // --- The orchestration ---
 
-// What one memq put came to, as the memory writer's put path answers it.
+// What one memq put came to, as the memory writer's put path answers it, and
+// whether the put ran past its bound or never ran to an exit, which ends the
+// record loop so a slow or down store costs the compaction one write bound
+// rather than one per record.
 export type StretchWriteOutcome = "written" | "duplicate" | "failed";
+export type StretchWrite = { outcome: StretchWriteOutcome; stop: boolean };
 
 // What hooks/index.ts hands the fork at each compaction: the journal host,
 // the persona and session the line names, the session's state, the fork
@@ -346,7 +350,7 @@ export type StretchDeps = {
   sessionId: string;
   state: AgentState;
   fork: (prompt: string) => Promise<unknown>;
-  writeRecord: (text: string, kind: MemoryKind) => Promise<StretchWriteOutcome>;
+  writeRecord: (text: string, kind: MemoryKind) => Promise<StretchWrite>;
   memq: (args: string[]) => Promise<{ exitCode: number | null; stderr: string } | null>;
   enqueue: (inputs: FollowUpInput[]) => Promise<void>;
   persist: () => Promise<unknown>;
@@ -442,24 +446,29 @@ export async function stretchDistillation(deps: StretchDeps, trigger: string, me
 
     // The records, each through the put path unless a shown record already
     // holds it. The duplicate check reads both lists; the name hash in the
-    // put path refuses the same text twice whichever fork wrote it.
+    // put path refuses the same text twice whichever fork wrote it. A put
+    // that stops the loop leaves the records after it unwritten, counted
+    // failed.
+    let stopped = false;
     for (const record of reply.records) {
+      if (stopped) { counts.recordsFailed += 1; continue; }
       const duplicate = stretchDuplicateOf(record.existing, state.stretchShown, state.shownMemories);
       if (duplicate !== null) {
         counts.recordsDuplicate += 1;
         deps.decide("memory_duplicate", `${stretchText(duplicate, STRETCH_NAME_MAX)}: the stretch fork named it as already holding the fact`);
         continue;
       }
-      let written: StretchWriteOutcome;
+      let written: StretchWrite;
       try {
         written = await deps.writeRecord(record.text, record.kind);
       } catch {
         counts.recordsFailed += 1;
         continue;
       }
-      if (written === "written") counts.recordsWritten += 1;
-      else if (written === "duplicate") counts.recordsDuplicate += 1;
+      if (written.outcome === "written") counts.recordsWritten += 1;
+      else if (written.outcome === "duplicate") counts.recordsDuplicate += 1;
       else counts.recordsFailed += 1;
+      if (written.stop) stopped = true;
     }
 
     // The verdicts, each acted on where its name is in the shown set. A

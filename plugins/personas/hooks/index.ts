@@ -619,7 +619,7 @@ function stretchDepsOf(dp: any): StretchDeps {
     writeRecord: async (text: string, kind: string) => {
       const written = await writeMemoryRecord(dp, text, { kind, source: "distilled", createdAt: Date.now(), writerTag: WRITER_TAG_STRETCH });
       noteMemoryWrite(written, text);
-      return written.outcome;
+      return { outcome: written.outcome, stop: written.outcome === "written" ? written.deferred === true : written.outcome === "failed" && !written.ran };
     },
     memq: (args: string[]) => kitMemq(dp, args, { timeoutMs: MEMQ_WRITE_TIMEOUT_MS }),
     enqueue: async (inputs) => {
@@ -2305,8 +2305,10 @@ function spawnStarted(dp: any, subagentType: string, result: AgentSpawnResult | 
 // distilled or user is written in order through writeMemoryRecord under its
 // own source, and leaves the JSON on a write or on the store already holding
 // its name. Any other outcome leaves it for the next start. A write that
-// memq never ran to an exit ends the pass and counts the rest as left, so a
-// host that is down costs the start one bound rather than one per entry.
+// memq never ran to an exit ends the pass and counts the rest as left, and so
+// does a write read back with its embedding deferred, which leaves the JSON:
+// a host that is down or slow costs the start one bound rather than one per
+// entry.
 // Self-review lessons stay. One memory_migrated decision names the counts
 // wherever there was a candidate, and the state is saved where any entry
 // left the JSON.
@@ -2325,7 +2327,7 @@ async function migrateLegacyMemories(dp: any): Promise<void> {
       source: entry.source as "worker" | "distilled" | "user",
       createdAt: entry.createdAt,
     });
-    if (written.outcome === "written") { moved += 1; done.add(entry); }
+    if (written.outcome === "written") { moved += 1; done.add(entry); if (written.deferred) stopped = true; }
     else if (written.outcome === "duplicate") { present += 1; done.add(entry); }
     else { left += 1; if (!written.ran) stopped = true; }
   }

@@ -95,8 +95,14 @@ export type DrainNoteDeps = Pick<DrainsDeps, "session">;
 // which memq trims. The body is one provenance line naming the persona, the
 // source, this session and the UTC date of `createdAt`, a blank line, then
 // the text. So neither opens with `--`, which memq reads as an option
-// whatever the text. Logs nothing itself: kitMemq logs a spawn that failed,
-// and each caller logs the outcome its own way.
+// whatever the text. A put that ran past its bound is read back by name with
+// memq get --no-stamp under the read bound, since memq stores the row before
+// it embeds the body and the embedding can outlast the write bound: a record
+// found is written with its embedding deferred, and none found is failed. The
+// read-back runs inside the recall read's stand-down, since skipping it would
+// report a stored record as failed. A put that never started is failed with
+// no read-back. Logs nothing itself: kitMemq logs a spawn that failed, and
+// each caller logs the outcome its own way.
 // `writerTag`, where set, is one more tag naming which writer drafted the
 // text, the fork or the Haiku fallback; it changes nothing else about the
 // record, so the same text from either writer derives one name.
@@ -120,6 +126,7 @@ export async function writeMemoryRecord(
   const description = " " + Array.from(firstLine).slice(0, 120).join("");
   const date = new Date(Number.isFinite(createdAt) ? createdAt : Date.now()).toISOString().slice(0, 10);
   const body = `Written by persona ${deps.session.persona} from source ${source} in session ${deps.session.mySessionId} on ${date}.\n\n${text}`;
+  const put: { cause?: "start" | "timeout" } = {};
   const res = await deps.kitMemq([
     "put", name, description,
     "--body", body,
@@ -128,8 +135,14 @@ export async function writeMemoryRecord(
     "--tag", "persona-" + storeId,
     ...(writerTag !== undefined ? ["--tag", writerTag] : []),
     "--author", "persona-" + storeId,
-  ], { timeoutMs: MEMQ_WRITE_TIMEOUT_MS });
-  if (res === null) return { outcome: "failed", name, reason: "memq did not run to an exit", ran: false };
+  ], { timeoutMs: MEMQ_WRITE_TIMEOUT_MS, onNotRun: (cause) => { put.cause = cause; } });
+  if (res === null && put.cause !== "timeout") return { outcome: "failed", name, reason: "memq did not run to an exit", ran: false };
+  if (res === null) {
+    const got = await deps.kitMemq(["get", name, "--no-stamp"], { timeoutMs: MEMQ_READ_TIMEOUT_MS, pastStandDown: true });
+    if (fetchedRecordOf(got) !== null) return { outcome: "written", name, deferred: true };
+    const after = got === null ? ", and the read-back did not run" : ", and a read-back found no record named " + name;
+    return { outcome: "failed", name, reason: "memq did not run to an exit" + after, ran: false };
+  }
   if (res.exitCode === 0) return { outcome: "written", name };
   const lines = res.stderr.split(LINE_TERMINATOR);
   const refusal = res.exitCode === 1 ? lines.find((line: string) => line.startsWith(`memq: '${name}' already exists`)) : undefined;

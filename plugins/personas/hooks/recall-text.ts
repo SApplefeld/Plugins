@@ -54,14 +54,19 @@ export function memqKindOf(kind: unknown): "fact" | "preference" | "lesson" {
   return kind === "preference" || kind === "lesson" ? kind : "fact";
 }
 
-// What one memq put came to. `written` is exit 0. `duplicate` is exit 1 with
-// memq's refusal of a name the store already holds, which is the dedupe: the
-// same text always derives the same name. Its `retired` is true where that
-// refusal says the store holds the name retired under archive/. `failed` is
-// anything else, with the first non-empty stderr line as its reason, and
-// `ran` false where memq never ran to an exit.
+// What one memq put came to. `written` is exit 0, or a put that never ran to
+// an exit whose read-back by name found the record, which carries `deferred`
+// true since memq stores the row before it embeds the body, so its embedding
+// waits for the next db-refresh. `duplicate` is exit 1 with memq's refusal of
+// a name the store already holds, which is the dedupe: the same text always
+// derives the same name. Its `retired` is true where that refusal says the
+// store holds the name retired under archive/. `failed` is anything else,
+// with the first non-empty stderr line as its reason, and `ran` false where
+// memq never ran to an exit and no read-back found the record: a put that
+// never started takes no read-back, and a put past its bound is failed where
+// its read-back found none or did not run.
 export type MemoryWriteOutcome =
-  | { outcome: "written"; name: string }
+  | { outcome: "written"; name: string; deferred?: true }
   | { outcome: "duplicate"; name: string; retired: boolean }
   | { outcome: "failed"; name: string; reason: string; ran: boolean };
 

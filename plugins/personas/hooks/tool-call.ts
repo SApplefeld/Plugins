@@ -2088,6 +2088,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const written = await writeMemoryRecord(text, { kind, source: "worker", createdAt: Date.now() });
     noteMemoryWrite(written, text);
     await persist();
+    if (written.outcome === "written" && written.deferred) {
+      return { result: `Wrote memory record ${written.name} to the shared memory store; memq ran past its bound and a read-back found the record, so its embedding waits for the next db-refresh.` };
+    }
     if (written.outcome === "written") {
       return { result: `Wrote memory record ${written.name} to the shared memory store.` };
     }

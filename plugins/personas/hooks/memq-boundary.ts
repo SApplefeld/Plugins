@@ -193,7 +193,9 @@ export type KitMemqResult = { exitCode: number | null; stdout: string; stderr: s
 // What a kitMemq caller passes beside the argv: the bound on the run, and the
 // callback that receives the cause and reason of a run that did not reach an
 // exit.
-export type KitMemqOptions = { timeoutMs: number; onNotRun?: (cause: "start" | "timeout", reason: string) => void };
+// `pastStandDown` lets one fetch run inside an armed stand-down. Only a `get`
+// honours it, so it can never turn a read or a write into anything else.
+export type KitMemqOptions = { timeoutMs: number; onNotRun?: (cause: "start" | "timeout", reason: string) => void; pastStandDown?: boolean };
 
 // Whether `cause` has not yet failed today, by the UTC day the latch holds
 // for it, which moves to today. A failure logged behind it earns one
@@ -293,18 +295,23 @@ export async function boundaryKitNodeRun(
 // never arms one, since a fetch that fails costs one record its body and the
 // chain renders that record as unfetched rather than withholding the block.
 // A fetch inside the window resolves null, which the chain renders the same
-// way. A fetch that fails earns no memq_spawn_failed decision and spends no
-// latch either: the once-a-day latch stays the prompt's read's.
+// way, unless its caller set `pastStandDown`: the memory writer's read-back
+// of a put that ran past its bound sets it, since that fetch decides whether
+// a record the store may hold is reported written or failed, and a skipped
+// read-back would report a stored record as failed. A fetch that fails earns
+// no memq_spawn_failed decision and spends no latch either: the once-a-day
+// latch stays the prompt's read's.
 export async function boundaryKitMemq(
   deps: KitBoundaryDeps,
   session: MemqSession,
   argv: string[],
-  { timeoutMs, onNotRun }: KitMemqOptions,
+  { timeoutMs, onNotRun, pastStandDown }: KitMemqOptions,
 ): Promise<KitMemqResult | null> {
   const verb = typeof argv[0] === "string" ? argv[0] : "none";
   const purpose: "read" | "fetch" | "write" = verb === "recall-candidates" ? "read"
     : verb === "get" ? "fetch" : "write";
-  if (purpose !== "write" && session.memqStandDownUntil > deps.now()) return null;
+  const standsDown = purpose === "read" || (purpose === "fetch" && pastStandDown !== true);
+  if (standsDown && session.memqStandDownUntil > deps.now()) return null;
   const failed = (cause: "start" | "timeout" | "unavailable", reason: string): null => {
     if (purpose === "fetch") return null;
     if (firstFailureToday(session.memqFailedDay, cause)) {
