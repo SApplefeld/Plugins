@@ -1437,7 +1437,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       return { deny: `ask_open: question and recommend must both be given and non-empty.` };
     }
     const askBlocking = (e as any).blocking === true;
-    const nodeId = turnLeafId() || sess.state.activeGoalId || "unknown";
+    // Where no entry holds the turn, the id names the persona that asked.
+    const nodeId = turnLeafId() || sess.state.activeGoalId || sess.persona;
     const askReaskSuppressMs = typeof cfg.askReaskSuppressMs === "number" ? (cfg.askReaskSuppressMs as number) : 10 * 60_000;
     const storedQuestion = `${askQuestion.endsWith("?") ? askQuestion : `${askQuestion}?`} Recommend: ${askRecommend}`;
     // The rollback below restores the owed list whole, so an owed brief the

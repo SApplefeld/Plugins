@@ -618,7 +618,8 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         sess.jevAskMarkerOutcomeStampId = null;
         shadowOutcome(host(), askMarkerCallStampId, "ask_marker", ASK_MARKER_VALUE);
       }
-      const nodeId = turnLeafIdAtDelete || sess.state.activeGoalId || "unknown";
+      // Where no entry holds the turn, the id names the persona that asked.
+      const nodeId = turnLeafIdAtDelete || sess.state.activeGoalId || sess.persona;
       const askReaskSuppressMs = typeof cfg.askReaskSuppressMs === "number" ? (cfg.askReaskSuppressMs as number) : 10 * 60_000;
       const askBlocking = statusLine !== null && statusLine.state === "blocked";
       let refusedByTurnCap = 0;
