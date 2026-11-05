@@ -106,7 +106,8 @@ export function unnamedExpiredAskQuestion(state: AgentState, node: GoalNode): st
 }
 
 // The bound on a lead's reason, which is text from the worker's own closing
-// line written into the store.
+// line written into the store. The bound counts code points, so a surrogate
+// pair is never split, and a reason cut to it ends in an ellipsis.
 const LEAD_REASON_MAX = 300;
 
 // The status line a closing text states, read from its first non-blank line:
@@ -126,5 +127,7 @@ export function readStatusLine(text: unknown): { state: "working" | "blocked" | 
   const m = /^(WORKING|BLOCKED|WAITING):(.*)$/.exec(firstLine);
   if (!m) return null;
   const state = m[1] === "WORKING" ? "working" : m[1] === "BLOCKED" ? "blocked" : "waiting";
-  return { state, reason: m[2].trim().slice(0, LEAD_REASON_MAX) };
+  const reason = m[2].trim();
+  const points = Array.from(reason.slice(0, LEAD_REASON_MAX * 2 + 2));
+  return { state, reason: points.length > LEAD_REASON_MAX ? `${points.slice(0, LEAD_REASON_MAX - 1).join("")}…` : reason };
 }
