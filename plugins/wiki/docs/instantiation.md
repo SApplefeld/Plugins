@@ -87,10 +87,13 @@ steps:
 
 A refused step stops the run with that step's own one-line reason. A stop after
 the copy names the folder it left behind, so you can remove it before a retry.
-A stop from the trust step on also says `~/.claude.json` may hold a trust entry
-for that folder. The entry trusts that one path and nothing else, so it can
-stay. A retry at the same path finds the folder already trusted and writes
-nothing.
+A run that `kb-create.ps1` stops itself while the copy is still running, as at
+its time bound, names the folder too. It does so only where the folder was
+absent or empty when the copy started and now holds anything, so a folder that
+already held your files is never named as the run's. A stop from the trust
+step on also says `~/.claude.json` may hold a trust entry for that folder.
+The entry trusts that one path and nothing else, so it can stay. A retry at
+the same path finds the folder already trusted and writes nothing.
 
 Read the specialized `CLAUDE.md` once creation ends. The session wrote it from
 a one-line description. To deepen it, run the session in the hand path's

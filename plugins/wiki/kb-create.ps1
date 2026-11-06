@@ -25,14 +25,16 @@ script of this one run as its own pwsh process, or git:
 
 Each step's refusal stops the run with that step's own stderr line, a sibling
 script that succeeds writes none of its stderr through this run (step 4's git
-output is passed through either way), and a stop
-after the folder exists names the folder so the operator can remove it, as
-new-kb.ps1 does. -WhatIf prints the five steps as they would run and runs none
-of them; it still reads the list's root to say which, and reads the list for
-the name, so a listed name is refused there too. Nothing here registers a
-scheduled task. Before step 1 the run refuses a name or description the list
-would refuse at step 5, a value starting with a hyphen or a dash, and a name
-already listed, so such a run copies, trusts and pushes nothing.
+output is passed through either way), and a stop after the folder exists names
+the folder so the operator can remove it, as new-kb.ps1 does. A stop the engine
+wait makes during step 2 names it too, where this run found the folder absent or
+empty and it now exists and holds anything. -WhatIf prints the five steps as
+they would run and runs none of them; it still reads the list's root to say
+which, and reads the list for the name, so a listed name is refused there too.
+Nothing here registers a scheduled task. Before step 1 the run refuses a name or
+description the list would refuse at step 5, a value starting with a hyphen or a
+dash, and a name already listed, so such a run copies, trusts and pushes
+nothing.
 
 .PARAMETER Name
 The knowledge base's name, also its folder name under the root.
@@ -69,7 +71,9 @@ with git's own exit code.
 Each sibling script runs inside the same job, assigned the way git is, so a
 create killed partway takes the script and every process it started with it.
 A sibling script and its output wait at most 900 seconds, above kb-trust.ps1's
-two probes of at most 300 seconds each, and stopping its processes adds at most
+two probes of at most 300 seconds each, or the whole number of seconds from 1
+to 99999 that KB_ENGINE_TIMEOUT_SECONDS holds. Any other value in that
+variable is refused before step 1. Stopping its processes adds at most
 two 5-second drains; past that bound the job's processes are stopped and the
 run stops with one line naming the script and the bound. Where the script
 exited inside the bound and a process it started still held its output past
@@ -112,6 +116,13 @@ $PSNativeCommandUseErrorActionPreference = $false
 # Not $script:WikiPath: names ignore case, so it would be the top-level $wikiPath.
 $script:LeftFolder = $null
 
+# The folder step 2 is making, set only while new-kb.ps1 runs and only where
+# this run found that folder absent or empty just before step 2, so a folder
+# already holding the operator's files is never named as the run's. A stop the
+# engine wait makes in that stretch reads it, since new-kb.ps1 may have copied
+# the template by then; a refusal new-kb.ps1 makes itself names its own folder.
+$script:StepTwoFolder = $null
+
 # Set as step 3 starts, since from then on ~/.claude.json may hold a trust
 # entry for the folder. Removing the folder leaves that entry, so a later stop
 # says so.
@@ -130,6 +141,21 @@ function Stop-WithReason {
         [Console]::Error.WriteLine("kb-create: ~/.claude.json may also hold a trust entry for $($script:LeftFolder). It stays after the folder is removed, and a retry at the same path reuses it.")
     }
     exit 1
+}
+
+# Names step 2's folder as left by this run, for a stop the engine wait makes
+# while new-kb.ps1 runs: only where this run found that folder absent or empty
+# before step 2, and it now exists and holds anything, since new-kb.ps1 accepts
+# an empty destination and the next run would too. A folder that cannot be read
+# is left unnamed, so the stop's own reason still prints.
+function Set-LeftFolderFromStepTwo {
+    if (-not $script:StepTwoFolder) { return }
+    try {
+        if ((Test-Path -LiteralPath $script:StepTwoFolder -PathType Container) -and
+            ($null -ne (Get-ChildItem -LiteralPath $script:StepTwoFolder -Force | Select-Object -First 1))) {
+            $script:LeftFolder = $script:StepTwoFolder
+        }
+    } catch { }
 }
 
 # Full path with no trailing separator, as kb-registry.ps1's ConvertTo-NormalPath
@@ -178,6 +204,8 @@ function ConvertTo-CommandLineArgument {
 # streams has that process ended with the job's processes, one line saying a
 # process it started held them, and its own result returned. Where that
 # process is not ended, the run stops, since the caller reads the output.
+# During step 2, each stop made here also names the folder step 2 was making,
+# where this run found it absent or empty and it now exists and holds anything.
 function Invoke-Engine {
     param([string]$ScriptPath, [string[]]$Arguments)
     $scriptName = Split-Path -Leaf $ScriptPath
@@ -196,8 +224,12 @@ function Invoke-Engine {
         $assignError = [KbCreate.JobObject]::Assign($script:job, $process.Handle)
         if ($assignError -ne 0 -and -not $process.HasExited) {
             # The child can exit between the check and the kill, which then
-            # throws; the line below still names the failed assignment.
+            # throws; the line below still names the failed assignment. The
+            # bounded wait lets a child stopped mid-copy end before its folder
+            # is read.
             try { $process.Kill() } catch { }
+            try { [void]$process.WaitForExit($script:streamDrainSeconds * 1000) } catch { }
+            Set-LeftFolderFromStepTwo
             Stop-WithReason "${scriptName}: assigning its process to the kill-on-close job object failed with Win32 error $assignError; it was stopped."
         }
         $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -206,6 +238,7 @@ function Invoke-Engine {
         $deadline = [DateTime]::UtcNow.AddSeconds($script:engineTimeoutSeconds)
         if (-not $process.WaitForExit($script:engineTimeoutSeconds * 1000)) {
             $null = Stop-JobProcesses $process $streams
+            Set-LeftFolderFromStepTwo
             Stop-WithReason "$scriptName did not finish within the engine bound of $script:engineTimeoutSeconds seconds."
         }
         # The streams close when every process holding them ends, which can be
@@ -219,6 +252,7 @@ function Invoke-Engine {
         if (-not [System.Threading.Tasks.Task]::WaitAll($streams, $remaining)) {
             $holder = "a process $scriptName started held its output past the engine bound of $script:engineTimeoutSeconds seconds"
             if (-not (Stop-JobProcesses $process $streams)) {
+                Set-LeftFolderFromStepTwo
                 Stop-WithReason "$holder and was not stopped with the job's processes, so its output could not be read."
             }
             [Console]::Error.WriteLine("kb-create: $holder and was stopped with the job's processes.")
@@ -579,6 +613,8 @@ $script:gitExe = $gitCmd.Source
 # at most 10 seconds for its lock, and its test hold at most 300 seconds more.
 # new-kb.ps1 declares no wait. 900 seconds clears the largest with over four
 # minutes to spare, so the bound ends only a child that has hung.
+# KB_ENGINE_TIMEOUT_SECONDS replaces it where set, read on every run, so a test
+# can drive the engine bound's stop in seconds.
 $script:pushTimeoutSeconds = 300
 $script:engineTimeoutSeconds = 900
 $script:streamDrainSeconds = 5
@@ -588,6 +624,12 @@ if ($PSBoundParameters.ContainsKey('Remote') -and -not [string]::IsNullOrEmpty($
         Stop-WithReason 'KB_PUSH_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 99999.'
     }
     $script:pushTimeoutSeconds = [int]$env:KB_PUSH_TIMEOUT_SECONDS
+}
+if (-not [string]::IsNullOrEmpty($env:KB_ENGINE_TIMEOUT_SECONDS)) {
+    if ($env:KB_ENGINE_TIMEOUT_SECONDS -notmatch '^[1-9][0-9]{0,4}$') {
+        Stop-WithReason 'KB_ENGINE_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 99999.'
+    }
+    $script:engineTimeoutSeconds = [int]$env:KB_ENGINE_TIMEOUT_SECONDS
 }
 
 # The list's name and description rules, checked here so a value step 5 would
@@ -698,8 +740,19 @@ try {
     }
 
     # --- Step 2. The folder exists from here on, so a later stop names it.
+    # A stop during step 2 names it only where it was absent or empty here, so
+    # a folder already holding the operator's files stays unnamed. A read that
+    # fails leaves it unnamed too.
+    try {
+        if (-not (Test-Path -LiteralPath $wikiPath) -or
+            ((Test-Path -LiteralPath $wikiPath -PathType Container) -and
+             ($null -eq (Get-ChildItem -LiteralPath $wikiPath -Force | Select-Object -First 1)))) {
+            $script:StepTwoFolder = $wikiPath
+        }
+    } catch { }
     $null = Invoke-Step 2 'new-kb.ps1' $newKb @('-Name', $Name, '-Path', $wikiPath)
     $script:LeftFolder = $wikiPath
+    $script:StepTwoFolder = $null
 
     # --- Step 3. Set before the step, since kb-trust.ps1 can write the entry and
     # then refuse at its second probe.

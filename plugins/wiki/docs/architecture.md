@@ -147,9 +147,11 @@ gathers a name, a description and an optional remote URL, then runs
 Every script and git process the run starts runs inside one kill-on-close
 job object, made before the list is read, so a create killed partway ends
 every process it started. A job that cannot be made stops the run before
-anything is read or copied. Each script waits at most 900 seconds, and each
-git call at step 4 waits at most the push bound of 300 seconds or the value
-of `KB_PUSH_TIMEOUT_SECONDS`.
+anything is read or copied. Each script waits at most 900 seconds, or the
+value of `KB_ENGINE_TIMEOUT_SECONDS`. A stop the engine wait makes during
+step 2 names the folder the run left, where the run found it absent or
+empty and it now holds anything. Each git call at step 4 waits at most the
+push bound of 300 seconds or the value of `KB_PUSH_TIMEOUT_SECONDS`.
 
 Each step's refusal stops the run with that step's own stderr line, and a
 step that succeeds passes none of its script's stderr through. A stop
