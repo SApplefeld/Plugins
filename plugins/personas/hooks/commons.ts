@@ -36,7 +36,9 @@ export interface CommonsEntry {
 
 // The idle controller ticks an owner counts against one inbox drain still in
 // flight before it clears that drain's slot, logs the overrun and drains
-// afresh. drainInboxIdle in hooks/controller-tick.ts is its one reader.
+// afresh. It has two readers: drainInboxIdle in hooks/controller-tick.ts,
+// which counts the ticks, and fleetHealthOf in hooks/fleet.ts, whose wedge
+// bound for a fleet row is built on it.
 export const INBOX_DRAIN_IDLE_TICKS = 3;
 
 // The per-turn fields a session publishes beside its claims, so a session in
