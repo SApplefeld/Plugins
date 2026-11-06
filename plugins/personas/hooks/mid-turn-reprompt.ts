@@ -87,6 +87,10 @@ export type RepromptSession = {
   // The newest record timestamp a queued re-prompt covered, or null where
   // none has been queued this session.
   repromptCoveredUntil: number | null;
+  // The newest record timestamp whose operator line the re-prompt walk in
+  // hooks/index.ts has applied, or null where none has; a record at or
+  // below it is retaken with its line applied no second time.
+  repromptLineAppliedUntil: number | null;
   // The start stamp of the oldest owner turn whose window has not been read
   // whole, or null where every window so far was.
   repromptWindowFrom: number | null;

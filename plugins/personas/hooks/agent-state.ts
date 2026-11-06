@@ -183,6 +183,27 @@ export interface GoalNode {
                       // folded (foldablePlans, applyFold). Absent on a node
                       // that never folded. Load drops a value that is not a
                       // positive integer.
+  pullRequest?: number; // Plan node only: the number of the pull request the
+                      // plan's branch is under. Written by goal_add in a
+                      // [QUEUE] delivery turn, from the record's labelled
+                      // `Pull request:` field, in its number or link form.
+                      // The kit event stream's plan-queued event carries it
+                      // as its detail. Absent on an entry queued with no
+                      // record. Load drops a value that is not a positive
+                      // integer.
+  branch?: string; // Plan node only: the plan's branch, written by the same
+                      // goal_add from the record's `Branch:` field. Load
+                      // drops a value off the branch shape,
+                      // QUEUE_BRANCH_FORM with no ".." and no trailing "/".
+  pullRequestUrl?: string; // Plan node only: the pull request's link, written
+                      // by the same goal_add where the `Pull request:` field
+                      // is the link form, and absent for the number form.
+                      // Load drops a value off QUEUE_PULL_REQUEST_LINK_FORM.
+  pausedByOperatorLine?: true; // Set on each node an operator's [PAUSE] line
+                      // paused, the plan holder and its active leaf. A
+                      // [RESUME] line finds what it resumes by this flag,
+                      // never by activeGoalId, and the resume clears it.
+                      // Load drops a value that is not true.
 }
 
 export interface EnvErrors {
@@ -1226,6 +1247,13 @@ export const PLAN_PATH_REQUIRED_FORM =
   "no leading slash, no drive letter, no further path segments, and a name " +
   "starting with a letter or digit and using only letters, digits, \".\", \"_\" or \"-\".";
 
+// The shapes a plan entry's branch and pull request link take, held at the
+// goal_add that reads them from a [QUEUE] record and at every store load. A
+// branch also holds no ".." and does not end in "/". The link's one group
+// is the pull request's number.
+export const QUEUE_BRANCH_FORM = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+export const QUEUE_PULL_REQUEST_LINK_FORM = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/([0-9]{1,9})$/;
+
 // How long a waiting lead holds the controller's idle branch, measured from
 // the clock the lead was read at. Past it the branch runs as usual with the
 // lead left on the entry.
@@ -2111,6 +2139,27 @@ function enforceInvariants(state: AgentState): void {
     if (folded !== undefined && !(Number.isInteger(folded) && (folded as number) > 0)) delete g.foldedChildren;
   }
 
+  // A pull request number, kept on every load only where it is a positive
+  // integer, the same rule: 0, a string and a float each name no pull
+  // request. A node without one loads as it was stored.
+  for (const g of state.goals) {
+    const pullRequest = (g as { pullRequest?: unknown }).pullRequest;
+    if (pullRequest !== undefined && !(Number.isInteger(pullRequest) && (pullRequest as number) > 0)) delete g.pullRequest;
+  }
+
+  // The queue record's two text fields and the operator line's flag, each
+  // kept only in its shape, the same rule: a branch off QUEUE_BRANCH_FORM,
+  // holding "..", or ending in "/" names none, a link off
+  // QUEUE_PULL_REQUEST_LINK_FORM names none, and a flag that is not true
+  // marks nothing.
+  for (const g of state.goals) {
+    const raw = g as { branch?: unknown; pullRequestUrl?: unknown; pausedByOperatorLine?: unknown };
+    if (raw.branch !== undefined && !(typeof raw.branch === "string" && QUEUE_BRANCH_FORM.test(raw.branch)
+      && !raw.branch.includes("..") && !raw.branch.endsWith("/"))) delete g.branch;
+    if (raw.pullRequestUrl !== undefined && !(typeof raw.pullRequestUrl === "string" && QUEUE_PULL_REQUEST_LINK_FORM.test(raw.pullRequestUrl))) delete g.pullRequestUrl;
+    if (raw.pausedByOperatorLine !== undefined && raw.pausedByOperatorLine !== true) delete g.pausedByOperatorLine;
+  }
+
   // The seeded root's three fields, each kept only in the shape the seed
   // writes: doneWhen an array of strings, turnBudget a positive integer,
   // turnsSpent a whole number. A value of another shape is dropped rather
@@ -2425,7 +2474,7 @@ export function resolvePlanPath(state: AgentState, node: GoalNode): string | und
 // document's completion completes, which for a task under a plan node is
 // its parent. Returns undefined for a task entry. resolvePlanPath is this
 // walk's path; the two never diverge because one derives from the other.
-export function planHolderOf(state: AgentState, node: GoalNode): GoalNode | undefined {
+export function planHolderOf(state: Pick<AgentState, "goals">, node: GoalNode): GoalNode | undefined {
   if (node.planPath) return node;
   let current: GoalNode | undefined = node;
   let steps = state.goals.length;
@@ -2538,6 +2587,296 @@ export function activateNext(state: AgentState, completedId?: string): string | 
   // Nothing to activate.
   state.activeGoalId = null;
   return null;
+}
+
+// The one pause body: the node goes paused under the reason, and the active
+// slot empties where it named the node. goal_edit's pause, goal_resume's
+// pause of the entry it displaces and the operator's [PAUSE] line run
+// through here; the controller's plan switch and the turn budget's block
+// write their paused entries themselves. Each caller records its own
+// decision, since the detail names the caller. Every pause clears the
+// operator line's flag, so a node a tool paused is never one a [RESUME]
+// line lifts; the line sets the flag again after its own pause.
+export function pauseGoalNode(state: AgentState, node: GoalNode, reason: string, now: number): void {
+  node.status = "paused";
+  node.blockedReason = reason;
+  node.updatedAt = now;
+  delete node.pausedByOperatorLine;
+  if (state.activeGoalId === node.id) state.activeGoalId = null;
+}
+
+export interface ResumeGoalNodeOptions {
+  now: number;
+  // Appended to the resume decision's detail: the record or origin that
+  // admitted a resume at or under an entry awaiting the operator's yes, or
+  // "" where none was awaiting.
+  admittedBy: string;
+  // The operator's [RESUME] line resumes the holder and then its leaf in one
+  // write. For it, an active node goes pending and is never paused: one
+  // above the target takes the shape a holder with an active leaf takes,
+  // and one elsewhere in the tree is displaced, with one
+  // operator_resume_displaced decision naming it and the target. A tool call
+  // pauses whatever else is active, as a resume of one entry displaces the
+  // other.
+  fromLine: boolean;
+}
+
+export interface ResumeGoalNodeResult {
+  budgetRelease: boolean;
+}
+
+// The one resume body: the target leaves paused, or the round budget's
+// block, and becomes the active entry, with every consequence goal_resume
+// carried: another active node paused with the reason naming the target, an
+// awaiting entry above it released, a round budget restarted, ancestors
+// blocked only by "Child task blocked" freed, a blocked lead cleared and the
+// node's blocking asks lifted, and the operator line's flag on the node
+// cleared. Decisions for each land here. The caller owns the session's
+// nudge counters and the store write.
+export function resumeGoalNode(state: AgentState, target: GoalNode, opts: ResumeGoalNodeOptions): ResumeGoalNodeResult {
+  const { now, admittedBy, fromLine } = opts;
+  // M9: if a different node is active, pause it first (M10: write blockedReason).
+  if (state.activeGoalId && state.activeGoalId !== target.id) {
+    const activeNode = state.goals.find((g) => g.id === state.activeGoalId);
+    if (activeNode && activeNode.status === "active") {
+      if (fromLine) {
+        activeNode.status = "pending";
+        activeNode.updatedAt = now;
+        if (!ancestorIdsOf(state, target).includes(activeNode.id)) {
+          state.decisions.push({
+            timestamp: now,
+            loop: "goal",
+            action: "operator_resume_displaced",
+            detail: `${activeNode.id} returned to pending by the operator's [RESUME] line resuming ${target.id}`,
+          });
+        }
+      } else {
+        pauseGoalNode(state, activeNode, `Paused by goal_resume of ${target.id}`, now);
+        state.decisions.push({
+          timestamp: now,
+          loop: "goal",
+          action: "paused_by_resume",
+          detail: `${activeNode.id} paused (goal_resume of ${target.id})`,
+        });
+      }
+    }
+  }
+  // M10: clear blockedReason on resume.
+  const pausedReason = target.blockedReason || "unknown";
+  const budgetRelease = target.status === "blocked";
+  // An allowed resume at or under an entry awaiting the operator's yes is
+  // that word on the entry, so the entry's flag goes, and its awaiting
+  // reason with it. An entry above the resumed node stays paused.
+  const awaitingAbove = awaitingEntryAtOrAbove(state, target);
+  if (awaitingAbove && awaitingAbove !== target) {
+    awaitingAbove.awaitingYes = undefined;
+    if (awaitingAbove.blockedReason === AWAITING_YES_REASON) awaitingAbove.blockedReason = undefined;
+    awaitingAbove.updatedAt = now;
+  }
+  target.blockedReason = undefined;
+  target.awaitingYes = undefined;
+  // Any resume lifts the operator line's pause on the node, so a later
+  // [RESUME] line finds nothing of this node's left to resume.
+  delete target.pausedByOperatorLine;
+  target.status = "active";
+  // A released entry left at its maxRounds would re-block on its next
+  // scored round, so its count restarts. Its scores stay.
+  if (budgetRelease) target.completedRounds = 0;
+  // completeLeaf's walk blocked each plan above the released entry with
+  // "Child task blocked", and activateNext never descends into a blocked
+  // plan, so a release that left them would strand their pending work.
+  // blockedAncestorsToFree decides the chain as the load-time recovery
+  // does, and undefined is an ancestor in a state it cannot explain,
+  // which leaves every ancestor as it is and is named in the decision.
+  const releaseChain = budgetRelease ? blockedAncestorsToFree(state, target) : [];
+  const chainNote = releaseChain === undefined ? "; ancestors left as they are, one above in a state the release does not free" : "";
+  // A resume lifts a blocked lead whatever paused the entry, since the
+  // lead would otherwise hold the idle branch until a working turn that
+  // may never come. A worker still blocked restates BLOCKED: at its next
+  // turn end and is held again. A waiting lead keeps its own hold window
+  // and stays.
+  const liftedLead = target.lead && target.lead.state === "blocked" ? target.lead : null;
+  if (liftedLead) target.lead = null;
+  target.updatedAt = now;
+  state.activeGoalId = target.id;
+  state.decisions.push({
+    timestamp: now,
+    loop: "goal",
+    action: "resume",
+    detail: budgetRelease
+      ? `Node ${target.id} resumed (blocked: ${pausedReason}; round budget restarted${chainNote}${admittedBy})`
+      : `Node ${target.id} resumed (paused: ${pausedReason}${admittedBy})`,
+  });
+  // From the nearest ancestor up, one is freed only while its reason is
+  // exactly "Child task blocked" and no child of it is still blocked:
+  // the released entry is active and a lower ancestor freed here is
+  // pending. A pending or active ancestor is passed over, as the helper
+  // passes it. The first blocked ancestor that fails ends the walk,
+  // leaving it and everything above it as they are.
+  for (const ancestor of releaseChain ?? []) {
+    if (ancestor.blockedReason !== "Child task blocked"
+      || state.goals.some((g) => g.parentId === ancestor.id && g.status === "blocked")) break;
+    ancestor.status = "pending";
+    ancestor.blockedReason = undefined;
+    ancestor.updatedAt = now;
+    state.decisions.push({
+      timestamp: now,
+      loop: "goal",
+      action: "unblocked",
+      detail: `${ancestor.id}: returned to pending, goal_resume's release of ${target.id} cleared "Child task blocked"`,
+    });
+  }
+  if (liftedLead) {
+    state.decisions.push({
+      timestamp: now,
+      loop: "goal",
+      action: "lead_cleared",
+      detail: `${target.id}: blocked lead cleared by goal_resume`,
+    });
+  }
+  // The resume lifts the hold on the resumed node's asks and closes
+  // none: every open blocking entry on the node is lifted on the
+  // ledger alone, its record left open for a reader to answer. A
+  // blocking entry on another node keeps holding.
+  for (const entry of openBlockingAsks(state)) {
+    if (entry.nodeId === target.id) liftAsk(state, entry.id);
+  }
+  state.updatedAt = now;
+  return { budgetRelease };
+}
+
+// The operator's two lines, read from a message's own words with the
+// channel envelope already stripped and the text trimmed. A line opens
+// with the literal [PAUSE] or [RESUME]; the rest of a [PAUSE] message's
+// first line, trimmed and cut to reasonMax code points, is the reason. Any
+// other text is no line.
+export type OperatorLine = { kind: "pause"; reason: string } | { kind: "resume" };
+
+export const OPERATOR_LINE_PAUSE_REASON = "paused from the operator's line";
+
+export function readOperatorLine(body: string, reasonMax: number): OperatorLine | null {
+  if (body.startsWith("[PAUSE]")) {
+    const firstLine = body.slice("[PAUSE]".length).split(/\r?\n/, 1)[0];
+    const rest = Array.from(firstLine.trim()).slice(0, reasonMax).join("");
+    return { kind: "pause", reason: rest === "" ? OPERATOR_LINE_PAUSE_REASON : rest };
+  }
+  if (body.startsWith("[RESUME]")) return { kind: "resume" };
+  return null;
+}
+
+// The ids above a node, nearest first. The walk is bounded by the node
+// count, so a parentId cycle ends it, and a missing parent ends it there.
+function ancestorIdsOf(state: Pick<AgentState, "goals">, node: GoalNode): string[] {
+  const ids: string[] = [];
+  let current: GoalNode | undefined = node;
+  let steps = state.goals.length;
+  while (current && current.parentId && steps-- > 0) {
+    ids.push(current.parentId);
+    const parentId: string = current.parentId;
+    current = state.goals.find((g) => g.id === parentId);
+  }
+  return ids;
+}
+
+// One step an operator line takes on one node. "pause" pauses and flags it.
+// "resume" runs the shared resume body. "release" returns a paused holder
+// to pending without making it the active entry: one whose descendant is
+// the active entry takes the shape a holder with an active leaf takes,
+// leaving the leaf as it is, and one with no flagged descendant left to
+// resume waits for the controller's walk to pick its next leaf. "unflag"
+// clears the flag on a node already out of paused and changes nothing else.
+type OperatorLineStep = { node: GoalNode; act: "pause" | "resume" | "release" | "unflag" };
+
+// The one targeting rule: what an operator line does to the tree, read
+// before it writes, or null where the line finds nothing to act on. A
+// [PAUSE] pauses the plan holder of the active entry and the active leaf,
+// so the next tick activates nothing under the holder; a task with no
+// holder, or one whose holder is neither active, pending nor paused, is
+// paused alone. A [RESUME] acts on every flagged entry, found by
+// the flag and never by activeGoalId, ancestors before descendants, so a
+// holder resumed first goes back to pending when its leaf resumes after it.
+// Each step is decided on the tree as it stands before the line: a flagged
+// node no longer paused is only unflagged, since a goal_resume or another
+// writer already moved it. applyOperatorLine is the one caller.
+function operatorLineSteps(state: AgentState, line: OperatorLine): OperatorLineStep[] | null {
+  const active = state.goals.find((g) => g.id === state.activeGoalId && g.status === "active");
+  if (line.kind === "pause") {
+    if (!active) return null;
+    const holder = planHolderOf(state, active);
+    const holderPausable = holder !== undefined && holder !== active
+      && (holder.status === "active" || holder.status === "pending" || holder.status === "paused");
+    return (holderPausable ? [holder, active] : [active]).map((node) => ({ node, act: "pause" }));
+  }
+  const flagged = state.goals.filter((g) => g.pausedByOperatorLine === true);
+  if (flagged.length === 0) return null;
+  const activeAncestors = active ? ancestorIdsOf(state, active) : [];
+  const ancestry = new Map(flagged.map((g) => [g.id, ancestorIdsOf(state, g)]));
+  const resumesBelow = (node: GoalNode) =>
+    flagged.some((g) => g !== node && g.status === "paused" && ancestry.get(g.id)!.includes(node.id));
+  return flagged
+    .slice()
+    .sort((a, b) => ancestry.get(a.id)!.length - ancestry.get(b.id)!.length)
+    .map((node) => ({
+      node,
+      act: node.status !== "paused" ? "unflag"
+        : activeAncestors.includes(node.id) || (node.planPath && !resumesBelow(node)) ? "release"
+        : "resume",
+    }));
+}
+
+// Applies an operator line to the tree through operatorLineSteps, flagging
+// each node a [PAUSE] pauses and clearing the flag on each node a [RESUME]
+// reaches, so the holder ends pending and its leaf active. Returns the ids
+// changed, in order, the context sentence's subject, or null where the line
+// changed none; that absence is logged as a decision, and a [RESUME] whose
+// flags all sat on nodes already out of paused clears them. While the turn
+// budget blocks the root a [RESUME] resumes nothing and keeps every flag,
+// since goal_resume refuses every entry then and the root's release is the
+// one way back; one operator_resume_budget_blocked decision says so, and
+// the flags wait for a [RESUME] after the release. The caller persists; the
+// landed write's status diff emits paused and resumed, so nothing emits
+// here.
+export function applyOperatorLine(state: AgentState, line: OperatorLine, now: number): string[] | null {
+  if (line.kind === "resume" && rootBudgetBlocked(state)) {
+    state.decisions.push({ timestamp: now, loop: "goal", action: "operator_resume_budget_blocked", detail: `[RESUME] line while the root is blocked by "${TURN_BUDGET_REASON}": nothing resumes and the flags stay` });
+    return null;
+  }
+  const steps = operatorLineSteps(state, line) ?? [];
+  const changed = steps.filter((s) => s.act !== "unflag").map((s) => s.node.id);
+  if (line.kind === "pause") {
+    if (changed.length === 0) {
+      state.decisions.push({ timestamp: now, loop: "goal", action: "operator_pause_none", detail: "[PAUSE] line with no active entry" });
+      return null;
+    }
+    for (const { node } of steps) {
+      pauseGoalNode(state, node, line.reason, now);
+      node.pausedByOperatorLine = true;
+    }
+    state.decisions.push({
+      timestamp: now,
+      loop: "goal",
+      action: "paused_by_operator_line",
+      detail: `${changed.join(", ")}: ${line.reason}`,
+    });
+    state.updatedAt = now;
+    return changed;
+  }
+  for (const { node, act } of steps) {
+    delete node.pausedByOperatorLine;
+    if (act === "resume") {
+      resumeGoalNode(state, node, { now, admittedBy: "; admitted by the operator's [RESUME] line", fromLine: true });
+    } else if (act === "release") {
+      node.status = "pending";
+      node.blockedReason = undefined;
+      node.updatedAt = now;
+    }
+  }
+  if (changed.length === 0) {
+    state.decisions.push({ timestamp: now, loop: "goal", action: "operator_resume_none", detail: "[RESUME] line with no entry the operator's line paused" });
+    return null;
+  }
+  state.updatedAt = now;
+  return changed;
 }
 
 // Whether the root is the planner's: it exists and either has no direct

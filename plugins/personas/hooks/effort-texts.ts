@@ -64,6 +64,12 @@ export const AWAITING_YES_DONE_REFUSED_TEXT =
   "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so a word to complete it is taken up there. " +
   "It stays as it is until that word reaches you.";
 
+// The one sentence a turn carries after the operator's [PAUSE] line paused
+// the plan holder and its leaf, and the one after a [RESUME] line resumed
+// them. The hook fills {entries} with the ids it changed, in order.
+export const OPERATOR_LINE_PAUSED_TEXT = "The [PAUSE] line this turn opens with has paused {entries}; a paused entry starts no step until resumed.";
+export const OPERATOR_LINE_RESUMED_TEXT = "The [RESUME] line this turn opens with has resumed {entries}; the leaf is active again and its work continues from where the pause left it.";
+
 // The record goal_add sends the coordinator persona for a plan the autonomy
 // level admitted outside the operator's and the coordinator persona's turns:
 // a [PROPOSAL] at plan-and-ask, whose entry waits for the operator's yes, and

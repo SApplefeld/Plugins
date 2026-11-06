@@ -77,6 +77,9 @@ import {
   pruneAsks,
   ASK_SEED_QUESTION,
   ASKS_OPEN_MAX,
+  readOperatorLine,
+  applyOperatorLine,
+  type OperatorLine,
 } from "./agent-state";
 import { readPlanRecord, resolvePlanDir } from "./plan-record";
 import type { PlanRecordReading } from "./plan-record";
@@ -181,7 +184,7 @@ import { segment, writeEvent, type JournalWrite } from "./decision-journal";
 // The in-process recognition index the memory-recognition ask matches, the
 // gate its answer sets, and the memory-recognition nudge's index, match,
 // claim and text.
-import { RECOGNITION_OPS_MAX, nudgeClaim, nudgeCollectHits, nudgeDedupKey, nudgeElisionsOf, nudgeEventDetail, nudgeHitsWithheld, nudgeMarkerKeys, nudgeMarkerOf, nudgeStrictSeat, nudgeSubjectsOf, nudgeText, type NudgeBoundary, type NudgeMarker, type NudgePayload } from "./recognition";
+import { RECOGNITION_OPS_MAX, nudgeClaim, nudgeCollectHits, nudgeDedupKey, nudgeElisionsOf, nudgeEventDetail, nudgeHitsWithheld, nudgeMarkerKeys, nudgeMarkerOf, nudgeStrictSeat, nudgeSubjectsOf, nudgeText, shellCommandOf, type NudgeBoundary, type NudgeMarker, type NudgePayload } from "./recognition";
 // The one builder of a prompt's context blocks, for a typed prompt and for a
 // delivered inbox record.
 import { assembleContext, deliveryWithContext, type ContextSources } from "./context-assembly";
@@ -190,6 +193,7 @@ import { FORK_IDLE } from "./fork-watch";
 import { compactionPassEvent, compactionPassOptionOf, compactionPassReading, compactionPassShadow, compactionPassStep, compactionPlanDetail, compactionReadingDetail, compactionRerunAtCompaction, compactionSummaryUsageDetail, newCompactionPassState, type CompactionPassDeps, type CompactionPassOption, type CompactionPassReading } from "./compaction-pass";
 import { endStretchAtCompaction, markStretchApplied, stretchInstructions, WRITER_TAG_STRETCH, type StretchDeps } from "./stretch-distillation";
 import { boundaryBankCompactionBoundary, boundaryKitInstallPathOf, boundaryKitMemq, boundaryKitNodeRun, firstFailureToday, MEMQ_UNAVAILABLE_LINES, type KitBoundaryDeps, type KitMemqOptions, type KitMemqResult } from "./memq-boundary";
+import { emitGoalDiff, emitGoalDiffFrom, emitKitEvent, followKitEventsOwner, newKitEventsState, type KitEventDeps } from "./kit-events";
 // The follow-up queue a turn's end fills and the next prompt's context
 // lists, and its three sources: the documentation check, the memory fork and
 // the stretch fork.
@@ -203,7 +207,7 @@ import { COMPACT_CUT_MARKER, COMPACT_REMINDER_INTERVAL_MS, COMPACT_VALVE_PERCENT
 import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore, type AfterHook, type BeforeGuard, type GuardCall, type GuardContext, type GuardHost, type GuardResult, type GuardVerdictRecord } from "./guards/runner";
 // The module's own after-call hooks: the C# formatter and the
 // memory-recognition nudge.
-import { formatterHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
+import { formatterHook, prReadyHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
 import { childEnvOf, gitHooksPathOf } from "./spawn";
 import { newSpawnTypes, recordSpawnType, spawnLogLine, spawnTypeOf, type SpawnTypes } from "./spawn-types";
 // The nine deny guards: the four the kit's command hooks held, ported, the
@@ -227,7 +231,7 @@ import { TURN_PLAN_EDITS_MAX as TURN_PLAN_EDITS_MAXFromModule, namesPlanDocument
 import { MEMQ_WRITE_TIMEOUT_MS, type RecallInjection, recallGetNamesOf as recallGetNamesOfFromModule, RECOGNITION_CHECK_EVERY_MS, type NudgePrepared, nudgeToolPayload } from "./recall-text";
 import { STATE_NOT_LOADED_STORE_CAUSE, STORE_EMPTY_AT_START, STORE_UNREADABLE_AT_START, readPersonaStore, HEARTBEAT_FILENAME, PERSONA_STORE_FILENAME, YIELD_LOG_FILENAME, GOAL_HISTORY_FILENAME, METER_DRAIN_EVERY_MS, METER_DRAIN_TIMEOUT_MS, personaStoreId as personaStoreIdFromModule } from "./store-files";
 import { isWorkTool, isNudgeCountWork, type StepWatch, stepWatchOf, nextStepToolsValue, stepEffortRewrite, TURN_TOOL_RING_MAX, type TurnToolFlags, freshTurnToolFlags, RECAP_TIMEOUT_MS, RECAP_RECENT_MS, RECAP_OPERATOR_MS, recapTimeOf, recapAgeText } from "./turn-state-text";
-import { ASK_MARKER_LINE, ASK_MARKER_LINE_BREAK, askRecommendOf, unnamedExpiredAskQuestion, readStatusLine } from "./worker-ask";
+import { ASK_MARKER_LINE, ASK_MARKER_LINE_BREAK, LEAD_REASON_MAX, askRecommendOf, unnamedExpiredAskQuestion, readStatusLine } from "./worker-ask";
 import { type HookBudget, type LiveAskResult as LiveAskResultFromModule, filterJevLive as filterJevLiveFromModule, JEV_LIVE_DEFAULT as JEV_LIVE_DEFAULTFromModule } from "./jev-live";
 import type { SessionState } from "./session-state";
 import { liveAsk as liveAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, openLedgerAsk as openLedgerAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule, type AskJournalDeps, type AskLayerDeps } from "./ask-layer";
@@ -237,7 +241,8 @@ import { recallInjection as recallInjectionFromModule, recognitionAsk as recogni
 import { controllerTick, drainInbox, heartbeatTick, type DrainChoice, type DrainOverrun, type TickContext } from "./controller-tick";
 import { persistAnswering, serveToolCall, type EffortAct, type ToolCallContext } from "./tool-call";
 import { serveTurnComplete, type TurnCompleteContext } from "./turn-complete";
-import { readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, liftHeldAsksForReprompt } from "./mid-turn-reprompt";
+import { channelBodyOf, readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, liftHeldAsksForReprompt } from "./mid-turn-reprompt";
+import { OPERATOR_LINE_PAUSED_TEXT, OPERATOR_LINE_RESUMED_TEXT } from "./effort-texts";
 // The relay adapter: the Channels broker's hook events, posted by the module
 // itself under the `plugin` hook owner, behind the relayAdapter option.
 import { relayAdapterOf } from "./relay-adapter";
@@ -608,6 +613,39 @@ function compactionPassDepsOf(dp: any): CompactionPassDeps {
   };
 }
 
+// The kit event stream's session memory (hooks/kit-events.ts): the plan
+// holders' statuses the last landed write showed and the spawn chain's tail.
+// One per module load, like childTempRoot below, and never in the store.
+const kitEvents = newKitEventsState();
+
+// Moves the kit event snapshot to the session's hold: seeded from the state
+// held now where this session owns the persona, unseeded where it does not.
+// The identity switch and join paths in tool-call.ts, the tick's promotion
+// and both yields here call it after the state and the owner flag are in
+// place. The session start sets both across several branches and calls it
+// once, after the last of them and before its first write.
+function followKitEvents(): void {
+  followKitEventsOwner(kitEvents, sess.isOwner, sess.state);
+}
+
+// The kit event stream's deps over `$`, built at each call as
+// compactionPassDepsOf is. The spawn goes through runChild and resolves
+// `node` as the restart recap's spawn does; the home is read as hostOf reads
+// it, USERPROFILE then HOME.
+function kitEventDepsOf(dp: any): KitEventDeps {
+  return {
+    run: (argv, init) => runChild(dp, argv, init),
+    pluginRoot: () => dp.plugin.root,
+    home: () => hostOf(dp).getHome(),
+    workdir: () => sess.workdir,
+    sessionId: () => sess.mySessionId,
+    now: () => Date.now(),
+    decide: (action: string, detail: string) => {
+      sess.state.decisions.push({ timestamp: Date.now(), loop: "monitor", action, detail });
+    },
+  };
+}
+
 // The stretch fork's deps over `$`, built at each call as compactionPassDepsOf is.
 function stretchDepsOf(dp: any): StretchDeps {
   return {
@@ -973,19 +1011,36 @@ async function guardEvent(dp: any, event: "guard_verdict" | "guard_shadow" | "gu
 // called while the guards still ran.
 const guardPhaseCalls = new Map<string, string>();
 
+// The plan holder of the entry the turn started on, `turnLeafId` as the
+// turn.start handler recorded it, or undefined where the turn started on no
+// entry or on one under no plan, or where the session does not own the
+// persona: turn.start records the leaf for a reader too, and only the owner
+// writes the stream. The pr-ready after hook's entry.
+function turnPlanHolderOf(turnLeafId: string | null): GoalNode | undefined {
+  if (!sess.isOwner) return undefined;
+  const leaf = turnLeafId === null ? undefined : sess.state.goals.find((g) => g.id === turnLeafId);
+  return leaf === undefined ? undefined : planHolderOf(sess.state, leaf);
+}
+
 // The module's own after hooks for one call, built over the hook-bound `$`
-// for hostOf's reason: the C# formatter and, on a call the model made, the
-// memory-recognition nudge. A call a plugin raised
-// through $.tool.call reaches the handler too, and the engine drops the
-// context such a call's result carries, so a pointer claimed there would be
-// marked as pointed at and never seen; `modelMade` is next.origin naming
-// "engine", the compaction bank's own test. They run beside the hooks
-// runner.ts holds registered, in a runAfter pass of their own, their
+// for hostOf's reason: the C# formatter, the pull request ready mark and,
+// on a call the model made, the memory-recognition nudge. A call a plugin
+// raised through $.tool.call reaches the handler too, and the engine drops
+// the context such a call's result carries, so a pointer claimed there
+// would be marked as pointed at and never seen; `modelMade` is next.origin
+// naming "engine", the compaction bank's own test. They run beside the
+// hooks runner.ts holds registered, in a runAfter pass of their own, their
 // contexts after those. `askRecognition` is the call's memory-recognition
-// ask, which the nudge settles before it claims.
-function moduleAfterHooks(dp: any, modelMade: boolean, askRecognition?: () => Promise<void>): AfterHook[] {
+// ask, which the nudge settles before it claims. `turnLeaf` reads the entry
+// the turn started on, for the ready mark's plan holder.
+function moduleAfterHooks(dp: any, modelMade: boolean, askRecognition: (() => Promise<void>) | undefined, turnLeaf: () => string | null): AfterHook[] {
   const hooks: AfterHook[] = [
     formatterHook({ cwd: () => guardCwdOf(dp), host: guardHostOf(dp), resolve: (name: string) => executableOf(dp, name) }),
+    prReadyHook({
+      command: (call) => shellCommandOf(call.tool, call),
+      holder: () => turnPlanHolderOf(turnLeaf()),
+      emit: (plan, detail) => emitKitEvent(kitEventDepsOf(dp), kitEvents, "pr-ready", plan, detail),
+    }),
   ];
   if (modelMade) hooks.push(recognitionHook({ nudge: (call: GuardCall, r: GuardResult) => toolCallNudges(dp, call, r, askRecognition) }));
   return hooks;
@@ -1071,9 +1126,10 @@ async function redactedSubmitNext(dp: any, e: PromptSubmitInput, next: Next<"pro
  * guards' and after hooks' contexts leading its own. `spawnTypes` is the
  * register call's map of started subagents to their types, for the guard
  * context. `askRecognition`, where the handler passes one, is handed to the
- * recognition nudge's after hook.
+ * recognition nudge's after hook. `turnLeaf` reads the entry the turn
+ * started on, for the pr-ready after hook.
  */
-async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, guardsOption: GuardsOption, spawnTypes: SpawnTypes, askRecognition?: () => Promise<void>): Promise<{ early: ToolCallResult } | { r: ToolCallResult }> {
+async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, guardsOption: GuardsOption, spawnTypes: SpawnTypes, askRecognition: (() => Promise<void>) | undefined, turnLeaf: () => string | null): Promise<{ early: ToolCallResult } | { r: ToolCallResult }> {
   // The before-tool guards, on every call whatever its loop. Each matched
   // guard's verdict is journaled; under live a deny is this call's result
   // and under shadow the call runs and each guard's verdict is set beside
@@ -1161,7 +1217,7 @@ async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, g
       // call. They share the one context guardCtxOf builds, the registered
       // hooks' contexts lead, and the registered pass's failure is the one
       // journaled where both fail, as one pass in registration order would.
-      const moduleHooks = moduleAfterHooks(dp, next.origin?.plugin === "engine", askRecognition);
+      const moduleHooks = moduleAfterHooks(dp, next.origin?.plugin === "engine", askRecognition, turnLeaf);
       const [registered, own] = await Promise.allSettled([
         runAfter(guardCall, r as GuardResult, guardCtxOf),
         runAfter(guardCall, r as GuardResult, guardCtxOf, moduleHooks),
@@ -1530,6 +1586,7 @@ const sess: SessionState = {
   turnStartedAt: null,
   workdir: "",
   repromptCoveredUntil: null,
+  repromptLineAppliedUntil: null,
   repromptWindowFrom: null,
   repromptIdPendingLogged: false,
   repromptChain: Promise.resolve(),
@@ -2621,6 +2678,7 @@ export const yieldNow = async (dp: any, onDisk: { activeSessionId: string; epoch
   const rec = yieldRecord(persona, sessionId, onDisk.activeSessionId, epoch, onDisk.epoch);
   state.decisions.push(rec.decision);
   sess.isOwner = false;
+  followKitEvents();
   try { dp.ui.log(`Agentic: yielded '${persona}' to ${onDisk.activeSessionId} (epoch ${onDisk.epoch})`); } catch { /* non-fatal */ }
   try {
     await appendLines(dp, sess.yieldLogPath, [rec.logLine]);
@@ -3145,7 +3203,14 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
         action: "persona_yield_commons",
         detail: `Yielded ${resource} to ${winner} (commons arbitration)`,
       });
+      // The kit event stream's diff for this branch's own write below reads
+      // the yielded persona's values taken here, before the unseed and the
+      // first await: the snapshot's statuses and open asks as they stood,
+      // and the launch directory.
+      const yieldedKitEvents = { seeded: kitEvents.seeded, statuses: new Map(kitEvents.statuses), asks: new Map(kitEvents.asks) };
+      const yieldedWorkdir = sess.workdir;
       sess.isOwner = false;
+      followKitEvents();
       try {
         await appendLines(dp, sess.yieldLogPath, [rec.logLine]);
       } catch { /* non-fatal */ }
@@ -3159,6 +3224,38 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
       const store2 = await readPersonaStore({ exists: (p) => dp.fs.exists(p), read: (p) => dp.fs.read(p), sleep: (ms) => dp.clock.sleep(ms) }, sess.storePath);
       store2[startPersona] = yieldedState;
       await dp.fs.write(sess.storePath, JSON.stringify(store2, null, 2));
+      // That write landed the yielded state, the rollback above applied, so
+      // the plan holders' transitions it carries go out as events against
+      // the snapshot taken before the unseed: the change reached the store,
+      // and the next owner reseeds from what it loads, so it emits them
+      // again neither before nor after. The session's own snapshot stays
+      // unseeded on every exit from this branch. A write that threw never
+      // reaches here. The record names the yielded persona's launch
+      // directory and this session, read from the captures above.
+      if (yieldedKitEvents.seeded) {
+        const yieldedDeps = kitEventDepsOf(dp);
+        yieldedDeps.workdir = () => yieldedWorkdir;
+        yieldedDeps.sessionId = () => startSessionId;
+        // A lost append is noted as a line in the yield log, beside the
+        // yield's own line, once the emit settles. The yielded state is
+        // already in the store and the persona belongs to the winner, so a
+        // decision pushed onto that state would reach no store, and a second
+        // store write would race the winner's.
+        const lostNotes: string[] = [];
+        yieldedDeps.decide = (action: string, detail: string) => {
+          lostNotes.push(JSON.stringify({ ts: new Date().toISOString(), persona: startPersona, session: startSessionId, action, detail }));
+        };
+        // The yield's emit logs no decision, so it leaves the session-wide
+        // failure flag as it found it for whichever persona owns next.
+        const failureLoggedBefore = kitEvents.failureLogged;
+        try {
+          await emitGoalDiffFrom(yieldedDeps, kitEvents, yieldedKitEvents, yieldedState);
+        } catch { /* the stream is observability; a failed emit changes nothing */ }
+        kitEvents.failureLogged = failureLoggedBefore;
+        try {
+          await appendLines(dp, sess.yieldLogPath, lostNotes);
+        } catch { /* non-fatal, as the yield's own line is */ }
+      }
       return false;
     }
   } catch {
@@ -3188,6 +3285,24 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   }
   store[startPersona] = startState;
   await dp.fs.write(sess.storePath, JSON.stringify(store, null, 2));
+  // The kit event stream reads the write that landed: the plan holders'
+  // status transitions since the last landed write go out as events, each
+  // awaited to its bound so a tool's answer follows the line on disk. A
+  // refused write returned above and moved no snapshot, so the next landed
+  // write carries its change. A yield that writes nothing unseeds the
+  // snapshot and the next ownership reseeds from the state it holds, so its
+  // change is not emitted; a commons yield emits the change its own write
+  // landed, on the yield branch above. The write's own await is one the session can move under, so
+  // the diff runs only where this write's persona, epoch, state and owner
+  // flag still hold. A switch or yield that completed meanwhile has moved
+  // the snapshot to its own hold. A move that leaves the snapshot where it
+  // was, such as the tick's epoch raise, leaves this write's change to the
+  // next landed write. Nothing here changes the write.
+  if (sess.isOwner && !sessionMidSwitch() && !movedSince(startPersona, startEpoch, startState)) {
+    try {
+      await emitGoalDiff(kitEventDepsOf(dp), kitEvents, startState);
+    } catch { /* the stream is observability; a failed emit changes nothing */ }
+  }
   return true;
 };
 
@@ -4028,6 +4143,31 @@ export const register: Register = async (on, options) => {
     if (currentTurnEntry !== null) return currentTurnEntry.kind === "reprompt";
     if (currentTurnOriginKind === "channel" && currentTurnSenderClass === "participant") return false;
     return OPERATOR_ORIGIN_KINDS.has(currentTurnOriginKind);
+  };
+  // The operator's [PAUSE] and [RESUME] lines, read from one channel
+  // message's own words. The caller has settled that the words are an
+  // operator-class message from the persona's thread: at prompt.submit by the
+  // envelope's class, at the mid-turn re-prompt by the scan, which keeps
+  // operator records alone. The line read here is null for any other text
+  // and for a session that is not the persona's owner.
+  const operatorLineOf = (body: string): OperatorLine | null =>
+    sess.isOwner ? readOperatorLine(body.trim(), LEAD_REASON_MAX) : null;
+  // The one context sentence a line that changed entries carries.
+  const operatorLineSentence = (line: OperatorLine, changed: readonly string[]): string =>
+    (line.kind === "pause" ? OPERATOR_LINE_PAUSED_TEXT : OPERATOR_LINE_RESUMED_TEXT).replace("{entries}", changed.join(", "));
+  // At prompt.submit a line acts on the tree and the store, and the store
+  // write's status diff emits paused and resumed; the message itself goes
+  // down unchanged. Returns the sentence only where the line changed
+  // entries and its store write landed. A refused write, a yield to another
+  // session among them, carries none, since the store then holds another
+  // state; the change stands in memory as every refused write's does.
+  const operatorLineBlocks = async (persistNow: () => Promise<boolean>, body: string): Promise<string[]> => {
+    const line = operatorLineOf(body);
+    if (line === null) return [];
+    const changed = applyOperatorLine(sess.state, line, Date.now());
+    const landed = await persistNow();
+    if (changed === null || !landed) return [];
+    return [operatorLineSentence(line, changed)];
   };
   // Whether the reply tool (channel-relay's mcp__..__reply) was called
   // anywhere during the current turn. Reset at turn.start, set by tool.call.
@@ -5736,6 +5876,11 @@ export const register: Register = async (on, options) => {
     // commons claim and the controller tick below unregistered. The state
     // stands in memory and the first write that finds a store it can parse
     // carries it.
+    // The kit event stream's snapshot is seeded from the loaded state before
+    // the first write, with no emit, so a restart never replays the tree as
+    // events and the write below emits nothing. A session starting as a
+    // reader leaves it unseeded, for the promotion that loads its own state.
+    followKitEvents();
     try {
       // A store from before the fold, or one a crash left mid-fold, folds at
       // this write; see foldSettledPlans for the two writes that fold.
@@ -6152,6 +6297,7 @@ export const register: Register = async (on, options) => {
       gitUnavailable: () => gitUnavailable,
       setGitUnavailable: (value) => { gitUnavailable = value; },
       setCountResetSinceNudgeOpened: (value) => { countResetSinceNudgeOpened = value; },
+      followKitEventsOwner: followKitEvents,
     });
     const tick = tickContextOf();
 
@@ -6968,7 +7114,7 @@ export const register: Register = async (on, options) => {
         migrateLegacyMemories: () => migrateLegacyMemories($),
         completeLeafReturningClosed: (id, note, leftOpen) => completeLeafReturningClosed($, id, note, leftOpen),
         drainPairDraftOwed: (turnOpen) => drainPairDraftOwed($, turnOpen),
-        guardedNext: (askRecognition) => guardedNext($, e, next, guardsOption, spawnTypes, askRecognition),
+        guardedNext: (askRecognition) => guardedNext($, e, next, guardsOption, spawnTypes, askRecognition, () => turnLeafId),
         originIsEngine: () => next.origin?.plugin === "engine",
         settleRecognitionOutcomes: (fetches) => settleRecognitionOutcomes($, fetches),
         bankCompactionBoundary: (turnKind) => bankCompactionBoundary($, turnKind),
@@ -7037,6 +7183,7 @@ export const register: Register = async (on, options) => {
         planningInFlight: () => planningInFlight,
         arming: () => arming,
         setCountResetSinceNudgeOpened: (value) => { countResetSinceNudgeOpened = value; },
+        followKitEventsOwner: followKitEvents,
       };
       return await serveToolCall(ctx, e);
     } finally {
@@ -7240,6 +7387,10 @@ export const register: Register = async (on, options) => {
           await persist($);
         }
       }
+      // An operator-class channel message opening with [PAUSE] or [RESUME]
+      // acts on the tree here; a keyboard, SDK or participant prompt is not
+      // the thread's operator line and never reaches it.
+      const lineBlocks = operatorsWord && originKind === "channel" ? await operatorLineBlocks(() => persist($), channelBodyOf(keptText)) : [];
 
       // The prompt enters the chain once, below, after the context blocks are
       // built: from Claude Code 2.1.280 the engine attaches only the context a
@@ -7326,7 +7477,7 @@ export const register: Register = async (on, options) => {
       // is returned as it came so nothing is put on it after the fact.
       return settleSubmit(await nextScrubbed({
         ...e,
-        context: [...(e.context ?? []), ...(contextBlocks ?? [])] as readonly string[],
+        context: [...(e.context ?? []), ...(contextBlocks ?? []), ...lineBlocks] as readonly string[],
       }));
     } finally {
       hookBudget.live = false;
@@ -7414,20 +7565,50 @@ export const register: Register = async (on, options) => {
           return backstopOutcome;
         },
         // The [MID-TURN MESSAGE] re-prompt, hooks/mid-turn-reprompt.ts: the
-        // scan over the closing turn's window, then one turn carrying what
-        // it took, framed with the context blocks as a delivery is, and
-        // with the [ASKS] block, since its messages are the operator's. The
-        // blocks are built whatever opens meanwhile, since the re-prompt is
-        // queued either way. A refused submit withdraws the follow-ups the
-        // blocks offered, as a refused delivery does.
+        // scan over the closing turn's window, the operator's [PAUSE] and
+        // [RESUME] lines among the taken messages applied to the tree, then
+        // one turn carrying what the scan took, framed with the context
+        // blocks as a delivery is, and with the [ASKS] block, since its
+        // messages are the operator's. The blocks are built whatever opens
+        // meanwhile, since the re-prompt is queued either way. A refused
+        // submit withdraws the follow-ups the blocks offered, as a refused
+        // delivery does, and undoes no line: the operator's line is the act,
+        // and only the delivery of its words is retried.
         queueMidTurnReprompt: async (turnStartedAt: number) => {
           const repromptHost = { getHome: hostOf($).getHome, run: (argv: readonly string[], init: ProcessRunInit) => runChild($, argv, init), pluginRoot: $.plugin.root };
           const scanned = await readMidTurnMessages(repromptHost, sess, turnStartedAt);
           if (scanned.kind !== "taken") return;
           const repromptBody = repromptText(scanned.messages);
+          // Each taken message is the operator's, so one opening with
+          // [PAUSE] or [RESUME] acts on the tree here, oldest first, before
+          // the blocks are built, so the [GOAL TREE] block and the sentences
+          // read one tree. A refused submit moves no coverage and the next
+          // owner turn end takes the same message again, so the stamp
+          // repromptLineAppliedUntil marks the newest message walked and a
+          // message at or below it applies nothing and carries no sentence.
+          // Each message is judged against the stamp as it stood before this
+          // walk, which only moves forward, so two messages sharing one time
+          // both apply. The words are read as prompt.submit reads them,
+          // scrubbed and then stripped of the envelope. One store write
+          // follows the walk, and the sentences ride only where it landed,
+          // as at prompt.submit.
+          const lineSentences: string[] = [];
+          let lineApplied = false;
+          const appliedBefore = sess.repromptLineAppliedUntil;
+          for (const message of scanned.messages) {
+            if (!sess.isOwner) break;
+            if (appliedBefore !== null && message.at <= appliedBefore) continue;
+            if (sess.repromptLineAppliedUntil === null || message.at > sess.repromptLineAppliedUntil) sess.repromptLineAppliedUntil = message.at;
+            const line = operatorLineOf(channelBodyOf(scrubText(message.prompt).text));
+            if (line === null) continue;
+            lineApplied = true;
+            const changed = applyOperatorLine(sess.state, line, Date.now());
+            if (changed !== null) lineSentences.push(operatorLineSentence(line, changed));
+          }
+          const repromptLineBlocks = lineApplied && await persist($) ? lineSentences : [];
           const repromptFollowUps: string[] = [];
           const repromptBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => true, operatorsWord: true }, repromptBody, contextSourcesOf($, undefined, repromptFollowUps));
-          const framedRepromptText = deliveryWithContext(repromptBlocks ?? [], repromptBody);
+          const framedRepromptText = deliveryWithContext([...(repromptBlocks ?? []), ...repromptLineBlocks], repromptBody);
           const repromptEntry = expectTurn({ kind: "reprompt", coveredAt: scanned.messages.map((m) => m.at), senderClass: "operator", text: framedRepromptText });
           const repromptOutcome = await submitExpectedTurn($, expectedTurns, repromptEntry);
           if (repromptOutcome.ok) {
@@ -7504,6 +7685,8 @@ export const register: Register = async (on, options) => {
         planningInFlight: () => planningInFlight,
         arming: () => arming,
         setCountResetSinceNudgeOpened: (value) => { countResetSinceNudgeOpened = value; },
+        followKitEventsOwner: followKitEvents,
+        emitKitEvent: (kind, plan, detail) => emitKitEvent(kitEventDepsOf($), kitEvents, kind, plan, detail),
       };
       await serveTurnComplete(ctx, e);
       return await next(e);

@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, activateNext, awaitingEntryAtOrAbove, blockedAncestorsToFree, bracketSafeText, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openTurnRecord, parseState, planHolderOf, previousSessionsText, recordPreviousSession, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, activateNext, awaitingEntryAtOrAbove, bracketSafeText, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -179,6 +179,48 @@ export async function persistAnswering(
     });
     return { failed };
   }
+}
+
+// The fields a [QUEUE] record names by label, for the plan entry goal_add
+// makes in the record's turn. Each label is matched without case where it
+// opens the text, a line, or a clause after a comma, semicolon, opening
+// parenthesis or sentence end (a period and whitespace), with optional
+// spaces before it. A label with a word before it, such as `Base branch:` or
+// `Parent pull request:`, is another field and is passed over. Its value
+// runs to the first comma, semicolon, opening parenthesis, line break, or
+// period followed by whitespace or the end. The
+// record is another persona's words, so each value is held to its shape:
+// the branch to the ref form with no `..` and no trailing `/`, the pull
+// request to one to nine digits or the pull request link, and a value off
+// its shape names nothing. The record must name the add's planPath under
+// `Plan document:`: one naming another plan document is another plan's,
+// and one with no `Plan document:` names no plan, so nothing is read from
+// either. The two shapes are the store load's own, from agent-state.ts.
+export type QueueRecordFields = Pick<GoalNode, "branch" | "pullRequest" | "pullRequestUrl">;
+
+function queueRecordLabelValue(text: string, label: string): string | undefined {
+  const match = new RegExp(`(?:^|[,;(]|\\.\\s)[ \\t]*${label}:[ \\t]*([^,;(\\r\\n]*?)[ \\t]*(?:[,;(]|\\r?\\n|\\.(?=\\s|$)|$)`, "im").exec(text);
+  return match === null ? undefined : match[1];
+}
+
+export function queueRecordFieldsOf(text: string, planPath: string): { fields: QueueRecordFields; labelled: boolean } {
+  const fields: QueueRecordFields = {};
+  const doc = queueRecordLabelValue(text, "Plan document");
+  if (doc !== planPath) return { fields, labelled: false };
+  const branch = queueRecordLabelValue(text, "Branch");
+  const pull = queueRecordLabelValue(text, "Pull request");
+  if (branch === undefined && pull === undefined) return { fields, labelled: false };
+  if (branch !== undefined && QUEUE_BRANCH_FORM.test(branch) && !branch.includes("..") && !branch.endsWith("/")) fields.branch = branch;
+  if (pull !== undefined) {
+    const link = QUEUE_PULL_REQUEST_LINK_FORM.exec(pull);
+    const digits = link !== null ? link[1] : /^[0-9]{1,9}$/.test(pull) ? pull : undefined;
+    const number = digits === undefined ? 0 : Number(digits);
+    if (number > 0) {
+      fields.pullRequest = number;
+      if (link !== null) fields.pullRequestUrl = pull;
+    }
+  }
+  return { fields, labelled: true };
 }
 
 // The sentence a goal tool's answer ends with where its store write threw and
@@ -366,6 +408,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         sess.state = createDefaultState(name, sess.mySessionId);
       }
       sess.isOwner = false;
+      ctx.followKitEventsOwner();
       sess.myEpoch = existing?.epoch ?? 0;
       sess.state.decisions.push({
         timestamp: Date.now(),
@@ -432,6 +475,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       // F9: a live earlier holder exists. Join as reader, do NOT bump epoch,
       // do NOT set isOwner, do NOT write the heartbeat.
       sess.isOwner = false;
+      ctx.followKitEventsOwner();
       sess.myEpoch = existing?.epoch ?? 0;
       sess.state.decisions.push({
         timestamp: Date.now(),
@@ -463,6 +507,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     sess.state.epoch += 1;
     sess.myEpoch = sess.state.epoch;
     sess.isOwner = true;
+    ctx.followKitEventsOwner();
     sess.state.monitor.sessionStart = Date.now();
     sess.state.monitor.turnCount = 0;
     sess.state.monitor.totalToolCalls = 0;
@@ -810,6 +855,37 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // the model is answered with.
     const unprompted = kind === "plan" && !turnIsOperatorsOrCoordinators();
     const awaitingYes = unprompted && autonomy === "plan-and-ask";
+    // A plan added in a [QUEUE] delivery turn takes the record's branch and
+    // pull request from its labels, read from the record in the store. The
+    // read sets fields or nothing: a record not found, one with no
+    // `Plan document:` naming this plan, or one with no Branch or Pull
+    // request label leaves the entry bare and is logged, and a store read
+    // that throws is the same as none found. The decision is pushed before
+    // the add so it rides the add's own store write, and dropped where the
+    // add is refused, so a refused add logs neither.
+    let queueFields: QueueRecordFields | undefined;
+    let queueDecision: AgentState["decisions"][number] | undefined;
+    const queueEntry = currentTurnEntry();
+    if (kind === "plan" && planPath !== undefined && queueEntry?.kind === "delivery" && queueEntry.queueLead
+      && queueEntry.deliveredTo === sess.persona && turnIsOperatorsOrCoordinators()) {
+      let record: InboxRecord | undefined;
+      try {
+        record = (await listInboxRecords(commonsStore(), sess.persona)).find((r) => r.id === queueEntry.recordId);
+      } catch {
+        record = undefined;
+      }
+      const read = record === undefined ? { fields: {}, labelled: false } : queueRecordFieldsOf(record.text, planPath);
+      queueFields = read.fields;
+      queueDecision = {
+        timestamp: Date.now(),
+        loop: "goal",
+        action: read.labelled ? "queue_record_fields" : "queue_record_fields_missing",
+        detail: read.labelled
+          ? `${queueEntry.recordId}: branch ${read.fields.branch ?? "none"}, pull request ${read.fields.pullRequest ?? "none"}${read.fields.pullRequestUrl === undefined ? "" : ` (${read.fields.pullRequestUrl})`}`
+          : `${queueEntry.recordId}: ${record === undefined ? "record not in the store" : "no Plan document label naming this plan with a Branch or Pull request label"}`,
+      };
+      sess.state.decisions.push(queueDecision);
+    }
     const added = await addGoalEntry({
       kind,
       title,
@@ -823,7 +899,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       dropTaskId: sourceTask?.id,
       coordinatorPersona,
       architectPersona,
+      queueFields,
     });
+    if (!added.ok && queueDecision !== undefined) dropDecision(queueDecision);
     if (!added.ok && added.failed !== undefined) {
       return { result: `Not added: the store write failed with ${added.failed}; the plan entry was taken back out of the tree and no record went to the coordinator persona. A repeat of this call is safe.` };
     }
@@ -932,13 +1010,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
         return { deny: `Cannot pause ${nodeId}: status is "${node.status}" (only an active or pending node can be paused).` };
       }
-      const wasActive = node.status === "active";
-      node.status = "paused";
-      node.blockedReason = reason || "paused by operator";
-      node.updatedAt = now;
-      if (wasActive && sess.state.activeGoalId === nodeId) {
-        sess.state.activeGoalId = null;
-      }
+      pauseGoalNode(sess.state, node, reason || "paused by operator", now);
       sess.state.decisions.push({
         timestamp: now,
         loop: "goal",
@@ -1952,30 +2024,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       }
       return { result: "No paused nodes to resume." };
     }
-    // M9: if a different node is active, pause it first (M10: write blockedReason).
-    if (sess.state.activeGoalId && sess.state.activeGoalId !== target.id) {
-      const activeNode = sess.state.goals.find((g) => g.id === sess.state.activeGoalId);
-      if (activeNode && activeNode.status === "active") {
-        activeNode.status = "paused";
-        activeNode.blockedReason = `Paused by goal_resume of ${target.id}`;
-        activeNode.updatedAt = Date.now();
-        sess.state.decisions.push({
-          timestamp: Date.now(),
-          loop: "goal",
-          action: "paused_by_resume",
-          detail: `${activeNode.id} paused (goal_resume of ${target.id})`,
-        });
-      }
-    }
-    // M10: clear blockedReason on resume.
-    const pausedReason = target.blockedReason || "unknown";
-    const budgetRelease = target.status === "blocked";
-    // An allowed resume at or under an entry awaiting the operator's yes is
-    // that word on the entry, so the entry's flag goes, and its awaiting
-    // reason with it. An entry above the resumed node stays paused.
-    const awaitingAbove = awaitingEntryAtOrAbove(sess.state, target);
     // A delivery turn names the seat whose record admitted the resume, read
     // from the entry's ground against the grounds the effort gate admits.
+    const awaitingAbove = awaitingEntryAtOrAbove(sess.state, target);
     const resumeEntry = currentTurnEntry();
     const deliverySeat = (ground: string): string => ground === COORDINATOR_GROUND ? "coordinator record"
       : architectPersona !== "" && ground === `WORKER:${architectPersona}` ? "architect record"
@@ -1984,81 +2035,13 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       : resumeEntry !== null && resumeEntry.kind === "delivery" ? `; admitted by ${deliverySeat(resumeEntry.ground)} ${resumeEntry.recordId}`
       : resumeEntry?.kind === "reprompt" ? "; admitted by the operator's mid-turn re-prompt"
       : `; admitted by origin ${currentTurnOriginKind()}`;
-    if (awaitingAbove && awaitingAbove !== target) {
-      awaitingAbove.awaitingYes = undefined;
-      if (awaitingAbove.blockedReason === AWAITING_YES_REASON) awaitingAbove.blockedReason = undefined;
-      awaitingAbove.updatedAt = Date.now();
-    }
-    target.blockedReason = undefined;
-    target.awaitingYes = undefined;
-    target.status = "active";
-    // A released entry left at its maxRounds would re-block on its next
-    // scored round, so its count restarts. Its scores stay.
-    if (budgetRelease) target.completedRounds = 0;
-    // completeLeaf's walk blocked each plan above the released entry with
-    // "Child task blocked", and activateNext never descends into a blocked
-    // plan, so a release that left them would strand their pending work.
-    // blockedAncestorsToFree decides the chain as the load-time recovery
-    // does, and undefined is an ancestor in a state it cannot explain,
-    // which leaves every ancestor as it is and is named in the decision.
-    const releaseChain = budgetRelease ? blockedAncestorsToFree(sess.state, target) : [];
-    const chainNote = releaseChain === undefined ? "; ancestors left as they are, one above in a state the release does not free" : "";
-    // A resume lifts a blocked lead whatever paused the entry, since the
-    // lead would otherwise hold the idle branch until a working turn that
-    // may never come. A worker still blocked restates BLOCKED: at its next
-    // turn end and is held again. A waiting lead keeps its own hold window
-    // and stays.
-    const liftedLead = target.lead && target.lead.state === "blocked" ? target.lead : null;
-    if (liftedLead) target.lead = null;
-    target.updatedAt = Date.now();
-    sess.state.activeGoalId = target.id;
+    // The resume body lives in agent-state.ts, shared with the operator's
+    // [RESUME] line; the nudge counters are the session's, so they reset here.
+    const { budgetRelease } = resumeGoalNode(sess.state, target, { now: Date.now(), admittedBy, fromLine: false });
     sess.nudgedAnswersWithoutStatus = 0;
     sess.nudgeCapRefusedFor = null;
     setCountResetSinceNudgeOpened(true);
     sess.lastNudgeAt = 0;
-    sess.state.decisions.push({
-      timestamp: Date.now(),
-      loop: "goal",
-      action: "resume",
-      detail: budgetRelease
-        ? `Node ${target.id} resumed (blocked: ${pausedReason}; round budget restarted${chainNote}${admittedBy})`
-        : `Node ${target.id} resumed (paused: ${pausedReason}${admittedBy})`,
-    });
-    // From the nearest ancestor up, one is freed only while its reason is
-    // exactly "Child task blocked" and no child of it is still blocked:
-    // the released entry is active and a lower ancestor freed here is
-    // pending. A pending or active ancestor is passed over, as the helper
-    // passes it. The first blocked ancestor that fails ends the walk,
-    // leaving it and everything above it as they are.
-    for (const ancestor of releaseChain ?? []) {
-      if (ancestor.blockedReason !== "Child task blocked"
-        || sess.state.goals.some((g) => g.parentId === ancestor.id && g.status === "blocked")) break;
-      ancestor.status = "pending";
-      ancestor.blockedReason = undefined;
-      ancestor.updatedAt = Date.now();
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "goal",
-        action: "unblocked",
-        detail: `${ancestor.id}: returned to pending, goal_resume's release of ${target.id} cleared "Child task blocked"`,
-      });
-    }
-    if (liftedLead) {
-      sess.state.decisions.push({
-        timestamp: Date.now(),
-        loop: "goal",
-        action: "lead_cleared",
-        detail: `${target.id}: blocked lead cleared by goal_resume`,
-      });
-    }
-    // goal_resume lifts the hold on the resumed node's asks and closes
-    // none: every open blocking entry on the node is lifted on the
-    // ledger alone, its record left open for a reader to answer. A
-    // blocking entry on another node keeps holding.
-    for (const entry of openBlockingAsks(sess.state)) {
-      if (entry.nodeId === target.id) liftAsk(sess.state, entry.id);
-    }
-    sess.state.updatedAt = Date.now();
     const written = await persistAnswering(ctx, "goal_resume", target.id);
     const resumed = `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.${budgetRelease ? " Round budget restarted." : ""}`;
     return { result: typeof written === "boolean" ? resumed : resumed + goalWriteFailedText(written.failed, false) };

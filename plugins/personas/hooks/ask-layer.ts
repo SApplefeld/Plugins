@@ -427,7 +427,9 @@ export async function withdrawLiftedAskBy(deps: AskLayerDeps, state: AgentState,
 // nothing written: the caller logs a "cap" refusal as ask_cap_refused. A
 // record write that throws undoes the open whole before the throw goes on,
 // since an entry with no record would hold the work on a question no reader
-// session can see or answer.
+// session can see or answer. No kit event is written here: the open runs
+// before a store write the caller may see refused and rolled back, so the
+// stream's open event rides the landed write's diff in hooks/kit-events.ts.
 export async function openLedgerAsk(
   deps: AskLayerDeps,
   state: AgentState,

@@ -625,6 +625,9 @@ export async function addGoalEntry(
     dropTaskId: string | undefined;
     coordinatorPersona: string;
     architectPersona: string;
+    // The fields goal_add read from a [QUEUE] record's labels, on the node
+    // before its first store write; absent where the turn carried no record.
+    queueFields?: Pick<GoalNode, "branch" | "pullRequest" | "pullRequestUrl">;
   },
 ): Promise<GoalEntryAdd> {
   const { kind, parentId, root, planPath, unprompted, awaitingYes, coordinatorPersona, architectPersona } = a;
@@ -679,6 +682,7 @@ export async function addGoalEntry(
     createdAt: now,
     updatedAt: now,
     ...(planPath ? { planPath } : {}),
+    ...(a.queueFields ?? {}),
   };
   // What this add changes, so an unprompted add whose save yields, whose
   // store write throws or whose record cannot be written can take it back:

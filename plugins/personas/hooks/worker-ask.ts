@@ -108,7 +108,7 @@ export function unnamedExpiredAskQuestion(state: AgentState, node: GoalNode): st
 // The bound on a lead's reason, which is text from the worker's own closing
 // line written into the store. The bound counts code points, so a surrogate
 // pair is never split, and a reason cut to it ends in an ellipsis.
-const LEAD_REASON_MAX = 300;
+export const LEAD_REASON_MAX = 300;
 
 // The status line a closing text states, read from its first non-blank line:
 // one of the literal uppercase markers `WORKING:`, `WAITING:` or `BLOCKED:`

@@ -1,18 +1,19 @@
-// after-hooks.ts: the two after-call hooks the tool.call handler runs on a
-// call's result through runner.ts: the C# formatter and the
-// memory-recognition nudge. Each attaches what it has to say as context and
-// nothing else, and each swallows its own failure, so a formatter that will
-// not start or a nudge that cannot read the store attaches nothing and
-// raises no GuardError.
+// after-hooks.ts: the three after-call hooks the tool.call handler runs on a
+// call's result through runner.ts: the C# formatter, the memory-recognition
+// nudge and the pull request ready mark. Each attaches what it has to say as
+// context and nothing else, and each swallows its own failure, so a
+// formatter that will not start, a nudge that cannot read the store or a
+// mark whose emit failed attaches nothing and raises no GuardError.
 //
 // Nothing here reads `$` (runner.ts says why). Each hook reaches what it
 // needs through deps hooks/index.ts builds over `$` and hands in: the
 // formatter the session's working directory, a host to spawn through and
-// the resolver for its launchers, the nudge the session's recognition index.
-// None reads the shared GuardContext, so none fails where that context
-// cannot be built. The formatter passes over a call whose result is an
-// error, as the PostToolUse hook it replaces fired on a call that succeeded
-// alone.
+// the resolver for its launchers, the nudge the session's recognition index,
+// the ready mark the call's shell line, the turn's plan holder and the kit
+// event emit. None reads the shared GuardContext, so none fails where that
+// context cannot be built. The formatter and the ready mark pass over a call
+// whose result is an error, as the PostToolUse hook the formatter replaces
+// fired on a call that succeeded alone.
 
 import type { AfterHook, GuardCall, GuardHost, GuardResult } from "./runner";
 
@@ -122,6 +123,72 @@ export function formatterHook(deps: FormatterDeps): AfterHook {
           // this launcher did not resolve, did not start or ran past its
           // bound; the next one runs
         }
+      }
+      return {};
+    },
+  };
+}
+
+// The tools whose call runs a shell line, named in any case, as
+// hooks/recognition.ts names them for its `cmd:` match.
+const PR_READY_TOOLS = /^(bash|powershell)$/i;
+
+/**
+ * The `gh pr ready` command in a shell line, read at a simple-command
+ * position alone: the text's start, or after `&&`, `||`, `;`, `|` or a line
+ * break. The split reads no quotes, so a quoted string holding a separator
+ * and then `gh pr ready`, as in `echo "done; gh pr ready 12"`, is a mark
+ * too, and an echoed or quoted `gh pr ready` with no separator before it
+ * inside the quotes is no mark. The first such
+ * command whose words hold no `--undo` is the one read. Returns the pull
+ * request number it names, the first word after `ready` that is one to nine
+ * digits, null where it names none; and null where no such command stands.
+ */
+export function prReadyCommandOf(command: string): { number: number | null } | null {
+  for (const segment of command.split(/&&|\|\|?|;|\r?\n/)) {
+    const words = segment.trim().split(/\s+/);
+    if (words[0] !== "gh" || words[1] !== "pr" || words[2] !== "ready") continue;
+    if (words.includes("--undo")) continue;
+    const number = words.slice(3).find((word) => /^[0-9]{1,9}$/.test(word));
+    return { number: number === undefined ? null : Number(number) };
+  }
+  return null;
+}
+
+// What the ready mark reaches through hooks/index.ts: `command` reads the
+// call's shell line as hooks/recognition.ts's shellCommandOf does, `holder`
+// is the plan holder of the entry the turn started on, a goal node carrying
+// planPath, or undefined where the turn started on none, and `emit` writes
+// one pr-ready event for that holder's plan, awaited to the stream's bound
+// and never rejecting.
+export type PrReadyDeps = {
+  command(e: GuardCall): string;
+  holder(): { planPath?: string; pullRequest?: number } | undefined;
+  emit(plan: string, detail?: string): Promise<void>;
+};
+
+/**
+ * Writes pr-ready where a bash or powershell call whose result is not an
+ * error ran `gh pr ready` at a simple-command position, for the plan holder
+ * of the entry the turn started on, detail `pr <number>` from that entry's
+ * pullRequest, else from the command's own number, else absent. A turn that
+ * started on no plan holder writes nothing. Never blocks or edits the
+ * command: it reads the finished call. Attaches nothing.
+ */
+export function prReadyHook(deps: PrReadyDeps): AfterHook {
+  return {
+    name: "pr-ready",
+    readsContext: false,
+    matches: (e: GuardCall, r: GuardResult) => r.isError !== true && PR_READY_TOOLS.test(e.tool) && prReadyCommandOf(deps.command(e)) !== null,
+    apply: async (e: GuardCall) => {
+      try {
+        const ready = prReadyCommandOf(deps.command(e));
+        const holder = deps.holder();
+        if (ready === null || holder === undefined || !holder.planPath) return {};
+        const number = holder.pullRequest ?? ready.number;
+        await deps.emit(holder.planPath, number === null ? undefined : `pr ${number}`);
+      } catch {
+        // the stream is observability; a failed read or emit marks nothing
       }
       return {};
     },

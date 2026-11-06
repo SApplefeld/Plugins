@@ -37,6 +37,12 @@ export interface SessionState {
   // null where none has been queued; hooks/mid-turn-reprompt.ts takes no
   // record at or before it. In memory only, never persisted.
   repromptCoveredUntil: number | null;
+  // The newest transcript record timestamp whose operator line, [PAUSE] or
+  // [RESUME], the re-prompt walk has applied to the tree, or null where none
+  // has. A refused submit moves no coverage, so the next owner turn end takes
+  // the same record again; the walk applies no line from a record at or
+  // below this stamp. In memory only, never persisted.
+  repromptLineAppliedUntil: number | null;
   // The start stamp of the oldest owner turn whose re-prompt window has not
   // been read whole, or null where every window was; the scan's stamp, so a
   // window a refused submit, a failed read or a skipped turn end left open

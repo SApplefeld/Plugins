@@ -86,6 +86,10 @@ export interface SharedHandlerState {
   planningInFlight: () => boolean;
   arming: () => "off" | "reader" | "owner";
   setCountResetSinceNudgeOpened: (value: boolean) => void;
+  // Moves the kit event snapshot (hooks/kit-events.ts) to the session's hold,
+  // with no emit. Called after a site replaces sess.state or flips
+  // sess.isOwner, so a promotion or a persona switch never replays the tree.
+  followKitEventsOwner: () => void;
 }
 
 // What hooks/index.ts hands the tick bodies. The engine's verbs; the five
@@ -493,6 +497,7 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
       sess.state.epoch += 1;
       sess.myEpoch = sess.state.epoch;
       sess.isOwner = true;
+      ctx.followKitEventsOwner();
       sess.state.decisions.push({
         timestamp: now,
         loop: "monitor",

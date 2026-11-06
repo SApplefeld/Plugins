@@ -21,6 +21,7 @@ import type { HoldTimeout } from "./decision-seam";
 import type { noteMemoryOwedDropped as noteMemoryOwedDroppedFromModule, notePairDraftsDropped as notePairDraftsDroppedFromModule } from "./drains";
 import type { PluginHost } from "./host";
 import { answeredOrThrow, type HookBudget, type LiveAskResult } from "./jev-live";
+import { sectionClosedDetailOf, type KitEventKind } from "./kit-events";
 import { MEMORY_OWED_MAX, pushMemoryOwed } from "./memory-writer";
 import { chainReprompt, openRepromptWindow } from "./mid-turn-reprompt";
 import { listInboxRecords, writeReplyRecord } from "./operator";
@@ -144,13 +145,16 @@ export interface TurnCompleteContext extends SharedHandlerState {
   drainInboxNow: () => (() => Promise<boolean>) | null;
   openLedgerAsk: (...args: AfterDeps<typeof openLedgerAskFromModule>) => ReturnType<typeof openLedgerAskFromModule>;
   withdrawLiftedAskBy: (...args: AfterDeps<typeof withdrawLiftedAskByFromModule>) => ReturnType<typeof withdrawLiftedAskByFromModule>;
+  // One kit event on the session's chain (hooks/kit-events.ts), awaited to
+  // the stream's bound and never rejecting.
+  emitKitEvent: (kind: KitEventKind, plan: string, detail?: string) => Promise<void>;
 }
 
 // The turn-end body: what the handler's try block in hooks/index.ts runs
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -684,7 +688,20 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // takes no lead, and a subagent's completion neither sets nor clears one,
   // since its answer is the subagent's report. The ASK: marker above is
   // handled as it is whether or not this line is present, and the status
-  // line is the one reading taken above the marker step.
+  // line is the one reading taken above the marker step. A lead change also
+  // holds goal-blocked or waiting for the kit event stream, once per change
+  // as lead_set is, for the plan holder of the leaf; a leaf under no plan
+  // holds none.
+  //
+  // The kit events this turn end holds, in the order their moments had:
+  // the lead kinds here and section-closed at the Chapter advance below.
+  // Each goes out only once the turn's store write at the end of this body
+  // returns true, so a refused write, whose change stays in memory, emits
+  // nothing, and the next owner's turn, reading the store that write never
+  // changed, emits each once. A commons yield at that write lands the state
+  // and returns false, so it emits none of them, a loss the stream accepts
+  // as it accepts a failed append.
+  const heldKitEvents: Array<[KitEventKind, string, string]> = [];
   if (!skipped && sess.isOwner && !completesSubagentLoop && turnLeaf) {
     const leadLine = statusLine !== null && statusLine.state !== "working" ? { state: statusLine.state, reason: statusLine.reason } : null;
     const workingLine = statusLine !== null && statusLine.state === "working";
@@ -701,6 +718,10 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           action: "lead_set",
           detail: `${turnLeaf.id}: ${leadLine.state}: ${leadLine.reason.slice(0, 150)}`,
         });
+        const leadHolder = planHolderOf(sess.state, turnLeaf);
+        if (leadHolder?.planPath) {
+          heldKitEvents.push([leadLine.state === "blocked" ? "goal-blocked" : "waiting", leadHolder.planPath, leadLine.reason]);
+        }
       }
     } else if (workingLine && previous && previous.state === "waiting") {
       turnLeaf.lead = null;
@@ -1240,17 +1261,25 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         // A readable document re-arms the once-per-session log, so a
         // document that becomes unreadable again later logs once more.
         planRecordUnreadableLogged.delete(holder.id);
-        if (reading.kind === "read" && reading.chapters > (holder.chapterCount ?? 0)) {
-          const previous = holder.chapterCount ?? 0;
-          holder.chapterCount = reading.chapters;
-          holder.updatedAt = Date.now();
-          planChapterAdvanced = true;
-          sess.state.decisions.push({
-            timestamp: Date.now(),
-            loop: "goal",
-            action: "plan_progress",
-            detail: `${holder.id}: ${planPath} Chapters ${previous} -> ${reading.chapters}`,
-          });
+        // A Chapter count above the stored one is a section closed: the
+        // count is stored, plan_progress logged, and section-closed held
+        // for the kit event stream with the helper's `<n> of <m>` detail,
+        // to go out once the write below lands.
+        if (reading.kind === "read") {
+          const sectionClosed = sectionClosedDetailOf(holder.chapterCount ?? 0, reading.chapters, reading.sections);
+          if (sectionClosed !== null) {
+            const previous = holder.chapterCount ?? 0;
+            holder.chapterCount = reading.chapters;
+            holder.updatedAt = Date.now();
+            planChapterAdvanced = true;
+            sess.state.decisions.push({
+              timestamp: Date.now(),
+              loop: "goal",
+              action: "plan_progress",
+              detail: `${holder.id}: ${planPath} Chapters ${previous} -> ${reading.chapters}`,
+            });
+            heldKitEvents.push(["section-closed", planPath, sectionClosed]);
+          }
         }
         // The section total and the latest Chapter's Next: line, for the
         // board card that reads the store. Each is written only where it
@@ -1876,9 +1905,15 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // The main turn's closing write folds what this turn completed, where
   // no other turn is open or has started since this one's delete; see
   // foldSettledPlans for the two writes that fold.
+  // The kit events held above go out only on a true return, after the
+  // write landed what they report, each awaited to the stream's bound. A
+  // false return or a throw leaves the list unsent: the write is unchanged
+  // by them, and a failed emit is caught inside the emit itself.
   try {
     if (sess.isOwner && !completesSubagentLoop && !turnIsOpen() && turnStartSeq() === turnStartSeqAtDelete) await foldSettledPlans();
-    await persist();
+    if (await persist()) {
+      for (const [kind, plan, detail] of heldKitEvents) await emitKitEvent(kind, plan, detail);
+    }
   } catch { /* persist could not read or write the store; this turn's record waits in memory */ }
 
   // The completion drain: a turn this session saw start has closed and no
