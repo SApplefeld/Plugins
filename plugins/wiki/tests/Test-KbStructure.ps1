@@ -13,7 +13,9 @@ Also checks the permission allowlist, which is load-bearing: a headless run
 cannot answer a permission prompt, so a missing allow rule stalls an
 unattended ingest and a missing deny rule lets it damage sources/ or read a
 secret. The checks confirm settings.json parses, denies writes under
-sources/, inbox/, .git/ and .claude/, denies every raw git verb and the raw
+sources/, inbox/, .git/ and .claude/, denies Write and Edit on an instruction
+file (CLAUDE.md, CLAUDE.local.md, a .claude/ folder, .mcp.json) at any depth
+under wiki/, denies every raw git verb and the raw
 shell verbs that would bypass the helpers, denies the Grep tool, denies reads
 of credential files, allows the three vetted helpers a KB session calls to
 move a file, to commit, and to read status, grants no other script or
@@ -167,6 +169,7 @@ $settingsChecks = @(
     'deny array blocks writes under inbox/'
     'deny array blocks writes under .git/'
     'deny array blocks writes under .claude/'
+    'deny array blocks instruction files under wiki/'
     'deny array blocks raw shell verbs'
     'deny array blocks every raw git verb'
     'deny array blocks the Grep tool'
@@ -206,7 +209,26 @@ if (-not $parsed) {
     Test-Check -Description 'deny array blocks writes under sources/' -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(.*sources')
     Test-Check -Description 'deny array blocks writes under inbox/'   -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(.*inbox')
     Test-Check -Description 'deny array blocks writes under .git/'    -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(.*\.git')
-    Test-Check -Description 'deny array blocks writes under .claude/' -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(.*\.claude')
+    # The root .claude/ check is anchored at ./.claude/, so the nested
+    # ./wiki/**/.claude/** rules below cannot stand in for the root pair.
+    Test-Check -Description 'deny array blocks writes under .claude/' -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(\./\.claude/')
+
+    # The allow rule on wiki/ covers every path under it, and Claude Code loads
+    # a CLAUDE.md, a CLAUDE.local.md or a .claude/ folder from any folder it
+    # works in, and .mcp.json at the project root, so these deny rules keep a
+    # page the agent writes from becoming an instruction file the next run
+    # follows. Each of the eight is pinned as its exact string, Write and Edit
+    # for each of the four names, compared with regard to case, so a missing
+    # Edit rule or a respelled pattern fails the check.
+    $instructionRules = @(
+        'Write(./wiki/**/CLAUDE.md)', 'Edit(./wiki/**/CLAUDE.md)',
+        'Write(./wiki/**/CLAUDE.local.md)', 'Edit(./wiki/**/CLAUDE.local.md)',
+        'Write(./wiki/**/.claude/**)', 'Edit(./wiki/**/.claude/**)',
+        'Write(./wiki/**/.mcp.json)', 'Edit(./wiki/**/.mcp.json)'
+    )
+    $missingInstructionRules = @($instructionRules | Where-Object { -not ($denyRules -ccontains $_) })
+    Test-Check -Description 'deny array blocks instruction files under wiki/' -Passed ($missingInstructionRules.Count -eq 0)
+    if ($missingInstructionRules.Count -gt 0) { Write-Host "  missing: $($missingInstructionRules -join ', ')" }
 
     # sources/ immutability and the no-outside-write guarantee hold only if the raw
     # verbs that could bypass the helpers are denied outright.

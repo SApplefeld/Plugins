@@ -310,7 +310,9 @@ A KB created before the version mark existed fails this check on
 A green run confirms the KB's structure: the required directories and files are
 present, `CLAUDE.md` and the four skills exist, `settings.json` parses, and the
 permission allowlist has the right shape (it denies writes under `sources/`,
-`inbox/`, `.git/`, and `.claude/`, denies all of raw git and the raw shell verbs
+`inbox/`, `.git/`, and `.claude/`, denies writes to the instruction files
+Claude Code loads, `CLAUDE.md`, `CLAUDE.local.md`, a `.claude/` folder and
+`.mcp.json`, at any depth under `wiki/`, denies all of raw git and the raw shell verbs
 that would bypass the helpers, denies credential reads, allows the three vetted
 helpers, and pins the default permission mode).
 

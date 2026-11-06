@@ -8,7 +8,13 @@ pages it finds itself, commits them, and optionally pushes.
 The single sanctioned path by which a knowledge base commits. It accepts only
 repo-relative paths under sources/ or wiki/, or the exact files index.md and
 log.md, and refuses everything else, including anything under .git/, .claude/,
-inbox/, and the CLAUDE.md schema. It stages the named paths explicitly, never
+inbox/, and the CLAUDE.md schema. It also refuses, on every route, a path
+holding an instruction file's name at any depth: CLAUDE.md, CLAUDE.local.md,
+.mcp.json, a .claude folder or a CLAUDE~ short name such as CLAUDE~1.MD, in
+any letter case. After staging it reads the index back and refuses, unstaging
+the entries it named, where any staged path holds such a name, so a folder or a
+pattern given as -Path cannot stage one under a name the entry did not
+spell. It stages the named paths explicitly, never
 with a wildcard, commits with hooks disabled and the message read from a file,
 and, with -Push, pushes the current branch to origin. Every git invocation is
 checked, so a failed git step stops the run loudly rather than reporting a
@@ -24,7 +30,8 @@ or hand-placed file name sits on their command line for the shell to re-read.
 
 .PARAMETER Path
 The repo-relative paths to stage and commit, separated by a vertical bar. Each
-must be under sources/ or wiki/, or be exactly index.md or log.md, and must
+must be under sources/ or wiki/, or be exactly index.md or log.md, must name
+no instruction file Claude Code loads in any of its segments, and must
 exist on disk. A vertical bar is used because Windows forbids it in a file
 name, so it can never be ambiguous with a path that contains a comma or a
 semicolon. PowerShell passes arguments to a script run with -File as literal
@@ -508,6 +515,34 @@ if ($sourceHandleSet) {
     $resolvedSource = $matched[0].Name
 }
 
+# True where any segment of a slash-separated path names an instruction file
+# Claude Code loads. Claude Code loads a CLAUDE.md or CLAUDE.local.md from any
+# folder it works in and a .claude/ folder beside it, so a file under wiki/ by
+# one of those names is an instruction the next run follows, whatever it
+# holds. Claude Code reads .mcp.json at the project root alone, and the nested
+# name is refused because nothing legitimate writes it. The names alone are
+# read, never the content, and each is matched as a whole segment, so
+# CLAUDE.md.bak, notes-CLAUDE.md and .claude-notes pass. A segment shaped
+# like a Windows short name of one, CLAUDE~ and digits with or without an
+# extension as in CLAUDE~1.MD, is refused too, as the walker's pull stop
+# refuses it. Every match is without regard to case, since Windows reads
+# claude.md as CLAUDE.md. This is the one place the names live: the entry
+# check and the staged-index check both call it.
+function Test-InstructionPath {
+    param([string]$normalized)
+    foreach ($segment in ($normalized -split '/')) {
+        $instructionName = $segment.Equals('CLAUDE.md', [System.StringComparison]::OrdinalIgnoreCase) -or
+                           $segment.Equals('CLAUDE.local.md', [System.StringComparison]::OrdinalIgnoreCase) -or
+                           $segment.Equals('.claude', [System.StringComparison]::OrdinalIgnoreCase) -or
+                           $segment.Equals('.mcp.json', [System.StringComparison]::OrdinalIgnoreCase) -or
+                           [regex]::IsMatch($segment, '^CLAUDE~[0-9]+(\..*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($instructionName) {
+            return $true
+        }
+    }
+    return $false
+}
+
 # Every staged path passes these checks: the caller's -Path entries, and the
 # paths the helper builds from sources/ and from git status. The apostrophe
 # rule and the sources/ rule guard the command line, so they hold for the
@@ -554,6 +589,13 @@ function Assert-PathEntry {
                ($normalized -like 'wiki/*')
     if (-not $inScope) {
         Stop-WithReason "path is outside the committable set (sources/, wiki/, index.md, log.md): $entry"
+    }
+    # The instruction-file rule runs on every route, a handle's resolved source
+    # and a reconciled path included. It reads the entry's own segments; a
+    # folder or a pattern entry that stages such a name without spelling it is
+    # caught by the same rule over the index after git add.
+    if (Test-InstructionPath $normalized) {
+        Stop-WithReason "path names an instruction file Claude Code loads (CLAUDE.md, CLAUDE.local.md, .mcp.json, a .claude folder or a short name of one), which no knowledge base commits: $entry"
     }
 
     $full = Join-Path $repoRoot $entry
@@ -723,12 +765,47 @@ try {
     # --literal-pathspecs on the handle and reconcile routes: a name the helper
     # read from disk holding [ ] or * stages that file alone, never a sibling
     # the pattern would match. A person's plain -Path stages as it always has.
+    # The reset below takes the same mode, so it names the same entries.
+    $pathspecMode = @()
     if ($sourceHandleSet -or $reconcileSet) {
-        $addArgs = @('-C', $repoRoot, '--literal-pathspecs', 'add', '--') + $paths
-    } else {
-        $addArgs = @('-C', $repoRoot, 'add', '--') + $paths
+        $pathspecMode = @('--literal-pathspecs')
     }
+    $addArgs = @('-C', $repoRoot) + $pathspecMode + @('add', '--') + $paths
     Invoke-GitOrStop -Arguments $addArgs -FailReason 'git add failed.'
+
+    # The commit takes the whole index, and a plain -Path entry may be a folder
+    # or a pattern, which git add expands to paths the entry check never saw:
+    # 'wiki/notes' stages wiki/notes/CLAUDE.md with it. So the staged set is
+    # read back and every path in it, a path staged before this run included,
+    # takes the instruction-file rule. On a hit the entries this run named are
+    # reset to HEAD in the same pathspec mode git add took, which unstages
+    # every stage under those entries, a folder entry's earlier stages
+    # included, and nothing outside them, and the run stops with the refusal.
+    # The output is read as UTF-8 so a non-ASCII path is compared whole, as
+    # the reconcile route reads git status.
+    $savedEncoding = $null
+    try {
+        $savedEncoding = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    } catch { }
+    try {
+        $stagedNow = & git -C $repoRoot diff --cached --name-only -z
+        $stagedExit = $LASTEXITCODE
+    } finally {
+        if ($null -ne $savedEncoding) {
+            try { [Console]::OutputEncoding = $savedEncoding } catch { }
+        }
+    }
+    if ($stagedExit -ne 0) {
+        Stop-WithReason 'git diff --cached failed.'
+    }
+    foreach ($stagedPath in @((@($stagedNow) -join "`n") -split "`0" | Where-Object { $_ -ne '' })) {
+        if (Test-InstructionPath $stagedPath) {
+            $resetArgs = @('-C', $repoRoot) + $pathspecMode + @('reset', '-q', '--') + $paths
+            Invoke-GitOrStop -Arguments $resetArgs -FailReason "git reset failed after a staged path named an instruction file; a person unstages it: $stagedPath"
+            Stop-WithReason "path names an instruction file Claude Code loads (CLAUDE.md, CLAUDE.local.md, .mcp.json, a .claude folder or a short name of one), which no knowledge base commits: $stagedPath"
+        }
+    }
 
     & git -C $repoRoot diff --cached --quiet
     $hasStagedChanges = ($LASTEXITCODE -ne 0)

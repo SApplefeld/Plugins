@@ -43,6 +43,9 @@ drives the run wrapper against a stub in place of `claude`.
 `tests/Test-KbMove.ps1` drives the handle routes of the status, move and
 commit helpers and `kb-commit.ps1 -Reconcile` against a throwaway KB, and
 checks that the three helpers' copies of the handle function are byte-equal.
+It drives the commit helper's refusal of a path holding an instruction file's
+name under `wiki/`, by `-Path`, by a folder given as `-Path` and by
+`-Reconcile`, while a sibling page in the same folder commits.
 It also drives the move helper's refusals of a symbolic link and of a stamp
 or a move that throws, and its answer to a name `sources/` already holds: an
 identical inbox copy deleted, a copy of different content refused, and
@@ -407,7 +410,14 @@ denies all of raw git (`Bash(git:*)`), plus raw `mv`, `rm`, `cp`, `curl`,
 no agent runs either. A scheduled task or an operator's hand runs them.
 
 **The agent cannot edit its own guard rails.** Writes are denied under
-`sources/`, `inbox/`, `.git/`, and `.claude/`. `CLAUDE.md` is in neither the
+`sources/`, `inbox/`, `.git/`, and `.claude/`. The instruction-file names
+Claude Code loads, `CLAUDE.md`, `CLAUDE.local.md`, a `.claude/` folder and
+`.mcp.json`, are denied at any depth under `wiki/` as well, in the letter case
+the rules are written. Whether the engine refuses another spelling, such as
+`claude.md`, is unobserved, and a file written under one is loaded from disk.
+`kb-commit.ps1` refuses a path holding one of those names in any letter case,
+or a `CLAUDE~` short name, on every route, a path git stages included. The
+root `CLAUDE.md` is in neither the
 allow nor the deny list, so a headless run cannot alter the schema while an
 interactive session still can after a prompt. The write denies bind the Write
 and Edit tools, not the shell, so `settings.json` also pins
