@@ -338,7 +338,7 @@ function unnamedPersona(index: number): string {
 const PATH_SEPARATOR = /[\\/]/;
 
 /** The last segment of a path, as text. Empty for a value that is nothing but separators. */
-function lastSegment(value: string): string {
+export function lastSegment(value: string): string {
   const segments = value.split(PATH_SEPARATOR);
   return segments[segments.length - 1] ?? "";
 }

@@ -96,6 +96,22 @@ export const MAX_INTAKE_REASON_LENGTH = 480;
 export const MAX_INTAKE_WORD_LENGTH = 60;
 
 /**
+ * The length a branch name and a pull request URL stay under. Each names something on a remote and
+ * is drawn whole or not at all: a cut branch name names another branch and a cut URL opens another
+ * page, so a value reaching this cap is absent rather than cut.
+ */
+export const MAX_INTAKE_REF_LENGTH = 200;
+
+/**
+ * The one shape a pull request URL may take: a pull request page on github.com, its owner and
+ * repository in the characters GitHub admits, each starting with a letter, digit or underscore so no
+ * segment reads as `.` or `..`, ending at the number. Anything else, an ssh remote, a path past the
+ * number or another host, is no URL for the entry, so a store can send a reader nowhere but a pull
+ * request page.
+ */
+export const PULL_REQUEST_URL = /^https:\/\/github\.com\/[A-Za-z0-9_][A-Za-z0-9_.-]*\/[A-Za-z0-9_][A-Za-z0-9_.-]*\/pull\/([0-9]+)$/;
+
+/**
  * One queue entry as the store holds it, with every field validated on its own.
  *
  * Only `id` is required: it is the handle `activeGoalId` names and the key a plan reading is filed
@@ -148,6 +164,15 @@ export type QueueEntry = {
    * `MAX_INTAKE_NEXT_LENGTH`, the bound a plan file's own `Next:` value takes.
    */
   readonly nextSection?: string;
+  /** The plan's pull request number. Absent unless the store wrote a positive integer. */
+  readonly pullRequest?: number;
+  /**
+   * The pull request's page, matching `PULL_REQUEST_URL` with `pullRequest`'s own number. Absent
+   * where `pullRequest` is absent, or the store's value is any other shape.
+   */
+  readonly pullRequestUrl?: string;
+  /** The plan's branch: a trimmed, non-blank name under `MAX_INTAKE_REF_LENGTH`, else absent. */
+  readonly branch?: string;
 };
 
 /**
@@ -313,6 +338,33 @@ function countField(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
+/** One pull request number, or `undefined` when the store wrote anything but a positive integer. */
+function pullRequestField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * One pull request URL, or `undefined` unless it is a string under the ref cap matching
+ * `PULL_REQUEST_URL` whose number is `pullRequest`. A URL carrying another number names another
+ * pull request than the entry's, so it is no URL for this entry.
+ */
+function pullRequestUrlField(value: unknown, pullRequest: number | undefined): string | undefined {
+  const text = stringField(value);
+  if (pullRequest === undefined || text === undefined || text.length >= MAX_INTAKE_REF_LENGTH) return undefined;
+  const matched = PULL_REQUEST_URL.exec(text);
+  return matched !== null && Number(matched[1]) === pullRequest ? text : undefined;
+}
+
+/**
+ * One branch name, its whitespace runs collapsed as a title's are, or `undefined` when it is not a
+ * string, is blank, or reaches the ref cap. The collapse cuts at the cap, so a value reaching it is
+ * caught by the length check and is absent rather than cut.
+ */
+function branchField(value: unknown): string | undefined {
+  const text = boundedField(value, MAX_INTAKE_REF_LENGTH);
+  return text === undefined || text.length === 0 || text.length >= MAX_INTAKE_REF_LENGTH ? undefined : text;
+}
+
 /**
  * The plan file name one queue entry names, or null when it names none this module will act on.
  *
@@ -414,6 +466,7 @@ function entryOf(value: unknown): QueueEntry | null {
       }
     : undefined;
 
+  const pullRequest = pullRequestField(value.pullRequest);
   return {
     id,
     kind: boundedField(value.kind, MAX_INTAKE_WORD_LENGTH),
@@ -430,6 +483,9 @@ function entryOf(value: unknown): QueueEntry | null {
     chapterCount: countField(value.chapterCount),
     sectionCount: countField(value.sectionCount),
     nextSection: boundedField(value.nextSection, MAX_INTAKE_NEXT_LENGTH),
+    pullRequest,
+    pullRequestUrl: pullRequestUrlField(value.pullRequestUrl, pullRequest),
+    branch: branchField(value.branch),
   };
 }
 

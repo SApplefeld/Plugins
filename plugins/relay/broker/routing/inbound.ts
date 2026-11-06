@@ -293,6 +293,19 @@ export const UNPOSTED_WEB_ID_PREFIX = "web-";
  */
 export const WEB_SENDER_PREFIX = "web:";
 
+/**
+ * The prefixes a workers-board act opens with. A page line whose bounded words open with one, case
+ * and all, and that carries no file is a control line for the session's plugin rather than part of
+ * the conversation the response gate times, so it is handed over at once and alone, whatever the
+ * gate's mode, and joins no buffer. A Discord line is never one, whatever its words.
+ */
+const BOARD_ACT_PREFIXES: readonly string[] = ["[PAUSE]", "[RESUME]"];
+
+/** Whether a page line is a board act: its bounded, trimmed words open with a board act's prefix and it carries no file. */
+function isBoardAct(words: string, fileIds: readonly string[]): boolean {
+  return fileIds.length === 0 && BOARD_ACT_PREFIXES.some((prefix) => words.startsWith(prefix));
+}
+
 /** The name a web line is attributed to: the login's part before `@`, bounded as the gateway bounds a name. */
 export function webAuthorName(login: string): string {
   const name = boundedAuthor(login.split("@")[0]);
@@ -1556,6 +1569,11 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
    * a line both reads of `attached` had passed. On the live gate the line joined its thread's
    * buffer or went down with it, and the answer is true: a pipe refusing a released buffer is
    * announced in the thread, as it is for a Discord line, and is not the page's to hear.
+   *
+   * A board act takes the off-gate path in every mode and is admitted to no buffer, the simulated
+   * one included: it is a control line the plugin acts on alone, and one held behind the gate would
+   * reach the session late and as one attributed line among several. A buffer already held for the
+   * thread stays held and delivers on its own trigger, without the act in it.
    */
   function deliverTakenWritten(
     record: SessionRecord,
@@ -1563,14 +1581,15 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
     buffered: BufferedMessage,
     addressed: { mentionsBot: boolean; repliesToBot: boolean },
     refusals: readonly NoticeRefusal[],
+    boardAct = false,
   ): Promise<boolean> {
-    if (gate === null || simulated) {
+    if (gate === null || simulated || boardAct) {
       // Shadow: the message joins the simulated buffer here, before the delivery below awaits
       // anything, as it would join the live buffer. The gateway does not await one delivery
       // before firing the next, so an admission after the pipe write and its notices could
       // take a later message first. The pipe's outcome is never read: live admission does not
       // read it either. What the gate decides is journaled by the gate and reaches nothing else.
-      gate?.admit(message.threadId, record.sessionId, buffered, addressed);
+      if (!boardAct) gate?.admit(message.threadId, record.sessionId, buffered, addressed);
       // Read before the pipe write, on `handOverBuffers`'s reasoning: the tailer compares this
       // instant with the transcript line the harness writes as it injects the message, and a
       // read after the write could sit past that line's own timestamp.
@@ -2242,7 +2261,16 @@ export function createInboundRouter(options: InboundRouterOptions): InboundRoute
           text: words,
           attachments: [],
         };
-        const taken = deliverTakenWritten(record, message, buffered, { mentionsBot: false, repliesToBot: false }, []);
+        // A board act is read off the bounded words, the text the session is handed, never the raw
+        // text the page sent.
+        const taken = deliverTakenWritten(
+          record,
+          message,
+          buffered,
+          { mentionsBot: false, repliesToBot: false },
+          [],
+          isBoardAct(words, fileIds),
+        );
         return {
           after: taken.then((outcome) => {
             written = outcome;

@@ -16,8 +16,8 @@
 // reading. A source going from read to held is logged once, by name, and again only after it has read
 // well in between.
 import path from "node:path";
-import { comparablePath, initialEventState, readEvents } from "../board/events.ts";
-import type { EventReaderState, ReadEventsResult } from "../board/events.ts";
+import { comparablePath, initialEventState, initialTimelineEventState, readEvents, readTimelineEvents } from "../board/events.ts";
+import type { EventReaderState, ReadEventsResult, ReadTimelineEventsResult, TimelineReaderState } from "../board/events.ts";
 import { sweepArchivedPlans, sweepPlans, statPlanFile } from "../board/plans.ts";
 import type {
   PlanDirectoryListing,
@@ -62,6 +62,8 @@ export type PassSources = {
   /** The live and archived plans under `roots`, the root list the pass hands its sweep. */
   plans: (roots: readonly string[]) => PlansReading;
   events: (previous: EventReaderState, roots: readonly string[]) => ReadEventsResult;
+  /** The timeline fold over the same events file, on an offset of its own. */
+  timeline: (previous: TimelineReaderState) => ReadTimelineEventsResult;
   usage: () => UsageReading;
   /** The relay plugin's release from the harness's install record, or `UNREADABLE` where it gave none. */
   plugins: () => InstalledRelease | typeof UNREADABLE;
@@ -243,6 +245,7 @@ export function webPassSources(config: WebPassConfig, log: (message: string) => 
       };
     },
     events: (previous, roots) => readEvents(previous, roots, { path: config.boardEventsPath }),
+    timeline: (previous) => readTimelineEvents(previous, { path: config.boardEventsPath }),
     usage: () => readUsage(config.usageCacheRoot === null ? {} : { root: config.usageCacheRoot }),
     plugins: () => readInstalledPlugins(installedPluginsPath()),
     direction: () => readDirection(config.directionLedgerPath, config.boardProjects) ?? UNREADABLE,
@@ -309,6 +312,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
   const plans: Reading<PlansReading> = { value: null, at: null };
   const ledger: Reading<readonly LedgerReading[]> = { value: null, at: null };
   const events: Reading<EventReaderState> = { value: null, at: null };
+  const timeline: Reading<TimelineReaderState> = { value: null, at: null };
   const usage: Reading<readonly UsageAccount[]> = { value: null, at: null };
   const plugins: Reading<InstalledRelease> = { value: null, at: null };
   const rollout: Reading<RolloutReading> = { value: null, at: null };
@@ -323,6 +327,8 @@ export function createWebPass(options: WebPassOptions): WebPass {
   // The event reader is incremental, so its state outlives one pass whether or not a pass read well.
   let eventState = initialEventState();
   let eventRoots: readonly string[] | null = null;
+  // The timeline fold reads the same file on its own offset, and its state outlives a pass the same way.
+  let timelineState = initialTimelineEventState();
   let timer: NodeJS.Timeout | null = null;
   // The roots the latest pass handed the plan sweep, which the views join plans to a repo through.
   const sweepRoots = createSweepRoots(log);
@@ -369,6 +375,33 @@ export function createWebPass(options: WebPassOptions): WebPass {
     if (unreadable) return UNREADABLE;
     eventRoots = roots;
     return state;
+  }
+
+  /**
+   * One tick of the timeline fold, taken where the events fold ticks. It is one more reading of the
+   * events source rather than a source of its own, so it is named in no `held` list: a read that
+   * fails keeps the last good fold, as the events fold keeps its state. The first tick drains several
+   * windows, since the fold starts at byte 0 and one window would draw a page from the file's oldest
+   * lines alone.
+   */
+  function readTimelineStream(at: number): void {
+    // The limit is fixed before the loop, since the first read sets `timeline.at`.
+    const windows = timeline.at === null ? EVENT_DRAIN_WINDOWS : 1;
+    for (let step = 0; step < windows; step += 1) {
+      let result: ReadTimelineEventsResult;
+      try {
+        result = sources.timeline(timelineState);
+      } catch {
+        // The error is dropped unread, as a failed source's is: it can quote the path or the text.
+        return;
+      }
+      if (result.unreadable) return;
+      const advanced = result.state.offset > timelineState.offset;
+      timelineState = result.state;
+      timeline.value = timelineState;
+      timeline.at = at;
+      if (!advanced) return;
+    }
   }
 
   function run(): void {
@@ -419,7 +452,10 @@ export function createWebPass(options: WebPassOptions): WebPass {
     attempt("plans", plans, at, () => sources.plans(roots));
     if (!held.has("plans") && !sameRoots(roots, planRoots)) planRoots = roots;
     if (plans.value !== null) planIndex(plans.value);
-    if (personas !== null) attempt("events", events, at, () => readEventStream(personas));
+    if (personas !== null) {
+      attempt("events", events, at, () => readEventStream(personas));
+      readTimelineStream(at);
+    }
     attempt("usage", usage, at, () => {
       const reading = sources.usage();
       return reading.available ? reading.accounts : UNREADABLE;
@@ -459,6 +495,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
         plans: { ...plans },
         ledger: { ...ledger },
         events: { ...events },
+        timeline: { ...timeline },
         usage: { ...usage },
         plugins: { ...plugins },
         rollout: { ...rollout },

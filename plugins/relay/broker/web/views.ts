@@ -12,9 +12,9 @@
 // null value. A list drawn from it is empty and a count drawn from it is null, and the source is in
 // `held` so the page can say "no reading yet".
 import path from "node:path";
-import { eventPlanName, planName } from "../board/card.ts";
-import { comparablePath, initialEventState } from "../board/events.ts";
-import type { EventReaderState } from "../board/events.ts";
+import { eventPlanName, lastSegment, planName } from "../board/card.ts";
+import { MAX_TIMELINE_EVENTS_PER_SESSION, comparablePath, initialEventState } from "../board/events.ts";
+import type { EventReaderState, TimelineEvent, TimelineEventKind, TimelineReaderState } from "../board/events.ts";
 import type { PlanReading } from "../board/plans.ts";
 import type { PersonaQueue, QueueEntry, QueuePlanReading } from "../board/queues.ts";
 import type { RosterPersona } from "../board/roster.ts";
@@ -27,6 +27,7 @@ import { deriveSurfaceState, toView } from "../discord/state.ts";
 import type { StateThresholds, SurfaceState, ViewSignals } from "../discord/state.ts";
 import { liveByLineage } from "../registry.ts";
 import type { SessionRecord } from "../registry.ts";
+import { clean } from "../sanitize.ts";
 import type { UsageAccount } from "../usage/cache.ts";
 import { PACE_PERIOD_MS, aheadOfPace, measuredAt, projectExhaustion, rolledWeekly } from "../usage/pace.ts";
 import { foldRootName } from "./config.ts";
@@ -35,7 +36,7 @@ import { headingOf } from "./direction.ts";
 import type { DirectionReading, Heading } from "./direction.ts";
 import type { InstalledRelease } from "./plugins.ts";
 import { SHARED_ROW_CAP } from "./rollout.ts";
-import { EMPTY_MARKS, blockedHandledKey, blockedHides, handledHides, handledKey, planMarkKey } from "./watermarks.ts";
+import { EMPTY_MARKS, blockedHandledKey, blockedHides, handledHides, handledKey, planMarkKey, reviewHandledKey } from "./watermarks.ts";
 import type { BlockedReasons, HandledHow, Marks } from "./watermarks.ts";
 
 /** The sources a view draws from, in the order `asOf` and `held` list them. */
@@ -181,6 +182,8 @@ export type Readings = {
   plans: Reading<PlansReading>;
   ledger: Reading<readonly LedgerReading[]>;
   events: Reading<EventReaderState>;
+  /** The timeline fold over the events file, read beside `events` and held with it; no source of its own. */
+  timeline: Reading<TimelineReaderState>;
   usage: Reading<readonly UsageAccount[]>;
   rollout: Reading<RolloutReading>;
   plugins: Reading<InstalledRelease>;
@@ -268,12 +271,31 @@ export type StandupView = {
 };
 
 /**
+ * A review waiting on the operator: a queue entry with a `pr-ready` timeline line on its plan, whatever
+ * lines follow it, and whose pull request no review mark hides. `pullRequest`, `pullRequestUrl` and
+ * `branch` are the entry's, null where the store wrote none the reader admits; `readyAt` is the
+ * newest `pr-ready` line's stamp.
+ */
+export type ReviewItem = {
+  kind: "review";
+  repo: string;
+  title: string;
+  planPath: string | null;
+  pullRequest: number | null;
+  pullRequestUrl: string | null;
+  branch: string | null;
+  readyAt: string;
+  entryId: string;
+};
+
+/**
  * The Needs-me page's view: every item the standup view's `needsYou` holds, in three groups the
- * page draws in this order, and `rollout`, the client branches with something to roll out.
+ * page draws in this order, then the reviews waiting, and `rollout`, the client branches with
+ * something to roll out.
  */
 export type NeedsMeView = {
   sandbox: string;
-  groups: { blocked: Item[]; ask: Item[]; hands: Item[] };
+  groups: { blocked: Item[]; ask: Item[]; hands: Item[]; review: ReviewItem[] };
   rollout: RolloutRow[] | null;
   /** The publish rows with something to publish, null while the source has never read. */
   publish: PublishRow[] | null;
@@ -342,6 +364,47 @@ export type PlanView = {
   chapters: { number: number; completed: string | null; next: string | null }[];
   next: string | null;
   openAsks: Item[];
+  asOf: AsOf;
+  held: readonly SourceName[];
+};
+
+/** A Workers row's state: the repo's, or `paused` where the entry in hand reads paused by the operator rather than by the nudge cap. */
+export type WorkerState = RepoState | "paused";
+
+/** One timeline line as a row draws it: the kind, its stamp, the plan it names and the kit's detail. */
+export type TimelineLine = { event: TimelineEventKind; ts: string; plan: string; detail: string | null };
+
+/**
+ * One roster persona on the Workers page. The entry in hand is the one `activeGoalId` names, else
+ * the first in queue order whose word is in flight, blocked or stalled or whose status reads paused
+ * and is not done; its title and store fields
+ * fill the row, each null where the queue holds no such entry or the store wrote none the reader
+ * admits. `step` is the repo row's. `timeline` holds the newest lines of the persona's sessions,
+ * ended ones included, oldest first and at most `MAX_TIMELINE_EVENTS_PER_SESSION` of them.
+ */
+export type WorkerRow = {
+  name: string;
+  state: WorkerState;
+  title: string | null;
+  step: RepoStep | null;
+  lastTurnAt: string | null;
+  pullRequest: number | null;
+  pullRequestUrl: string | null;
+  branch: string | null;
+  /** The entry in hand's `blockedReason` where its status reads paused; null otherwise. */
+  pausedReason: string | null;
+  timeline: TimelineLine[];
+};
+
+/**
+ * The Workers page's view: one row per roster persona in the standup page's state order, a paused
+ * row taking an idle row's place, and the tiles the page heads with: how many rows read working,
+ * asking and blocked, and how many personas have a review waiting that no mark hides.
+ */
+export type WorkersView = {
+  sandbox: string;
+  tiles: { working: number; asking: number; blocked: number; ready: number };
+  rows: WorkerRow[];
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -954,6 +1017,141 @@ function needsYou(readings: Readings, repos: readonly Repo[]): Item[] {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Workers and reviews
+// ---------------------------------------------------------------------------------------------
+
+/** The store status that reads paused, compared as the status rule compares a status word. */
+const PAUSED_STATUS = "paused";
+
+function readsPaused(entry: QueueEntry): boolean {
+  return entry.status?.trim().toLowerCase() === PAUSED_STATUS;
+}
+
+/**
+ * The entry a persona has in hand: the one `activeGoalId` names, else the first in queue order whose
+ * word is in flight, blocked or stalled or whose status reads paused and is not done; null where the
+ * queue holds none such. A paused entry is looked for by its status because the plugin's pause leaves
+ * no entry active, so `activeGoalId` names none while the worker is paused.
+ */
+function entryInHand(repo: Repo): QueueEntry | null {
+  const queue = repo.queue;
+  if (queue === null) return null;
+  const named = queue.activeGoalId === null ? undefined : queue.entries.find((entry) => entry.id === queue.activeGoalId);
+  if (named !== undefined) return named;
+  const entries = new Map(queue.entries.map((entry) => [entry.id, entry]));
+  for (const status of repo.status?.entries ?? []) {
+    const entry = entries.get(status.id);
+    if (entry === undefined) continue;
+    if (status.word === "in flight" || status.word === "blocked" || status.word === "stalled") return entry;
+    if (status.word !== "done" && readsPaused(entry)) return entry;
+  }
+  return null;
+}
+
+/**
+ * The timeline lines of every session the registry records under `lineage`, an ended session's
+ * included, since a plan's `pr-ready` line is often its session's last: oldest first and uncut, so a
+ * review is found however many lines follow its `pr-ready`. Each session is looked up by the `clean`
+ * key the fold stores it under.
+ */
+function timelineOf(readings: Readings, lineage: string): TimelineEvent[] {
+  const fold = readings.timeline.value;
+  if (fold === null) return [];
+  const lines: TimelineEvent[] = [];
+  for (const record of readings.records) {
+    if (record.lineage !== lineage) continue;
+    lines.push(...(fold.latest.get(clean(record.sessionId)) ?? []));
+  }
+  lines.sort((left, right) => left.tsMs - right.tsMs);
+  return lines;
+}
+
+/**
+ * The reviews waiting in one repo: each queue entry with a `pr-ready` line among `lines` on its plan,
+ * the entry's `planSegment` and the line's plan compared by `eventPlanName`, and whose pull request
+ * number no review mark hides. The newest such line keys the review whatever lines follow it, since
+ * the kit writes `goal-complete` minutes after `pr-ready` in the same finishing pass: the mark alone
+ * retires a review. An entry with no number cannot be marked, so it stands while its `pr-ready` line
+ * is in the fold. A done entry still counts: a merged pull request's plan is complete.
+ */
+function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent[]): ReviewItem[] {
+  const queue = repo.queue;
+  if (queue === null || lines.length === 0) return [];
+  const handled = (readings.marks ?? EMPTY_MARKS).handled;
+  const items: ReviewItem[] = [];
+  for (const entry of queue.entries) {
+    if (entry.planSegment === null || entry.planSegment === undefined) continue;
+    const name = eventPlanName(entry.planSegment);
+    let newest: TimelineEvent | null = null;
+    for (const line of lines) {
+      if (line.event !== "pr-ready" || eventPlanName(line.plan) !== name) continue;
+      if (newest === null || line.tsMs >= newest.tsMs) newest = line;
+    }
+    if (newest === null) continue;
+    const pullRequest = entry.pullRequest ?? null;
+    if (pullRequest !== null && handled.get(reviewHandledKey(repo.persona.name, pullRequest))?.kind === "review") continue;
+    const reading = queue.readings.get(entry.id);
+    items.push({
+      kind: "review",
+      repo: repo.persona.name,
+      title: entry.title,
+      planPath: reading === undefined ? null : planRelative(reading),
+      pullRequest,
+      pullRequestUrl: entry.pullRequestUrl ?? null,
+      branch: entry.branch ?? null,
+      readyAt: newest.ts,
+      entryId: entry.id,
+    });
+  }
+  return items;
+}
+
+/** The standup page's state order, a paused row taking an idle row's place. */
+const WORKER_STATE_ORDER: readonly RepoState[] = ["asking", "blocked", "stalled", "working", "idle", "dormant"];
+
+function workerRank(state: WorkerState): number {
+  return WORKER_STATE_ORDER.indexOf(state === "paused" ? "idle" : state);
+}
+
+/** The Workers page's view: one row per roster persona, sorted by state and stable within one. */
+export function workersView(readings: Readings): WorkersView {
+  const repos = fleet(readings);
+  let ready = 0;
+  const rows = repos.map((repo): WorkerRow => {
+    const lines = timelineOf(readings, repo.persona.name);
+    if (reviewsOf(readings, repo, lines).length > 0) ready += 1;
+    const entry = entryInHand(repo);
+    const paused = entry !== null && readsPaused(entry);
+    return {
+      name: repo.persona.name,
+      // The nudge cap's pause is the status rule's stalled, which the repo state already carries.
+      state: paused && entry.pausedByNudgeCap !== true ? "paused" : repo.state,
+      title: entry?.title ?? null,
+      step: stepOf(readings, repo.persona.workdir),
+      lastTurnAt: workerOf(readings, repo).lastTurnAt,
+      pullRequest: entry?.pullRequest ?? null,
+      pullRequestUrl: entry?.pullRequestUrl ?? null,
+      branch: entry?.branch ?? null,
+      pausedReason: paused ? (entry.blockedReason ?? null) : null,
+      // The row draws the newest lines alone, so a lineage of many sessions draws no more than one does.
+      // A line carries its plan's file name alone, so a path's folders, an account name among them, never reach the page.
+      timeline: lines
+        .slice(Math.max(0, lines.length - MAX_TIMELINE_EVENTS_PER_SESSION))
+        .map(({ event, ts, plan, detail }) => ({ event, ts, plan: lastSegment(plan), detail })),
+    };
+  });
+  rows.sort((left, right) => workerRank(left.state) - workerRank(right.state));
+  const count = (state: WorkerState): number => rows.filter((row) => row.state === state).length;
+  return {
+    sandbox: readings.host,
+    tiles: { working: count("working"), asking: count("asking"), blocked: count("blocked"), ready },
+    rows,
+    asOf: asOf(readings),
+    held: readings.held,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------------------------
 
@@ -1353,13 +1551,15 @@ export function standupView(readings: Readings): StandupView {
  * the order `needsYou` gives them, so the page's sorts start from the same list the standup page shows.
  */
 export function needsMeView(readings: Readings): NeedsMeView {
-  const items = needsYou(readings, fleet(readings));
+  const repos = fleet(readings);
+  const items = needsYou(readings, repos);
   return {
     sandbox: readings.host,
     groups: {
       blocked: items.filter((item) => item.kind === "blocked"),
       ask: items.filter((item) => item.kind === "ask"),
       hands: items.filter((item) => item.kind === "hands"),
+      review: repos.flatMap((repo) => reviewsOf(readings, repo, timelineOf(readings, repo.persona.name))),
     },
     rollout: rolloutWaiting(readings),
     publish: publishWaiting(readings),

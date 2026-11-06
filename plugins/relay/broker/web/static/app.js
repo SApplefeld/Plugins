@@ -41,6 +41,7 @@
     "needs-me": { render: renderNeedsMe, url: () => "/web/needs-me" },
     ask: { render: renderAsk, url: askUrl, gone: askGone },
     talk: { render: renderTalkScreen, url: talkUrl, accept: talkAccept, follow: true },
+    workers: { render: renderWorkers, url: () => "/web/workers" },
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -48,11 +49,17 @@
   // ---------------------------------------------------------------------------------------------
 
   /** The fixed path of each screen, the paths the broker serves the shell on; the repo screen is `REPO_PREFIX` plus the name. */
-  const SCREEN_PATHS = { standup: "/", "needs-me": "/needs-me", ask: "/ask", plan: "/plan", health: "/health", talk: "/talk" };
+  const SCREEN_PATHS = { standup: "/", "needs-me": "/needs-me", ask: "/ask", plan: "/plan", health: "/health", talk: "/talk", workers: "/workers" };
   const REPO_PREFIX = "/repo/";
 
   /** The query keys each screen reads, in the order a path the shell builds carries them; a key off the list is dropped. */
-  const SCREEN_KEYS = { standup: [], "needs-me": ["item"], ask: ["repo", "id"], plan: ["root", "path", "repo"], health: [], talk: ["lineage", "root", "path"], repo: [] };
+  const SCREEN_KEYS = { standup: [], "needs-me": ["item", "chip"], ask: ["repo", "id"], plan: ["root", "path", "repo"], health: [], talk: ["lineage", "root", "path"], repo: [], workers: ["name"] };
+
+  /** The list row a query selects: the Needs me screen's `item`, or the Workers screen's `name`, the persona's; null where it names none. */
+  function selectedOf(query) {
+    if (typeof query.item === "string") return query.item;
+    return typeof query.name === "string" ? query.name : null;
+  }
 
   /**
    * The screen and query an address names, or null for a path the shell has no screen for. `where`
@@ -83,7 +90,7 @@
       const value = search.get(key);
       if (value !== null) query[key] = value;
     }
-    return { screen, name, query, item: typeof query.item === "string" ? query.item : null };
+    return { screen, name, query, item: selectedOf(query) };
   }
 
   /**
@@ -100,10 +107,20 @@
     return pairs.length === 0 ? base : base + "?" + pairs.join("&");
   }
 
-  /** The path of a route with no list row selected, which tells one screen's reading from another's. */
+  /** The route to a screen with no repo name, in the shape `routeOf` reads from an address: its query, and the row the query selects or null. */
+  function routeTo(screen, query) {
+    return { screen, name: null, query, item: selectedOf(query) };
+  }
+  /**
+   * The path of a route with no list row selected, by `item` or by a worker's `name`, and no Needs me
+   * chip chosen, which tells one screen's reading from another's: a chip filters the reading the
+   * screen holds and reads nothing new, and a selected worker is a row of the reading already held.
+   */
   function placeOf(at) {
     const query = Object.assign({}, at.query);
     delete query.item;
+    delete query.chip;
+    delete query.name;
     return pathOf({ screen: at.screen, name: at.name, query });
   }
 
@@ -575,28 +592,59 @@
   /**
    * The one toast the pages share: a line, and an optional command the operator can select and copy. Its live region is in the
    * page empty before the first message, so a screen reader announces that message. Focus moves to Dismiss where the tapped
-   * button is disabled or gone, and returns to a rollout button when the toast is dismissed.
+   * button is disabled or gone, and returns to a rollout button when the toast is dismissed. A toast
+   * given an `action`, `{ words, run }`, carries that one button in Dismiss's place, whose tap runs it;
+   * the caller clears that toast itself. Answers the toast's body, so a caller can tell its toast is
+   * still the one shown. A Needs me dismissal whose Undo toast this one replaces is posted at once, as
+   * a second Dismiss posts it, so no item leaves later with no Undo on screen. Every toast shows its
+   * own line, then its command, then each of `toastNotes` on a line of its own, oldest first; null
+   * words draw the notes alone.
    */
   const toastBox = h("div", "toast");
   toastBox.setAttribute("role", "status");
 
-  function showToast(words, command) {
+  /**
+   * The words of each failed Dismiss post, oldest first. They ride on whatever toast is up and on every
+   * toast after it, so no toast, Undo's included, covers them before the operator reads them, and only
+   * a tap on a toast's Dismiss button empties the list.
+   */
+  const toastNotes = [];
+
+  /** One failed Dismiss's words as a line of a toast. */
+  function toastNote(words) {
+    return h("span", "toast-note", words);
+  }
+
+  function showToast(words, command, action) {
+    const shown = needsMe.pending;
+    const displaced = shown !== null && shown.toast !== null && toastBox.contains(shown.toast);
+    if (displaced) postDismiss(shown);
     const body = h("div", "toast-body");
-    body.append(h("span", null, words));
+    if (words !== null) body.append(h("span", null, words));
     if (command) body.append(h("code", "toast-code", command));
-    const close = h("button", "toast-close", "Dismiss");
-    close.type = "button";
-    listen(close, "click", () => {
-      const held = toastBox.contains(document.activeElement);
-      toastBox.replaceChildren();
-      if (held) {
-        const next = document.querySelector("#app button.ro-button:not(:disabled)");
-        if (next !== null) next.focus();
-      }
-    });
+    for (const note of toastNotes) body.append(toastNote(note));
+    let close;
+    if (action) {
+      close = h("button", "toast-close toast-act", action.words);
+      close.type = "button";
+      listen(close, "click", () => action.run());
+    } else {
+      close = h("button", "toast-close", "Dismiss");
+      close.type = "button";
+      listen(close, "click", () => {
+        const held = toastBox.contains(document.activeElement);
+        toastNotes.length = 0;
+        toastBox.replaceChildren();
+        if (held) {
+          const next = document.querySelector("#app button.ro-button:not(:disabled)");
+          if (next !== null) next.focus();
+        }
+      });
+    }
     toastBox.replaceChildren(body, close);
     const active = document.activeElement;
     if (active === null || active === document.body || active.disabled === true || !active.isConnected) close.focus();
+    return body;
   }
 
   /** Posts Mark rolled out for a row and shows the broker's answer in the toast; nothing is thrown. */
@@ -2443,6 +2491,40 @@
   }
 
   /**
+   * Posts one line to the say route and answers the status word the broker gave it. The talk
+   * composer and the Workers board's acts both send through here. An answer that is not a 2xx throws
+   * an `Unreadable` carrying its HTTP status; a timeout, a dropped connection or a body that is not
+   * JSON throws as the browser threw it.
+   */
+  async function postSay(body, timeoutMs) {
+    const response = await fetch("/web/say", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status, response.status);
+    const answer = await response.json();
+    return txt(answer.status);
+  }
+
+  /**
+   * Whether a failed say post was the broker refusing the line: a 4xx, so nothing was sent. A 5xx
+   * may come after the broker read the line, and a post with no answer may have landed, so the
+   * state of either is unknown.
+   */
+  function refusedSay(error) {
+    return error instanceof Unreadable && error.status !== null && error.status >= 400 && error.status < 500;
+  }
+
+  /** The status line's words for the say route's status word: Sent or Answered for a line that landed, else why nothing was sent. */
+  function sayWords(status) {
+    if (status === "delivered") return "Sent.";
+    if (status === "answered") return "Answered.";
+    return Object.prototype.hasOwnProperty.call(SEND_WORDS, status) ? SEND_WORDS[status] : "The broker answered " + status + "; nothing was sent.";
+  }
+
+  /**
    * Posts the typed line, and the files picked for it, to the broker as this operator's word. Each
    * file not yet sent goes up first and keeps the id it came back with on its pick, so a send tried
    * again names the kept ids and uploads only the files that have none. The broker answers what
@@ -2484,7 +2566,6 @@
     if (lastView !== null) draw(lastView);
     let echo = null;
     let posted = false;
-    let refused = false;
     let said = false;
     try {
       for (const pick of picked) if (pick.id === null) pick.id = await uploadFile(pick, lineage);
@@ -2498,20 +2579,7 @@
         if (echo.shown && lastView !== null) draw(lastView);
       }
       posted = true;
-      const response = await fetch("/web/say", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(answering ? { lineage, text, answers: true } : { lineage, text, files: ids }),
-        signal: AbortSignal.timeout(sayTimeoutMs(ids.length)),
-      });
-      if (!response.ok) {
-        // A 4xx is the broker refusing the line, so nothing was sent. A 5xx may come after the
-        // broker read it, so its state is unknown.
-        refused = response.status >= 400 && response.status < 500;
-        throw new Unreadable("the broker answered HTTP " + response.status);
-      }
-      const answer = await response.json();
-      const status = txt(answer.status);
+      const status = await postSay(answering ? { lineage, text, answers: true } : { lineage, text, files: ids }, sayTimeoutMs(ids.length));
       said = true;
       // A line a poll carried back while the request was out settled at its landing, so the answer
       // changes nothing, and the ring is not read again, since the poll that carried it just was.
@@ -2528,15 +2596,12 @@
         if (draft.startsWith(text)) talk.draft = draft.slice(text.length).trimStart();
         // The same for the files: those picked after the send began stay for the next line.
         talk.picked = talk.picked.filter((pick) => picked.indexOf(pick) < 0);
-        talk.status = status === "answered" ? "Answered." : "Sent.";
         if (echo !== null) echo.settled = true;
       } else if (status === "unknown-file") {
         // The ids name files saved for a session no longer live; the picks stay for the next send.
         for (const pick of talk.picked) pick.id = null;
-        talk.status = SEND_WORDS[status];
-      } else {
-        talk.status = Object.prototype.hasOwnProperty.call(SEND_WORDS, status) ? SEND_WORDS[status] : "The broker answered " + status + "; nothing was sent.";
       }
+      talk.status = sayWords(status);
       talk.sending = false;
       await refreshTalk();
     } catch (error) {
@@ -2551,6 +2616,7 @@
       // send of the same words still waits, moves the landing to that send and the refusal stands.
       if (!said) {
         const here = lineage === talk.lineage;
+        const refused = refusedSay(error);
         if (echo !== null && echo.landed && !(refused && moveLanding(echo))) {
           // Settled at its landing.
         } else if (posted && !refused) {
@@ -3082,6 +3148,7 @@
     empty: "the line was empty, so nothing was sent, left open",
     "unknown-file": "a file the line named is no longer held, so nothing was sent, left open",
     closed: "already closed",
+    handled: "dismissed",
     "already-acted": "already acted on from a page",
     "no-recommendation": "no recommendation to agree to",
     changed: "the recommendation changed since you read it, read it again",
@@ -3089,10 +3156,41 @@
   };
 
   /** The word a delivered line reads, by the act that sent it. */
-  const DELIVERED_WORDS = { agree: "agreed", correct: "corrected", dismiss: "dismissed" };
+  const DELIVERED_WORDS = { agree: "agreed", correct: "answered", dismiss: "dismissed" };
 
-  /** Each act's name, for the words beside an item whose answer could not be read. */
-  const ACT_NAMES = { agree: "Agree", correct: "Correct", dismiss: "Dismiss" };
+  /** Each act's name, for the words beside an item whose answer could not be read; the `correct` route's act is Answer on the page. */
+  const ACT_NAMES = { agree: "Agree", correct: "Answer", dismiss: "Dismiss" };
+
+  /** How long a dismissed item's toast offers Undo before its Dismiss is posted. */
+  const UNDO_MS = 5000;
+
+  /** How far left a card on the phone layout must travel under a finger to dismiss it. */
+  const SWIPE_PX = 80;
+
+  /** How far a pointer may travel on a card and still be a tap that selects the row. */
+  const TAP_SLOP_PX = 10;
+
+  /** The phone layout, under the stylesheet's first breakpoint, where a card takes the swipe. */
+  const PHONE_QUERY = "(max-width: 699px)";
+
+  /**
+   * The chips over the Needs me list: the address's `chip` value, the words, and the groups each lists
+   * in the order drawn. All lists every group, Decisions the asks, Blocked the blocked runs and the
+   * hands items, and Reviews the pull requests ready for review. An address with no chip, or one off
+   * this list, reads as All.
+   */
+  const CHIPS = [
+    { id: "all", words: "All", groups: ["blocked", "ask", "review", "hands"] },
+    { id: "decisions", words: "Decisions", groups: ["ask"] },
+    { id: "blocked", words: "Blocked", groups: ["blocked", "hands"] },
+    { id: "reviews", words: "Reviews", groups: ["review"] },
+  ];
+
+  /** Every group a Needs me reading carries, so a selected item is found whichever chip lists it. */
+  const ALL_GROUPS = ["blocked", "ask", "hands", "review"];
+
+  /** The one origin a review's Open PR link may point at; the broker admits the URL under a github.com pull request pattern too. */
+  const GITHUB_PREFIX = "https://github.com/";
 
   /** A blocked run's `changed`: the reason the page drew is no longer the block's. */
   const BLOCK_CHANGED_WORDS = "the block's reason changed since you read it, read it again";
@@ -3125,8 +3223,17 @@
    * What the Needs-me and ask pages hold between polls: the order chosen; the asks the operator acted
    * on in this tab, kept in its session storage, which the batch leaves alone; the words beside each
    * item from its last act; whether an act is out, and the items it is out for; each item whose line
-   * was delivered, with the reading it was drawn from, which a newer reading replaces; the Correct box
-   * open, by its item's key, with its draft; and each open Context, by its item's key.
+   * was delivered, with the reading it was drawn from, which a newer reading replaces; the Answer box
+   * open, by its item's key, with its draft; each open Context, by its item's key; and the Context the
+   * Needs me detail pane read for the item it shows, the brief, plan title and conversation it draws,
+   * with the reading it was read under, dropped once the detail shows another item so a return reads
+   * it afresh, or once a newer reading is drawn where the read failed. `processing`
+   * holds each item whose Agree was tapped, until a reading no longer carries it or the post fails.
+   * `pending` is the dismissal whose toast is up, `{ key, item, timer, toast }`, and `posting` the keys
+   * whose Dismiss post is out; every draw leaves the items under either off the list and the counts.
+   * `swipe` is the card a finger is on,
+   * `{ key, pointer, x, y, moved, sideways }`, and `swiped` the key of the card whose swipe ended, so
+   * the tap that ends it does not select the row.
    */
   const needsMe = {
     sort: "kind",
@@ -3137,6 +3244,12 @@
     delivered: new Map(),
     correct: null,
     context: new Map(),
+    detail: new Map(),
+    processing: new Set(),
+    pending: null,
+    posting: new Set(),
+    swipe: null,
+    swiped: null,
   };
 
   /** The asks touched so far in this tab, read from its session storage; an unreadable store gives an empty set. */
@@ -3168,9 +3281,58 @@
     return JSON.stringify([item.repo, item.askId]);
   }
 
-  /** The key any item's page state is held under: an ask's `needsKey`, a blocked run's lineage and queue entry. */
+  /** The key any item's page state is held under: an ask's `needsKey`, a blocked run's lineage and queue entry, a review's lineage and queue entry. */
   function itemKey(item) {
+    if (item.kind === "review") return JSON.stringify([item.repo, "review", txt(item.entryId)]);
     return item.kind === "blocked" ? JSON.stringify([item.repo, "blocked", txt(item.entryId)]) : needsKey(item);
+  }
+
+  /** When an item came up: a review's ready time, any other item's opening time; null where it names none. */
+  function openedOf(one) {
+    return parse(one.kind === "review" ? one.readyAt : one.openedAt);
+  }
+
+  /** Whether every draw leaves the item off: its Dismiss toast is up, or its Dismiss post is out. */
+  function dismissing(one) {
+    const key = itemKey(one);
+    return (needsMe.pending !== null && needsMe.pending.key === key) || needsMe.posting.has(key);
+  }
+
+  /** A review's or a Workers row's pull request number where it is a positive integer, the one a review Dismiss can name; null otherwise. */
+  function reviewNumber(one) {
+    const number = num(one.pullRequest);
+    return number !== null && Number.isInteger(number) && number > 0 ? number : null;
+  }
+
+  /**
+   * Whether the item takes Dismiss: an ask naming its id, a blocked run naming its queue entry, and a
+   * review naming a pull request number, the one key its handled mark can take. A hands item never does.
+   */
+  function dismissable(one) {
+    if (txt(one.repo) === "") return false;
+    if (one.kind === "ask") return txt(one.askId) !== "";
+    if (one.kind === "blocked") return txt(one.entryId) !== "";
+    return one.kind === "review" && txt(one.entryId) !== "" && reviewNumber(one) !== null;
+  }
+
+  /** The chip the address names on the Needs me screen, All on any other screen or where it names none the list knows. */
+  function chipOf() {
+    const at = screen === "needs-me" ? routeOf(window.location) : null;
+    const id = at === null ? null : at.query.chip;
+    return CHIPS.find((one) => one.id === id) ?? CHIPS[0];
+  }
+
+  /** The Needs me query for a chip and a selected row key, the chip left out where it is All. */
+  function needsQuery(chip, rowKey) {
+    const query = {};
+    if (rowKey !== null) query.item = rowKey;
+    if (chip.id !== "all") query.chip = chip.id;
+    return query;
+  }
+
+  /** The items a chip lists, in the order drawn, less any delivered from this reading and any being dismissed. */
+  function listedItems(view, chip) {
+    return chip.groups.flatMap((name) => sortedItems(groupItems(view, name))).filter((one) => !deliveredIn(view, one) && !dismissing(one));
   }
 
   /** The words beside an item once its act is answered; a status the table lacks is named as the broker said it. */
@@ -3194,8 +3356,8 @@
   function sortedItems(items) {
     const indexed = items.map((item, index) => ({ item, index }));
     const byAge = (a, b) => {
-      const x = parse(a.item.openedAt);
-      const y = parse(b.item.openedAt);
+      const x = openedOf(a.item);
+      const y = openedOf(b.item);
       if (x !== y) {
         if (x === null) return 1;
         if (y === null) return -1;
@@ -3284,9 +3446,13 @@
    * takes the acting highlight and reads `sending` at once. A delivered line takes the item off the
    * reading it was drawn from, so it leaves the list on that redraw and the next reading decides again;
    * any other answer, or none, leaves it with the broker's word and its buttons live. A `changed` reads
-   * the view again, so the item shows the text the broker now holds. Answers whether it was delivered.
+   * the view again, so the item shows the text the broker now holds. A review's Dismiss delivers no
+   * line and answers `handled` once its mark is written, which takes the item off as a delivered line
+   * does. Answers whether it was delivered or, for that Dismiss, handled. A caller passing `said`
+   * finds the words set beside the item in `said.words`, taken before the redraw, which drops the words
+   * of an item the reading no longer holds.
    */
-  async function sendAct(item, act, body) {
+  async function sendAct(item, act, body, said = null) {
     if (needsMe.acting) return false;
     const key = itemKey(item);
     if (item.kind === "ask") touch(key);
@@ -3306,31 +3472,190 @@
     } finally {
       needsMe.acting = false;
       needsMe.out.delete(key);
-      if (status === "delivered") {
+      if (said !== null) said.words = needsMe.statuses.get(key) ?? null;
+      if (landed(status, act)) {
         if (lastView !== null && here === visit) needsMe.delivered.set(key, lastView);
         if (needsMe.correct !== null && needsMe.correct.key === key) needsMe.correct = null;
       }
       if (status === "changed") await refreshView();
       else redrawNeeds();
     }
-    return status === "delivered";
+    return landed(status, act);
   }
 
-  /** Agrees to one ask on the recommendation this page drew. */
-  function sendAgree(item) {
-    return sendAct(item, "agree", agreeBody(item));
+  /** Whether an act's answer means it took: a delivered line, or a review Dismiss's written mark. */
+  function landed(status, act) {
+    return status === "delivered" || (act === "dismiss" && status === "handled");
   }
 
-  /** Dismisses one item: an ask by its id, a blocked run by its queue entry and the text the view gave it, which the broker matches byte for byte. */
-  function sendDismiss(item) {
-    const body =
-      item.kind === "blocked"
-        ? { kind: "blocked", repo: item.repo, entryId: item.entryId, reason: txt(item.text) }
-        : { kind: "ask", askId: item.askId, repo: item.repo };
-    return sendAct(item, "dismiss", body);
+  /**
+   * Agrees to one ask on the recommendation this page drew. The item is processing from the tap: its
+   * buttons are disabled and it reads "processing" until a reading no longer carries it, so a delivered
+   * Agree whose ask the next reading still holds stays disabled rather than offering a second tap. An
+   * Agree that was refused, or whose answer could not be read, ends processing with the broker's word,
+   * and the buttons come back.
+   */
+  async function sendAgree(item) {
+    const key = itemKey(item);
+    if (needsMe.acting) return false;
+    needsMe.processing.add(key);
+    const delivered = await sendAct(item, "agree", agreeBody(item));
+    if (!delivered) {
+      needsMe.processing.delete(key);
+      redrawNeeds();
+    }
+    return delivered;
   }
 
-  /** Opens the Correct box under one ask, closing any other, and puts the caret in it. */
+  /**
+   * Dismisses one item: an ask by its id, a blocked run by its queue entry and the text the view gave
+   * it, which the broker matches byte for byte, and a review by its lineage and pull request number.
+   * `said` is passed to `sendAct` for the words set beside the item.
+   */
+  function sendDismiss(item, said = null) {
+    let body;
+    if (item.kind === "review") body = { kind: "review", repo: item.repo, pullRequest: reviewNumber(item) };
+    else
+      body =
+        item.kind === "blocked"
+          ? { kind: "blocked", repo: item.repo, entryId: item.entryId, reason: txt(item.text) }
+          : { kind: "ask", askId: item.askId, repo: item.repo };
+    return sendAct(item, "dismiss", body, said);
+  }
+
+  /** Waits until no act is out, so a Dismiss whose toast expired during another act is posted after it rather than refused. */
+  async function whenIdle() {
+    while (needsMe.acting) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  /** What a dismissal's toast names the item by: a review's plan title, any other item's text, cut short. */
+  function dismissHeadline(one) {
+    return cutPoints(txt(one.kind === "review" ? one.title : one.text), 60);
+  }
+
+  /**
+   * Takes a dismissal's toast down where it is still the one shown; a later toast that replaced it is
+   * left alone. Where failure notes are held, a plain toast carries them on in its place, so the notes
+   * stay until the operator taps Dismiss.
+   */
+  function clearDismissToast(pending) {
+    if (pending.toast === null || !toastBox.contains(pending.toast)) return;
+    if (toastNotes.length > 0) showToast(null);
+    else toastBox.replaceChildren();
+  }
+
+  /**
+   * Adds a failed Dismiss's words to the toast notes and to the toast up now, as a line below its own
+   * line and command, so a dismissal's Undo and a tag's undo command both stay on screen. With no toast
+   * up, a plain toast of the notes opens.
+   */
+  function showDismissFailure(words) {
+    toastNotes.push(words);
+    const body = toastBox.querySelector(".toast-body");
+    if (body === null) showToast(null);
+    else body.append(toastNote(words));
+  }
+
+  /**
+   * Dismisses an item from the Needs me list with Undo: the item leaves the list and the counts at once,
+   * and a toast names it with Undo for `UNDO_MS`. Its Dismiss is posted when the toast expires, never
+   * before; Undo restores it and posts nothing. A second Dismiss while a toast is up posts the first at
+   * once and starts its own toast. Nothing posts from an unload, so an item whose page closes during its
+   * toast is back on the next load, as the toast says. Where the address selects the item, the selection
+   * moves off it, so the detail shows the next item rather than one leaving. The Undo toast carries any
+   * failure notes below its line, as every toast does.
+   */
+  function dismissLater(one) {
+    // A processing item takes no Dismiss, whether from its button, its key or a swipe.
+    if (!dismissable(one) || dismissing(one) || needsMe.processing.has(itemKey(one))) return;
+    if (needsMe.pending !== null) postDismiss(needsMe.pending);
+    const pending = { key: itemKey(one), item: one, timer: null, toast: null };
+    needsMe.pending = pending;
+    pending.timer = setTimeout(() => postDismiss(pending), UNDO_MS);
+    if (screen === "needs-me" && item === itemRowKey(one)) go(routeTo("needs-me", needsQuery(chipOf(), null)), true);
+    else redrawNeeds();
+    pending.toast = showToast("Dismissed " + dismissHeadline(one) + ". It stays open if this page closes now.", null, { words: "Undo", run: () => undoDismiss(pending) });
+  }
+
+  /**
+   * Undo on a dismissal's toast: the item comes back and nothing is posted, and any failure notes the
+   * toast carried stay on the plain toast that follows. A toast already expired or posted does nothing.
+   */
+  function undoDismiss(pending) {
+    if (needsMe.pending !== pending) return;
+    clearTimeout(pending.timer);
+    needsMe.pending = null;
+    clearDismissToast(pending);
+    redrawNeeds();
+  }
+
+  /**
+   * Posts a dismissal whose toast expired or was cut short by a second Dismiss, exactly as the Dismiss
+   * button once posted it, after any act already out. The item stays off the list until the answer:
+   * a delivered line stands in its place as an act's does, and a refusal or no answer brings it back
+   * with the broker's word beside it, selected where the address selects no other item, so the detail
+   * shows that word. The same word shows in a toast whatever is selected and whichever screen is open,
+   * since the operator tapped Dismiss five seconds before and may be reading anything now, as a note
+   * added below whatever toast is up rather than in place of it. Nothing is posted again.
+   */
+  async function postDismiss(pending) {
+    if (needsMe.pending !== pending) return;
+    clearTimeout(pending.timer);
+    needsMe.pending = null;
+    clearDismissToast(pending);
+    needsMe.posting.add(pending.key);
+    let took = false;
+    const said = { words: null };
+    try {
+      await whenIdle();
+      took = await sendDismiss(pending.item, said);
+    } finally {
+      needsMe.posting.delete(pending.key);
+    }
+    // The broker's word is the one sendAct set and captured before its own redraw, which drops the words of an item the reading no longer holds.
+    const words = took ? null : said.words ?? unconfirmed(null, "dismiss");
+    if (!took && screen === "needs-me" && item === null) go(routeTo("needs-me", needsQuery(chipOf(), itemRowKey(pending.item))), true);
+    else redrawNeeds();
+    if (words !== null) showDismissFailure("Dismiss of " + dismissHeadline(pending.item) + " not done: " + words + ".");
+  }
+
+  /** How many code points of a worker's text a Discuss draft quotes, the broker's own bound on every text a line quotes. */
+  const QUOTED_POINTS = 200;
+
+  /**
+   * A worker's text in the form the broker quotes it into a line: each control character and line
+   * break made a space, runs of whitespace made one, the ends trimmed, each double quote made a single
+   * one, then cut to `QUOTED_POINTS` with the ellipsis paid out of the bound, in code points and in
+   * UTF-16 units alike. Set inside one pair of double quotes, it can neither leave them nor start a line.
+   */
+  function quotedText(text) {
+    const flat = txt(text)
+      .replace(/[\u0000-\u001f\u007f\u0085\u2028\u2029]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/"/g, "'");
+    if (Array.from(flat).length <= QUOTED_POINTS && flat.length <= QUOTED_POINTS) return flat;
+    let kept = Array.from(flat).slice(0, QUOTED_POINTS - 1);
+    while (kept.join("").length + 1 > QUOTED_POINTS && kept.length > 0) kept = kept.slice(0, -1);
+    return kept.join("") + "…";
+  }
+
+  /**
+   * Opens the talk screen for an item's session in the detail pane, its composer holding the item's
+   * question or reason quoted as the broker quotes a worker's text, in front of any draft the composer
+   * already holds, for the operator to edit; nothing is sent until they send it. A draft that already
+   * opens with that quote keeps it once, so a second Discuss on the item does not quote it again.
+   */
+  function discuss(one) {
+    const lineage = txt(one.repo);
+    if (lineage === "") return;
+    const quote = '"' + quotedText(one.text) + '"';
+    const draft = talk.draft.trimStart();
+    talk.draft = draft.startsWith(quote) ? draft : quote + " " + draft;
+    go(routeTo("talk", { lineage }));
+  }
+
+  /** Opens the Answer box under one ask, closing any other, and puts the caret in it. */
   function openCorrect(item) {
     const key = itemKey(item);
     if (needsMe.correct === null || needsMe.correct.key !== key) needsMe.correct = { key, draft: "" };
@@ -3339,7 +3664,7 @@
     if (field !== null) field.focus();
   }
 
-  /** Closes the Correct box and drops its draft. */
+  /** Closes the Answer box and drops its draft. */
   function closeCorrect() {
     needsMe.correct = null;
     redrawNeeds();
@@ -3425,20 +3750,37 @@
       redrawNeeds();
       return;
     }
-    const held = { loading: true, ask: null, lines: null, failure: null };
-    needsMe.context.set(key, held);
+    const reading = readContext(item, withAsk, needsMe.context);
     redrawNeeds();
+    await reading;
+  }
+
+  /**
+   * Reads an item's Context once and holds it in `into` under the item's key: the ask view where
+   * `withAsk` holds for an ask, and the session's talk view. The held entry is set before the first
+   * read starts, so a draw made meanwhile shows it reading, and the draw after the reads is made only
+   * while the shell is still on the screen visit that started them. An answer that lands after the
+   * entry was dropped or read again is dropped. A Context disclosure holds its reads in
+   * `needsMe.context`, and the Needs me detail pane its own in `needsMe.detail`. A read again after a
+   * failure passes the failed entry as `prior`, whose ask and lines the new entry keeps while it reads
+   * and wherever its own read of either fails, so what was read stays drawn rather than reading again.
+   */
+  async function readContext(item, withAsk, into, prior = null) {
+    const key = itemKey(item);
+    const here = visit;
+    const held = { loading: true, ask: prior === null ? null : prior.ask, lines: prior === null ? null : prior.lines, failure: null };
+    into.set(key, held);
     const reads = await Promise.allSettled([
       withAsk && item.kind === "ask" ? fetchView(contextAskUrl(item)) : Promise.resolve(null),
       fetchView(contextTalkUrl(item)),
     ]);
-    if (needsMe.context.get(key) !== held) return;
+    if (into.get(key) !== held) return;
     held.loading = false;
     if (reads[0].status === "fulfilled" && isObject(reads[0].value)) held.ask = reads[0].value;
     if (reads[1].status === "fulfilled") held.lines = contextLines(reads[1].value, item);
     const failed = reads.find((read) => read.status === "rejected");
     if (failed !== undefined) held.failure = failed.reason instanceof Unreadable ? failed.reason.message : "the reading could not be fetched";
-    redrawNeeds();
+    if (here === visit) redrawNeeds();
   }
 
   /** A full-size act button, its words set as text, disabled while any act is out. */
@@ -3495,7 +3837,7 @@
   }
 
   /**
-   * The Correct box under an ask: the question quoted as text, a box of three rows bounded at the talk
+   * The Answer box under an ask: the question quoted as text, a box of three rows bounded at the talk
    * composer's 4000, then Send and Cancel. Enter is a new line, and Ctrl or Cmd with Enter sends. The
    * draft lives in `needsMe.correct`, so a redraw puts the typed text back.
    */
@@ -3540,50 +3882,237 @@
     return status;
   }
 
+  /** Adds a key's letter to an act button, the hint the desktop layout shows and the phone hides, and names the key to assistive technology. */
+  function keyHint(button, letter) {
+    const mark = h("kbd", "nm-key", letter);
+    mark.setAttribute("aria-hidden", "true");
+    button.append(mark);
+    button.setAttribute("aria-keyshortcuts", letter);
+    return button;
+  }
+
+  /** One part of the detail pane under its small uppercase heading, keyed by its name. */
+  function detailSection(words, key) {
+    const section = h("section", "nm-sec", null, key);
+    section.setAttribute("aria-label", words);
+    section.append(h("h3", "nm-sec-h", words));
+    return section;
+  }
+
+  /** The kind tags a row and the detail carry: decision, with blocking where it blocks, for an ask; blocked; review. */
+  function kindTags(one) {
+    if (one.kind === "blocked") return [h("span", "tag tag-bad", "blocked")];
+    if (one.kind === "review") return [h("span", "tag", "review")];
+    if (one.kind !== "ask") return [];
+    const tags = [h("span", "tag tag-blue", "decision")];
+    if (one.blocking === true) tags.push(h("span", "tag tag-bad", "blocking"));
+    return tags;
+  }
+
+  /** What a list row says of an item: a review's pull request number and plan title, any other item's text. */
+  function rowText(one) {
+    if (one.kind !== "review") return txt(one.text);
+    const number = reviewNumber(one);
+    return (number === null ? "" : "PR " + number + ": ") + txt(one.title);
+  }
+
+  /** Whether the item reads a Context: an ask or a blocked run naming its session and its id, the items whose session holds the conversation. */
+  function contextual(one) {
+    if (txt(one.repo) === "") return false;
+    if (one.kind === "ask") return txt(one.askId) !== "";
+    return one.kind === "blocked" && txt(one.entryId) !== "";
+  }
+
   /**
-   * One item: who and how long, its headline, what is recommended, then the acts its kind can take with
-   * the broker's last word and, where open, the Correct box and the Context. An ask takes Agree where it
-   * carries a recommendation, Correct and Dismiss. A blocked run takes Dismiss alone, since it carries no
-   * recommendation and its session is stopped. Any other kind, a hands item among them, is a reading of
-   * a true condition and takes none.
+   * The line under a detail's heading, each part as text, the age alone in a clock span: for an ask
+   * the plan title the ask view gives, or the plan path until it arrives, when it was asked, whether it
+   * blocks its run, and the session; for a blocked run when it was raised, and for a hands item when
+   * it opened, its plan path and the session; for a review when it was marked ready, the session and the pull request number.
+   */
+  function metaLine(one, held, now) {
+    const line = h("div", "nm-meta", null, "meta");
+    const at = openedOf(one);
+    const parts = [];
+    const age = (words) => {
+      const part = h("span");
+      part.append(words, clockText("span", null, span(now - at)), " ago");
+      return part;
+    };
+    if (one.kind === "review") {
+      if (at !== null) parts.push(age("Ready "));
+      parts.push(h("span", null, txt(one.repo)));
+      const number = reviewNumber(one);
+      if (number !== null) parts.push(h("span", null, "pull request " + number));
+    } else {
+      const title = held !== undefined && isObject(held.ask) ? txt(held.ask.title) : "";
+      const plan = title !== "" ? title : txt(one.planPath);
+      const planPart = plan === "" ? null : h("span", null, "plan: " + plan);
+      if (one.kind === "ask" && planPart !== null) parts.push(planPart);
+      if (at !== null) parts.push(age(one.kind === "ask" ? "Asked " : one.kind === "blocked" ? "Blocked " : "Opened "));
+      if (one.kind === "ask") parts.push(h("span", null, one.blocking === true ? "Blocks its run" : "Does not block its run"));
+      if (one.kind !== "ask" && planPart !== null) parts.push(planPart);
+      if (txt(one.repo) !== "") parts.push(h("span", null, txt(one.repo)));
+    }
+    parts.forEach((part, index) => {
+      if (index > 0) line.append(" · ");
+      line.append(part);
+    });
+    return line;
+  }
+
+  /**
+   * The detail's Conversation: the session's newest lines since the item opened, each under the talk
+   * page's own head and then its text, as a Context draws them, or a line while they are first read,
+   * where there are none, or where a read failed. Lines kept from an earlier read stay drawn while the
+   * read runs again.
+   */
+  function conversation(item, held, now) {
+    const section = detailSection("Conversation", "conversation");
+    if (held === undefined || (held.loading && held.lines === null)) {
+      section.append(h("p", "meta", "reading"));
+      return section;
+    }
+    if (held.lines !== null) {
+      if (held.lines.length === 0) section.append(h("p", "meta", "No lines from the session since this opened."));
+      for (const line of held.lines) {
+        const row = h("div", "nm-line", null, "line:" + String(line.seq));
+        row.append(talkHead(line, txt(item.repo), now), h("div", null, txt(line.text)));
+        section.append(row);
+      }
+    }
+    if (held.failure !== null) section.append(h("p", "meta nm-context-failed", "The context could not be read: " + held.failure + "."));
+    return section;
+  }
+
+  /**
+   * One item in the detail pane, in the order the inbox mockup draws it: who, its kind and age; its
+   * headline as the heading; the meta line, with the whole text under it where the headline was cut,
+   * which an ask draws first under "Why it came up"; for an ask "Why it came up", the ask's brief, and
+   * "Options", the recommendation as the one tinted option, since the ledger records no alternatives; "Conversation", the session's newest lines; then
+   * the act row with each act's key, the Answer box where open, and the broker's last word. An ask
+   * takes Agree where it carries a recommendation, Answer, Discuss and Dismiss. A blocked run takes
+   * Discuss and Dismiss, since it carries no recommendation and its session is stopped. Any other kind,
+   * a hands item among them, is a reading of a true condition and takes none. The brief, the plan title
+   * and the conversation are the item's Context, read once when the detail first shows the item. An
+   * item whose Agree is processing reads "processing" with every act disabled.
    */
   function needsItem(item, now) {
-    const box = h("div", "nm-item", null, itemRowKey(item));
+    const box = h("div", "nm-item nm-detail", null, itemRowKey(item));
     const anchor = askKey(item);
     if (anchor !== null) box.id = anchor;
     const head = h("div", "nm-head");
     const who = h("span", "nm-who", item.repo ? txt(item.repo) : "Hands");
     const opened = parse(item.openedAt);
-    if (item.kind === "blocked") who.append(" ", h("span", "tag", "blocked"));
-    else if (item.kind === "ask" && item.blocking === true) who.append(" ", h("span", "tag", "blocking"));
+    for (const tag of kindTags(item)) who.append(" ", tag);
     head.append(who, clockText("span", "nm-age", opened === null ? "" : span(now - opened)));
     const headline = cutPoints(txt(item.text), HEADLINE_POINTS);
     // An ask's question opens its own page; any other item's text is plain.
     const href = askHrefOf(item);
-    box.append(head, href !== null ? link("nm-text", href, headline) : h("div", "nm-text", headline));
-    if (txt(item.recommend) !== "") box.append(recRow(txt(item.recommend)));
+    const heading = h("h2", "nm-heading", null, "heading");
+    heading.append(href !== null ? link("nm-text", href, headline) : h("span", "nm-text", headline));
+    box.append(head, heading);
+    const key = itemKey(item);
+    const held = contextual(item) ? needsMe.detail.get(key) : undefined;
+    box.append(metaLine(item, held, now));
+    // The whole text where the headline was cut: the first thing under "Why it came up" for an ask that draws it, under the meta line otherwise.
+    const whole = headline !== txt(item.text) ? md("div", "nm-whole", item.text, "whole") : null;
+    const whyDrawn = item.kind === "ask" && txt(item.repo) !== "";
+    if (whole !== null && !whyDrawn) box.append(whole);
     if ((item.kind !== "ask" && item.kind !== "blocked") || txt(item.repo) === "") return box;
 
-    const key = itemKey(item);
-    if (needsMe.out.has(key)) box.classList.add("nm-acting");
-    // An item's page state is keyed on its id, so an item the view gives no id takes no act and no Context.
-    const named = txt(item.kind === "blocked" ? item.entryId : item.askId) !== "";
-    const controls = h("div", "nm-controls", null, "controls");
-    if (item.kind === "blocked") {
-      if (named) controls.append(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => sendDismiss(item)));
-    } else if (named) {
-      if (agreeable(item)) controls.append(actButton("nm-agree", "Agree", "agree|" + key, () => sendAgree(item)));
-      controls.append(actButton("nm-correct", "Correct", "correct|" + key, () => openCorrect(item)));
-      controls.append(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => sendDismiss(item)));
-      if (txt(item.recommend).trim() === "") controls.append(h("span", "meta", "no recommendation to agree to"));
+    const processing = needsMe.processing.has(key);
+    if (needsMe.out.has(key) || processing) box.classList.add("nm-acting");
+    if (item.kind === "ask") {
+      const why = detailSection("Why it came up", "why");
+      if (whole !== null) why.append(whole);
+      const brief = held !== undefined && isObject(held.ask) ? txt(held.ask.brief) : "";
+      if (brief.trim() !== "") why.append(md("div", "ask-brief", brief));
+      else why.append(h("p", "meta", held === undefined || (held.loading && !isObject(held.ask)) ? "reading" : "No brief recorded for this ask."));
+      const options = detailSection("Options", "options");
+      if (txt(item.recommend).trim() !== "") {
+        const option = h("div", "nm-opt rec");
+        option.append(h("span", "nm-opt-tag", "RECOMMENDED"), md("div", "nm-opt-text", item.recommend));
+        options.append(option);
+      } else {
+        options.append(h("p", "meta", "No recommendation to agree to."));
+      }
+      box.append(why, options);
     }
-    if (named) controls.append(contextButton(item, key, true));
+    box.append(conversation(item, held, now));
+
+    // An item's page state is keyed on its id, so an item the view gives no id takes no act.
+    const named = contextual(item);
+    const acts = [];
+    const controls = h("div", "nm-controls nm-acts", null, "controls");
+    if (item.kind === "blocked") {
+      if (named) {
+        acts.push(keyHint(actButton("nm-discuss", "Discuss", "discuss|" + key, () => discuss(item)), "D"));
+        acts.push(keyHint(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => dismissLater(item)), "X"));
+      }
+    } else if (named) {
+      if (agreeable(item)) acts.push(keyHint(actButton("nm-agree", "Agree", "agree|" + key, () => sendAgree(item)), "A"));
+      acts.push(keyHint(actButton("nm-correct", "Answer", "correct|" + key, () => openCorrect(item)), "R"));
+      acts.push(keyHint(actButton("nm-discuss", "Discuss", "discuss|" + key, () => discuss(item)), "D"));
+      acts.push(keyHint(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => dismissLater(item)), "X"));
+    }
+    for (const button of acts) {
+      if (processing) button.disabled = true;
+      controls.append(button);
+    }
+    if (acts.length > 0) controls.append(h("span", "nm-hint", "J / K to move between items", "hint"));
     box.append(controls);
     if (item.kind === "ask" && needsMe.correct !== null && needsMe.correct.key === key) box.append(correctBox(item, key));
+    const words = processing ? "processing" : needsMe.statuses.get(key);
+    if (words !== undefined) box.append(statusLine(words));
+    return box;
+  }
+
+  /**
+   * A queue entry's pull request in an act row, for a review and a Workers row alike, `one` carrying
+   * the store's `pullRequestUrl` and `pullRequest`: Open PR, a link to that URL alone, set only where
+   * it is a string on GitHub and opened in a new tab with no opener and no referrer; "PR <number>" as
+   * text where there is a number and no link; and null where there is neither, so nothing is drawn.
+   * `key` names the item the part is keyed under.
+   */
+  function pullRequestPart(one, key) {
+    const url = txt(one.pullRequestUrl);
+    const number = reviewNumber(one);
+    // The one link the page draws from a queue entry: the store's URL, admitted by the broker under its pattern, used as a link target alone.
+    if (url.indexOf(GITHUB_PREFIX) === 0) {
+      const open = link("nm-open-pr", url, "Open PR", "open-pr|" + key);
+      open.target = "_blank";
+      open.rel = "noopener noreferrer";
+      return open;
+    }
+    return number === null ? null : h("span", "nm-pr", "PR " + number, "pr|" + key);
+  }
+
+  /**
+   * A review in the detail pane: the session with its kind and ready age, the plan title as the heading,
+   * the meta line, then Open PR and Dismiss. Open PR is `pullRequestPart`'s: a link to the entry's pull
+   * request URL, "PR <number>" as text with a number and no link, and nothing with neither. Dismiss
+   * writes the review's handled mark, keyed by the pull request number, so it is drawn only where the
+   * number is one the mark can take. Nothing here merges: the pull request is the operator's to merge
+   * by hand.
+   */
+  function reviewItem(one, now) {
+    const box = h("div", "nm-item nm-detail", null, itemRowKey(one));
+    const key = itemKey(one);
+    if (needsMe.out.has(key)) box.classList.add("nm-acting");
+    const head = h("div", "nm-head");
+    const who = h("span", "nm-who", txt(one.repo));
+    for (const tag of kindTags(one)) who.append(" ", tag);
+    const ready = openedOf(one);
+    head.append(who, clockText("span", "nm-age", ready === null ? "" : span(now - ready)));
+    box.append(head, h("h2", "nm-heading", txt(one.title), "heading"), metaLine(one, undefined, now));
+    const controls = h("div", "nm-controls nm-acts", null, "controls");
+    const pr = pullRequestPart(one, key);
+    if (pr !== null) controls.append(pr);
+    if (dismissable(one)) controls.append(keyHint(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => dismissLater(one)), "X"));
+    controls.append(h("span", "nm-hint", "J / K to move between items", "hint"));
+    box.append(controls);
     const words = needsMe.statuses.get(key);
     if (words !== undefined) box.append(statusLine(words));
-    const context = named ? needsMe.context.get(key) : undefined;
-    if (context !== undefined) box.append(contextPanel(item, context, headline !== txt(item.text), now));
     return box;
   }
 
@@ -3594,37 +4123,87 @@
     return line;
   }
 
-  /** The path that selects an item in the Needs me list, its row key as the `item` query value, built through the route table. */
+  /** The path that selects an item in the Needs me list, its row key as the `item` query value beside the chip shown, built through the route table. */
   function itemPath(one) {
-    return pathOf({ screen: "needs-me", name: null, query: { item: itemRowKey(one) } });
+    return pathOf(routeTo("needs-me", needsQuery(chipOf(), itemRowKey(one))));
   }
 
   /**
-   * One row of the Needs me list: who and the kind tag, the age, and the headline, as a link that
-   * selects the item in the detail pane, marked `sel` where it is the one the detail pane shows.
+   * Lets a finger dismiss a card on the phone layout: a leftward travel of `SWIPE_PX` or more, further
+   * than it travels down, dismisses it with the same toast as Dismiss. A shorter travel snaps the card
+   * back and does nothing, and any travel past `TAP_SLOP_PX` is not a tap, so it selects no row. The
+   * card takes `touch-action: pan-y` from the stylesheet, so a vertical drag still scrolls the list and
+   * the browser cancels the pointer. A mouse takes no swipe. The finger is held in `needsMe.swipe`, not
+   * on the node, since a poll's patch can rebind these handlers to the live card mid-swipe.
+   */
+  function swipeable(row, one) {
+    const key = itemRowKey(one);
+    listen(row, "pointerdown", (event) => {
+      needsMe.swiped = null;
+      if (event.pointerType === "mouse" || !window.matchMedia(PHONE_QUERY).matches) return;
+      needsMe.swipe = { key, pointer: event.pointerId, x: event.clientX, y: event.clientY, moved: false, sideways: false };
+    });
+    listen(row, "pointermove", (event) => {
+      const held = needsMe.swipe;
+      if (held === null || held.key !== key || held.pointer !== event.pointerId) return;
+      const dx = event.clientX - held.x;
+      const dy = event.clientY - held.y;
+      if (Math.abs(dx) > TAP_SLOP_PX || Math.abs(dy) > TAP_SLOP_PX) held.moved = true;
+      // The card follows the finger only once the travel is past the tap's slop and more across than down, so a scroll leaves it still.
+      if (!held.sideways && Math.abs(dx) > TAP_SLOP_PX && Math.abs(dx) > Math.abs(dy)) held.sideways = true;
+      if (held.sideways) event.currentTarget.style.setProperty("transform", "translateX(" + Math.min(0, dx) + "px)");
+    });
+    const end = (event) => {
+      const held = needsMe.swipe;
+      if (held === null || held.key !== key || held.pointer !== event.pointerId) return;
+      needsMe.swipe = null;
+      event.currentTarget.style.removeProperty("transform");
+      // A cancelled pointer was the browser's scroll, which ends in no click, so only a lifted finger marks the swipe.
+      if (event.type !== "pointerup") return;
+      if (held.moved) needsMe.swiped = key;
+      const dx = event.clientX - held.x;
+      const dy = event.clientY - held.y;
+      if (-dx >= SWIPE_PX && Math.abs(dy) < Math.abs(dx)) dismissLater(one);
+    };
+    listen(row, "pointerup", end);
+    listen(row, "pointercancel", end);
+    // The tap that ends a swipe is the swipe's, so it moves no address; the shell's link handler skips a prevented click.
+    listen(row, "click", (event) => {
+      if (needsMe.swiped !== key) return;
+      needsMe.swiped = null;
+      event.preventDefault();
+    });
+  }
+
+  /**
+   * One row of the Needs me list: who and the kind tags, the age, and the headline, as a link that
+   * selects the item in the detail pane, marked `sel` where it is the one the detail pane shows. A row
+   * whose Agree is processing carries the word, and a row that takes Dismiss takes the phone's swipe.
    */
   function needsRow(one, now, selectedKey) {
     const key = itemRowKey(one);
     const row = link(key === selectedKey ? "nm-row sel" : "nm-row", itemPath(one), null, key);
     if (key === selectedKey) row.setAttribute("aria-current", "true");
-    if (needsMe.out.has(itemKey(one))) row.classList.add("nm-acting");
+    const processing = needsMe.processing.has(itemKey(one));
+    if (needsMe.out.has(itemKey(one)) || processing) row.classList.add("nm-acting");
     const head = h("div", "nm-head");
     const who = h("span", "nm-who", one.repo ? txt(one.repo) : "Hands");
-    const opened = parse(one.openedAt);
-    if (one.kind === "blocked") who.append(" ", h("span", "tag", "blocked"));
-    else if (one.kind === "ask" && one.blocking === true) who.append(" ", h("span", "tag", "blocking"));
+    const opened = openedOf(one);
+    for (const tag of kindTags(one)) who.append(" ", tag);
+    if (processing) who.append(" ", h("span", "tag tag-blue", "processing"));
     head.append(who, clockText("span", "nm-age", opened === null ? "" : span(now - opened)));
-    row.append(head, h("div", "nm-text", cutPoints(txt(one.text), HEADLINE_POINTS)));
+    row.append(head, h("div", "nm-text", cutPoints(rowText(one), HEADLINE_POINTS)));
+    if (dismissable(one)) swipeable(row, one);
     return row;
   }
 
   /**
    * One group of the list: its label with a count and an optional note, then its rows in the chosen
    * order, or a line saying there are none. An item whose line was delivered from this reading is
-   * out of the count, and its words stand in its place.
+   * out of the count, and its words stand in its place; an item being dismissed is drawn nowhere.
    */
   function needsGroup(view, name, words, note, now, attn, selectedKey) {
-    const items = sortedItems(groupItems(view, name));
+    const items = sortedItems(groupItems(view, name)).filter((one) => !dismissing(one));
     const open = items.filter((one) => !deliveredIn(view, one));
     const section = h("section", "section", null, "group:" + name);
     section.setAttribute("aria-label", words);
@@ -3639,34 +4218,54 @@
     return section;
   }
 
-  /** The open items of a Needs me reading in the order the list draws them: blocked, then asks, then hands. */
+  /** The open items the chip shown lists, in the order the list draws them. */
   function openItems(view) {
-    return ["blocked", "ask", "hands"].flatMap((name) => sortedItems(groupItems(view, name))).filter((one) => !deliveredIn(view, one));
+    return listedItems(view, chipOf());
+  }
+
+  /** The item the detail shows: the one the address selects, found in any group, or the chip's first open item where it selects none. */
+  function chosenItem(view, selectedKey) {
+    if (selectedKey === null) return openItems(view)[0];
+    return ALL_GROUPS.flatMap((name) => groupItems(view, name)).find((one) => itemRowKey(one) === selectedKey && !dismissing(one));
   }
 
   /**
-   * The detail pane's item: the one the address selects, or the first row where it selects none,
-   * drawn with its acts, its Correct box, its last word and its Context as `needsItem` draws them.
+   * The detail pane's item: the one the address selects, or the chip's first row where it selects
+   * none, drawn as `needsItem` draws an ask, a blocked run and a hands item and `reviewItem` a review.
    * A selected item the reading no longer holds draws a line saying so, and a reading with no open
    * item draws the list's own empty line.
    */
   function needsDetail(view, now, selectedKey) {
-    const open = openItems(view);
-    const all = ["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name));
-    const chosen = selectedKey === null ? open[0] : all.find((one) => itemRowKey(one) === selectedKey);
+    const chosen = chosenItem(view, selectedKey);
     if (chosen === undefined) return h("div", "nm-none", selectedKey === null ? "Nothing here." : "This item is no longer in the reading.");
-    return deliveredIn(view, chosen) ? deliveredLine(chosen) : needsItem(chosen, now);
+    if (deliveredIn(view, chosen)) return deliveredLine(chosen);
+    return chosen.kind === "review" ? reviewItem(chosen, now) : needsItem(chosen, now);
+  }
+
+  /** Each group's label, its note, and whether a group with items is edged for attention. */
+  const GROUP_WORDS = {
+    blocked: ["Blocked on you", null, true],
+    ask: ["Asks", "each proceeds on its recommendation", false],
+    review: ["Reviews", "pull requests ready for you; nothing here merges", false],
+    hands: ["Your hands", null, false],
+  };
+
+  /** Shows a chip's items: the address takes the chip with no row selected, so the detail shows the chip's first item and a reload keeps the chip. */
+  function chooseChip(chip) {
+    go(routeTo("needs-me", needsQuery(chip, null)), screen === "needs-me");
   }
 
   /**
-   * The Needs me list pane: the title with the open count and the oldest age, the sort buttons, the
-   * groups, the source line and the batch bar. The ask screen draws the same list beside its ask,
-   * from the Needs me reading it takes each pass.
+   * The Needs me list pane: the title with the open count and the oldest age, the chips with the count
+   * each lists, the sort buttons, the groups the chip shows, the source line and, where the chip lists
+   * the asks, the batch bar. The ask screen draws the same list beside its ask, from the Needs me
+   * reading it takes each pass, under All.
    */
   function needsList(view, now, selectedKey) {
     const out = h("div", "nm", null, "nm");
-    const all = openItems(view);
-    const dated = all.map((one) => parse(one.openedAt)).filter((at) => at !== null);
+    const chip = chipOf();
+    const all = listedItems(view, CHIPS[0]);
+    const dated = all.map(openedOf).filter((at) => at !== null);
 
     const top = h("div", "top", null, "top");
     const row = h("div", "top-row");
@@ -3674,12 +4273,26 @@
     title.append(h("span", "nm-count", " · " + all.length));
     row.append(title, stamp(view));
     top.append(row);
-    if (dated.length > 0) {
-      const oldest = h("p", "sub", "oldest ");
-      oldest.append(clockText("span", null, span(now - Math.min.apply(null, dated))));
-      top.append(oldest);
-    }
+    const sub = h("p", "sub", null, "sub");
+    if (dated.length > 0) sub.append("oldest ", clockText("span", null, span(now - Math.min.apply(null, dated))));
+    sub.append(h("span", "nm-swipe-hint", (dated.length > 0 ? " · " : "") + "swipe a card left to dismiss it"));
+    top.append(sub);
     out.append(top);
+
+    const chips = h("div", "chips nm-chips", null, "chips");
+    chips.setAttribute("role", "group");
+    chips.setAttribute("aria-label", "Show");
+    for (const one of CHIPS) {
+      const on = one.id === chip.id;
+      const button = h("button", on ? "chip on" : "chip", one.words + " ");
+      button.append(h("span", "nm-chip-n", String(listedItems(view, one).length)));
+      button.type = "button";
+      button.setAttribute("aria-pressed", on ? "true" : "false");
+      button.dataset.key = "chip|" + one.id;
+      listen(button, "click", () => chooseChip(one));
+      chips.append(button);
+    }
+    out.append(chips);
 
     const sorts = h("div", "nm-sort");
     sorts.setAttribute("role", "group");
@@ -3697,21 +4310,19 @@
     }
     out.append(sorts);
 
-    const rolloutNeeds = rolloutGroup(view);
-    const groups = h("div", "nm-groups");
-    groups.append(
-      needsGroup(view, "blocked", "Blocked on you", null, now, true, selectedKey),
-      needsGroup(view, "ask", "Asks", "each proceeds on its recommendation", now, false, selectedKey),
-      ...(rolloutNeeds === null ? [] : [rolloutNeeds]),
-      needsGroup(view, "hands", "Your hands", null, now, false, selectedKey),
-    );
-    out.append(
-      groups,
-      sources(view, ["roster", "queues", "ledger", "events", "registry", "usage", "rollout"]),
-    );
+    // The rollout rows stand under All alone, before the hands group, as no chip names them.
+    const rolloutNeeds = chip.id === "all" ? rolloutGroup(view) : null;
+    const groups = h("div", "nm-groups", null, "groups");
+    for (const name of chip.groups) {
+      if (name === "hands" && rolloutNeeds !== null) groups.append(rolloutNeeds);
+      const [words, note, attn] = GROUP_WORDS[name];
+      groups.append(needsGroup(view, name, words, note, now, attn, selectedKey));
+    }
+    out.append(groups, sources(view, ["roster", "queues", "ledger", "events", "registry", "usage", "rollout"]));
+    if (chip.groups.indexOf("ask") < 0) return out;
 
     // The batch is over the asks in the order drawn that the operator has not touched.
-    const untouched = sortedItems(groupItems(view, "ask")).filter((item) => agreeable(item) && !needsMe.touched.has(needsKey(item)));
+    const untouched = sortedItems(groupItems(view, "ask")).filter((item) => agreeable(item) && !needsMe.touched.has(needsKey(item)) && !dismissing(item));
     const bar = h("div", "nm-batch", null, "batch-bar");
     const batch = h("button", "nm-batch-button");
     batch.type = "button";
@@ -3735,21 +4346,371 @@
 
   /**
    * The Needs me screen: the list pane, and the detail pane holding the item the address selects
-   * with its acts, as the sheet on a phone.
+   * with its acts, as the sheet on a phone. The detail reads the shown item's Context the first time
+   * it draws the item, and again on a newer reading where that read failed, and drops what it read for
+   * any other item.
    */
   function renderNeedsMe(view) {
     const now = nowOf(view);
     // A delivered item's hide holds for the reading it was drawn from alone, so a newer reading decides again.
     for (const [key, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(key);
     // An item's words and Context go with the item, so a key no item in this reading holds is dropped.
-    const held = new Set(["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name)).map(itemKey));
+    const held = new Set(ALL_GROUPS.flatMap((name) => groupItems(view, name)).map(itemKey));
     for (const key of needsMe.statuses.keys()) if (!held.has(key)) needsMe.statuses.delete(key);
     for (const key of needsMe.context.keys()) if (!held.has(key)) needsMe.context.delete(key);
-    // The row the detail shows is the one marked in the list: the selected item, else the first open row.
+    // An Agree is processing until a reading no longer carries its item.
+    for (const key of needsMe.processing) if (!held.has(key)) needsMe.processing.delete(key);
+    const chosen = chosenItem(view, item);
+    const shownKey = chosen === undefined ? null : itemKey(chosen);
+    for (const key of needsMe.detail.keys()) if (key !== shownKey) needsMe.detail.delete(key);
+    // A read that failed is read again on a newer reading, once per reading, so a broker that recovers fills the detail; what it had read stays drawn meanwhile.
+    const shownHeld = shownKey === null ? undefined : needsMe.detail.get(shownKey);
+    const failed = shownHeld !== undefined && !shownHeld.loading && shownHeld.failure !== null && shownHeld.reading !== view;
+    if (failed) needsMe.detail.delete(shownKey);
+    if (chosen !== undefined && contextual(chosen) && !needsMe.detail.has(shownKey)) {
+      readContext(chosen, true, needsMe.detail, failed ? shownHeld : null);
+      needsMe.detail.get(shownKey).reading = view;
+    }
+    // The row the detail shows is the one marked in the list: the selected item, else the chip's first open row.
     const first = openItems(view)[0];
     const shown = item !== null ? item : first === undefined ? null : itemRowKey(first);
     const out = document.createDocumentFragment();
-    out.append(pane("list", needsList(view, now, shown)), detailPane(SCREEN_PATHS["needs-me"], needsDetail(view, now, item)));
+    const listPath = pathOf(routeTo("needs-me", needsQuery(chipOf(), null)));
+    out.append(pane("list", needsList(view, now, shown)), detailPane(listPath, needsDetail(view, now, item)));
+    return out;
+  }
+
+  /**
+   * The inbox's keys on the Needs me screen: A agrees, R opens the Answer box, D discusses and X
+   * dismisses the item the detail shows, each only where its button is drawn live for that item, and
+   * J and K move the selection down and up the list the chip shows, moving the address as a row tap
+   * does. A key pressed in a field, the Answer box among them, held with Alt, Ctrl, Meta or Shift, or
+   * repeating while held stays the browser's, so typing and its shortcuts never fire an act.
+   */
+  function inboxKey(event) {
+    if (screen !== "needs-me" || lastView === null) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat) return;
+    if (typedInto(event.target) || typedInto(document.activeElement)) return;
+    const letter = typeof event.key === "string" ? event.key.toLowerCase() : "";
+    if (letter === "j" || letter === "k") {
+      const rows = openItems(lastView);
+      if (rows.length === 0) return;
+      const at = rows.findIndex((one) => itemRowKey(one) === (item ?? itemRowKey(rows[0])));
+      const next = at < 0 ? 0 : letter === "j" ? Math.min(rows.length - 1, at + 1) : Math.max(0, at - 1);
+      event.preventDefault();
+      go(routeTo("needs-me", needsQuery(chipOf(), itemRowKey(rows[next]))));
+      return;
+    }
+    const one = chosenItem(lastView, item);
+    if (one === undefined || deliveredIn(lastView, one)) return;
+    // The buttons' own rule: every act waits while one is out, and a processing item takes none.
+    if (needsMe.acting || needsMe.processing.has(itemKey(one))) return;
+    let act = null;
+    if (letter === "a" && agreeable(one)) act = () => sendAgree(one);
+    else if (letter === "r" && one.kind === "ask" && contextual(one)) act = () => openCorrect(one);
+    else if (letter === "d" && contextual(one)) act = () => discuss(one);
+    else if (letter === "x" && dismissable(one)) act = () => dismissLater(one);
+    if (act === null) return;
+    event.preventDefault();
+    act();
+  }
+
+  /** Whether a node takes typing: a field, a text area, a select or editable content. */
+  function typedInto(node) {
+    return node instanceof Element && (node.isContentEditable || node.tagName === "INPUT" || node.tagName === "TEXTAREA" || node.tagName === "SELECT");
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Workers page
+  // ---------------------------------------------------------------------------------------------
+
+  /** The two fixed lines the board's Pause and Resume send, which the persona plugin acts on. Neither carries any page text. */
+  const PAUSE_LINE = "[PAUSE] paused from the workers board";
+  const RESUME_LINE = "[RESUME] resumed from the workers board";
+
+  /**
+   * Each row state's dot, word and tone class: the standup's row marks, a blue dot for working and a
+   * hollow one for any other state, beside the standup's state word, and `paused`, the state the
+   * Workers view alone gives a row whose entry the operator paused. A state off the table is drawn as
+   * its own word beside a hollow dot.
+   */
+  const WORKER_STATES = {
+    asking: ["hollow", "Asking", "wk-wait"],
+    blocked: ["hollow", "Blocked", "wk-bad"],
+    stalled: ["hollow", "Stalled", "wk-bad"],
+    working: ["blue", "Working", "wk-ok"],
+    idle: ["hollow", "Idle", "wk-idle"],
+    dormant: ["hollow", "Dormant", "wk-idle"],
+    paused: ["hollow", "Paused", "wk-wait"],
+  };
+
+  /** The four tiles over the rows: the `tiles` count each reads, the words under the count, and the count's tone class. */
+  const WORKER_TILES = [
+    ["working", "working", ""],
+    ["asking", "waiting on you", "wk-wait"],
+    ["blocked", "blocked", "wk-bad"],
+    ["ready", "PRs ready to review", ""],
+  ];
+
+  /**
+   * What a timeline line says, by its kind, the kit's closed list of eleven. The kit's detail follows
+   * as text: after a space for a closed section, whose detail reads "<n> of <m>", and after a colon
+   * for any other kind that carries one. A kind off the list is drawn as its own word.
+   */
+  const TIMELINE_WORDS = {
+    "plan-queued": "Queued a plan",
+    "plan-started": "Started the plan",
+    "section-closed": "Closed section",
+    "goal-complete": "Finished the plan",
+    "goal-blocked": "Blocked",
+    waiting: "Waiting",
+    "ask-opened": "Asked you",
+    "ask-closed": "Ask closed",
+    "pr-ready": "Pull request ready",
+    paused: "Paused",
+    resumed: "Resumed",
+  };
+
+  /** The timeline kinds whose mark is drawn filled: a step of the plan finished. */
+  const TIMELINE_DONE = ["section-closed", "goal-complete", "pr-ready"];
+
+  /**
+   * What the Workers screen holds between polls: the persona whose Pause or Resume post is out, or
+   * null, and the words under each persona's act row from its last Pause or Resume, dropped once a
+   * reading no longer lists that persona.
+   */
+  const workers = { acting: null, statuses: new Map() };
+
+  /** The rows a Workers reading carries, each an object naming its persona, in the view's own order. */
+  function workerRows(view) {
+    return objects(view.rows).filter((row) => txt(row.name) !== "");
+  }
+
+  /** A row's step where it names a section and a count above zero; null otherwise. */
+  function workerStep(row) {
+    const step = isObject(row.step) ? row.step : null;
+    return step !== null && num(step.section) !== null && num(step.sectionCount) !== null && step.sectionCount > 0 ? step : null;
+  }
+
+  /** The path that selects a persona on the Workers screen, its name as the `name` query value, built through the route table. */
+  function workerPath(name) {
+    return pathOf(routeTo("workers", { name }));
+  }
+
+  /** A row's state as its dot and word in the state's tone; `dot` hides the mark from assistive technology. */
+  function workerState(row) {
+    const state = txt(row.state);
+    const known = Object.prototype.hasOwnProperty.call(WORKER_STATES, state) ? WORKER_STATES[state] : null;
+    const words = h("span", "wk-state " + (known === null ? "wk-idle" : known[2]));
+    words.append(dot(known === null ? "hollow" : known[0]), known === null ? state : known[1]);
+    return words;
+  }
+
+  /** "<age> ago" from a stamp, the age alone in a clock span so the clock moving it flags nothing; "n/a" where there is no stamp. */
+  function agoText(cls, iso, now) {
+    const at = parse(iso);
+    const box = h("span", cls);
+    if (at === null) box.append("n/a");
+    else box.append(clockText("span", null, span(now - at)), " ago");
+    return box;
+  }
+
+  /** A timeline line's words: its kind's phrase, then the kit's detail as text where the line carries one. */
+  function timelineWords(line) {
+    const kind = txt(line.event);
+    const phrase = Object.prototype.hasOwnProperty.call(TIMELINE_WORDS, kind) ? TIMELINE_WORDS[kind] : kind;
+    const detail = txt(line.detail);
+    if (detail === "") return phrase;
+    return phrase + (kind === "section-closed" ? " " : ": ") + detail;
+  }
+
+  /** The four tiles: how many rows read working, waiting on you and blocked, and how many personas have a pull request ready to review. */
+  function workerTiles(view) {
+    const tiles = isObject(view.tiles) ? view.tiles : {};
+    const box = h("div", "wk-tiles", null, "tiles");
+    for (const [id, words, tone] of WORKER_TILES) {
+      const tile = h("div", "wk-tile", null, "tile:" + id);
+      tile.append(h("b", ("wk-n " + tone).trim(), String(num(tiles[id]) ?? 0)), h("span", null, words));
+      box.append(tile);
+    }
+    return box;
+  }
+
+  /**
+   * One persona's row in the Workers list, a link that selects it in the detail pane, marked `sel`
+   * where it is the one the detail shows: the name, the state's glyph and word and the last active
+   * age, then the plan title or "nothing queued", then the step as "N of M" over a bar or "n/a", and
+   * for a paused row the store's reason. The fields the row draws ride in its `data-fields`
+   * attribute, so a poll that moves any of them flags the whole row `changed` through the patch.
+   */
+  function workerRow(row, now, selected) {
+    const name = txt(row.name);
+    const line = link(selected ? "wk-row sel" : "wk-row", workerPath(name), null, "worker:" + name);
+    if (selected) line.setAttribute("aria-current", "true");
+    const step = workerStep(row);
+    line.dataset.fields = JSON.stringify([txt(row.state), txt(row.title), step === null ? null : [step.section, step.sectionCount], txt(row.lastTurnAt), txt(row.pausedReason)]);
+    const head = h("div", "wk-head");
+    head.append(h("span", "wk-name", name), workerState(row), agoText("wk-age", row.lastTurnAt, now));
+    line.append(head);
+    const title = txt(row.title);
+    line.append(title === "" ? h("div", "wk-title muted", "nothing queued") : h("div", "wk-title", title));
+    const progress = h("div", "wk-step");
+    if (step === null) progress.append(h("span", "muted", "n/a"));
+    else progress.append(bar((step.section / step.sectionCount) * 100), h("span", "muted", step.section + " of " + step.sectionCount));
+    line.append(progress);
+    if (txt(row.state) === "paused" && txt(row.pausedReason) !== "") line.append(h("div", "wk-reason", txt(row.pausedReason)));
+    return line;
+  }
+
+  /** The Workers list pane: the title with the read time, the roster count, the four tiles, the rows in the view's order, and the read times. */
+  function workersList(view, now, shownName) {
+    const out = h("div", "wk", null, "wk");
+    const rows = workerRows(view);
+    const top = h("div", "top", null, "top");
+    const head = h("div", "top-row");
+    head.append(h("h1", null, "Workers"), stamp(view));
+    top.append(head, h("p", "sub", rows.length + (rows.length === 1 ? " worker" : " workers") + " on the roster", "sub"));
+    out.append(top, workerTiles(view));
+    const card = h("div", "card wk-rows", null, "rows");
+    card.setAttribute("aria-label", "Workers");
+    if (rows.length === 0) card.append(h("div", "nm-none", "No worker is on the roster."));
+    for (const row of rows) card.append(workerRow(row, now, txt(row.name) === shownName));
+    out.append(card, sources(view, ["roster", "queues", "events", "registry"]));
+    return out;
+  }
+
+  /**
+   * The detail's timeline: the persona's lines oldest first, so the newest is last, each with its age
+   * and the final segment of the plan it names, then its words. A line is keyed by its stamp, kind,
+   * detail and plan, a repeat of all four by its count, so a line the poll moved up keeps its node.
+   */
+  function workerTimeline(row, now) {
+    const section = detailSection("Timeline", "timeline");
+    const lines = objects(row.timeline);
+    if (lines.length === 0) {
+      section.append(h("p", "meta", "No events yet"));
+      return section;
+    }
+    const steps = h("ol", "wk-tl", null, "tl");
+    const seen = new Map();
+    for (const line of lines) {
+      const base = JSON.stringify([txt(line.ts), txt(line.event), txt(line.detail), txt(line.plan)]);
+      const count = seen.get(base) ?? 0;
+      seen.set(base, count + 1);
+      const step = h("li", TIMELINE_DONE.indexOf(txt(line.event)) >= 0 ? "done" : null, null, count === 0 ? base : base + "#" + count);
+      const when = h("div", "wk-when");
+      when.append(agoText(null, line.ts, now));
+      const plan = txt(line.plan).split("/").pop();
+      if (plan !== "") when.append(" · ", h("span", "mono", plan));
+      step.append(when, h("div", "wk-what", timelineWords(line)));
+      steps.append(step);
+    }
+    section.append(steps);
+    return section;
+  }
+
+  /**
+   * A persona in the detail pane, in the order the board mockup draws it: the crumb, the plan title
+   * as the heading, the meta line with the state, the section, the pull request number and the branch
+   * where the store holds them and the last active age, the paused reason where the row reads paused,
+   * the timeline, then the act row: Message, which opens the talk screen's composer for the persona;
+   * Open PR as `pullRequestPart` draws it; and Pause, or Resume where the row reads paused, each one
+   * tap posting its fixed line. The say route's word for the last of those two stands under the row.
+   */
+  function workerDetail(row, now) {
+    const name = txt(row.name);
+    const box = h("div", "nm-item nm-detail wk-detail", null, "worker:" + name);
+    if (workers.acting === name) box.classList.add("nm-acting");
+    const title = txt(row.title);
+    box.append(h("div", "nm-meta", "Workers › " + name, "crumb"), h("h2", "nm-heading", title === "" ? "nothing queued" : title, "heading"));
+    const meta = h("div", "nm-meta", null, "meta");
+    const parts = [workerState(row)];
+    const step = workerStep(row);
+    if (step !== null) parts.push(h("span", null, "Section " + step.section + " of " + step.sectionCount));
+    const number = reviewNumber(row);
+    if (number !== null) parts.push(h("span", null, "PR " + number));
+    if (txt(row.branch) !== "") parts.push(h("span", "mono", "branch " + txt(row.branch)));
+    const active = h("span", null, "last active ");
+    active.append(agoText(null, row.lastTurnAt, now));
+    parts.push(active);
+    parts.forEach((part, index) => {
+      if (index > 0) meta.append(" · ");
+      meta.append(part);
+    });
+    box.append(meta);
+    const paused = txt(row.state) === "paused";
+    if (paused && txt(row.pausedReason) !== "") box.append(h("p", "wk-reason", txt(row.pausedReason), "reason"));
+    box.append(workerTimeline(row, now));
+
+    const controls = h("div", "nm-controls nm-acts", null, "controls");
+    controls.append(link("wk-act", pathOf(routeTo("talk", { lineage: name })), "Message", "message|" + name));
+    const pr = pullRequestPart(row, name);
+    if (pr !== null) controls.append(pr);
+    const toggle = h("button", "wk-act", paused ? "Resume" : "Pause", (paused ? "resume|" : "pause|") + name);
+    toggle.type = "button";
+    toggle.disabled = workers.acting !== null;
+    listen(toggle, "click", () => sendBoardAct(name, paused ? RESUME_LINE : PAUSE_LINE));
+    controls.append(toggle);
+    box.append(controls);
+    const words = workers.statuses.get(name);
+    if (words !== undefined) box.append(statusLine(words));
+    return box;
+  }
+
+  /** The detail pane's persona: the one the address names, else the first row; a line where the reading holds no such row. */
+  function workersDetail(view, now, selectedName) {
+    const rows = workerRows(view);
+    const chosen = selectedName === null ? rows[0] : rows.find((row) => txt(row.name) === selectedName);
+    if (chosen === undefined) return h("div", "nm-none", selectedName === null ? "No worker is on the roster." : "This worker is no longer in the reading.");
+    return workerDetail(chosen, now);
+  }
+
+  /** Draws the Workers screen again from the last reading, so an act's words show at once; nothing where the shell is on another screen. */
+  function redrawWorkers() {
+    if (screen === "workers" && lastView !== null) draw(lastView);
+  }
+
+  /**
+   * Sends a Pause or Resume, one of the two fixed lines, to a persona's session through the say route
+   * the talk composer sends by, with no file, and sets the route's word for it under the act row as
+   * the talk composer sets its own. One act at a time: every Pause and Resume button is disabled while
+   * one is out, and there is no confirm step. A 4xx is the broker refusing the line, so nothing was
+   * sent. A timeout, a dropped connection, a 5xx or an unreadable answer leaves the line's fate
+   * unknown, and the words say it may still arrive. An answer landing after the shell moved to
+   * another screen visit keeps its words and draws nothing.
+   */
+  async function sendBoardAct(name, text) {
+    if (workers.acting !== null || name === "") return;
+    workers.acting = name;
+    workers.statuses.set(name, "Sending.");
+    redrawWorkers();
+    const here = visit;
+    let words;
+    try {
+      words = sayWords(await postSay({ lineage: name, text }, sayTimeoutMs(0)));
+    } catch (error) {
+      const reason = error instanceof Unreadable ? error.message : "the broker did not answer";
+      words = refusedSay(error) ? "Could not send: " + reason + "." : "Not confirmed: " + reason + ". The line may still reach the session.";
+    } finally {
+      workers.acting = null;
+    }
+    workers.statuses.set(name, words);
+    if (here === visit) redrawWorkers();
+  }
+
+  /**
+   * The Workers screen: the tiles and the rows in the list pane, and the persona the address names,
+   * or the first row, in the detail pane, as the sheet on a phone. The rows are drawn in the view's
+   * order, which is the standup's state order with a paused row in an idle row's place.
+   */
+  function renderWorkers(view) {
+    const now = nowOf(view);
+    const rows = workerRows(view);
+    const names = new Set(rows.map((row) => txt(row.name)));
+    for (const name of workers.statuses.keys()) if (!names.has(name)) workers.statuses.delete(name);
+    const shown = item !== null ? item : rows.length === 0 ? null : txt(rows[0].name);
+    const out = document.createDocumentFragment();
+    out.append(pane("list", workersList(view, now, shown)), detailPane(SCREEN_PATHS.workers, workersDetail(view, now, item)));
     return out;
   }
 
@@ -3848,7 +4809,7 @@
    * One ask: who asked and how long ago, the question, the recommendation, the brief, the plan, the
    * thread, the step to the previous and next ask, then Agree, Answer and Dismiss with a Context of
    * the session's lines. They are the Needs me page's acts, with the same bodies, words, touched mark
-   * and inline Correct box, so the batch there skips an ask answered here. A handled ask, one whose
+   * and inline Answer box, so the batch there skips an ask answered here. A handled ask, one whose
    * line a page delivered, draws the act and its time in place of the buttons, since every other page
    * hides it until its session closes or raises it. The ask is the detail pane, with the Needs me
    * list beside it and this ask's row selected there.
@@ -4263,33 +5224,43 @@
   let lastOk = null;
   /** The summary reading beside every screen's own, which the rail's counts read; null before one arrives. */
   let summaryView = null;
-  /** The standup reading the shell last drew, which the rail's Workers count reads; null until the standup is drawn. */
+  /** The standup reading the shell last drew, which the rail's Workers count reads where no Workers reading is held; null until the standup is drawn. */
   let standupView = null;
+  /** The Workers reading this visit took, whose `tiles.working` the rail's Workers count reads; null off the Workers screen. */
+  let workersView = null;
   /** Counts each screen entered, so a poll begun on an earlier screen draws nothing once the shell has moved on. */
   let visit = 0;
   /** The timer of the next poll, cleared when the screen changes so one poll loop runs at a time. */
   let pollTimer = null;
 
-  /** The rail's entries: the glyph the mockup's `.ic` span carries, the word, and the screen each opens. */
+  /**
+   * The rail's entries, in the mockup's order: the glyph its `.ic` span carries, the word, the screen
+   * each opens, and the screens it is marked on. Repos opens the standup and is marked on the repo
+   * and plan screens the standup leads to.
+   */
   const RAIL = [
-    { screen: "needs-me", glyph: "◉", words: "Needs me" },
-    { screen: "standup", glyph: "▤", words: "Workers" },
-    { screen: "health", glyph: "♥", words: "Health" },
+    { screen: "needs-me", glyph: "◉", words: "Needs me", marks: ["needs-me"] },
+    { screen: "workers", glyph: "▤", words: "Workers", marks: ["workers"] },
+    { screen: "standup", glyph: "⌂", words: "Repos", marks: ["standup", "repo", "plan"] },
+    { screen: "health", glyph: "♥", words: "Health", marks: ["health"] },
   ];
 
   /**
    * The count beside a rail entry, or null for none: Needs me takes the summary's `needsYou`,
-   * Workers the number of standup repos working, from the standup reading the shell holds, and
-   * Health the capacity verdict word.
+   * Workers the Workers reading's `tiles.working` where the shell holds one, else the number of
+   * standup repos working from the standup reading it holds, and Health the capacity verdict word.
    */
   function railCount(entry) {
     if (entry.screen === "needs-me") {
       const count = isObject(summaryView) ? num(summaryView.needsYou) : null;
       return count === null ? null : String(count);
     }
-    if (entry.screen === "standup") {
+    if (entry.screen === "workers") {
+      const working = isObject(workersView) && isObject(workersView.tiles) ? num(workersView.tiles.working) : null;
+      if (working !== null) return String(working);
       return standupView === null ? null : String(list(standupView.repos).filter((repo) => isObject(repo) && repo.state === "working").length);
     }
+    if (entry.screen !== "health") return null;
     const word = isObject(summaryView) && isObject(summaryView.capacity) ? txt(summaryView.capacity.verdict) : "";
     return word === "" ? null : word;
   }
@@ -4301,16 +5272,16 @@
   }
 
   /**
-   * The rail: the brand, the three entries with their counts, the entry of the screen drawn marked,
+   * The rail: the brand, a link to the standup, the four entries with their counts, the entry of the screen drawn marked,
    * and at the foot the sibling pills above the sandbox's name. On a phone the stylesheet lays it
    * as the bottom tab bar.
    */
   function shellRail() {
     const rail = h("nav", "rail", null, "rail");
     rail.setAttribute("aria-label", "Screens");
-    rail.append(h("div", "brand", "Channels", "brand"));
+    rail.append(link("brand", SCREEN_PATHS.standup, "Channels", "brand"));
     for (const entry of RAIL) {
-      const on = entry.screen === screen;
+      const on = entry.marks.includes(screen);
       const nav = link(on ? "nav on" : "nav", SCREEN_PATHS[entry.screen], null, "nav:" + entry.screen);
       if (on) nav.setAttribute("aria-current", "page");
       nav.append(h("span", "ic", entry.glyph), h("span", "word", entry.words));
@@ -4375,12 +5346,12 @@
   /**
    * The classes on the shell's root the stylesheet lays the phone out by: `sheet` where a row is
    * selected and the detail slides up over the list, which an ask, a repo, a plan and a talk
-   * address each name, and `stacked` where the screen has no selection and the two panes flow as
+   * address each name, as a Needs me or Workers address naming a row does, and `stacked` where the screen has no selection and the two panes flow as
    * one column. The standup screen has neither, so a phone shows its list alone.
    */
   function frameClasses() {
     const named = screen === "ask" || screen === "repo" || screen === "plan" || screen === "talk";
-    app.classList.toggle("sheet", named || (screen === "needs-me" && item !== null));
+    app.classList.toggle("sheet", named || ((screen === "needs-me" || screen === "workers") && item !== null));
     app.classList.toggle("stacked", screen === "health");
   }
 
@@ -4614,12 +5585,13 @@
   /**
    * Takes a reading of the screen's own view through the screen's `accept`, which reads the repo
    * drawn beside the standup and the plan, and holds a standup reading for the rail's count and the
-   * repo screen's list. Returns the reading to draw, or null for an answer the screen has moved past.
+   * repo screen's list, and a Workers reading for the rail's count. Returns the reading to draw, or null for an answer the screen has moved past.
    * `here` is the visit the reading was fetched on; a later visit's readings are not touched.
    */
   async function acceptView(view, here) {
     const shown = page.accept ? await page.accept(view) : view;
     if (here === visit && shown !== null && screen === "standup") standupView = shown;
+    if (here === visit && shown !== null && screen === "workers") workersView = shown;
     return shown;
   }
 
@@ -4710,10 +5682,12 @@
     seenSent = false;
     // The readings a screen takes beside its own are held for the visit that took them: the ask's
     // Needs me list, the standup the standup and repo screens draw and the rail's Workers count reads,
-    // and the repo whose detail the standup screen draws and whose plans the plan screen lists. The
-    // standup is kept where the list it draws stays on the page, so the list is drawn from it at once.
+    // the repo whose detail the standup screen draws and whose plans the plan screen lists, and the
+    // Workers reading the rail's count reads. The standup is kept where the list it draws stays on the
+    // page, so the list is drawn from it at once.
     askNeeds = null;
     if (!listKept) standupView = null;
+    workersView = null;
     if (!planToPlan) repoBeside = null;
     notice.hidden = true;
     frameClasses();
@@ -4730,12 +5704,13 @@
 
   /**
    * Moves the address to a route and draws its screen: the one place `pushState` is called, over a path `pathOf` builds.
-   * A tap on the address already shown replaces the entry rather than adding one, so Back never stalls on a repeat tap.
+   * A tap on the address already shown replaces the entry rather than adding one, so Back never stalls on a repeat tap, and a
+   * caller passing `replace` as true replaces it too: a chip changed on its own screen, or a dismissed item leaving the address.
    */
-  function go(at) {
+  function go(at, replace) {
     const path = pathOf(at);
     const here = routeOf(window.location);
-    if (here !== null && pathOf(here) === path) history.replaceState(null, "", path);
+    if (replace === true || (here !== null && pathOf(here) === path)) history.replaceState(null, "", path);
     else history.pushState(null, "", path);
     enter(at);
   }
@@ -4774,6 +5749,7 @@
     document.body.append(toastBox);
     document.addEventListener("click", followLink);
     document.addEventListener("keydown", stepKey);
+    document.addEventListener("keydown", inboxKey);
     window.addEventListener("popstate", returned);
     enter(at);
   }

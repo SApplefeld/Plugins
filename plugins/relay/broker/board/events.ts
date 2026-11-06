@@ -1,9 +1,10 @@
 // The event reader both surfaces share: what the kit's goal release stream says about blocked and
-// completed plans, tailed rather than re-read whole. Two folds of the same stream live here, each
+// completed plans, tailed rather than re-read whole. Three folds of the same stream live here, each
 // with its own offset and its own kept state: the board card's per-plan fold, keyed by (root, plan),
-// and the session surface's per-session fold, keyed by session id. The offsets are independent
-// because the board fold runs only when the board card is configured while the session fold runs
-// whenever Discord does, and a fold that consumed the other's bytes would starve it.
+// the session surface's per-session fold, keyed by session id and keeping one event, and the web
+// surface's timeline fold, keyed by session id and keeping a short recent list of more kinds. The
+// offsets are independent because each fold runs on its own surface's schedule, and a fold that
+// consumed another's bytes would starve it.
 //
 // `~/.claude/kit-events.jsonl` is append-only under the kit's own contract: one JSON object per
 // line, and past 1 MB the kit rotates it to `kit-events.jsonl.old` and starts the main path over.
@@ -248,26 +249,32 @@ function bound(value: string, max: number): string {
  */
 const TS_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
-type ParsedLine = {
+type ParsedLine<Kind extends string> = {
   ts: string;
-  event: BoardEventKind;
+  event: Kind;
   project: string;
   plan: string;
   session: string | null;
   detail: string | null;
 };
 
+/** The two kinds the board and session folds key on. */
+const BOARD_KINDS: ReadonlySet<BoardEventKind> = new Set<BoardEventKind>(["goal-blocked", "goal-complete"]);
+
 /**
  * One line parsed against the kit's contract. `"malformed"` is a line this reader cannot place at
  * all (bad JSON, not an object, a required field missing, the wrong type, or a `ts` that carries no
- * explicit offset or names no instant). `null` is a line that parses cleanly but names an event kind this card does not track,
- * which is not malformed: the kit's contract allows kinds beyond the two this reader keys on.
+ * explicit offset or names no instant). `null` is a line that parses cleanly but names an event kind
+ * off `tracked`, the kinds the calling fold keeps, which is not malformed: the kit's contract allows
+ * kinds beyond the ones any one fold keys on. The kind is read before the detail, so an untracked
+ * kind is dropped whatever its detail holds, and a fold's malformed tally counts the same lines
+ * whichever kinds it tracks.
  *
  * `project` comes back exactly as written. It is matched against the configured roots and then
  * dropped, so bounding it would only make a real project path past the bound fail to match the root
  * it names.
  */
-function parseLine(line: string): ParsedLine | "malformed" | null {
+function parseLine<Kind extends string>(line: string, tracked: ReadonlySet<Kind>): ParsedLine<Kind> | "malformed" | null {
   let value: unknown;
   try {
     value = JSON.parse(line);
@@ -291,14 +298,14 @@ function parseLine(line: string): ParsedLine | "malformed" | null {
   const stamp = bound(ts, MAX_TS_CHARS);
   if (!TS_OFFSET.test(stamp) || Number.isNaN(Date.parse(stamp))) return "malformed";
 
-  if (kind !== "goal-blocked" && kind !== "goal-complete") return null;
+  if (!tracked.has(kind as Kind)) return null;
 
   const rawDetail = value["detail"];
   if (rawDetail !== undefined && rawDetail !== null && typeof rawDetail !== "string") return "malformed";
 
   return {
     ts: stamp,
-    event: kind,
+    event: kind as Kind,
     project,
     plan: bound(plan, MAX_PLAN_CHARS),
     session: typeof rawSession === "string" ? bound(rawSession, MAX_SESSION_CHARS) : null,
@@ -560,7 +567,7 @@ export function readEvents(
 
   for (const line of window.lines.split("\n")) {
     if (line.trim() === "") continue;
-    const parsed = parseLine(line);
+    const parsed = parseLine(line, BOARD_KINDS);
     if (parsed === "malformed") {
       malformed += 1;
       continue;
@@ -709,7 +716,7 @@ export function readSessionEvents(
 
   for (const line of window.lines.split("\n")) {
     if (line.trim() === "") continue;
-    const parsed = parseLine(line);
+    const parsed = parseLine(line, BOARD_KINDS);
     if (parsed === "malformed") {
       malformed += 1;
       continue;
@@ -752,5 +759,176 @@ export function readSessionEvents(
     });
   }
 
+  return { state: { ...window.position, malformed, latest }, unreadable: false };
+}
+
+/**
+ * The kinds the timeline fold keeps: the lines a worker's row on the Workers page draws, as the kit
+ * writes them. A closed list, so a kind the kit adds reaches no page until a reader here admits it.
+ */
+export const TIMELINE_KINDS = [
+  "plan-queued",
+  "plan-started",
+  "section-closed",
+  "goal-complete",
+  "goal-blocked",
+  "waiting",
+  "ask-opened",
+  "ask-closed",
+  "pr-ready",
+  "paused",
+  "resumed",
+] as const;
+
+export type TimelineEventKind = (typeof TIMELINE_KINDS)[number];
+
+const TIMELINE_KIND_SET: ReadonlySet<TimelineEventKind> = new Set<TimelineEventKind>(TIMELINE_KINDS);
+
+/**
+ * The most lines the timeline fold keeps per session, the oldest giving way. A row draws a short
+ * recent history, and the file's writer decides how many lines a session gets, so the fold and not
+ * the writer bounds what a row can hold.
+ */
+export const MAX_TIMELINE_EVENTS_PER_SESSION = 30;
+
+/**
+ * How old a kept timeline line may be, measured against the read's own clock: a line older than two
+ * days is dropped at intake and pruned from the kept lists on every read. The fold re-reads from
+ * byte 0 after a restart, so without the bound a restart would draw a session's whole history.
+ */
+export const MAX_TIMELINE_AGE_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * One timeline line kept for a session: the kind, the stamp and its instant, the plan the line names,
+ * and the kit's short detail, bounded at intake. The instant is resolved once, as `SessionGoalEvent`
+ * resolves it, and never later than the read's clock.
+ */
+export type TimelineEvent = {
+  event: TimelineEventKind;
+  ts: string;
+  tsMs: number;
+  plan: string;
+  detail: string | null;
+};
+
+/**
+ * The timeline fold's persisted state: its own byte offset, identity, mid-line flag and malformed
+ * tally, as the session fold holds them, and the kept lines per session id, each list in file order
+ * with the newest last.
+ *
+ * `latest` is never mutated in place, and a read that keeps nothing and prunes nothing returns the
+ * previous instance rather than a copy of it, so a caller holding the previous state can compare by
+ * reference.
+ */
+export type TimelineReaderState = {
+  offset: number;
+  identity: string | null;
+  midLine: boolean;
+  malformed: number;
+  latest: Map<string, TimelineEvent[]>;
+};
+
+/** A fresh timeline fold with nothing consumed yet. */
+export function initialTimelineEventState(): TimelineReaderState {
+  return { offset: 0, identity: null, midLine: false, malformed: 0, latest: new Map() };
+}
+
+/** The timeline fold's options are the session fold's: the clock bounds the age as well as the future. */
+export type ReadTimelineEventsOptions = ReadSessionEventsOptions;
+
+export type ReadTimelineEventsResult = {
+  state: TimelineReaderState;
+  /** True when this tick's read failed for a reason other than the file being absent; the state is carried through unchanged. */
+  unreadable: boolean;
+};
+
+/**
+ * Advances the timeline fold by one tick: reads whatever was appended since `previous.offset` and
+ * appends each complete line of a tracked kind to its session's kept list. `previous` is never
+ * mutated, and a tick that keeps nothing and prunes nothing hands back its very map.
+ *
+ * The fold stands on the session fold's gate and no more: no root filtering, the session key
+ * normalized through `clean`, a blank or over-bound id dropped, and a stamp later than the read's
+ * clock dropped, none of them malformed. Two bounds are its own. A line whose instant is more than
+ * `MAX_TIMELINE_AGE_MS` before the read's clock is dropped at intake, a line exactly that old kept,
+ * and every kept list is pruned of lines that have aged past the bound on each read, a session whose
+ * list empties dropped with them. A session's list holds at most `MAX_TIMELINE_EVENTS_PER_SESSION`
+ * lines, the earliest in file order giving way. The map stops at `MAX_TRACKED_SESSIONS` sessions, the
+ * session with the oldest line evicted, as the session fold evicts.
+ */
+export function readTimelineEvents(
+  previous: TimelineReaderState,
+  options: ReadTimelineEventsOptions = {},
+): ReadTimelineEventsResult {
+  const file = options.path ?? defaultEventsPath();
+  const maxBytes = options.maxBytes ?? MAX_EVENTS_READ_BYTES;
+  const read = options.readFile ?? readAppended;
+  const now = options.now ?? Date.now;
+
+  const window = readWindow(file, previous, maxBytes, read);
+  // A read that failed hands back the caller's own state object, not a copy of it, as the session
+  // fold does, so a caller comparing by identity sees nothing move.
+  if ("halted" in window && window.unreadable) return { state: previous, unreadable: true };
+
+  let latest = previous.latest;
+  // One clock reading for the whole tick: the ceiling for a stamp and the floor for its age.
+  const readAt = now();
+  const oldest = readAt - MAX_TIMELINE_AGE_MS;
+  // The copy is made on the first change, so a tick that changes nothing returns the previous map
+  // itself and a caller comparing by reference sees nothing moved.
+  const own = (): Map<string, TimelineEvent[]> => {
+    if (latest === previous.latest) latest = new Map(previous.latest);
+    return latest;
+  };
+  // The lines kept on earlier reads age too, on every read that reads well, a read with nothing new
+  // in the file included: each list drops what has passed the bound since.
+  const prune = (): void => {
+    for (const [session, list] of [...latest]) {
+      const fresh = list.filter((event) => event.tsMs >= oldest);
+      if (fresh.length === list.length) continue;
+      const kept = own();
+      if (fresh.length === 0) kept.delete(session);
+      else kept.set(session, fresh);
+    }
+  };
+
+  if ("halted" in window) {
+    prune();
+    return { state: { ...window.halted, latest }, unreadable: false };
+  }
+
+  let malformed = window.position.malformed;
+
+  for (const line of window.lines.split("\n")) {
+    if (line.trim() === "") continue;
+    const parsed = parseLine(line, TIMELINE_KIND_SET);
+    if (parsed === "malformed") {
+      malformed += 1;
+      continue;
+    }
+    if (parsed === null) continue;
+    if (parsed.session === null) continue;
+    const tsMs = Date.parse(parsed.ts);
+    if (tsMs > readAt) continue;
+    if (tsMs < oldest) continue;
+    if (parsed.session.length >= MAX_SESSION_CHARS) continue;
+    const session = clean(parsed.session);
+    if (session === "") continue;
+
+    const kept = own();
+    const held = kept.get(session);
+    // Deleted before it is set, so a session kept fresh stands at the young end of the map and the
+    // session with the oldest line is the one that gives way to a newcomer.
+    kept.delete(session);
+    if (held === undefined && kept.size >= MAX_TRACKED_SESSIONS) {
+      const evicted = kept.keys().next();
+      if (evicted.done !== true) kept.delete(evicted.value);
+    }
+    const list = held === undefined ? [] : held.slice(Math.max(0, held.length - MAX_TIMELINE_EVENTS_PER_SESSION + 1));
+    list.push({ event: parsed.event, ts: parsed.ts, tsMs, plan: parsed.plan, detail: parsed.detail });
+    kept.set(session, list);
+  }
+
+  prune();
   return { state: { ...window.position, malformed, latest }, unreadable: false };
 }

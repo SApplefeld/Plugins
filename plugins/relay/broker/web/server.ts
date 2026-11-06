@@ -63,7 +63,7 @@ import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
 import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { askView, blockKey, blockedReasons, healthView, needsMeView, planView, repoView, rootName, standupView } from "./views.ts";
+import { askView, blockKey, blockedReasons, healthView, needsMeView, planView, repoView, rootName, standupView, workersView } from "./views.ts";
 import type { Readings } from "./views.ts";
 import type { HandledHow, HandledMark, WatermarkStore } from "./watermarks.ts";
 
@@ -99,7 +99,7 @@ const ROUTE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
  */
 const SHELL_PAGE = "shell.html";
 /** The fixed page paths, each served the shell. */
-const PAGE_ROUTES: ReadonlySet<string> = new Set(["/", "/plan", "/health", "/talk", "/needs-me", "/ask"]);
+const PAGE_ROUTES: ReadonlySet<string> = new Set(["/", "/plan", "/health", "/talk", "/needs-me", "/ask", "/workers"]);
 const REPO_PREFIX = "/repo/";
 const ROUTE_PREFIX = "/web/";
 /** The one path the summary peer list admits a node to, the summary `registerViewHandlers` serves. */
@@ -620,7 +620,7 @@ function sendJson(response: ServerResponse, body: unknown, status = 200): void {
 }
 
 /**
- * Registers `/web/standup`, `/web/needs-me`, `/web/ask`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`.
+ * Registers `/web/standup`, `/web/needs-me`, `/web/workers`, `/web/ask`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`.
  * Each answers a GET from the readings `source` hands back, the pass's latest, and reads no file of its own. A
  * request string reaches no response and no log: it is compared with names the broker holds and dropped.
  *
@@ -653,6 +653,7 @@ export function registerViewHandlers(
   get("summary", (_request, response) => sendJson(response, summaryView(source())));
   // The view carries the batch cap the Agree route enforces, so the page never holds its own copy.
   get("needs-me", (_request, response) => sendJson(response, { ...needsMeView(source()), maxBatch: MAX_AGREE_BATCH }));
+  get("workers", (_request, response) => sendJson(response, workersView(source())));
 
   get("ask", (request, response) => {
     const query = queryOf(request.url ?? "");
@@ -1089,7 +1090,8 @@ const MAX_QUOTED_LENGTH = 200;
  * an ask the ledger does not hold open for the lineage, or a queue entry the status reading does not
  * read as blocked; `already-acted` an item this broker already delivered a line for; `no-recommendation`
  * an ask with no recommendation to agree to; `changed` an ask whose recommendation, or a block whose
- * reason, is no longer the text the page drew; `refused: blocking` a blocking ask in a batch.
+ * reason, is no longer the text the page drew; `refused: blocking` a blocking ask in a batch;
+ * `handled` a review whose mark was written, since a review's Dismiss sends no line.
  */
 export type ActStatus =
   | WebDeliveryStatus
@@ -1097,7 +1099,8 @@ export type ActStatus =
   | "already-acted"
   | "no-recommendation"
   | "changed"
-  | "refused: blocking";
+  | "refused: blocking"
+  | "handled";
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
@@ -1203,28 +1206,41 @@ function agreeItem(value: unknown): AgreeItem | null {
 
 type DismissItem =
   | { kind: "ask"; askId: string; repo: string }
-  | { kind: "blocked"; repo: string; entryId: string; reason: string | null };
+  | { kind: "blocked"; repo: string; entryId: string; reason: string | null }
+  | { kind: "review"; repo: string; pullRequest: number };
 
 /**
- * A Dismiss body: an ask by id and lineage, or a blocked queue entry by lineage, entry id and the
+ * A Dismiss body: an ask by id and lineage, a blocked queue entry by lineage, entry id and the
  * reason the page drew, null where the body carries none or not a string, which `dismiss` answers as
- * `changed`, as an Agree with no recommendation is.
+ * `changed`, as an Agree with no recommendation is, or a review by lineage and pull request number,
+ * which must be a positive integer.
  */
 function dismissItem(body: Record<string, unknown>): DismissItem | null {
   if (body.kind === "ask") {
     const named = askOf(body);
     return named === null ? null : { kind: "ask", ...named };
   }
+  const { repo } = body;
+  if (typeof repo !== "string" || repo === "") return null;
+  if (body.kind === "review") {
+    const { pullRequest } = body;
+    if (typeof pullRequest !== "number" || !Number.isInteger(pullRequest) || pullRequest <= 0) return null;
+    return { kind: "review", repo, pullRequest };
+  }
   if (body.kind !== "blocked") return null;
-  const { repo, entryId, reason } = body;
-  if (typeof repo !== "string" || repo === "" || typeof entryId !== "string" || entryId === "") return null;
+  const { entryId, reason } = body;
+  if (typeof entryId !== "string" || entryId === "") return null;
   return { kind: "blocked", repo, entryId, reason: typeof reason === "string" ? reason : null };
 }
 
 /**
  * Registers `POST /web/agree` with `{askId, repo, recommend}`, `POST /web/agree-batch` with
  * `{items: [{askId, repo, recommend}]}`, `POST /web/correct` with `{askId, repo, words}`, and
- * `POST /web/dismiss` with `{kind: "ask", askId, repo}` or `{kind: "blocked", repo, entryId, reason}`.
+ * `POST /web/dismiss` with `{kind: "ask", askId, repo}`, `{kind: "blocked", repo, entryId, reason}` or
+ * `{kind: "review", repo, pullRequest}`. A review's Dismiss is the one act that sends no line: it
+ * writes the review's handled mark where a queue entry under the lineage carries the number, answers
+ * `handled`, and answers `closed` where none does. A mark that cannot be written is the handler's
+ * failure, a 500, since nothing was delivered that the answer could stand for.
  * Each carries the operator's word, so the gate has already refused the broker host's own node and
  * required the same-origin JSON headers, and the login an act acts for is the peer's. Each act is one
  * operator line to the item's session through `deliverWeb`, composed by the broker from what it holds:
@@ -1357,6 +1373,17 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
       return settle(
         await act(login, item.repo, key, label, (at) => dismissAskLine(entry.id, entry.question, at), askMark(item.repo, entry, "dismissed")),
       );
+    }
+    if (item.kind === "review") {
+      const { repo, pullRequest } = item;
+      const carried =
+        options.source().queues.value?.some(
+          (held) => held.queue.name === repo && held.queue.entries.some((entry) => entry.pullRequest === pullRequest),
+        ) ?? false;
+      if (!carried) return "closed";
+      const settle = settler(`web dismiss: pull request ${String(pullRequest)} for ${JSON.stringify(repo)}`);
+      options.marks.markHandled({ kind: "review", repo, pullRequest, markedAt: now(), how: "dismissed" });
+      return settle("handled");
     }
     const { repo, entryId } = item;
     // The text the blocked item draws, read the way the views read it, or none where the entry is not blocked.
