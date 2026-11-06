@@ -1,12 +1,17 @@
-// The web surface's pages: one script for all seven, loaded after markdown.js, whose renderer it
-// calls. Each page names itself in `<body data-page>`, fetches its view and the siblings reading
-// from the broker every five seconds and draws them again.
+// The web surface's one script, loaded by the shell page after markdown.js, whose renderer it
+// calls. The shell reads which screen to draw from the address, through the route table below,
+// fetches that screen's view, the siblings reading and the summary from the broker every five
+// seconds, builds the rail and the screen as a tree of nodes and patches the live tree from it, so
+// a node whose key persists keeps its scroll, its selection, its focus and the words typed in it
+// across every refresh. A link to another screen moves the address with `history.pushState` and
+// draws that screen here, with no page load, and the back button returns through `popstate`.
 // The page holds no state the broker does not, apart from which session list is expanded.
 //
 // Render rule: every string in a view was written by a session or a person and is hostile to the
 // page. View text goes in through `textContent`, `append` of a string, or the text nodes
 // `markdown.js`'s renderer builds inside its fixed elements, never as markup, and a link is fixed
-// route text plus `encodeURIComponent` of a view value. Nothing here builds HTML.
+// route text plus `encodeURIComponent` of a view value. Nothing here builds HTML, and the patch
+// copies text nodes and attribute values from the built tree to the live one, never markup.
 "use strict";
 
 (function () {
@@ -14,8 +19,6 @@
   const TIMEOUT_MS = 8000;
   /** How long one thread post carrying a file may take at the broker, on top of the base wait. */
   const FILE_POST_MS = 30000;
-  /** How many polls a text selection on the page may hold it still, so it can be copied. */
-  const HOLD_POLLS = 6;
 
   /** How long a batch Agree may take: the broker agrees its items one by one, each a thread post and a hand-over. */
   function batchTimeoutMs(count) {
@@ -31,24 +34,94 @@
   }
 
   const PAGES = {
-    standup: { render: renderStandup, url: () => "/web/standup" },
-    repo: { render: renderRepo, url: repoUrl },
-    plan: { render: renderPlan, url: planUrl },
+    standup: { render: renderStandupScreen, url: () => "/web/standup", accept: standupAccept },
+    repo: { render: renderRepoScreen, url: repoUrl },
+    plan: { render: renderPlanScreen, url: planUrl, accept: planAccept },
     health: { render: renderHealth, url: () => "/web/health" },
     "needs-me": { render: renderNeedsMe, url: () => "/web/needs-me" },
     ask: { render: renderAsk, url: askUrl, gone: askGone },
-    talk: { render: renderTalk, url: talkUrl, accept: talkAccept, follow: true },
+    talk: { render: renderTalkScreen, url: talkUrl, accept: talkAccept, follow: true },
   };
+
+  // ---------------------------------------------------------------------------------------------
+  // The route table: the screen each path opens, and the query keys each screen reads
+  // ---------------------------------------------------------------------------------------------
+
+  /** The fixed path of each screen, the paths the broker serves the shell on; the repo screen is `REPO_PREFIX` plus the name. */
+  const SCREEN_PATHS = { standup: "/", "needs-me": "/needs-me", ask: "/ask", plan: "/plan", health: "/health", talk: "/talk" };
+  const REPO_PREFIX = "/repo/";
+
+  /** The query keys each screen reads, in the order a path the shell builds carries them; a key off the list is dropped. */
+  const SCREEN_KEYS = { standup: [], "needs-me": ["item"], ask: ["repo", "id"], plan: ["root", "path", "repo"], health: [], talk: ["lineage", "root", "path"], repo: [] };
+
+  /**
+   * The screen and query an address names, or null for a path the shell has no screen for. `where`
+   * is a Location or an anchor, read for its `pathname` and `search` alone. `name` is the repo
+   * screen's repo, decoded, or null on any other screen; a repo path whose encoding is broken names
+   * no screen. `query` holds the screen's own keys and no other, and `item` is the list row the
+   * query selects, by its key, or null.
+   */
+  function routeOf(where) {
+    if (!isObject(where)) return null;
+    const pathname = txt(where.pathname);
+    let screen = null;
+    let name = null;
+    if (pathname.indexOf(REPO_PREFIX) === 0 && pathname.length > REPO_PREFIX.length) {
+      screen = "repo";
+      try {
+        name = decodeURIComponent(pathname.slice(REPO_PREFIX.length).replace(/\/+$/, ""));
+      } catch (error) {
+        return null;
+      }
+    } else {
+      for (const known of Object.keys(SCREEN_PATHS)) if (SCREEN_PATHS[known] === pathname) screen = known;
+    }
+    if (screen === null) return null;
+    const search = new URLSearchParams(txt(where.search));
+    const query = {};
+    for (const key of SCREEN_KEYS[screen]) {
+      const value = search.get(key);
+      if (value !== null) query[key] = value;
+    }
+    return { screen, name, query, item: typeof query.item === "string" ? query.item : null };
+  }
+
+  /**
+   * The path of a route, built from the table and the route's own keys alone: the screen's fixed
+   * path, or the repo prefix and the encoded name, then the query keys the screen reads, each
+   * encoded. This is the only text `history.pushState` and `history.replaceState` take, so nothing
+   * a reading carries can move the address anywhere but the screens the shell has.
+   */
+  function pathOf(at) {
+    const base = at.screen === "repo" ? REPO_PREFIX + encodeURIComponent(txt(at.name)) : SCREEN_PATHS[at.screen];
+    const pairs = SCREEN_KEYS[at.screen]
+      .filter((key) => typeof at.query[key] === "string")
+      .map((key) => encodeURIComponent(key) + "=" + encodeURIComponent(at.query[key]));
+    return pairs.length === 0 ? base : base + "?" + pairs.join("&");
+  }
+
+  /** The path of a route with no list row selected, which tells one screen's reading from another's. */
+  function placeOf(at) {
+    const query = Object.assign({}, at.query);
+    delete query.item;
+    return pathOf({ screen: at.screen, name: at.name, query });
+  }
 
   // ---------------------------------------------------------------------------------------------
   // Small helpers
   // ---------------------------------------------------------------------------------------------
 
-  /** An element with fixed classes and, when given, text set as text. */
-  function h(tag, cls, text) {
+  /**
+   * An element with fixed classes and, when given, text set as text and a key written as its
+   * `data-key`. The patch pairs a built element with the live one of the same key among its
+   * siblings, so a list row's key is the item's identity and a static part's is the name its
+   * builder gives it; an element with no key pairs by position with a live one of its tag.
+   */
+  function h(tag, cls, text, key) {
     const element = document.createElement(tag);
     if (cls) element.className = cls;
     if (text !== undefined && text !== null) element.textContent = text;
+    if (typeof key === "string") element.dataset.key = key;
     return element;
   }
 
@@ -57,25 +130,55 @@
    * `markdown.js`'s renderer over `document`, so every byte of the text reaches the page as a text
    * node and never as markup.
    */
-  function md(tag, cls, text) {
-    const element = h(tag, cls);
+  function md(tag, cls, text, key) {
+    const element = h(tag, cls, null, key);
     element.append(...window.markdownBlocks(txt(text), document));
     return element;
   }
 
+  /**
+   * An element holding text the clock moves while the data stands still, an age or a read time,
+   * marked `data-clock` so the patch updates its text without flagging it changed. Every such text
+   * sits alone in one of these, apart from the data words around it.
+   */
+  function clockText(tag, cls, text, key) {
+    const element = h(tag, cls, text, key);
+    element.dataset.clock = "";
+    return element;
+  }
+
   /** A link to a fixed route; the caller builds `href` from route text and encoded values only. */
-  function link(cls, href, text) {
-    const anchor = h("a", cls, text);
+  function link(cls, href, text, key) {
+    const anchor = h("a", cls, text, key);
     anchor.href = href;
     return anchor;
+  }
+
+  /** The handlers each built node was given, by node, so a kept live node can take its fresh twin's. */
+  const handlers = new WeakMap();
+
+  /**
+   * Binds a handler to a built node and records it. A handler closes over the view it was built
+   * from, so when the patch keeps a live node it drops the handlers that node was built with and
+   * binds the ones its fresh twin carries; a handler reads the node it fires on from the event,
+   * never from the variable it was built beside, which names the fresh twin.
+   */
+  function listen(node, type, handler) {
+    node.addEventListener(type, handler);
+    const held = handlers.get(node);
+    if (held === undefined) handlers.set(node, [[type, handler]]);
+    else held.push([type, handler]);
   }
 
   function repoHref(name) {
     return "/repo/" + encodeURIComponent(name);
   }
 
-  function planHref(root, path) {
-    return "/plan?root=" + encodeURIComponent(root) + "&path=" + encodeURIComponent(path);
+  /** A plan's address through the route table, carrying `repo`, the repo whose plans its list pane holds, where it is not empty. */
+  function planHref(root, path, repo) {
+    const query = { root, path };
+    if (repo !== "") query.repo = repo;
+    return pathOf({ screen: "plan", name: null, query });
   }
 
   function txt(value) {
@@ -147,10 +250,12 @@
       .map((name) => parse(asOf[name]))
       .filter((at) => at !== null);
     const now = nowOf(view);
-    box.append(h("span", null, times.length > 0 ? "as of " + dayClock(Math.min.apply(null, times), now) : "no reading yet"));
+    box.append(clockText("span", null, times.length > 0 ? "as of " + dayClock(Math.min.apply(null, times), now) : "no reading yet"));
     for (const name of list(view.held)) {
       const at = parse(asOf[name]);
-      box.append(" ", h("span", "held", at === null ? txt(name) + ": no reading yet" : txt(name) + " held " + span(now - at)));
+      const line = h("span", "held", at === null ? txt(name) + ": no reading yet" : txt(name) + " held ");
+      if (at !== null) line.append(clockText("span", null, span(now - at)));
+      box.append(" ", line);
     }
     return box;
   }
@@ -159,11 +264,15 @@
   function sources(view, names) {
     const asOf = view && view.asOf ? view.asOf : {};
     // A rollout source neither read nor held draws nothing: a host with no git renders as it did before the source.
-    const parts = names.filter((name) => name !== "rollout" || parse(asOf[name]) !== null || list(view && view.held).includes(name)).map((name) => {
+    const shown = names.filter((name) => name !== "rollout" || parse(asOf[name]) !== null || list(view && view.held).includes(name));
+    const note = h("div", "note");
+    shown.forEach((name, index) => {
       const at = parse(asOf[name]);
-      return name + (at === null ? " no reading yet" : " read " + clock(at));
+      if (index > 0) note.append(" · ");
+      if (at === null) note.append(name + " no reading yet");
+      else note.append(name + " read ", clockText("span", null, clock(at)));
     });
-    return h("div", "note", parts.join(" · "));
+    return note;
   }
 
   function back(href, label) {
@@ -333,7 +442,7 @@
     redrawNeeds();
     if (sent) {
       // The composer is gone with the focus it held, so focus returns to the button that opened it.
-      const button = held ? app.querySelector('[data-focus-key="steer"]') : null;
+      const button = held ? app.querySelector('[data-key="steer"]') : null;
       if (button !== null) button.focus();
       await refreshView();
     } else if (held) {
@@ -345,7 +454,8 @@
 
   /** The one-line composer the Steer button opens: a labelled line, Send, and the status line where there is one. */
   function steerComposer() {
-    const box = h("div", "steer-composer");
+    // Keyed, so the line above it that the ledger's date draws never takes the composer's place, and its field, by position.
+    const box = h("div", "steer-composer", null, "steer-composer");
     box.id = "steer-composer";
     const row = h("div", "steer-row");
     const caption = h("label", "sr", "Your direction, one line");
@@ -360,11 +470,11 @@
     input.placeholder = "One line of direction";
     input.value = steer.draft;
     input.disabled = steer.sending;
-    input.dataset.focusKey = "steer-text";
-    input.addEventListener("input", () => {
-      steer.draft = input.value;
+    input.dataset.key = "steer-text";
+    listen(input, "input", (event) => {
+      steer.draft = event.currentTarget.value;
     });
-    input.addEventListener("keydown", (event) => {
+    listen(input, "keydown", (event) => {
       if (event.key === "Enter" && !event.isComposing) {
         event.preventDefault();
         sendSteer();
@@ -373,8 +483,8 @@
     const send = h("button", "send", "Send");
     send.type = "button";
     send.disabled = steer.sending;
-    send.dataset.focusKey = "steer-send";
-    send.addEventListener("click", () => sendSteer());
+    send.dataset.key = "steer-send";
+    listen(send, "click", () => sendSteer());
     row.append(caption, input, send);
     box.append(row);
     if (steer.status !== null) {
@@ -393,9 +503,11 @@
   function headingCard(view, onRepo) {
     const heading = view.heading;
     if (!isObject(heading)) return null;
-    const card = h("section", "card pad heading-card");
-    card.setAttribute("aria-labelledby", "direction-heading");
-    const head = cardHead("Heading · " + txt(onRepo ? view.name : view.sandbox), null, "h2", "direction-heading");
+    const card = h("section", "card pad heading-card", null, "heading");
+    // The repo detail sits beside the standup list on the repo screen, so its heading takes an id of its own.
+    const headingId = onRepo ? "repo-direction-heading" : "direction-heading";
+    card.setAttribute("aria-labelledby", headingId);
+    const head = cardHead("Heading · " + txt(onRepo ? view.name : view.sandbox), null, "h2", headingId);
     const date = txt(heading.date) === "" ? null : tagDay(heading.date);
     if (onRepo) {
       if (date !== null) head.append(h("div", "heading-by", "set by you · " + date));
@@ -405,8 +517,8 @@
       button.disabled = steer.sending;
       button.setAttribute("aria-expanded", steer.open ? "true" : "false");
       if (steer.open) button.setAttribute("aria-controls", "steer-composer");
-      button.dataset.focusKey = "steer";
-      button.addEventListener("click", toggleSteer);
+      button.dataset.key = "steer";
+      listen(button, "click", toggleSteer);
       head.append(button);
     }
     card.append(head);
@@ -467,7 +579,6 @@
    */
   const toastBox = h("div", "toast");
   toastBox.setAttribute("role", "status");
-  if (["standup", "repo", "needs-me"].indexOf(document.body.dataset.page) >= 0) document.body.append(toastBox);
 
   function showToast(words, command) {
     const body = h("div", "toast-body");
@@ -475,7 +586,7 @@
     if (command) body.append(h("code", "toast-code", command));
     const close = h("button", "toast-close", "Dismiss");
     close.type = "button";
-    close.addEventListener("click", () => {
+    listen(close, "click", () => {
       const held = toastBox.contains(document.activeElement);
       toastBox.replaceChildren();
       if (held) {
@@ -545,8 +656,8 @@
     button.type = "button";
     button.setAttribute("aria-label", "Mark rolled out, " + rolloutClient(row));
     button.disabled = rolloutBusy.has(rolloutKey(row));
-    button.dataset.focusKey = "rollout|" + rolloutKey(row);
-    button.addEventListener("click", () => sendRollout(row));
+    button.dataset.key = "rollout|" + rolloutKey(row);
+    listen(button, "click", () => sendRollout(row));
     return button;
   }
 
@@ -618,15 +729,22 @@
     button.type = "button";
     button.setAttribute("aria-label", "Mark published, " + txt(row.repo));
     button.disabled = rolloutBusy.has(rolloutKey(row));
-    button.dataset.focusKey = "publish|" + rolloutKey(row);
-    button.addEventListener("click", () => sendPublish(row));
+    button.dataset.key = "publish|" + rolloutKey(row);
+    listen(button, "click", () => sendPublish(row));
     return button;
   }
 
   /** The footer line of a card: what the counts are, and when the tags were read. */
   function rolloutFooter(words, readAt) {
     const at = parse(readAt);
-    return h("div", "ro-foot", words + (at === null ? "" : " · tags " + clock(at)));
+    const foot = h("div", "ro-foot", words);
+    if (at !== null) foot.append(" · tags ", clockText("span", null, clock(at)));
+    return foot;
+  }
+
+  /** A shared row's key: its repository and commit sha, or its place among the rows where the view carries no sha. */
+  function sharedKey(one, index) {
+    return "shared:" + (txt(one.sha) === "" ? "#" + String(index) : txt(one.repo) + "@" + txt(one.sha));
   }
 
   /** The sandbox page's card over every client branch, or nothing where the slot is null. A held source draws `tags unread` in place of the rows. */
@@ -635,7 +753,7 @@
     if (!isObject(summary)) return null;
     const now = nowOf(view);
     const card = h("section", "card ro-card panel");
-    card.dataset.panel = "rollout";
+    card.dataset.key = "rollout";
     card.setAttribute("aria-labelledby", "rollout-heading");
     const rows = objects(summary.rows);
     const waiting = rows.filter((row) => num(row.toRollOut) > 0);
@@ -659,7 +777,7 @@
     if (waiting.length === 0 && publishing.length === 0 && shared.length === 0) return null;
     const full = h("div", "ro-full");
     for (const row of waiting) {
-      const line = h("div", "ro-line");
+      const line = h("div", "ro-line", null, "client:" + rolloutKey(row));
       const text = h("span");
       const since = tagDay(row.lastTagDate) === "" ? ", no rollout tag yet" : " since " + tagDay(row.lastTagDate);
       text.append(h("b", null, rolloutClient(row)), " · " + num(row.toRollOut) + " merged" + since);
@@ -667,14 +785,15 @@
       full.append(line);
     }
     for (const row of publishing) {
-      const line = h("div", "ro-line");
+      const line = h("div", "ro-line", null, "publish:" + txt(row.repo));
       const text = h("span");
       text.append(h("b", null, txt(row.repo)), " · " + publishSince(row, now));
       line.append(text, h("span", "ro-day", dayOf(row.oldestAt, now) ?? ""));
       full.append(line);
     }
-    for (const one of shared) {
-      const line = h("div", "ro-line");
+    // A shared row's key is its repository and commit, and its place in the list where the view carries no commit.
+    for (const [index, one] of shared.entries()) {
+      const line = h("div", "ro-line", null, sharedKey(one, index));
       const clients = num(one.clients) ?? 0;
       const at = num(one.atClients) ?? 0;
       const text = h("span", "muted");
@@ -688,7 +807,7 @@
     // The desktop layout draws the same rows as two lines, per the condensed mockup.
     const condensed = h("div", "ro-condensed");
     if (waiting.length > 0) {
-      const line = h("div", "ro-flow");
+      const line = h("div", "ro-flow", null, "clients");
       waiting.forEach((row, at) => {
         if (at > 0) line.append(" · ");
         const since = tagDay(row.lastTagDate) === "" ? ", no tag yet" : " since " + tagDay(row.lastTagDate);
@@ -697,12 +816,12 @@
       condensed.append(line);
     }
     for (const row of publishing) {
-      const line = h("div", "ro-flow");
+      const line = h("div", "ro-flow", null, "publish:" + txt(row.repo));
       line.append(h("b", null, txt(row.repo)), " ", h("span", "muted", "· " + publishSince(row, now)));
       condensed.append(line);
     }
-    for (const one of shared) {
-      const line = h("div", "ro-flow");
+    for (const [index, one] of shared.entries()) {
+      const line = h("div", "ro-flow", null, sharedKey(one, index));
       const clients = num(one.clients) ?? 0;
       const at = num(one.atClients) ?? 0;
       const merged = num(one.fannedOut) ?? 0;
@@ -720,9 +839,10 @@
     const row = view.rollout;
     if (!isObject(row)) return null;
     const now = nowOf(view);
-    const card = h("section", "card pad attn ro-repo");
-    card.setAttribute("aria-labelledby", "rollout-heading");
-    const head = cardHead("Rollout", null, "h2", "rollout-heading");
+    const card = h("section", "card pad attn ro-repo", null, "rollout");
+    // The repo detail sits beside the standup list, whose rollout card holds the plain id, so this one takes its own.
+    card.setAttribute("aria-labelledby", "repo-rollout-heading");
+    const head = cardHead("Rollout", null, "h2", "repo-rollout-heading");
     head.classList.add("ro-head");
     const held = rolloutHeld(view);
     if (held) head.append(h("div", "ro-sub held", "tags unread"));
@@ -738,14 +858,17 @@
     const commits = objects(row.commits);
     if (commits.length > 0) {
       const grid = h("div", "ro-commits");
-      for (const commit of commits) {
-        const mark = h("span", "ro-check", "✓");
+      // A commit row's key is its sha, and its place in the list where the view carries none.
+      for (const [index, commit] of commits.entries()) {
+        const key = "commit:" + (txt(commit.sha) || "#" + String(index));
+        const mark = h("span", "ro-check", "✓", key + ":mark");
         mark.setAttribute("aria-hidden", "true");
-        grid.append(mark, h("span", null, txt(commit.title) + (commit.fromDefault === true ? ", from main" : "")), h("span", "ro-day", dayOf(commit.at, now) ?? ""));
+        grid.append(mark, h("span", null, txt(commit.title) + (commit.fromDefault === true ? ", from main" : ""), key), h("span", "ro-day", dayOf(commit.at, now) ?? "", key + ":day"));
       }
       card.append(grid);
     }
-    if (toRollOut > commits.length) card.append(h("div", "ro-more", "and " + (toRollOut - commits.length) + " more"));
+    // Keyed, since it comes and goes between readings and the button's row after it must not pair with it by place.
+    if (toRollOut > commits.length) card.append(h("div", "ro-more", "and " + (toRollOut - commits.length) + " more", "more"));
     if (rolloutRowOf(row)) {
       const action = h("div", "ro-action");
       action.append(rolloutButton(row, "ro-button-repo"));
@@ -760,9 +883,10 @@
     const row = view.publish;
     if (!isObject(row)) return null;
     const now = nowOf(view);
-    const card = h("section", "card pad attn ro-repo");
-    card.setAttribute("aria-labelledby", "rollout-heading");
-    const head = cardHead("Rollout", null, "h2", "rollout-heading");
+    const card = h("section", "card pad attn ro-repo", null, "rollout");
+    // The repo detail sits beside the standup list, whose rollout card holds the plain id, so this one takes its own.
+    card.setAttribute("aria-labelledby", "repo-rollout-heading");
+    const head = cardHead("Rollout", null, "h2", "repo-rollout-heading");
     head.classList.add("ro-head");
     const held = rolloutHeld(view);
     if (held) head.append(h("div", "ro-sub held", "tags unread"));
@@ -778,14 +902,17 @@
     const commits = objects(row.commits);
     if (commits.length > 0) {
       const grid = h("div", "ro-commits");
-      for (const commit of commits) {
-        const mark = h("span", "ro-check", "✓");
+      // A commit row's key is its sha, and its place in the list where the view carries none.
+      for (const [index, commit] of commits.entries()) {
+        const key = "commit:" + (txt(commit.sha) || "#" + String(index));
+        const mark = h("span", "ro-check", "✓", key + ":mark");
         mark.setAttribute("aria-hidden", "true");
-        grid.append(mark, h("span", null, txt(commit.title)), h("span", "ro-day", dayOf(commit.at, now) ?? ""));
+        grid.append(mark, h("span", null, txt(commit.title), key), h("span", "ro-day", dayOf(commit.at, now) ?? "", key + ":day"));
       }
       card.append(grid);
     }
-    if (toPublish > commits.length) card.append(h("div", "ro-more", "and " + (toPublish - commits.length) + " more"));
+    // Keyed, since it comes and goes between readings and the button's row after it must not pair with it by place.
+    if (toPublish > commits.length) card.append(h("div", "ro-more", "and " + (toPublish - commits.length) + " more", "more"));
     if (publishRowOf(row)) {
       const action = h("div", "ro-action");
       action.append(publishButton(row, "ro-button-repo"));
@@ -806,16 +933,16 @@
     const publishing = objects(view.publish);
     const held = rolloutHeld(view);
     if (!held && rows.length === 0 && publishing.length === 0) return null;
-    const section = h("section", "section");
+    const section = h("section", "section", null, "group:rollout");
     section.setAttribute("aria-label", "Roll out");
     const count = publishing.length === 0 ? plural(rows.length, "client", "clients") : rows.length + publishing.length + " waiting";
     section.append(cardHead("Roll out", held ? "tags unread" : count, "h2"));
     const card = h("div", "card panel");
-    card.dataset.panel = "rollout";
+    card.dataset.key = "rollout";
     if (held) card.append(h("div", "nm-none", "tags unread"));
     else {
       for (const row of rows) {
-        const line = h("div", "ro-need");
+        const line = h("div", "ro-need", null, "client:" + rolloutKey(row));
         const text = h("div");
         text.append(h("b", null, rolloutClient(row)), " · " + (num(row.toRollOut) ?? 0) + " merged ");
         const parts = [];
@@ -829,7 +956,7 @@
         card.append(line);
       }
       for (const row of publishing) {
-        const line = h("div", "ro-need");
+        const line = h("div", "ro-need", null, "publish:" + txt(row.repo));
         const text = h("div");
         text.append(h("b", null, txt(row.repo)), " · " + publishSince(row, now) + " ");
         const oldest = dayOf(row.oldestAt, now);
@@ -878,6 +1005,14 @@
     return item.kind === "ask" && txt(item.askId) !== "" ? txt(item.repo) + ":" + txt(item.askId) : null;
   }
 
+  /**
+   * The key a Needs-you item's row is drawn under: an ask's and a blocked run's `itemKey`, and a
+   * hands item's repo and text, since the view gives it no id.
+   */
+  function itemRowKey(item) {
+    return item.kind === "hands" ? JSON.stringify([item.repo, "hands", txt(item.text)]) : itemKey(item);
+  }
+
   /** The ask page of an item that is an ask naming its repo and id, or null for any other item. */
   function askHrefOf(item) {
     return item.kind === "ask" && txt(item.repo) !== "" && txt(item.askId) !== ""
@@ -887,7 +1022,8 @@
 
   function needRow(item, now) {
     const href = askHrefOf(item);
-    const row = href !== null ? link("need-row", href) : item.repo ? link("need-row", repoHref(item.repo)) : h("div", "need-row");
+    const key = itemRowKey(item);
+    const row = href !== null ? link("need-row", href, null, key) : item.repo ? link("need-row", repoHref(item.repo), null, key) : h("div", "need-row", null, key);
     row.append(h("span", "who", item.repo ? item.repo : "Hands"));
     const middle = h("div");
     if (item.kind === "blocked") middle.append(h("span", "tag", "blocked"));
@@ -896,14 +1032,16 @@
     if (item.recommend) middle.append(recRow(item.recommend));
     row.append(middle);
     const opened = parse(item.openedAt);
-    row.append(h("span", "age", opened === null ? "" : span(now - opened)));
+    row.append(clockText("span", "age", opened === null ? "" : span(now - opened)));
     return row;
   }
 
-  function workerWords(worker, now) {
+  /** Appends "worker <state>" to `line`, and ", last turn <age> ago" where the worker has had one, the age as `clockText`. */
+  function workerWords(line, worker, now) {
     const state = worker && worker.surfaceState ? worker.surfaceState : "no session";
     const turn = worker ? parse(worker.lastTurnAt) : null;
-    return "worker " + state + (turn === null ? "" : ", last turn " + span(now - turn) + " ago");
+    line.append("worker " + state);
+    if (turn !== null) line.append(", last turn ", clockText("span", null, span(now - turn)), " ago");
   }
 
   function leaseWords(worker) {
@@ -922,10 +1060,11 @@
   /**
    * A repo that needs the operator, as a card: its head links to the repo page and its need line, one
    * line, to the ask page for an ask and to the repo page otherwise, so the card holds two links side by
-   * side rather than one inside the other.
+   * side rather than one inside the other. The card of the repo the detail pane shows is marked.
    */
-  function repoCard(repo, needs, now) {
-    const card = h("div", "card repo-card attn");
+  function repoCard(repo, needs, now, selected) {
+    const card = h("div", selected ? "card repo-card attn sel" : "card repo-card attn", null, "repo:" + txt(repo.name));
+    if (selected) card.setAttribute("aria-current", "true");
     const head = link("repo-head", repoHref(repo.name));
     const name = h("div", "repo-name");
     name.append(txt(repo.name), chevron());
@@ -934,13 +1073,15 @@
     const item = needs.find((candidate) => candidate.repo === repo.name && candidate.kind !== "hands");
     // The badge names the repo's own state where it is one a need explains, else the kind of need it holds.
     const word = CARD_STATES.indexOf(repo.state) >= 0 ? repo.state : item && item.kind === "ask" ? "asking" : "blocked";
-    head.append(
-      h("span", repo.state === "stalled" ? "badge red" : "badge", word + (opened === null ? "" : " · " + span(now - opened))),
-    );
+    const badge = h("span", repo.state === "stalled" ? "badge red" : "badge", word);
+    if (opened !== null) badge.append(" · ", clockText("span", null, span(now - opened)));
+    head.append(badge);
     card.append(head);
     if (item) card.append(link("need-line", askHrefOf(item) ?? repoHref(repo.name), cutPoints(txt(item.text), NEED_POINTER_POINTS)));
     const meta = h("div", "meta");
-    meta.append("queue " + (num(repo.queueDepth) ?? 0) + " · " + workerWords(repo.worker, now) + " · " + leaseWords(repo.worker));
+    meta.append("queue " + (num(repo.queueDepth) ?? 0) + " · ");
+    workerWords(meta, repo.worker, now);
+    meta.append(" · " + leaseWords(repo.worker));
     if (num(repo.unseen) > 0) {
       meta.append(" · ");
       meta.append(h("span", "alert", repo.unseen + " unseen"));
@@ -949,8 +1090,10 @@
     return card;
   }
 
-  function repoRow(repo, now) {
-    const row = link("row", repoHref(repo.name));
+  /** A repo's row in the standup list, a link to its repo screen, marked where it is the repo the detail pane shows. */
+  function repoRow(repo, now, selected) {
+    const row = link(selected ? "row sel" : "row", repoHref(repo.name), null, "repo:" + txt(repo.name));
+    if (selected) row.setAttribute("aria-current", "true");
     const name = h("div", "name");
     name.append(dot(repo.state === "working" ? "blue" : "hollow"), txt(repo.name));
     // A stalled repo with nothing to answer is a row carrying the stalled word. The view holds no time it stalled.
@@ -958,47 +1101,42 @@
     row.append(name);
     const turn = parse(repo.worker ? repo.worker.lastTurnAt : null);
     const step = repo.step && num(repo.step.section) !== null && num(repo.step.sectionCount) !== null ? repo.step : null;
-    const meta = h(
-      "div",
-      "meta",
-      "queue " + (num(repo.queueDepth) ?? 0) + (step === null ? "" : " · section " + step.section + " of " + step.sectionCount) + (turn === null ? "" : " · last turn " + span(now - turn) + " ago"),
-    );
+    const meta = h("div", "meta", "queue " + (num(repo.queueDepth) ?? 0) + (step === null ? "" : " · section " + step.section + " of " + step.sectionCount));
+    if (turn !== null) meta.append(" · last turn ", clockText("span", null, span(now - turn)), " ago");
     if (num(repo.unseen) > 0) meta.append(" · ", h("span", "alert", repo.unseen + " unseen"));
     row.append(meta);
     if (step !== null && txt(step.next) !== "") row.append(h("div", "meta next", "Next: " + step.next));
     return row;
   }
 
-  function renderStandup(view) {
+  /**
+   * The standup as the list pane: the needs band, the direction heading with its Steer composer, the
+   * rollout card, the workers' counts, the repos sorted by state, the health band and the read times,
+   * as one column. `selectedName` is the repo the detail pane shows, whose card, row or chip is marked.
+   */
+  function renderStandup(view, selectedName) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
     const repos = list(view.repos).slice().sort(compareRepos);
     const needs = list(view.needsYou);
     const health = view.health || {};
 
-    const top = h("div", "top");
+    const top = h("div", "top", null, "top");
     const row = h("div", "top-row");
     row.append(h("h1", null, txt(view.sandbox)), stamp(view));
     top.append(row, h("p", "sub", "Unseen changes, per repo"));
-    const nav = h("nav", "toplinks");
-    nav.setAttribute("aria-label", "Shortcuts");
-    nav.append(
-      link("alert", "/needs-me", "Needs me · " + needs.length + (needs.length === 1 ? " item" : " items")),
-      link("", "/health", num(health.expected) === null ? "All sessions" : "All " + health.expected + " sessions"),
-    );
-    top.append(nav);
     out.append(top);
 
-    // On a wide screen the needs and the direction take the left column and the workers the right, so the
-    // standup fits one screen; on a phone neither column draws a box, and the sections stack as one.
-    const cols = h("div", "standup-cols");
+    // The needs and the direction lead and the workers follow; neither column draws a box of its own, so
+    // the sections stack as one column in the list pane at every width.
+    const cols = h("div", "standup-cols", null, "cols");
     const main = h("div", "standup-main");
     const side = h("div", "standup-side");
     cols.append(main, side);
     out.append(cols);
 
     const band = h("section", "card attn panel");
-    band.dataset.panel = "needs";
+    band.dataset.key = "needs";
     band.id = "needs";
     band.setAttribute("aria-labelledby", "needs-heading");
     const head = cardHead("Needs you", needs.length + (needs.length === 1 ? " item" : " items"), "h2", "needs-heading");
@@ -1018,48 +1156,54 @@
     if (rolloutBand !== null) main.append(rolloutBand);
 
     // The rollup counts workers, so each chip names its unit, as "2 workers asking" or "1 worker idle".
-    const counts = h("div", "rollup");
+    // The head is drawn only beside counts, so the column's parts carry keys and never pair by place.
+    const counts = h("div", "rollup", null, "rollup");
     for (const state of ["asking", "blocked", "stalled", "working", "idle", "dormant"]) {
       const n = repos.filter((repo) => repo.state === state).length;
       if (n === 0) continue;
-      const item = h("span");
+      const item = h("span", null, null, "state:" + state);
       item.append(h("b", CARD_STATES.indexOf(state) >= 0 ? "alert" : "", String(n)), (n === 1 ? " worker " : " workers ") + state);
       counts.append(item);
     }
-    if (counts.firstChild !== null) side.append(cardHead("Workers", null, "h2"));
+    if (counts.firstChild !== null) {
+      const workersHead = cardHead("Workers", null, "h2");
+      workersHead.dataset.key = "workers-head";
+      side.append(workersHead);
+    }
     side.append(counts);
 
-    const stack = h("section", "repos");
+    const stack = h("section", "repos", null, "repos");
     stack.setAttribute("aria-label", "Repos");
     // A repo with an ask or a blocked item in the band needs the operator and draws as a card; every other
     // repo draws as a row, or as a chip in the dormant box.
     const needy = new Set(needs.filter((item) => item.kind === "ask" || item.kind === "blocked").map((item) => item.repo));
     // The cards and rows share one wrapper, a bounded panel on a wide screen and no box of its own on a phone.
     const repoList = h("div", "repo-list panel");
-    repoList.dataset.panel = "repos";
+    repoList.dataset.key = "repos";
     for (const repo of repos.filter((candidate) => needy.has(candidate.name))) {
-      repoList.append(repoCard(repo, needs, now));
+      repoList.append(repoCard(repo, needs, now, repo.name === selectedName));
     }
     const active = repos.filter((candidate) => !needy.has(candidate.name) && candidate.state !== "dormant");
     if (active.length > 0) {
-      const group = h("div", "card");
+      const group = h("div", "card", null, "active");
       const rows = h("div", "rows");
-      for (const repo of active) rows.append(repoRow(repo, now));
+      for (const repo of active) rows.append(repoRow(repo, now, repo.name === selectedName));
       group.append(rows);
       repoList.append(group);
     }
     if (repoList.firstChild !== null) stack.append(repoList);
     const dormant = repos.filter((candidate) => !needy.has(candidate.name) && candidate.state === "dormant");
     if (dormant.length > 0) {
-      const box = h("section", "card dormant");
+      const box = h("section", "card dormant", null, "dormant-box");
       const top2 = cardHead("Dormant", dormant.length, "h2");
       top2.append(h("div", "meta", "tap to open"));
       const chips = h("div", "chips panel");
-      chips.dataset.panel = "dormant";
+      chips.dataset.key = "dormant";
       for (const repo of dormant) {
-        const chip = link("chip", repoHref(repo.name), txt(repo.name));
+        const chip = link(repo.name === selectedName ? "chip sel" : "chip", repoHref(repo.name), txt(repo.name), "repo:" + txt(repo.name));
+        if (repo.name === selectedName) chip.setAttribute("aria-current", "true");
         const at = parse(repo.worker ? repo.worker.lastTurnAt : null) ?? parse(repo.lastDoneAt);
-        if (at !== null) chip.append(h("span", "muted", "· " + span(now - at)));
+        if (at !== null) chip.append(clockText("span", "muted", "· " + span(now - at)));
         if (num(repo.unseen) > 0) chip.append(h("span", "muted", "· " + repo.unseen + " unseen"));
         chips.append(chip);
       }
@@ -1068,7 +1212,7 @@
     }
     side.append(stack);
 
-    const band2 = link("card health-band", "/health");
+    const band2 = link("card health-band", "/health", null, "health");
     const bandHead = cardHead("Health", null, "span");
     const clear = num(health.expected) !== null && num(health.holes) === 0 && num(health.hands) === 0 && num(health.held) === 0;
     // Nothing expected is nothing to call healthy, so "0 of 0 reporting" draws the neutral dot.
@@ -1089,6 +1233,65 @@
     return out;
   }
 
+  /**
+   * The name of the repo the standup list draws first: the first repo needing the operator, else the
+   * first active one, else the first dormant one, in the order `renderStandup` draws them; null where
+   * the reading holds no repo.
+   */
+  function firstRepoName(view) {
+    const repos = list(view.repos).slice().sort(compareRepos);
+    const needy = new Set(list(view.needsYou).filter((item) => item.kind === "ask" || item.kind === "blocked").map((item) => item.repo));
+    const first = repos.find((repo) => needy.has(repo.name)) ?? repos.find((repo) => repo.state !== "dormant") ?? repos[0];
+    return first === undefined || txt(first.name) === "" ? null : txt(first.name);
+  }
+
+  /**
+   * The repo reading a screen draws beside its own: the standup's first repo, which its detail pane
+   * shows while no repo is selected, and the plan screen's repo, whose plans its list pane holds;
+   * null until one arrives.
+   */
+  let repoBeside = null;
+
+  /**
+   * Takes a standup reading and, after it, the repo reading of the repo its list draws first, for the
+   * detail pane. A failed repo read is not the screen's: the standup is drawn, with the last repo
+   * reading where it is still that repo's. A repo reading arriving after the shell moved to another
+   * screen visit is dropped.
+   */
+  async function standupAccept(view) {
+    const here = visit;
+    const name = firstRepoName(view);
+    if (name === null) {
+      repoBeside = null;
+      return view;
+    }
+    try {
+      const repo = await fetchView(repoUrlOf(name));
+      if (here === visit) repoBeside = repo;
+    } catch (error) {
+      // Kept as it was: the detail pane draws the last reading while it is this repo's, and a line otherwise.
+    }
+    return view;
+  }
+
+  /** The detail pane's repo by name: its reading where the shell holds that repo's, else a line saying it is being read. */
+  function repoDetailOf(name) {
+    if (name === null) return h("p", "muted", "No repo is on the roster.");
+    if (!isObject(repoBeside) || txt(repoBeside.name) !== name) return h("p", "muted", "Reading " + name + ".");
+    return renderRepo(repoBeside);
+  }
+
+  /**
+   * The standup screen: the standup in the list pane, and in the detail pane the repo its list draws
+   * first, which is the row marked; a tapped repo opens the repo screen, whose list pane is this one.
+   */
+  function renderStandupScreen(view) {
+    const first = firstRepoName(view);
+    const out = document.createDocumentFragment();
+    out.append(pane("list", renderStandup(view, first)), detailPane(SCREEN_PATHS.standup, repoDetailOf(first)));
+    return out;
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Repo page
   // ---------------------------------------------------------------------------------------------
@@ -1104,13 +1307,27 @@
     }
   }
 
-  function repoUrl() {
-    const name = repoName();
-    return name === null ? null : "/web/repo?name=" + encodeURIComponent(name);
+  /** The repo view's address for a repo by name, route text plus the encoded name. */
+  function repoUrlOf(name) {
+    return "/web/repo?name=" + encodeURIComponent(name);
   }
 
-  function planRow(plan, now, upNext) {
-    const row = plan.root && plan.path ? link("plan-row", planHref(plan.root, plan.path)) : h("div", "plan-row");
+  function repoUrl() {
+    const name = repoName();
+    return name === null ? null : repoUrlOf(name);
+  }
+
+  /**
+   * A plan's row: a link to the plan screen, through the route table, carrying the repo the row is
+   * drawn under so that screen lists the repo's plans beside it, and marked where it is the plan the
+   * detail pane shows.
+   */
+  function planRow(plan, now, upNext, repo, selected) {
+    const key = "plan:" + txt(plan.root) + ":" + (txt(plan.path) || txt(plan.title));
+    const cls = selected ? "plan-row sel" : "plan-row";
+    const href = pathOf({ screen: "plan", name: null, query: { root: txt(plan.root), path: txt(plan.path), repo } });
+    const row = plan.root && plan.path ? link(cls, href, null, key) : h("div", cls, null, key);
+    if (selected) row.setAttribute("aria-current", "true");
     const status = txt(plan.status).toLowerCase();
     const finished = status === "complete";
     const state = h("div", "state" + (upNext ? "" : finished ? " done" : status === "in progress" ? " doing" : ""));
@@ -1139,6 +1356,45 @@
     return row;
   }
 
+  /**
+   * A repo's two plan lists, Up next and Changed since the catch-up mark, as the repo detail and the
+   * plan screen's list pane both draw them. `selected` is the root and path of the plan the detail
+   * pane shows, whose row is marked, or null.
+   */
+  function planSections(view, now, selected) {
+    const repo = txt(view.name);
+    const since = parse(view.unseenSince);
+    const isSelected = (plan) => selected !== null && txt(plan.root) === selected.root && txt(plan.path) === selected.path;
+
+    const queued = list(view.upNext);
+    const nextSection = h("section", "section", null, "up-next");
+    nextSection.append(cardHead("Up next", queued.length));
+    if (queued.length === 0) nextSection.append(h("div", "card pad muted", "Nothing is queued."));
+    else {
+      const card = h("div", "card");
+      for (const plan of queued) card.append(planRow(plan, now, true, repo, isSelected(plan)));
+      nextSection.append(card);
+    }
+
+    const changed = list(view.changed);
+    const changedSection = h("section", "section", null, "changed");
+    changedSection.append(
+      cardHead(since === null ? "Changed in the last 24 hours" : "Changed since " + dayClock(since, now), view.changed === null ? null : changed.length),
+    );
+    if (view.changed === null) changedSection.append(h("div", "card pad muted", "No plans were swept for this repo."));
+    else if (changed.length === 0) changedSection.append(h("div", "card pad muted", "Nothing has changed."));
+    else {
+      const card = h("div", "card");
+      for (const plan of changed) card.append(planRow(plan, now, false, repo, isSelected(plan)));
+      changedSection.append(card);
+    }
+    return [nextSection, changedSection];
+  }
+
+  /**
+   * A repo's detail: its name and catch-up mark, its plans, its heading, its rollout and its worker,
+   * drawn in the detail pane of the repo screen and of the standup screen.
+   */
   function renderRepo(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
@@ -1151,8 +1407,8 @@
     const catchUp = h("div", "top-row");
     const caughtUp = h("button", "linkbtn", "Caught up");
     caughtUp.type = "button";
-    caughtUp.dataset.focusKey = "caught-up";
-    caughtUp.addEventListener("click", () => sendCaughtUp(txt(view.name)));
+    caughtUp.dataset.key = "caught-up:" + txt(view.name);
+    listen(caughtUp, "click", () => sendCaughtUp(txt(view.name), view));
     catchUp.append(
       h("p", "sub", since === null ? "No catch-up mark yet, so changed means the last 24 hours." : "Since you caught up, " + dayClock(since, now)),
       caughtUp,
@@ -1163,29 +1419,8 @@
     const cols = h("div", "repo-cols");
     const left = h("div", "stack");
 
-    const queued = list(view.upNext);
-    const nextSection = h("section", "section");
-    nextSection.append(cardHead("Up next", queued.length));
-    if (queued.length === 0) nextSection.append(h("div", "card pad muted", "Nothing is queued."));
-    else {
-      const card = h("div", "card");
-      for (const plan of queued) card.append(planRow(plan, now, true));
-      nextSection.append(card);
-    }
+    const [nextSection, changedSection] = planSections(view, now, null);
     left.append(nextSection);
-
-    const changed = list(view.changed);
-    const changedSection = h("section", "section");
-    changedSection.append(
-      cardHead(since === null ? "Changed in the last 24 hours" : "Changed since " + dayClock(since, now), view.changed === null ? null : changed.length),
-    );
-    if (view.changed === null) changedSection.append(h("div", "card pad muted", "No plans were swept for this repo."));
-    else if (changed.length === 0) changedSection.append(h("div", "card pad muted", "Nothing has changed."));
-    else {
-      const card = h("div", "card");
-      for (const plan of changed) card.append(planRow(plan, now, false));
-      changedSection.append(card);
-    }
     left.append(changedSection);
 
     // The worker page leads with what is queued, then what changed, then the Heading and Rollout cards.
@@ -1196,21 +1431,37 @@
     if (rolloutBox !== null) left.append(rolloutBox);
 
     const worker = view.worker || {};
-    const box = h("section", "card pad worker");
+    const box = h("section", "card pad worker", null, "worker");
     const head = cardHead(txt(worker.lineage || view.name) + ": Worker", null, "h2");
     head.prepend(dot(worker.surfaceState === "working" ? "blue" : "hollow"));
     head.append(h("div", "meta", (worker.surfaceState || "no session") + " · " + leaseWords(worker)));
     const turn = parse(worker.lastTurnAt);
-    box.append(head, h("div", "meta", turn === null ? "No turn recorded." : "Last turn " + dayClock(turn, now) + ", " + span(now - turn) + " ago."));
+    const last = h("div", "meta", turn === null ? "No turn recorded." : "Last turn " + dayClock(turn, now) + ", ");
+    if (turn !== null) last.append(clockText("span", null, span(now - turn)), " ago.");
+    box.append(head, last);
     // The worker's talk page, where its lineage is known; the plan page carries no lineage and links nowhere.
     if (txt(worker.lineage) !== "") {
       const talk = h("div", "meta");
-      talk.append(link("", talkHref(txt(worker.lineage)), "Talk to " + txt(worker.lineage)));
+      talk.append(link("worker-talk", talkHref(txt(worker.lineage)), "Talk to " + txt(worker.lineage)));
       box.append(talk);
     }
 
     cols.append(left, box);
     out.append(cols, sources(view, ["plans", "queues", "ledger", "events", "roster", "rollout"]));
+    return out;
+  }
+
+  /**
+   * The repo screen: the standup in the list pane with this repo marked, from the standup reading the
+   * screen takes beside its own each pass, and this repo's detail in the detail pane, the sheet on a
+   * phone, which closes to the standup.
+   */
+  function renderRepoScreen(view) {
+    // The row marked is the address's repo, so the list follows the place even before its reading lands.
+    const name = repoName() ?? txt(view.name);
+    const listed = isObject(standupView) ? renderStandup(standupView, name) : h("p", "muted", "Reading the standup.");
+    const out = document.createDocumentFragment();
+    out.append(pane("list", listed), detailPane(SCREEN_PATHS.standup, renderRepo(view)));
     return out;
   }
 
@@ -1228,6 +1479,70 @@
   function planUrl() {
     const params = planParams();
     return params === null ? null : "/web/plan?root=" + encodeURIComponent(params.root) + "&path=" + encodeURIComponent(params.path);
+  }
+
+  /**
+   * The repo whose plans the plan screen's list pane holds, for the plan reading `view`: the repo the
+   * address names in its `repo` key; else the repo the first open ask on the plan names, since the plan view
+   * lists the asks of the repos whose folder is the plan's root. Null where neither names one: the
+   * plan's root is a folder name, and a repo is named for its persona, so the root names no repo.
+   */
+  function planRepoOf(view) {
+    const named = new URLSearchParams(location.search).get("repo");
+    if (named !== null && named !== "") return named;
+    const asked = list(isObject(view) ? view.openAsks : null).find((ask) => isObject(ask) && txt(ask.repo) !== "");
+    return asked === undefined ? null : txt(asked.repo);
+  }
+
+  /**
+   * Takes a plan reading and, after it, the reading of the repo whose plans the list pane holds. A
+   * failed repo read is not the screen's: the plan is drawn, with the last repo reading where it is
+   * still that repo's. A repo reading arriving after the shell moved to another screen visit is dropped.
+   */
+  async function planAccept(view) {
+    const here = visit;
+    const name = planRepoOf(view);
+    if (name === null) return view;
+    try {
+      const repo = await fetchView(repoUrlOf(name));
+      if (here === visit) repoBeside = repo;
+    } catch (error) {
+      // Kept as it was: a list that cannot refresh shows the last reading rather than vanishing.
+    }
+    return view;
+  }
+
+  /**
+   * The plan screen's list pane: the repo's plans, Up next and Changed, with this plan's row marked,
+   * from the repo reading the screen takes beside its own each pass. A plan for which no repo is
+   * named lists none and says so, with the way back to the standup.
+   */
+  function planList(name) {
+    const out = document.createDocumentFragment();
+    const top = h("div", "top", null, "top");
+    top.append(name === null ? back("/", "Standup") : back(repoHref(name), name));
+    const row = h("div", "top-row");
+    row.append(h("h1", null, "Plans"));
+    top.append(row);
+    out.append(top);
+    if (name === null) out.append(h("p", "muted", "No repo is named for this plan, so no plan list is drawn beside it."));
+    else if (!isObject(repoBeside) || txt(repoBeside.name) !== name) out.append(h("p", "muted", "Reading " + name + "."));
+    else {
+      const [nextSection, changedSection] = planSections(repoBeside, nowOf(repoBeside), planParams());
+      out.append(nextSection, changedSection);
+    }
+    return out;
+  }
+
+  /**
+   * The plan screen: its repo's plans in the list pane and the plan in the detail pane, the sheet on a
+   * phone, which closes to the repo screen, or to the standup where no repo is named for the plan.
+   */
+  function renderPlanScreen(view) {
+    const name = planRepoOf(view);
+    const out = document.createDocumentFragment();
+    out.append(pane("list", planList(name)), detailPane(name === null ? SCREEN_PATHS.standup : repoHref(name), renderPlan(view)));
+    return out;
   }
 
   function mark(kind, words) {
@@ -1294,19 +1609,24 @@
     }
 
     const asks = list(view.openAsks);
+    // The asks come and go between readings, so the section is keyed and Progress after it never pairs with it by place.
     if (asks.length > 0) {
-      const box = h("section", "section");
+      const box = h("section", "section", null, "asks");
       box.append(cardHead("Open asks", asks.length));
       const card = h("div", "card");
       for (const ask of asks) {
-        const item = h("div", "ask");
+        const item = h("div", "ask", null, itemRowKey(ask));
         const text = h("div");
         if (ask.blocking) text.append(h("span", "tag", "blocking"));
         text.append(txt(ask.text));
         item.append(text);
         if (ask.recommend) item.append(recRow(ask.recommend));
         const opened = parse(ask.openedAt);
-        if (opened !== null) item.append(h("div", "meta", "asked " + span(now - opened) + " ago"));
+        if (opened !== null) {
+          const asked = h("div", "meta", "asked ");
+          asked.append(clockText("span", null, span(now - opened)), " ago");
+          item.append(asked);
+        }
         card.append(item);
       }
       box.append(card);
@@ -1317,11 +1637,11 @@
     progress.append(cardHead("Progress"));
     if (sections.length === 0) progress.append(h("div", "meta", "This plan lists no sections."));
     else {
-      const steps = h("ul", "steps");
+      const steps = h("ul", "steps", null, "sections");
       let current = -1;
       if (!finished) current = sections.findIndex((section) => !section.done);
       sections.forEach((section, index) => {
-        const item = h("li");
+        const item = h("li", null, null, "section:" + txt(section.name));
         const isDone = finished || Boolean(section.done);
         item.append(
           isDone ? mark("done", "done") : index === current ? mark("now", "in flight") : mark("later", "waiting"),
@@ -1334,9 +1654,9 @@
     if (view.next) progress.append(h("div", "next-line", "Next: " + view.next));
     if (chapters.length > 0) {
       progress.append(cardHead("Chapters", chapters.length, "h3"));
-      const steps = h("ul", "steps");
+      const steps = h("ul", "steps", null, "chapters");
       for (const chapter of chapters) {
-        const item = h("li");
+        const item = h("li", null, null, "chapter:" + String(chapter.number));
         item.append(mark("done", "closed"));
         const body = h("span", null, "Chapter " + chapter.number + ": " + txt(chapter.completed));
         if (chapter.next) body.append(h("span", "chapter-next", "Next: " + chapter.next));
@@ -1357,6 +1677,9 @@
   const WINDOW_NAMES = { five_hour: "5 Hr", seven_day: "7 Day" };
   const HOLE_WORDS = { "no-heartbeat": "no heartbeat", "stale-heartbeat": "heartbeat stale" };
   const VERDICT_TITLES = { underused: "Underused this week", balanced: "Balanced this week", overcommitted: "Overcommitted this week" };
+  // The tone each verdict word is drawn in, by the class the verdict card's badge and the folded rail's dot take; amber is
+  // the badge's own colour, and a word with no entry, unknown, takes no tone.
+  const VERDICT_TONES = { underused: "blue", balanced: "green", overcommitted: "amber" };
   const UNKNOWN_REASONS = {
     "no-accounts": "no account reporting a weekly window",
     "no-completed-plans": "no plan finished in the last 7 days",
@@ -1366,17 +1689,20 @@
   const SESSIONS_SHOWN = 8;
   let sessionsExpanded = false;
 
+  /** One session in the health list, a link to the talk screen for its lineage, the persona name the talk view keys on, or its name where it has none. */
   function sessionCell(session) {
     const state = txt(session.surfaceState);
-    const cell = h("div", "cell");
+    const cell = link("cell", talkHref(txt(session.lineage) || txt(session.name)), null, "session:" + txt(session.name));
     const kind = state === "working" ? "blue" : state === "needs you" || state === "blocked" ? "amber" : "hollow";
-    const idle = state === "idle" || state === "exited" ? " · " + state + " " + span(num(session.idleFor) ?? 0) : state === "working" ? "" : " · " + state;
-    cell.append(dot(kind), h("span", state === "working" ? "" : "muted", txt(session.name) + idle));
+    const idle = state === "idle" || state === "exited";
+    const words = h("span", state === "working" ? "" : "muted", txt(session.name) + (idle ? " · " + state + " " : state === "working" ? "" : " · " + state));
+    if (idle) words.append(clockText("span", null, span(num(session.idleFor) ?? 0)));
+    cell.append(dot(kind), words);
     return cell;
   }
 
   function sessionsSection(view) {
-    const box = h("section", "section");
+    const box = h("section", "section", null, "sessions");
     const head = h("div", "section-head");
     head.append(label("Sessions"));
     const count = h("div");
@@ -1386,7 +1712,7 @@
     box.append(head);
 
     for (const hole of list(view.holes)) {
-      const card = h("article", "card hole");
+      const card = h("article", "card hole", null, "hole:" + txt(hole.name));
       const top = h("div", "hole-head");
       const why = Object.prototype.hasOwnProperty.call(HOLE_WORDS, hole.reason) ? HOLE_WORDS[hole.reason] : txt(hole.reason);
       top.append(h("h3", "repo-name", txt(hole.name) + ": Worker"), h("div", "why", why));
@@ -1416,9 +1742,9 @@
           sessionsExpanded ? "Show fewer" : rest + " more" + (states.length === 1 ? ", all " + states[0] : ""),
         );
         button.type = "button";
-        button.dataset.focusKey = "sessions-more";
+        button.dataset.key = "sessions-more";
         button.setAttribute("aria-expanded", sessionsExpanded ? "true" : "false");
-        button.addEventListener("click", () => {
+        listen(button, "click", () => {
           sessionsExpanded = !sessionsExpanded;
           draw(lastView);
         });
@@ -1445,7 +1771,7 @@
    * projection under it, and every window's bar at the foot, an untouched account's at 0% included.
    */
   function accountRow(account, now) {
-    const box = h("div", "card account");
+    const box = h("div", "card account", null, "account:" + (txt(account.email) || String(account.number)));
     const lines = windowLines(account);
     const untouched = lines.length > 0 && lines.every((line) => num(line.window.pct) === 0);
     const head = h("div", "account-head");
@@ -1477,24 +1803,34 @@
       box.append(h("div", "meta", "Spend " + (num(spend.pct) ?? 0) + "%" + used));
     }
 
-    // The windows close the card, so the bars of cards side by side end level.
+    // The windows close the card, so the bars of cards side by side end level. The lines above them
+    // come and go with the account's state, so the grid is keyed and never pairs with one by place.
     if (lines.length > 0) {
-      const grid = h("div", "windows");
+      const grid = h("div", "windows", null, "windows");
       for (const line of lines) {
         const pct = num(line.window.pct) ?? 0;
         const reset = parse(line.window.resetsAt);
-        grid.append(h("span", "muted", line.name), h("span", null, pct + "%"), h("span", "muted reset", reset === null ? "" : until(reset - now)), bar(pct, pct >= 80));
+        const key = "window:" + line.name;
+        const track = bar(pct, pct >= 80);
+        track.dataset.key = key + ":bar";
+        grid.append(h("span", "muted", line.name, key), h("span", null, pct + "%", key + ":pct"), clockText("span", "muted reset", reset === null ? "" : until(reset - now), key + ":reset"), track);
       }
       box.append(grid);
     }
     return box;
   }
 
+  /** The tone class of a verdict word, or "" for a word with none. */
+  function verdictTone(word) {
+    return Object.prototype.hasOwnProperty.call(VERDICT_TONES, word) ? VERDICT_TONES[word] : "";
+  }
+
   /** The sandbox's verdict: the word, the budget against the queue, the lever, and the formula's footer. A view without one draws nothing. */
   function verdictCard(view) {
     const verdict = view.verdict;
     if (!isObject(verdict)) return null;
-    const card = h("div", "card verdict");
+    // Keyed, since a view may carry no verdict and the account tiles after it must not pair with it by place.
+    const card = h("div", "card verdict", null, "verdict");
     const head = h("div", "verdict-head");
     const left = num(verdict.plansLeft);
     const queued = num(verdict.queued);
@@ -1509,8 +1845,7 @@
       // The word is chosen on unrounded figures, where overcommitted is always below the queue and underused always above it,
       // so those two take their mark from the word; rounding cannot pull a balanced figure below the queue.
       const mark = verdict.word === "overcommitted" ? "<" : verdict.word === "underused" ? ">" : left > queued ? ">" : "=";
-      const tone = { underused: "blue", balanced: "green" };
-      head.append(h("span", "badge " + (Object.prototype.hasOwnProperty.call(tone, verdict.word) ? tone[verdict.word] : ""), "budget " + mark + " queue"));
+      head.append(h("span", "badge " + verdictTone(verdict.word), "budget " + mark + " queue"));
     }
     card.append(head);
     const rows = h("div", "verdict-rows");
@@ -1541,7 +1876,8 @@
     head.append(count);
     card.append(head);
     const published = parse(kit.updatedAt);
-    const line = h("div", "kit-line", published === null ? "Release time unknown." : "Published " + span(now - published) + " ago");
+    const line = h("div", "kit-line", published === null ? "Release time unknown." : "Published ");
+    if (published !== null) line.append(clockText("span", null, span(now - published)), " ago");
     if (kit.sha) line.append(" ", h("span", "muted mono", txt(kit.sha)));
     card.append(line);
     if (behind.length > 0) card.append(h("div", "meta", "Restart to take it: " + behind.map((session) => txt(session.name)).join(", ")));
@@ -1549,12 +1885,14 @@
   }
 
   function capacitySection(view, now) {
-    const box = h("section", "section");
+    const box = h("section", "section", null, "capacity");
     const accounts = list(view.capacity);
     const head = h("div", "section-head");
     head.append(label("Capacity · " + accounts.length + (accounts.length === 1 ? " account" : " accounts")));
     const read = parse(view.asOf ? view.asOf.usage : null);
-    head.append(h("div", "stamp", read === null ? "swap: no reading yet" : "swap read " + span(now - read) + " ago"));
+    const swap = h("div", "stamp", read === null ? "swap: no reading yet" : "swap read ");
+    if (read !== null) swap.append(clockText("span", null, span(now - read)), " ago");
+    head.append(swap);
     box.append(head);
     const verdict = verdictCard(view);
     if (verdict) box.append(verdict);
@@ -1571,7 +1909,7 @@
   }
 
   function handsSection(view, now) {
-    const box = h("section", "section");
+    const box = h("section", "section", null, "hands");
     const hands = list(view.hands);
     box.append(label("Your hands · " + hands.length));
     const card = h("div", "card");
@@ -1579,15 +1917,17 @@
     else {
       const items = h("ol", "hands");
       hands.forEach((hand, index) => {
-        const item = h("li");
+        const item = h("li", null, null, itemRowKey(hand));
         item.append(h("div", "n", String(index + 1)));
         const body = h("div");
         body.append(h("div", "text", txt(hand.text)));
-        const parts = [];
-        if (hand.repo) parts.push(hand.repo);
         const opened = parse(hand.openedAt);
-        if (opened !== null) parts.push(span(now - opened) + " ago");
-        if (parts.length > 0) body.append(h("div", "meta", parts.join(" · ")));
+        if (hand.repo || opened !== null) {
+          const meta = h("div", "meta", hand.repo ? String(hand.repo) : null);
+          if (hand.repo && opened !== null) meta.append(" · ");
+          if (opened !== null) meta.append(clockText("span", null, span(now - opened)), " ago");
+          body.append(meta);
+        }
         item.append(body);
         items.append(item);
       });
@@ -1598,13 +1938,13 @@
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Sibling sandboxes: the rail on every page and the health page's card
+  // Sibling sandboxes: the pills at the rail's foot on every screen and the health screen's card
   // ---------------------------------------------------------------------------------------------
 
   /**
-   * The path a sibling pill opens on the sibling, by this page's name: the pages that name no object
-   * of this sandbox open the same page there, and the others open the sibling's standup. The href is
-   * the sibling's origin, from this broker's own configuration, plus one of these fixed paths.
+   * The path a sibling pill opens on the sibling, by the screen drawn: the screens that name no
+   * object of this sandbox open the same screen there, and the others open the sibling's standup.
+   * The href is the sibling's origin, from this broker's own configuration, plus one of these fixed paths.
    */
   const RAIL_PATHS = { standup: "/", "needs-me": "/needs-me", health: "/health" };
 
@@ -1648,18 +1988,18 @@
     const siblings = list(view.siblings);
     if (siblings.length === 0) return null;
     const now = siblingsNow(view);
-    const rail = h("nav", "rail");
-    rail.setAttribute("aria-label", "Sandboxes");
-    rail.append(h("span", "pill active", txt(view.sandbox)));
-    const path = Object.prototype.hasOwnProperty.call(RAIL_PATHS, document.body.dataset.page) ? RAIL_PATHS[document.body.dataset.page] : "";
+    const pills = h("nav", "sandboxes", null, "sandboxes");
+    pills.setAttribute("aria-label", "Sandboxes");
+    const path = Object.prototype.hasOwnProperty.call(RAIL_PATHS, screen) ? RAIL_PATHS[screen] : "";
     for (const sibling of siblings) {
       if (!isObject(sibling)) continue;
       const origin = txt(sibling.origin);
-      const pill = SIBLING_ORIGIN.test(origin) ? link("pill", origin + path, null) : h("span", "pill");
+      const key = "sibling:" + txt(sibling.name);
+      const pill = SIBLING_ORIGIN.test(origin) ? link("pill", origin + path, null, key) : h("span", "pill", null, key);
       siblingWords(pill, sibling, now);
-      rail.append(pill);
+      pills.append(pill);
     }
-    return rail;
+    return pills;
   }
 
   /** The health page's "Other sandboxes" card: every count the summary carries, one row per sibling. */
@@ -1673,7 +2013,7 @@
     const card = h("div", "card");
     for (const sibling of siblings) {
       if (!isObject(sibling)) continue;
-      const row = h("div", "row");
+      const row = h("div", "row", null, "sibling:" + txt(sibling.name));
       row.append(h("span", "name", txt(sibling.name)));
       const words = h("span", "meta");
       const summary = sibling.summary;
@@ -1695,27 +2035,30 @@
       card.append(row);
     }
     const read = parse(view.asOf);
-    card.append(h("div", "note", "counts only, polled over the tailnet · " + (read === null ? "no poll yet" : "as of " + dayClock(read, now))));
+    const note = h("div", "note", "counts only, polled over the tailnet · " + (read === null ? "no poll yet" : "as of "));
+    if (read !== null) note.append(clockText("span", null, dayClock(read, now)));
+    card.append(note);
     box.append(card);
     return box;
   }
 
+  /**
+   * The health screen: the sessions in the list pane, each a link to its talk screen, and the
+   * capacity with its verdict, the hands and the other sandboxes in the detail pane. No row is
+   * selected, so the phone stacks the two panes in its one column.
+   */
   function renderHealth(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
-    const top = h("div", "top");
-    top.append(back("/", "Standup"));
+    const top = h("div", "top", null, "top");
     const row = h("div", "top-row");
     row.append(h("h1", null, "Health"), stamp(view));
     top.append(row);
-    out.append(top);
-    const cols = h("div", "health-cols");
     const hands = handsSection(view, now);
     // Under the hands, where the mockup places it: the other sandboxes are the operator's, not a session's.
     const others = otherSandboxes(siblingsView);
     if (others !== null) hands.append(others);
-    cols.append(sessionsSection(view), capacitySection(view, now), hands);
-    out.append(cols);
+    out.append(pane("list", top, sessionsSection(view)), pane("detail", capacitySection(view, now), hands));
     return out;
   }
 
@@ -2010,8 +2353,11 @@
   async function loadTalkPlan() {
     const url = planUrl();
     if (url === null) return;
+    const here = visit;
+    const lineage = talk.lineage;
     try {
       const view = await fetchView(url);
+      if (here !== visit || talk.lineage !== lineage) return;
       talk.plan = { title: txt(view.title), sections: list(view.sections).length };
       if (lastView !== null) draw(lastView);
     } catch (error) {
@@ -2019,23 +2365,29 @@
     }
   }
 
-  /** Reads the ring now, off the poll's timer, and draws what came back; an answer the page has left draws nothing. */
+  /**
+   * Reads the ring now, off the poll's timer, and draws what came back. An answer the page has left
+   * draws nothing: one for another lineage, or one arriving after the shell moved to another screen
+   * visit, so a talk view is never drawn through another screen's renderer.
+   */
   async function refreshTalk() {
+    const here = visit;
     const view = await talkAccept(await fetchView(talkUrl()));
-    if (view === null) return;
+    if (view === null || here !== visit) return;
     draw(view);
     lastView = view;
     lastOk = Date.now();
     notice.hidden = true;
   }
 
-  /** Points the page at another lineage: the drawn lines go, and the whole ring is fetched. */
-  async function retarget(lineage) {
-    if (lineage === talk.lineage) return;
+  /** Points the talk state at a lineage and drops what was held for the last one: its lines, echoes, ring, statuses and plan. */
+  function resetTalk(lineage) {
     talk.lineage = lineage;
     talk.lines = [];
     talk.echoes = [];
     talk.nextSeq = 0;
+    talk.ringStart = null;
+    talk.plan = null;
     talk.status = null;
     talk.pendingStatus = null;
     talk.drawn = new Set();
@@ -2043,7 +2395,19 @@
     talk.waiting = false;
     // A kept id names a file saved for the old lineage's session, so each pick is sent again.
     for (const pick of talk.picked) pick.id = null;
-    history.replaceState(null, "", talkHref(lineage));
+  }
+
+  /**
+   * Points the page at another lineage: the drawn lines go, and the whole ring is fetched. The
+   * address and the place the shell holds move together, so a later link to either lineage is told
+   * apart from the screen drawn.
+   */
+  async function retarget(lineage) {
+    if (lineage === talk.lineage) return;
+    resetTalk(lineage);
+    history.replaceState(null, "", talkPath(lineage));
+    const at = routeOf(window.location);
+    if (at !== null) lastPlace = placeOf(at);
     try {
       await refreshTalk();
     } catch (error) {
@@ -2101,9 +2465,7 @@
    * dropped connection, an HTTP 5xx or an unreadable body, keeps it, marked not yet confirmed, since
    * the broker may still deliver the line; `echoMark` reads it may not have sent once the timer set
    * at that end, `UNSENT_MARK_MS` long, flags it, and the timer draws the page then, since a broker
-   * that is down answers no poll. A selection or a line being typed holds that draw as it holds a
-   * poll, for at most as many tries of `POLL_MS` as the poll's hold allows, after which the timer
-   * draws over it. A refusal of a send whose echo already took a landing, while an
+   * that is down answers no poll. A refusal of a send whose echo already took a landing, while an
    * earlier send of the same words still waits, moves that landing to the earlier send, by
    * `moveLanding`, which gives the refused send's files back to the picks. A failure
    * before the request goes out, such as an upload
@@ -2197,18 +2559,11 @@
             // The mark `echoMark` draws changes `UNSENT_MARK_MS` after this end, on the timer's own
             // clock, which flags the echo unsent at that moment and draws it. A broker that is down
             // fails every poll, which draws nothing, so no poll's draw can be relied on to carry the
-            // mark: a selection or a line being typed holds the draw as it holds a poll, and the
-            // timer tries again every `POLL_MS`, skipping at most `HOLD_POLLS` times before it draws
-            // over the hold, as the poll does. An echo landed or cleared by then is off the list and
-            // draws nothing. The end is set once per send, so an echo gets one timer.
-            const drawUnsent = (skipped) => {
-              if (lastView === null || talk.echoes.indexOf(echo) < 0) return;
-              if ((selected() === null && !composing()) || skipped >= HOLD_POLLS) draw(lastView);
-              else setTimeout(() => drawUnsent(skipped + 1), POLL_MS);
-            };
+            // mark. An echo landed or cleared by then is off the list and draws nothing. The end is
+            // set once per send, so an echo gets one timer.
             setTimeout(() => {
               echo.unsent = true;
-              drawUnsent(0);
+              if (lastView !== null && talk.echoes.indexOf(echo) >= 0) draw(lastView);
             }, UNSENT_MARK_MS);
           }
           if (here && echo !== null && talk.echoes.indexOf(echo) >= 0) talk.status = UNCONFIRMED_WORDS;
@@ -2249,10 +2604,12 @@
    * every other answer is said in the status line under the waiting block. The broker's answer
    * stays the status whatever the read after it does: a read that fails is said in the page's
    * notice, as a failed poll is. An answer that comes back after a pill moved the page to another
-   * lineage is about a block no longer drawn, so it is dropped unsaid.
+   * lineage is about a block no longer drawn, so it is dropped unsaid. Once the shell has moved to
+   * another screen visit, the reading it holds is that screen's, and the block is never looked for in it.
    */
   async function postPending(name, body) {
     const lineage = talk.lineage;
+    const here = visit;
     if (talk.acting || lineage === null) return;
     talk.acting = true;
     if (lastView !== null) draw(lastView);
@@ -2286,7 +2643,8 @@
         setNotice("Could not refresh: " + (error instanceof Unreadable ? error.message : "the reading could not be drawn") + ". Showing the last reading.");
         return;
       }
-      if (talk.lineage !== lineage) return;
+      // A refresh from another screen visit drew nothing, so the reading held is not this lineage's.
+      if (talk.lineage !== lineage || here !== visit) return;
       // Where nothing is waiting any longer the block is gone, so its outcome is said under the composer.
       if (lastView !== null && !hasPending(lastView)) {
         if (talk.pendingStatus !== null) talk.status = talk.pendingStatus;
@@ -2299,12 +2657,12 @@
   }
 
   /** A full-size button for the waiting block, its words set as text. */
-  function pendingButton(cls, words, focusKey, onClick) {
+  function pendingButton(cls, words, key, onClick) {
     const button = h("button", cls, words);
     button.type = "button";
     button.disabled = talk.acting;
-    button.dataset.focusKey = focusKey;
-    button.addEventListener("click", onClick);
+    button.dataset.key = key;
+    listen(button, "click", onClick);
     return button;
   }
 
@@ -2317,18 +2675,18 @@
    */
   function questionCard(entry) {
     const id = txt(entry.entryId);
-    const card = h("div", "ask");
+    const card = h("div", "ask", null, "q:" + id);
     // Each question keeps its position in the ask, which is what a pick sends as its index.
     list(entry.questions).forEach((question, at) => {
       if (question === null || typeof question !== "object") return;
-      const line = h("div", "ask-line");
+      const line = h("div", "ask-line", null, "question:" + at);
       line.append(h("span", "ask-tag", "ASK:"), " ");
       if (txt(question.header) !== "") line.append(h("b", null, txt(question.header)), " · ");
       line.append(txt(question.question));
       card.append(line);
       if (entry.answerable !== true) return;
       const options = list(question.options).filter((option) => option !== null && typeof option === "object" && num(option.index) !== null);
-      const group = h("div", "ask-options");
+      const group = h("div", "ask-options", null, "options:" + at);
       group.setAttribute("role", "group");
       group.setAttribute("aria-label", txt(question.question) || "Options");
       const chosen = options.filter((option) => option.chosen === true).map((option) => option.index);
@@ -2363,7 +2721,7 @@
   function permissionCard(request) {
     const requestId = txt(request.requestId);
     const nonce = txt(request.nonce);
-    const card = h("div", "perm");
+    const card = h("div", "perm", null, "p:" + requestId);
     const head = h("div", "ask-line");
     head.append(h("span", "ask-tag", "PERMISSION:"), " ", h("b", null, txt(request.toolName)), " · request " + requestId);
     card.append(head);
@@ -2406,7 +2764,7 @@
   function pendingSection(view) {
     const { questions, permissions } = pendingOf(view);
     if (questions.length === 0 && permissions.length === 0) return null;
-    const card = h("section", "card pad attn waiting");
+    const card = h("section", "card pad attn waiting", null, "waiting");
     card.setAttribute("aria-label", "Waiting on you");
     card.append(label("Waiting on you", "h2"));
     // One slot of fixed height sits above the cards and is always drawn, so a card arriving behind it
@@ -2416,8 +2774,8 @@
     if (held > 0) {
       const more = h("button", "held-more", held + " more waiting");
       more.type = "button";
-      more.dataset.focusKey = "held-more";
-      more.addEventListener("click", showHeld);
+      more.dataset.key = "held-more";
+      listen(more, "click", showHeld);
       slot.append(more);
     } else {
       slot.append(h("span", "meta", "Nothing else waiting"));
@@ -2458,9 +2816,9 @@
     return head;
   }
 
-  function talkLine(line, lineage, now) {
+  function talkLine(line, lineage, now, key) {
     const mine = line.kind === "inbound" && line.senderClass === "operator";
-    const box = h("div", "msg" + (mine ? " mine" : ""));
+    const box = h("div", "msg" + (mine ? " mine" : ""), null, key);
     box.append(talkHead(line, lineage, now));
     const files = list(line.files).filter((file) => file !== null && typeof file === "object");
     // A line of files alone draws no empty bubble above them.
@@ -2496,18 +2854,19 @@
     const params = planParams();
 
     const top = h("div", "top");
-    top.append(params === null ? back("/", "Standup") : back(planHref(params.root, params.path), talk.plan ? talk.plan.title || "Plan" : "Plan"));
+    top.append(params === null ? back("/", "Standup") : back(planHref(params.root, params.path, lineage), talk.plan ? talk.plan.title || "Plan" : "Plan"));
     const row = h("div", "top-row");
     row.append(h("h1", null, lineage));
     top.append(row);
     out.append(top);
 
+    // The plan card and the session pills arrive after the first draw, so each is keyed and the parts after them never pair with them by place.
     if (talk.plan !== null) {
-      const card = h("section", "card pad");
+      const card = h("section", "card pad", null, "about");
       card.setAttribute("aria-label", "Talking about");
       const head = h("div", "section-head");
       head.append(label("Talking about", "h2"));
-      if (params !== null) head.append(link("tall", planHref(params.root, params.path), "Plan"));
+      if (params !== null) head.append(link("tall", planHref(params.root, params.path, lineage), "Plan"));
       card.append(head);
       const what = h("div", "talk-about");
       what.append(h("b", null, talk.plan.title));
@@ -2518,15 +2877,15 @@
 
     const names = list(view.lineages).filter((name) => typeof name === "string");
     if (names.length > 0) {
-      const pills = h("div", "chips");
+      const pills = h("div", "chips", null, "pills");
       pills.setAttribute("role", "group");
       pills.setAttribute("aria-label", "Sessions to talk with");
       for (const name of names) {
         const pill = h("button", name === lineage ? "chip on" : "chip", name);
         pill.type = "button";
         pill.setAttribute("aria-pressed", name === lineage ? "true" : "false");
-        pill.dataset.focusKey = "pill-" + name;
-        pill.addEventListener("click", () => retarget(name));
+        pill.dataset.key = "pill-" + name;
+        listen(pill, "click", () => retarget(name));
         pills.append(pill);
       }
       out.append(pills);
@@ -2540,29 +2899,33 @@
     out.append(earlier);
 
     const lines = talk.lines;
-    const transcript = h("section", "transcript");
+    const transcript = h("section", "transcript", null, "transcript");
     transcript.setAttribute("aria-label", "Conversation");
     const shown = talk.echoes.filter((echo) => echo.shown);
     if (lines.length === 0 && shown.length === 0) transcript.append(h("div", "muted talk-empty", "No lines yet."));
-    for (const line of lines) transcript.append(talkLine(line, lineage, now));
+    // A ring line's key is its sequence number, and an echo's the count of the send that made it.
+    for (const line of lines) transcript.append(talkLine(line, lineage, now, "line:" + String(line.seq)));
     // Sent lines the ring has not carried back yet, in the operator's own style.
-    for (const echo of shown) transcript.append(talkLine({ kind: "inbound", senderClass: "operator", author: echo.author, text: echo.text, at: echo.at, echo: echoMark(echo) }, lineage, now));
+    for (const echo of shown) transcript.append(talkLine({ kind: "inbound", senderClass: "operator", author: echo.author, text: echo.text, at: echo.at, echo: echoMark(echo) }, lineage, now, "echo:" + String(echo.send)));
     out.append(transcript);
 
     const newest = lines.length === 0 ? null : num(lines[lines.length - 1].at);
-    out.append(h("div", "note", (newest === null ? "no lines yet" : "newest line " + dayClock(newest, now)) + " · as of " + dayClock(now, now)));
+    const note = h("div", "note", (newest === null ? "no lines yet" : "newest line " + dayClock(newest, now)) + " · as of ");
+    note.append(clockText("span", null, dayClock(now, now)));
+    out.append(note);
 
     // What the session is held on, between the conversation and the composer, so the composer's
     // typed line sits under the question it can answer.
     const waiting = pendingSection(view);
     if (waiting !== null) out.append(waiting);
 
-    // The composer. The draft lives in `talk.draft`, so a poll's redraw puts the typed text back,
-    // and the input's focus key puts the caret back in it. While a question waits on a typed answer,
+    // The composer. The draft lives in `talk.draft` and is what the line is built with, so the patch
+    // keeps the live line, its caret and its focus. While a question waits on a typed answer,
     // Enter and Send post the line as that answer, as a message in the Discord thread would be.
     const answering = takesTypedAnswer(view);
-    const composer = h("div", "composer");
-    const field = h("div", "composer-row");
+    const composer = h("div", "composer", null, "composer");
+    // The file chips draw above the row only while files are picked, so the row is keyed and its line never pairs with the chips by place.
+    const field = h("div", "composer-row", null, "row");
     const input = h("input", "compose-input");
     input.type = "text";
     input.id = "talk-compose";
@@ -2571,11 +2934,11 @@
     input.enterKeyHint = "send";
     input.placeholder = "Message " + lineage;
     input.value = talk.draft;
-    input.dataset.focusKey = "talk-compose";
-    input.addEventListener("input", () => {
-      talk.draft = input.value;
+    input.dataset.key = "talk-compose";
+    listen(input, "input", (event) => {
+      talk.draft = event.currentTarget.value;
     });
-    input.addEventListener("keydown", (event) => {
+    listen(input, "keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
         sendLine(answering);
@@ -2586,8 +2949,8 @@
     send.disabled = talk.sending;
     send.setAttribute("aria-label", "Send");
     send.textContent = "Send";
-    send.dataset.focusKey = "talk-send";
-    send.addEventListener("click", () => sendLine(answering));
+    send.dataset.key = "talk-send";
+    listen(send, "click", () => sendLine(answering));
     const compose = h("label", "sr", "Message to " + lineage);
     compose.htmlFor = "talk-compose";
     // The picker is the browser's own file input, kept out of sight; the Attach button opens it, so
@@ -2597,27 +2960,30 @@
     picker.multiple = true;
     picker.hidden = true;
     picker.id = "talk-file";
-    picker.addEventListener("change", () => pickFiles(picker.files));
+    picker.dataset.key = "talk-file";
+    listen(picker, "change", (event) => pickFiles(event.currentTarget.files));
     const attach = h("button", "attach", "Attach");
     attach.type = "button";
     attach.disabled = talk.sending || talk.picked.length >= MAX_FILES;
     attach.setAttribute("aria-label", "Attach files");
-    attach.dataset.focusKey = "talk-attach";
-    attach.addEventListener("click", () => picker.click());
+    attach.dataset.key = "talk-attach";
+    // The picker on the page, which is the one the operator's choice lands on, rather than the one built beside this button.
+    listen(attach, "click", () => document.getElementById("talk-file").click());
     field.append(compose, picker, attach, input, send);
     if (talk.picked.length > 0) {
-      const chips = h("div", "file-chips");
+      const chips = h("div", "file-chips", null, "files");
       chips.setAttribute("role", "group");
       chips.setAttribute("aria-label", "Files to send");
       talk.picked.forEach((pick, index) => {
-        const chip = h("div", "file-chip");
+        // A picked file has no id until it is sent, so its chip's key carries its place among the picks.
+        const chip = h("div", "file-chip", null, "file:" + String(index) + ":" + pick.name);
         chip.append(h("span", "file-chip-name", pick.name + " · " + byteSize(pick.size)));
         const remove = h("button", "file-chip-remove", "×");
         remove.type = "button";
         remove.disabled = talk.sending;
         remove.setAttribute("aria-label", "Remove " + pick.name);
-        remove.dataset.focusKey = "talk-remove-" + index;
-        remove.addEventListener("click", () => {
+        remove.dataset.key = "talk-remove-" + index;
+        listen(remove, "click", () => {
           talk.picked = talk.picked.filter((held) => held !== pick);
           if (lastView !== null) draw(lastView);
         });
@@ -2635,6 +3001,59 @@
       composer.append(status);
     }
     out.append(composer);
+    return out;
+  }
+
+  /** The talk screen's path for a lineage, through the route table, keeping the plan the address names. */
+  function talkPath(lineage) {
+    const params = planParams();
+    const query = params === null ? { lineage } : { lineage, root: params.root, path: params.path };
+    return pathOf({ screen: "talk", name: null, query });
+  }
+
+  /**
+   * The talk screen's list pane: the lineages the talk view lists, by name, the addressed one among
+   * them even where its session has ended, each a link to its talk screen, with the one the composer
+   * talks to marked.
+   */
+  function talkList(view) {
+    const out = document.createDocumentFragment();
+    const lineage = txt(view.lineage);
+    const top = h("div", "top", null, "top");
+    const row = h("div", "top-row");
+    row.append(h("h1", null, "Talk"));
+    top.append(row);
+    out.append(top);
+    const names = list(view.lineages).filter((name) => typeof name === "string" && name !== "").sort();
+    if (names.length === 0) {
+      out.append(h("p", "muted", "No live session to talk with."));
+      return out;
+    }
+    const card = h("div", "card", null, "lineages");
+    card.setAttribute("aria-label", "Sessions to talk with");
+    const rows = h("div", "rows");
+    for (const name of names) {
+      const on = name === lineage;
+      const pick = link(on ? "row sel" : "row", talkPath(name), null, "lineage:" + name);
+      if (on) pick.setAttribute("aria-current", "true");
+      const words = h("div", "name");
+      words.append(dot(on ? "blue" : "hollow"), name);
+      pick.append(words);
+      rows.append(pick);
+    }
+    card.append(rows);
+    out.append(card);
+    return out;
+  }
+
+  /**
+   * The talk screen: the sessions to talk with in the list pane, and the composer with the lines, the
+   * waiting prompts and the session pills in the detail pane, the sheet on a phone. Talk has no list
+   * of its own without a lineage, so the sheet closes to the health screen, whose list holds the sessions.
+   */
+  function renderTalkScreen(view) {
+    const out = document.createDocumentFragment();
+    out.append(pane("list", talkList(view)), detailPane(SCREEN_PATHS.health, renderTalk(view)));
     return out;
   }
 
@@ -2826,16 +3245,24 @@
   }
 
   /**
-   * Fetches the reading again and draws it, so an ask whose recommendation changed, or a rollout just marked, shows the new
-   * text now rather than on the next poll; a fetch that fails draws the last reading instead.
+   * Fetches the reading again, with the readings drawn beside it as the poll reads them, and draws it,
+   * so an ask whose recommendation changed, or a rollout just marked, shows the new text now in both
+   * panes rather than on the next poll; a fetch that fails draws the last reading instead. An answer
+   * arriving after the shell moved to another screen visit draws nothing, so a reading is never drawn
+   * through another screen's renderer.
    */
   async function refreshView() {
+    const here = visit;
     try {
-      const view = await fetchView(page.url());
+      const [read] = await Promise.all([fetchView(page.url()), fetchBeside()]);
+      if (here !== visit) return;
+      const view = await acceptView(read, here);
+      if (view === null || here !== visit) return;
       lastView = view;
       lastOk = Date.now();
       draw(view);
     } catch (error) {
+      if (here !== visit) return;
       if (isGone(error)) drawGone();
       else redrawNeeds();
     }
@@ -2867,6 +3294,8 @@
     needsMe.out.add(key);
     needsMe.statuses.set(key, "sending");
     redrawNeeds();
+    // The visit the act was sent on: once the shell has moved on, the reading held is another screen's.
+    const here = visit;
     let status = null;
     try {
       const answer = await postAgree(act, body, TIMEOUT_MS);
@@ -2878,7 +3307,7 @@
       needsMe.acting = false;
       needsMe.out.delete(key);
       if (status === "delivered") {
-        if (lastView !== null) needsMe.delivered.set(key, lastView);
+        if (lastView !== null && here === visit) needsMe.delivered.set(key, lastView);
         if (needsMe.correct !== null && needsMe.correct.key === key) needsMe.correct = null;
       }
       if (status === "changed") await refreshView();
@@ -2942,6 +3371,8 @@
     }
     needsMe.acting = true;
     redrawNeeds();
+    // The visit the batch was sent on: once the shell has moved on, the reading held is another screen's.
+    const here = visit;
     let changed = false;
     try {
       const answer = await postAgree("agree-batch", { items: sent.map(agreeBody) }, batchTimeoutMs(sent.length));
@@ -2950,7 +3381,7 @@
         const result = results[at];
         const status = result !== null && typeof result === "object" ? txt(result.status) : null;
         if (status === "changed") changed = true;
-        if (status === "delivered" && lastView !== null) needsMe.delivered.set(needsKey(item), lastView);
+        if (status === "delivered" && lastView !== null && here === visit) needsMe.delivered.set(needsKey(item), lastView);
         needsMe.statuses.set(needsKey(item), status !== null ? actWords(status, "agree", item) : "no answer for this one, so the Agree is not confirmed");
       });
     } catch (error) {
@@ -3011,12 +3442,12 @@
   }
 
   /** A full-size act button, its words set as text, disabled while any act is out. */
-  function actButton(cls, words, focusKey, onClick) {
+  function actButton(cls, words, key, onClick) {
     const button = h("button", cls, words);
     button.type = "button";
     button.disabled = needsMe.acting;
-    button.dataset.focusKey = focusKey;
-    button.addEventListener("click", onClick);
+    button.dataset.key = key;
+    listen(button, "click", onClick);
     return button;
   }
 
@@ -3026,8 +3457,8 @@
     const button = h("button", open ? "nm-context on" : "nm-context", "Context");
     button.type = "button";
     button.setAttribute("aria-expanded", open ? "true" : "false");
-    button.dataset.focusKey = "context|" + key;
-    button.addEventListener("click", () => toggleContext(item, withAsk));
+    button.dataset.key = "context|" + key;
+    listen(button, "click", () => toggleContext(item, withAsk));
     return button;
   }
 
@@ -3038,7 +3469,7 @@
    * the ask page's own rule.
    */
   function contextPanel(item, held, cut, now) {
-    const panel = h("div", "nm-context-body");
+    const panel = h("div", "nm-context-body", null, "context");
     if (cut) panel.append(md("div", "nm-whole", item.text));
     if (held.loading) {
       panel.append(h("div", "meta", "reading"));
@@ -3054,7 +3485,7 @@
     if (held.lines !== null) {
       if (held.lines.length === 0) panel.append(h("div", "meta", "No lines from the session since this opened."));
       for (const line of held.lines) {
-        const row = h("div", "nm-line");
+        const row = h("div", "nm-line", null, "line:" + String(line.seq));
         row.append(talkHead(line, txt(item.repo), now), h("div", null, txt(line.text)));
         panel.append(row);
       }
@@ -3070,7 +3501,7 @@
    */
   function correctBox(item, key) {
     const held = needsMe.correct;
-    const box = h("div", "nm-correct-box");
+    const box = h("div", "nm-correct-box", null, "correct");
     box.append(h("div", "nm-quote", txt(item.text)));
     const caption = h("label", "sr", "Your words to " + txt(item.repo) + " on this ask");
     caption.htmlFor = "correct-text";
@@ -3081,14 +3512,16 @@
     field.placeholder = "Your words";
     field.value = held.draft;
     field.disabled = needsMe.acting;
-    field.dataset.focusKey = "correct-text|" + key;
+    field.dataset.key = "correct-text|" + key;
     const send = actButton("nm-send", "Send", "correct-send|" + key, () => sendCorrect(item));
     send.disabled = needsMe.acting || held.draft.trim() === "";
-    field.addEventListener("input", () => {
-      held.draft = field.value;
-      send.disabled = needsMe.acting || field.value.trim() === "";
+    // The draft is read from the field the event fired on, and the redraw sets Send's state from it; the
+    // patch keeps this field and its caret, since the draft it draws is the field's own value.
+    listen(field, "input", (event) => {
+      held.draft = event.currentTarget.value;
+      redrawNeeds();
     });
-    field.addEventListener("keydown", (event) => {
+    listen(field, "keydown", (event) => {
       if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
         event.preventDefault();
         sendCorrect(item);
@@ -3102,7 +3535,7 @@
 
   /** The broker's last word beside an item, read out as a status. */
   function statusLine(words) {
-    const status = h("div", "meta nm-status", words);
+    const status = h("div", "meta nm-status", words, "status");
     status.setAttribute("role", "status");
     return status;
   }
@@ -3115,7 +3548,7 @@
    * a true condition and takes none.
    */
   function needsItem(item, now) {
-    const box = h("div", "nm-item");
+    const box = h("div", "nm-item", null, itemRowKey(item));
     const anchor = askKey(item);
     if (anchor !== null) box.id = anchor;
     const head = h("div", "nm-head");
@@ -3123,7 +3556,7 @@
     const opened = parse(item.openedAt);
     if (item.kind === "blocked") who.append(" ", h("span", "tag", "blocked"));
     else if (item.kind === "ask" && item.blocking === true) who.append(" ", h("span", "tag", "blocking"));
-    head.append(who, h("span", "nm-age", opened === null ? "" : span(now - opened)));
+    head.append(who, clockText("span", "nm-age", opened === null ? "" : span(now - opened)));
     const headline = cutPoints(txt(item.text), HEADLINE_POINTS);
     // An ask's question opens its own page; any other item's text is plain.
     const href = askHrefOf(item);
@@ -3135,7 +3568,7 @@
     if (needsMe.out.has(key)) box.classList.add("nm-acting");
     // An item's page state is keyed on its id, so an item the view gives no id takes no act and no Context.
     const named = txt(item.kind === "blocked" ? item.entryId : item.askId) !== "";
-    const controls = h("div", "nm-controls");
+    const controls = h("div", "nm-controls", null, "controls");
     if (item.kind === "blocked") {
       if (named) controls.append(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => sendDismiss(item)));
     } else if (named) {
@@ -3156,52 +3589,96 @@
 
   /** What stands where a delivered item was until the next reading: the act's word and the session it went to. */
   function deliveredLine(item) {
-    const line = h("div", "nm-item nm-sent", needsMe.statuses.get(itemKey(item)) ?? "");
+    const line = h("div", "nm-item nm-sent", needsMe.statuses.get(itemKey(item)) ?? "", itemRowKey(item));
     line.setAttribute("role", "status");
     return line;
   }
 
+  /** The path that selects an item in the Needs me list, its row key as the `item` query value, built through the route table. */
+  function itemPath(one) {
+    return pathOf({ screen: "needs-me", name: null, query: { item: itemRowKey(one) } });
+  }
+
   /**
-   * One group: its label with a count and an optional note, then its items in the chosen order, or a
-   * line saying there are none. An item whose line was delivered from this reading is out of the count,
-   * and its words stand in its place.
+   * One row of the Needs me list: who and the kind tag, the age, and the headline, as a link that
+   * selects the item in the detail pane, marked `sel` where it is the one the detail pane shows.
    */
-  function needsGroup(view, name, words, note, now, attn) {
+  function needsRow(one, now, selectedKey) {
+    const key = itemRowKey(one);
+    const row = link(key === selectedKey ? "nm-row sel" : "nm-row", itemPath(one), null, key);
+    if (key === selectedKey) row.setAttribute("aria-current", "true");
+    if (needsMe.out.has(itemKey(one))) row.classList.add("nm-acting");
+    const head = h("div", "nm-head");
+    const who = h("span", "nm-who", one.repo ? txt(one.repo) : "Hands");
+    const opened = parse(one.openedAt);
+    if (one.kind === "blocked") who.append(" ", h("span", "tag", "blocked"));
+    else if (one.kind === "ask" && one.blocking === true) who.append(" ", h("span", "tag", "blocking"));
+    head.append(who, clockText("span", "nm-age", opened === null ? "" : span(now - opened)));
+    row.append(head, h("div", "nm-text", cutPoints(txt(one.text), HEADLINE_POINTS)));
+    return row;
+  }
+
+  /**
+   * One group of the list: its label with a count and an optional note, then its rows in the chosen
+   * order, or a line saying there are none. An item whose line was delivered from this reading is
+   * out of the count, and its words stand in its place.
+   */
+  function needsGroup(view, name, words, note, now, attn, selectedKey) {
     const items = sortedItems(groupItems(view, name));
-    const open = items.filter((item) => !deliveredIn(view, item));
-    const section = h("section", "section");
+    const open = items.filter((one) => !deliveredIn(view, one));
+    const section = h("section", "section", null, "group:" + name);
     section.setAttribute("aria-label", words);
     const head = cardHead(words, open.length, "h2");
     if (note) head.append(h("div", "meta", note));
     section.append(head);
-    const card = h("div", attn && open.length > 0 ? "card attn panel" : "card panel");
-    card.dataset.panel = name;
+    const card = h("div", attn && open.length > 0 ? "card attn" : "card");
+    card.dataset.key = name;
     if (items.length === 0) card.append(h("div", "nm-none", "Nothing here."));
-    for (const item of items) card.append(deliveredIn(view, item) ? deliveredLine(item) : needsItem(item, now));
+    for (const one of items) card.append(deliveredIn(view, one) ? deliveredLine(one) : needsRow(one, now, selectedKey));
     section.append(card);
     return section;
   }
 
-  function renderNeedsMe(view) {
-    const out = h("div", "nm");
-    const now = nowOf(view);
-    // A delivered item's hide holds for the reading it was drawn from alone, so a newer reading decides again.
-    for (const [key, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(key);
-    // An item's words and Context go with the item, so a key no item in this reading holds is dropped.
-    const held = new Set(["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name)).map(itemKey));
-    for (const key of needsMe.statuses.keys()) if (!held.has(key)) needsMe.statuses.delete(key);
-    for (const key of needsMe.context.keys()) if (!held.has(key)) needsMe.context.delete(key);
-    const all = ["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name)).filter((item) => !deliveredIn(view, item));
-    const dated = all.map((item) => parse(item.openedAt)).filter((at) => at !== null);
+  /** The open items of a Needs me reading in the order the list draws them: blocked, then asks, then hands. */
+  function openItems(view) {
+    return ["blocked", "ask", "hands"].flatMap((name) => sortedItems(groupItems(view, name))).filter((one) => !deliveredIn(view, one));
+  }
 
-    const top = h("div", "top");
-    top.append(back("/", txt(view.sandbox) || "Standup"));
+  /**
+   * The detail pane's item: the one the address selects, or the first row where it selects none,
+   * drawn with its acts, its Correct box, its last word and its Context as `needsItem` draws them.
+   * A selected item the reading no longer holds draws a line saying so, and a reading with no open
+   * item draws the list's own empty line.
+   */
+  function needsDetail(view, now, selectedKey) {
+    const open = openItems(view);
+    const all = ["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name));
+    const chosen = selectedKey === null ? open[0] : all.find((one) => itemRowKey(one) === selectedKey);
+    if (chosen === undefined) return h("div", "nm-none", selectedKey === null ? "Nothing here." : "This item is no longer in the reading.");
+    return deliveredIn(view, chosen) ? deliveredLine(chosen) : needsItem(chosen, now);
+  }
+
+  /**
+   * The Needs me list pane: the title with the open count and the oldest age, the sort buttons, the
+   * groups, the source line and the batch bar. The ask screen draws the same list beside its ask,
+   * from the Needs me reading it takes each pass.
+   */
+  function needsList(view, now, selectedKey) {
+    const out = h("div", "nm", null, "nm");
+    const all = openItems(view);
+    const dated = all.map((one) => parse(one.openedAt)).filter((at) => at !== null);
+
+    const top = h("div", "top", null, "top");
     const row = h("div", "top-row");
     const title = h("h1", null, "Needs me");
     title.append(h("span", "nm-count", " · " + all.length));
     row.append(title, stamp(view));
     top.append(row);
-    if (dated.length > 0) top.append(h("p", "sub", "oldest " + span(now - Math.min.apply(null, dated))));
+    if (dated.length > 0) {
+      const oldest = h("p", "sub", "oldest ");
+      oldest.append(clockText("span", null, span(now - Math.min.apply(null, dated))));
+      top.append(oldest);
+    }
     out.append(top);
 
     const sorts = h("div", "nm-sort");
@@ -3211,8 +3688,8 @@
       const button = h("button", sort.id === needsMe.sort ? "nm-sort-button on" : "nm-sort-button", sort.words);
       button.type = "button";
       button.setAttribute("aria-pressed", sort.id === needsMe.sort ? "true" : "false");
-      button.dataset.focusKey = "sort|" + sort.id;
-      button.addEventListener("click", () => {
+      button.dataset.key = "sort|" + sort.id;
+      listen(button, "click", () => {
         needsMe.sort = sort.id;
         redrawNeeds();
       });
@@ -3220,15 +3697,13 @@
     }
     out.append(sorts);
 
-    // On a wide screen the groups sit side by side, each scrolling in its own panel, so the page fits one
-    // screen; on a phone the wrapper draws no box and the groups stack.
     const rolloutNeeds = rolloutGroup(view);
     const groups = h("div", "nm-groups");
     groups.append(
-      needsGroup(view, "blocked", "Blocked on you", null, now, true),
-      needsGroup(view, "ask", "Asks", "each proceeds on its recommendation", now, false),
+      needsGroup(view, "blocked", "Blocked on you", null, now, true, selectedKey),
+      needsGroup(view, "ask", "Asks", "each proceeds on its recommendation", now, false, selectedKey),
       ...(rolloutNeeds === null ? [] : [rolloutNeeds]),
-      needsGroup(view, "hands", "Your hands", null, now, false),
+      needsGroup(view, "hands", "Your hands", null, now, false, selectedKey),
     );
     out.append(
       groups,
@@ -3237,11 +3712,11 @@
 
     // The batch is over the asks in the order drawn that the operator has not touched.
     const untouched = sortedItems(groupItems(view, "ask")).filter((item) => agreeable(item) && !needsMe.touched.has(needsKey(item)));
-    const bar = h("div", "nm-batch");
+    const bar = h("div", "nm-batch", null, "batch-bar");
     const batch = h("button", "nm-batch-button");
     batch.type = "button";
     batch.disabled = needsMe.acting || untouched.length === 0;
-    batch.dataset.focusKey = "batch";
+    batch.dataset.key = "batch";
     const cap = batchCap(view);
     const count = Math.min(untouched.length, cap);
     const blocking = untouched.slice(0, count).filter((item) => item.blocking === true).length;
@@ -3252,9 +3727,29 @@
           (count === 1 && untouched.length <= cap ? " recommendation" : " recommendations") +
           " I haven't touched" +
           (blocking > 0 ? " (" + blocking + " blocking, which " + (blocking === 1 ? "is" : "are") + " refused)" : "");
-    batch.addEventListener("click", () => sendBatch(untouched, cap));
+    listen(batch, "click", () => sendBatch(untouched, cap));
     bar.append(batch, h("div", "meta nm-batch-note", "Each lands as your word with the time. A blocking ask is refused and stays open for you."));
     out.append(bar);
+    return out;
+  }
+
+  /**
+   * The Needs me screen: the list pane, and the detail pane holding the item the address selects
+   * with its acts, as the sheet on a phone.
+   */
+  function renderNeedsMe(view) {
+    const now = nowOf(view);
+    // A delivered item's hide holds for the reading it was drawn from alone, so a newer reading decides again.
+    for (const [key, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(key);
+    // An item's words and Context go with the item, so a key no item in this reading holds is dropped.
+    const held = new Set(["blocked", "ask", "hands"].flatMap((name) => groupItems(view, name)).map(itemKey));
+    for (const key of needsMe.statuses.keys()) if (!held.has(key)) needsMe.statuses.delete(key);
+    for (const key of needsMe.context.keys()) if (!held.has(key)) needsMe.context.delete(key);
+    // The row the detail shows is the one marked in the list: the selected item, else the first open row.
+    const first = openItems(view)[0];
+    const shown = item !== null ? item : first === undefined ? null : itemRowKey(first);
+    const out = document.createDocumentFragment();
+    out.append(pane("list", needsList(view, now, shown)), detailPane(SCREEN_PATHS["needs-me"], needsDetail(view, now, item)));
     return out;
   }
 
@@ -3332,14 +3827,21 @@
    * browser's, so typing and its shortcuts never leave the page.
    */
   function stepKey(event) {
+    if (screen !== "ask") return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const active = document.activeElement;
     if (active !== null && (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
     const target = app.querySelector(event.key === "ArrowLeft" ? '.ask-step a[rel="prev"]' : '.ask-step a[rel="next"]');
-    if (target === null) return;
+    const at = target === null ? null : routeOf(target);
+    if (at === null) return;
     event.preventDefault();
-    location.assign(target.href);
+    go(at);
+  }
+
+  /** The ask screen's list pane: the Needs me list from the reading taken each pass, with this ask's row selected, or a line until one arrives. */
+  function askList(selectedKey) {
+    return askNeeds === null ? h("p", "muted", "Reading Needs me") : needsList(askNeeds, nowOf(askNeeds), selectedKey);
   }
 
   /**
@@ -3348,7 +3850,8 @@
    * the session's lines. They are the Needs me page's acts, with the same bodies, words, touched mark
    * and inline Correct box, so the batch there skips an ask answered here. A handled ask, one whose
    * line a page delivered, draws the act and its time in place of the buttons, since every other page
-   * hides it until its session closes or raises it.
+   * hides it until its session closes or raises it. The ask is the detail pane, with the Needs me
+   * list beside it and this ask's row selected there.
    */
   function renderAsk(view) {
     const out = document.createDocumentFragment();
@@ -3367,7 +3870,11 @@
     row.append(who, stamp(view));
     top.append(row);
     const opened = parse(view.openedAt);
-    if (opened !== null) top.append(h("p", "sub", "asked " + span(now - opened) + " ago"));
+    if (opened !== null) {
+      const asked = h("p", "sub", "asked ");
+      asked.append(clockText("span", null, span(now - opened)), " ago");
+      top.append(asked);
+    }
     out.append(top);
 
     const ask = h("section", needsMe.out.has(key) ? "card pad section ask-card nm-acting" : "card pad section ask-card");
@@ -3404,8 +3911,8 @@
       // Delivered from this reading: the buttons go, and the next reading carries the handled mark.
       out.append(statusLine(words ?? ""));
     } else {
-      const acts = h("div", "ask-acts");
-      const controls = h("div", "nm-controls ask-controls");
+      const acts = h("div", "ask-acts", null, "acts");
+      const controls = h("div", "nm-controls ask-controls", null, "controls");
       // An ask's page state is keyed on its id, so a view with none takes no act and no Context, as on Needs me.
       if (item.askId !== "") {
         if (agreeable(item)) controls.append(actButton("nm-agree", "Agree", "agree|" + key, () => sendAgree(item)));
@@ -3424,10 +3931,13 @@
     }
 
     out.append(sources(view, ["roster", "ledger", "registry"]));
-    return out;
+    const frame = document.createDocumentFragment();
+    // The ask's list pane is the Needs me list, so its sheet closes to that list.
+    frame.append(pane("list", askList(itemRowKey(item))), detailPane(SCREEN_PATHS["needs-me"], out));
+    return frame;
   }
 
-  /** What the ask page draws where the broker holds no such open ask: a line saying so, and no button to act on it. */
+  /** What the ask screen draws where the broker holds no such open ask: a line saying so in the detail pane, and no button to act on it. */
   function askGone() {
     const out = document.createDocumentFragment();
     const top = h("div", "top");
@@ -3440,19 +3950,459 @@
     card.setAttribute("role", "status");
     card.append(h("p", null, "This ask is not open. The broker's last reading lists no open ask at this address."));
     out.append(card);
-    return out;
+    const frame = document.createDocumentFragment();
+    frame.append(pane("list", askList(null)), detailPane(SCREEN_PATHS["needs-me"], out));
+    return frame;
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Polling
+  // Patching the live tree
   // ---------------------------------------------------------------------------------------------
 
-  const page = PAGES[document.body.dataset.page];
+  /** How long a node keeps the `changed` class the patch gave it, a little past the stylesheet's fade. */
+  const CHANGED_MS = 1600;
+
+  /** The keys two siblings have shared, so each such defect is logged once for the page's life. */
+  const warnedKeys = new Set();
+
+  /** An element's key, read from its `data-key` alone; null for an element with none and for a text node. */
+  function keyOf(node) {
+    return node.nodeType === 1 && typeof node.dataset.key === "string" ? node.dataset.key : null;
+  }
+
+  /** Whether an element holds text the clock moves, as `clockText` marks it, so a change in that text is not a data change. */
+  function ticks(node) {
+    return node.nodeType === 1 && typeof node.dataset.clock === "string";
+  }
+
+  /** Whether a built node can be paired with a live one: both text, or both elements of one tag. */
+  function sameShape(live, fresh) {
+    return live.nodeType === fresh.nodeType && (live.nodeType !== 1 || live.tagName === fresh.tagName);
+  }
+
+  /** A class attribute's value without the `changed` token, so the token the patch adds never reads as a change; null where nothing is left. */
+  function classWithoutChanged(value) {
+    if (value === null) return null;
+    const held = value.split(" ").filter((token) => token !== "" && token !== "changed").join(" ");
+    return held === "" ? null : held;
+  }
+
+  function markChanged(node) {
+    const held = classWithoutChanged(node.getAttribute("class"));
+    node.setAttribute("class", held === null ? "changed" : held + " changed");
+  }
+
+  function unmarkChanged(node) {
+    const held = classWithoutChanged(node.getAttribute("class"));
+    if (held === null) node.removeAttribute("class");
+    else node.setAttribute("class", held);
+  }
+
+  /** The timer that takes each flagged node's `changed` class away, by node, so each node's flag runs its own time. */
+  const flagTimers = new Map();
+
+  /**
+   * Gives a node the `changed` class for `CHANGED_MS`. A node flagged again while its flag is up has
+   * its timer cleared and armed again, and its class taken off and put back with a layout read
+   * between, so the stylesheet's fade starts over from the top.
+   */
+  function flagNode(node) {
+    const held = flagTimers.get(node);
+    if (held !== undefined) {
+      clearTimeout(held);
+      unmarkChanged(node);
+      void node.offsetWidth;
+    }
+    markChanged(node);
+    flagTimers.set(
+      node,
+      setTimeout(() => {
+        flagTimers.delete(node);
+        unmarkChanged(node);
+      }, CHANGED_MS),
+    );
+  }
+
+  /**
+   * Copies the built element's style properties to the live one through the style object, which the
+   * content policy allows where a style attribute set as text is not, and drops the properties the
+   * built element lacks. Answers whether any property moved.
+   */
+  function syncStyle(live, fresh) {
+    let changed = false;
+    const names = Array.from(fresh.style);
+    for (const name of names) {
+      const value = fresh.style.getPropertyValue(name);
+      if (live.style.getPropertyValue(name) === value) continue;
+      live.style.setProperty(name, value);
+      changed = true;
+    }
+    for (const name of Array.from(live.style)) {
+      if (names.indexOf(name) >= 0) continue;
+      live.style.removeProperty(name);
+      changed = true;
+    }
+    return changed;
+  }
+
+  /**
+   * Makes the live element's attributes the built one's: a value that differs is set as the builder
+   * set it, one the built element lacks is removed, and the style attribute goes through `syncStyle`.
+   * Answers whether any attribute changed.
+   */
+  function syncAttributes(live, fresh) {
+    let changed = false;
+    const names = fresh.getAttributeNames();
+    for (const name of names) {
+      if (name === "style") {
+        if (syncStyle(live, fresh)) changed = true;
+        continue;
+      }
+      const value = fresh.getAttribute(name);
+      const held = name === "class" ? classWithoutChanged(live.getAttribute("class")) : live.getAttribute(name);
+      if (held === value) continue;
+      live.setAttribute(name, value);
+      changed = true;
+    }
+    for (const name of live.getAttributeNames()) {
+      if (names.indexOf(name) >= 0) continue;
+      // A class holding the `changed` token alone is the patch's own, and the timer takes it.
+      if (name === "class" && classWithoutChanged(live.getAttribute("class")) === null) continue;
+      if (name === "style") {
+        syncStyle(live, fresh);
+        changed = true;
+        continue;
+      }
+      live.removeAttribute(name);
+      changed = true;
+    }
+    return changed;
+  }
+
+  /** Drops the handlers a kept live node was built with and binds the ones its built twin carries, as `listen` recorded them. */
+  function syncHandlers(live, fresh) {
+    const old = handlers.get(live);
+    const next = handlers.get(fresh);
+    if (old === undefined && next === undefined) return;
+    if (old !== undefined) for (const [type, handler] of old) live.removeEventListener(type, handler);
+    if (next !== undefined) for (const [type, handler] of next) live.addEventListener(type, handler);
+    if (next === undefined) handlers.delete(live);
+    else handlers.set(live, next);
+  }
+
+  /**
+   * A field's value becomes the built one's only where the two differ. A builder draws a field from
+   * the draft its input handler keeps, so a field being typed in holds what the builder drew and is
+   * left alone, caret and all; a draft the page cleared or rewrote lands.
+   */
+  function syncValue(live, fresh) {
+    if (typeof fresh.value !== "string" || fresh.value === live.value) return;
+    live.value = fresh.value;
+  }
+
+  /** Makes a kept live element its built twin: attributes, handlers, a field's value, then its children. */
+  function syncElement(live, fresh, flagged) {
+    if (syncAttributes(live, fresh)) flagged.add(live);
+    syncHandlers(live, fresh);
+    syncValue(live, fresh);
+    syncChildren(live, fresh, flagged);
+  }
+
+  /**
+   * Pairs the built children with the live ones, a keyed node with the live node of its key
+   * wherever it sits among the siblings and an unkeyed one with the first unpaired unkeyed live
+   * node of its shape in live order, so one live node whose tag changed is passed over rather than
+   * stopping the pairing of every unkeyed sibling after it. A built key already seen among these
+   * siblings is a builder's defect: it is logged once and the node is drawn as new.
+   *
+   * Moves. Every live node left unpaired is removed first. Of the kept nodes, the longest run whose
+   * old order already matches the built order stays where it is, and only the kept nodes outside
+   * that run are moved, since a browser drops a moved node's focus, selection and scroll. So a kept
+   * node moves only where it changed places with the kept nodes around it: one row moved to the end
+   * of a list moves alone, and the rows it passed stay. Each kept node is then synced, and a built
+   * node with no pair is inserted whole.
+   *
+   * Flags. A text node whose text changed flags its parent. An inserted element takes the flag
+   * itself, and an inserted text node flags its parent. A removed unkeyed node flags its parent,
+   * and a removed keyed node flags nothing, so a row leaving a list does not flash the list. Nothing
+   * is flagged under a parent that held no child nodes before this patch, so the first draw and a
+   * list's first row stay quiet. A text change, or a text node inserted or removed, under a parent
+   * marked `data-clock` by `clockText` flags nothing, since the clock moved it and not the data.
+   * The flags are collected here, and `patch` decides whether they are shown.
+   */
+  function syncChildren(live, fresh, flagged) {
+    const olds = Array.from(live.childNodes);
+    const news = Array.from(fresh.childNodes);
+    const byKey = new Map();
+    for (const node of olds) {
+      const key = keyOf(node);
+      if (key !== null && !byKey.has(key)) byKey.set(key, node);
+    }
+    const paired = new Map();
+    const claimed = new Set();
+    const seen = new Set();
+    for (const node of news) {
+      const key = keyOf(node);
+      if (key === null) continue;
+      if (seen.has(key)) {
+        if (!warnedKeys.has(key)) {
+          warnedKeys.add(key);
+          console.warn("Two siblings under " + String(live.tagName) + " share the key " + JSON.stringify(key) + "; the second is drawn as new.");
+        }
+        continue;
+      }
+      seen.add(key);
+      const twin = byKey.get(key);
+      if (twin !== undefined && !claimed.has(twin) && sameShape(twin, node)) {
+        claimed.add(twin);
+        paired.set(node, twin);
+      }
+    }
+    // `at` is the first unclaimed unkeyed live node; the look for a node of the built one's shape starts there.
+    let at = 0;
+    for (const node of news) {
+      if (keyOf(node) !== null) continue;
+      while (at < olds.length && (claimed.has(olds[at]) || keyOf(olds[at]) !== null)) at += 1;
+      let match = at;
+      while (match < olds.length && (claimed.has(olds[match]) || keyOf(olds[match]) !== null || !sameShape(olds[match], node))) match += 1;
+      if (match < olds.length) {
+        claimed.add(olds[match]);
+        paired.set(node, olds[match]);
+      }
+    }
+    // A parent that held nothing is being drawn for the first time, so what lands in it is not a change.
+    const quiet = olds.length === 0;
+    for (const node of olds) {
+      if (claimed.has(node)) continue;
+      node.remove();
+      if (keyOf(node) === null && (node.nodeType === 1 || !ticks(live))) flagged.add(live);
+    }
+    const position = new Map(olds.map((node, index) => [node, index]));
+    const twins = news.filter((node) => paired.has(node));
+    const run = steadyRun(twins.map((node) => position.get(paired.get(node))));
+    const stays = new Set(twins.filter((node, index) => run.has(index)));
+    // From the last built node back, each lands just before the one after it; a twin in the steady run is already there.
+    let after = null;
+    for (let index = news.length - 1; index >= 0; index -= 1) {
+      const node = news[index];
+      const twin = paired.get(node);
+      if (twin === undefined) {
+        live.insertBefore(node, after);
+        if (!quiet) {
+          if (node.nodeType === 1) flagged.add(node);
+          else if (!ticks(live)) flagged.add(live);
+        }
+        after = node;
+        continue;
+      }
+      if (!stays.has(node)) live.insertBefore(twin, after);
+      if (twin.nodeType === 1) syncElement(twin, node, flagged);
+      else if (twin.textContent !== node.textContent) {
+        twin.textContent = node.textContent;
+        if (!ticks(live)) flagged.add(live);
+      }
+      after = twin;
+    }
+  }
+
+  /**
+   * The longest run of `positions`, read in order, that only increases, as the set of its indexes.
+   * The kept twins at those indexes already stand in built order and stay; every other twin moves.
+   */
+  function steadyRun(positions) {
+    const tails = [];
+    const before = [];
+    positions.forEach((value, index) => {
+      let low = 0;
+      let high = tails.length;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (positions[tails[middle]] < value) low = middle + 1;
+        else high = middle;
+      }
+      before[index] = low > 0 ? tails[low - 1] : -1;
+      tails[low] = index;
+    });
+    const run = new Set();
+    for (let index = tails.length > 0 ? tails[tails.length - 1] : -1; index >= 0; index = before[index]) run.add(index);
+    return run;
+  }
+
+  /**
+   * The one place the page patches the tree after its first draw: makes the children of
+   * `live` the built `fresh`'s, keeping every live node whose key or place persists so the browser
+   * keeps its scroll, its selection, its focus and the words typed in it. Where `flag` is true, each
+   * node `syncChildren` flags takes the `changed` class through `flagNode`; where it is false the
+   * patch changes the tree the same way and flags nothing. `draw` passes true for a poll's reading
+   * alone, so only what the broker's data moved is highlighted, never what the operator's own act drew.
+   */
+  function patch(live, fresh, flag) {
+    const flagged = new Set();
+    syncChildren(live, fresh, flagged);
+    if (flag !== true) return;
+    for (const node of flagged) flagNode(node);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The shell: the rail, the panes, the screen the address names, and the poll
+  // ---------------------------------------------------------------------------------------------
+
   const app = document.getElementById("app");
   const notice = document.getElementById("notice");
+  /** The screen drawn, by name and by its `PAGES` entry, and the list row the address selects; null before the first address is read. */
+  let screen = null;
+  let page = null;
+  let item = null;
+  /** The path of the screen's reading with no row selected, so a change of row alone redraws instead of reading again. */
+  let lastPlace = null;
+  /** The screens whose list pane is the standup's repo list. */
+  const STANDUP_LISTED = new Set(["standup", "repo"]);
+  /** Whether this screen visit's list pane is the list the screen left drew, which keeps its scroll on the visit's first draw. */
+  let listKept = false;
   let lastView = null;
-  let heldPolls = 0;
   let lastOk = null;
+  /** The summary reading beside every screen's own, which the rail's counts read; null before one arrives. */
+  let summaryView = null;
+  /** The standup reading the shell last drew, which the rail's Workers count reads; null until the standup is drawn. */
+  let standupView = null;
+  /** Counts each screen entered, so a poll begun on an earlier screen draws nothing once the shell has moved on. */
+  let visit = 0;
+  /** The timer of the next poll, cleared when the screen changes so one poll loop runs at a time. */
+  let pollTimer = null;
+
+  /** The rail's entries: the glyph the mockup's `.ic` span carries, the word, and the screen each opens. */
+  const RAIL = [
+    { screen: "needs-me", glyph: "◉", words: "Needs me" },
+    { screen: "standup", glyph: "▤", words: "Workers" },
+    { screen: "health", glyph: "♥", words: "Health" },
+  ];
+
+  /**
+   * The count beside a rail entry, or null for none: Needs me takes the summary's `needsYou`,
+   * Workers the number of standup repos working, from the standup reading the shell holds, and
+   * Health the capacity verdict word.
+   */
+  function railCount(entry) {
+    if (entry.screen === "needs-me") {
+      const count = isObject(summaryView) ? num(summaryView.needsYou) : null;
+      return count === null ? null : String(count);
+    }
+    if (entry.screen === "standup") {
+      return standupView === null ? null : String(list(standupView.repos).filter((repo) => isObject(repo) && repo.state === "working").length);
+    }
+    const word = isObject(summaryView) && isObject(summaryView.capacity) ? txt(summaryView.capacity.verdict) : "";
+    return word === "" ? null : word;
+  }
+
+  /** The sandbox's name, from the summary, else the siblings reading, else nothing. */
+  function sandboxName() {
+    const own = isObject(summaryView) ? txt(summaryView.sandbox) : "";
+    return own !== "" ? own : isObject(siblingsView) ? txt(siblingsView.sandbox) : "";
+  }
+
+  /**
+   * The rail: the brand, the three entries with their counts, the entry of the screen drawn marked,
+   * and at the foot the sibling pills above the sandbox's name. On a phone the stylesheet lays it
+   * as the bottom tab bar.
+   */
+  function shellRail() {
+    const rail = h("nav", "rail", null, "rail");
+    rail.setAttribute("aria-label", "Screens");
+    rail.append(h("div", "brand", "Channels", "brand"));
+    for (const entry of RAIL) {
+      const on = entry.screen === screen;
+      const nav = link(on ? "nav on" : "nav", SCREEN_PATHS[entry.screen], null, "nav:" + entry.screen);
+      if (on) nav.setAttribute("aria-current", "page");
+      nav.append(h("span", "ic", entry.glyph), h("span", "word", entry.words));
+      const count = railCount(entry);
+      // Health's count is the verdict word, marked `n-word`. The folded rail, too narrow for a word, shows the dot beside it
+      // instead, in the verdict's tone, and the entry's title carries the word.
+      const kind = entry.screen === "needs-me" && count !== "0" ? "n" : entry.screen === "health" ? "n dim n-word" : "n dim";
+      if (count !== null) nav.append(h("span", kind, count));
+      if (count !== null && entry.screen === "health") {
+        nav.append(h("span", ("dot n-dot " + verdictTone(count)).trim()));
+        nav.title = count;
+      }
+      rail.append(nav);
+    }
+    const foot = h("div", "foot", null, "foot");
+    const pills = sandboxRail(siblingsView);
+    if (pills !== null) foot.append(pills);
+    const name = sandboxName();
+    if (name !== "") foot.append(h("span", "sandbox", name, "sandbox"));
+    rail.append(foot);
+    return rail;
+  }
+
+  /**
+   * The sibling pills and the sandbox's name as a row, or null where there is neither. The rail's
+   * foot holds them on the desktop; below that width the foot is hidden and this row, at the head of
+   * the list pane or of a screen drawn as one, is where they are reached.
+   */
+  function sandboxRow() {
+    const pills = sandboxRail(siblingsView);
+    const name = sandboxName();
+    if (pills === null && name === "") return null;
+    const row = h("div", "sandbox-row", null, "sandbox-row");
+    if (pills !== null) row.append(pills);
+    if (name !== "") row.append(h("span", "sandbox", name, "sandbox"));
+    return row;
+  }
+
+  /**
+   * One pane of the main area: the list, the detail, or the whole area for a screen drawn as one.
+   * The list pane and the whole pane open with the sandbox row.
+   */
+  function pane(kind, ...parts) {
+    const box = h("section", "pane " + kind, null, "pane:" + kind);
+    const row = kind === "detail" ? null : sandboxRow();
+    if (row !== null) box.append(row);
+    box.append(...parts);
+    return box;
+  }
+
+  /**
+   * The detail pane of a screen with a selected row. On a phone it is the sheet over the list, and
+   * its head, a grab bar and a Close link to `listPath`, the path of the list the sheet is drawn over
+   * with no row selected, is drawn there; the wide layouts hide it. `listPath` is a route-table path.
+   */
+  function detailPane(listPath, ...parts) {
+    const head = h("div", "sheet-head", null, "sheet-head");
+    head.append(h("span", "grab"), link("close", listPath, "Close", "close"));
+    return pane("detail", head, ...parts);
+  }
+
+  /**
+   * The classes on the shell's root the stylesheet lays the phone out by: `sheet` where a row is
+   * selected and the detail slides up over the list, which an ask, a repo, a plan and a talk
+   * address each name, and `stacked` where the screen has no selection and the two panes flow as
+   * one column. The standup screen has neither, so a phone shows its list alone.
+   */
+  function frameClasses() {
+    const named = screen === "ask" || screen === "repo" || screen === "plan" || screen === "talk";
+    app.classList.toggle("sheet", named || (screen === "needs-me" && item !== null));
+    app.classList.toggle("stacked", screen === "health");
+  }
+
+  /** Whether a pane is scrolled to its foot, within a line or two; a missing pane counts as at the foot. */
+  function atFoot(box) {
+    return box === null || box.scrollTop + box.clientHeight >= box.scrollHeight - 80;
+  }
+
+  /** Scrolls each pane the selector names to its top. */
+  function toTop(selector) {
+    for (const box of app.querySelectorAll(selector)) box.scrollTo(0, 0);
+  }
+
+  /** Draws the rail and one line in the main area, where no reading is drawn: before the first arrives, or on an address naming nothing. */
+  function drawLine(words) {
+    const fresh = document.createDocumentFragment();
+    fresh.append(shellRail(), pane("whole", h("p", "muted", words)));
+    // The line has no detail pane to slide up or flow beside, so no phone layout class dims or hides it.
+    app.classList.remove("sheet", "stacked");
+    patch(app, fresh, false);
+    toTop(".pane");
+  }
 
   /** A failed read, with the HTTP status where the broker answered one, so the ask page can tell a closed ask from an outage. */
   class Unreadable extends Error {
@@ -3467,47 +4417,29 @@
     notice.hidden = false;
   }
 
-  /** Draws `view` whole off to the side and swaps it in, so a draw that throws leaves the last one. */
-  function draw(view) {
-    const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.focusKey : undefined;
-    // A page that follows its newest content stays at the foot when the reader was there, and starts there.
-    const follow = page.follow === true && (lastView === null || window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 80);
+  /**
+   * Builds `view` whole off to the side, then patches it into the page, so a live node whose key
+   * persists keeps its scroll, its selection, its focus and the words typed in it. A builder that
+   * throws does so before the patch starts and leaves the last page untouched; a throw inside the
+   * patch stops it where it is and can leave the page part patched, until the next draw patches the
+   * rest. Only a draw from the poll, `fromPoll`, flags what changed: a redraw the operator's own act
+   * caused, such as opening a Correct box or a Context, flags nothing.
+   */
+  function draw(view, fromPoll) {
+    // A screen that follows its newest content keeps its detail pane at the foot when the reader was there, and starts there.
+    const follow = page.follow === true && (lastView === null || atFoot(app.querySelector(".pane.detail")));
     const drawn = page.render(view);
-    // A bounded panel scrolls inside itself and a redraw builds it new, so each panel's place is read by its key
-    // before the swap and set again after.
-    const scrolled = new Map(Array.from(app.querySelectorAll("[data-panel]"), (panel) => [panel.dataset.panel, panel.scrollTop]));
-    // The sibling rail sits above every page's own top bar, from the broker's last poll of the siblings.
-    const rail = sandboxRail(siblingsView);
-    if (rail !== null) drawn.prepend(rail);
-    // Each link and button carries a key built from its href, counted per repeat, so a redraw puts focus back.
-    const seen = new Map();
-    for (const control of drawn.querySelectorAll("a[href], button")) {
-      if (control.dataset.focusKey) continue;
-      const href = control.getAttribute("href");
-      const count = seen.get(href) ?? 0;
-      seen.set(href, count + 1);
-      control.dataset.focusKey = href + "|" + count;
-    }
-    app.replaceChildren(drawn);
+    // The rail, then the screen's own two panes, the list and the detail.
+    const fresh = document.createDocumentFragment();
+    fresh.append(shellRail(), drawn);
+    frameClasses();
+    patch(app, fresh, fromPoll === true);
+    // The first reading a screen visit draws starts its panes at the top, the detail alone where the
+    // list is the one the screen left drew; a following screen then goes to its foot.
+    if (lastView === null) toTop(listKept ? ".pane.detail" : ".pane");
     goneDrawn = false;
-    for (const panel of app.querySelectorAll("[data-panel]")) panel.scrollTop = scrolled.get(panel.dataset.panel) ?? 0;
-    if (follow) window.scrollTo(0, document.documentElement.scrollHeight);
-    if (focused) {
-      const again = Array.from(app.querySelectorAll("[data-focus-key]")).find((control) => control.dataset.focusKey === focused);
-      if (again) again.focus();
-    }
-  }
-
-  /** The text selection touching the page, which a redraw would throw away; focus comes back by its key. */
-  function selected() {
-    const selection = document.getSelection();
-    return selection !== null && !selection.isCollapsed && selection.containsNode(app, true) ? selection : null;
-  }
-
-  /** A line being typed in the talk, the Steer or the Correct box: a redraw would move the caret to its end mid-word. */
-  function composing() {
-    const active = document.activeElement;
-    return active !== null && (active.id === "talk-compose" || active.id === "steer-text" || active.id === "correct-text") && active.value !== "";
+    const detail = follow ? app.querySelector(".pane.detail") : null;
+    if (detail !== null) detail.scrollTo(0, detail.scrollHeight);
   }
 
   /** Whether the not-open line is what the page shows, so a later failed poll leaves it in place. */
@@ -3521,9 +4453,13 @@
   /** Draws the page's not-open line from this answer alone; nothing is kept, so a later 200 draws the thing again. */
   function drawGone() {
     const drawn = page.gone();
-    const rail = sandboxRail(siblingsView);
-    if (rail !== null) drawn.prepend(rail);
-    app.replaceChildren(drawn);
+    // The rail, then the gone draw's own panes, so it reaches the patch in the shape a screen's draw does.
+    const fresh = document.createDocumentFragment();
+    fresh.append(shellRail(), drawn);
+    frameClasses();
+    patch(app, fresh, false);
+    // The line's first draw starts the panes at the top; a later poll's leaves the list where the reader scrolled it.
+    if (!goneDrawn) toTop(".pane");
     lastView = null;
     goneDrawn = true;
     notice.hidden = true;
@@ -3556,7 +4492,7 @@
    * answer is ignored; the mark only moves what the standup page counts as unseen.
    */
   function sendSeen() {
-    if (seenSent || document.body.dataset.page !== "plan") return;
+    if (seenSent || screen !== "plan") return;
     seenSent = true;
     fetch("/web/seen", {
       method: "POST",
@@ -3570,30 +4506,39 @@
 
   /**
    * The caught-up body: the repo, and the time of the older of the plans and ledger readings the
-   * drawn page carries, so the broker stamps the mark with what the operator saw. The time is left
-   * out when neither reading carries one.
+   * drawn repo reading `drawn` carries, so the broker stamps the mark with what the operator saw. The
+   * time is left out when neither reading carries one.
    */
-  function drawnAtOf(name) {
-    const asOf = lastView && lastView.asOf ? lastView.asOf : {};
+  function drawnAtOf(name, drawn) {
+    const asOf = isObject(drawn) && isObject(drawn.asOf) ? drawn.asOf : {};
     const times = [asOf.plans, asOf.ledger].filter((value) => parse(value) !== null);
     const body = { repo: name };
     if (times.length > 0) body.drawnAt = times.reduce((a, b) => (parse(a) <= parse(b) ? a : b));
     return body;
   }
 
-  /** Posts the caught-up mark for a repo once per tap, then draws the page again so it shows the result. */
-  async function sendCaughtUp(name) {
+  /**
+   * Posts the caught-up mark for a repo once per tap, stamped from `drawn`, the repo reading the tapped
+   * button was drawn from, then draws the screen again so it shows the result. Once the shell has
+   * moved to another screen visit, the screen is not read or drawn again.
+   */
+  async function sendCaughtUp(name, drawn) {
     if (caughtUpSending) return;
     caughtUpSending = true;
+    const here = visit;
     try {
       const response = await fetch("/web/caught-up", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(drawnAtOf(name)),
+        body: JSON.stringify(drawnAtOf(name, drawn)),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status);
-      const view = await fetchView(page.url());
+      if (here !== visit) return;
+      const [read] = await Promise.all([fetchView(page.url()), fetchBeside()]);
+      if (here !== visit) return;
+      const view = await acceptView(read, here);
+      if (view === null || here !== visit) return;
       draw(view);
       lastView = view;
       lastOk = Date.now();
@@ -3622,7 +4567,7 @@
    * failure here is not the page's: the last reading stays, and the ask's own fetch decides the notice.
    */
   async function fetchNeeds() {
-    if (document.body.dataset.page !== "ask") return;
+    if (screen !== "ask") return;
     try {
       askNeeds = await fetchView("/web/needs-me");
     } catch (error) {
@@ -3630,41 +4575,85 @@
     }
   }
 
+  /**
+   * The summary reading beside the screen's own, once per pass, which the rail's counts read. A
+   * failure here is not the screen's: the last reading stays, and the screen's own fetch decides the notice.
+   */
+  async function fetchSummary() {
+    try {
+      summaryView = await fetchView("/web/summary");
+    } catch (error) {
+      // Kept as it was: a rail that cannot refresh its counts shows the last poll rather than none.
+    }
+  }
+
+  /**
+   * The repo screen's standup reading beside its own, once per pass, which its list pane draws. A
+   * failure here is not the screen's: the last reading stays, and the repo's own fetch decides the notice.
+   */
+  async function fetchStandup() {
+    if (screen !== "repo") return;
+    const here = visit;
+    try {
+      const view = await fetchView("/web/standup");
+      if (here === visit) standupView = view;
+    } catch (error) {
+      // Kept as it was: a list that cannot refresh shows the last poll rather than vanishing.
+    }
+  }
+
+  /**
+   * The readings a screen draws beside its own view that are fetched with it, the ask's Needs me
+   * list and the repo screen's standup, so the poll and an act's refresh read the same set. The
+   * repos beside the standup and the plan are read after their view, by the screen's `accept`.
+   */
+  function fetchBeside() {
+    return Promise.all([fetchNeeds(), fetchStandup()]);
+  }
+
+  /**
+   * Takes a reading of the screen's own view through the screen's `accept`, which reads the repo
+   * drawn beside the standup and the plan, and holds a standup reading for the rail's count and the
+   * repo screen's list. Returns the reading to draw, or null for an answer the screen has moved past.
+   * `here` is the visit the reading was fetched on; a later visit's readings are not touched.
+   */
+  async function acceptView(view, here) {
+    const shown = page.accept ? await page.accept(view) : view;
+    if (here === visit && shown !== null && screen === "standup") standupView = shown;
+    return shown;
+  }
+
   async function poll() {
+    // The screen this poll reads for; once the shell has moved on, what comes back is dropped undrawn.
+    const here = visit;
     let failure = null;
     try {
-      const [view] = await Promise.all([fetchView(page.url()), fetchSiblings(), fetchNeeds()]);
+      const [view] = await Promise.all([fetchView(page.url()), fetchSiblings(), fetchSummary(), fetchBeside()]);
+      if (here !== visit) return;
       try {
-        const selection = selected();
-        let shown = view;
-        if ((selection === null && !composing()) || heldPolls >= HOLD_POLLS) {
-          if (page.accept) shown = await page.accept(view);
-          if (shown === null) {
-            // An answer the page has moved past: nothing is drawn and the last good view stays.
-            setTimeout(poll, POLL_MS);
-            return;
-          }
-          draw(shown);
-          heldPolls = 0;
-          sendSeen();
-        } else {
-          // A selection, or a line being typed, holds the page still for a few polls, so it can be copied or
-          // finished. The stamp and the reading's age stay with what is drawn, so nothing on the page claims a
-          // newer reading than it shows.
-          heldPolls += 1;
+        const shown = await acceptView(view, here);
+        if (here !== visit) return;
+        if (shown === null) {
+          // An answer the page has moved past: nothing is drawn and the last good view stays.
+          pollTimer = setTimeout(poll, POLL_MS);
+          return;
         }
-        if (heldPolls === 0) {
-          lastView = shown;
-          lastOk = Date.now();
-        }
+        // The patch keeps a selection inside unchanged text and the field being typed in, so every
+        // reading is drawn as it arrives. The first draw of a screen visit flags nothing, since no
+        // earlier reading of this screen is on the page to have changed; each later poll's draw flags.
+        draw(shown, lastView !== null);
+        sendSeen();
+        lastView = shown;
+        lastOk = Date.now();
         notice.hidden = true;
       } catch (error) {
         failure = "the reading could not be drawn";
       }
     } catch (error) {
+      if (here !== visit) return;
       if (isGone(error)) {
         drawGone();
-        setTimeout(poll, POLL_MS);
+        pollTimer = setTimeout(poll, POLL_MS);
         return;
       }
       failure = error instanceof Unreadable ? error.message : "the reading could not be fetched";
@@ -3675,26 +4664,124 @@
         setNotice("Could not refresh: " + failure + ".");
       } else if (lastView === null) {
         setNotice("Could not load: " + failure + ". Trying again every " + POLL_MS / 1000 + " seconds.");
-        app.replaceChildren(h("p", "muted", "No reading yet."));
+        drawLine("No reading yet.");
       } else {
         setNotice("Could not refresh: " + failure + ". Showing the last reading, " + span(Date.now() - lastOk) + " old.");
       }
     }
-    setTimeout(poll, POLL_MS);
+    pollTimer = setTimeout(poll, POLL_MS);
+  }
+
+  /** What the main area says on a screen whose address names no object to read. */
+  const EMPTY_WORDS = { plan: "Open a plan from a repo page.", talk: "No session named in the address.", ask: "Open an ask from the standup or Needs me page." };
+
+  /**
+   * Opens the screen a route names. Where only the selected row differs from the screen drawn, the
+   * last reading is drawn again with the new row, its detail at the top. Otherwise the poll loop of
+   * the screen left is stopped, what it held is forgotten, and the new screen's loop starts now; the
+   * screen left stays on the page, scrolled where it was, until the new screen draws at its top. A
+   * move between the standup and a repo, whose list pane is the same standup list, keeps that list
+   * where the reader scrolled it, and only the detail starts at its top.
+   */
+  function enter(at) {
+    const place = placeOf(at);
+    const moved = at.item !== item;
+    item = at.item;
+    if (place === lastPlace) {
+      frameClasses();
+      if (lastView !== null) draw(lastView);
+      else if (goneDrawn) drawGone();
+      // Another row's detail starts at its top, not where the last row's was scrolled to.
+      if (moved) toTop(".pane.detail");
+      return;
+    }
+    visit += 1;
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = null;
+    lastPlace = place;
+    listKept = STANDUP_LISTED.has(screen) && STANDUP_LISTED.has(at.screen);
+    // A move between two plans keeps the repo reading, which their list draws where it is the same repo's.
+    const planToPlan = screen === "plan" && at.screen === "plan";
+    screen = at.screen;
+    page = PAGES[screen];
+    lastView = null;
+    lastOk = null;
+    goneDrawn = false;
+    seenSent = false;
+    // The readings a screen takes beside its own are held for the visit that took them: the ask's
+    // Needs me list, the standup the standup and repo screens draw and the rail's Workers count reads,
+    // and the repo whose detail the standup screen draws and whose plans the plan screen lists. The
+    // standup is kept where the list it draws stays on the page, so the list is drawn from it at once.
+    askNeeds = null;
+    if (!listKept) standupView = null;
+    if (!planToPlan) repoBeside = null;
+    notice.hidden = true;
+    frameClasses();
+    // The talk screen's held lines are one lineage's: a different lineage in the address starts afresh.
+    if (screen === "talk" && talkLineage() !== talk.lineage) resetTalk(talkLineage());
+    const url = page.url();
+    if (url === null) {
+      drawLine(Object.prototype.hasOwnProperty.call(EMPTY_WORDS, screen) ? EMPTY_WORDS[screen] : "No repo named in the address.");
+      return;
+    }
+    if (screen === "talk") loadTalkPlan();
+    poll();
+  }
+
+  /**
+   * Moves the address to a route and draws its screen: the one place `pushState` is called, over a path `pathOf` builds.
+   * A tap on the address already shown replaces the entry rather than adding one, so Back never stalls on a repeat tap.
+   */
+  function go(at) {
+    const path = pathOf(at);
+    const here = routeOf(window.location);
+    if (here !== null && pathOf(here) === path) history.replaceState(null, "", path);
+    else history.pushState(null, "", path);
+    enter(at);
+  }
+
+  /**
+   * A tap on a link to one of the shell's own screens draws that screen here, with no page load. A
+   * link to another origin, to a file, or to any path the route table has no screen for is left to
+   * the browser, as is a tap with a modifier key or a button other than the main one, so a middle
+   * click, a long press and a sibling pill keep their meaning.
+   */
+  function followLink(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (anchor === null || anchor.target !== "" || anchor.origin !== window.location.origin) return;
+    const at = routeOf(anchor);
+    if (at === null) return;
+    event.preventDefault();
+    go(at);
+  }
+
+  /** The screen the address names now, after the back or forward button moved it. */
+  function returned() {
+    const at = routeOf(window.location);
+    if (at !== null) enter(at);
   }
 
   function start() {
-    if (page === undefined) return;
-    const url = page.url();
-    if (url === null) {
-      const empty = { plan: "Open a plan from a repo page.", talk: "No session named in the address.", ask: "Open an ask from the standup or Needs me page." };
-      app.replaceChildren(h("p", "muted", empty[document.body.dataset.page] ?? "No repo named in the address."));
+    // A load with no address at all is a node test's, which reads the patch and the router and draws nothing.
+    if (window.location === undefined) return;
+    const at = routeOf(window.location);
+    if (at === null) {
+      drawLine("No screen at this address.");
       return;
     }
-    if (document.body.dataset.page === "talk") loadTalkPlan();
-    if (document.body.dataset.page === "ask") document.addEventListener("keydown", stepKey);
-    poll();
+    // The toast's live region joins the page empty, before any message, so a screen reader announces the first one.
+    document.body.append(toastBox);
+    document.addEventListener("click", followLink);
+    document.addEventListener("keydown", stepKey);
+    window.addEventListener("popstate", returned);
+    enter(at);
   }
+
+  // The patch and the router are the two members the script exposes, so a node test drives each
+  // on its own, as `markdown.js` exposes its renderer; the page itself reads nothing off them.
+  window.patch = patch;
+  window.route = routeOf;
 
   start();
 })();

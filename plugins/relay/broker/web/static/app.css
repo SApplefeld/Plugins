@@ -1,31 +1,77 @@
-/* The web surface's one stylesheet. Phone width is the base; the wide rules are at the foot.
-   Colours are the mockups' palette, with the amber darkened so text on white and on the tint
-   keeps a 4.5:1 contrast. System fonts only, so the pages load nothing from another origin. */
+/* The shell's one stylesheet. Phone width is the base; the two wide layouts are at the foot.
+   Every colour is a token under `:root`, and the dark block beneath it swaps the colour tokens
+   and nothing else. Type is one scale of five size tokens, the body at
+   14 px. System fonts only, so the page loads nothing from another origin. */
 :root {
-  --bg: #f4f3ef;
-  --card: #ffffff;
-  --line: #e3e1dc;
+  --bg: #f6f5f2;
+  --panel: #ffffff;
+  --rail: #1f2329;
+  --rail-ink: #cfd3da;
+  --rail-on: #2f3540;
+  --rail-dim: #3a404b;
+  --rail-foot: #8a909a;
+  --rail-hi: #ffffff;
+  --ink: #1c1f24;
+  --on-ink: #ffffff;
+  --muted: #6b7079;
+  --line: #e6e3dc;
   --line-strong: #d6d3cc;
-  --ink: #1a1a1a;
-  --muted: #5c5c5c;
-  --amber: #974708;
-  --amber-tint: #fbefe4;
-  --blue: #1f5fbf;
-  --blue-tint: #e7eefa;
-  --green: #2a7048;
-  --green-tint: #e6f2ea;
-  --red: #a32a2a;
-  --red-tint: #fbe9e9;
+  --accent: #3b6fd8;
+  --accent-deep: #2a54aa;
+  --accent-soft: #e8effc;
+  --ok: #2f8a57;
+  --ok-soft: #e3f3ea;
+  --warn: #9a6113;
+  --warn-soft: #fbf0dc;
+  --bad: #c2413b;
+  --bad-soft: #fbe5e3;
   --track: #e9e7e2;
+  --dim: rgba(0, 0, 0, 0.45);
   --mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
-  /* The spacing steps inside the overview's, Needs me's, worker page's and plan page's cards. */
+  /* The type scale: labels, meta, controls and rows, body, headings. */
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-md: 13px;
+  --t-body: 14px;
+  --t-lg: 20px;
+  /* The spacing steps inside the cards. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
-  /* The height of a bounded panel on a wide screen: the rollout card and the repo list. The dormant strip
-     takes half of it. The Needs you list and each Needs me group are bounded by the screen's height less
-     their page's own lines instead. */
-  --panel-h: 25vh;
+  /* The rail's width on each wide layout, and the tab bar's height on a phone. */
+  --rail-w: 220px;
+  --rail-fold: 64px;
+  --tabs-h: 64px;
+  --list-w: 420px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171b;
+    --panel: #1e2126;
+    --rail: #0f1114;
+    --rail-ink: #cfd3da;
+    --rail-on: #2f3540;
+    --rail-dim: #3a404b;
+    --rail-foot: #8a909a;
+    --rail-hi: #ffffff;
+    --ink: #e6e8eb;
+    --on-ink: #15171b;
+    --muted: #9aa0a8;
+    --line: #2b2f36;
+    --line-strong: #3a3f47;
+    --accent: #7aa2f7;
+    --accent-deep: #a4bffa;
+    --accent-soft: #1f2a44;
+    --ok: #5fbf85;
+    --ok-soft: #16302a;
+    --warn: #e0a458;
+    --warn-soft: #3a2c16;
+    --bad: #e4736d;
+    --bad-soft: #3b1f1f;
+    --track: #2b2f36;
+    --dim: rgba(0, 0, 0, 0.6);
+  }
 }
 
 * {
@@ -34,23 +80,25 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  height: 100%;
 }
 
 body {
   margin: 0;
+  height: 100%;
   background: var(--bg);
   color: var(--ink);
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
-  font-size: 14px;
+  font-size: var(--t-body);
   line-height: 1.35;
 }
 
 a {
-  color: var(--blue);
+  color: var(--accent);
 }
 
 a:hover {
-  color: #163f80;
+  color: var(--accent-deep);
 }
 
 a:focus-visible,
@@ -59,23 +107,400 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-/* The page widens with the window up to 2000 px, so a wider browser gives the columns room. Past that, lines would
-   run too long to read, so the page centres with margins. */
-.page {
-  max-width: 2000px;
-  margin: 0 auto;
-  padding: 12px 16px 24px;
+/* The smaller type: controls, rows, cards' lines, chips and buttons. */
+.notice,
+.pill,
+.back,
+.sub,
+.need-row,
+.rec-text,
+.empty,
+.rollup,
+.badge.serves,
+.row,
+.chip,
+.health-band .line,
+.brief-grid,
+.ask,
+.steps,
+.next-line,
+.grid,
+.linkbtn,
+.account-head,
+.account .bound,
+.account .who,
+.verdict-rows,
+.verdict-lever,
+.kit-line,
+.hands li,
+.talk-about,
+.bubble,
+.file-chip,
+.file-link,
+.perm,
+.ask-option,
+.ask-submit,
+.ask-typed,
+.ask-console,
+.perm-allow,
+.perm-deny,
+.nm-sort-button,
+.nm-agree,
+.nm-correct,
+.nm-dismiss,
+.nm-context,
+.nm-send,
+.nm-cancel,
+.nm-batch-button,
+.nm-row,
+.ask-step-link,
+.ask-step-count,
+.nm-sent,
+.nm-context-body,
+.nm-quote,
+.nm-none,
+.held-more,
+.ro-line,
+.ro-empty,
+.ro-flow,
+.ro-lead,
+.ro-commits,
+.ro-button,
+.ro-need,
+.toast,
+.nav,
+.sheet-head {
+  font-size: var(--t-md);
+}
+
+/* The meta type: stamps, ages, notes, counts and the mono lines. */
+.pill .count.down,
+.stamp,
+.need-row .age,
+.rec,
+.chapter-next,
+.badge,
+.meta,
+.note,
+.plan-row .state,
+.plan-row .next,
+.md-subtext,
+.hole-head .why,
+.verdict-foot,
+.windows,
+.talk-earlier,
+.talk-empty,
+.ask-option-desc,
+.perm-input,
+.nm-age,
+.heading-by,
+.steer,
+.ro-sub,
+.ro-day,
+.ro-foot,
+.ro-tag,
+.ro-more,
+.toast-code,
+.toast-close,
+.rail .foot,
+.rail .word {
+  font-size: var(--t-sm);
+}
+
+/* The label type: section headers, tags, message heads and the rail's counts. */
+.label,
+.card-h-title,
+.rec-label,
+.tag,
+.msg-head,
+.nav .n {
+  font-size: var(--t-xs);
+}
+
+/* The heading type: a screen's title and the rail's brand. */
+h1,
+.brand {
+  font-size: var(--t-lg);
+}
+
+/* The shell's frame: the rail and the panes fill the window, and each pane scrolls on its own. On a
+   phone the panes stack in the one column, with the rail as the tab bar across the foot. */
+#app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--tabs-h);
+  height: 100%;
+  min-width: 0;
+}
+
+#app > .muted {
+  padding: 16px;
+}
+
+.pane {
+  grid-row: 1;
+  grid-column: 1;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 12px 16px 24px;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   overflow-wrap: anywhere;
 }
 
-#app {
+/* On a phone the list fills the column, and the detail is hidden until a row is selected. */
+.pane.detail {
+  display: none;
+}
+
+/* The detail as the bottom sheet over the list: it rises from the tab bar, with the list dimmed beneath. */
+#app.sheet::before {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: var(--tabs-h);
+  background: var(--dim);
+  z-index: 4;
+}
+
+#app.sheet .pane.detail {
+  display: flex;
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 8vh;
+  bottom: var(--tabs-h);
+  z-index: 5;
+  background: var(--bg);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -6px 24px var(--dim);
+  padding-top: 0;
+}
+
+/* The sheet's head: the grab bar, and the Close link that returns to the list alone. */
+.sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 -16px;
+  padding: 6px 16px 0;
+  background: var(--bg);
+}
+
+.grab {
+  display: block;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  margin: 4px auto 0;
+  flex: 0 0 auto;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 4px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+/* A screen with no selection whose two panes flow as one column on a phone: the list, then the detail,
+   with the tab bar staying at the foot while the column scrolls. */
+#app.stacked {
+  grid-template-rows: auto auto var(--tabs-h);
+  overflow-y: auto;
+}
+
+#app.stacked .pane {
+  overflow: visible;
+}
+
+#app.stacked .pane.list {
+  grid-row: 1;
+  padding-bottom: 0;
+}
+
+#app.stacked .pane.detail {
+  display: flex;
+  grid-row: 2;
+}
+
+#app.stacked .rail {
+  grid-row: 3;
+  position: sticky;
+  bottom: 0;
+}
+
+/* The rail: on a phone, the tab bar across the foot. */
+.rail {
+  grid-row: 2;
+  grid-column: 1;
+  display: flex;
+  align-items: stretch;
+  background: var(--rail);
+  color: var(--rail-ink);
+  min-width: 0;
+}
+
+.rail .brand,
+.rail .foot {
+  display: none;
+}
+
+.nav {
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: 6px 4px;
+  color: var(--rail-ink);
+  text-decoration: none;
+  border-radius: 8px;
+}
+
+.nav:hover {
+  color: var(--rail-hi);
+}
+
+.nav.on {
+  background: var(--rail-on);
+  color: var(--rail-hi);
+}
+
+.nav .ic {
+  line-height: 1;
+}
+
+.nav .n {
+  background: var(--accent);
+  color: var(--on-ink);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.nav .n.dim {
+  background: var(--rail-dim);
+  color: var(--rail-ink);
+}
+
+/* Health's verdict word: cut short with an ellipsis where its tab or entry is narrower than the word. */
+.nav .n.n-word {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Health's verdict as a dot in the verdict's tone, drawn on the folded rail alone, where the word does not fit. */
+.nav .n-dot {
+  display: none;
+}
+
+.brand {
+  font-weight: 700;
+  color: var(--rail-hi);
+  padding: 4px 10px 18px;
+  letter-spacing: 0.2px;
+}
+
+.rail .foot {
+  margin-top: auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  color: var(--rail-foot);
   min-width: 0;
+}
+
+.rail .sandbox {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+/* The sibling pills, at the rail's foot above the sandbox's name: one per sibling sandbox. */
+.sandboxes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pill {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  border: 1px solid var(--rail-dim);
+  background: var(--rail-on);
+  color: var(--rail-ink);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* A sibling pill wraps its words inside the rail or the pane rather than running past it. */
+.sandboxes .pill {
+  max-width: 100%;
+  flex-wrap: wrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+a.pill:hover {
+  color: var(--rail-hi);
+  border-color: var(--rail-foot);
+}
+
+/* The sibling pills and the sandbox's name at the head of the list pane or a screen drawn as one,
+   below the desktop width, where the rail's foot is hidden. Each pill is a full touch target. */
+.sandbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.sandbox-row .pill {
+  min-height: 44px;
+}
+
+.sandbox-row .sandbox {
+  font-family: var(--mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.pill .count {
+  color: var(--rail-foot);
+}
+
+.pill .count.amber {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.pill .count.down {
+  font-family: var(--mono);
 }
 
 .sr {
@@ -97,12 +522,16 @@ button:focus-visible {
 
 /* Notice: the fetch error, shown over the last render. */
 .notice {
-  background: var(--red-tint);
-  border: 1px solid var(--red);
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  z-index: 6;
+  background: var(--bad-soft);
+  border: 1px solid var(--bad);
   border-radius: 12px;
-  color: var(--red);
+  color: var(--bad);
   padding: 10px 12px;
-  font-size: 13px;
   font-weight: 500;
 }
 
@@ -110,55 +539,19 @@ button:focus-visible {
   display: none;
 }
 
-/* Sandbox rail: this sandbox's pill, then one per sibling, above the header on every page. */
-.rail {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+/* Changed: a node whose text or attribute the latest poll moved, which the patch flags for a moment. The fade
+   starts from the warn tint and ends on the node's own background, so only `from` is set. */
+.changed {
+  animation: changed 1.5s ease-out;
 }
 
-.pill {
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 18px;
-  border: 1px solid var(--line-strong);
-  background: var(--card);
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
+@keyframes changed {
+  from {
+    background-color: var(--warn-soft);
+  }
 }
 
-a.pill:hover {
-  color: var(--ink);
-  background: var(--bg);
-}
-
-.pill.active {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #ffffff;
-  font-weight: 600;
-}
-
-.pill .count {
-  color: var(--muted);
-}
-
-.pill .count.amber {
-  color: var(--amber);
-  font-weight: 600;
-}
-
-.pill .count.down {
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
-/* The health page's other-sandboxes card, under the hands. */
+/* The health screen's other-sandboxes card, under the hands. */
 .others {
   display: flex;
   flex-direction: column;
@@ -198,24 +591,17 @@ a.pill:hover {
   align-items: center;
   gap: 4px;
   min-height: 44px;
-  font-size: 13px;
   font-weight: 500;
   text-decoration: none;
 }
 
 h1 {
   margin: 0;
-  font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-.plan-title {
-  font-size: 20px;
-}
-
 .stamp {
-  font-size: 12px;
   color: var(--muted);
   font-family: var(--mono);
   display: flex;
@@ -224,39 +610,18 @@ h1 {
 }
 
 .stamp .held {
-  color: var(--amber);
+  color: var(--warn);
   font-weight: 600;
 }
 
 .sub {
   margin: 0;
-  font-size: 13px;
   color: var(--muted);
-}
-
-.toplinks {
-  display: none;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.toplinks a {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.toplinks .alert {
-  color: var(--amber);
-  font-weight: 600;
 }
 
 /* Cards and section labels */
 .card {
-  background: var(--card);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
@@ -267,16 +632,15 @@ h1 {
 }
 
 .card.attn {
-  border-left: 3px solid var(--amber);
+  border-left: 3px solid var(--warn);
 }
 
 .card.working {
-  border-left: 3px solid var(--blue);
+  border-left: 3px solid var(--accent);
 }
 
 .label {
   margin: 0;
-  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -286,9 +650,8 @@ h1 {
   color: var(--muted);
 }
 
-/* A section's header on the overview, Needs me, worker and plan pages: the name and count in small
-   capitals with a rule beneath, and whatever follows the name pushed to the row's right. The
-   "Recommends" label takes the same type, so one rule sets the size of both. */
+/* A section's header: the name and count in small capitals with a rule beneath, and whatever
+   follows the name pushed to the row's right. The "Recommends" label takes the same type. */
 .card-h {
   display: flex;
   flex-wrap: wrap;
@@ -301,7 +664,6 @@ h1 {
 .card-h-title,
 .rec-label {
   margin: 0;
-  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -344,15 +706,15 @@ h1 {
 }
 
 .dot.amber {
-  background: var(--amber);
+  background: var(--warn);
 }
 
 .dot.blue {
-  background: var(--blue);
+  background: var(--accent);
 }
 
 .dot.green {
-  background: var(--green);
+  background: var(--ok);
 }
 
 .dot.hollow {
@@ -379,7 +741,6 @@ h1 {
   border-top: 1px solid var(--line);
   color: var(--ink);
   text-decoration: none;
-  font-size: 13px;
   align-items: baseline;
 }
 
@@ -393,23 +754,21 @@ a.need-row:hover {
 }
 
 .need-row .age {
-  font-size: 12px;
   color: var(--muted);
 }
 
 .tag {
   display: inline-block;
-  font-size: 11px;
   font-weight: 600;
-  color: var(--amber);
-  background: var(--amber-tint);
+  color: var(--warn);
+  background: var(--warn-soft);
   border-radius: 9px;
   padding: 1px 7px;
   margin-right: 6px;
 }
 
 /* A recommendation on its own line with space above: "Recommends" in the header's label type, then the text beside it.
-   It sits on the page's own shade inside the white card, so it reads as the card's lower half rather than more
+   It sits on the page's own shade inside the card, so it reads as the card's lower half rather than more
    of the question. */
 .rec {
   display: flex;
@@ -420,26 +779,22 @@ a.need-row:hover {
   padding: var(--space-2) var(--space-3);
   border-radius: 6px;
   background: var(--bg);
-  font-size: 12px;
   color: var(--muted);
 }
 
 .rec-text {
   min-width: 0;
-  font-size: 13px;
   color: var(--ink);
 }
 
-/* A chapter's "Next:" line on the plan page, a muted line under the chapter's title. */
+/* A chapter's "Next:" line on the plan screen, a muted line under the chapter's title. */
 .chapter-next {
   display: block;
-  font-size: 12px;
   color: var(--muted);
 }
 
 .empty {
   padding: 10px 12px 12px;
-  font-size: 13px;
   color: var(--muted);
   border-top: 1px solid var(--line);
 }
@@ -449,7 +804,6 @@ a.need-row:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
-  font-size: 13px;
   padding: 0 2px;
 }
 
@@ -458,7 +812,7 @@ a.need-row:hover {
 }
 
 .rollup .alert {
-  color: var(--amber);
+  color: var(--warn);
 }
 
 /* Repo cards */
@@ -468,11 +822,13 @@ a.need-row:hover {
   gap: 8px;
 }
 
-/* On a phone the standup's two columns, the repo list and the Needs me groups' row draw no box of their
-   own, so their sections, cards and rows stack as one column. */
+/* The standup's two columns, the repo page's two columns, the repo list on a phone and the Needs me
+   groups draw no box of their own, so their sections, cards and rows stack as one column in the pane
+   that holds them. */
 .standup-cols,
 .standup-main,
 .standup-side,
+.repo-cols,
 .repo-list,
 .nm-groups {
   display: contents;
@@ -528,28 +884,27 @@ a.need-line {
 }
 
 .badge {
-  font-size: 12px;
   font-weight: 600;
-  color: var(--amber);
-  background: var(--amber-tint);
+  color: var(--warn);
+  background: var(--warn-soft);
   padding: 3px 9px;
   border-radius: 11px;
   white-space: nowrap;
 }
 
 .badge.red {
-  color: var(--red);
-  background: var(--red-tint);
+  color: var(--bad);
+  background: var(--bad-soft);
 }
 
 .badge.blue {
-  color: var(--blue);
-  background: var(--blue-tint);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .badge.green {
-  color: var(--green);
-  background: var(--green-tint);
+  color: var(--ok);
+  background: var(--ok-soft);
 }
 
 /* The serves chip holds up to a direction item's words, so it wraps where a badge does not. */
@@ -564,12 +919,11 @@ a.need-line {
 }
 
 .meta {
-  font-size: 12px;
   color: var(--muted);
 }
 
 .meta .alert {
-  color: var(--amber);
+  color: var(--warn);
   font-weight: 500;
 }
 
@@ -596,7 +950,6 @@ a.need-line {
   border-bottom: 1px solid var(--line);
   color: var(--ink);
   text-decoration: none;
-  font-size: 13px;
 }
 
 .row:last-child {
@@ -634,10 +987,9 @@ a.row:hover {
   padding: 0 12px;
   border-radius: 22px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   text-decoration: none;
-  font-size: 13px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -649,7 +1001,6 @@ a.row:hover {
 }
 
 .note {
-  font-size: 12px;
   color: var(--muted);
   font-family: var(--mono);
   border-top: 1px solid var(--line);
@@ -671,11 +1022,7 @@ a.health-band:hover {
   background: var(--bg);
 }
 
-.health-band .line {
-  font-size: 13px;
-}
-
-/* Plan rows (repo page) */
+/* Plan rows (repo screen) */
 .plan-row {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr) 12px;
@@ -697,25 +1044,40 @@ a.plan-row:hover {
   background: var(--bg);
 }
 
+/* The row, plan row or repo card whose detail the detail pane draws: tinted and edged in the accent,
+   as the Needs me list marks its selected row. The edge is an inset shadow, so the row keeps its size. */
+.row.sel,
+.plan-row.sel,
+.repo-card.sel {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* The dormant repo whose detail the detail pane draws, filled as a chip that is on. */
+.chip.sel {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-ink);
+}
+
 .plan-row .state {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
   font-weight: 600;
   color: var(--muted);
 }
 
 .plan-row .state.doing {
-  color: var(--blue);
+  color: var(--accent);
 }
 
 .plan-row .state.done {
-  color: var(--green);
+  color: var(--ok);
 }
 
 .plan-row .state.doing .dot {
-  background: var(--blue);
+  background: var(--accent);
 }
 
 .plan-row .body {
@@ -729,10 +1091,6 @@ a.plan-row:hover {
   font-weight: 500;
 }
 
-.plan-row .next {
-  font-size: 12px;
-}
-
 .plan-row .meta {
   overflow-wrap: anywhere;
 }
@@ -744,7 +1102,7 @@ a.plan-row:hover {
   gap: var(--space-2);
 }
 
-/* Plan page */
+/* Plan screen */
 .chips-row {
   display: flex;
   gap: 8px;
@@ -754,7 +1112,6 @@ a.plan-row:hover {
 
 .goal {
   margin: 0;
-  font-size: 15px;
   line-height: 1.4;
 }
 
@@ -784,18 +1141,6 @@ a.plan-row:hover {
   line-height: 1.3;
 }
 
-:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) h3 {
-  font-size: 1.1em;
-}
-
-:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) h4 {
-  font-size: 1em;
-}
-
-:is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) h5 {
-  font-size: 0.95em;
-}
-
 :is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) :is(ul, ol) {
   padding-left: 1.4em;
 }
@@ -806,18 +1151,15 @@ a.plan-row:hover {
   border: 1px solid var(--line);
   border-radius: 6px;
   font-family: var(--mono);
-  font-size: 12.5px;
   white-space: pre-wrap;
 }
 
 :is(.ask-question, .ask-brief, .goal, .nm-whole, .brief-text) code {
   white-space: pre-wrap;
   font-family: var(--mono);
-  font-size: 0.95em;
 }
 
 .md-subtext {
-  font-size: 12px;
   color: var(--muted);
 }
 
@@ -831,7 +1173,6 @@ a.plan-row:hover {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
   gap: var(--space-2) var(--space-3);
-  font-size: 13px;
 }
 
 .brief-label {
@@ -841,7 +1182,7 @@ a.plan-row:hover {
 }
 
 .brief-label.assumes {
-  color: var(--amber);
+  color: var(--warn);
   font-weight: 600;
 }
 
@@ -859,7 +1200,6 @@ a.plan-row:hover {
   gap: 4px;
   padding: 12px 14px;
   border-top: 1px solid var(--line);
-  font-size: 13px;
 }
 
 .ask:first-child {
@@ -873,7 +1213,6 @@ a.plan-row:hover {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   gap: var(--space-2);
-  font-size: 13px;
   align-items: start;
 }
 
@@ -890,11 +1229,11 @@ a.plan-row:hover {
 }
 
 .mark.done {
-  color: var(--green);
+  color: var(--ok);
 }
 
 .mark.now {
-  color: var(--blue);
+  color: var(--accent);
 }
 
 .mark.later {
@@ -902,17 +1241,16 @@ a.plan-row:hover {
 }
 
 .next-line {
-  font-size: 13px;
   font-weight: 500;
 }
 
-/* Health page */
+/* Health screen */
 .hole {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border-left: 3px solid var(--amber);
+  border-left: 3px solid var(--warn);
 }
 
 .hole-head {
@@ -922,16 +1260,14 @@ a.plan-row:hover {
 }
 
 .hole-head .why {
-  font-size: 12px;
   font-weight: 600;
-  color: var(--amber);
+  color: var(--warn);
 }
 
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 6px 12px;
-  font-size: 13px;
 }
 
 .grid .cell {
@@ -939,6 +1275,9 @@ a.plan-row:hover {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
 }
 
 .grid .cell span:last-child {
@@ -947,7 +1286,6 @@ a.plan-row:hover {
 
 .hole-head h3 {
   margin: 0;
-  font-size: 14px;
   font-weight: 600;
 }
 
@@ -956,15 +1294,14 @@ a.plan-row:hover {
   padding: 0 4px;
   border: 0;
   background: transparent;
-  color: var(--blue);
+  color: var(--accent);
   font: inherit;
-  font-size: 13px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
 }
 
-/* The account cards: one across on a phone, two across where the page is wide (see the media block). */
+/* The account cards: one across on a phone, two across where the pane is wide (see the media block). */
 .accounts {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -986,26 +1323,22 @@ a.plan-row:hover {
   align-items: baseline;
   flex-wrap: wrap;
   gap: 4px 8px;
-  font-size: 13px;
 }
 
 .account-head .binding {
-  font-size: 15px;
   font-weight: 600;
 }
 
 .account-head .binding.hot,
 .account .bound {
-  color: var(--amber);
+  color: var(--warn);
 }
 
 .account .bound {
-  font-size: 13px;
   font-weight: 600;
 }
 
 .account .who {
-  font-size: 13px;
   font-weight: 500;
   overflow-wrap: anywhere;
 }
@@ -1030,7 +1363,6 @@ a.plan-row:hover {
 }
 
 .verdict-title {
-  font-size: 15px;
   font-weight: 600;
 }
 
@@ -1038,18 +1370,12 @@ a.plan-row:hover {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
   gap: 8px 10px;
-  font-size: 13px;
-}
-
-.verdict-lever {
-  font-size: 13px;
 }
 
 .verdict-foot {
   padding-top: 6px;
   border-top: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: 12px;
   color: var(--muted);
 }
 
@@ -1059,17 +1385,12 @@ a.plan-row:hover {
   gap: 6px;
 }
 
-.kit-line {
-  font-size: 13px;
-}
-
 .windows {
   display: grid;
   grid-template-columns: 48px 40px minmax(0, 1fr);
   gap: 2px 10px;
   align-items: center;
   font-family: var(--mono);
-  font-size: 12px;
 }
 
 .windows .reset {
@@ -1090,11 +1411,11 @@ a.plan-row:hover {
 .bar > span {
   display: block;
   height: 6px;
-  background: var(--blue);
+  background: var(--accent);
 }
 
 .bar > span.hot {
-  background: var(--amber);
+  background: var(--warn);
 }
 
 .hands {
@@ -1108,7 +1429,6 @@ a.plan-row:hover {
   gap: 10px;
   padding: 12px;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
 }
 
 .hands li:last-child {
@@ -1126,159 +1446,6 @@ a.plan-row:hover {
   font-weight: 500;
 }
 
-/* Wide screens: the same pages with room to breathe. */
-@media (min-width: 900px) {
-  body {
-    font-size: 14px;
-  }
-
-  .page {
-    padding: 18px 24px 28px;
-    gap: 14px;
-  }
-
-  .toplinks {
-    display: flex;
-  }
-
-  /* The Needs you rows stack at full width, each on a fixed persona column, so every question starts at one x. */
-  .need-row {
-    grid-template-columns: 12ch minmax(0, 1fr) auto;
-    align-content: center;
-    border-top: 0;
-    gap: var(--space-2);
-    padding: var(--space-1) 16px;
-  }
-
-  .band-head {
-    padding: var(--space-3) 16px var(--space-1);
-  }
-
-  .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 16px;
-    align-items: start;
-  }
-
-  /* The standup's needs and direction on the left, its workers on the right. */
-  .standup-cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 14px;
-    align-items: start;
-  }
-
-  .standup-main,
-  .standup-side {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    min-width: 0;
-  }
-
-  .repo-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  /* A card keeps its full height and the panel scrolls, rather than the bounded column squeezing it. */
-  .repo-list > * {
-    flex-shrink: 0;
-  }
-
-  /* A long list scrolls inside its own bounded panel, so the page holds every section in one screen. The
-     panel's header stays in view while its rows scroll beneath. */
-  /* The panel is the positioning context too, so a visually hidden .sr span inside it is clipped with the
-     rows rather than placed against the page, where it would stretch the page past the screen. */
-  .panel {
-    position: relative;
-    overflow-x: hidden;
-    overflow-y: auto;
-  }
-
-  /* The bounds hold only on a screen at least 600 px tall. On a shorter one, such as a phone held
-     sideways, a bound would leave each panel a sliver, so the panels take their full height and the
-     page scrolls whole. */
-  @media (min-height: 600px) {
-    .panel {
-      max-height: var(--panel-h);
-    }
-
-    /* The left column is as tall as the screen less the page's own lines above and below, about 240 px.
-       The heading and rollout cards keep their height, and the Needs you list, its first child, takes
-       what is left, never less than 120 px. */
-    .standup-main {
-      max-height: calc(100vh - 240px);
-    }
-
-    .chips.panel {
-      max-height: calc(var(--panel-h) / 2);
-    }
-
-    /* Each Needs me group is as tall as the screen less the page's own lines: the title block, the sort
-       bar, a group's header, the batch bar and the source line, about 420 px. */
-    .nm-groups .panel {
-      max-height: calc(100vh - 420px);
-    }
-  }
-
-  .standup-main > * {
-    flex-shrink: 0;
-  }
-
-  .standup-main > .panel:first-child {
-    flex-shrink: 1;
-    min-height: 120px;
-    max-height: none;
-  }
-
-  /* The Needs me groups sit side by side, each scrolling in its own panel. */
-  .nm-groups {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(0, 1fr);
-    gap: 14px;
-    align-items: start;
-  }
-
-  .panel > .card-h {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--card);
-  }
-
-  .health-cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr);
-    gap: 16px;
-    align-items: start;
-  }
-
-  .accounts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .repo-cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-    gap: 16px;
-    align-items: start;
-  }
-}
-
-@media (max-width: 899px) {
-  .cols,
-  .health-cols,
-  .repo-cols {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-}
-
 .stack {
   display: flex;
   flex-direction: column;
@@ -1286,32 +1453,29 @@ a.plan-row:hover {
   min-width: 0;
 }
 
-/* Talk page */
+/* Talk screen */
 button.chip {
   font: inherit;
-  font-size: 13px;
   cursor: pointer;
 }
 
 .chip.on {
   background: var(--ink);
   border-color: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
 }
 
 .chip.on:hover {
   background: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
 }
 
 .talk-about {
-  font-size: 13px;
   margin-top: 6px;
 }
 
 .talk-earlier,
 .talk-empty {
-  font-size: 12px;
   color: var(--muted);
   text-align: center;
 }
@@ -1347,7 +1511,6 @@ button.chip {
 }
 
 .msg-head {
-  font-size: 11px;
   color: var(--muted);
 }
 
@@ -1357,11 +1520,10 @@ button.chip {
 }
 
 .bubble {
-  background: var(--card);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px 12px 12px 4px;
   padding: 10px 12px;
-  font-size: 13px;
   white-space: pre-wrap;
   min-width: 0;
 }
@@ -1369,12 +1531,12 @@ button.chip {
 .msg.mine .bubble {
   background: var(--ink);
   border-color: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
   border-radius: 12px 12px 4px 12px;
 }
 
 .composer {
-  background: var(--card);
+  background: var(--panel);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   padding: 10px 12px;
@@ -1396,7 +1558,7 @@ button.chip {
   padding: 0 14px;
   border-radius: 22px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   font: inherit;
 }
@@ -1409,7 +1571,7 @@ button.chip {
   border-radius: 22px;
   border: 1px solid var(--ink);
   background: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
   font: inherit;
   cursor: pointer;
 }
@@ -1433,7 +1595,7 @@ button.chip {
   padding: 0 12px;
   border-radius: 22px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   font: inherit;
   cursor: pointer;
@@ -1461,8 +1623,7 @@ button.chip {
   padding-left: 12px;
   border-radius: 22px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
-  font-size: 13px;
+  background: var(--panel);
 }
 
 .file-chip-name {
@@ -1478,7 +1639,6 @@ button.chip {
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 18px;
   cursor: pointer;
 }
 
@@ -1497,11 +1657,10 @@ button.chip {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  font-size: 13px;
   overflow-wrap: anywhere;
 }
 
-/* Talk page: what the session is held on */
+/* Talk screen: what the session is held on */
 .waiting {
   display: flex;
   flex-direction: column;
@@ -1515,7 +1674,6 @@ button.chip {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  font-size: 13px;
 }
 
 .perm {
@@ -1554,10 +1712,9 @@ button.chip {
   padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
   text-align: left;
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -1566,16 +1723,15 @@ button.chip {
 .ask-option.on {
   border-color: var(--ink);
   background: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
 }
 
 .ask-option-desc {
-  font-size: 12px;
   color: var(--muted);
 }
 
 .ask-option.on .ask-option-desc {
-  color: #ffffff;
+  color: var(--on-ink);
 }
 
 .ask-controls {
@@ -1594,10 +1750,9 @@ button.chip {
   padding: 0 14px;
   border-radius: 22px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
   cursor: pointer;
 }
 
@@ -1605,12 +1760,12 @@ button.chip {
 .perm-allow {
   border-color: var(--ink);
   background: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
 }
 
 .perm-deny {
-  border-color: var(--red);
-  color: var(--red);
+  border-color: var(--bad);
+  color: var(--bad);
 }
 
 .ask-option:disabled,
@@ -1636,14 +1791,13 @@ button.chip {
   border-radius: 8px;
   background: var(--bg);
   font-family: var(--mono);
-  font-size: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 240px;
   overflow-y: auto;
 }
 
-/* Needs-me page */
+/* Needs me screen: the list pane's groups and rows, and the detail pane's item. */
 .nm {
   display: flex;
   flex-direction: column;
@@ -1675,10 +1829,9 @@ button.chip {
   padding: 0 14px;
   border-radius: 22px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1692,7 +1845,7 @@ button.chip {
 .nm-batch-button {
   border-color: var(--ink);
   background: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
 }
 
 .nm-agree:disabled,
@@ -1702,6 +1855,42 @@ button.chip {
   background: var(--track);
   color: var(--muted);
   cursor: default;
+}
+
+/* A row of the list: a link that selects the item, with the selected one edged and tinted in the accent. */
+.nm-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
+  min-width: 0;
+  color: var(--ink);
+  text-decoration: none;
+  border-left: 3px solid transparent;
+}
+
+.nm-row + .nm-row,
+.nm-row + .nm-sent,
+.nm-sent + .nm-row {
+  border-top: 1px solid var(--line);
+}
+
+a.nm-row:hover {
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.nm-row.sel {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.nm-row .nm-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .nm-item {
@@ -1732,13 +1921,11 @@ button.chip {
 }
 
 .nm-age {
-  font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
 }
 
 .nm-text {
-  font-size: 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1748,11 +1935,7 @@ a.nm-text {
 }
 
 .ask-question {
-  font-size: 16px;
-}
-
-.ask-brief {
-  font-size: 14px;
+  font-weight: 500;
 }
 
 .ask-where {
@@ -1762,11 +1945,18 @@ a.nm-text {
   gap: 4px 12px;
 }
 
+/* The thread link is a touch target, so it stands a full 44 px tall. */
+.ask-thread {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
 .ask-controls {
   padding: 4px 0 8px;
 }
 
-/* The ask page's step row: Previous, the ask's place in the Needs me order, then Next. */
+/* The ask screen's step row: Previous, the ask's place in the Needs me order, then Next. */
 .ask-step {
   display: flex;
   align-items: center;
@@ -1777,8 +1967,9 @@ a.nm-text {
 .ask-step-link {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 44px;
-  font-size: 14px;
+  min-width: 44px;
   font-weight: 500;
   text-decoration: none;
 }
@@ -1790,7 +1981,6 @@ a.nm-text {
 }
 
 .ask-step-count {
-  font-size: 13px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1810,15 +2000,14 @@ a.nm-text {
   padding-top: 4px;
 }
 
-/* An item whose act is out: tinted and edged in blue until the broker answers. */
+/* An item whose act is out: tinted and edged in the accent until the broker answers. */
 .nm-acting {
-  background: var(--blue-tint);
-  box-shadow: inset 3px 0 0 var(--blue);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* What stands where a delivered item was, until the next reading. */
 .nm-sent {
-  font-size: 13px;
   color: var(--ink);
 }
 
@@ -1835,7 +2024,6 @@ a.nm-text {
   padding: 8px 10px;
   border-radius: 8px;
   background: var(--bg);
-  font-size: 13px;
   min-width: 0;
 }
 
@@ -1856,7 +2044,6 @@ a.nm-text {
   padding: 2px 0 2px 10px;
   border-left: 3px solid var(--line-strong);
   color: var(--muted);
-  font-size: 13px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1867,7 +2054,7 @@ a.nm-text {
   padding: 8px 12px;
   border-radius: 12px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   font: inherit;
   resize: vertical;
@@ -1886,7 +2073,6 @@ a.nm-text {
 
 .nm-none {
   padding: 10px 12px;
-  font-size: 13px;
   color: var(--muted);
 }
 
@@ -1916,16 +2102,15 @@ a.nm-text {
   min-width: 44px;
   padding: 0 14px;
   border-radius: 22px;
-  border: 1px solid var(--amber);
-  background: var(--amber-tint);
-  color: var(--amber);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
   font: inherit;
-  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
 
-/* Direction heading: the standup page's card, with its Steer button, and the repo page's. */
+/* Direction heading: the standup screen's card, with its Steer button, and the repo screen's. */
 .heading-card {
   display: flex;
   flex-direction: column;
@@ -1933,26 +2118,23 @@ a.nm-text {
 }
 
 .heading-by {
-  font-size: 11px;
   color: var(--muted);
 }
 
 .heading-text {
   margin: 0;
-  font-size: 15px;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
 .steer {
-  min-height: 32px;
+  min-height: 44px;
   padding: 0 10px;
   border-radius: 8px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
   font: inherit;
-  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -1961,6 +2143,13 @@ a.nm-text {
   background: var(--track);
   color: var(--muted);
   cursor: default;
+}
+
+/* The worker card's link to its talk screen, a full touch target inside its meta line. */
+.worker-talk {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 
 /* The composer the Steer button opens: one line and Send, sharing the talk composer's controls. */
@@ -1977,18 +2166,17 @@ a.nm-text {
   align-items: center;
 }
 
-/* Rollout: the sandbox card, the repo page's card, the Needs-me group and the toast they share. */
+/* Rollout: the sandbox card, the repo screen's card, the Needs me group and the toast they share. */
 .ro-head {
   padding: var(--space-3) var(--space-3) var(--space-1);
 }
 
 .ro-sub {
-  font-size: 12px;
   color: var(--muted);
 }
 
 .ro-sub.held {
-  color: var(--amber);
+  color: var(--warn);
   font-weight: 600;
 }
 
@@ -1998,12 +2186,10 @@ a.nm-text {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--line);
-  font-size: 13px;
   align-items: baseline;
 }
 
 .ro-day {
-  font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -2011,14 +2197,12 @@ a.nm-text {
 .ro-empty {
   padding: 8px 12px;
   border-top: 1px solid var(--line);
-  font-size: 13px;
   color: var(--muted);
 }
 
 .ro-foot {
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--line);
-  font-size: 12px;
   color: var(--muted);
   font-family: var(--mono);
 }
@@ -2029,11 +2213,6 @@ a.nm-text {
 
 .ro-flow {
   padding: var(--space-1) var(--space-3);
-  font-size: 13px;
-}
-
-.ro-flow .muted {
-  font-size: 13px;
 }
 
 .ro-repo {
@@ -2057,30 +2236,23 @@ a.nm-text {
 }
 
 .ro-tag {
-  font-size: 12px;
   color: var(--muted);
   font-family: var(--mono);
-}
-
-.ro-lead {
-  font-size: 13px;
 }
 
 .ro-commits {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   gap: var(--space-1) var(--space-2);
-  font-size: 13px;
   align-items: baseline;
 }
 
 .ro-check {
-  color: var(--green);
+  color: var(--ok);
   font-weight: 700;
 }
 
 .ro-more {
-  font-size: 12px;
   color: var(--muted);
 }
 
@@ -2094,25 +2266,24 @@ a.nm-text {
   padding: 0 12px;
   border-radius: 8px;
   font: inherit;
-  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }
 
 .ro-button-repo {
-  min-height: 36px;
-  min-width: 36px;
+  min-height: 44px;
+  min-width: 44px;
   border: 1px solid var(--ink);
   background: var(--ink);
-  color: #ffffff;
+  color: var(--on-ink);
 }
 
 .ro-button-need {
-  min-height: 32px;
-  min-width: 32px;
+  min-height: 44px;
+  min-width: 44px;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: var(--panel);
   color: var(--ink);
 }
 
@@ -2129,7 +2300,6 @@ a.nm-text {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3);
-  font-size: 13px;
   min-width: 0;
 }
 
@@ -2142,15 +2312,11 @@ a.nm-text {
   border-top: 1px solid var(--line);
 }
 
-.ro-need .muted {
-  font-size: 13px;
-}
-
 .toast {
   position: fixed;
   left: 12px;
   right: 12px;
-  bottom: 12px;
+  bottom: calc(var(--tabs-h) + 12px);
   z-index: 10;
   max-width: 560px;
   margin: 0 auto;
@@ -2161,8 +2327,7 @@ a.nm-text {
   padding: 10px 12px;
   border-radius: 12px;
   background: var(--ink);
-  color: #ffffff;
-  font-size: 13px;
+  color: var(--on-ink);
   overflow-wrap: anywhere;
 }
 
@@ -2182,7 +2347,6 @@ a.nm-text {
 
 .toast-code {
   font-family: var(--mono);
-  font-size: 12px;
   user-select: all;
 }
 
@@ -2194,24 +2358,192 @@ a.nm-text {
   min-width: 36px;
   padding: 0 10px;
   border-radius: 8px;
-  border: 1px solid #ffffff;
+  border: 1px solid var(--on-ink);
   background: transparent;
-  color: #ffffff;
+  color: var(--on-ink);
   font: inherit;
-  font-size: 12px;
   cursor: pointer;
 }
 
 .toast-close:focus-visible {
-  outline-color: #ffffff;
+  outline-color: var(--on-ink);
 }
 
-@media (min-width: 900px) {
+/* Tablet and up: the rail folds to icons at the left, the list and the detail sit side by side, and a
+   screen drawn as one takes both columns. The sheet head and the dimming go, since the detail has its
+   own column. */
+@media (min-width: 700px) {
+  #app,
+  #app.stacked {
+    grid-template-columns: var(--rail-fold) minmax(0, 1fr) minmax(0, 1.4fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  #app.sheet::before {
+    content: none;
+  }
+
+  .rail,
+  #app.stacked .rail {
+    grid-row: 1;
+    grid-column: 1;
+    position: static;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 12px 8px;
+  }
+
+  .nav {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: center;
+    gap: 10px;
+    padding: 9px 10px;
+  }
+
+  .rail .word,
+  .rail .brand,
+  .rail .foot,
+  .nav .n.n-word {
+    display: none;
+  }
+
+  .nav .n-dot {
+    display: inline-block;
+  }
+
+  .pane,
+  #app.stacked .pane {
+    grid-row: 1;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 18px 20px 28px;
+    gap: 14px;
+  }
+
+  .pane.list,
+  #app.stacked .pane.list {
+    grid-column: 2;
+    border-right: 1px solid var(--line);
+    padding-bottom: 28px;
+  }
+
+  .pane.detail,
+  #app.sheet .pane.detail,
+  #app.stacked .pane.detail {
+    display: flex;
+    grid-row: 1;
+    grid-column: 3;
+    position: static;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+    padding-top: 18px;
+  }
+
+  .pane.whole {
+    grid-column: 2 / span 2;
+  }
+
+  .sheet-head {
+    display: none;
+  }
+
+  .toast {
+    left: calc(var(--rail-fold) + 12px);
+    bottom: 12px;
+  }
+
+  /* The Needs you rows stack at full width, each on a fixed persona column, so every question starts at one x. */
+  .need-row {
+    grid-template-columns: 12ch minmax(0, 1fr) auto;
+    align-content: center;
+    border-top: 0;
+    gap: var(--space-2);
+    padding: var(--space-1) 16px;
+  }
+
+  .band-head {
+    padding: var(--space-3) 16px var(--space-1);
+  }
+
+  .repo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* The pane scrolls as a whole, so a panel keeps its full height; its header stays in view as the pane
+     scrolls under it, and it is the positioning context for a visually hidden .sr span inside it. */
+  .panel {
+    position: relative;
+  }
+
+  .panel > .card-h {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--panel);
+  }
+
+  .accounts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .ro-full {
     display: none;
   }
 
   .ro-condensed {
     display: block;
+  }
+}
+
+/* Desktop: the rail opens to its words, brand and foot, and the list takes its fixed width with the
+   detail taking the rest, however wide the window grows. */
+@media (min-width: 1100px) {
+  #app,
+  #app.stacked {
+    grid-template-columns: var(--rail-w) var(--list-w) minmax(0, 1fr);
+  }
+
+  .rail,
+  #app.stacked .rail {
+    padding: 14px 10px;
+  }
+
+  .nav {
+    justify-content: flex-start;
+  }
+
+  .nav .n {
+    margin-left: auto;
+  }
+
+  .rail .word,
+  .rail .brand {
+    display: block;
+  }
+
+  .nav .n.n-word {
+    display: block;
+  }
+
+  .nav .n-dot {
+    display: none;
+  }
+
+  .rail .foot {
+    display: flex;
+  }
+
+  .sandbox-row {
+    display: none;
+  }
+
+  .toast {
+    left: calc(var(--rail-w) + 12px);
   }
 }

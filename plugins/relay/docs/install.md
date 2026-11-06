@@ -575,8 +575,8 @@ browser on this host is refused too, so open the pages from the phone or another
 `CHANNEL_WEB_PORT` (default 8788), `CHANNEL_WEB_TAILSCALE` (the CLI, default `tailscale` on PATH)
 and `CHANNEL_WEB_STATIC_ROOT` (the pages' directory, an absolute path) rarely need setting.
 `CHANNEL_WEB_SIBLINGS` names the other sandboxes as comma-separated `Name=address:port` entries,
-each address a tailnet IPv4. With it set, every page shows a rail of their needs-you counts, and a
-tap lands on the sibling's page. Each sibling's listener must admit this host's node and login.
+each address a tailnet IPv4. With it set, every screen shows a pill per sibling with its needs-you
+count, and a tap lands on the sibling's screen. Each sibling's listener must admit this host's node and login.
 `CHANNEL_WEB_SUMMARY_PEERS` names the sibling nodes admitted to the summary route alone, as "Three
 sandboxes on one tailnet" below sets out.
 `CHANNEL_DIRECTION_LEDGER` is the absolute path of this machine's direction ledger, the
@@ -822,7 +822,8 @@ image or template exists. In order:
 4. Restart the broker on each sibling whose keys changed. The installer has already restarted the
    new sandbox's broker with its keys written.
 5. Check the new sandbox's log for the start-up line, which counts one summary peer per sibling,
-   and open any page from your phone. The rail shows one pill per sibling.
+   and open any screen from your phone. The row at the top of the list shows one pill per
+   sibling.
 
 ## 3. Install the service
 

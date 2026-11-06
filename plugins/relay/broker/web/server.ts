@@ -93,23 +93,20 @@ type WebRoute = { handler: WebRouteHandler; operatorWord: boolean; octetStream: 
 /** The shape a route name may take, so the table is a fixed set of words and never a path. */
 const ROUTE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 
-/** The pages the fixed routes serve, and the file each comes from. */
-const PAGE_ROUTES: Readonly<Record<string, string>> = {
-  "/": "index.html",
-  "/plan": "plan.html",
-  "/health": "health.html",
-  "/talk": "talk.html",
-  "/needs-me": "needs-me.html",
-  "/ask": "ask.html",
-};
+/**
+ * The one page file, the application shell, served on every page path: the script in it reads
+ * which screen to draw from the path and the query, so a bookmark of any path opens on its screen.
+ */
+const SHELL_PAGE = "shell.html";
+/** The fixed page paths, each served the shell. */
+const PAGE_ROUTES: ReadonlySet<string> = new Set(["/", "/plan", "/health", "/talk", "/needs-me", "/ask"]);
 const REPO_PREFIX = "/repo/";
-const REPO_PAGE = "repo.html";
 const ROUTE_PREFIX = "/web/";
 /** The one path the summary peer list admits a node to, the summary `registerViewHandlers` serves. */
 const SUMMARY_PATH = `${ROUTE_PREFIX}summary`;
 
 /** The file kinds the static handler serves, by extension, and what each is sent as. */
-const STATIC_TYPES: Readonly<Record<string, string>> = {
+export const STATIC_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -207,10 +204,10 @@ export function resolveStatic(root: string, pathname: string): string | null {
   return resolved.startsWith(base + path.sep) ? resolved : null;
 }
 
-/** The file one of the fixed page routes serves for a request path, or null for none. */
-function pageFor(pathname: string): string | null {
-  if (Object.hasOwn(PAGE_ROUTES, pathname)) return PAGE_ROUTES[pathname];
-  if (pathname.startsWith(REPO_PREFIX) && pathname.length > REPO_PREFIX.length) return REPO_PAGE;
+/** The file a page path serves, the shell for every fixed path and every `/repo/<name>`, or null for none. */
+export function pageFor(pathname: string): string | null {
+  if (PAGE_ROUTES.has(pathname)) return SHELL_PAGE;
+  if (pathname.startsWith(REPO_PREFIX) && pathname.length > REPO_PREFIX.length) return SHELL_PAGE;
   return null;
 }
 
