@@ -49,6 +49,9 @@ export interface SessionState {
   // rejects. In memory only.
   repromptChain: Promise<void>;
   cacheWarmUntil: number | null; // the clock's warm-until instant, which the beat publishes
+  inboxDrainedAt: number | null; // the instant the inbox drain last settled while it held the slot, or the owner's own turn last ended, which the beat publishes
+  controllerTickMs: number; // this session's controller tick cadence, which the beat publishes for the fleet's reading
+  heartbeatMs: number; // this session's heartbeat cadence, which the beat publishes for the same reading
   // The controller tick's fleet watcher's last reading, for the coordinator
   // persona alone: one entry per persona a reading of this session's has
   // named, plus the three the watcher keeps about the roster file and the tick

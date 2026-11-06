@@ -32,7 +32,7 @@ import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromMo
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
 import type { ExpectedTurn, SubmitOutcome } from "./channel-text";
-import { claimResource, commonsWinner, readAllClaims, readAllEntries, type CommonsStore } from "./commons";
+import { INBOX_DRAIN_IDLE_TICKS, claimResource, commonsWinner, readAllClaims, readAllEntries, type CommonsStore } from "./commons";
 import { compactionPassStep, type CompactionPassDeps, type CompactionPassOption } from "./compaction-pass";
 import { backoffFactor, bumpWindow, effectiveWindowCount, estimateTokens, fnv1aHash, shouldRunClassify } from "./cost-ledger";
 import { splitOf } from "./decision-journal";
@@ -164,7 +164,7 @@ export interface TickContext extends SharedHandlerState {
   noteCompletionShape: (site: string, value: unknown) => void;
   clearAgentHold: () => void;
   heartbeatPathOf: () => string;
-  recordFailedDelivery: (rec: InboxRecord, outcome: { how: string; reason: string }) => void;
+  recordFailedDelivery: (rec: InboxRecord, outcome: { how: string; reason: string }, fate?: string) => void;
   cacheClock: CacheClockState;
   cacheWatch: { warmSeen: boolean };
   PROPOSAL_EVERY_MS: number;
@@ -173,6 +173,9 @@ export interface TickContext extends SharedHandlerState {
   MAX_CONSECUTIVE_NUDGES: number;
   staleAfterMs: number;
   controllerTickMs: number;
+  // This session's heartbeat cadence, the term the fleet reading adds to a
+  // watched persona's own ticks before it reads a delivery wedged.
+  heartbeatMs: number;
   supervisorMailbox: string;
   supervisorHeartbeatPath: string;
   supervisorMailboxSkipped: Set<string>;
@@ -211,7 +214,21 @@ export interface TickContext extends SharedHandlerState {
   fleetBlockInFlight: () => boolean;
   setFleetBlockInFlight: (value: boolean) => void;
   drainInFlight: () => Promise<boolean> | null;
+  // Setting the slot, to a drain or to null, zeroes the three companions
+  // below, which describe the drain the slot holds.
   setDrainInFlight: (value: Promise<boolean> | null) => void;
+  drainIdleTicks: () => number;
+  setDrainIdleTicks: (value: number) => void;
+  drainRecord: () => DrainChoice | null;
+  setDrainRecord: (value: DrainChoice | null) => void;
+  drainSawTurn: () => boolean;
+  // The overrun state outlives the slot, since an overrun swaps the slot's
+  // promise for its own and must still read what the previous overrun left.
+  drainOverrun: () => DrainOverrun;
+  setDrainOverrun: (value: DrainOverrun) => void;
+  // Sets sess.inboxDrainedAt, the instant a drain last settled while it
+  // held the slot, which the heartbeat publishes into the commons entry.
+  setInboxDrainedAt: (value: number) => void;
   gitUnavailable: () => boolean;
   setGitUnavailable: (value: boolean) => void;
 }
@@ -506,25 +523,153 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
   if (sess.isOwner && sess.pairDraftOwed !== null && openTurns.has(sess.pairDraftOwed.turnId)) void ctx.drainPairDraftOwed((turnId) => openTurns.has(turnId));
 }
 
-// The inbox drain, the controller tick's D3 block held in a name so a
-// turn's completion can run it too: the turn.complete body in hooks/turn-complete.ts calls it
-// through its context's drainInboxNow once a turn this session saw start has closed and
-// no other is open, so a burst of records drains at turn pace rather than
-// one per tick. It returns true where it submitted a record, or where a
-// drain already running when it was called submitted one. A running
-// drain holds its place until its submit settles, which the harness
-// states is when the submitted turn starts or is queued, never when it
-// ends. So the hold keeps a second drain from submitting beside a prompt
-// not yet entered, and is gone before the delivered turn can complete.
+// The inbox drain at a turn's end: the turn.complete body in
+// hooks/turn-complete.ts calls it through its context's drainInboxNow once a
+// turn this session saw start has closed and no other is open, so a burst of
+// records drains at turn pace rather than one per tick. It returns true where
+// it submitted a record, or where a drain already running when it was called
+// submitted one. A running drain holds the slot until its submit settles,
+// which is when the session is next idle: the end of the turn the submit
+// opened. So the turn end's wait on it settles at once in health and is the
+// step that delivers the next record, and the hold keeps a second drain from
+// submitting beside a prompt not yet entered. The idle tick never waits on
+// the slot: drainInboxIdle below counts the idle ticks that find the same
+// drain still in flight and clears it at the bound.
 export async function drainInbox(ctx: TickContext): Promise<boolean> {
   while (ctx.drainInFlight() !== null) {
     // A running drain that throws is reported by its own caller, so a
     // waiter reads the throw as nothing delivered and drains itself.
     try { if (await ctx.drainInFlight()) return true; } catch { /* reported by the drain's own caller */ }
   }
-  const drain = drainInboxOnce(ctx).finally(() => { ctx.setDrainInFlight(null); });
+  return startInboxDrain(ctx, (owns) => drainInboxOnce(ctx, owns));
+}
+
+// What the last overrun left: "none" where no overrun stands, "cleared" from
+// an overrun's clear until the engine is read as answering again, and "held"
+// where an overrun found "cleared" still standing. While held, the idle tick
+// starts no drain, counts nothing and logs nothing, since a fresh drain would
+// wedge the same way and skip a record the engine may still deliver. Both
+// lift to "none" only on a settle that says the engine answered: a drain
+// that reached its submit settling, a drain an overrun cleared settling
+// late, or a turn starting. A drain that settles without submitting, such
+// as a fresh drain that found nothing pending, lifts nothing.
+export type DrainOverrun = "none" | "cleared" | "held";
+
+// The record the drain in the slot chose, with the follow-up ids its prompt
+// offers, and whether the drain has reached its submit: marked the record
+// delivered and called the submit. The overrun skips only a submitted
+// record, and turn.start counts a turn after the submit only once it is set.
+export interface DrainChoice {
+  id: string;
+  key: string;
+  followUps: readonly string[];
+  submitted: boolean;
+}
+
+// One drain, holding the slot until it settles. `body` is handed `owns`,
+// which reads whether the slot still holds this drain, so a drain the idle
+// tick cleared as wedged writes nothing once it resumes. A drain that returns
+// while the slot still holds it, whether it found nothing pending, delivered
+// a record or had its submit answered failed, stamps the instant as the
+// session's last settled drain, which the heartbeat publishes and the
+// coordinator's fleet reading ages. A drain that throws, a cleared drain
+// settling late and a drain that never settles stamp nothing, so the stamp
+// freezes exactly when delivery stops. The settle lifts an overrun's state
+// only where the drain reached its submit or an overrun had cleared it, as
+// DrainOverrun states, and clears the slot only where the slot still holds
+// this drain, so a cleared drain settling late cannot clear the slot a
+// newer one took.
+function startInboxDrain(ctx: TickContext, body: (owns: () => boolean) => Promise<boolean>): Promise<boolean> {
+  // owns() is read only after the body's first await, by which point
+  // `drain` is assigned.
+  const drain: Promise<boolean> = body(() => ctx.drainInFlight() === drain).then((delivered) => {
+    if (ctx.drainInFlight() === drain) ctx.setInboxDrainedAt(Date.now());
+    return delivered;
+  }).finally(() => {
+    const ownsSlot = ctx.drainInFlight() === drain;
+    if (!ownsSlot || ctx.drainRecord()?.submitted === true) ctx.setDrainOverrun("none");
+    if (ownsSlot) ctx.setDrainInFlight(null);
+  });
   ctx.setDrainInFlight(drain);
   return drain;
+}
+
+// The inbox drain at an idle tick, the tick's D3 block. Where the slot is
+// empty it drains as drainInbox does. Where the slot holds a drain it never
+// waits: it counts one idle tick against that drain and returns false, so a
+// drain that never settles cannot hold every later tick. A tick that finds a
+// turn open counts nothing, since a turn running is not a wedge. At
+// INBOX_DRAIN_IDLE_TICKS the drain is read as wedged and the slot is taken
+// from it: where the previous overrun's clear still stands, nothing having
+// lifted it since, the slot is cleared and held, under one decision naming
+// the held record; otherwise the overrun's own promise takes the slot at once, so
+// no caller finds the slot empty before the fresh drain starts, and that
+// promise skips the wedged drain's record, logs the overrun and drains
+// afresh, in drainAfterOverrun.
+export async function drainInboxIdle(ctx: TickContext): Promise<boolean> {
+  if (ctx.drainOverrun() === "held") return false;
+  if (ctx.drainInFlight() === null) return startInboxDrain(ctx, (owns) => drainInboxOnce(ctx, owns));
+  if (ctx.turnIsOpen()) return false;
+  const idleTicks = ctx.drainIdleTicks() + 1;
+  ctx.setDrainIdleTicks(idleTicks);
+  if (idleTicks < INBOX_DRAIN_IDLE_TICKS) return false;
+  const record = ctx.drainRecord();
+  const sawTurn = ctx.drainSawTurn();
+  if (ctx.drainOverrun() === "cleared") {
+    ctx.setDrainInFlight(null);
+    ctx.setDrainOverrun("held");
+    ctx.sess.state.decisions.push({
+      timestamp: Date.now(),
+      loop: "monitor",
+      action: "inbox_drain_overrun",
+      detail: `drain still in flight after ${idleTicks} idle ticks, no lift since the last overrun: slot cleared and held; ${record === null ? "no record chosen" : `record ${record.id} held as it stands`}`.slice(0, 200),
+    });
+    return !(await ctx.persist());
+  }
+  ctx.setDrainOverrun("cleared");
+  return startInboxDrain(ctx, (owns) => drainAfterOverrun(ctx, idleTicks, record, sawTurn, owns));
+}
+
+// The body of the overrun's slot promise. Where the wedged drain reached its
+// submit and no turn started after it, its record is treated as a failed
+// submit and marked skipped with a note the sender reads, since the engine
+// never took the prompt. Where the drain had not reached its submit, the
+// record was never marked delivered, so it is left pending for the fresh
+// drain. Where a turn did start after the submit, the record is left as it stands, since
+// that turn may have read it and a skip note would have the sender send it
+// twice. The record is read fresh from the store by its key, since the
+// drain's own copy was marked delivered in memory, and one gone from the
+// store is named in the decision and not written. A store that throws on the
+// read or the write is named the same way, so the decision and the fresh
+// drain happen whatever the store did. A persist refused here means the
+// session yielded the persona under this tick, so the tick ends as it does
+// after a delivery.
+async function drainAfterOverrun(ctx: TickContext, idleTicks: number, record: DrainChoice | null, sawTurn: boolean, owns: () => boolean): Promise<boolean> {
+  const { sess, withdrawFollowUpsOffered, recordFailedDelivery } = ctx;
+  let fate = record === null ? "no record chosen"
+    : !record.submitted ? `record ${record.id} left pending, its drain never reached its submit`
+    : `record ${record.id} left as it stands, a turn started after its submit`;
+  if (record !== null && record.submitted && !sawTurn) {
+    withdrawFollowUpsOffered(record.followUps);
+    try {
+      const store = ctx.commonsStore();
+      const existing = await store.get(record.key);
+      const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
+      if (parsed) {
+        recordFailedDelivery({ ...parsed, id: record.id }, { how: "unanswered", reason: `no answer after ${idleTicks} idle ticks` }, "marked skipped");
+        await store.set(record.key, { ...parsed, status: "skipped", note: SKIP_NOTE_UNANSWERED });
+        fate = `record ${record.id} marked skipped`;
+      } else fate = `record ${record.id} is no longer in the store, nothing written`;
+    } catch { fate = `record ${record.id} not written, the store refused its read or write`; }
+  }
+  sess.state.decisions.push({
+    timestamp: Date.now(),
+    loop: "monitor",
+    action: "inbox_drain_overrun",
+    detail: `drain still in flight after ${idleTicks} idle ticks, slot cleared; ${fate}`.slice(0, 200),
+  });
+  if (!(await ctx.persist())) return true;
+  return drainInboxOnce(ctx, owns);
 }
 
 // The sentence a record the drain refuses carries as its `note`, one per
@@ -534,8 +679,15 @@ export async function drainInbox(ctx: TickContext): Promise<boolean> {
 const SKIP_NOTE_NO_CLAIM = "Skipped at delivery: the writer held no live claim reaching this persona.";
 const SKIP_NOTE_BAD_NAME = "Skipped at delivery: the writer's persona name failed the delivery bracket rule.";
 const SKIP_NOTE_BAD_RECORD = "Skipped at delivery: the record's id or text failed the record rule.";
+const SKIP_NOTE_UNANSWERED = "Skipped at delivery: the session's submit never answered while it sat idle.";
 
-export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
+// `owns` reads whether the slot still holds this drain. It is read after
+// every await and before any write, since the idle tick takes the slot from
+// a drain it reads as wedged, and a drain so cleared that later resumes
+// returns false and writes nothing more: no companion record, no delivered
+// mark, no submit, no failed-outcome line, since a newer drain may have
+// taken its record and the overrun may have marked it skipped.
+export async function drainInboxOnce(ctx: TickContext, owns: () => boolean): Promise<boolean> {
   const { withdrawFollowUpsOffered, recordFailedDelivery, sess, turnIsOpen, coordinatorPersona, architectPersona } = ctx;
   // D3: drain operator inbox (one record per call, owner only).
   // List pending inbox records whose writer may reach this persona
@@ -549,9 +701,8 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
   // (ask_answered path) before the general drain.
   // The open-turn reading is taken here rather than trusted from the
   // caller. The tick's blocks before this call submit, and a submit
-  // resolves once its turn has started or been queued rather than when
-  // that turn ends, so a turn can have opened underneath them by the time
-  // this line runs. This drain marks
+  // resolves only when the session is next idle, so a turn can have
+  // opened underneath them by the time this line runs. This drain marks
   // a record delivered and then submits it, and a submit into an open turn
   // is queued rather than answered, so the record would carry a delivered
   // stamp with no turn that ever read it. Skipping leaves it pending and
@@ -580,6 +731,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
         // rule, is marked skipped here, once, so the drain never
         // lists it.
         const answerGround = deliveryGroundIn(await readAllClaims(store, sess.staleAfterMs), persona, answer.from, coordinatorPersona, deliveryArchitectLine(architectPersona, answer));
+        if (!owns()) return false;
         const answerProblem = deliveryRecordProblem(answer);
         if ("refused" in answerGround && answerGround.refused === "no_claim") {
           sess.state.decisions.push({
@@ -592,6 +744,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
           answer.status = "skipped";
           answer.note = "refused" in answerGround ? SKIP_NOTE_BAD_NAME : SKIP_NOTE_BAD_RECORD;
           await store.set(answer.key, { ...answer });
+          if (!owns()) return false;
           sess.state.decisions.push("refused" in answerGround && answerGround.refused === "bad_name"
             ? {
               timestamp: Date.now(),
@@ -616,8 +769,14 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
           // written, and the next quiet tick delivers it with the
           // blocks as they stand then.
           const answerFollowUps: string[] = [];
+          // The slot's companion learns the answer this drain chose, and the
+          // follow-up list its prompt will offer, before the blocks read, as
+          // the general drain below tells it, and learns the submit just
+          // before it: an idle tick that clears this drain as wedged reads
+          // all three from there.
+          ctx.setDrainRecord({ id: answer.id, key: answer.key, followUps: answerFollowUps, submitted: false });
           const answerBlocks = await ctx.answerBlocksOf(answer, answerFollowUps);
-          if (answerBlocks === null) return false;
+          if (answerBlocks === null || !owns()) return false;
           // Close the ask on the ledger and, where its record is still
           // open, on the record in the same step. The ledger is the
           // owner's truth, so a record that is missing or already
@@ -625,6 +784,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
           if (askRecord && askRecord.status === "open") {
             askRecord.status = "answered";
             await store.set(askKey(persona, askId), askRecord);
+            if (!owns()) return false;
           }
           closeAsk(sess.state, askId, "answered", `record ${answer.id}`, answer.text, Date.now());
           // D5b: remember the closed question so the classifier does
@@ -641,12 +801,14 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
           // signal can tell a record the delivery rule holds on purpose.
           answer.ground = answerLabel;
           const existing = await store.get(answer.key);
+          if (!owns()) return false;
           if (existing) {
             const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
             parsed.status = "delivered";
             parsed.deliveredAt = answer.deliveredAt;
             parsed.ground = answer.ground;
             await store.set(answer.key, parsed);
+            if (!owns()) return false;
           }
           // Deliver the answer as a labelled prompt.
           // The entry is the one the ledger entry names, or the active
@@ -663,7 +825,9 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
             action: "ask_answered",
             detail: `ask ${askId} closed by record ${answer.id}`,
           });
+          ctx.setDrainRecord({ id: answer.id, key: answer.key, followUps: answerFollowUps, submitted: true });
           const answerOutcome = await ctx.submitAnswerDelivery(answer, askEntry, answerLabel, answerBlocks);
+          if (!owns()) return false;
           if (!answerOutcome.ok) {
             // A refused submit opens no turn, so the follow-up entries
             // its blocks listed list again on the next prompt.
@@ -689,6 +853,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
     const badName: { rec: InboxRecord; persona: string; problem: string }[] = [];
     const badRecord: { rec: InboxRecord; problem: string }[] = [];
     const claims = pending.length > 0 ? await readAllClaims(store, sess.staleAfterMs) : [];
+    if (!owns()) return false;
     for (const rec of pending) {
       if (rec.status !== "pending") continue;
       const ground = deliveryGroundIn(claims, persona, rec.from, coordinatorPersona, deliveryArchitectLine(architectPersona, rec));
@@ -705,6 +870,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
     // next `listInboxRecords` read, so the record costs one line total.
     for (const rec of withoutClaim) {
       await store.set(rec.key, { ...rec, status: "skipped", note: SKIP_NOTE_NO_CLAIM });
+      if (!owns()) return false;
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",
@@ -714,6 +880,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
     }
     for (const { rec, persona: writerPersona, problem } of badName) {
       await store.set(rec.key, { ...rec, status: "skipped", note: SKIP_NOTE_BAD_NAME });
+      if (!owns()) return false;
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",
@@ -723,6 +890,7 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
     }
     for (const { rec, problem } of badRecord) {
       await store.set(rec.key, { ...rec, status: "skipped", note: SKIP_NOTE_BAD_RECORD });
+      if (!owns()) return false;
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",
@@ -741,20 +909,27 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
       // opened while the sources read, so the record stays pending with
       // nothing written and the next quiet tick delivers it.
       const deliveryFollowUps: string[] = [];
+      // The slot's companion learns the record this drain chose, and the
+      // follow-up list its prompt will offer, before the blocks read, and
+      // learns the submit just before it: an idle tick that clears this
+      // drain as wedged reads all three from there.
+      ctx.setDrainRecord({ id: oldest.id, key: oldest.key, followUps: deliveryFollowUps, submitted: false });
       const deliveryBlocks = await ctx.deliveryBlocksOf(oldest, deliveryFollowUps);
-      if (deliveryBlocks === null) return false;
+      if (deliveryBlocks === null || !owns()) return false;
       oldest.status = "delivered";
       oldest.deliveredAt = Date.now();
       // The ground the decision line and the bracket name, stored so the
       // wait signal can tell a record the delivery rule holds on purpose.
       oldest.ground = ground;
       const existing = await store.get(oldest.key);
+      if (!owns()) return false;
       if (existing) {
         const parsed = typeof existing === "string" ? JSON.parse(existing) : existing;
         parsed.status = "delivered";
         parsed.deliveredAt = oldest.deliveredAt;
         parsed.ground = oldest.ground;
         await store.set(oldest.key, parsed);
+        if (!owns()) return false;
       }
       sess.state.decisions.push({
         timestamp: Date.now(),
@@ -762,7 +937,9 @@ export async function drainInboxOnce(ctx: TickContext): Promise<boolean> {
         action: "operator_delivered",
         detail: `record ${oldest.id} submitted as ${deliveryPrefix(ground, oldest.id, "plain")}`,
       });
+      ctx.setDrainRecord({ id: oldest.id, key: oldest.key, followUps: deliveryFollowUps, submitted: true });
       const deliveryOutcome = await ctx.submitDelivery(oldest, ground, deliveryBlocks);
+      if (!owns()) return false;
       if (!deliveryOutcome.ok) {
         // A refused submit opens no turn, so the follow-up entries its
         // blocks listed list again on the next prompt.
@@ -924,7 +1101,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       // back would compare the next tick's personas against FLEET_UNSEEN
       // with no memo to hold, which reports every one of them as new.
       const previousFirstReadingDone = sess.fleetFirstReadingDone;
-      const { current, changed, notes, movedKeys } = fleetReadingOf(report, previousMap, previousFirstReadingDone, fleetNow, { tickFailure: ctx.tickFailure(), startStoreProblem: ctx.startStoreProblem(), reconcileStoreProblem: ctx.reconcileStoreProblem() });
+      const { current, changed, notes, movedKeys } = fleetReadingOf(report, previousMap, previousFirstReadingDone, fleetNow, ctx.heartbeatMs, { tickFailure: ctx.tickFailure(), startStoreProblem: ctx.startStoreProblem(), reconcileStoreProblem: ctx.reconcileStoreProblem() });
       // The reading is advanced here, before the submit below, and not when
       // the model reports. What the order guards is the window between a
       // submit and the turn it opens: the prompt submit does not resolve until
@@ -1340,9 +1517,10 @@ export async function idleTick(ctx: TickContext): Promise<void> {
     }
   }
 
-  // D3: drain operator inbox, one record per call; drainInbox above
-  // owns the block, and a turn's completion calls it too.
-  if (await drainInbox(ctx)) return;
+  // D3: drain operator inbox, one record per call. drainInboxIdle above
+  // owns the block and never waits on a drain in flight; a turn's
+  // completion runs drainInbox, which does.
+  if (await drainInboxIdle(ctx)) return;
 
   // D4: increment tick index for backoff and cost_summary cadence.
   sess.controllerTickCount = (sess.controllerTickCount ?? 0) + 1;

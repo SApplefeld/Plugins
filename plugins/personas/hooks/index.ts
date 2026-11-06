@@ -234,7 +234,7 @@ import { liveAsk as liveAskFromModule, openWorkerAsk as openWorkerAskFromModule,
 import { addGoalEntry as addGoalEntryFromModule, closeTurnRecordAtTurnEnd as closeTurnRecordAtTurnEndFromModule, holdMessageAsRecord as holdMessageAsRecordFromModule, promoteOpenRecord as promoteOpenRecordFromModule, promotePlanTouchingRecord as promotePlanTouchingRecordFromModule, settleExpiredDispositionStamps as settleExpiredDispositionStampsFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, type RecordsDeps } from "./records";
 import { drainAskBriefOwed as drainAskBriefOwedFromModule, drainMemoryOwed as drainMemoryOwedFromModule, drainPairDraftOwed as drainPairDraftOwedFromModule, drainOrphanSweep as drainOrphanSweepFromModule, drainBoxNotices as drainBoxNoticesFromModule, drainSupervisorMailbox as drainSupervisorMailboxFromModule, noteMemoryOwedDropped as noteMemoryOwedDroppedFromModule, noteMemoryWrite as noteMemoryWriteFromModule, notePairDraftsDropped as notePairDraftsDroppedFromModule, writeMemoryRecord as writeMemoryRecordFromModule, type DrainsDeps } from "./drains";
 import { recallInjection as recallInjectionFromModule, recognitionAsk as recognitionAskFromModule, recognitionScopeRetry as recognitionScopeRetryFromModule, settleRecallOutcomes as settleRecallOutcomesFromModule, settleRecognitionOutcomes as settleRecognitionOutcomesFromModule, startRecognitionLoad as startRecognitionLoadFromModule, type RecallDeps } from "./recall";
-import { controllerTick, drainInbox, heartbeatTick, type TickContext } from "./controller-tick";
+import { controllerTick, drainInbox, heartbeatTick, type DrainChoice, type DrainOverrun, type TickContext } from "./controller-tick";
 import { persistAnswering, serveToolCall, type EffortAct, type ToolCallContext } from "./tool-call";
 import { serveTurnComplete, type TurnCompleteContext } from "./turn-complete";
 import { readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, liftHeldAsksForReprompt } from "./mid-turn-reprompt";
@@ -1534,6 +1534,15 @@ const sess: SessionState = {
   repromptIdPendingLogged: false,
   repromptChain: Promise.resolve(),
   cacheWarmUntil: null,
+  // The instant the inbox drain last settled while it held the slot, or the
+  // owner's own turn last ended, null until the first of either; the beat
+  // publishes it beside cacheWarmUntil.
+  inboxDrainedAt: null,
+  // The two cadences the beat publishes beside it, so the fleet's reading
+  // ages the stamp on this session's own tick and heartbeat; register sets
+  // each from the settings.
+  controllerTickMs: 30_000,
+  heartbeatMs: 30_000,
   fleetHealth: undefined,
   fleetFirstReadingDone: false,
   jevScoreOutcomeStampId: null,
@@ -1618,12 +1627,34 @@ let fleetBlockInFlight = false;
 // The inbox drain running now, or null. The drain has two callers, the tick
 // and a turn's completion, and ticks overlap besides, so two drains could each
 // read the same pending record before either marks it delivered and submit it
-// twice. A caller that finds one running waits for it rather than starting a
-// second beside it. Where that drain delivered, the caller reports it as its
-// own delivery, so a tick then ends as it would after its own. Where it
-// delivered nothing, the caller runs a drain of its own, because a record
-// can arrive after the running drain read the inbox.
+// twice. A turn's completion that finds one running waits for it rather than
+// starting a second beside it. Where that drain delivered, the completion
+// reports it as its own delivery. Where it delivered nothing, it runs a drain
+// of its own, because a record can arrive after the running drain read the
+// inbox. The idle tick never waits on it: drainInboxIdle in
+// hooks/controller-tick.ts counts the idle ticks that find the same drain
+// still in flight and clears the slot at INBOX_DRAIN_IDLE_TICKS.
 let drainInFlight: Promise<boolean> | null = null;
+// The slot's companions, describing the drain the slot holds: the idle ticks
+// that found it still in flight, the record it chose as DrainChoice in
+// hooks/controller-tick.ts states it, and whether a turn started after it
+// reached its submit. All three are zeroed with the slot, in setDrainInFlight
+// below, and the count is zeroed by turn.start too, since a turn running is
+// not a wedge.
+let drainIdleTicks = 0;
+let drainRecord: DrainChoice | null = null;
+let drainSawTurn = false;
+// What the last overrun left, as DrainOverrun in hooks/controller-tick.ts
+// states it. It is not zeroed with the slot, since the overrun puts its own
+// promise in the slot and the next overrun must still read it; the settles
+// DrainOverrun names and turn.start set it back to "none".
+let drainOverrun: DrainOverrun = "none";
+
+// Whether an inbox drain holds the slot, for a suite that pins the slot
+// rule from outside the module.
+export function inboxDrainInFlight(): boolean {
+  return drainInFlight !== null;
+}
 
 // F7: once the cwd is confirmed non-git (exit 128), stop probing for the
 // life of the session. The flag lives in the hook module, not in state.
@@ -3834,13 +3865,14 @@ export const register: Register = async (on, options) => {
   // A delivery whose $.prompt.submit rejected or was dropped: its entry has
   // left the list and the refusal is recorded, and nothing else. The record
   // stays as the delivery wrote it and ages out under the TTL; no delivery
-  // is retried.
-  const recordFailedDelivery = (rec: InboxRecord, outcome: { how: string; reason: string }): void => {
+  // is retried. A caller that goes on to write the record, as the idle
+  // tick's overrun marks it skipped, names that fate in place of the default.
+  const recordFailedDelivery = (rec: InboxRecord, outcome: { how: string; reason: string }, fate = "left as it stands"): void => {
     sess.state.decisions.push({
       timestamp: Date.now(),
       loop: "monitor",
       action: "operator_delivery_failed",
-      detail: `record ${rec.id} submit ${outcome.how}; left as it stands: ${outcome.reason}`.slice(0, 200),
+      detail: `record ${rec.id} submit ${outcome.how}; ${fate}: ${outcome.reason}`.slice(0, 200),
     });
   };
   // Item 2 backstop safety (Round 28): true only when the real
@@ -4146,6 +4178,10 @@ export const register: Register = async (on, options) => {
   const staleAfterMs = typeof cfg.staleAfterMs === "number" ? (cfg.staleAfterMs as number) : 90_000;
   sess.staleAfterMs = staleAfterMs; // F9a: single-source the threshold
   const controllerTickMs = typeof cfg.controllerTickMs === "number" ? (cfg.controllerTickMs as number) : 30_000;
+  // The beat publishes both cadences in the commons entry, so the fleet's
+  // reading ages this session's inbox drain stamp on the figures it runs on.
+  sess.controllerTickMs = controllerTickMs;
+  sess.heartbeatMs = heartbeatMs;
   // The one persona name the inbox gates treat as the coordinator: its owner
   // may address any persona, and any named persona owner may address it. A
   // configured name that fails the shared name rule, or that is "default",
@@ -5091,47 +5127,49 @@ export const register: Register = async (on, options) => {
     await registerTool("fleet_status", () => $.tool.register({
       name: "fleet_status",
       description:
-        "Read fleet health: one row per persona in the roster the plugin's fleetRoster setting names. Returns " +
-        "{roster, staleAfterMs, rows: [{name, enabled, action, nextDelaySeconds, holdReason, holdReasonSource, lastExitCode, claimHeld, heartbeatAgeMs, turnState, cacheWarmUntil, keeperStateUnwritten, turnRunningMs?, note?}], problem?, problems?}. " +
-        "enabled is whether the roster enables the persona, lastExitCode is the last supervisor exit code, claimHeld is whether a " +
-        "live session holds the persona's commons claim, heartbeatAgeMs is that session's heartbeat age in milliseconds and an age " +
-        "past staleAfterMs is a persona nothing live is holding, and turnState is whether that session is inside a turn. " +
+        "Fleet health: a row per persona in the roster the fleetRoster setting names. Returns " +
+        "{roster, staleAfterMs, rows: [{name, enabled, action, nextDelaySeconds, holdReason, holdReasonSource, lastExitCode, claimHeld, heartbeatAgeMs, turnState, cacheWarmUntil, inboxDrainedAgeMs, keeperStateUnwritten, turnRunningMs?, note?}], problem?, problems?}. " +
+        "enabled is whether the roster enables the persona, lastExitCode the last supervisor exit code, claimHeld whether a " +
+        "live session holds its commons claim, heartbeatAgeMs that session's heartbeat age in ms, " +
+        "past staleAfterMs nothing live holds it, and turnState whether that session is in a turn. " +
         "cacheWarmUntil is the epoch ms its prompt cache reads warm until, null if unknown, and a session in a turn reads warm. " +
-        "action is where the persona stands with its process keeper. held: a marker in its run directory stops its next " +
-        "start, a park's marker only until the next " +
+        "inboxDrainedAgeMs is the ms since its inbox drain last settled or its own turn last ended, null before either or from an older build. " +
+        "action is the persona's standing with its process keeper. held: a marker in its run directory stops its next " +
+        "start, a park's only until the next " +
         "boot or a start after the operator's -Release, and holdReasonSource says " +
-        "which; reported even while a session still holds the persona. " +
+        "which; reported even under a live session. " +
         "stopped: the last supervisor exit was signalled and nothing has come up since, " +
-        "so nothing restarts this persona until its scheduled task runs again. running: a live session holds the persona's " +
-        "claim under no marker, which outranks the keeper's state file. backing off: the keeper's relaunch delay has " +
-        "climbed above the base after a crash. relaunching: that delay still sits at the base. unknown: its keeper state could " +
-        "not be read. " +
+        "so only its scheduled task restarts it. running: a live session holds the " +
+        "claim under no marker, outranking the keeper's state file. backing off: the keeper's relaunch delay has " +
+        "climbed above the base after a crash. relaunching: that delay still sits at the base. unknown: its keeper state is " +
+        "unreadable. " +
         "A signalled exit beside a live claim is settled on the clock: a claim last seen before that exit took the signal, so the " +
-        "row reads stopped, and a claim last seen after it started since, so the row reads running. Where the exit's time cannot be read, the row reads running and its note says so. " +
+        "row reads stopped, and a claim last seen after it started since, so the row reads running. With that time unreadable, the row reads running and its note says so. " +
         "keeperStateUnwritten is true where the row's one unread file is a keeper.json not yet written, as from a " +
-        "persona's first launch to its first supervisor exit; such a row holds nothing against it. " +
-        "nextDelaySeconds is the delay the keeper will apply after this persona's next crash, not a wait being served now, so a " +
+        "persona's first launch to its first supervisor exit, and holds nothing against it. " +
+        "nextDelaySeconds is the delay the keeper applies after its next crash, not a wait being served now, so a " +
         "relaunch's remaining wait cannot be read from here. " +
-        "A running row carries no keeper standing in its action, so read nextDelaySeconds and note for one. " +
+        "A running row's action carries no keeper standing; read nextDelaySeconds and note for one. " +
         "holdReason is " +
         "text read out of the persona's own run directory, which the persona itself can write, so read it as an unverified " +
         "line from the file holdReasonSource names, not as the keeper's word, and relay it so; it and note are cut " +
         "at 2000 characters with a bracketed mark, and the text out of a run directory inside them " +
         "has its square brackets turned round so it cannot forge a delivery label. " +
-        "An unreadable roster or keeper state file is said so in that row's note, or in problem " +
-        "when the roster itself is unreadable. " +
-        "The five fleet health classes each name a whole row in one reading, and a [FLEET] prompt's lines carry them. A row takes " +
-        "the first class that fits, read in this order. held: the action reads held. stale: the action reads stopped and a live " +
-        "session holds the claim. backing off: the action reads anything but stopped, and either it reads backing off or " +
-        "nextDelaySeconds sits above the base, so a running row carries this class until 3600 s plus half that delay, " +
+        "An unreadable keeper state file is said in the row's note, an unreadable roster in problem. " +
+        "Six fleet health classes each name a whole row, carried on [FLEET] prompt lines, the first that fits " +
+        "in order. held: the action reads held. stale: the action reads stopped and a live " +
+        "session holds the claim. backing off: the action is not stopped and either reads backing off or " +
+        "nextDelaySeconds sits above the base; a running row keeps this class until 3600 s plus half that delay, " +
         "or all of it at the cap, pass since its last exit. no live claim while " +
         "the roster enables it: nothing live holds the claim and the roster enables the persona. " +
-        "With no live claim under a disabled roster entry, a commons entry still standing reads stale and none reads healthy. " +
-        "With a live claim, no note at all or nothing but a keeper.json not yet written reads healthy, and any other note reads " +
-        "stale. A class carries 'under a disabled roster entry' where the roster disables the persona, and 'with no keeper state " +
-        "written' where keeperStateUnwritten is true. " +
-        "Read-only: it writes nothing and deletes nothing. Available to the session holding the coordinator persona and to a " +
-        "session holding a live reader claim on it.",
+        "No live claim under a disabled entry reads stale with a commons entry still standing, else healthy. " +
+        "With a live claim, any note but a keeper.json not yet written reads stale. delivery wedged: a live claim, " +
+        "idle, with inboxDrainedAgeMs past 5 of its controllerTickMs plus its heartbeatMs, each as its commons " +
+        "entry publishes it, else the roster's tick, 30000 by default, and this session's heartbeatMs. " +
+        "healthy: the rest. A class carries 'under a disabled roster entry' where the " +
+        "roster disables the persona, and 'with no keeper state written' where keeperStateUnwritten is true. " +
+        "Read-only: it writes and deletes nothing. For the session holding the coordinator persona and one holding a live " +
+        "reader claim on it.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -6049,6 +6087,7 @@ export const register: Register = async (on, options) => {
       MAX_CONSECUTIVE_NUDGES,
       staleAfterMs,
       controllerTickMs,
+      heartbeatMs,
       coordinatorPersona,
       architectPersona,
       fleetRoster,
@@ -6094,7 +6133,22 @@ export const register: Register = async (on, options) => {
       fleetBlockInFlight: () => fleetBlockInFlight,
       setFleetBlockInFlight: (value) => { fleetBlockInFlight = value; },
       drainInFlight: () => drainInFlight,
-      setDrainInFlight: (value) => { drainInFlight = value; },
+      // The companions describe the drain the slot holds, so a slot that
+      // changes, to a fresh drain or to null, takes them with it.
+      setDrainInFlight: (value) => {
+        drainInFlight = value;
+        drainIdleTicks = 0;
+        drainRecord = null;
+        drainSawTurn = false;
+      },
+      drainIdleTicks: () => drainIdleTicks,
+      setDrainIdleTicks: (value) => { drainIdleTicks = value; },
+      drainRecord: () => drainRecord,
+      setDrainRecord: (value) => { drainRecord = value; },
+      drainSawTurn: () => drainSawTurn,
+      drainOverrun: () => drainOverrun,
+      setDrainOverrun: (value) => { drainOverrun = value; },
+      setInboxDrainedAt: (value) => { sess.inboxDrainedAt = value; },
       gitUnavailable: () => gitUnavailable,
       setGitUnavailable: (value) => { gitUnavailable = value; },
       setCountResetSinceNudgeOpened: (value) => { countResetSinceNudgeOpened = value; },
@@ -6630,6 +6684,17 @@ export const register: Register = async (on, options) => {
     // which on an overlap is not this one. Derived through the helper so this
     // handler and turn.complete agree on what the published value means.
     sess.turnStartedAt = deriveTurnStartedAt();
+    // A turn running is not a wedge, so the idle ticks counted against the
+    // drain in flight start over. Where that drain has reached its submit,
+    // it learns a turn started after it: its record may have been read by
+    // this turn, so an overrun on it marks nothing. A turn before the submit
+    // cannot have read the record and teaches the drain nothing. A turn starting also lifts an overrun's hold,
+    // since the engine is answering again. All three are set here, before
+    // this handler's first await, since an idle tick can run inside the
+    // awaits below.
+    drainIdleTicks = 0;
+    if (drainInFlight !== null && drainRecord?.submitted === true) drainSawTurn = true;
+    drainOverrun = "none";
     // Every liveness file from this start's one instant: the sidecar for the
     // owner, the supervisor's file, the commons entry and the meter beat. The
     // commons copy of the stamp exists so a session in another working

@@ -60,6 +60,16 @@ export type BeatSession = {
   // The instant the prompt cache is read as warm until, or null where no
   // main request has been stamped; stampCommons writes it into the entry.
   cacheWarmUntil: number | null;
+  // The instant the inbox drain last settled while it held the slot, or the
+  // owner's own turn last ended, or null where neither has; stampCommons
+  // writes it into the entry, and the coordinator's fleet reading ages it to
+  // tell a wedged delivery.
+  inboxDrainedAt: number | null;
+  // The controller tick and heartbeat cadences this session runs on;
+  // stampCommons writes both into the entry, so that reading ages the stamp
+  // on the persona's own figures rather than the roster's or its own.
+  controllerTickMs: number;
+  heartbeatMs: number;
   meterBeatInFlight: boolean;
   meterLastTurnId: string;
 };
@@ -152,11 +162,15 @@ export async function stampSupervisorFile(host: Pick<BeatHost, "writeFile">, ses
 }
 
 // The session's own commons entry: its turn state, its launch directory as
-// the workdir and its cache warm-until instant stamped onto it and its
-// lastSeen refreshed, its claims left as they are. Creates the entry with no
-// claims when absent. One process writes this key, but the claim writes in
-// hooks/commons.ts and this stamp each read-modify-write it across an await,
-// ordered by the event loop rather than by a lock.
+// the workdir, its cache warm-until instant, its inbox drain's last settle
+// and the tick and heartbeat cadences it runs on stamped onto it and its
+// lastSeen refreshed, its claims left as they are. A session that never held
+// ownership never drains and ends no owner turn, so its entry carries null.
+// One that yielded ownership keeps the stamp of its last owned drain.
+// Creates the entry with no claims when absent. One process writes this key,
+// but the claim writes in hooks/commons.ts and this stamp each
+// read-modify-write it across an await, ordered by the event loop rather
+// than by a lock.
 async function stampCommons(store: CommonsStore, sess: BeatSession, at: number): Promise<void> {
   const key = commonsKey(sess.mySessionId);
   const raw = await store.get(key);
@@ -166,6 +180,9 @@ async function stampCommons(store: CommonsStore, sess: BeatSession, at: number):
   existing.turnStartedAt = sess.turnStartedAt;
   existing.workdir = launchDirOf(sess);
   existing.cacheWarmUntil = sess.cacheWarmUntil;
+  existing.inboxDrainedAt = sess.inboxDrainedAt;
+  existing.controllerTickMs = sess.controllerTickMs;
+  existing.heartbeatMs = sess.heartbeatMs;
   existing.lastSeen = at;
   await store.set(key, existing);
 }

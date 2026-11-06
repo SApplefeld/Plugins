@@ -356,6 +356,13 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // The persona's own last turn, which the beat file names; a subagent's
   // completion names none.
   if (!completesSubagentLoop && meterSessionKnown(sess.mySessionId)) sess.meterLastTurnId = meterFacts.turnId;
+  // The owner's own turn end is the fleet reading's last settled delivery
+  // too, at the same instant the beat below publishes. No drain settles
+  // while a turn is open, so the drain's stamp alone ages through a long
+  // turn and the beat would publish the turn closed beside a stamp older
+  // than the wedge bound. A subagent's completion ends no turn of the
+  // owner's, and a reader never drains, so neither stamps.
+  if (!completesSubagentLoop && sess.isOwner) sess.inboxDrainedAt = meterEndedAt;
   // Every liveness file from this end's one instant, the one the metered
   // row ends at: the sidecar for the owner, the supervisor's file, the
   // commons entry and the meter beat; and beside them the meter's spool

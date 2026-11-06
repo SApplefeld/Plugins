@@ -29,7 +29,15 @@ export interface CommonsEntry {
   turnStartedAt?: number | null; // the session's clock at turn.start, null between turns
   workdir?: string; // the session's launch directory, where its store sits, "" when unknown
   cacheWarmUntil?: number | null; // the instant the session's prompt cache is read as warm until, null before a main request; absent in an older build's entry
+  inboxDrainedAt?: number | null; // the instant the session's inbox drain last settled while it held the slot, or the owner's own turn last ended, null before the first of either and on a reader, which never drains; absent in an older build's entry
+  controllerTickMs?: number; // the controller tick cadence the session runs on, published for the fleet's reading; absent in an older build's entry
+  heartbeatMs?: number; // the heartbeat cadence the session runs on, published for the same reading; absent in an older build's entry
 }
+
+// The idle controller ticks an owner counts against one inbox drain still in
+// flight before it clears that drain's slot, logs the overrun and drains
+// afresh. drainInboxIdle in hooks/controller-tick.ts is its one reader.
+export const INBOX_DRAIN_IDLE_TICKS = 3;
 
 // The per-turn fields a session publishes beside its claims, so a session in
 // another working directory can read this one's turn state. Entries written

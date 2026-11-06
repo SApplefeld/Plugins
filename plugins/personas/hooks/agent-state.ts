@@ -508,10 +508,14 @@ export interface NudgeBudget {
 }
 
 /**
- * The five health classes the steward reports on. Each is one word for a whole
+ * The six health classes the steward reports on. Each is one word for a whole
  * fleet row. The fourth is not a variant of the third: an enabled persona that
  * has never come up has no commons entry at all, so it reports a null
- * heartbeat age and satisfies none of the other four.
+ * heartbeat age and satisfies none of the other five. The fifth is a live
+ * idle persona whose published inbox drain stamp is older than the bound
+ * fleetHealthOf in hooks/fleet.ts computes from the tick and heartbeat it
+ * publishes beside the stamp: its heartbeat is live and its keeper content,
+ * and only the stamp says delivery stopped.
  *
  * They live here beside the memo the watcher's reading is made of, which is
  * written in these words.
@@ -521,6 +525,7 @@ export const FLEET_HEALTH = {
   backingOff: "backing off",
   stale: "stale",
   noClaim: "no live claim while the roster enables it",
+  deliveryWedged: "delivery wedged",
   healthy: "healthy",
 } as const;
 export type FleetHealth = (typeof FLEET_HEALTH)[keyof typeof FLEET_HEALTH];

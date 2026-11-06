@@ -19,7 +19,7 @@ import {
   type FleetHealth,
   type FleetHealthMemo,
 } from "./agent-state";
-import { commonsWinner, type CommonsEntry, type UnionedClaim } from "./commons";
+import { commonsWinner, INBOX_DRAIN_IDLE_TICKS, type CommonsEntry, type UnionedClaim } from "./commons";
 import type { PluginHost } from "./host";
 import { personaNameProblem, quoteCarriedLines, quoteContinuationLines } from "./operator";
 import { cachePartText } from "./cache-clock";
@@ -94,6 +94,13 @@ type FleetRow = {
   // The live session's published warm-until instant, null where none. It
   // moves on every main request, so no class or change comparison reads it.
   cacheWarmUntil: number | null;
+  // How long ago the live session's inbox drain last settled or its own
+  // turn last ended, from the instant its entry publishes; null where the
+  // entry carries no finite stamp, as one from a build without it or a
+  // session yet to settle a drain or end a turn, and null under no live
+  // claim. The health class reads it against the tick and heartbeat the
+  // session publishes beside it.
+  inboxDrainedAgeMs: number | null;
   // Whether everything this row could not read is a keeper.json the process
   // keeper has not written yet. bin/Start-Persona.ps1 writes that file once
   // the supervisor returns and at no other point, so a persona on its
@@ -109,7 +116,42 @@ type FleetRow = {
 
 // The fields of a roster entry this report reads. Everything else the roster
 // carries steers the supervisor and is the process keeper's business.
-export type RosterEntry = { name?: unknown; workdir?: unknown; rundir?: unknown; enabled?: unknown };
+// `controllerTickMs` is the launch setting the launcher hands that persona,
+// read here so the fleet ages the persona's inbox drain stamp on its own
+// tick where its commons entry publishes none.
+export type RosterEntry = { name?: unknown; workdir?: unknown; rundir?: unknown; enabled?: unknown; controllerTickMs?: unknown };
+
+// The controller tick the plugin runs on where its settings name none,
+// the figure hooks/index.ts applies to its own controllerTickMs.
+const DEFAULT_CONTROLLER_TICK_MS = 30_000;
+
+// The largest tick the launcher admits: bin/supervise.sh refuses a
+// controllerTickMs over nine digits, so a figure past this reaches no
+// running persona and is passed over here.
+const CONTROLLER_TICK_MS_CAP = 999_999_999;
+
+// A cadence published in a commons entry, read as the cache stamp is: the
+// entry is another session's to write, so only a positive finite number at
+// or under the launcher's tick cap is taken, and anything else reads null.
+// The launcher caps no heartbeat, so the tick's cap bounds the heartbeat too
+// as a sanity limit.
+function publishedCadenceMs(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= CONTROLLER_TICK_MS_CAP ? value : null;
+}
+
+// The controller tick a roster entry's persona runs on: the entry's
+// `controllerTickMs` in a shape the launcher accepts, a positive number at or
+// under its cap or that number written as digits with no leading zero, else
+// the plugin's default. That default is not the launcher's own for an absent
+// field, which is shorter, so an absent tick reads a wedge late and never
+// falsely. The roster is a file every persona of the fleet can
+// write, so a value of any other shape takes the default rather than
+// reaching the bound.
+export function rosterControllerTickMs(entry: RosterEntry): number {
+  const tick = entry.controllerTickMs;
+  const asNumber = typeof tick === "string" && /^[1-9][0-9]{0,8}$/.test(tick) ? Number(tick) : tick;
+  return publishedCadenceMs(asNumber) ?? DEFAULT_CONTROLLER_TICK_MS;
+}
 
 // The directory the process keeper works in for a roster entry: the entry's
 // `rundir`, or `<workdir>/run` when it carries none, which is what
@@ -370,14 +412,15 @@ function fleetCommonsOf(
   staleAfterMs: number,
   now: number,
   lastEndMs: number | null,
-): Pick<FleetRow, "claimHeld" | "heartbeatAgeMs" | "turnState" | "turnRunningMs" | "cacheWarmUntil"> & { lastSeen: number | null } {
+): Pick<FleetRow, "claimHeld" | "heartbeatAgeMs" | "turnState" | "turnRunningMs" | "cacheWarmUntil" | "inboxDrainedAgeMs"> & { lastSeen: number | null; cadence: FleetCadence } {
   const resource = `persona:${persona}`;
+  const noCadence: FleetCadence = { controllerTickMs: null, heartbeatMs: null };
   const holders = entries.filter((entry) => entry.claims.some((claim) => claim && claim.resource === resource));
-  if (holders.length === 0) return { claimHeld: false, lastSeen: null, heartbeatAgeMs: null, turnState: "unknown", cacheWarmUntil: null };
+  if (holders.length === 0) return { claimHeld: false, lastSeen: null, heartbeatAgeMs: null, turnState: "unknown", cacheWarmUntil: null, inboxDrainedAgeMs: null, cadence: noCadence };
   const live = holders.filter((entry) => now - entry.lastSeen <= staleAfterMs);
   if (live.length === 0) {
     const freshest = holders.reduce((a, b) => (b.lastSeen > a.lastSeen ? b : a));
-    return { claimHeld: false, lastSeen: freshest.lastSeen, heartbeatAgeMs: Math.max(0, now - freshest.lastSeen), turnState: "unknown", cacheWarmUntil: null };
+    return { claimHeld: false, lastSeen: freshest.lastSeen, heartbeatAgeMs: Math.max(0, now - freshest.lastSeen), turnState: "unknown", cacheWarmUntil: null, inboxDrainedAgeMs: null, cadence: noCadence };
   }
   // The recorded exit places every live entry, not just the one arbitration
   // picks. The keeper stamps lastEnd once the supervisor has returned, which
@@ -396,13 +439,20 @@ function fleetCommonsOf(
   const arbitrated = started.length > 0 ? started : live;
   const winner = commonsWinner(liveClaimsOf(arbitrated, staleAfterMs, now), resource);
   const entry = arbitrated.find((candidate) => candidate.sessionId === winner);
-  if (!entry) return { claimHeld: false, lastSeen: null, heartbeatAgeMs: null, turnState: "unknown", cacheWarmUntil: null };
+  if (!entry) return { claimHeld: false, lastSeen: null, heartbeatAgeMs: null, turnState: "unknown", cacheWarmUntil: null, inboxDrainedAgeMs: null, cadence: noCadence };
   const heartbeatAgeMs = Math.max(0, now - entry.lastSeen);
   const cacheWarmUntil = typeof entry.cacheWarmUntil === "number" && Number.isFinite(entry.cacheWarmUntil) ? entry.cacheWarmUntil : null;
+  // Read as the cache stamp is: the entry is another session's to write,
+  // so only a finite number is aged and anything else reads null.
+  const inboxDrainedAgeMs = typeof entry.inboxDrainedAt === "number" && Number.isFinite(entry.inboxDrainedAt) ? Math.max(0, now - entry.inboxDrainedAt) : null;
+  // The cadences the persona publishes it runs on, null each where the
+  // entry carries none, as one from a build without them, or carries a
+  // figure no launched persona runs on.
+  const cadence: FleetCadence = { controllerTickMs: publishedCadenceMs(entry.controllerTickMs), heartbeatMs: publishedCadenceMs(entry.heartbeatMs) };
   if (typeof entry.turnStartedAt === "number") {
-    return { claimHeld: true, lastSeen: entry.lastSeen, heartbeatAgeMs, turnState: "in turn", turnRunningMs: Math.max(0, now - entry.turnStartedAt), cacheWarmUntil };
+    return { claimHeld: true, lastSeen: entry.lastSeen, heartbeatAgeMs, turnState: "in turn", turnRunningMs: Math.max(0, now - entry.turnStartedAt), cacheWarmUntil, inboxDrainedAgeMs, cadence };
   }
-  return { claimHeld: true, lastSeen: entry.lastSeen, heartbeatAgeMs, turnState: "idle", cacheWarmUntil };
+  return { claimHeld: true, lastSeen: entry.lastSeen, heartbeatAgeMs, turnState: "idle", cacheWarmUntil, inboxDrainedAgeMs, cadence };
 }
 
 // The action one row reports, from the keeper's standing and whether a live
@@ -499,11 +549,16 @@ export type FleetLine = { composed: string; carried: string | null };
 // on the current run's next exit, which only the watcher's class reduction
 // reads. It rides beside the rows rather than on them, so the row the tool
 // serves keeps its shape, and it is keyed by name because a report gives one
-// name one row.
+// name one row. `cadence` rides beside the rows for the same reason: the
+// class reduction ages each row's inbox drain stamp on the tick and
+// heartbeat that row's persona runs on, read from what its commons entry
+// publishes, then the roster's tick, then the defaults.
+type FleetCadence = { controllerTickMs: number | null; heartbeatMs: number | null };
 type FleetReport = {
   roster: string | null;
   rows: FleetRow[];
   ladderDueToReset: ReadonlySet<string>;
+  cadence: ReadonlyMap<string, FleetCadence>;
   problem?: FleetLine;
   problems?: FleetLine[];
 };
@@ -526,7 +581,7 @@ export const readFleetRows = async (
   now: number,
 ): Promise<FleetReport> => {
   if (fleetRoster === "") {
-    return { roster: null, rows: [], ladderDueToReset: new Set(), problem: { composed: "the plugin's fleetRoster setting names no roster file, so there is no fleet to read.", carried: null } };
+    return { roster: null, rows: [], ladderDueToReset: new Set(), cadence: new Map(), problem: { composed: "the plugin's fleetRoster setting names no roster file, so there is no fleet to read.", carried: null } };
   }
   let roster: unknown;
   try {
@@ -546,6 +601,7 @@ export const readFleetRows = async (
       roster: fleetRoster,
       rows: [],
       ladderDueToReset: new Set(),
+      cadence: new Map(),
       problem: {
         composed: `the roster '${fleetRoster}' could not be read, and the error the read returned is carried beside this sentence.`,
         carried: boundedText(safeErrorText(err)),
@@ -553,10 +609,11 @@ export const readFleetRows = async (
     };
   }
   if (!Array.isArray(roster)) {
-    return { roster: fleetRoster, rows: [], ladderDueToReset: new Set(), problem: { composed: `the roster '${fleetRoster}' does not hold a JSON array of persona entries.`, carried: null } };
+    return { roster: fleetRoster, rows: [], ladderDueToReset: new Set(), cadence: new Map(), problem: { composed: `the roster '${fleetRoster}' does not hold a JSON array of persona entries.`, carried: null } };
   }
   const rows: FleetRow[] = [];
   const ladderDueToReset = new Set<string>();
+  const cadence = new Map<string, FleetCadence>();
   const problems: FleetLine[] = [];
   // The names already given a row. A roster naming one persona twice gets one
   // row and a problem line rather than two rows: the watcher that reduces
@@ -614,6 +671,11 @@ export const readFleetRows = async (
     ];
     const note = notes.length > 0 ? boundedText(notes.join("; ")) : undefined;
     if (fleetLadderDueToReset(keeper.nextDelaySeconds, keeper.lastEndMs, commons.claimHeld, now)) ladderDueToReset.add(name);
+    // The tick the persona publishes comes first, since its settings file
+    // can keep a tick the roster never named; the roster's launch setting
+    // stands in where the entry carries none. The heartbeat is the entry's
+    // or null, and the reading fills null with its own.
+    cadence.set(name, { controllerTickMs: commons.cadence.controllerTickMs ?? rosterControllerTickMs(entry), heartbeatMs: commons.cadence.heartbeatMs });
     rows.push({
       name,
       enabled: entry.enabled === true,
@@ -626,6 +688,7 @@ export const readFleetRows = async (
       heartbeatAgeMs: commons.heartbeatAgeMs,
       turnState: commons.turnState,
       cacheWarmUntil: commons.cacheWarmUntil,
+      inboxDrainedAgeMs: commons.inboxDrainedAgeMs,
       // True only where the keeper half's own absent-state-file reading is the
       // whole note. The join above can add one more, and a row short of the
       // stamp that places a signalled exit is a row nobody can place.
@@ -634,12 +697,12 @@ export const readFleetRows = async (
       ...(note !== undefined ? { note } : {}),
     });
   }
-  return { roster: fleetRoster, rows, ladderDueToReset, ...(problems.length > 0 ? { problems } : {}) };
+  return { roster: fleetRoster, rows, ladderDueToReset, cadence, ...(problems.length > 0 ? { problems } : {}) };
 };
 
-// One row's health class. The five classes and the value the watcher stores
+// One row's health class. The six classes and the value the watcher stores
 // for one are in hooks/agent-state.ts, beside the memo that holds them,
-// because parseState refuses a stored memo carrying anything else.
+// which is written in those words.
 // `action` alone cannot decide the class: a live claim makes
 // a row read "running" whatever ladder the keeper's state file records, so a
 // persona whose relaunch ladder has climbed and one whose keeper state could
@@ -655,12 +718,23 @@ export const readFleetRows = async (
 // class, whether its old entry is still standing or has aged out of the store.
 // A disabled line is nobody's problem once its entry has gone and reads
 // healthy, and its entry still standing is the session that has just ended.
-// Healthy is the residue, and a live claim reaches it only where the keeper's
-// own files read whole or are short of nothing but a keeper.json the keeper
-// has yet to write: under a claim, a note is otherwise the keeper state that
-// could not be read, and a persona whose keeper state cannot be read is one
-// nobody can say is well.
-function fleetHealthOf(row: FleetRow, ladderDueToReset: boolean): FleetHealth {
+// A live claim whose keeper files read whole, or are short of nothing but a
+// keeper.json the keeper has yet to write, then reads delivery wedged where
+// it is idle with an inbox drain stamp older than the bound below.
+// Under a claim, a note is otherwise the keeper state that could not be
+// read, and a persona whose keeper state cannot be read is one nobody can
+// say is well, so it reads stale before the stamp is looked at. Healthy is
+// the residue.
+// The wedge bound is `(INBOX_DRAIN_IDLE_TICKS + 2) * controllerTickMs +
+// heartbeatMs`: the owner's own idle tick gets INBOX_DRAIN_IDLE_TICKS ticks
+// to clear a wedged drain, two more let its fresh drain settle, and the
+// heartbeat term covers the beat that carries the stamp into the entry,
+// since the beat stamps it and not the settle. Both figures are the row's
+// own as the caller resolved them: the persona's published tick and
+// heartbeat, then the roster's tick and the reader's heartbeat, then the
+// default tick. A row with no stamp, from a build without it or a session
+// yet to settle a drain or end a turn, is never read wedged.
+function fleetHealthOf(row: FleetRow, ladderDueToReset: boolean, controllerTickMs: number, heartbeatMs: number): FleetHealth {
   if (row.action === "held") return FLEET_HEALTH.held;
   // A signalled exit standing over a live claim: the keeper recorded exit 130
   // or 143, on which it relaunches nothing, and the claim's own heartbeat is
@@ -707,7 +781,13 @@ function fleetHealthOf(row: FleetRow, ladderDueToReset: boolean): FleetHealth {
   // whole of that run; reading the note alone would report every persona of a
   // fresh fleet as stale from the moment it came up until the moment it first
   // exited, and report nothing at all about one that never came up.
-  return row.note === undefined || row.keeperStateUnwritten ? FLEET_HEALTH.healthy : FLEET_HEALTH.stale;
+  if (row.note !== undefined && !row.keeperStateUnwritten) return FLEET_HEALTH.stale;
+  // The wedged row's own line in the [FLEET] prompt is composed where the
+  // reading compares classes, never written into `note`, so it cannot turn
+  // the row stale above.
+  const wedgedAfterMs = (INBOX_DRAIN_IDLE_TICKS + 2) * controllerTickMs + heartbeatMs;
+  if (row.turnState === "idle" && row.inboxDrainedAgeMs !== null && row.inboxDrainedAgeMs > wedgedAfterMs) return FLEET_HEALTH.deliveryWedged;
+  return FLEET_HEALTH.healthy;
 }
 
 // The two values the roster keys take when there is nothing wrong, against which
@@ -883,12 +963,14 @@ type FleetReading = { current: Record<string, FleetHealthMemo>; changed: FleetCh
 // nothing but its arguments and writes nothing outside the reading it
 // returns. idleTick in hooks/controller-tick.ts calls it between reading
 // the report and advancing sess.fleetHealth, and keeps the store writes, the
-// submit and every rollback.
+// submit and every rollback. `heartbeatMs` is this reader's own heartbeat
+// cadence, the term the wedge bound adds to each row's own tick.
 export function fleetReadingOf(
   report: FleetReport,
   previousMap: Record<string, FleetHealthMemo> | undefined,
   previousFirstReadingDone: boolean,
   fleetNow: number,
+  heartbeatMs: number,
   { tickFailure, startStoreProblem, reconcileStoreProblem }: FleetTickLines,
 ): FleetReading {
   // Built with no prototype, and read through Object.hasOwn, because a
@@ -1004,7 +1086,12 @@ export function fleetReadingOf(
     // to healthy, and have that fall held back as a flap into a class it
     // has already been reported in. The note saying its keeper state is
     // gone then reaches nobody who did not call fleet_status by hand.
-    const health = fleetClassValue(fleetHealthOf(row, report.ladderDueToReset.has(row.name)), row.enabled, row.keeperStateUnwritten);
+    // The cadence is read beside the row for the same name the row was
+    // built under, so every row has one; the default tick and this
+    // reader's heartbeat stand in for a reading short of either.
+    const rowCadence = report.cadence.get(row.name);
+    const rowHealth = fleetHealthOf(row, report.ladderDueToReset.has(row.name), rowCadence?.controllerTickMs ?? DEFAULT_CONTROLLER_TICK_MS, rowCadence?.heartbeatMs ?? heartbeatMs);
+    const health = fleetClassValue(rowHealth, row.enabled, row.keeperStateUnwritten);
     // What this persona reads as when there is nothing to say about it,
     // which for a roster entry the operator has disabled is that entry
     // healthy and disabled: an entry disabled before the steward's first
@@ -1015,6 +1102,19 @@ export function fleetReadingOf(
     if (moved !== null) {
       changed.push({ row, from: moved.from, to: health, suppressed: moved.suppressed });
       movedKeys += 1;
+      // A row moving to wedged carries how long ago its drain settled, in
+      // whole seconds rounded down, as the plugin's own line under the
+      // reading: the number is the plugin's, so it is composed rather than
+      // carried, and it rides with the change line so a row that stays
+      // wedged inside the quiet window submits nothing on its own. The
+      // name takes the free-text bound as the departure line's does, the
+      // roster being a file every persona of the fleet can write.
+      if (rowHealth === FLEET_HEALTH.deliveryWedged && row.inboxDrainedAgeMs !== null) {
+        notes.push({
+          composed: `${boundedText(row.name)}: inbox drain last settled ${Math.floor(row.inboxDrainedAgeMs / 1000)} s ago while idle`,
+          carried: null,
+        });
+      }
     }
   }
   // Every key the previous reading held and this one has not written
