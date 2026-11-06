@@ -58,16 +58,27 @@ recorded and the pass moving on as each step states:
      is skipped and the visit goes on. After the fetch, origin/main is resolved once to its
      commit id, and every read and merge below names that id, so a later
      fetch cannot bring a commit the stop never read. Before any merge, the
-     paths the fetched commit changes against the merge base are read with
-     git diff --no-renames --name-only -z, which is what the merge would
-     bring, a rename listed as the path it leaves and the path it makes;
-     where the id or that read fails or times out the pull is recorded
-     failed and the visit goes on over the unchanged tree, as after a failed
-     fetch. A changed path under .claude/, matched without regard to case,
-     stops the pull: no merge lands and no model run
+     paths the fetched commit changes are read against every merge base:
+     git merge-base --all HEAD <id> lists the bases, one git diff
+     --no-renames --name-only -z <base> <id> is read per base, and the
+     union of their paths is what the merge would bring, a rename listed as
+     the path it leaves and the path it makes. Every base is read because
+     git builds a merge with several bases from all of them, so a guard
+     rail one base changed could be rolled back by a merge whose paths a
+     single-base read never listed. Where the id, the base list or any diff
+     fails or times out, or the two histories share no base, the pull is
+     recorded failed and the visit goes on over the unchanged tree, as after
+     a failed fetch. A changed path under .claude/, matched without regard
+     to case, stops the pull: no merge lands and no model run
      starts, the step records "deferred: engine change" with the stopping
      paths, and the wiki is stuck from that pass with its remaining steps
-     skipped. So does any changed path whose first segment is shaped like a
+     skipped. So does a changed path with a segment equal to .claude anywhere
+     below the root, as in wiki/.claude/skills/x/SKILL.md, or that is the
+     single segment .claude, matched without regard to case and never
+     exempt, since Claude Code loads skills from a nested .claude/ folder
+     and the engine ships nothing below the root; a segment that only
+     begins with the name, such as .claude-notes, is no stop. So does any
+     changed path whose first segment is shaped like a
      Windows short name, a ~ followed by a digit as in CLAUDE~1, which may be
      a second spelling of a guard rail at the wiki's root on disk. So do
      a changed CLAUDE.md or CLAUDE.local.md at any depth, a root .mcp.json,
@@ -1132,7 +1143,8 @@ function Get-MergeNote {
 
 # The paths among those a pull would bring that may not land unread: each
 # under .claude/ or equal to CLAUDE.md, the wiki's guard rails, less the ones
-# that are the installed engine's own bytes. Both names are matched without
+# that are the installed engine's own bytes, and the never-exempt stops this
+# comment names below. Both names are matched without
 # regard to case, since the wiki's checkout folds case and a .Claude/ entry in
 # the fetched tree lands in .claude/. A path whose first segment is shaped
 # like a Windows short name, a ~ followed by a digit as in CLAUDE~1, may be a
@@ -1142,7 +1154,13 @@ function Get-MergeNote {
 # path whose last segment is either name, a root .mcp.json, and a segment at
 # any depth shaped like their short name, CLAUDE~ and digits with or without
 # an extension as in wiki/CLAUDE~1.MD, all matched without regard to case,
-# are stops that are never exempt. The
+# are stops that are never exempt. So is a path with a segment equal to
+# .claude anywhere below the root, or that is the single segment .claude,
+# matched without regard to case: Claude Code loads skills from a nested
+# .claude/ folder, and the engine ships nothing below the root, so no such
+# path can be its own. A segment that only begins with the name, such as
+# .claude-notes, is no stop, and the root .claude/ folder is read by the
+# exemption below. The
 # exemption reads spelling exactly, since a second case spelling of a file
 # is a second index entry: a path is exempt only where it is .claude/ plus
 # the relative path of a file the engine ships under template/.claude/,
@@ -1187,6 +1205,13 @@ function Get-GuardRailStops {
             continue
         }
         if ([regex]::IsMatch($path, '(^|/)CLAUDE~[0-9]+(\.[^/]*)?(/|$)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+            $stops.Add($path)
+            continue
+        }
+        # A whole segment equal to .claude after the first, or the whole path
+        # being that one segment. The root folder, .claude/ and more, is left
+        # to the exemption below.
+        if ([regex]::IsMatch($path, '^\.claude$|/\.claude(/|$)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
             $stops.Add($path)
             continue
         }
@@ -1281,31 +1306,56 @@ function Invoke-PullStep {
     $fetchedId = Get-FirstLine $resolved.Stdout
 
     # What the merge would bring is read before any merge: the paths origin/main
-    # changes against the merge base. A pulled change to the wiki's guard
-    # rails would run as the account at the next step with no reader. A change
-    # under .claude/ lands only where it is the installed engine's own bytes,
-    # and one to a CLAUDE.md or CLAUDE.local.md at any depth or to the root
-    # .mcp.json never lands; otherwise nothing is merged and the wiki is stuck
-    # from this pass, as a settings-file conflict leaves it, until a pull
-    # reads ran. Renames are listed as a deletion and an addition, so a guard
-    # rail renamed to an ordinary name still lists the path it leaves. A read
-    # that fails leaves the tree unchanged, so the visit goes on over it as
-    # after a failed fetch. The paths are the remote's text and reach the
+    # changes against every merge base, as their union. A pulled change to the
+    # wiki's guard rails would run as the account at the next step with no
+    # reader. A change under .claude/ lands only where it is the installed
+    # engine's own bytes, and one to a nested .claude folder, to a CLAUDE.md
+    # or CLAUDE.local.md at any depth or to the root .mcp.json never lands;
+    # otherwise nothing is merged and the wiki is stuck from this pass, as a
+    # settings-file conflict leaves it, until a pull reads ran. Every base is
+    # read, one diff each, because git builds a merge with several bases from
+    # all of them, so a guard rail one base changed could be rolled back by a
+    # merge whose paths a single-base read never listed; a path unchanged
+    # against every base is unchanged against the base git builds, so the
+    # union is a superset of what the merge changes. Renames are listed as a
+    # deletion and an addition, so a guard rail renamed to an ordinary name
+    # still lists the path it leaves. Exit 1 from merge-base is git's answer
+    # that the histories share no commit, and is recorded failed with its
+    # own note. A read that fails leaves the tree unchanged, so the visit
+    # goes on over it as after a failed fetch. The base ids are git's own
+    # text, read a line each. The paths are the remote's text and reach the
     # log, the status and a notice only through ConvertTo-LogText, as the
     # conflicted paths do.
-    $changed = Invoke-Git $WikiPath @('diff', '--no-renames', '--name-only', '-z', "HEAD...$fetchedId")
-    if ($changed.TimedOut -or $changed.ExitCode -ne 0) {
-        Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $changed 'git diff HEAD...origin/main') $startedAt
+    $bases = Invoke-Git $WikiPath @('merge-base', '--all', 'HEAD', $fetchedId)
+    if ($bases.TimedOut -or ($bases.ExitCode -ne 0 -and $bases.ExitCode -ne 1)) {
+        Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $bases 'git merge-base --all HEAD origin/main') $startedAt
         return $true
     }
-    $guard = Get-GuardRailStops $WikiPath $fetchedId @(($changed.Stdout -split "`0") | Where-Object { $_ -ne '' })
+    if ($bases.ExitCode -eq 1) {
+        Add-Step $Wiki 'pull' 'failed' 'git merge-base --all HEAD origin/main found no merge base' $startedAt
+        return $true
+    }
+    $changedPaths = New-Object System.Collections.Generic.List[string]
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($baseLine in @(Get-Lines $bases.Stdout)) {
+        $base = $baseLine.Trim()
+        $changed = Invoke-Git $WikiPath @('diff', '--no-renames', '--name-only', '-z', $base, $fetchedId)
+        if ($changed.TimedOut -or $changed.ExitCode -ne 0) {
+            Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $changed "git diff $base origin/main") $startedAt
+            return $true
+        }
+        foreach ($path in @(($changed.Stdout -split "`0") | Where-Object { $_ -ne '' })) {
+            if ($seen.Add($path)) { $changedPaths.Add($path) }
+        }
+    }
+    $guard = Get-GuardRailStops $WikiPath $fetchedId @($changedPaths)
     if ($null -ne $guard.Failed) {
         Add-Step $Wiki 'pull' 'failed' (Get-ChildNote $guard.Failed $guard.What) $startedAt
         return $true
     }
     if ($guard.Stops.Count -gt 0) {
         $paths = @($guard.Stops | ForEach-Object { ConvertTo-LogText $_ })
-        Write-Log "$($Wiki.name) pull would change $($paths -join ', '); a pulled change under .claude/ lands only as the installed engine's own bytes and one to a CLAUDE.md, a CLAUDE.local.md or the root .mcp.json never lands, so no merge lands and the wiki is stuck until a session or a person brings its HEAD to hold the change or the other machine's engine is updated"
+        Write-Log "$($Wiki.name) pull would change $($paths -join ', '); a pulled change under .claude/ lands only as the installed engine's own bytes and one to a nested .claude folder, a CLAUDE.md, a CLAUDE.local.md or the root .mcp.json never lands, so no merge lands and the wiki is stuck until a session or a person brings its HEAD to hold the change or the other machine's engine is updated"
         Add-Step $Wiki 'pull' 'deferred' 'engine change' $startedAt $paths
         (Get-WikiState $Wiki.name)['deferred']['stuck'] = $true
         return $false
@@ -1689,7 +1739,7 @@ function Add-VisitNotice {
             # The stop lands nothing, so the text counts the pulled paths and
             # names the two ways it clears, with no pass count, since the
             # stop keeps none.
-            $text = "$($Wiki.name) is stuck: its pull from origin would change $pathCount among .claude/, any CLAUDE.md or CLAUDE.local.md, and the root .mcp.json, which the walker lands only as the installed engine's own bytes under .claude/ and never elsewhere; a session or a person must bring the wiki's HEAD to hold the change or update the other machine's engine, and the walker resumes once a pull lands."
+            $text = "$($Wiki.name) is stuck: its pull from origin would change $pathCount among .claude/, any nested .claude folder, any CLAUDE.md or CLAUDE.local.md, and the root .mcp.json, which the walker lands only as the installed engine's own bytes under the root .claude/ and never elsewhere; a session or a person must bring the wiki's HEAD to hold the change or update the other machine's engine, and the walker resumes once a pull lands."
         } elseif ($paths -ccontains '.claude/settings.json') {
             $text = "$($Wiki.name) is stuck: its pull from origin conflicts on .claude/settings.json, which no headless run may attempt; a session or a person must resolve the conflict in the wiki, and the walker resumes once a pull lands."
         } else {
@@ -1700,7 +1750,7 @@ function Add-VisitNotice {
         if ($null -ne $last -and $last -gt $now.AddHours(-$script:noticeIntervalHours)) { return }
         $kind = 'still'
         if ($engineChange) {
-            $text = "$($Wiki.name) is still stuck: its pull from origin would change $pathCount among .claude/, any CLAUDE.md or CLAUDE.local.md, and the root .mcp.json; a session or a person must bring the wiki's HEAD to hold the change or update the other machine's engine."
+            $text = "$($Wiki.name) is still stuck: its pull from origin would change $pathCount among .claude/, any nested .claude folder, any CLAUDE.md or CLAUDE.local.md, and the root .mcp.json; a session or a person must bring the wiki's HEAD to hold the change or update the other machine's engine."
         } else {
             $text = "$($Wiki.name) is still stuck after $passes passes: its pull from origin conflicts on $pathCount; a session must resolve the conflict in the wiki."
         }

@@ -276,8 +276,8 @@ function Invoke-Captured {
 
 # Runs git in one repository with line-ending conversion off, and throws on failure.
 function Invoke-Git {
-    param([string]$Repo, [string[]]$Arguments)
-    $result = Invoke-Captured 'git' (@('-C', $Repo, '-c', 'core.autocrlf=false') + $Arguments)
+    param([string]$Repo, [string[]]$Arguments, [hashtable]$Environment = @{})
+    $result = Invoke-Captured 'git' (@('-C', $Repo, '-c', 'core.autocrlf=false') + $Arguments) $Environment
     if ($result.TimedOut -or $result.ExitCode -ne 0) { throw "git $($Arguments -join ' ') in $Repo failed: $($result.Stderr)" }
     return $result.Stdout
 }
@@ -601,6 +601,54 @@ function Read-Status {
         return [ordered]@{ missing = $true; engineHash = $null; wikis = @(); deferred = @(); failures = @() }
     }
     return (Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json -AsHashtable)
+}
+
+# Builds a history with two merge bases on a wiki's origin and brings the wiki
+# to one side of it. From the base A, where the wiki, the other clone and
+# origin's main all stand, the other clone commits B on main, which appends a
+# line to $RolledBack, and C on $Side off A, which appends a line to
+# $OtherPath. D merges main into the side, and the wiki is fast-forwarded to
+# D. E merges C into main with $RolledBack put back to A's text, and origin's
+# main is brought to E. The bases of D and E are B and C. git's one merge base
+# is the newer by committer date, so C is dated an hour after B: a read
+# against C alone lists nothing, the read against B lists $RolledBack, and
+# git's merge of E into D takes E's rollback. Returns the ids and A's text of
+# $RolledBack.
+function New-TwoBaseHistory {
+    param([string]$Wiki, [string]$Other, [string]$Side, [string]$RolledBack, [string]$OtherPath)
+    $null = Invoke-Git $Other @('fetch', '-q', 'origin')
+    $null = Invoke-Git $Other @('checkout', '-q', 'main')
+    $null = Invoke-Git $Other @('merge', '-q', '--ff-only', 'origin/main')
+    $aId = (Invoke-Git $Other @('rev-parse', 'HEAD')).Trim()
+    $rolledFile = Join-Path $Other ($RolledBack -replace '/', '\')
+    $otherFile = Join-Path $Other ($OtherPath -replace '/', '\')
+    $baseText = [System.IO.File]::ReadAllText($rolledFile)
+    $otherText = if (Test-Path -LiteralPath $otherFile) { [System.IO.File]::ReadAllText($otherFile) } else { '' }
+    $older = @{ GIT_COMMITTER_DATE = [DateTime]::UtcNow.AddHours(-2).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture) }
+    $newer = @{ GIT_COMMITTER_DATE = [DateTime]::UtcNow.AddHours(-1).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture) }
+    [System.IO.File]::WriteAllText($rolledFile, ($baseText + "A line from the other clone, rolled back by E.`n"))
+    $null = Invoke-Git $Other @('add', '--', $RolledBack)
+    $null = Invoke-Git $Other @('commit', '-q', '-m', "Remote change to $RolledBack") $older
+    $bId = (Invoke-Git $Other @('rev-parse', 'HEAD')).Trim()
+    $null = Invoke-Git $Other @('push', '-q', 'origin', 'main')
+    $null = Invoke-Git $Other @('checkout', '-q', '-b', $Side, $aId)
+    [System.IO.File]::WriteAllText($otherFile, ($otherText + "A side line from the other clone.`n"))
+    $null = Invoke-Git $Other @('add', '--', $OtherPath)
+    $null = Invoke-Git $Other @('commit', '-q', '-m', "Remote change to $OtherPath") $newer
+    $cId = (Invoke-Git $Other @('rev-parse', 'HEAD')).Trim()
+    $null = Invoke-Git $Other @('merge', '-q', '--no-ff', '-m', 'Merge main into the side', 'main')
+    $dId = (Invoke-Git $Other @('rev-parse', 'HEAD')).Trim()
+    $null = Invoke-Git $Other @('push', '-q', 'origin', $Side)
+    $null = Invoke-Git $Other @('checkout', '-q', 'main')
+    $null = Invoke-Git $Other @('merge', '-q', '--no-commit', '--no-ff', $cId)
+    [System.IO.File]::WriteAllText($rolledFile, $baseText)
+    $null = Invoke-Git $Other @('add', '--', $RolledBack)
+    $null = Invoke-Git $Other @('commit', '-q', '-m', "Merge the side into main with $RolledBack put back")
+    $eId = (Invoke-Git $Other @('rev-parse', 'HEAD')).Trim()
+    $null = Invoke-Git $Other @('push', '-q', 'origin', 'main')
+    $null = Invoke-Git $Wiki @('fetch', '-q', 'origin')
+    $null = Invoke-Git $Wiki @('merge', '-q', '--ff-only', $dId)
+    return [pscustomobject]@{ A = $aId; B = $bId; C = $cId; D = $dId; E = $eId; BaseText = $baseText }
 }
 
 $priorGlobal = $env:GIT_CONFIG_GLOBAL
@@ -1079,6 +1127,67 @@ try {
     $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
     $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
     Test-Check 'a fetched commit adding wiki/CLAUDE.md stops on its last segment: HEAD as before with no wiki/CLAUDE.md in the tree, no stub call, the pull deferred: engine change with the path wiki/CLAUDE.md alone and stuck true' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonHeadBefore) -and (-not (Test-Path -LiteralPath (Join-Path $episemon 'wiki\CLAUDE.md'))) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq 'wiki/CLAUDE.md') -and ($episemonDeferred[0]['stuck'] -eq $true))
+
+    # A .claude folder below the root is where Claude Code loads skills from,
+    # so a path with that segment stops on the segment alone: from a clean
+    # base again, the other clone first adds wiki/.claude-notes/page.md, a
+    # folder whose name only begins with .claude, and the pull lands it as a
+    # fast-forward; then it adds wiki/.claude/skills/x/SKILL.md, and the pull
+    # lists that path alone and refuses it. Neither path holds a CLAUDE.md or
+    # CLAUDE.local.md leaf, a CLAUDE~ short name or the root .claude/ folder,
+    # so no other rule reads either.
+    $null = Invoke-Git $episemon @('merge', '-q', '--ff-only', 'origin/main')
+    New-Item -ItemType Directory -Path (Join-Path $episemonOther 'wiki\.claude-notes') -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $episemonOther 'wiki\.claude-notes\page.md'), "A page under a near-miss folder from the other clone.`n")
+    $null = Invoke-Git $episemonOther @('add', '--', 'wiki/.claude-notes/page.md')
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-m', 'Remote near-miss folder')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonRemoteHead = (Invoke-Git $episemonBare @('rev-parse', 'main')).Trim()
+    Test-Check 'a fetched commit adding wiki/.claude-notes/page.md, under a folder whose name only begins with .claude, is fast-forwarded with no stub call and nothing deferred' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonRemoteHead) -and ((Get-Step $status 'episemon' 'pull') -ceq 'ran: fast-forward') -and (@(Get-Deferred $status).Count -eq 0))
+
+    New-Item -ItemType Directory -Path (Join-Path $episemonOther 'wiki\.claude\skills\x') -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $episemonOther 'wiki\.claude\skills\x\SKILL.md'), "A skill from the other clone.`n")
+    $null = Invoke-Git $episemonOther @('add', '--', 'wiki/.claude/skills/x/SKILL.md')
+    $null = Invoke-Git $episemonOther @('commit', '-q', '-m', 'Remote nested skill folder')
+    $null = Invoke-Git $episemonOther @('push', '-q', 'origin', 'main')
+    $episemonHeadBefore = (Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim()
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
+    $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
+    Test-Check 'a fetched commit adding wiki/.claude/skills/x/SKILL.md stops on its nested .claude segment: HEAD as before with no wiki/.claude in the tree, no stub call, the pull deferred: engine change with that path alone and stuck true' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonHeadBefore) -and (-not (Test-Path -LiteralPath (Join-Path $episemon 'wiki\.claude'))) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq 'wiki/.claude/skills/x/SKILL.md') -and ($episemonDeferred[0]['stuck'] -eq $true))
+
+    # A history with two merge bases is read against each base. The control
+    # rolls wiki/page.md back: the fetched commit changes it against one base
+    # and holds it against the other, no path is a guard rail, and the merge
+    # lands with the page at its base text, which is what the rollback does.
+    # The wiki's merge commit is then pushed, so the next history starts from
+    # a base every side holds.
+    $null = Invoke-Git $episemon @('merge', '-q', '--ff-only', 'origin/main')
+    $episemonControl = New-TwoBaseHistory $episemon $episemonOther 'side-page' 'wiki/page.md' 'wiki/other.md'
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    Test-Check 'a fetched commit on a history with two merge bases, rolling wiki/page.md back against one base and holding it against the other, is merged with no stub call and nothing deferred, the pull naming the restore point and the page reading its base text after the merge' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq "ran: merged, restore point $($episemonControl.D)") -and (@(Get-Deferred $status).Count -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -cne $episemonControl.D) -and ([System.IO.File]::ReadAllText((Join-Path $episemon 'wiki\page.md')) -ceq $episemonControl.BaseText))
+    $null = Invoke-Git $episemon @('push', '-q', 'origin', 'HEAD:main')
+
+    # The same shape with wiki/CLAUDE.md rolled back stops on that path, which
+    # only the diff against the base that changed it lists: HEAD stays at D
+    # with the guarded line still in the tree, and the pull lists
+    # wiki/CLAUDE.md alone among the stops, wiki/page.md being the side's
+    # ordinary change. The root CLAUDE.md left origin with the rename above,
+    # so the guard rail rolled back is the one the nested check added.
+    $episemonTwoBase = New-TwoBaseHistory $episemon $episemonOther 'side-guard' 'wiki/CLAUDE.md' 'wiki/page.md'
+    Clear-Stub
+    $r = Invoke-Walker
+    $status = Read-Status
+    $episemonDeferred = @(@($status['deferred']) | Where-Object { $_['name'] -ceq 'episemon' })
+    $episemonPaths = @(if ($episemonDeferred.Count -eq 1 -and $episemonDeferred[0].ContainsKey('paths')) { @($episemonDeferred[0]['paths']) } else { @() })
+    Test-Check 'a fetched commit on a history with two merge bases, rolling wiki/CLAUDE.md back against one base and holding it against the other, stops on wiki/CLAUDE.md: HEAD as before with the guarded line still in wiki/CLAUDE.md, no stub call, the pull deferred: engine change with the path wiki/CLAUDE.md alone and stuck true' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0) -and ((Invoke-Git $episemon @('rev-parse', 'HEAD')).Trim() -ceq $episemonTwoBase.D) -and ([System.IO.File]::ReadAllText((Join-Path $episemon 'wiki\CLAUDE.md')) -cne $episemonTwoBase.BaseText) -and (@(Get-StubRecords).Count -eq 0) -and ((Get-Step $status 'episemon' 'pull') -ceq 'deferred: engine change') -and ($episemonDeferred.Count -eq 1) -and ($episemonDeferred[0]['reason'] -ceq 'engine change') -and ($episemonPaths.Count -eq 1) -and ($episemonPaths[0] -ceq 'wiki/CLAUDE.md') -and ($episemonDeferred[0]['stuck'] -eq $true))
 
     # The stuck rule. phi's origin and local history disagree on a page and
     # the stub never joins it, so each pass defers it with the count one
@@ -1919,8 +2028,8 @@ try {
     # show the sleeping stub, or the later read proves nothing.
     #
     # The killed pass visits three wikis, and the state it leaves shows the
-    # write after each visit. episemon's origin still holds the commit adding
-    # wiki/CLAUDE.md that stopped it above, so from a state holding no notice
+    # write after each visit. episemon's origin still holds the two-base
+    # history rolling wiki/CLAUDE.md back that stopped it above, so from a state holding no notice
     # fields the pass makes it stuck again and collects its stuck notice,
     # which only the pass's end would append. gimel's own kb-run.ps1 makes a
     # Lint: commit, so its due lint is stamped with no stub call. iota's

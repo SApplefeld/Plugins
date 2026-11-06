@@ -171,8 +171,18 @@ this computer's account named `kbuser`. The registrar does two things:
   ancestor, read where the folder does not exist yet, it must be inheritable
   by folders and files and must not carry NoPropagateInherit, which stops it
   at the ancestor's direct children. No deny rule for any of those that reaches the
-  launcher may remove a read right. A nested group, a domain group and a
-  local group whose members cannot be listed are not consulted, and a
+  launcher may remove a read right. Administrators, Power Users, Account
+  Operators, Server Operators, Print Operators, Backup Operators, RAS
+  Servers, Pre-Windows 2000 Compatible Access and Network Configuration
+  Operators count for deny rules alone, so an allow rule for one of them
+  never passes the check. A limited token holds Administrators for deny only,
+  and membership in the other eight produces a filtered token. The rule holds
+  even where Windows gives the task an unfiltered token, such as with User
+  Account Control off, so it can refuse a folder the task could read. A
+  refusal marks each such group the account belongs to. Where an allow rule
+  for one of them would otherwise have passed, the refusal names that group
+  as not counted. The remedy is a grant to the account by name. A nested group, a domain group
+  and a local group whose members cannot be listed are not consulted, and a
   refusal names the identities that were and any group skipped. The
   registrar checks only the read, so name a folder only that account,
   SYSTEM and Administrators can write: whoever can write the launcher runs
@@ -406,9 +416,18 @@ stuck from its first pass.
 
 A pull whose fetched commits change anything under `.claude/`, a file named
 `CLAUDE.md` or `CLAUDE.local.md` at any depth, or the root `.mcp.json` is
-stopped before any merge, conflict or none. So is one changing a path whose
+stopped before any merge, conflict or none. So is one changing a path with
+a segment equal to `.claude` anywhere below the root, such as
+`wiki/.claude/skills/x/SKILL.md`, since Claude Code loads skills from a
+nested `.claude/` folder. A folder whose name only begins with `.claude`,
+such as `.claude-notes`, is not one. So is one changing a path that is the
+single segment `.claude`, a file or submodule entry at the root, since the
+engine ships no such file. So is one changing a path whose
 first segment is shaped like a Windows short name, such as `CLAUDE~1/`, or
-holding a `CLAUDE~` short name at any depth. The KB reads
+holding a `CLAUDE~` short name at any depth. The changed paths are read
+against every merge base, one diff per base, so a merge with several bases
+cannot roll a guard rail back unread. A history sharing no base records the
+pull failed. The KB reads
 `deferred: engine change` with the changed paths that stopped it. Nothing
 lands, no model run starts, the KB's other steps are skipped that pass, and
 it is stuck from that pass. One class of pulled file is exempt: a file under
@@ -606,8 +625,8 @@ and each account's walker reads only that account's wiki list.
 | A commit or create run stops with "KB_PUSH_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 99999." | The account's `KB_PUSH_TIMEOUT_SECONDS` holds a value outside that range. `kb-commit.ps1` checks it on every `-Push` call, even on a wiki with no remote, so the run stops before staging | Set the variable to a whole number from 1 to 99999, or remove it to take the 300-second default. |
 | A create run stops with "KB_ENGINE_TIMEOUT_SECONDS must be a whole number of seconds from 1 to 99999." | The account's variable named in the line holds a value outside that range. `kb-create.ps1` checks it on every run, so the run stops before step 1 and copies, trusts and pushes nothing | Set the variable to a whole number from 1 to 99999, or remove it to take the 900-second default. A value below about 640 seconds, the trust step's worst case as `kb-create.ps1` states it beside the bound, can stop a healthy trust step, and such a stop can leave the trust writer's temporary copy of `~/.claude.json` beside it. |
 | A KB reads `deferred: conflict` | A pull conflicted where the model may not join it, or the merge run could not finish | The `deferred` list names the paths. Resolve the conflict in the KB as the owning account, commit and push. "Conflicting pulls" above has the detail. |
-| A KB reads `deferred: engine change` | A pull from `origin` would change a path under `.claude/`, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, the root `.mcp.json`, or a path holding a Windows short name such as `CLAUDE~1`, that is not the installed engine's own bytes | The `deferred` list names the paths. Read the change as the owning account and, where it is wanted, bring the KB's `HEAD` to hold it: `git merge --ff-only origin/main` in the KB, or a merge you make. Where this machine runs an older engine than the machine that pushed, update this machine's plugin instead and the stop clears on its own. "Conflicting pulls" above has the detail. |
-| The operator's thread says a wiki is stuck | A pull from `origin` conflicted on three passes in a row, or on `.claude/settings.json` from its first pass, and the model merge did not join it; or a pull would change a path under `.claude/`, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, or the root `.mcp.json`, which the walker stops before any merge | Ask a session on the owning account to resolve the conflict in the wiki, naming the paths in the notice record's `paths` field. The field holds the first 10 paths, and the KB's entry under `deferred` in `walk-status.json` lists them all. The field is an addition to the line, so a reader that ignores it still reads the line. Where a merge had landed, the pass's block in `walk.log` names its restore point. The walker writes the notice to `walk-notices.jsonl` and repeats it once a day. A pass whose pull lands writes a cleared line carrying the pull's note, which names the restore point where a merge landed. For an engine-change stop, ask the session to read the change and bring the KB's `HEAD` to hold it by hand, or update the stuck machine's plugin where it runs the older engine. |
+| A KB reads `deferred: engine change` | A pull from `origin`, read against every merge base, would change a path under `.claude/`, a `.claude` folder anywhere below the root, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, the root `.mcp.json`, or a path holding a Windows short name such as `CLAUDE~1`, that is not the installed engine's own bytes | The `deferred` list names the paths. Read the change as the owning account and, where it is wanted, bring the KB's `HEAD` to hold it: `git merge --ff-only origin/main` in the KB, or a merge you make. Where this machine runs an older engine than the machine that pushed, update this machine's plugin instead and the stop clears on its own. "Conflicting pulls" above has the detail. |
+| The operator's thread says a wiki is stuck | A pull from `origin` conflicted on three passes in a row, or on `.claude/settings.json` from its first pass, and the model merge did not join it; or a pull would change a path under `.claude/`, a `.claude` folder anywhere below the root, a `CLAUDE.md` or `CLAUDE.local.md` at any depth, or the root `.mcp.json`, which the walker stops before any merge | Ask a session on the owning account to resolve the conflict in the wiki, naming the paths in the notice record's `paths` field. The field holds the first 10 paths, and the KB's entry under `deferred` in `walk-status.json` lists them all. The field is an addition to the line, so a reader that ignores it still reads the line. Where a merge had landed, the pass's block in `walk.log` names its restore point. The walker writes the notice to `walk-notices.jsonl` and repeats it once a day. A pass whose pull lands writes a cleared line carrying the pull's note, which names the restore point where a merge landed. For an engine-change stop, ask the session to read the change and bring the KB's `HEAD` to hold it by hand, or update the stuck machine's plugin where it runs the older engine. |
 | A step reads `deferred: live` pass after pass | Something other than a run is writing a file outside `inbox/`, such as an editor that saves as you type | `pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Live` in the KB lists each path and its minutes. Close the editor, and the step runs thirty minutes after the last write. |
 | A step reads `failed: git identity unset` | The owning account has no git identity | Set `git config --global user.name` and `user.email` as that account. |
 | A KB reads `skipped: budget` every pass | One KB's runs take the pass's whole 6900-second budget | Read `walk.log` for the step's seconds. A large backfill settles once the inbox drains. |

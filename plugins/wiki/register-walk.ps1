@@ -27,9 +27,16 @@ folder's access rules, or from those of its nearest existing ancestor where the 
 yet: an allow rule must grant ReadAndExecute to the account, to Everyone, to Authenticated Users or to
 a local group the account is a direct member of, and must reach the copied files: inheritable by
 files where the folder exists, and by folders and files without NoPropagateInherit where an ancestor
-was read. No deny rule for any of those that reaches the launcher may remove a read right. A nested
-group, a domain group and a local group whose members cannot be listed are not consulted, and a
-refusal names the identities that were and any group skipped. It refuses a launcher root under a
+was read. No deny rule for any of those that reaches the launcher may remove a read right.
+Administrators, Power Users, Account Operators, Server Operators, Print Operators, Backup Operators,
+RAS Servers, Pre-Windows 2000 Compatible Access and Network Configuration Operators count for deny
+rules alone, so an allow rule for one of them never passes the check. A limited token holds
+Administrators for deny only, and membership in any of the other eight produces a filtered token. The
+rule holds even where Windows gives the task an unfiltered token, such as with User Account Control
+off, so it can refuse a launcher root the task could read. A nested group, a domain group and a local
+group whose members cannot be listed are not consulted, and a refusal names the identities that were,
+marks each group counted for deny rules alone, names such a group whose allow rule it did not count,
+and names any group skipped. It refuses a launcher root under a
 plugins\marketplaces or plugins\cache folder, which a plugin update replaces. -LauncherRoot may
 name the folder this script runs from, in which case no file is copied onto itself: an engine
 checkout registers its own launcher that way.
@@ -90,12 +97,33 @@ function Resolve-AbsolutePath {
     return [System.IO.Path]::GetFullPath($unresolved)
 }
 
+# The local groups the read check counts for deny rules alone, by SID, since a group name is
+# localized and a SID is not. A limited token, such as the task's S4U logon at the Limited run level
+# gets, holds Administrators for deny only, and membership in any of the other eight produces a
+# filtered token. So an allow rule for one of them never passes the read check, while a deny rule for
+# one of them still binds the task and still refuses. All nine are read alike, on the refusing side.
+# The rule holds even where Windows gives the task an unfiltered token, such as with User Account
+# Control off, so it can refuse a root the task could read, and the refusal then names the group
+# whose allow rule was not counted so the account is granted by name.
+$script:DenyOnlyGroupSids = @(
+    'S-1-5-32-544',  # Administrators
+    'S-1-5-32-547',  # Power Users
+    'S-1-5-32-548',  # Account Operators
+    'S-1-5-32-549',  # Server Operators
+    'S-1-5-32-550',  # Print Operators
+    'S-1-5-32-551',  # Backup Operators
+    'S-1-5-32-553',  # RAS Servers
+    'S-1-5-32-554',  # Pre-Windows 2000 Compatible Access
+    'S-1-5-32-556'   # Network Configuration Operators
+)
+
 # The identities whose access rules speak for an account, keyed by SID: the account itself, Everyone,
-# Authenticated Users and each local group it is a direct member of. A nested group and a domain
-# group are not consulted, since the registrar holds no password for the account and runs no probe
-# as it, so a refusal names exactly what was. An account that does not resolve to a SID is refused.
-# Returns the identities, keyed by SID, and the names of the local groups whose members could not be
-# listed, which a refusal names as skipped.
+# Authenticated Users and each local group it is a direct member of. A group on
+# $script:DenyOnlyGroupSids stays in the set, so its deny rules are read, and the read check counts
+# it for deny rules alone. A nested group and a domain group are not consulted, since the registrar
+# holds no password for the account and runs no probe as it, so a refusal names exactly what was. An
+# account that does not resolve to a SID is refused. Returns the identities, keyed by SID, and the
+# names of the local groups whose members could not be listed, which a refusal names as skipped.
 function Get-ConsultedIdentities {
     param([Parameter(Mandatory)][string]$Account)
     try {
@@ -138,9 +166,12 @@ function Get-ConsultedIdentities {
 # Refuses unless the account can read the folder, read from the folder's access rules or, where the
 # folder does not exist yet, from those of its nearest existing ancestor. The read holds where an
 # allow rule grants ReadAndExecute, or a right set containing it, to one of the account's consulted
-# identities and no deny rule for any of them that reaches the launcher removes a read right. A rule
-# counts only where it reaches the files copied into the folder, since a copied file holds only the
-# inheritable rules of the folder it lands in. Where the folder exists, an allow rule counts only where
+# identities and no deny rule for any of them that reaches the launcher removes a read right. A group
+# on $script:DenyOnlyGroupSids counts for deny rules alone, for the reason the list's comment gives:
+# its allow rule never grants the read, and the refusal marks each such group and names any such allow
+# rule it did not count, so the person refused grants the account by name. A rule counts only where it reaches the files
+# copied into the folder, since a copied file holds only the inheritable rules of the folder it lands
+# in. Where the folder exists, an allow rule counts only where
 # it carries ObjectInherit, and a deny rule counts unless it is InheritOnly without ObjectInherit.
 # Where an ancestor was read, an allow rule counts only where it carries ContainerInherit and
 # ObjectInherit, since the new folder holds only what it inherits too, and a deny rule counts where it
@@ -177,8 +208,11 @@ function Assert-AccountCanRead {
     if ($consulted.Skipped.Count -gt 0) {
         $skippedNote = " Local groups whose members could not be listed, not consulted: $($consulted.Skipped -join ', ')."
     }
-    $checked = @($identities.Keys | ForEach-Object { "$($identities[$_]) ($_)" }) -join ', '
+    $checked = @($identities.Keys | ForEach-Object {
+        if ($script:DenyOnlyGroupSids -contains $_) { "$($identities[$_]) ($_, counted for deny rules only)" } else { "$($identities[$_]) ($_)" }
+    }) -join ', '
     $grantedTo = $null
+    $uncountedAllow = [System.Collections.Generic.List[string]]::new()
     foreach ($rule in $rules) {
         $sidValue = $rule.IdentityReference.Value
         if (-not $identities.Contains($sidValue)) { continue }
@@ -206,6 +240,13 @@ function Assert-AccountCanRead {
         $needed = if ($isAncestor) { $bothInherit } else { $objectInherit }
         if (($rule.InheritanceFlags -band $needed) -ne $needed) { continue }
         if ($isAncestor -and -not $propagates) { continue }
+        # An allow rule that would grant the read for a group counted for deny rules alone is not
+        # counted, and is kept so the refusal names it rather than saying no such rule exists.
+        if ($script:DenyOnlyGroupSids -contains $sidValue) {
+            $named = "$($identities[$sidValue]) ($sidValue)"
+            if (-not $uncountedAllow.Contains($named)) { $uncountedAllow.Add($named) }
+            continue
+        }
         if ($null -eq $grantedTo) { $grantedTo = $identities[$sidValue] }
     }
     if ($null -eq $grantedTo) {
@@ -214,7 +255,7 @@ function Assert-AccountCanRead {
         } else {
             "it carries no allow rule granting ReadAndExecute with ObjectInherit, which the copied files would inherit,"
         }
-        Stop-WithReason "-LauncherRoot '$Folder' is not readable by ${Account}: $where to any of the identities checked: $checked.$skippedNote The task runs as $Account and would fail before the launcher writes a line. Grant that account read on the folder, or name one it can read."
+        Stop-WithReason "-LauncherRoot '$Folder' is not readable by ${Account}: $where to any of the identities checked$(if ($uncountedAllow.Count -gt 0) { ' that count for allow rules. Identities checked' }): $checked.$skippedNote The task runs as $Account and would fail before the launcher writes a line.$(if ($uncountedAllow.Count -gt 0) { " An allow rule on '$readFrom' for $($uncountedAllow -join ' and ') would reach the launcher and was not counted, since such a group counts for deny rules only. Grant that account read on the folder by name, or name one it can read." } else { ' Grant that account read on the folder, or name one it can read.' })"
     }
 }
 

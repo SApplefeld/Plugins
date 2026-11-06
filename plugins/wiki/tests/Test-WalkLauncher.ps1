@@ -33,12 +33,17 @@ Guest is a direct member, or a missing child of such a folder, whose inheritable
 the registrar refuses -User .\Guest with no -LauncherRoot by one stderr line naming it and no warning,
 a launcher root only the running account can read by one line naming the identities it checked, a
 launcher root whose only grant to Guest is not inheritable by files by that same line, a launcher
-root granting BUILTIN\Guests read and denying Guest by one line naming the deny, a PATH without pwsh
-or claude, and a launcher root under a plugin cache; and as the running account it
-accepts its own folder with no read check. The Guest account exists and resolves on every Windows
-installation while disabled, which is why the cross-account cases run as it. Each granted folder sits
-under the work folder, carries its own access rules rather than inherited ones, and grants the running
-account full control, so the cleanup removes it. It also parses register-walk.ps1 and checks that every Register-ScheduledTask,
+root granting BUILTIN\Guests read and denying Guest by one line naming the deny, a launcher root
+granting BUILTIN\Administrators alone for the built-in administrator account by that same line with
+the group marked as counted for deny rules only, where a root also granting that account's own SID
+is accepted, a PATH without pwsh or claude, and a launcher root under a plugin cache; and as the
+running account it accepts its own folder with no read check. The Guest account exists and resolves
+on every Windows installation while disabled, which is why the cross-account cases run as it. The
+built-in administrator account is read from the SID ending in 500, and its cases are skipped with a
+printed line where it does not resolve, is not listed in Administrators or runs the test. Each
+granted folder sits under the work folder, carries its own access rules rather than inherited ones,
+and grants the running account full control, so the cleanup removes it. It also parses
+register-walk.ps1 and checks that every Register-ScheduledTask,
 Unregister-ScheduledTask and Copy-Item sits inside an if whose condition calls ShouldProcess, and
 runs that same check on a synthetic script with an unguarded call to show it can fail.
 
@@ -575,6 +580,31 @@ try {
     $guestsRoot = New-GrantedFolder 'guests-group' @($guestsSid)
     $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $guestsRoot)
     Test-Check 'a launcher root granting ReadAndExecute to BUILTIN\Guests, of which Guest is a direct member, is accepted: exit 0' ((-not $r.TimedOut) -and ($r.ExitCode -eq 0))
+    # The built-in administrator account is the SID ending in 500 in the domain that holds Guest as
+    # 501, a member of BUILTIN\Administrators on every installation, and it may be renamed, so it is
+    # named by translation. The registrar counts Administrators for deny rules alone, which a limited
+    # token holds for deny only, and the rule holds even where the task's token is unfiltered. The block
+    # is skipped with a printed line where the account does not resolve, is not listed as a member, or
+    # is the account running the test, which takes no read check.
+    $adminSid = [Security.Principal.SecurityIdentifier]::new("$($guestSid.AccountDomainSid.Value)-500")
+    $administratorsSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $adminAccount = $null
+    try { $adminAccount = $adminSid.Translate([Security.Principal.NTAccount]).Value } catch { $adminAccount = $null }
+    $adminListed = $false
+    if ($null -ne $adminAccount) {
+        try { $adminListed = @(Get-LocalGroupMember -SID $administratorsSid -ErrorAction Stop).SID -contains $adminSid } catch { $adminListed = $false }
+    }
+    if ($adminListed -and ($script:currentSid -ne $adminSid)) {
+        $adminGroupRoot = New-GrantedFolder 'administrators-group' @($administratorsSid)
+        $r = Invoke-Registrar @('-User', $adminAccount, '-WhatIf', '-LauncherRoot', $adminGroupRoot)
+        $refusals = @(Get-Lines $r.Stderr | Where-Object { $_ -match 'identities checked' })
+        Test-Check "a launcher root granting ReadAndExecute to BUILTIN\Administrators alone is refused for $adminAccount by the no-grant read-check rule, not the deny rule: exit 1 and one stderr line saying no allow rule reaches the identities checked that count for allow rules, S-1-5-32-544 marked as counted for deny rules only, and its allow rule named as not counted" ((-not $r.TimedOut) -and ($r.ExitCode -eq 1) -and ($refusals.Count -eq 1) -and ($refusals[0] -match 'no allow rule') -and ($refusals[0] -match 'identities checked that count for allow rules') -and ($refusals[0] -notmatch 'a deny rule') -and ($refusals[0] -match [regex]::Escape($adminAccount)) -and ($refusals[0] -match '\(S-1-5-32-544, counted for deny rules only\)') -and ($refusals[0] -match '\(S-1-5-32-544\) would reach the launcher and was not counted'))
+        $adminSidRoot = New-GrantedFolder 'administrators-group-and-admin-sid' @($administratorsSid, $adminSid)
+        $r = Invoke-Registrar @('-User', $adminAccount, '-WhatIf', '-LauncherRoot', $adminSidRoot)
+        Test-Check "a launcher root granting ReadAndExecute to BUILTIN\Administrators and to $adminAccount's own SID is accepted on the account's own grant: exit 0" ((-not $r.TimedOut) -and ($r.ExitCode -eq 0))
+    } else {
+        Write-Host "[SKIP] the built-in administrator cases: the SID $($adminSid.Value) resolves to '$adminAccount', is listed in BUILTIN\Administrators: $adminListed, and the test runs as $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+    }
     $ownRoot = New-GrantedFolder 'running-account-only' @()
     $r = Invoke-Registrar @('-User', '.\Guest', '-WhatIf', '-LauncherRoot', $ownRoot)
     $refusals = @(Get-Lines $r.Stderr | Where-Object { $_ -match 'identities checked' })

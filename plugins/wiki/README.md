@@ -196,8 +196,9 @@ failed or made no `Lint:` commit three passes in a row, and pushes. Dropping a f
 
 The walker calls a model only where there is work: an ingest with a file
 waiting, a lint that is due, or a pull that conflicts, which a model run joins.
-A pull that would change anything under `.claude/`, a
-`CLAUDE.md` or `CLAUDE.local.md` in any folder, or a root `.mcp.json` lands
+A pull that would change anything under `.claude/`, a `.claude` folder
+below the root, a `CLAUDE.md` or `CLAUDE.local.md` in any folder, or a root
+`.mcp.json` lands
 nothing and starts no model run, beside the settings conflict that already
 stops it. So does a path spelled like a Windows short name of one of them,
 such as `CLAUDE~1`. The KB reads `deferred: engine change` and stays stuck

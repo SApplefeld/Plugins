@@ -530,10 +530,20 @@ takes seven steps: trust, engine update, pull, feed, ingest, lint and push.
   copies the engine's `template/.claude/` over the KB's, keeping `feed.json`
   and any file the engine does not ship, and commits. A KB with a live uncommitted file, or a merge left in progress, is recorded `deferred` and updated on a later pass.
 - **Pull** first aborts any merge left in progress, then fetches `origin` and merges `origin/main` where the KB has a remote.
-  Before any merge it reads the paths the fetched `origin/main` changes, and
-  a change under `.claude/`, to a file named `CLAUDE.md` or `CLAUDE.local.md`
+  Before any merge it reads the paths the fetched `origin/main` changes
+  against every merge base, one diff per base, and stops on their union.
+  Git builds a merge with several bases from all of them, so a single-base
+  read could miss a guard rail that one base changed and the merge rolls
+  back. A history sharing no base records the pull failed. A change under
+  `.claude/`, to a file named `CLAUDE.md` or `CLAUDE.local.md`
   at any depth, or to the root `.mcp.json` stops the pull with reason
-  `engine change`. So does a path whose first segment is shaped like a
+  `engine change`. So does a path with a segment equal to `.claude` anywhere
+  below the root, such as `wiki/.claude/skills/x/SKILL.md`, matched without
+  regard to case. Claude Code loads skills from a nested `.claude/` folder,
+  and the engine ships nothing below the root, so no such path is exempt.
+  So does a path that is the single segment `.claude`, a file or submodule
+  entry at the root, since the engine ships no such file.
+  So does a path whose first segment is shaped like a
   Windows short name, such as `CLAUDE~1/`, or holding a `CLAUDE~` short name at
   any depth. Nothing lands, no model run starts, and the KB is
   stuck. The stop keeps no pass count and clears when a later pull lands:
@@ -596,7 +606,10 @@ folder outside the plugin cache and registers `wiki-walk` under the task folder
 `\llm-wiki\<domain>.<account>\`. Where `-User` names another account, the
 registrar requires `-LauncherRoot` and refuses unless that account can read
 the folder. It reads the answer from the folder's access rules, or its nearest
-existing ancestor's, before anything is copied or registered. At each start
+existing ancestor's, before anything is copied or registered. The check
+counts Administrators, and eight other local groups whose membership filters
+the task's limited token, for deny rules alone. An allow rule for one of them
+never passes it, and a deny rule for one of them still refuses. At each start
 the launcher reads Claude Code's
 install record for `wiki@applefeld`, copies that version's folder to
 `%LOCALAPPDATA%\llm-wiki\runtime\<version>\` where no complete copy exists,
