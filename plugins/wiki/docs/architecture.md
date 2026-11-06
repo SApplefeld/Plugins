@@ -48,7 +48,7 @@ name under `wiki/`, by `-Path`, by a folder given as `-Path` and by
 `-Reconcile`, while a sibling page in the same folder commits. It drives the
 move helper's refusal of an inbox file named `CLAUDE.md`, `claude.local.md` or
 `CLAUDE~1.MD`, by `-Name` and by `-Handle`, and of `CLAUDE.md` typed with a
-trailing dot or space, while `CLAUDE-notes.md` moves.
+trailing dot or space, while `CLAUDE-notes.md` moves. It drives `-Rename`: a listed name renamed in place with `sources/` left empty and `CLAUDE-notes.md` left under its own name, a hidden file found and its hidden attribute cleared, a `.claude` folder renamed whole, an existing `renamed-<name>` refusing the sweep with nothing renamed, `-WhatIf` renaming nothing, and a junction named `.claude` refused as a reparse point.
 It also drives the move helper's refusals of a symbolic link and of a stamp
 or a move that throws, and its answer to a name `sources/` already holds: an
 identical inbox copy deleted, a copy of different content refused, and
@@ -210,8 +210,8 @@ moves the original to `sources/`, writes a per-source summary page, revises the
 handful of wiki pages the source genuinely touches, updates `index.md`, appends
 a `log.md` entry, and makes exactly one commit. It pushes once at run end, and
 a KB with no remote named `origin` pushes nothing. An
-empty inbox produces no commit and a clean exit. A snapshot listing a name
-Claude Code loads as instructions, such as `CLAUDE.md`, stops the whole run
+empty inbox produces no commit and a clean exit. Before its snapshot the run calls `kb-move.ps1 -Rename`, which renames each inbox file or folder whose name Claude Code loads as instructions, such as `CLAUDE.md`, in place to `inbox/renamed-<name>` without reading it, so a renamed file is listed and ingested as a document in the same run. A sweep that refuses stops the whole run before anything under `inbox/` is read, and the run reports the refusal. A snapshot that still lists such a name,
+one the sweep's exact list leaves, such as `CLAUDE.md.` with a trailing dot, stops the whole run
 before any source is read, and the run reports the name for a person to
 remove or rename.
 
@@ -395,7 +395,15 @@ files byte for byte instead: it removes an identical inbox copy and prints
 `duplicate: sources/<name>`, and it refuses a copy of different content,
 which stays in `inbox/` for a person to rename. A stamp, a move, a compare or
 a delete that throws ends in one `kb-move:` line, with the file left in
-`inbox/`.
+`inbox/`. With `-Rename`, which takes no handle and no name, it moves
+nothing: it lists `inbox/` with hidden and system items and folders
+included, keeps each item whose name is on that same list, and renames each
+in place to `inbox/renamed-<name>`, clearing the hidden and system
+attributes and printing `renamed: inbox/renamed-<name>` per item. It reads
+no byte of any item. Every kept item is checked before any is renamed, so a
+refusal by a check renames nothing, while a clear or rename that throws on
+a later item leaves the earlier renames made. The ingest skill runs it once,
+before its snapshot.
 `kb-commit.ps1` is the only path
 that commits: it accepts only
 bar-delimited repo-relative paths under `sources/` or `wiki/` or exactly

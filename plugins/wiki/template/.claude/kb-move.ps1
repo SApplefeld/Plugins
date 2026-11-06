@@ -1,7 +1,9 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Moves one file from inbox/ to sources/ inside a knowledge base repo.
+Moves one file from inbox/ to sources/ inside a knowledge base repo, or, with
+-Rename, renames each inbox/ item whose name Claude Code would load as
+instructions.
 
 .DESCRIPTION
 The single sanctioned path by which a file reaches sources/. It takes the file
@@ -13,10 +15,10 @@ destination resolve to locations inside the repo and outside .git/ and
 Claude Code would load as instructions from sources/, CLAUDE.md,
 CLAUDE.local.md, .mcp.json or .claude in any letter case or one shaped like
 the short name CLAUDE~1, is refused on both routes and the file stays in
-inbox/ for a person to rename. The list is tested on the name as given and
-again on the leaf of each resolved path, since Windows drops a trailing dot or
-space when it resolves a path, so CLAUDE.md. and CLAUDE.md with a trailing
-space are refused as CLAUDE.md. A move
+inbox/, where -Rename renames it in place. The list is tested on the name as
+given and again on the leaf of each resolved path, since Windows drops a
+trailing dot or space when it resolves a path, so CLAUDE.md. and CLAUDE.md with
+a trailing space are refused as CLAUDE.md. A move
 keeps the time the file arrived with, so
 without the stamp a source dropped days ago would read as stale to
 `kb-status.ps1 -What Live` in the gap before the first page write; with it the
@@ -41,6 +43,25 @@ that throws on either file is refused with its one-line reason and the file
 stays in inbox/. On a successful move the destination path, relative to the
 repo root, is written to stdout.
 
+With -Rename the script moves nothing to sources/. It lists inbox/ with
+hidden and system items and folders included, keeps each item whose name is
+on the instruction-name list above, and renames each in place to
+inbox/renamed-<name>. A renamed file reaches the ingest as a document under a
+name Claude Code does not load. A renamed folder stays in inbox/ as a folder,
+which the snapshot does not list and the ingest does not read. Every kept
+item is checked before any is renamed, so a refusal by a check leaves inbox/
+as it was: a reparse point is refused as on the move route, an
+inbox/renamed-<name> that already exists as a file or a folder is refused
+naming it, and each origin and destination must resolve inside the repo and
+clear of .git/ and .claude/. The rename reads no byte of any item. It clears
+the hidden and system attributes, so a renamed file reaches
+`kb-status.ps1 -What Inbox`, sets no time stamp, and writes
+`renamed: inbox/renamed-<name>` to stdout, one line per item. Where no item
+is on the list it writes nothing and exits 0. A clear or rename that throws
+is refused with its one-line reason. That refusal comes after the checks, so
+the items renamed before it stay renamed and their renamed: lines are already
+written. Under -WhatIf nothing is renamed and no attribute changes.
+
 .PARAMETER Name
 The bare file name of the item in inbox/ to move. It must be a plain leaf
 name: no directory separators, no drive markers, and not a relative-parent
@@ -63,8 +84,21 @@ but the apostrophe refusal, which guards only a name typed on the line, so a
 name starting with a dash is refused by handle as by name. Exactly one of
 -Name and -Handle is given.
 
+.PARAMETER Rename
+Sweeps inbox/ for the names on the instruction-name list and renames each
+such file or folder in place to renamed-<name>. It takes no -Name and no
+-Handle: the script finds the names itself, hidden and system items among
+them, so no name sits on the command line and no listing a caller took can
+miss one.
+
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-move.ps1 -Name report.pdf
+
+.EXAMPLE
+pwsh -NoProfile -File ./.claude/kb-move.ps1 -Rename
+With a hidden inbox/CLAUDE.md and a plain inbox/notes.md, renames the first to
+inbox/renamed-CLAUDE.md, clears its hidden attribute, leaves notes.md as it
+is, and prints `renamed: inbox/renamed-CLAUDE.md`.
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox
@@ -83,7 +117,10 @@ param(
     [string]$Name,
 
     [Parameter(Mandatory, ParameterSetName = 'Handle')]
-    [string]$Handle
+    [string]$Handle,
+
+    [Parameter(Mandatory, ParameterSetName = 'Rename')]
+    [switch]$Rename
 )
 
 Set-StrictMode -Version Latest
@@ -132,11 +169,107 @@ function Get-FileDigest {
     return -join ($digest | ForEach-Object { $_.ToString('x2') })
 }
 
+# Defence in depth: confirms each fully resolved path stays inside the repo
+# and clear of .git/ and .claude/, comparing the normalized full path rather
+# than the raw input, and refuses the run on the first that does not. Both
+# routes call it on their origin and destination before anything on disk
+# changes.
+function Assert-InsideRepo {
+    param([string[]]$Paths)
+    foreach ($full in $Paths) {
+        if (-not $full.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Stop-WithReason "resolved path escapes the repo root: $full"
+        }
+        if ($full.StartsWith($gitPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Stop-WithReason "resolved path is under .git/: $full"
+        }
+        if ($full.StartsWith($claudePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Stop-WithReason "resolved path is under .claude/: $full"
+        }
+    }
+}
+
 # The repo root is the parent of the .claude/ directory this script lives in.
 $repoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).ProviderPath
 
 # The names Claude Code loads as instructions, a copy of kb-commit.ps1's line, the reference, pinned by tests/Test-InstructionNameParity.ps1.
 $instructionName = '^(CLAUDE\.md|CLAUDE\.local\.md|\.mcp\.json|\.claude|CLAUDE~[0-9]+(\..*)?)$'
+
+# The prefixes Assert-InsideRepo tests a resolved path against.
+$sep          = [System.IO.Path]::DirectorySeparatorChar
+$rootPrefix   = $repoRoot.TrimEnd('\', '/') + $sep
+$gitPrefix    = (Join-Path $repoRoot '.git') + $sep
+$claudePrefix = (Join-Path $repoRoot '.claude') + $sep
+
+# -Rename sweeps inbox/ for the names on the list and renames each item in
+# place. A renamed file reaches the ingest as a document under a name Claude
+# Code does not load, and a renamed folder stays in inbox/ as a folder, which
+# the snapshot does not list and the ingest does not read. The listing takes
+# -Force, since a hidden or system item is loaded as a plain one and would
+# otherwise be left in place, and takes folders, since a .claude folder is
+# loaded as one. The sweep resolves no name and reads no byte of any item: a
+# rename is not a read. Every kept item is checked before any is renamed, so
+# a refusal by a check leaves inbox/ as it was. A clear or rename that throws
+# on a later item refuses with the earlier renames made and their renamed:
+# lines written. The new name is renamed- and the old name, which no entry on
+# the list matches, since the list is anchored at the start of the name.
+if ($PSCmdlet.ParameterSetName -eq 'Rename') {
+    $inboxDir = Join-Path $repoRoot 'inbox'
+    if (-not (Test-Path -LiteralPath $inboxDir -PathType Container)) {
+        Stop-WithReason 'inbox/ does not exist.'
+    }
+    $kept = @(Get-ChildItem -LiteralPath $inboxDir -Force | Where-Object { $_.Name -match $instructionName })
+    $planned = @()
+    foreach ($item in $kept) {
+        $oldName  = $item.Name
+        $newName  = "renamed-$oldName"
+        $srcFull  = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $oldName))
+        $destFull = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $newName))
+        Assert-InsideRepo @($srcFull, $destFull)
+        # The item's own attributes are read, never a link target's, so a
+        # reparse point is refused on the path and a rename through it never
+        # reaches the target. The read also finds the hidden and system bits
+        # the rename clears below.
+        try {
+            $attributes = [System.IO.File]::GetAttributes($srcFull)
+        } catch {
+            Stop-WithReason ("could not read the attributes of inbox/$oldName, so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+        }
+        if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Stop-WithReason "inbox/$oldName is a reparse point, such as a symbolic link; only a plain file is moved."
+        }
+        # The destination is never overwritten, a hidden one included, and
+        # NTFS compares names ignoring case, so a File or Directory exists
+        # read, each of which sees hidden items, is the check.
+        if ([System.IO.File]::Exists($destFull) -or [System.IO.Directory]::Exists($destFull)) {
+            Stop-WithReason "inbox/$newName already exists, so inbox/$oldName stays as it is and nothing is renamed."
+        }
+        $planned += [pscustomobject]@{ OldName = $oldName; NewName = $newName; Source = $srcFull; Attributes = $attributes }
+    }
+    # Each rename sits inside its own gate, so -WhatIf names every item it
+    # would rename and renames none. The hidden and system bits are cleared
+    # first, so a renamed file reaches the snapshot.
+    # No time stamp is set: the item stays in inbox/, where no staleness
+    # reading applies, and the stamp is the move route's alone.
+    foreach ($plan in $planned) {
+        if (-not $PSCmdlet.ShouldProcess("inbox/$($plan.OldName)", "Rename in place to inbox/$($plan.NewName)")) { continue }
+        $cleared = [System.IO.FileAttributes]($plan.Attributes -band (-bnot ([System.IO.FileAttributes]::Hidden -bor [System.IO.FileAttributes]::System)))
+        try {
+            if ($cleared -ne $plan.Attributes) {
+                [System.IO.File]::SetAttributes($plan.Source, $cleared)
+            }
+        } catch {
+            Stop-WithReason ("could not clear the attributes of inbox/$($plan.OldName), so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+        }
+        try {
+            Rename-Item -LiteralPath $plan.Source -NewName $plan.NewName -ErrorAction Stop
+        } catch {
+            Stop-WithReason ("could not rename inbox/$($plan.OldName) to inbox/$($plan.NewName), so it stays in inbox/: " + ($_.Exception.GetBaseException().Message -replace '\s+', ' ').Trim())
+        }
+        Write-Output "renamed: inbox/$($plan.NewName)"
+    }
+    exit 0
+}
 
 # A handle resolves to a name against the live inbox, listed as kb-status.ps1
 # -What Inbox lists it: the inbox's own files, .gitkeep left out. The shape is
@@ -182,7 +315,7 @@ if ($Name.StartsWith('-')) {
 # Both precede the stamp, the compare and the move, so nothing on disk
 # changes. -match ignores case, as Windows reads claude.md as CLAUDE.md.
 if ($Name -match $instructionName) {
-    Stop-WithReason "inbox/$Name carries an instruction file's name, which Claude Code would load from sources/; it stays in inbox/, and a person renames the file."
+    Stop-WithReason "inbox/$Name carries an instruction file's name, which Claude Code would load from sources/; it stays in inbox/, where kb-move.ps1 -Rename renames it in place."
 }
 # A name given on the line sits inside a Bash single-quoted string, the one
 # form that passes $, backticks and spaces byte for byte, and an apostrophe
@@ -201,14 +334,6 @@ if (-not (Test-Path -LiteralPath $inboxPath -PathType Leaf)) {
     Stop-WithReason "inbox/$Name does not exist or is not a file."
 }
 
-# Defence in depth: confirm the fully resolved origin and destination stay
-# inside the repo and clear of .git/ and .claude/, comparing the normalized
-# full paths rather than the raw input.
-$sep          = [System.IO.Path]::DirectorySeparatorChar
-$rootPrefix   = $repoRoot.TrimEnd('\', '/') + $sep
-$gitPrefix    = (Join-Path $repoRoot '.git') + $sep
-$claudePrefix = (Join-Path $repoRoot '.claude') + $sep
-
 $srcFull  = [System.IO.Path]::GetFullPath($inboxPath)
 $destFull = [System.IO.Path]::GetFullPath($sourcesPath)
 
@@ -219,21 +344,11 @@ $destFull = [System.IO.Path]::GetFullPath($sourcesPath)
 foreach ($full in @($srcFull, $destFull)) {
     $leaf = [System.IO.Path]::GetFileName($full)
     if ($leaf -match $instructionName) {
-        Stop-WithReason "inbox/$leaf carries an instruction file's name, which Claude Code would load from sources/; it stays in inbox/, and a person renames the file."
+        Stop-WithReason "inbox/$leaf carries an instruction file's name, which Claude Code would load from sources/; it stays in inbox/, where kb-move.ps1 -Rename renames it in place."
     }
 }
 
-foreach ($full in @($srcFull, $destFull)) {
-    if (-not $full.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Stop-WithReason "resolved path escapes the repo root: $full"
-    }
-    if ($full.StartsWith($gitPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Stop-WithReason "resolved path is under .git/: $full"
-    }
-    if ($full.StartsWith($claudePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Stop-WithReason "resolved path is under .claude/: $full"
-    }
-}
+Assert-InsideRepo @($srcFull, $destFull)
 
 # A reparse point in inbox/, a symbolic link or a junction among them, is
 # refused before anything writes to it, since a time set through such a link

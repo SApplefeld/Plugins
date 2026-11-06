@@ -221,7 +221,9 @@ pwsh -NoProfile -File ./.claude/kb-commit.ps1 -Path '<paths>' -Message '<msg>' [
 existing source. A re-dropped file whose bytes match the source of the same
 name is removed from `inbox/`, since its original is already in `sources/`.
 A file of different content under a name `sources/` already holds is
-refused and stays in `inbox/` for a person to rename.
+refused and stays in `inbox/` for a person to rename. `kb-move.ps1 -Rename`
+renames any inbox item whose name is on its list of instruction-file names,
+the names Claude Code would read as instructions, and takes no other name.
 
 `kb-commit.ps1` stages exactly the paths you name and nothing else. Separate
 them with a vertical bar, which Windows forbids in a file name, and use no
