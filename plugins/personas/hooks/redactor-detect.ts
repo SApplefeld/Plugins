@@ -1021,6 +1021,32 @@ function isRecordId(token: string): boolean {
   return m !== null && m[1].split(/[_-]/).every((part) => isSlugPart(part) || isWordish(part) || CAPS_OR_LETTER_PART.test(part))
 }
 
+// A wiki fed name has the shape the wiki feeder writes into an inbox:
+// `<source>--<path>--<hash7>.<ext>`, the feed source's name, the upstream
+// path with each slash turned into two dashes and its extension dropped, the
+// first seven hex characters of the blob sha, and the extension. The generic
+// scan's token ends at the dot, so the extension is outside the token this
+// check receives. The optional extension group, of one to ten letters or
+// digits, only admits a dotted name a caller might pass whole. The source is
+// the first two-dash segment and the hash the last, so the path may hold
+// two-dash joins of its own. The two-dash joins are matched first and each
+// run of letters and digits is split on single dashes after, so no part is
+// empty: a triple dash, a leading or trailing dash, or a hash of any other
+// length or case leaves the token judged as before. Each part of the source
+// is a word or a short number, and each part of the path is a word, a short
+// acronym, a short number, an all-caps word with up to three digits, or a
+// single letter. A fed name right after a key's name is judged as before.
+const FED_NAME = /^([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)--([A-Za-z0-9]+(?:-{1,2}[A-Za-z0-9]+)*)--([0-9a-f]{7})(?:\.[A-Za-z0-9]{1,10})?$/
+
+function isFedName(token: string): boolean {
+  const m = FED_NAME.exec(token)
+  return (
+    m !== null &&
+    m[1]!.split('-').every(isSlugPart) &&
+    m[2]!.split(/-+/).every((part) => isSlugPart(part) || isWordish(part) || CAPS_OR_LETTER_PART.test(part))
+  )
+}
+
 function looksSecret(token: string, before: string, cfg: Config): boolean {
   if (token.startsWith('REDACTED-')) return false
   if (cfg.allow.has(token) || DIGITS_ONLY.test(token)) return false
@@ -1031,6 +1057,7 @@ function looksSecret(token: string, before: string, cfg: Config): boolean {
   if (token.includes('+') && token.split('+').every((p) => p === '' || WORD_PART.test(p) || isPublicId(p, named, cfg))) return false
   if (named && SESSION_UUID.test(token) && SESSION_ID_NAME.test(before)) return false
   if (!named && isRecordId(token)) return false
+  if (!named && isFedName(token)) return false
   if (looksLikeName(token, named)) return false
 
   const h = entropy(token)
