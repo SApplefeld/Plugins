@@ -23,13 +23,17 @@ under its own leaf name and adds nothing, since a copied file carries no front
 matter of ours; -Name, -DroppedBy and -Note are refused with it.
 
 A name, or a copied file's leaf name, is refused where it is empty or blank,
-holds a backslash, a slash or a colon, starts with a dot, holds an apostrophe,
+holds a backslash, a slash or a colon, starts with a dot, equals CLAUDE.md or
+CLAUDE.local.md in any letter case or is shaped like the short name CLAUDE~1,
+holds an apostrophe,
 holds a character the
 file system forbids in a name, has a stem before its first dot that is a Windows
 reserved device name (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9, in any
 case), ends in a dot or a space, or equals an entry already in the inbox under a
-case-insensitive comparison. The file is created only where it does not exist,
-so a second writer racing this one is refused rather than overwritten.
+case-insensitive comparison. The two dot-leading instruction file names,
+.mcp.json and .claude, are refused by the leading-dot rule first. The file is
+created only where it does not exist, so a second writer racing this one is
+refused rather than overwritten.
 
 A call refused by a rule prints one line, "kb-drop: <reason>", on stderr, exits
 1 and writes nothing. A write that fails partway prints the same line naming
@@ -92,6 +96,9 @@ $ignoreCase = [StringComparison]::OrdinalIgnoreCase
 # The Windows reserved device names; a name whose stem before the first dot
 # equals one of them, in any case, opens the device instead of a file.
 $reservedNames = @('CON', 'PRN', 'AUX', 'NUL') + @(0..9 | ForEach-Object { "COM$_"; "LPT$_" })
+
+# The names Claude Code loads as instructions, a copy of kb-commit.ps1's line, the reference, pinned by tests/Test-InstructionNameParity.ps1.
+$instructionName = '^(CLAUDE\.md|CLAUDE\.local\.md|\.mcp\.json|\.claude|CLAUDE~[0-9]+(\..*)?)$'
 
 # Quotes one argument for a Windows command line so the child receives it unchanged.
 function ConvertTo-CommandLineArgument {
@@ -192,6 +199,11 @@ if ($fileName.IndexOfAny([char[]]@('\', '/', ':')) -ge 0) {
     Stop-WithReason "name '$fileName' holds a path separator or a colon"
 }
 if ($fileName.StartsWith('.', [StringComparison]::Ordinal)) { Stop-WithReason "name '$fileName' starts with a dot" }
+# A dropped file keeps its name into sources/, where Claude Code would load an
+# instruction file from beside any source a run reads, so kb-move.ps1 refuses
+# these names and this rule gives the drop the same early answer. The two
+# dot-leading names on the list are refused by the leading-dot rule first.
+if ($fileName -match $instructionName) { Stop-WithReason "name '$fileName' is an instruction file's name" }
 # A session's own name is the one a person types on a shell line, where an
 # apostrophe ends a single-quoted string, so a name holding one is refused here
 # as kb-move.ps1 -Name refuses it.

@@ -515,6 +515,9 @@ if ($sourceHandleSet) {
     $resolvedSource = $matched[0].Name
 }
 
+# The names Claude Code loads as instructions, the reference, copied byte for byte in kb-move.ps1 and kb-drop.ps1 and pinned by tests/Test-InstructionNameParity.ps1.
+$instructionName = '^(CLAUDE\.md|CLAUDE\.local\.md|\.mcp\.json|\.claude|CLAUDE~[0-9]+(\..*)?)$'
+
 # True where any segment of a slash-separated path names an instruction file
 # Claude Code loads. Claude Code loads a CLAUDE.md or CLAUDE.local.md from any
 # folder it works in and a .claude/ folder beside it, so a file under wiki/ by
@@ -526,17 +529,12 @@ if ($sourceHandleSet) {
 # like a Windows short name of one, CLAUDE~ and digits with or without an
 # extension as in CLAUDE~1.MD, is refused too, as the walker's pull stop
 # refuses it. Every match is without regard to case, since Windows reads
-# claude.md as CLAUDE.md. This is the one place the names live: the entry
-# check and the staged-index check both call it.
+# claude.md as CLAUDE.md, and -match ignores case. The entry check and the
+# staged-index check both call this function.
 function Test-InstructionPath {
     param([string]$normalized)
     foreach ($segment in ($normalized -split '/')) {
-        $instructionName = $segment.Equals('CLAUDE.md', [System.StringComparison]::OrdinalIgnoreCase) -or
-                           $segment.Equals('CLAUDE.local.md', [System.StringComparison]::OrdinalIgnoreCase) -or
-                           $segment.Equals('.claude', [System.StringComparison]::OrdinalIgnoreCase) -or
-                           $segment.Equals('.mcp.json', [System.StringComparison]::OrdinalIgnoreCase) -or
-                           [regex]::IsMatch($segment, '^CLAUDE~[0-9]+(\..*)?$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        if ($instructionName) {
+        if ($segment -match $instructionName) {
             return $true
         }
     }

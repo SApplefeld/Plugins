@@ -9,7 +9,14 @@ by its bare name or by the handle `kb-status.ps1 -What Inbox` prints for it,
 resolves a handle against the live inbox, validates that the name cannot escape
 inbox/ or overwrite an existing source, confirms both the origin and
 destination resolve to locations inside the repo and outside .git/ and
-.claude/, then sets the file's last-write time to now and moves it. A move
+.claude/, then sets the file's last-write time to now and moves it. A name
+Claude Code would load as instructions from sources/, CLAUDE.md,
+CLAUDE.local.md, .mcp.json or .claude in any letter case or one shaped like
+the short name CLAUDE~1, is refused on both routes and the file stays in
+inbox/ for a person to rename. The list is tested on the name as given and
+again on the leaf of each resolved path, since Windows drops a trailing dot or
+space when it resolves a path, so CLAUDE.md. and CLAUDE.md with a trailing
+space are refused as CLAUDE.md. A move
 keeps the time the file arrived with, so
 without the stamp a source dropped days ago would read as stale to
 `kb-status.ps1 -What Live` in the gap before the first page write; with it the
@@ -128,6 +135,9 @@ function Get-FileDigest {
 # The repo root is the parent of the .claude/ directory this script lives in.
 $repoRoot = (Resolve-Path -LiteralPath (Split-Path -Parent $PSScriptRoot)).ProviderPath
 
+# The names Claude Code loads as instructions, a copy of kb-commit.ps1's line, the reference, pinned by tests/Test-InstructionNameParity.ps1.
+$instructionName = '^(CLAUDE\.md|CLAUDE\.local\.md|\.mcp\.json|\.claude|CLAUDE~[0-9]+(\..*)?)$'
+
 # A handle resolves to a name against the live inbox, listed as kb-status.ps1
 # -What Inbox lists it: the inbox's own files, .gitkeep left out. The shape is
 # checked before the inbox is read, so a value that is not a handle is refused
@@ -164,6 +174,16 @@ if ($Name -eq '.' -or $Name -eq '..') {
 if ($Name.StartsWith('-')) {
     Stop-WithReason 'Name must not start with a dash.'
 }
+# A source keeps its inbox name, and Claude Code loads a CLAUDE.md or another
+# instruction file from the folder of a file it reads, so a file under
+# sources/ by such a name would instruct every later run that reads beside
+# it. This refusal tests the name as given, on the line or from a handle,
+# before any path is read, and the resolved leaves are tested again below.
+# Both precede the stamp, the compare and the move, so nothing on disk
+# changes. -match ignores case, as Windows reads claude.md as CLAUDE.md.
+if ($Name -match $instructionName) {
+    Stop-WithReason "inbox/$Name carries an instruction file's name, which Claude Code would load from sources/; it stays in inbox/, and a person renames the file."
+}
 # A name given on the line sits inside a Bash single-quoted string, the one
 # form that passes $, backticks and spaces byte for byte, and an apostrophe
 # ends that string in Bash before this script runs. This refusal catches a
@@ -191,6 +211,17 @@ $claudePrefix = (Join-Path $repoRoot '.claude') + $sep
 
 $srcFull  = [System.IO.Path]::GetFullPath($inboxPath)
 $destFull = [System.IO.Path]::GetFullPath($sourcesPath)
+
+# Windows drops a trailing dot or space when it resolves a path, so a name
+# such as CLAUDE.md. passes the test on the name as given and still reaches
+# inbox/CLAUDE.md. The list is tested again on the leaf of each resolved path,
+# the names the stamp, the compare and the move act on.
+foreach ($full in @($srcFull, $destFull)) {
+    $leaf = [System.IO.Path]::GetFileName($full)
+    if ($leaf -match $instructionName) {
+        Stop-WithReason "inbox/$leaf carries an instruction file's name, which Claude Code would load from sources/; it stays in inbox/, and a person renames the file."
+    }
+}
 
 foreach ($full in @($srcFull, $destFull)) {
     if (-not $full.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {

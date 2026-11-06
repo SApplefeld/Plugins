@@ -76,6 +76,12 @@ kb-commit staged, so another run's unstaged edits to the same files stay
 out of it. Then commit any other recovered work by `-Reconcile`, then
 finish any untracked orphan. If `-Reconcile` refuses on a staged path, stop
 the whole run and report the refusal, as step 4b does for a refused move.
+A refusal whose line opens
+`kb-commit: path names an instruction file Claude Code loads` means a
+recovered or staged path names an instruction file. On `-Reconcile` it
+refuses the whole reconcile, and on any step 1 commit it commits nothing.
+Stop the whole run and report the refusal with the path it names, for a
+person to remove. The file stays on disk until a person removes it.
 
 If the working tree carries recovered work with **no** untracked or staged
 file under `sources/`, those changes came from some other interrupted run, not
@@ -135,6 +141,21 @@ next. Every completed source is committed before the next begins, so a
 crash loses at most the one in-flight source's uncommitted work, and
 step 1's reconcile is what recovers that at the start of the next run.
 Never stage work from two sources together.
+
+Before the first source is read, look at every name the step 2 snapshot
+lists. Where any name is equal in any letter case to `CLAUDE.md`,
+`CLAUDE.local.md`, `.mcp.json` or `.claude`, or is shaped like the short name
+`CLAUDE~1`, stop the whole run here, before step 4's first read. Read nothing
+under `inbox/`, commit nothing more, and report each such name for a person
+to remove or rename. Claude Code loads an instruction file from the folder of
+any file it reads, so reading any inbox file would load it. The snapshot
+lists names and reads no file, so this check loads nothing. A trailing dot or
+space does not change the name, so `CLAUDE.md.` is the same name as
+`CLAUDE.md`. The commits step 1 made stay committed. No other run holds the
+tree, so unlike the live stop in step b, this stop flushes them itself, as
+step 5 says for a run that ended without a commit. Where step 1 made a
+commit, end with step 5's push-only call. Otherwise end with step 3's
+unpushed check.
 
 For each source, in the order the snapshot listed them:
 

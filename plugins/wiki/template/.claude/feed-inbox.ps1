@@ -986,7 +986,9 @@ try {
 
         # Every rule of the three helpers that take a name (kb-move.ps1 refuses
         # / \ or :, a leading dash and an apostrophe, which the map above has
-        # already removed; kb-commit.ps1 and kb-status.ps1 refuse '..' and :),
+        # already removed; kb-commit.ps1 and kb-status.ps1 refuse '..' and :;
+        # kb-move.ps1 and kb-commit.ps1 also refuse an instruction file's name,
+        # which a fed name carrying its blob hash never equals),
         # plus what Windows cannot hold as a file name, plus the length cap and
         # the size cap.
         $reason = $null

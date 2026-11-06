@@ -17,7 +17,7 @@ preserve.
 
 The engine repo (this one) contains the `template/` tree, nine scripts at
 its root, four plugin-level skills separate from the four vendored into each
-KB, a `SessionStart` hook, twelve tests, a plugin
+KB, a `SessionStart` hook, thirteen tests, a plugin
 manifest, and this `docs/` library. `new-kb.ps1` copies the template.
 `kb-create.ps1` creates a KB, `kb-trust.ps1` trusts it and `kb-registry.ps1`
 lists it. `kb-drop.ps1` writes one file into a listed KB's `inbox/`, the only
@@ -45,7 +45,10 @@ commit helpers and `kb-commit.ps1 -Reconcile` against a throwaway KB, and
 checks that the three helpers' copies of the handle function are byte-equal.
 It drives the commit helper's refusal of a path holding an instruction file's
 name under `wiki/`, by `-Path`, by a folder given as `-Path` and by
-`-Reconcile`, while a sibling page in the same folder commits.
+`-Reconcile`, while a sibling page in the same folder commits. It drives the
+move helper's refusal of an inbox file named `CLAUDE.md`, `claude.local.md` or
+`CLAUDE~1.MD`, by `-Name` and by `-Handle`, and of `CLAUDE.md` typed with a
+trailing dot or space, while `CLAUDE-notes.md` moves.
 It also drives the move helper's refusals of a symbolic link and of a stamp
 or a move that throws, and its answer to a name `sources/` already holds: an
 identical inbox copy deleted, a copy of different content refused, and
@@ -61,7 +64,12 @@ drives the drop script and the session-start hook against a temporary
 `feed-inbox.ps1` hold
 the same class of control, format, line separator and paragraph separator
 characters they strip or refuse, and sweeps every other script for a
-line that strips by category without the whole class. The source
+line that strips by category without the whole class.
+`tests/Test-InstructionNameParity.ps1` checks that `kb-commit.ps1`,
+`kb-move.ps1` and `kb-drop.ps1` each hold one line setting `$instructionName`,
+whose quoted pattern naming the instruction files Claude Code loads equals
+`kb-commit.ps1`'s, the reference. It also fails any other line in those files
+that names `$instructionName` outside a `-match` read, lines opening with `#` aside. The source
 repository also holds the publish job, `.github/workflows/publish.yml`, and its
 scripts and their tests under `tools/publish/`. "Publishing to the marketplace"
 below covers them. The engine repo is machinery only.
@@ -202,7 +210,10 @@ moves the original to `sources/`, writes a per-source summary page, revises the
 handful of wiki pages the source genuinely touches, updates `index.md`, appends
 a `log.md` entry, and makes exactly one commit. It pushes once at run end, and
 a KB with no remote named `origin` pushes nothing. An
-empty inbox produces no commit and a clean exit.
+empty inbox produces no commit and a clean exit. A snapshot listing a name
+Claude Code loads as instructions, such as `CLAUDE.md`, stops the whole run
+before any source is read, and the run reports the name for a person to
+remove or rename.
 
 **Lint** (`wiki-lint`) is the health pass, run by the walker once a week per KB
 or by hand. It runs six checks in
@@ -238,7 +249,9 @@ subject. The reconcile step commits recovered edits alone first, through
 the line. An ingest run first recovers a source an interrupted commit left
 staged, committing it by `-SourceHandle` with no `-Path`, since its pages are
 already staged. It stops the whole run when more than one source is staged,
-or when `-Reconcile` refuses on a staged path. It then commits the other
+or when `-Reconcile` refuses on a staged path. It also stops the whole run
+when `-Reconcile` refuses the whole reconcile because a recovered path names an
+instruction file Claude Code loads. It then commits the other
 recovered edits under a `Reconcile:` subject, and only then finishes any
 untracked orphan source, whose handle it reads from
 `kb-status.ps1 -What Sources`. All of this runs before the inbox is touched.
@@ -371,7 +384,9 @@ only path into `sources/`: it takes the handle `kb-status.ps1 -What Inbox`
 prints beside an inbox file, which it resolves against the inbox at the call,
 or a bare inbox file name from a person at the keyboard. It refuses a handle
 matching no file or more than one, refuses a name
-containing a separator or leading dash, never overwrites an existing source,
+containing a separator or leading dash, refuses on either route a name or a
+resolved leaf naming an instruction file Claude Code loads, from its copy of the list
+`kb-commit.ps1` holds, never overwrites an existing source,
 confirms the resolved paths stay inside the repo and clear of `.git/` and
 `.claude/`, and refuses an inbox file that is a reparse point, such as a
 symbolic link or a junction. It then sets the file's last-write time to now

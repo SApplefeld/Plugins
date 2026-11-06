@@ -65,7 +65,12 @@ nothing under `sources/` or `inbox/`, and writes the subject
 `Reconcile: <n> files` with the staged paths listed in the body, so a
 hand-placed page's name reaches git from the file system and never from the
 line. `-Message` is the body that follows, a short note on what the run recovered,
-in single quotes and holding no apostrophe. If instead a file
+in single quotes and holding no apostrophe. A refusal whose line opens
+`kb-commit: path names an instruction file Claude Code loads` means a
+recovered or staged path names an instruction file. `-Reconcile` has then
+refused the whole reconcile and committed nothing. Stop the whole run: run no
+check, commit nothing and do not push. Report the refusal with the path it
+names, for a person to remove. If instead a file
 under `sources/` is untracked, that is a crashed ingest, not lint's business:
 report it and leave it for the next ingest run. Lint never moves or commits a
 source.
