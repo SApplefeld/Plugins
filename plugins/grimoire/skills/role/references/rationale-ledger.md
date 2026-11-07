@@ -2005,14 +2005,14 @@ Extracted at `6bc07fb`: lines 1-47 (`skills.role.c1.md`); lines 48-65 (`skills.r
 ### c3.C056
 - key: Treat a record whose authorship the seat cannot account for as unwarranted and ask the operator.
 - class: rule
-- source: plugins/grimoire/skills/role/SKILL.md:85
+- source: plugins/grimoire/skills/role/SKILL.md:77
 - provenance: 9077782 2026-08-31, the fail-closed end of the causal-chain refusal rule, installed with it.
 - verdict: rewrite
 - landed: f5d48d7 section 24
 - reason: The rule and its compaction bound stay; the honour-only account behind it moves here, that the tier records no authorship so what enforces the rule is the seat's own account, which a compaction erases. The gate returns every act the grant would cover to the operator's word, which is why it holds however cheap the ask looks.
 - proposed: Keep the rule and the compaction clause; move "the rule is honour-only by construction... the tier records no authorship" to the ledger.
 - baseline-test: yes
-- passage: Only the seat's own account of what it and its agents did enforces that rule, and a compaction erases it. So a seat that cannot account for a record's authorship treats the record as unwarranted and asks the operator.
+- passage: The seat's own account of what it and its agents did enforces that rule. Where the store writes an `author:` stamp on the record, that stamp serves as the account for a writer that kept its own id, and for nothing more. A compaction erases the account and leaves the stamp. A seat with neither treats the record as unwarranted and asks the operator.
 
 ### c3.C057
 - key: State three things beside a grant instance's scope: its scoping and resolution rule, its provenance, and its resolution moment.

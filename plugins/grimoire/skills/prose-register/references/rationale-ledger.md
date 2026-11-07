@@ -869,7 +869,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C003
 - key: State in each finding whether the defect is frequency and uniformity across the document or a single line.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:5
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:5
 - provenance: a5fce80 2026-08-18, the catalog's opening frame, written so a reviewer can tell a pattern from an instance.
 - verdict: keep
 - reason: The surrounding clauses are the criterion, not decoration: one triad is a sentence and a triad in every paragraph is a signature is what tells the reviewer which finding to raise.
@@ -929,7 +929,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C009
 - key: Do not let three-item lists and three-clause sentences become the document's default cadence.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:21
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:22
 - provenance: a5fce80 2026-08-18, the first catalogued tell, named in the spec's minimum list of patterns.
 - verdict: keep
 - reason: No finding. The rule is the cadence one, not a ban on triads, and its bound at line 27 keeps a genuine three-member set legal.
@@ -938,7 +938,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C010
 - key: Treat "The service is fast, reliable, and secure. It handles authentication, authorization, and auditing across the web, mobile, and API surfaces." as the triadic-rhythm tell.
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:23
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:24
 - provenance: a5fce80 2026-08-18; the spec's acceptance for this file required a before and after rewrite for every pattern.
 - verdict: keep
 - reason: The specimens are the acceptance rather than illustration. A finishing review raised as a Major that two patterns were described and not shown, and the fix was to add specimens, so retiring one re-creates a defect already adjudicated.
@@ -948,7 +948,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C011
 - key: Rewrite the triadic tell as "The service handles authentication and authorization. It also writes an audit record for every call, which is the part that matters when a customer disputes a charge."
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:25
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:26
 - provenance: a5fce80 2026-08-18, same acceptance.
 - verdict: keep
 - reason: The after half is the half the finishing Major was about; a described pattern with no shown fix is what it named as unmet.
@@ -958,7 +958,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C012
 - key: The rewrite works because it drops one item, keeps two, and spends the saved words on why the second earns its place.
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:27
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:28
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: This is the recipe, not commentary: without it the pair shows a fix and never names the move the writer repeats.
@@ -967,7 +967,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C013
 - key: When a real set has three members, write three.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:27
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:28
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: This is the carve-out that stops the cadence rule from becoming a ban on triads, and it already sits in nineteen words beside its threshold.
@@ -976,7 +976,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C014
 - key: Raise the triadic-rhythm finding only when nearly every set in the document has three members.
 - class: mechanic
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:27
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:28
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: No finding. It is the threshold that makes the tell raisable and is the frequency half of the opening frame applied to this pattern.
@@ -985,7 +985,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C015
 - key: Do not use the "it is not X, it is Y" negation-then-correction construction.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:31
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:32
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list.
 - verdict: keep
 - reason: No finding. Note that this rule is the one line 81 of this same document violates, which is why C032 is a rewrite.
@@ -995,7 +995,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C016
 - key: Replace "This is not a configuration change. It is a change to how the system thinks about identity." with "The change moves identity resolution out of the config file and into the token itself."
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:33
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:36
 - provenance: a5fce80 2026-08-18, the file's before-and-after acceptance.
 - verdict: keep
 - reason: Per C010, the specimen pairs are what a finishing review already ruled this file owes for every pattern.
@@ -1004,7 +1004,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C017
 - key: Use the "However," pivot only against a real position a real reader holds, never against a straw position invented one clause earlier.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:37
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:38
 - provenance: a5fce80 2026-08-18, written as the carve-out that keeps Section 6's licensed pivot from being flagged as this tell.
 - verdict: keep
 - reason: The family-resemblance sentence is the carve-out, and a ban read without it costs the writing skill its core rhetorical move. It is a different test from line 71, which asks whether the marker survives deletion.
@@ -1013,7 +1013,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C018
 - key: Vary paragraph and sentence length rather than writing every paragraph three sentences and every sentence the same length.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:41
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:42
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list as uniform paragraph and sentence length.
 - verdict: keep
 - reason: No conflict with SKILL.md:51, which sets a band of two to four sentences rather than a fixed three, so variation inside the band satisfies both. The pointer at Section 6 is already one line below, and the spread measurement at line 43 exists nowhere else.
@@ -1023,7 +1023,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C019
 - key: Measure the tell by taking the sentence lengths in a section and looking at the spread; sentences all within a few words of each other read as generated.
 - class: mechanic
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:43
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:42
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: No finding. This is the catalog's whole contribution over the doctrine and Section 6, which both say to vary length and neither says how to measure it.
@@ -1032,7 +1032,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C020
 - key: Three consecutive 26-to-31-word sentences, with the next two paragraphs built the same way, is the uniform-length tell.
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:45
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:42
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: Per C010, and this specimen is also the only calibration of the spread measurement, showing what a too-narrow spread looks like on the page.
@@ -1050,7 +1050,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C022
 - key: Do not put a bolded lead-in term on every bullet, especially on bullets carrying an argument.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:51
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:46
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list.
 - verdict: keep
 - reason: No conflict with SKILL.md:63, which says bullets are typically bold term plus explanation and is bounded to non-ranked field lists; SKILL.md:75 independently bars bullets for decomposing arguments, which is the same boundary this rule draws.
@@ -1090,7 +1090,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C026
 - key: Cut signposting and throat-clearing phrases such as "It is worth noting that", "importantly", "in essence", "at its core", "simply put", and "that said".
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:65
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:50
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list.
 - verdict: keep
 - reason: SKILL.md:92 bars two hand-holding phrases in a close; this line states the body-prose class and the deletion test that decides membership, which is the only place that test exists.
@@ -1100,7 +1100,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C027
 - key: Test a signpost by deleting it; if the sentence is unchanged, it was throat-clearing.
 - class: mechanic
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:65
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:50
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: No finding. The test is what makes the phrase list open-ended rather than a closed enumeration a writer can route around.
@@ -1109,7 +1109,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C028
 - key: Replace "It is worth noting that the migration is reversible." with "The migration is reversible."
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:67
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:54
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: Per C010; it is the cheapest pair in the file and shows the deletion test being run.
@@ -1118,7 +1118,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C029
 - key: Keep a contrast marker such as "However," when it has an antecedent, because removing it changes the logical relation.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:71
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:56
 - provenance: a5fce80 2026-08-18, the survivor clause of the deletion test.
 - verdict: keep
 - reason: This is the exception the deletion test owes, and it is a different test from line 37: this one asks whether the marker survives deletion, that one asks whether the position it argues against is real.
@@ -1127,7 +1127,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C030
 - key: Do not write a paragraph that describes the structure of the section following it.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:75
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:60
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list.
 - verdict: keep
 - reason: No finding. Note that line 111's "Two notes for a reviewer" opener is this document's own instance of it, which is why C041 is a rewrite.
@@ -1137,7 +1137,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C031
 - key: Delete a structural preview and start with the section's thesis sentence instead.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:79
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:60
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: No finding. It is the rewrite half of C030 and names the replacement, without which a writer deletes the preview and has no opener.
@@ -1157,7 +1157,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C033
 - key: Do not close with a summary paragraph whose every sentence appeared earlier in different words.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:85
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:64
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list.
 - verdict: rewrite
 - landed: 4b8969b section 48
@@ -1170,7 +1170,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C034
 - key: Close by stating the end state the reader now has after applying the design, which is new information arrived at by the body.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:87
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:66
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: The line names Section 7 as the owner and adds the discriminator, that the end state is arrived at rather than repeated, which is what separates the licensed close from the tell above it.
@@ -1180,7 +1180,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C035
 - key: Replace "In summary, the design separates the two roles, restricts the permissions on each, and audits the boundary between them." with "The result is an operator who can run every report and cannot read a single card number."
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:89
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:70
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: Per C010.
@@ -1189,7 +1189,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C036
 - key: Do not end every section on a one-line aphoristic moral set off alone.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:95
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:74
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list.
 - verdict: keep
 - reason: The "set off alone" recognizer is what separates an aphorism closing a section from an ordinary last sentence, and the once-versus-every-section threshold is the frequency bound the whole catalog runs on.
@@ -1198,7 +1198,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C037
 - key: End a section on the concrete consequence instead of a moral.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:99
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:78
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: No finding. It is the replacement for the deleted moral, without which the rule says only what not to write.
@@ -1215,7 +1215,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C039
 - key: Avoid the generated-prose vocabulary set: delve, robust, seamless, comprehensive, streamline, crucial, figurative landscape, realm, myriad, testament to, figurative navigate, "in today's [adjective] world", and ensure where a plain verb serves.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:105
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:82
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list.
 - verdict: keep
 - reason: No conflict with C041. Line 105 is a recognizer list, not an instruction to avoid the words, and line 111 is its bound; the imperative reading came from the extraction, not the passage.
@@ -1224,7 +1224,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C040
 - key: Replace "In today's fast-moving compliance landscape, a comprehensive audit trail is crucial to ensuring seamless reporting." with a sentence asserting a fact about what an auditor needs.
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:107
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:84
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: Per C010, and line 111's second note refers back to this pair when it says swapping the word and keeping the empty sentence fixes nothing.
@@ -1233,7 +1233,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C041
 - key: Do not treat these words as banned; raise the finding on density and figurative use, since robust in statistics and ensure in a contract clause are correct.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:111
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:88
 - provenance: a5fce80 2026-08-18, written as the bound on the vocabulary recognizer above it.
 - verdict: rewrite
 - landed: 4b8969b section 48
@@ -1245,7 +1245,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C042
 - key: Fix a vocabulary tell by making the sentence assert a fact, not by swapping the word and keeping the empty sentence.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:111
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:88
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: The rewrite at C041 deletes only the paragraph's opener; this sentence is the fix recipe and is untouched.
@@ -1254,7 +1254,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C043
 - key: Do not build headers from one template such as repeated "Understanding X", all gerunds, or the same syllable count.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:115
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:92
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list as over-parallel headers.
 - verdict: keep
 - reason: No finding. Section 4 sets the header form and says nothing about headers being too alike, which is what this rule catches.
@@ -1282,7 +1282,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C046
 - key: Avoid comma-plus-participle tails such as ", ensuring that", ", allowing teams to", ", making it easy to", ", providing a foundation for".
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:125
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:98
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: No finding. Nothing else in the corpus names this construction, and the reason it is catalogued, that it appends a benefit without arguing for it, is a defect no other rule reaches.
@@ -1291,7 +1291,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C047
 - key: Replace "The gateway caches the token, reducing round trips and allowing downstream services to authorize locally, ensuring consistent latency." with two sentences naming the removed network hop.
 - class: rationale-example
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:127
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:102
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: Per C010; it shows the stacked form and the two-sentence fix.
@@ -1300,7 +1300,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C048
 - key: Accept one participial tail in a document; treat three in a paragraph as the pattern.
 - class: mechanic
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:131
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:104
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: No finding. It is the frequency threshold that keeps a single legitimate tail from being raised as a finding.
@@ -1309,7 +1309,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C049
 - key: Do not close by listing options, assigning each a merit, and declining to pick.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:135
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:108
 - provenance: a5fce80 2026-08-18, named in the spec's minimum pattern list as the non-committal verdict.
 - verdict: keep
 - reason: No conflict with the doctrine's decision-ask rule, which requires a marked and argued recommendation and says a bare pick is not one. Presenting the options and getting the call is options plus a recommendation, which is what this rule asks for rather than what it bars.
@@ -1336,7 +1336,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C052
 - key: Do not follow a prose paragraph with a bullet list that repeats the same points as fragments.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:145
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:112
 - provenance: a5fce80 2026-08-18; this is the second of the two patterns the finishing review found described rather than shown.
 - verdict: keep
 - reason: No finding. Its specimens and disposition at line 159 arrived in ba1060b as the fix for that Major.
@@ -1354,7 +1354,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C054
 - key: Keep whichever of the paragraph and the list carries the detail.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:159
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:112
 - provenance: ba1060b 2026-08-18, added in the finishing pass as the fix for the described-rather-than-shown Major.
 - verdict: keep
 - reason: The middle sentence a compression would drop is the one that walks the paired specimens and draws the boundary C053 names, and the whole line is an adjudicated review fix.
@@ -1363,7 +1363,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C055
 - key: Cut the list where it would only re-say the sentence.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:159
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:112
 - provenance: ba1060b 2026-08-18, same fix.
 - verdict: keep
 - reason: It is not C054 restated: C054 decides which member to keep when both carry something, and this decides the case where the list carries nothing, which C054 alone does not dispose of.
@@ -1372,7 +1372,7 @@ Extracted at `6bc07fb`: whole document (`skills.scott-writing-style.references.a
 ### C056
 - key: Avoid weightless intensifiers: truly, really, incredibly, highly, vital, essential, powerful, and significantly with no figure behind it.
 - class: rule
-- source: plugins/grimoire/skills/scott-writing-style/references/ai-tells.md:163
+- source: plugins/grimoire/skills/prose-register/references/ai-tells.md:13
 - provenance: a5fce80 2026-08-18.
 - verdict: keep
 - reason: The line names Section 8 and says why it reaches further, that the adverbial form survives the adjective ban by attaching to ordinary words. Dropping "significantly" to leave a pointer would break the by-name hunt list for the one word a reviewer meets most.

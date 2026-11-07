@@ -684,11 +684,11 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 ### c1.C069
 - key: Where a dispatch is what the turn ended on, evaluate the wedge hallmark at the first re-block after the wake, before doing anything else with that dispatch.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/SKILL.md:57
+- source: plugins/grimoire/skills/executing-work/SKILL.md:56
 - provenance: d66c58d 2026-08-23, the wedge hallmark: a rule loaded only on suspicion arrived after the multi-hour wait it exists to end.
 - verdict: keep
 - reason: Times the hallmark after a `WAITING:` wake, where line 357 times the first-turn reading at every dispatch's first re-block; different readings at different points in a dispatch's life.
-- passage: On the wake, evaluate the hallmark at the first re-block, before anything else with that dispatch.
+- passage: On that first wake, evaluate the hallmark at the first re-block, before anything else with that dispatch.
 
 ### c1.C070
 - key: Apply BLOCKED's literal-leading-prefix rule to WAITING, and never give capacity as a WAITING reason.
@@ -5547,20 +5547,20 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 ### W004
 - key: Owe a round besides whenever the fix delta's subject is something the area's tests are liable to route around rather than exercise, that judgment reading over hunks that change what runs, so a prose-only delta sits below it by construction.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/SKILL.md:585
+- source: plugins/grimoire/skills/executing-work/references/findings.md:81
 - provenance: the operator's ruling of 2026-09-20 on the architect persona's relay thread, landed by the claim-class amendment of that date: prose findings are advisory in the way security findings are, fixed when needed or at the end, because holding them to an immediate fix bred the review loop `docs/backlog.md` items 21 and 22 recorded.
 - verdict: keep
 - reason: The rule stands as c3.C130 had it. The bound is new: every prose edit met the unbounded clause, since no test exercises prose, which made the prose exemption unreachable.
-- passage: A round is also owed where the delta's subject is something the area's tests are liable to route around rather than exercise, a judgment over hunks that change what runs, so a prose-only delta sits below it.
+- passage: A round is also owed where the area's tests are liable to route around the delta's subject rather than exercise it, a judgment over hunks that change what runs, so a prose-only delta sits below it.
 
 ### W005
 - key: Treat the four forms as the claim class's whole disposition: fixed at the close, or a Chapter line naming the sentence left standing and why the finding does not hold, never a silent drop, with a sentence stating something the code does not do still fixed at the close.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/SKILL.md:573
+- source: plugins/grimoire/skills/executing-work/references/findings.md:65
 - provenance: the operator's ruling of 2026-09-20 on the architect persona's relay thread, landed by the claim-class amendment of that date: prose findings are advisory in the way security findings are, fixed when needed or at the end, because holding them to an immediate fix bred the review loop `docs/backlog.md` items 21 and 22 recorded.
 - verdict: keep
 - reason: Advisory must not come to mean droppable. The doctrine's nothing-untrue-ships rule still owns a false statement about behavior, and this sentence says where that fix lands.
-- passage: None is silently dropped, and a sentence stating something the code does not do is still fixed at the close.
+- passage: A sentence stating something the code does not do is still fixed at the close.
 
 ### W006
 - key: Await a background dispatch by ending the turn on `WAITING:` once it is the only remaining work in the turn, whatever its class and whether or not it carries a model override.
@@ -5655,7 +5655,8 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 - verdict: keep
 - landed: 49d2dea6 section 4
 - reason: The verb holds from a linked worktree only because the marker is keyed by session and the moment measured on the transcript located by that id, which is why the sentence says the directory does not matter rather than leaving a reader to infer it.
-- passage: Any directory serves, a linked worktree included. The peer-sessions banking rule owns the verb and its preconditions.
+- passage: in any directory, a linked worktree included
+- passage: The peer-sessions banking rule owns the verb and its preconditions
 
 ### Y004
 - key: Declare at banked moments and at no other: a dispatch `WAITING:` stop, a `BLOCKED:` stop and a mid-section turn end each end with work in flight and declare nothing.
@@ -5665,12 +5666,12 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 - verdict: keep
 - landed: 49d2dea6 section 4
 - reason: A declaration is honored at the session's next deferred offer, so one made with a dispatch pending, a blocker open or a section half-written lands a compaction on exactly the state the invariant says is not on disk. Naming the three stops is what keeps a run from reading every turn end as a boundary.
-- passage: Declare at banked moments only. A dispatch `WAITING:` stop, a `BLOCKED:` stop and a mid-section turn end leave work in flight, so none of them declares.
+- passage: declare at banked moments only. A dispatch `WAITING:` stop, a `BLOCKED:` stop and a mid-section turn end leave work in flight and never declare.
 
 ### A001
 - key: Record each approach tried and abandoned in a section on the Chapter's `Failed approaches:` line, as "tried X, failed because Y, learned Z", with "none" acceptable.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/SKILL.md:593
+- source: plugins/grimoire/skills/executing-work/references/closing.md:45
 - provenance: docs/plans/claude-kit_corpus-compression_spec_v1.md section 3, 2026-09-26, which adds the field after `Decisions / Surprises` as declared growth of about twenty words.
 - verdict: keep
 - reason: A Chapter is what a fresh session resumes from, and without this line an approach that failed leaves no trace in it, so the next session can spend the same attempt again. The fixed form makes the lesson as findable as the failure.
@@ -6589,32 +6590,32 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c2.C050
 - key: Mark every load-bearing technical assertion in the brief confirmed, inferred, or reported: confirmed names its evidence, inferred says to verify before relying, reported names the peer session and says the same.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:69
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:72
 - provenance: e1613d8 2026-08-25, section 8 found the set stated as two members and the brief field is where a peer-reported claim reaches an agent.
 - verdict: keep
 - reason: The orchestrator fills this field, so it is a different act from the doctrine's own-prose marking (A069).
-- passage: - Every load-bearing technical assertion you make marked confirmed, naming its evidence (file:line, the command run); inferred, saying to verify it before relying on it; or reported, naming the peer session and saying the same.
+- passage: - Every load-bearing technical assertion you make marked confirmed, naming its evidence (file:line, the command run); inferred, saying to verify it before use; or reported, naming the peer session and saying the same.
 
 ### c2.C051
 - key: Confirm a claim about what a tool prints only by running the tool or by the line in its own source that emits the output, preferring the source where it is in reach.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:72
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:75
 - provenance: a738710 2026-08-28, review-and-record plan section 1, which shipped a run-only rule and had the review find it would run mutating CLIs; the source-line reach is the fix.
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - reason: The rule and its run-versus-source reason stay; only the unmarked-assertion sentence at the field's end leaves (A072). The source admission is what makes the rule safe for a mutating CLI.
 - proposed: Delete "An unmarked assertion reads as settled fact ... passes its own gate" and leave the rest of the field as written.
 - baseline-test: yes
-- passage: A claim about what a tool prints is confirmed only by a run of it or by the source line that emits it, the source preferred where in reach, since a run exercises one branch, and never by document agreement, however many documents agree
+- passage: A claim about what a tool prints is confirmed only by a run of it or by the source line that emits it, the source preferred where in reach, since a run exercises one branch, and never by document agreement
 
 ### c2.C052
 - key: Never accept document agreement as confirmation of what a tool prints, however many documents agree.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:74
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:77
 - provenance: a738710 2026-08-28, three surfaces by design.
 - verdict: keep
 - reason: Delivered copy for the implementer; the charter copy serves the reviewer (A074).
-- passage: and never by document agreement, however many documents agree
+- passage: and never by document agreement
 
 ### c2.C054
 - key: Include the standing absence-check clause in the brief.
@@ -6629,11 +6630,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c2.C055
 - key: Report a check whose acceptance is a refusal by naming, in words, which rule refused each case.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:77
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:80
 - provenance: b854bb0 2026-08-29, the class split after a single report form produced no output for three listed members.
 - verdict: keep
 - reason: Pinned verbatim across three surfaces; compression reds the pin (A078).
-- passage: Name in words which rule refused each case of a check whose acceptance is a refusal, such as a guard's deny or an error path,
+- passage: Name in words which rule refused each case of a refusal check, since the class is any check whose acceptance is a refusal,
 
 ### c2.C056
 - key: Name the refusing rule because a check recording only that something refused greens identically whether the intended rule or another one refused first.
@@ -6647,11 +6648,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c2.C057
 - key: Report a check whose acceptance is an absence by naming the predicate you ran, the scope you ran it over, and what it matched, stating an empty result against that predicate and scope.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:82
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:84
 - provenance: b854bb0 2026-08-29.
 - verdict: keep
 - reason: Pinned across three surfaces (A083).
-- passage: For a check whose acceptance is an absence, such as a clean sweep, an empty grep or a contention gate reading clear, name the predicate, the scope and what it matched, an empty match stated against both,
+- passage: For an absence check, such as a clean sweep, an empty grep or a contention gate reading clear, name the predicate, the scope and what it matched, an empty match stated against both, since the class is any check whose acceptance is an absence,
 
 ### c2.C058
 - key: Name predicate and scope because a predicate narrower than the class it guards reports the same clear verdict whether the state is absent or merely unnamed.
@@ -7453,14 +7454,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c4.C093
 - key: Treat a brief's read-only instruction as a request rather than a control when the agent type is not on the guard's roster.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:184
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:187
 - provenance: 502d9f1 2026-08-20, two ai-os incident notes; wording baseline-tested (the old excerpt yields no bracket).
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - reason: The rule stays; the roster copy ("the strict reviewer class plus the qa-verifier") restates `hooks/readonly-agent-guard.js`'s classifier and has drifted (plan-reviewer and scope-adjudicator have joined the strict set), so the sentence points at the guard's own classifier instead, keeping the three ungoverned instances the RED test used.
 - proposed: "The readonly-agent-guard binds only the types its own classifier names, so a scout dispatched as Explore or general-purpose, or a Workflow `agent()` call naming no `agentType`, carries Bash the guard never reads, and its brief's read-only instruction is a request, not a control." Keep the bracket sentence per A039 and the instances-not-boundary sentence.
 - baseline-test: yes
-- passage: The readonly-agent-guard binds only the types its own classifier names. So a scout dispatched as Explore or general-purpose, or a Workflow `agent()` call naming no `agentType`, carries Bash the guard never reads, and its brief's read-only instruction is a request, not a control.
+- passage: `readonly-agent` binds only the types its own classifier names. So a scout dispatched as Explore or general-purpose, or a Workflow `agent()` call naming no `agentType`, carries Bash the guard never reads, and its brief's read-only instruction is a request, not a control.
 
 ### c4.C094
 - key: Bracket every read-only-intent dispatch under an ungoverned type with `git status --porcelain` before dispatch and again at return.
@@ -7760,7 +7761,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### U015
 - key: Dispatch round 1's two reviewers in parallel with each other, overlapping no run of your own.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/implementing.md:158
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:161
 - source: plugins/grimoire/skills/executing-work/references/review.md:5
 - provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6
 - verdict: rewrite
@@ -7769,7 +7770,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - proposed: (via A039) State at step 2 that a delta a guard should have refused, found in a delegated diff, takes step 3's incident path; leave the writer-tier sentence as it stands.
 - baseline-test: yes
 - passage: A delta in that diff a guard should have refused takes step 3's incident path.
-- passage: On round 1, dispatch the `adversarial-reviewer` agent and the `blind-reviewer` agent in parallel with each other, overlapping no run of yours.
+- passage: On round 1, dispatch the `adversarial-reviewer` and `blind-reviewer` in parallel, overlapping no run of yours.
 
 ### T166
 - key: Write the same line at a section's open for the whole section, to the file and in the five parts step 4 sets, and let that one fire no stop.
@@ -8662,11 +8663,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### U005
 - key: Re-raise the round after a Critical from a correctness lens that survives adjudication to round 1's roster and tier, the tier re-read against the writer tier in force when the re-raised round dispatches.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/review.md:23
+- source: plugins/grimoire/skills/executing-work/references/review.md:25
 - provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; amended by docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 1 2026-09-20, which keys the re-raise on a correctness lens's Critical.
 - verdict: keep
 - reason: A Critical breaks the decay so the decay stays a default rather than a cap on what a real defect can summon; a Critical any later round returns, a re-raised round included, does the same to the next round.
-- passage: A correctness lens's Critical that survives adjudication, in any round, re-raises the next round to round 1's roster, rows and tier, read against the writer tier in force when it dispatches.
+- passage: A correctness lens's Critical that survives adjudication unrefuted, in any round, re-raises the next round to round 1's roster, rows and tier, read against the writer tier in force when it dispatches.
 
 ### U006
 - key: Hand the round after a re-raised round that returns no Critical back to one lens, resuming the decay.
@@ -21521,7 +21522,7 @@ Extracted at `6bc07fb`: whole document (`agents.implementer-fable.md`). Amended 
 - provenance: 4caabee 2026-08-11, reviewer-effort-compensation section 1: this charter carried no effort field, so the top implementer tier drifted with whatever the orchestrating session was set to.
 - verdict: keep
 - reason: The field is the fix for a measured drift; deleting it returns the tier to inheriting the session's effort.
-- passage: effort: high
+- passage: effort: medium
 - flag: weak-reason
 
 ### C005

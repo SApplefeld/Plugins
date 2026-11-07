@@ -234,11 +234,11 @@ Extracted at `6bc07fb`: whole document (`skills.branch-hygiene.SKILL.md`). Redra
 ### C022
 - key: Recover a stranded branch's commits before deleting it.
 - class: rule
-- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:30
+- source: plugins/grimoire/skills/branch-hygiene/SKILL.md:35
 - provenance: c800e05 2026-06-26 (the diff, not the message), as the manual recovery the merge-strand-guard plan left out of scope ("Auto-recovering stranded commits... Scott releases it").
 - verdict: keep
 - reason: Branch-hygiene owns recovering stranded commits per the ownership map; the lead-in is three words and the executable condition is step 5, so there is nothing to compress. The delete of a stranded branch is the one act in this skill that destroys commits held nowhere else.
-- passage: Recover a stranded branch's commits before deleting it:
+- passage: Recover a stranded branch's commits before deleting it.
 
 ### C023
 - key: Confirm the stranded commits with `git log --oneline <integration-ref>..<branch>`.

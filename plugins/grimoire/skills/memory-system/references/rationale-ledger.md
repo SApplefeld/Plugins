@@ -354,12 +354,12 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 ### c1.C035
 - key: Read a memory body with `memq get <name> [--type|--type=<type>|--operator]`.
 - class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:23
+- source: plugins/grimoire/skills/memory-system/SKILL.md:28
 - provenance: 8e22ff4 2026-07-31 installed `get`; 6cbb24a 2026-08-03 added its tier flag.
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: A calling convention is what a session types, and no machinery types it for the session. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: `memq get <name> [--type\|--type=<type>\|--operator] [--no-stamp]` | A memory record's body from the first tier holding that name.
+- passage: `memq get <name> [--type\|--type=<type>\|--operator] [--no-stamp]` | The body from the first tier holding the name, else exit 1.
 
 ### c1.C036
 - key: Pin a tier with `--type` or `--operator` to reach a shared-tier record that a nearer tier shadows by name.
@@ -945,13 +945,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 ### c1.C093
 - key: Expect `get` to resolve a name collision most-specific-first: pending tier, project memory, type tier, operator tier, then those last three archives in the same order.
 - class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:38
+- source: plugins/grimoire/skills/memory-system/SKILL.md:28
 - provenance: 8e22ff4 2026-07-31 set the precedence; 70f4f8b 2026-08-02 inserted the pending tier into it.
 - verdict: rewrite
 - landed: f92e99ec section 5
 - reason: The order is what predicts a collision and tells a session when to pin, and the provenance fence names the tier only for shared hits, so the rule stays. What changes is that the order is stated twice; line 38 is the titled owner. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was rewrite.
 - proposed: State the precedence once at line 38 and cut the get row's copy to "from the first tier holding that name".
-- passage: A memory record's body from the first tier holding that name.
+- passage: The body from the first tier holding the name, else exit 1.
 - passage: On a name collision `get` takes the most specific tier first: a run's pending tier, a project memory, the type tier, then the operator tier. The project, type and operator archives follow in that order, so live beats retired.
 
 ### c1.C094
@@ -3108,14 +3108,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 ### c3.C033
 - key: Expect the prompt-free grant in `hooks/memq-grant.js` to own the list of shapes withheld on the engine's write-gated spawn vector with the store signals set.
 - class: mechanic
-- source: plugins/grimoire/skills/memory-system/SKILL.md:216, "Seventeen shapes get no grant there"
+- source: plugins/grimoire/skills/memory-system/SKILL.md:173, "There memq runs under the prompt-free grant in `memq-grant`"
 - provenance: 752dbce 2026-08-22 made the grant hook the enforcement point with six shapes; b5c0a98, c0a1388, 0d1e610, 2b6e936 and 9b1180b 2026-09-03 grew the list to twelve, each addition a reviewer-found reach; the persona-memory-port plan's section 5 added `forget`, the project-tier delete, and its section 6 named the four database verbs the hook already withheld, which the paragraph had left out, so the count then read seventeen as `docs/security-model.md` counted it; the passage now names the hook as the list's owner rather than counting. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which names the vector and its two variables as the condition the grant binds on (kaizen issue 585); the bypass-mode sentences it added are N001.
 - verdict: rewrite
 - landed: ad41f892 section 3
 - reason: The list stays because a withheld shape on that vector is silence rather than a refusal, so the list is what a worker can consult; the per-shape reasons move here, since hooks/memq-grant.js:43-73 and 501-651 carry every one of them and test/memq-grant.test.js pins each shape (A068 to A070).
 - proposed: (via A068) Compress the paragraph to the twelve withheld shapes, the granted rest, the silence rule and the recognition-debt and pointer handoffs, pointing at `hooks/memq-grant.js` for each shape's reason.
 - baseline-test: yes
-- passage: **The engine's write-gated spawn vector, with `KIT_MEMORY_ROOT` and `KIT_MEMORY_ROOT_ALLOW_DATA=1` set, gets a bounded subset of this CLI.** There memq runs under the prompt-free grant in `hooks/memq-grant.js`, which owns the list of withheld shapes.
+- passage: **The engine's write-gated spawn vector, with `KIT_MEMORY_ROOT` and `KIT_MEMORY_ROOT_ALLOW_DATA=1` set, gets a bounded subset of this CLI.** There memq runs under the prompt-free grant in `memq-grant`, which owns the list of withheld shapes.
 - flag: stale
 
 ### c3.C034

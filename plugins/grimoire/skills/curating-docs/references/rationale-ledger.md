@@ -33,7 +33,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan's taxonomy (Section 1).
 - verdict: keep
 - reason: The taxonomy row is the owner's text; the templates.md copy is the skeleton seeded into a project README whose reader never loads the skill, and the docs-curator charter carries the constraint because a dispatched agent starts blank. Neither copy is a reason to thin the row.
-- passage: | `docs/` root | Stable about-the-solution docs (architecture, security model) and the README index | Updated in place as the solution changes |
+- passage: | `docs/` root | Stable about-the-solution docs (architecture, security model) and the README, the index of the stable documents rather than of plans | Updated in place as the solution changes |
 
 ### C003
 - key: Keep only open or in-progress plans in `docs/plans/`, and move a plan out the moment it is Complete or abandoned.
@@ -118,11 +118,11 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 ### C011
 - key: Re-run `git add` on the moved file whenever it carries unstaged edits, so the finalized content is what commits.
 - class: rule
-- source: plugins/grimoire/skills/curating-docs/SKILL.md:30
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:28
 - provenance: aeffbb2 2026-08-09, a close-out that finalized the doc, moved it, and committed the pre-finalization bytes because `git mv` stages index content.
 - verdict: keep
 - reason: The class recurred after the sentence shipped (operator memory git-mv-stages-the-index-content-not-your-edits, applied x6) and no hook catches it, so the rule and its one-line why stay at the point of action; the why is what keeps the re-add from reading as superstition beside a `git mv` that appears staged.
-- passage: Then `git add` the moved file again if it carries unstaged edits. `git mv` stages the index content, not the worktree, so those edits miss the commit unless re-added.
+- passage: Then `git add` each moved file again if it carries unstaged edits. `git mv` stages the index content, not the worktree, so those edits miss the commit unless re-added.
 
 ### C012
 - key: Read the `RM` pair against the file in `git status --short` as the sign that the moved file still needs re-adding.
@@ -241,23 +241,23 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 ### C023
 - key: For a new plan that builds on or supersedes another, add a `## Related` section linking both directions and note the supersession in the older plan's header.
 - class: rule
-- source: plugins/grimoire/skills/curating-docs/SKILL.md:49
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:41
 - provenance: b49a47b 2026-06-19, the create path, written before afc7790 2026-07-25 added the archived-plan carve-out to the close path.
 - verdict: rewrite
 - landed: 368ae03 section 33
 - reason: For an older plan already archived, this step's header note contradicts C004, C016, C060 and the archive README; the carve-out is the later rule and the archive is immutable, so the create path points at the close path's statement rather than restating it without the exception. brainstorming:28 restates the same both-directions wording and gives way on the same trace. Lands at line 43 as "If it builds on or supersedes another plan, cross-reference it per the close path's step 4 above, the new plan taking the moving plan's part there, the archived-plan carve-out included." Step 4 at line 32 states the three duties whole; the clause naming the new plan's part was added at round 1, since step 4 is written for a moving plan. Amendment 2 note: "brainstorming:28 restates the same both-directions wording" describes brainstorming before section 28 (`16c5e61`); at HEAD its line 28 points at this skill's create path rather than restating it, so the contention has one surface, this one, and the pointer lands on it.
 - proposed: Make the create path's cross-reference step point at the close path's statement (both directions, header mark, and the archived-plan carve-out) instead of restating it without the carve-out.
 - baseline-test: yes
-- passage: 2. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
+- passage: 3. If it builds on or supersedes another plan, cross-reference it per the close path's step 4. The new plan takes the moving plan's part there, the archived-plan carve-out included.
 
 ### C024
 - key: Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
 - class: rule
-- source: plugins/grimoire/skills/curating-docs/SKILL.md:50
+- source: plugins/grimoire/skills/curating-docs/SKILL.md:42
 - provenance: b49a47b 2026-06-19, the docs-lifecycle plan's Section 4.
 - verdict: keep
 - reason: No finding. It is the create-path half of the backlog's cross-effort scope.
-- passage: 3. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
+- passage: 4. Add any cross-effort next-steps that surfaced during design to `docs/backlog.md`.
 
 ### C025
 - key: Move a done backlog item into the quarter's snapshot at `docs/archive/backlog-YYYY-QN.md`, creating the file if absent and appending within the quarter.
@@ -393,7 +393,7 @@ Extracted at `6bc07fb`: whole document (`skills.curating-docs.SKILL.md`). Amende
 - verdict: keep
 - reason: kit-plan-lib.js classifyPlanStatus and session-start.js read the value and nothing writes it, so the exact-value duty is still the author's. The skeleton and brainstorming restate the values by design because 897d921 found "readers and no producer".
 - passage: must equal `Complete` exactly, whole string and case-insensitive, for the plan to read as terminal. `Complete (archived)` or any other trailing text does not terminate.
-- passage: A plan headed `Complete (archived)` or with any other text after `Complete` still reads complete to the session-start push and the Stop hook's docs-hygiene check, so write the value exactly.
+- passage: A `Status:` value with text after `Complete` still reads complete to the session-start push and the personas plugin's documentation check, so write the value exactly.
 - passage: `scripts/plan-contract.js` refuses one with trailing text in a spec.
 
 ### C038
