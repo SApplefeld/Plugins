@@ -3151,7 +3151,7 @@
     handled: "dismissed",
     "already-acted": "already acted on from a page",
     "no-recommendation": "no recommendation to agree to",
-    changed: "the recommendation changed since you read it, read it again",
+    changed: "the ask changed since you read it, read it again",
     "refused: blocking": "refused: blocking, answer this one yourself",
   };
 
@@ -3430,9 +3430,12 @@
     }
   }
 
-  /** The body an Agree sends: the ask, its lineage and the recommendation this page drew, which the broker matches before it delivers. */
+  /**
+   * The body an Agree sends: the ask, its lineage, the recommendation this page drew, and the question
+   * and the two times that name the version it drew, each of which the broker matches before it delivers.
+   */
   function agreeBody(item) {
-    return { askId: item.askId, repo: item.repo, recommend: txt(item.recommend) };
+    return { askId: item.askId, repo: item.repo, recommend: txt(item.recommend), question: txt(item.text), openedAt: item.openedAt, reraisedAt: item.reraisedAt };
   }
 
   /** The words beside an item whose act could not be confirmed: the broker may or may not have sent it. */
@@ -3508,9 +3511,12 @@
   }
 
   /**
-   * Dismisses one item: an ask by its id, a blocked run by its queue entry and the text the view gave
-   * it, which the broker matches byte for byte, and a review by its lineage and pull request number.
-   * `said` is passed to `sendAct` for the words set beside the item.
+   * Dismisses one item: an ask by its id with the question, the two times and the recommendation this
+   * page drew, the recommendation as the view gave it, null kept as null, a blocked
+   * run by its queue entry and the text the view gave it, each of which the broker matches byte for
+   * byte, and a review by its lineage and pull request number. The body is built from `item` as held
+   * at the call, so a Dismiss posted after its Undo notice sends what the operator tapped, never a
+   * later reading. `said` is passed to `sendAct` for the words set beside the item.
    */
   function sendDismiss(item, said = null) {
     let body;
@@ -3519,7 +3525,15 @@
       body =
         item.kind === "blocked"
           ? { kind: "blocked", repo: item.repo, entryId: item.entryId, reason: txt(item.text) }
-          : { kind: "ask", askId: item.askId, repo: item.repo };
+          : {
+              kind: "ask",
+              askId: item.askId,
+              repo: item.repo,
+              question: txt(item.text),
+              openedAt: item.openedAt,
+              reraisedAt: item.reraisedAt,
+              recommend: item.recommend,
+            };
     return sendAct(item, "dismiss", body, said);
   }
 
@@ -3671,16 +3685,26 @@
   }
 
   /**
-   * Sends the Correct box's words for its ask. The broker builds the line from the ask's id, its
-   * question and these words, so the page composes none. A line not delivered keeps the box and the
-   * draft, with the caret back in it.
+   * Sends the Correct box's words for its ask, with the question, the two times and the recommendation
+   * this page drew, the recommendation as the view gave it, null kept as null, which the broker matches
+   * before it delivers. The broker builds the line from the ask's id, its question
+   * and these words, so the page composes none. A line not delivered keeps the box and the draft, with
+   * the caret back in it.
    */
   async function sendCorrect(item) {
     const held = needsMe.correct;
     if (held === null || held.key !== itemKey(item)) return;
     const words = held.draft.trim();
     if (words === "") return;
-    const sent = await sendAct(item, "correct", { askId: item.askId, repo: item.repo, words });
+    const sent = await sendAct(item, "correct", {
+      askId: item.askId,
+      repo: item.repo,
+      words,
+      question: txt(item.text),
+      openedAt: item.openedAt,
+      reraisedAt: item.reraisedAt,
+      recommend: item.recommend,
+    });
     const field = sent ? null : document.getElementById("correct-text");
     if (field !== null) field.focus();
   }
@@ -4817,8 +4841,8 @@
   function renderAsk(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
-    // The ask in the Needs me item's shape, so the shared acts and the touched mark key it the same way.
-    const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), text: txt(view.question), recommend: view.recommend, openedAt: view.openedAt };
+    // The ask in the Needs me item's shape, raise time included, so the shared acts and the touched mark key it the same way and send the version this page drew.
+    const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), text: txt(view.question), recommend: view.recommend, openedAt: view.openedAt, reraisedAt: view.reraisedAt };
     const key = itemKey(item);
     // A delivered ask's hide holds for the reading it was drawn from alone, as on the Needs me page.
     for (const [held, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(held);

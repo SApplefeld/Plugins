@@ -203,6 +203,8 @@ export type Item = {
   recommend: string | null;
   blocking: boolean;
   openedAt: string | null;
+  /** When an ask was last raised again, as `drawnAsk` writes it, so an act names the version drawn; null on every kind but an ask. */
+  reraisedAt: string | null;
   planPath: string | null;
   askId: string | null;
   /** The queue entry's id on a blocked item, so a Dismiss can name the entry; null on an ask and a hands item. */
@@ -868,16 +870,28 @@ function relativeUnder(workdir: string, file: string): string | null {
   return relative.split(path.sep).join("/");
 }
 
+/**
+ * The three fields of an ask the page draws and an act on it sends back: the question as `questionOf`
+ * cuts it at its recommendation segment, and the times the ask was opened and last raised again as
+ * ISO strings, null where the ledger holds none. The Needs me item and the ask view take these fields
+ * from here, and the act routes compare a body's against it, so the text compared is the text drawn.
+ */
+export function drawnAsk(ask: Pick<AskEntry, "question" | "openedAt" | "reraisedAt">): { question: string; openedAt: string | null; reraisedAt: string | null } {
+  return { question: questionOf(ask.question), openedAt: iso(ask.openedAt), reraisedAt: iso(ask.reraisedAt) };
+}
+
 /** An ask as an item. The text is the question cut at its recommendation segment, which the item carries apart. */
 function askItem(repo: Repo, ask: AskEntry): Item {
   const file = askPlanFile(repo.persona.workdir, ask);
+  const drawn = drawnAsk(ask);
   return {
     kind: "ask",
     repo: repo.persona.name,
-    text: questionOf(ask.question),
+    text: drawn.question,
     recommend: ask.recommend,
     blocking: ask.blocking === true,
-    openedAt: iso(ask.openedAt),
+    openedAt: drawn.openedAt,
+    reraisedAt: drawn.reraisedAt,
     planPath: file === null ? null : relativeUnder(repo.persona.workdir, file),
     askId: ask.id,
     entryId: null,
@@ -965,6 +979,7 @@ function blockedEntries(readings: Readings, repo: Repo): BlockedEntry[] {
         recommend: null,
         blocking: true,
         openedAt: iso(at),
+        reraisedAt: null,
         planPath: reading === undefined ? null : planRelative(reading),
         askId: null,
         entryId: status.id,
@@ -986,6 +1001,7 @@ function handsItems(readings: Readings, repos: readonly Repo[]): Item[] {
         recommend: null,
         blocking: false,
         openedAt: blocked.item.openedAt,
+        reraisedAt: null,
         planPath: null,
         askId: null,
         entryId: null,
@@ -1002,6 +1018,7 @@ function handsItems(readings: Readings, repos: readonly Repo[]): Item[] {
       recommend: null,
       blocking: false,
       openedAt: iso(account.fetchedAt),
+      reraisedAt: null,
       planPath: null,
       askId: null,
       entryId: null,
@@ -1593,7 +1610,7 @@ export function askView(
     recommend: ask.recommend,
     blocking: item.blocking,
     openedAt: item.openedAt,
-    reraisedAt: iso(ask.reraisedAt),
+    reraisedAt: item.reraisedAt,
     title: ask.entryTitle,
     planPath: item.planPath,
     brief: ask.brief,

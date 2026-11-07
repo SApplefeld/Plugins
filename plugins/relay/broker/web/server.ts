@@ -63,7 +63,7 @@ import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
 import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { askView, blockKey, blockedReasons, healthView, needsMeView, planView, repoView, rootName, standupView, workersView } from "./views.ts";
+import { askView, blockKey, blockedReasons, drawnAsk, healthView, needsMeView, planView, repoView, rootName, standupView, workersView } from "./views.ts";
 import type { Readings } from "./views.ts";
 import type { HandledHow, HandledMark, WatermarkStore } from "./watermarks.ts";
 
@@ -1068,12 +1068,19 @@ export const MAX_AGREE_BATCH = MAX_ASKS_PER_LIST;
 const MAX_ASK_ID_LENGTH = MAX_ASK_FIELD_LENGTH;
 
 /**
- * A single Agree or Dismiss names an id, a lineage and the text the page drew; the batch names up to
- * `MAX_AGREE_BATCH` of them, ids at their widest. A Correct carries the operator's own words and takes
- * the say route's ceiling, `MAX_SAY_BODY_BYTES`.
+ * A single Agree or an ask's Dismiss names an id, a lineage and the text the page drew: the question,
+ * the two times and the recommendation. The id, the question and the recommendation are each at most
+ * `MAX_ASK_FIELD_LENGTH` code points, and `JSON.stringify` writes a code point in at most six bytes,
+ * the `\uXXXX` escape of a control character or a lone surrogate, which the ledger's reader strips
+ * neither of: 3 x 1,000 x 6 = 18,000 bytes of field text, with 129 bytes of keys, quotes, commas,
+ * braces and two ISO times beside them on an Agree and 142 on a Dismiss, which also names its kind,
+ * 18,142 bytes before the lineage. 20 KiB holds that with the lineage; the batch holds
+ * `MAX_AGREE_BATCH` such items, 64 x 20 KiB. A Correct carries the operator's own words and takes the
+ * say route's ceiling, `MAX_SAY_BODY_BYTES`, which holds the id, the question, the recommendation, the
+ * times and 4,000 UTF-16 units of words at six bytes each.
  */
-const MAX_AGREE_BODY_BYTES = 8 * 1024;
-const MAX_AGREE_BATCH_BODY_BYTES = 512 * 1024;
+const MAX_AGREE_BODY_BYTES = 20 * 1024;
+const MAX_AGREE_BATCH_BODY_BYTES = MAX_AGREE_BATCH * MAX_AGREE_BODY_BYTES;
 
 /**
  * A Correct's words are bounded as the talk composer's field bounds a typed line: its `maxLength` of
@@ -1089,9 +1096,10 @@ const MAX_QUOTED_LENGTH = 200;
  * What an act became: the router's word for a line it was handed, or why none was handed. `closed` is
  * an ask the ledger does not hold open for the lineage, or a queue entry the status reading does not
  * read as blocked; `already-acted` an item this broker already delivered a line for; `no-recommendation`
- * an ask with no recommendation to agree to; `changed` an ask whose recommendation, or a block whose
- * reason, is no longer the text the page drew; `refused: blocking` a blocking ask in a batch;
- * `handled` a review whose mark was written, since a review's Dismiss sends no line.
+ * an ask with no recommendation to agree to; `changed` an ask whose question, version or
+ * recommendation, or a block whose reason, is no longer the text the page drew; `refused: blocking`
+ * a blocking ask in a batch; `handled` a review whose mark was written, since a review's Dismiss sends
+ * no line.
  */
 export type ActStatus =
   | WebDeliveryStatus
@@ -1181,7 +1189,10 @@ export type AgreeHandlerOptions = {
   log?: Logger;
 };
 
-type AgreeItem = { askId: string; repo: string; recommend: string | null };
+/** The three fields of an ask as the page drew them, as `drawnAsk` draws them from the entry. */
+type DrawnAsk = ReturnType<typeof drawnAsk>;
+
+type AgreeItem = { askId: string; repo: string; recommend: string | null; drawn: DrawnAsk | null };
 
 /** An ask id bounded in code points and a lineage bounded by the body cap, or null where either is not a non-empty string. */
 function askOf(value: Record<string, unknown>): { askId: string; repo: string } | null {
@@ -1191,34 +1202,85 @@ function askOf(value: Record<string, unknown>): { askId: string; repo: string } 
   return { askId, repo };
 }
 
+/** A time as the page sends one: the ISO string the view gave it, or null where the view gave none. */
+const isDrawnTime = (value: unknown): value is string | null => value === null || typeof value === "string";
+
 /**
- * A body's item: an ask id, the lineage it is open under, and the recommendation the page drew, null
- * where the body carries none or not a string. A missing recommendation is not a malformed body: it
- * is an Agree to text the broker cannot match, which `agree` answers as `changed`.
+ * The question and the two times a body says the page drew, or null where the body carries no
+ * `question` string, or an `openedAt` or `reraisedAt` that is neither a string nor null. A missing or
+ * mistyped field is not a malformed body: it is an act on text the broker cannot match, which every
+ * ask act answers as `changed`, as an Agree with no recommendation is.
+ */
+function drawnOf(value: Record<string, unknown>): DrawnAsk | null {
+  const { question, openedAt, reraisedAt } = value;
+  if (typeof question !== "string" || !isDrawnTime(openedAt) || !isDrawnTime(reraisedAt)) return null;
+  return { question, openedAt, reraisedAt };
+}
+
+/**
+ * Whether the body's three fields are the entry's as the views draw them, byte for byte, a null time
+ * equal only to a null; false where the body carries none. The operator's tap is an act on the ask
+ * they read, so a question rewritten or an ask raised again since the page drew it is not that ask.
+ */
+function drawnMatches(drawn: DrawnAsk | null, entry: AskEntry): boolean {
+  if (drawn === null) return false;
+  const held = drawnAsk(entry);
+  return drawn.question === held.question && drawn.openedAt === held.openedAt && drawn.reraisedAt === held.reraisedAt;
+}
+
+/** The recommendation an Answer or an ask's Dismiss says the page drew, null kept as null. */
+type DrawnRecommend = { recommend: string | null };
+
+/**
+ * The recommendation a body says the page drew, or null where the body carries no `recommend` that is
+ * a string or null. A missing or mistyped one is not a malformed body: it is an act on text the broker
+ * cannot match, which Answer and an ask's Dismiss answer as `changed`.
+ */
+function drawnRecommendOf(value: Record<string, unknown>): DrawnRecommend | null {
+  const { recommend } = value;
+  return recommend === null || typeof recommend === "string" ? { recommend } : null;
+}
+
+/**
+ * Whether the body's recommendation is the entry's, byte for byte, a null equal only to a null; false
+ * where the body carries none. The question the page sends is cut before the recommendation, so this
+ * is what holds an Answer or a Dismiss to the recommendation the operator read.
+ */
+function recommendMatches(drawn: DrawnRecommend | null, entry: AskEntry): boolean {
+  return drawn !== null && drawn.recommend === entry.recommend;
+}
+
+/**
+ * A body's item: an ask id, the lineage it is open under, the recommendation the page drew, null
+ * where the body carries none or not a string, and the question and times it drew through `drawnOf`.
+ * A missing recommendation is not a malformed body: it is an Agree to text the broker cannot match,
+ * which `agree` answers as `changed`.
  */
 function agreeItem(value: unknown): AgreeItem | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const named = askOf(value as Record<string, unknown>);
+  const body = value as Record<string, unknown>;
+  const named = askOf(body);
   if (named === null) return null;
-  const { recommend } = value as Record<string, unknown>;
-  return { ...named, recommend: typeof recommend === "string" ? recommend : null };
+  const { recommend } = body;
+  return { ...named, recommend: typeof recommend === "string" ? recommend : null, drawn: drawnOf(body) };
 }
 
 type DismissItem =
-  | { kind: "ask"; askId: string; repo: string }
+  | { kind: "ask"; askId: string; repo: string; drawn: DrawnAsk | null; recommend: DrawnRecommend | null }
   | { kind: "blocked"; repo: string; entryId: string; reason: string | null }
   | { kind: "review"; repo: string; pullRequest: number };
 
 /**
- * A Dismiss body: an ask by id and lineage, a blocked queue entry by lineage, entry id and the
- * reason the page drew, null where the body carries none or not a string, which `dismiss` answers as
- * `changed`, as an Agree with no recommendation is, or a review by lineage and pull request number,
- * which must be a positive integer.
+ * A Dismiss body: an ask by id and lineage with the question and times the page drew through
+ * `drawnOf` and the recommendation through `drawnRecommendOf`, a blocked queue entry by lineage, entry
+ * id and the reason the page drew, null where the body carries none or not a string, which `dismiss`
+ * answers as `changed`, as an Agree with no recommendation is, or a review by lineage and pull request
+ * number, which must be a positive integer.
  */
 function dismissItem(body: Record<string, unknown>): DismissItem | null {
   if (body.kind === "ask") {
     const named = askOf(body);
-    return named === null ? null : { kind: "ask", ...named };
+    return named === null ? null : { kind: "ask", ...named, drawn: drawnOf(body), recommend: drawnRecommendOf(body) };
   }
   const { repo } = body;
   if (typeof repo !== "string" || repo === "") return null;
@@ -1234,9 +1296,10 @@ function dismissItem(body: Record<string, unknown>): DismissItem | null {
 }
 
 /**
- * Registers `POST /web/agree` with `{askId, repo, recommend}`, `POST /web/agree-batch` with
- * `{items: [{askId, repo, recommend}]}`, `POST /web/correct` with `{askId, repo, words}`, and
- * `POST /web/dismiss` with `{kind: "ask", askId, repo}`, `{kind: "blocked", repo, entryId, reason}` or
+ * Registers `POST /web/agree` with `{askId, repo, recommend, question, openedAt, reraisedAt}`,
+ * `POST /web/agree-batch` with `{items: [...]}` of the same, `POST /web/correct` with `{askId, repo,
+ * words, question, openedAt, reraisedAt, recommend}`, and `POST /web/dismiss` with `{kind: "ask", askId,
+ * repo, question, openedAt, reraisedAt, recommend}`, `{kind: "blocked", repo, entryId, reason}` or
  * `{kind: "review", repo, pullRequest}`. A review's Dismiss is the one act that sends no line: it
  * writes the review's handled mark where a queue entry under the lineage carries the number, answers
  * `handled`, and answers `closed` where none does. A mark that cannot be written is the handler's
@@ -1251,8 +1314,16 @@ function dismissItem(body: Record<string, unknown>): DismissItem | null {
  *
  * The text the page sends is compared, never used: the operator's tap is an act on the text they read,
  * so an ask whose recommendation, or a block whose reason, is no longer that text, byte for byte, the
- * fallback sentence included, delivers nothing and answers `changed`. An Agree item with no
- * recommendation field is `changed` too, and so is a blocked Dismiss with no reason.
+ * fallback sentence included, delivers nothing and answers `changed`. Every act on an ask also sends
+ * the question the page drew and the two times that name the ask's version, when it was opened and
+ * when it was last raised again, and is `changed` unless all three are the entry's as `drawnAsk`
+ * draws them, a null time equal only to a null. Every act on an ask also sends the recommendation the
+ * page drew, and is `changed` unless it is the entry's byte for byte; an Answer or a Dismiss sends a
+ * null where the ask carries none, equal only to a null, since its question is cut before the
+ * recommendation and would not hold the act to it. An Agree item with no recommendation field is
+ * `changed` too, as is any ask act lacking one of the three fields, an Answer or an ask's Dismiss
+ * lacking a recommendation that is a string or null, and a blocked Dismiss with no reason. A page
+ * loaded before the fields were sent is refused on every ask act until it is loaded again.
  *
  * The answer to each single act is `{status}`: the router's word for the line, or `closed` where the
  * ledger holds no such open ask or the status reading does not read the entry as blocked,
@@ -1336,7 +1407,7 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
     how,
   });
 
-  async function agree(login: string, { askId, repo, recommend }: AgreeItem, inBatch: boolean): Promise<ActStatus> {
+  async function agree(login: string, { askId, repo, recommend, drawn }: AgreeItem, inBatch: boolean): Promise<ActStatus> {
     const entry = openAsk(repo, askId);
     if (entry === undefined) return "closed";
     const label = `web agree: ask ${JSON.stringify(entry.id)} for ${JSON.stringify(repo)}`;
@@ -1347,18 +1418,29 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
     const recommended = entry.recommend;
     if (recommended === null || recommended.trim() === "") return settle("no-recommendation");
     // Byte for byte: a recommendation rewritten since the page's last poll is not what the operator
-    // agreed to, and the line it would compose was never on their screen.
-    if (recommend !== recommended) return settle("changed");
+    // agreed to, and the line it would compose was never on their screen. The question and the
+    // version the page drew are held to the same rule, since a question can change under a
+    // recommendation that does not.
+    if (recommend !== recommended || !drawnMatches(drawn, entry)) return settle("changed");
     return settle(await act(login, repo, key, label, (at) => agreeLine(entry.id, recommended, at), askMark(repo, entry, "agreed")));
   }
 
-  async function correct(login: string, repo: string, askId: string, words: string): Promise<ActStatus> {
+  async function correct(
+    login: string,
+    repo: string,
+    askId: string,
+    words: string,
+    drawn: DrawnAsk | null,
+    recommend: DrawnRecommend | null,
+  ): Promise<ActStatus> {
     const entry = openAsk(repo, askId);
     if (entry === undefined) return "closed";
     const label = `web correct: ask ${JSON.stringify(entry.id)} for ${JSON.stringify(repo)}`;
     const settle = settler(label);
     const key = askActedKey(repo, entry);
     if (acted.has(key)) return settle("already-acted");
+    // The operator's words answer the ask they read: any other question, version or recommendation delivers nothing.
+    if (!drawnMatches(drawn, entry) || !recommendMatches(recommend, entry)) return settle("changed");
     return settle(await act(login, repo, key, label, () => correctLine(entry.id, entry.question, words), askMark(repo, entry, "corrected")));
   }
 
@@ -1370,6 +1452,8 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
       const settle = settler(label);
       const key = askActedKey(item.repo, entry);
       if (acted.has(key)) return settle("already-acted");
+      // The operator dismisses the ask they read: any other question, version or recommendation delivers nothing.
+      if (!drawnMatches(item.drawn, entry) || !recommendMatches(item.recommend, entry)) return settle("changed");
       return settle(
         await act(login, item.repo, key, label, (at) => dismissAskLine(entry.id, entry.question, at), askMark(item.repo, entry, "dismissed")),
       );
@@ -1454,7 +1538,7 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
     const named = askOf(body);
     const { words } = body;
     if (named === null || typeof words !== "string" || words.trim() === "" || words.length > MAX_CORRECT_WORDS_LENGTH) return null;
-    return { status: await correct(login, named.repo, named.askId, words) };
+    return { status: await correct(login, named.repo, named.askId, words, drawnOf(body), drawnRecommendOf(body)) };
   });
 
   post("dismiss", MAX_AGREE_BODY_BYTES, async (body, login) => {
