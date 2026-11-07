@@ -10,7 +10,8 @@
 // BLOCKED, where the ask runs up one hop.
 //
 // A denylist, not an allowlist: it denies the closed set of command shapes
-// below and lets everything else through, an unreadable command included. The
+// below, and a heredoc the shared reader `offendingDelimiter` refuses, at any
+// depth, and lets everything else through, an unreadable command included. The
 // shapes close ordinary mistakes, not adversarial spellings, so a kill or a
 // stash reachable only through a rewritten spelling (a verb assembled from a
 // variable, a control character forging a mask sentinel, an operand routed
@@ -61,8 +62,9 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, cmdletOperands, cmdletPaths, commandPositions, effectiveDirs, heredocBodies, heredocExemption,
-  maskQuoted, nestedPayloads, repoRoot, resolveTarget, segment, spliceContinuations, tokens, type LexHost,
+  GIT_VALUE_FLAGS, cmdletOperands, cmdletPaths, commandPositions, delimiterFault, effectiveDirs, heredocBodies,
+  heredocExemption, maskQuoted, nestedPayloads, offendingDelimiter, repoRoot, resolveTarget, segment,
+  spliceContinuations, tokens, type LexHost,
 } from "./readonly-agent";
 import { sharedStateAgentClass } from "./agent-class";
 
@@ -428,15 +430,21 @@ async function deleteAct(cmd: string, masked: string, cwd: string, host: LexHost
 }
 
 // The shared-state act the command performs, or null. The preprocessing is
-// the read-only guard's, in its order: CRLF normalized, heredoc bodies found
-// on a body-blind mask, the data-sink exemption decided over the whole string
-// at the top level, continuations spliced, then the mask the rules read, with
-// an exempt body blanked whole. The rules run, then each substitution interior
-// and nested payload is read one level deeper.
-async function sharedStateAct(cmd: string, cwd: string | null, depth: number, host: LexHost): Promise<string | null> {
+// the read-only guard's, in its order: CRLF normalized, any heredoc fault
+// `offendingDelimiter` returns (a `DelimiterFault` kind) refused at every
+// depth before any body is read, naming the word or the delimiter through
+// the fold and bracket guard, heredoc bodies found on a body-blind mask, the
+// data-sink exemption decided over the whole string at the top level,
+// continuations spliced, then the mask the rules read, with an exempt body
+// blanked whole. The rules run,
+// then each substitution interior and nested payload is read one level deeper.
+async function sharedStateAct(cmd: string, cwd: string | null, depth: number, host: LexHost, quote: (text: string) => string): Promise<string | null> {
   if (depth === 0) cmd = cmd.replace(/\r\n/g, "\n");
   const subs: Span[] = [];
-  const bodies = heredocBodies(cmd, maskQuoted(cmd));
+  const bare = maskQuoted(cmd);
+  const delimiter = offendingDelimiter(cmd, bare);
+  if (delimiter !== null) return delimiterFault(delimiter, quote);
+  const bodies = heredocBodies(cmd, bare);
   const exemptBody = depth === 0 && cwd ? await heredocExemption(cmd, cwd, false, host) : null;
   cmd = spliceContinuations(cmd, bodies);
   let masked = maskQuoted(cmd, bodies, subs);
@@ -449,11 +457,11 @@ async function sharedStateAct(cmd: string, cwd: string | null, depth: number, ho
   if (act !== null) return act;
   if (depth >= DEPTH_BOUND) return null;
   for (const s of subs) {
-    const nested = await sharedStateAct(cmd.slice(s.from, s.to), cwd, depth + 1, host);
+    const nested = await sharedStateAct(cmd.slice(s.from, s.to), cwd, depth + 1, host, quote);
     if (nested !== null) return nested;
   }
   for (const payload of nestedPayloads(cmd, masked)) {
-    const nested = await sharedStateAct(payload, cwd, depth + 1, host);
+    const nested = await sharedStateAct(payload, cwd, depth + 1, host, quote);
     if (nested !== null) return `${nested}, inside a nested shell`;
   }
   return null;
@@ -472,8 +480,9 @@ function refusalOf(t: string, cls: string, act: string): string {
 }
 
 // What the guard reaches through hooks/index.ts: the lexer's host for one
-// call.
-export type SharedStateDeps = { lexHost(): Promise<LexHost> };
+// call, and the fold and bracket guard a quoted command word takes on its
+// way to the model, which the refused heredoc delimiter word passes through.
+export type SharedStateDeps = { lexHost(): Promise<LexHost>; quote(text: string): string };
 
 /**
  * Denies a mutating or gate agent's Bash or PowerShell command that ends a
@@ -495,7 +504,7 @@ export function sharedStateGuard(deps: SharedStateDeps): BeforeGuard {
       const cmd = e.command;
       if (typeof cmd !== "string" || !cmd.trim()) return {};
       const cwd = typeof ctx.cwd === "string" && ctx.cwd.trim() ? ctx.cwd.trim() : null;
-      const act = await sharedStateAct(cmd, cwd, 0, await deps.lexHost());
+      const act = await sharedStateAct(cmd, cwd, 0, await deps.lexHost(), deps.quote);
       return act === null ? {} : { deny: refusalOf(t, cls, act) };
     },
   };

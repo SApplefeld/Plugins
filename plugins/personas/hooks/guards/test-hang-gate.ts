@@ -16,9 +16,11 @@
 // git-commit-gate.ts states: two levels of nested text, DEPTH_BOUND below.
 // A command running none passes: dotnet
 // build, dotnet stryker, npx stryker, node test/x.test.js, pytest and
-// Invoke-Pester among them, the mutation tool's own run included. A command
-// running any is judged runner call by runner call, in reading order, and
-// denied at the first that fails its rule.
+// Invoke-Pester among them, the mutation tool's own run included, save a
+// command naming dotnet or node as a word that holds a heredoc the shared
+// reader `offendingDelimiter` refuses, which is denied before any runner call
+// is read. A command running any is judged runner call by runner call, in
+// reading order, and denied at the first that fails its rule.
 // A dotnet test call passes where:
 //   it carries --blame-hang-timeout with a value in the vendor's timespan
 //     form, a number with an optional unit among h, hour, hours, m, min,
@@ -124,7 +126,7 @@
 // path, so the guard takes no LexHost.
 
 import type { BeforeGuard, GuardCall } from "./runner";
-import { commandPositions, heredocBodies, maskQuoted, nestedPayloads, segment, spliceContinuations, tokens } from "./readonly-agent";
+import { commandPositions, delimiterAdvice, delimiterWhat, heredocBodies, maskQuoted, nestedPayloads, offendingDelimiter, segment, spliceContinuations, tokens, type DelimiterFault } from "./readonly-agent";
 
 // A half-open range of command indexes, the lexer's own span shape.
 type Span = { from: number; to: number };
@@ -193,6 +195,16 @@ const ADD_NODE_TIMEOUT = "Add --test-timeout=<milliseconds>.";
 // and the doctrine bullet the refusal enforces.
 function refusal(what: string, advice: readonly string[]): string {
   return `Blocked: test-hang-gate refuses ${what} without a runner-enforced hang limit. ${advice.join(" ")} (the doctrine's "${HANG_RULE}" rule).\n`;
+}
+
+// The refusal of a command on the heredoc fault `offendingDelimiter`
+// returned, any `DelimiterFault` kind, through the quote dependency since the
+// fault's text is the command's own text on its way to the model.
+function delimiterRefusal(fault: DelimiterFault, quote: (text: string) => string): string {
+  return refusal(
+    `${delimiterWhat(fault, quote)}, rather than pass an unread dotnet test or node --test call`,
+    [`${delimiterAdvice(fault)}.`],
+  );
 }
 
 // What the guard reaches through hooks/index.ts: the fold and bracket guard a
@@ -348,20 +360,27 @@ function runnerReasonAt(cmd: string, masked: string, hit: { name: string; at: nu
 }
 
 // A command read the read-only guard's way, in the shared-state guard's
-// order: heredoc bodies found on a body-blind mask, continuations spliced,
-// then the quote mask, with each substitution interior collected into `subs`.
-// A heredoc body stays command text.
-function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string } {
-  const bodies = heredocBodies(cmd, maskQuoted(cmd));
+// order: a heredoc delimiter word `offendingDelimiter` refuses returned before
+// any body is read, as `delimiter`, with the text left unmasked; otherwise
+// heredoc bodies found on a body-blind mask, continuations spliced, then the
+// quote mask, with each substitution interior collected into `subs`. A
+// heredoc body stays command text.
+function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+  const bare = maskQuoted(cmd);
+  const delimiter = offendingDelimiter(cmd, bare);
+  if (delimiter !== null) return { cmd, masked: cmd, delimiter };
+  const bodies = heredocBodies(cmd, bare);
   const spliced = spliceContinuations(cmd, bodies);
-  return { cmd: spliced, masked: maskQuoted(spliced, bodies, subs) };
+  return { cmd: spliced, masked: maskQuoted(spliced, bodies, subs), delimiter: null };
 }
 
 // The first refusal any runner call in the command earns, or null: the top
 // level's calls in reading order, then each substitution interior and nested
 // payload read one level deeper, to DEPTH_BOUND, as command text whatever
-// shell runs it. The search for runner positions reads each { and } outside
-// quotes as a ;, so a runner word opening a PowerShell script block stands in
+// shell runs it, a nested text carrying a heredoc fault `offendingDelimiter`
+// returns refused naming the fault's text before any runner call in it is
+// read. The search for runner positions reads each { and } outside quotes as
+// a ;, so a runner word opening a PowerShell script block stands in
 // command position as PowerShell reads it. Each hit's words are read from the
 // unswapped mask, so a brace inside a word (${PROJ}, {A,B}) cuts no argument
 // list. Nested payloads are found on the swapped mask, so an iex opening a
@@ -378,6 +397,7 @@ function gateReason(cmd: string, masked: string, subs: readonly Span[], depth: n
   for (const text of inner) {
     const innerSubs: Span[] = [];
     const read = maskOf(text, innerSubs);
+    if (read.delimiter !== null) return delimiterRefusal(read.delimiter, quote);
     const reason = gateReason(read.cmd, read.masked, innerSubs, depth + 1, quote);
     if (reason !== null) return reason;
   }
@@ -404,6 +424,7 @@ export function testHangGateGuard(deps: TestHangGateDeps): BeforeGuard {
       try {
         const subs: Span[] = [];
         const read = maskOf(cmd.replace(/\r\n/g, "\n"), subs);
+        if (read.delimiter !== null) return { deny: delimiterRefusal(read.delimiter, deps.quote) };
         const reason = gateReason(read.cmd, read.masked, subs, 0, deps.quote);
         return reason === null ? {} : { deny: reason };
       } catch (err) {

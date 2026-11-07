@@ -78,7 +78,8 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, heredocBodies, maskQuoted, repoRoot, segment, spliceContinuations, tokens, type LexHost,
+  GIT_VALUE_FLAGS, QUOTED_HEREDOC_INTRO, delimiterAdvice, delimiterWhat, heredocBodies, maskQuoted, offendingDelimiter,
+  repoRoot, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
 } from "./readonly-agent";
 
 type Span = { from: number; to: number };
@@ -256,8 +257,9 @@ function docsPathsIn(word: string): string[] {
 type SimpleCommand = { words: string[]; outputs: string[]; bodies: string[]; pipeline: number; from: number; to: number };
 
 // The heredoc introductions `heredocBodies` took a body for, each mapped from
-// the index of its << to the index of its body. The introduction pattern and
-// its four skips are that function's own, read on the same text and mask, so
+// the index of its << to the index of its body. The introduction pattern is
+// that function's own, `QUOTED_HEREDOC_INTRO`, and its four skips are too,
+// read on the same text and mask, so
 // an introduction it passed over (an empty delimiter, one standing in a quoted
 // span, a substitution or a body, or one with no line after it) owns no body.
 // Each skip reads only local text: the introductions come in order and the
@@ -265,7 +267,7 @@ type SimpleCommand = { words: string[]; outputs: string[]; bodies: string[]; pip
 // break's continuation is judged by the backslashes just before it.
 function bodyIntros(cmd: string, masked: string, bodies: readonly Span[]): Map<number, number> {
   const owners = new Map<number, number>();
-  const intro = /(?<!<)<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)")(?=[ \t\r\n;|&)]|$)/g;
+  const intro = new RegExp(QUOTED_HEREDOC_INTRO, "g");
   let next = 0;
   let inside = 0;
   let m: RegExpExecArray | null;
@@ -274,7 +276,7 @@ function bodyIntros(cmd: string, masked: string, bodies: readonly Span[]): Map<n
     if (masked[at] === "\x00" || masked[at] === "\x02") continue;
     while (inside < bodies.length && bodies[inside].to <= at) inside++;
     if (inside < bodies.length && at >= bodies[inside].from) continue;
-    if ((m[1] ?? m[2]) === "") continue;
+    if ((m[2] ?? m[3]) === "") continue;
     let nl = cmd.indexOf("\n", at + m[0].length);
     while (nl >= 0) {
       let k = nl;
@@ -453,7 +455,10 @@ function changesDirectory(c: SimpleCommand): boolean {
 // and whether any command in it, at any depth, names a docs/ path in the
 // project in its words, any heredoc body it receives (a lone cat's data
 // included, since a substitution hands that text on), or its substitutions.
-type ShellReading = { writes: boolean; names: boolean };
+// `delimiter` is the heredoc fault `offendingDelimiter` refused, any
+// `DelimiterFault` kind, that stopped the read before any body was taken, at
+// any depth, or null.
+type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault | null };
 
 // Reads a shell command for a docs/ write: a simple command whose output
 // redirect aims at the project's docs/, or a pipeline in which a command
@@ -469,11 +474,17 @@ type ShellReading = { writes: boolean; names: boolean };
 // mask, each substitution's interior collected and read one level deeper to
 // DEPTH_BOUND, past which its text refuses on any docs/ path it names. A
 // nested shell's payload (bash -c "...") is a quoted word of a command word
-// off the list, so a docs/ path in it refuses.
+// off the list, so a docs/ path in it refuses. A heredoc fault
+// `offendingDelimiter` returns, any `DelimiterFault` kind, at any depth, ends
+// the read before any body is taken, with the fault as the reading's
+// refusal, since bash and the guard would bound that body at different
+// lines.
 async function readShell(command: string, placed: DocsJudge, depth: number): Promise<ShellReading> {
-  const WRITES: ShellReading = { writes: true, names: true };
+  const WRITES: ShellReading = { writes: true, names: true, delimiter: null };
   const subs: Span[] = [];
   const bare = maskQuoted(command);
+  const delimiter = offendingDelimiter(command, bare);
+  if (delimiter !== null) return { writes: true, names: true, delimiter };
   const bodies = heredocBodies(command, bare);
   const intros = bodyIntros(command, bare, bodies);
   const cmd = spliceContinuations(command, bodies);
@@ -489,6 +500,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number): Pro
       continue;
     }
     const inner = await readShell(text, judge, depth + 1);
+    if (inner.delimiter !== null) return inner;
     if (inner.writes) return WRITES;
     subNames.push(inner.names);
   }
@@ -512,7 +524,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number): Pro
     pipelines.set(c.pipeline, { names: seen.names || names, reads: seen.reads && reads });
   }
   for (const { names, reads } of pipelines.values()) if (names && !reads) return WRITES;
-  return { writes: false, names: named };
+  return { writes: false, names: named, delimiter: null };
 }
 
 // The fixed words of the hook's refusal after the agent type, which the
@@ -524,8 +536,10 @@ export const DOCS_WRITE_COMMAND_PHRASE = "subagent may not write into docs/. doc
 export const DOCS_READ_SENTENCE =
   "A shell command naming a docs/ path runs for a governed agent only as a read (cat, grep, sed -n, git diff and their kin).";
 
-// What the guard reaches through hooks/index.ts: the path host for one call.
-export type DocsWriteDeps = { lexHost(): Promise<LexHost> };
+// What the guard reaches through hooks/index.ts: the path host for one call,
+// and the fold and bracket guard a quoted command word takes on its way to
+// the model, which the refused heredoc delimiter word passes through.
+export type DocsWriteDeps = { lexHost(): Promise<LexHost>; quote(text: string): string };
 
 /**
  * Denies a subagent's write into the project's docs/, by the file a Write,
@@ -559,7 +573,18 @@ export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
       // the way a bash backslash-newline does.
       const unix = e.command.replace(/\r\n/g, "\n");
       const command = e.tool === "PowerShell" ? unix.replace(/`\n/g, "  ") : unix;
-      if ((await readShell(command, judge, 0)).writes) return { deny: `${refusal} ${DOCS_READ_SENTENCE}\n` };
+      const reading = await readShell(command, judge, 0);
+      // A delimiter fault stops the read before any docs/ path is weighed, so
+      // its refusal names the fault and its way around, never a docs/ write.
+      if (reading.delimiter !== null) {
+        const what = delimiterWhat(reading.delimiter, deps.quote);
+        return {
+          deny:
+            `Blocked: the docs/ write guard cannot tell whether the ${t} subagent's command writes into docs/, ` +
+            `because the command is ${what}, refused before its body is read. ${delimiterAdvice(reading.delimiter)}.\n`,
+        };
+      }
+      if (reading.writes) return { deny: `${refusal} ${DOCS_READ_SENTENCE}\n` };
       return {};
     },
   };

@@ -92,7 +92,13 @@
 // place of the cd. A heredoc writing a document whose prose holds a git add,
 // commit or push refuses too, since its body is read as command text: write
 // the document with the Write tool, and run the git step on its own with
-// git -C where it needs a directory. Where the body names a git add and a git
+// git -C where it needs a directory. A heredoc whose delimiter word holds a
+// quote or a backslash and is not plain, one word of [A-Za-z0-9_.-]+ inside
+// one pair of quotes or after one backslash, refuses naming the word before
+// any body is read, since bash removes quotes and backslashes from a
+// delimiter where the gate compares the raw token, and a terminator line the
+// two read differently puts the git lines inside the gate's body or inside a
+// quote span a stray quote opens. Where the body names a git add and a git
 // commit, or a git commit and a git push, the chain refusal answers first with
 // its own advice, and the Write tool is still the way around it. A git with no
 // subcommand word inside a compound command refuses as compound too,
@@ -159,8 +165,8 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, commandPositions, heredocBodies, maskQuoted, nestedPayloads, resolveTarget, segment,
-  spliceContinuations, tokens, type LexHost,
+  GIT_VALUE_FLAGS, commandPositions, delimiterAdvice, delimiterWhat, heredocBodies, maskQuoted, nestedPayloads, offendingDelimiter,
+  resolveTarget, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
 } from "./readonly-agent";
 
 // A half-open range of command indexes, the lexer's own span shape.
@@ -210,6 +216,13 @@ const ALIAS_DEFINED = refusal(
   "Run the git step the alias stands for as its own plain call",
   WINDOW_RULE,
 );
+
+// The refusal of a command on the heredoc fault `offendingDelimiter`
+// returned, any `DelimiterFault` kind, through the quote dependency since the
+// fault's text is the command's own text on its way to the model.
+function delimiterRefusal(fault: DelimiterFault, io: GateIo): string {
+  return refusal(delimiterWhat(fault, io.quote), delimiterAdvice(fault), WINDOW_RULE);
+}
 
 const MESSAGE_ADVICE = "Write the message to a file and pass -F with its path";
 const STDIN_MESSAGE = refusal("a commit message read from standard input (git commit -F -)", MESSAGE_ADVICE, TITLE_RULE);
@@ -659,39 +672,50 @@ function gitCallAt(cmd: string, masked: string, at: number, depth: number, power
 }
 
 // A command read the read-only guard's way, in the shared-state guard's
-// order: heredoc bodies found on a body-blind mask, so a quote inside a body
-// opens no span that would hide the command text after it, continuations
-// spliced, then the quote mask, with each substitution interior collected
-// into `subs`. A heredoc body stays command text.
-function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string } {
-  const bodies = heredocBodies(cmd, maskQuoted(cmd));
+// order: a heredoc delimiter word `offendingDelimiter` refuses returned before
+// any body is read, as `delimiter`, with the text left unmasked; otherwise
+// heredoc bodies found on a body-blind mask, so a quote inside a body opens
+// no span that would hide the command text after it, continuations spliced,
+// then the quote mask, with each substitution interior collected into `subs`.
+// A heredoc body stays command text.
+function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+  const bare = maskQuoted(cmd);
+  const delimiter = offendingDelimiter(cmd, bare);
+  if (delimiter !== null) return { cmd, masked: cmd, delimiter };
+  const bodies = heredocBodies(cmd, bare);
   const spliced = spliceContinuations(cmd, bodies);
-  return { cmd: spliced, masked: maskQuoted(spliced, bodies, subs) };
+  return { cmd: spliced, masked: maskQuoted(spliced, bodies, subs), delimiter: null };
 }
 
 // Every git add, stage, commit and push the command runs, and every git call
 // of unknown verb: the top level's in reading order, then each substitution
 // interior and nested payload read one level deeper, to DEPTH_BOUND, as
 // command text whatever shell runs it, so only the top level reads a
-// PowerShell call's backslashes as separators.
+// PowerShell call's backslashes as separators. A nested text whose heredoc
+// delimiter word `offendingDelimiter` refuses ends the read there, as
+// `delimiter` with no calls, so the gate refuses on it before any git call is
+// judged.
 // The search reads each { and } outside quotes as a ;, so a git word opening
 // a PowerShell script block, as in if (...) {git add .} or &{git add .},
 // stands in command position as PowerShell reads it.
-function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], depth: number, powershell: boolean): GitCall[] {
+function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], depth: number, powershell: boolean): { calls: GitCall[]; delimiter: DelimiterFault | null } {
   const search = masked.replace(/[{}]/g, ";");
-  const out: GitCall[] = [];
+  const calls: GitCall[] = [];
   for (const hit of commandPositions(search, ["git"])) {
     const call = gitCallAt(cmd, search, hit.at, depth, powershell && depth === 0);
-    if (call !== null) out.push(call);
+    if (call !== null) calls.push(call);
   }
-  if (depth >= DEPTH_BOUND) return out;
+  if (depth >= DEPTH_BOUND) return { calls, delimiter: null };
   const inner = [...subs.map((s) => cmd.slice(s.from, s.to)), ...nestedPayloads(cmd, search)];
   for (const text of inner) {
     const innerSubs: Span[] = [];
     const read = maskOf(text, innerSubs);
-    out.push(...gitCallsOf(read.cmd, read.masked, innerSubs, depth + 1, powershell));
+    if (read.delimiter !== null) return { calls: [], delimiter: read.delimiter };
+    const nested = gitCallsOf(read.cmd, read.masked, innerSubs, depth + 1, powershell);
+    if (nested.delimiter !== null) return { calls: [], delimiter: nested.delimiter };
+    calls.push(...nested.calls);
   }
-  return out;
+  return { calls, delimiter: null };
 }
 
 // What makes a command compound, read on the masked command, where every
@@ -736,8 +760,10 @@ async function loneReason(call: GitCall, cwd: string | null, host: () => Promise
   return rewritten === undefined ? null : unresolvedWord(call.unknown === null ? call.verb : "subcommand", rewritten.text, io);
 }
 
-// The refusal for a command, or null. A command running no git add, stage,
-// commit or push, and no git call of unknown verb, passes. One running any is
+// The refusal for a command, or null. A command carrying a heredoc fault
+// `offendingDelimiter` returns, at any depth read, is refused naming the
+// fault's text before any git call is judged. A command running no git add,
+// stage, commit or push, and no git call of unknown verb, passes. One running any is
 // refused by the two chain rules over every named verb it runs, then as
 // compound unless it is one lone plain git command, which then takes its own
 // words' refusal. So a git with no verb word passes only as the lone command.
@@ -749,7 +775,10 @@ async function loneReason(call: GitCall, cwd: string | null, host: () => Promise
 async function gateReason(cmd: string, cwd: string | null, powershell: boolean, host: () => Promise<LexHost>, io: GateIo): Promise<string | null> {
   const subs: Span[] = [];
   const read = maskOf(cmd.replace(/\r\n/g, "\n"), subs);
-  const found = gitCallsOf(read.cmd, read.masked, subs, 0, powershell);
+  if (read.delimiter !== null) return delimiterRefusal(read.delimiter, io);
+  const calls = gitCallsOf(read.cmd, read.masked, subs, 0, powershell);
+  if (calls.delimiter !== null) return delimiterRefusal(calls.delimiter, io);
+  const found = calls.calls;
   if (found.length === 0) return null;
   const runs = (...verbs: string[]) => found.some((x) => verbs.includes(x.verb));
   if (runs("add", "stage") && runs("commit")) return ADD_AND_COMMIT;

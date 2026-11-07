@@ -848,7 +848,7 @@ async function guardWindowsOf(dp: any): Promise<boolean> {
 function moduleBeforeGuards(dp: any): BeforeGuard[] {
   const lexHost = () => guardLexHostOf(dp);
   return [
-    docsWriteGuard({ lexHost }),
+    docsWriteGuard({ lexHost, quote: (text: string) => bracketSafeText(oneLine(text)) }),
     dispatchDocsGuard({}),
     prDocsGuard({ lexHost }),
     mergedPrPushGuard({
@@ -866,8 +866,8 @@ function moduleBeforeGuards(dp: any): BeforeGuard[] {
       isFile: (path: string) => guardIsFileOf(dp, path),
       resolve: (name: string) => executableOf(dp, name),
     }),
-    readonlyAgentGuard({ lexHost }),
-    sharedStateGuard({ lexHost }),
+    readonlyAgentGuard({ lexHost, quote: (text: string) => bracketSafeText(oneLine(text)) }),
+    sharedStateGuard({ lexHost, quote: (text: string) => bracketSafeText(oneLine(text)) }),
     gitCommitGateGuard({ lexHost, readFile: (path: string) => guardReadFileOf(dp, path), quote: (text: string) => bracketSafeText(oneLine(text)) }),
     emDashGuard({ quote: (text: string) => bracketSafeText(oneLine(text)) }),
     testHangGateGuard({ quote: (text: string) => bracketSafeText(oneLine(text)) }),

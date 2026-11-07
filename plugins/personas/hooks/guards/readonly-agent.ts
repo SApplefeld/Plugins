@@ -735,6 +735,12 @@ export function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[])
   return chars.join('');
 }
 
+// The quoted heredoc introduction both body finders read: `heredocBodies` and
+// docs-write's `bodyIntros`, which maps each introduction to its body and
+// must read exactly the introductions `heredocBodies` takes. Groups: the
+// dash, then the single-quoted and the double-quoted delimiter.
+export const QUOTED_HEREDOC_INTRO = String.raw`(?<!<)<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)")(?=[ \t\r\n;|&()<>]|$)`;
+
 // The ranges of quoted-delimiter heredoc bodies in the command. A heredoc body
 // is data the receiving command reads on stdin rather than shell syntax, so its
 // content is literal: `maskQuoted` reads these ranges to keep a body quote from
@@ -748,35 +754,405 @@ export function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[])
 // and the second is scanned as its own command, where its heredoc is parsed
 // afresh. Three bounds keep a range on the body. A << after
 // another < is a here-string operand, not an introduction. The delimiter must be
-// a whole word, so the desyncing spellings bash reads differently (<<'EOF'X,
-// <<'E'OF) match nothing. And the body starts after the introducing line, walking
-// a backslash continuation forward first, so a redirect on that line stays
-// outside the range. A body already found is data, so an introduction inside one
-// opens nothing: an introduction falling in a range is skipped, which keeps a
-// range from running past the terminator the shell reads.
+// a whole quoted word ending where `offendingDelimiter` ends the raw word, at a
+// blank, a newline or one of bash's metacharacters |, &, ;, (, ), < and >, so
+// <<'EOF'>out.txt forms a body here as it does for bash and for the reader.
+// A quoted word bash reads differently (<<'EOF'X, <<'E'OF, <<"E'OF") is
+// refused by `offendingDelimiter` before any guard calls this, so the word
+// bound here restates that rule rather than deciding it. And the body starts
+// after the introducing line, walking a backslash continuation forward first,
+// so a redirect on that line, glued to the word or not, stays outside the
+// range as command text every guard reads. A body already found is data, so
+// an introduction inside one opens nothing: an introduction falling in a range
+// is skipped, which keeps a range from running past the terminator the shell
+// reads.
+//
+// This reads the one body-blind mask the caller built, never rebuilt as a
+// body is found, while `offendingDelimiter` rebuilds its mask per passed
+// body. So a quote inside a body found here still stands as a span on this
+// mask over the lines after the body, and can pair with a later quote, such
+// as one in a later introduction's delimiter. A pairing like that can hide a
+// later introduction from this function, and can leave a << inside a later
+// body unmasked, read here as an introduction the reader never reads, since
+// the reader passed that body. After a body holding a quote, the two readers
+// can therefore disagree on which introductions exist and where their bodies
+// run.
 export function heredocBodies(cmd: string, masked: string): Span[] {
   const bodies: Span[] = [];
-  const intro = /(?<!<)<<-?[ \t]*(?:'([^'\n]*)'|"([^"\n]*)")(?=[ \t\r\n;|&)]|$)/g;
+  const memo = new Map<string, BodyEnd>();
+  const intro = new RegExp(QUOTED_HEREDOC_INTRO, 'g');
   let m: RegExpExecArray | null;
   while ((m = intro.exec(cmd)) !== null) {
     const at = m.index;
     if (masked[at] === '\x00' || masked[at] === SUB_SPAN) continue;
     if (bodies.some(b => at >= b.from && at < b.to)) continue;
-    const delim = m[1] !== undefined ? m[1] : m[2];
+    const delim = m[2] !== undefined ? m[2] : m[3];
     if (delim === '') continue;
-    let nl = cmd.indexOf('\n', m.index + m[0].length);
-    while (nl >= 0) {
-      const trail = /\\+$/.exec(cmd.slice(0, nl));
-      if (trail === null || trail[0].length % 2 === 0) break;
-      nl = cmd.indexOf('\n', nl + 1);
-    }
-    if (nl < 0) continue;
-    const esc = delim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const t = new RegExp('^[ \\t]*' + esc + '[ \\t]*$', 'm').exec(cmd.slice(nl + 1));
-    const end = t === null ? cmd.length : nl + 1 + t.index;
-    bodies.push({ from: nl + 1, to: end });
+    const end = bodyAfter(cmd, m.index + m[0].length, delim, m[1] === '-', memo);
+    if (end !== null) bodies.push(end.body);
   }
   return bodies;
+}
+
+// Where a heredoc introduction ending at `introEnd` ends the body it opens
+// for the delimiter `delim`, or null where no line follows the introducing
+// line. The body starts after that line, a backslash continuation walked
+// forward first, and ends at the first line equal to the delimiter by bash's
+// own test: the text after the introducing line split on \n alone, each line
+// compared whole under <<, and with its leading tabs stripped and nothing
+// else under <<- (`dash`). No other blank is stripped, so ` EOF`, `EOF ` and
+// a space-indented <<- line are body lines here as they are for bash. A body
+// with no terminator runs to the end of the text. `heredocBodies` and
+// `offendingDelimiter` read this one test and end a quoted word at the same
+// place, so a plain body the reader passes over is the body `heredocBodies`
+// takes wherever both read the introduction. `heredocExemption` keeps its
+// own line loop under the same equality rule, and refuses where no line
+// ends the body rather than running it to the end of the text.
+//
+// A line equal to the delimiter only once its trailing carriage returns are
+// removed ends the range too and is returned as `carriageReturn`, since one
+// bash ends the body there and another reads on: `offendingDelimiter`
+// refuses the command on it before any guard reads the range.
+//
+// Introductions on one line share the line their bodies start after, so a
+// caller passes one `memo` per command and each distinct body start,
+// delimiter and dash is walked once rather than once per introduction.
+type BodyEnd = { body: Span; carriageReturn: boolean };
+function bodyAfter(cmd: string, introEnd: number, delim: string, dash: boolean, memo?: Map<string, BodyEnd>): BodyEnd | null {
+  let nl = cmd.indexOf('\n', introEnd);
+  while (nl >= 0) {
+    let k = nl;
+    while (k > 0 && cmd[k - 1] === '\\') k--;
+    if ((nl - k) % 2 === 0) break;
+    nl = cmd.indexOf('\n', nl + 1);
+  }
+  if (nl < 0) return null;
+  const key = `${nl}\n${dash ? 1 : 0}\n${delim}`;
+  const known = memo?.get(key);
+  if (known !== undefined) return known;
+  const found = bodyEndFrom(cmd, nl + 1, delim, dash);
+  memo?.set(key, found);
+  return found;
+}
+
+function bodyEndFrom(cmd: string, from: number, delim: string, dash: boolean): BodyEnd {
+  let pos = from;
+  while (pos <= cmd.length) {
+    let end = cmd.indexOf('\n', pos);
+    if (end < 0) end = cmd.length;
+    const line = cmd.slice(pos, end);
+    const stripped = dash ? line.replace(/^\t+/, '') : line;
+    if (stripped === delim) return { body: { from, to: pos }, carriageReturn: false };
+    if (stripped.endsWith('\r') && stripped.replace(/\r+$/, '') === delim) return { body: { from, to: pos }, carriageReturn: true };
+    if (end >= cmd.length) break;
+    pos = end + 1;
+  }
+  return { body: { from, to: cmd.length }, carriageReturn: false };
+}
+
+// The character class a heredoc delimiter word holding a quote or a backslash
+// must match whole, inside one pair of matching outer quotes or after one
+// leading backslash, for every guard that reads heredoc bodies to read the
+// command at all. Bash removes the quotes and the backslash escapes from a
+// delimiter word before comparing body lines against it, and joins a quoted
+// part to the unquoted text beside it, where each guard compares lines
+// against the raw token, so the two end a body at the same line only where
+// that removal changes nothing: one word of these characters, bare or inside
+// one pair of quotes, or one leading backslash on such a word. Any other word
+// holding a quote or a backslash puts live commands on the wrong side of the
+// terminator for one reader or the other. With `<<"E\\OF"` bash ends the body
+// at a line reading E\OF while a raw comparison reads on to E\\OF, so the
+// commands between sit inside a guard's body. With `<<"E'OF"`, `<<"E'OF"x`,
+// `<<E"'"OF` or `<<E\'OF` bash's terminator line carries an apostrophe that
+// opens a quote span in `maskQuoted` over every command after it. No reading
+// of such a word is safe short of a second shell lexer, so every guard
+// refuses it ahead of its body scan, through `offendingDelimiter`.
+export const PLAIN_DELIMITER_CLASS = '[A-Za-z0-9_.-]+';
+const QUOTED_PLAIN_DELIMITER = new RegExp(`^(['"])(${PLAIN_DELIMITER_CLASS})\\1$`);
+const ESCAPED_PLAIN_DELIMITER = new RegExp(`^\\\\${PLAIN_DELIMITER_CLASS}$`);
+
+// What `offendingDelimiter` returns on a command it refuses: a delimiter
+// word holding a quote or a backslash outside the admitted forms, as the
+// command spells it; a terminator line equal to a plain delimiter only
+// once its trailing carriage returns are removed, named by that delimiter;
+// an introduction inside an open construct, or one whose introducing line
+// ends inside an open quote, substitution or construct, named by its plain
+// delimiter; the same open-span fault where a substitution follows the
+// introduction on its line, named the same way; or an introduction split by
+// a backslash-newline, named by its text from the first < through the
+// delimiter word read after the split.
+export type DelimiterFault = { kind: 'word' | 'carriage-return' | 'open-span' | 'open-span-substitution' | 'split'; text: string };
+
+// Whether a `${`, `$[` or `>(` construct is open before a given index of
+// `cmd`, counted left to right from the command's start on the masks
+// `offendingDelimiter` holds, each read from its `from` onward. `maskQuoted`
+// masks none of the three (`>(` is left standing on purpose, see its
+// comment), so a quote or `$(` span is not the only way an introducing line
+// can end with bash still reading one word. Each opener pushes its closer:
+// `}`, `]` or `)`. Inside an open `$[` a bare `[` nests, and inside an open
+// `>(` a bare `(` nests, as bash parses both; a bare `{` inside `${` does not
+// nest, which bash bears out, since `${x:-{a}` closes at its first `}`. A
+// closer pops only the closer on top, so a `}` closes no `$[`. A backslash
+// pair is stepped over, so `\}` closes nothing. A single-quoted span and a
+// masked substitution are not counted, so the `}` of `${x:-'}'}` closes
+// nothing. A double-quoted span is read on its raw text, since bash expands
+// `${` and `$[` there: an opener inside it pushes, a closer pops only an
+// opener pushed inside the same span, an apostrophe inside a construct
+// opened there quotes up to the next apostrophe, and an opener left open at
+// the span's closing quote stays open past it, as `"${x:-"` leaves bash
+// reading. A passed body is skipped whole, by `skipTo`, and the quote state
+// restarts there, as the mask segment the walk rebuilds at that point does.
+// What the count reads at each index it passes is kept, so an index already
+// passed, such as the second introduction on one line, reads its own state.
+function constructCounter(cmd: string, masks: readonly { from: number; masked: string }[]): { openAt(i: number): boolean; skipTo(i: number): void } {
+  const open = new Uint8Array(cmd.length + 1);
+  const stack: string[] = [];
+  let pos = 0;
+  let seg = 0;
+  let quote = '';
+  let local = 0;
+  let single = false;
+  const restart = () => { quote = ''; local = 0; single = false; };
+  const closerOf = (c: string) => (c === '{' ? '}' : c === '[' ? ']' : ')');
+  const advance = (to: number) => {
+    for (; pos < to; pos++) {
+      while (seg + 1 < masks.length && masks[seg + 1].from <= pos) { seg++; restart(); }
+      open[pos] = stack.length > 0 ? 1 : 0;
+      const mk = masks[seg].masked[pos - masks[seg].from];
+      const c = cmd[pos];
+      const next = cmd[pos + 1];
+      const top = stack[stack.length - 1];
+      if (quote === '') {
+        if (mk !== c) continue;
+        if (c === '"' || c === "'") { quote = c; continue; }
+        if (c === '\\') { pos++; open[pos] = open[pos - 1]; continue; }
+        if ((c === '$' && (next === '{' || next === '[')) || (c === '>' && next === '(')) {
+          stack.push(closerOf(next));
+          pos++;
+          open[pos] = 1;
+          continue;
+        }
+        if ((c === '(' && top === ')') || (c === '[' && top === ']')) stack.push(top);
+        else if (c === top) stack.pop();
+        continue;
+      }
+      if (mk === quote) { restart(); continue; }
+      if (quote === "'" || mk !== '\x00') continue;
+      if (single) { if (c === "'") single = false; continue; }
+      if (c === '\\') { pos++; open[pos] = open[pos - 1]; continue; }
+      if (c === '$' && (next === '{' || next === '[')) {
+        stack.push(closerOf(next));
+        local++;
+        pos++;
+        open[pos] = 1;
+        continue;
+      }
+      if (local === 0) continue;
+      if (c === "'") single = true;
+      else if (c === '[' && top === ']') { stack.push(top); local++; }
+      else if (c === top) { stack.pop(); local--; }
+    }
+    open[pos] = stack.length > 0 ? 1 : 0;
+  };
+  return {
+    openAt(i: number): boolean { advance(i); return open[i] === 1; },
+    skipTo(i: number): void { if (i > pos) { pos = i; restart(); } },
+  };
+}
+
+// The first fault of the command's heredoc delimiters, or null where there is
+// none. Every guard that reads heredoc bodies consults this on the same text
+// and body-blind mask it hands `heredocBodies`, before any body range,
+// exemption or quote mask is built on the command, and refuses on a non-null
+// return, so the fault's channel is this value and nothing throws.
+//
+// An introduction is a << or <<- outside a quoted span and a substitution
+// span on the current mask, neither preceded nor followed by another <, so a
+// here-string's <<< is none, and not inside a body the walk has passed. The
+// walk reads every run of < characters, a backslash-newline allowed between
+// them, so a << that bash joins across a backslash-newline is found as one
+// run. A run holding a backslash-newline is the fourth fault, since bash
+// removes the pair before it reads the operator and every reader runs on the
+// raw text: <\ then <"E'OF" on the next line is <<"E'OF" to bash. The fault
+// is returned rather than the text spliced, and names the text from the first
+// < through the word read after the split, read on past any unquoted
+// backslash-newline that ends that word. A backslash-newline inside the word
+// itself, as in <<\ then 'EOF' or <<'EO'\ then 'F', which bash joins into the
+// delimiter EOF, leaves a backslash in the raw word, so the word rule below
+// refuses it.
+//
+// The word is read raw, with no quote awareness: the characters after the
+// optional blanks up to the first space, tab or newline or the first of
+// bash's metacharacters |, &, ;, (, ), < and >, so <<'EOF'>out.txt reads the
+// word 'EOF'. A word holding no quote and no backslash is never an offence,
+// whatever bash makes of it, since its terminator carries no quote. A word
+// holding either is admitted in three forms only: one pair of matching outer
+// quotes around PLAIN_DELIMITER_CLASS content, exactly '' or "", or one
+// leading backslash before such content. Any other such word offends, an
+// unclosed quote (<<"EOF), a suffix (<<"E'OF"x), a mid-word quote (<<E"'"OF)
+// and an escaped quote (<<E\'OF) among them. Of the admitted forms only the
+// quoted plain word forms a body, found by the exact terminator test in
+// `bodyAfter`; a terminator line that is the delimiter only once its
+// trailing carriage returns are removed is the second fault, since one bash
+// ends the body there and another reads on.
+//
+// The third fault is an introducing line that ends inside an open quote or
+// substitution: the newline `bodyAfter` starts the body after, the first past
+// any backslash continuation, is masked on the current mask. Bash starts the
+// body after the newline token that ends the command, which is past where
+// that span closes, so a `"` or `$(` left open on the introducing line puts
+// bash's body lines, its terminator and the commands after it inside the
+// body the guard would read. A continuation's own newline is never masked,
+// since the mask steps over a backslash pair, so a line ending in a
+// backslash does not trip this. The same fault is returned where a `${`, `$[`
+// or `>(` construct, which no mask blanks, is open at the introduction's <<
+// or at that newline, by `constructCounter`: bash reads an introduction
+// inside one as part of a word and forms no heredoc, as with
+// `echo ${x:- <<'EOF'`, and reads on past a newline inside one, as with
+// `cat <<'EOF' ${x:-`, so either way the lines the guard would take as body
+// are not bash's body. The counter reads the construct openers from the
+// command's start, outside single-quoted spans, masked substitutions and the
+// bodies the walk has passed, and reads a double-quoted span's raw text too.
+// The same fault, in its substitution form, is returned where the raw text
+// from the end of the delimiter word to that newline holds a `$(`, `<(` or
+// `>(`, closed or not, quoted or not: a `)` bash does not read as a closer,
+// such as a `case` pattern's, one after a `#` comment or one inside a `${`,
+// ends the span early for the mask and the count while bash reads on, and
+// the list of such `)` is open, so the position is refused rather than a
+// word. A substitution opening before the << and enclosing it is not in that
+// text, so `git commit -m "$(cat <<'EOF'` keeps its reading, and a backtick
+// is not counted. The counter and the substitution test both read an opener
+// only where its two characters stand side by side, so an opener spelled
+// across a line continuation, such as $\ then { on the next line, is not
+// read as one.
+//
+// The walk adds each passed body to the passed list and rebuilds the mask
+// with those bodies honored before reading on, so a quote inside a passed
+// body opens no span that would hide a later introduction, and a line of a
+// passed body that quotes <<"E'OF" as text is not read as one. The empty and
+// the backslash forms open no body here, as they open none in
+// `heredocBodies`, so their lines are read as command text and any
+// introduction in them is read.
+//
+// The rebuilt mask is the mask of the text after the passed body, read from
+// a clean state, kept beside the earlier masks as a segment the walk looks
+// up by position. It equals the mask of the whole command with the passed
+// bodies honored at every position after the body, since `maskQuoted` ends
+// any quote span at a body it honors and skips the body's characters, so the
+// scan is at top level where the body ends. The rebuild is skipped where the
+// body holds no quote, backtick, $, backslash or <, since then the body opens
+// no span and the current mask already agrees with the honoring one past the
+// body; a span open on entry to the body, such as a # comment's apostrophe on
+// the introducing line, is the third fault above, so none reaches the
+// rebuild. A body ending at or before the newest segment's start takes no
+// segment either, as the second heredoc introduced on one line does when its
+// body, read from the same line as the first's, ends inside the first's: the
+// newest segment already starts past it, and the segments stay in increasing
+// order for the lookup by position. Each rebuild costs the tail's length, so
+// a long run of plain heredocs walks in one pass where no body is masked and
+// none holds a trigger character, and in a pass per body otherwise.
+export function offendingDelimiter(cmd: string, masked: string): DelimiterFault | null {
+  const passed: Span[] = [];
+  const memo = new Map<string, BodyEnd>();
+  const masks: { from: number; masked: string }[] = [{ from: 0, masked }];
+  const segmentOf = (i: number): { from: number; masked: string } => {
+    for (let k = masks.length - 1; k > 0; k--) if (i >= masks[k].from) return masks[k];
+    return masks[0];
+  };
+  const maskAt = (i: number): string => { const s = segmentOf(i); return s.masked[i - s.from]; };
+  const counter = constructCounter(cmd, masks);
+  const operator = /<(?:(?:\\\n)*<)+/g;
+  const lead = /-?[ \t]*/y;
+  const rawWord = /[^ \t\n|&;()<>]*/y;
+  const wordAt = (i: number): { start: number; word: string } => {
+    lead.lastIndex = i;
+    lead.exec(cmd);
+    rawWord.lastIndex = lead.lastIndex;
+    return { start: lead.lastIndex, word: rawWord.exec(cmd)![0] };
+  };
+  // True where the word ends in an unquoted backslash-newline: an odd run
+  // of backslashes before a newline, its last backslash unmasked.
+  const splitAfter = (start: number, word: string): boolean => {
+    const end = start + word.length;
+    if (cmd[end] !== '\n') return false;
+    let k = end;
+    while (k > start && cmd[k - 1] === '\\') k--;
+    const last = maskAt(end - 1);
+    return (end - k) % 2 === 1 && last !== '\x00' && last !== SUB_SPAN;
+  };
+  const splitFault = (at: number, from: number): DelimiterFault => {
+    let { start, word } = wordAt(from);
+    while (splitAfter(start, word)) ({ start, word } = wordAt(start + word.length + 1));
+    return { kind: 'split', text: cmd.slice(at, start + word.length) };
+  };
+  let m: RegExpExecArray | null;
+  while ((m = operator.exec(cmd)) !== null) {
+    const at = m.index;
+    const mk = maskAt(at);
+    if (mk === '\x00' || mk === SUB_SPAN) continue;
+    if (passed.some(b => at >= b.from && at < b.to)) continue;
+    if (m[0].length > 2) {
+      if (m[0].includes('\n')) return splitFault(at, at + m[0].length);
+      continue;
+    }
+    const { start, word } = wordAt(at + 2);
+    if (!/['"\\]/.test(word)) continue;
+    const quoted = QUOTED_PLAIN_DELIMITER.exec(word);
+    if (quoted === null) {
+      if (word === "''" || word === '""' || ESCAPED_PLAIN_DELIMITER.test(word)) continue;
+      return { kind: 'word', text: word };
+    }
+    const end = bodyAfter(cmd, start + word.length, quoted[2], cmd[at + 2] === '-', memo);
+    if (end === null) continue;
+    const lineEnd = maskAt(end.body.from - 1);
+    if (lineEnd === '\x00' || lineEnd === SUB_SPAN || counter.openAt(at) || counter.openAt(end.body.from - 1)) {
+      return { kind: 'open-span', text: quoted[2] };
+    }
+    if (/[$<>]\(/.test(cmd.slice(start + word.length, end.body.from - 1))) {
+      return { kind: 'open-span-substitution', text: quoted[2] };
+    }
+    if (end.carriageReturn) return { kind: 'carriage-return', text: quoted[2] };
+    passed.push(end.body);
+    counter.skipTo(end.body.to);
+    if (end.body.to <= masks[masks.length - 1].from) continue;
+    if (/['"`$\\<]/.test(cmd.slice(end.body.from, end.body.to))) {
+      masks.push({ from: end.body.to, masked: maskQuoted(cmd.slice(end.body.to)) });
+    }
+  }
+  return null;
+}
+
+// The description of a command refused for `fault`, as `offendingDelimiter`
+// returned it, for a guard whose refusal helper takes a what and an instead
+// sentence, the forms left to `delimiterAdvice`. The word is the command's
+// own text on its way to the model, so it passes through `quote`, the fold
+// and bracket guard every quoted command word takes.
+export function delimiterWhat(fault: DelimiterFault, quote: (text: string) => string): string {
+  if (fault.kind === 'word') return `a heredoc whose delimiter ${quote(fault.text)} holds a quote or a backslash and is not plain`;
+  if (fault.kind === 'open-span') return `a heredoc whose delimiter ${quote(fault.text)} is introduced inside an open \${, $[ or >( construct, or on a line that ends inside an open quote, substitution or such construct, so the shell does not start the body at the line the gate reads`;
+  if (fault.kind === 'open-span-substitution') return `a heredoc whose delimiter ${quote(fault.text)} is followed on its introducing line by a substitution, so the shell can start the body at a line the gate does not read`;
+  if (fault.kind === 'split') return `a heredoc introduction ${quote(fault.text)} split across lines by a backslash-newline, which the shell joins into an operator and delimiter the gate does not read`;
+  return `a heredoc whose terminator line is ${quote(fault.text)} followed by a carriage return, which ends the body for one bash and not another`;
+}
+
+// The same description inside the fixed refusal line of a guard whose reason
+// is a description of the command alone, so a word fault carries the
+// admitted forms in a parenthesis, since no instead sentence follows it.
+export function delimiterFault(fault: DelimiterFault, quote: (text: string) => string): string {
+  const what = delimiterWhat(fault, quote);
+  return fault.kind === 'word'
+    ? `${what} (one word of ${PLAIN_DELIMITER_CLASS} inside one pair of quotes, or after one backslash)`
+    : what;
+}
+
+// The way around the refusal `fault` names, for a guard whose refusal helper
+// takes an instead sentence.
+export function delimiterAdvice(fault: DelimiterFault): string {
+  if (fault.kind === 'word') return `Spell the delimiter as one word of ${PLAIN_DELIMITER_CLASS} inside one pair of quotes, so the gate and the shell end the body at the same line`;
+  if (fault.kind === 'open-span') return 'Close every quote, substitution and ${, $[ or >( construct before the << and on its introducing line, so the gate and the shell start the body at the same line';
+  if (fault.kind === 'open-span-substitution') return 'Move every substitution after the << on the introducing line ahead of the <<, or into a variable set on an earlier line, so the gate and the shell start the body at the same line';
+  if (fault.kind === 'split') return 'Write the << operator and its delimiter word on one line, with no backslash-newline inside them, so the gate and the shell read the same heredoc';
+  return 'End the terminator line with a bare newline, so the gate and the shell end the body at the same line';
 }
 
 // A copy of the masked command with the > characters inside each heredoc body
@@ -900,7 +1276,10 @@ function parseIntro(intro: string): { stream: IntroToken[]; heredoc: { delim: st
 // where the ENTIRE command string is one simple heredoc write of exactly this
 // shape, decided before and independently of the quote mask so body text cannot
 // influence it:
-//   1. one `cat` or `tee` owns one heredoc whose delimiter is quoted;
+//   1. one `cat` or `tee` owns one heredoc whose delimiter is quoted and
+//      plain, the exported `offendingDelimiter` having refused the command
+//      ahead of this decision where any delimiter word holding a quote or a
+//      backslash is outside the forms it admits;
 //   2. one `>`/`>>` redirect with no descriptor prefix, or one `tee` file
 //      operand, is the only destination;
 //   3. that destination resolves inside the class's writable set or outside
@@ -2232,7 +2611,7 @@ function unresolvableSplice(cmd: string, masked: string): string | null {
 // regex-per-heuristic over the whole string, so cost grows with the square of
 // command length (a 80 KB command takes seconds); the agent authoring that string
 // is the only party it delays.
-async function denyReason(cmd: string, cwd: string | null, strict: boolean, depth: number, host: LexHost): Promise<string | null> {
+async function denyReason(cmd: string, cwd: string | null, strict: boolean, depth: number, host: LexHost, quote: (text: string) => string): Promise<string | null> {
   // A CRLF pair is a line break the way a bare newline is, so it is normalized to
   // one before anything reads the command: a Windows-authored report or a
   // multi-line command carries \r\n between its lines, and the two rules that bound
@@ -2255,6 +2634,16 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
     return 'a control character in the command';
   }
 
+  // A heredoc fault `offendingDelimiter` returns, any `DelimiterFault` kind,
+  // refuses here, at every depth, before any body range, exemption or mask is
+  // built on the command, since bash and the guard would end or start its body
+  // at different lines and the commands between would be read as data or
+  // blanked by a stray quote.
+  // No carriage-return fault reaches here: the check above refuses every bare \r.
+  const bare = maskQuoted(cmd);
+  const delimiter = offendingDelimiter(cmd, bare);
+  if (delimiter !== null) return delimiterFault(delimiter, quote);
+
   // Heredoc bodies are found first, on a body-blind quote mask, so the second
   // mask can treat a body's own quotes as the literal data they are. The second
   // mask also collects the interiors of command substitutions found inside
@@ -2262,7 +2651,7 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
   // own below rather than inline, so their delimiters never reshape an operand
   // list.
   const subs: Span[] = [];
-  const bodies = heredocBodies(cmd, maskQuoted(cmd));
+  const bodies = heredocBodies(cmd, bare);
 
   // The data-sink exemption is decided over the whole command string, before and
   // independently of the quote mask, and holds only at the top level with a cwd
@@ -2356,7 +2745,7 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
   ];
   if (depth < 2) {
     for (const src of recursionSources) {
-      const nested = await denyReason(src.text, cwd, strict, depth + 1, host);
+      const nested = await denyReason(src.text, cwd, strict, depth + 1, host, quote);
       if (nested) return src.adorn(nested);
     }
   } else if (recursionSources.length) {
@@ -2395,8 +2784,10 @@ function refusalOf(t: string, reason: string): string {
 }
 
 // What the guard reaches through hooks/index.ts: the lexer's host for one
-// call, its home directory read once.
-export type ReadonlyAgentDeps = { lexHost(): Promise<LexHost> };
+// call, its home directory read once, and the fold and bracket guard a quoted
+// command word takes on its way to the model, which a refused heredoc
+// delimiter word passes through.
+export type ReadonlyAgentDeps = { lexHost(): Promise<LexHost>; quote(text: string): string };
 
 /**
  * Denies a strict seat's or the QA verifier's Bash or PowerShell command that
@@ -2419,7 +2810,7 @@ export function readonlyAgentGuard(deps: ReadonlyAgentDeps): BeforeGuard {
       const cmd = e.command;
       if (typeof cmd !== "string" || !cmd.trim()) return {};
       const cwd = typeof ctx.cwd === "string" && ctx.cwd.trim() ? ctx.cwd.trim() : null;
-      const reason = await denyReason(cmd, cwd, cls === "strict", 0, await deps.lexHost());
+      const reason = await denyReason(cmd, cwd, cls === "strict", 0, await deps.lexHost(), deps.quote);
       return reason === null ? {} : { deny: refusalOf(t, reason) };
     },
   };
