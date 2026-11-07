@@ -210,10 +210,10 @@ import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore
 import { formatterHook, prReadyHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
 import { childEnvOf, gitHooksPathOf } from "./spawn";
 import { newSpawnTypes, recordSpawnType, spawnLogLine, spawnTypeOf, type SpawnTypes } from "./spawn-types";
-// The nine deny guards: the four the kit's command hooks held, ported, the
+// The ten deny guards: the four the kit's command hooks held, ported, the
 // shared-state guard, the git commit gate, the em-dash guard, the test-hang
-// gate and the dispatch-docs guard beside them, and the path host their tree
-// reads go through.
+// gate, the inplace-rewrite guard and the dispatch-docs guard beside them,
+// and the path host their tree reads go through.
 import { pathOpsOf, readonlyAgentGuard, type LexHost } from "./guards/readonly-agent";
 import { docsWriteGuard } from "./guards/docs-write";
 import { dispatchDocsGuard } from "./guards/dispatch-docs";
@@ -223,6 +223,7 @@ import { sharedStateGuard } from "./guards/shared-state";
 import { gitCommitGateGuard } from "./guards/git-commit-gate";
 import { emDashGuard } from "./guards/em-dash";
 import { testHangGateGuard } from "./guards/test-hang-gate";
+import { inplaceRewriteGuard } from "./guards/inplace-rewrite";
 // The memq grant, answered on tool.check.
 import { MEMQ_GRANT_REASON, memqGrantMatches, memqGrantable, type MemqGrantDeps } from "./guards/memq-grant";
 import { ATTACHMENT_WITHHELD, BLOCK_WITHHELD, bodyFileRefusal, PROMPT_WITHHELD, REFUSED_TOOLS, REFUSED_TOOL_REASON, SPAWN_WITHHELD, scrubAttachment, scrubContextBlocks, scrubPrompt, scrubServed, scrubSpawn, scrubText, seedFiles, seedVault, serverOf, setRedactorOn, setRestoreTools, toolCallBack, toolCallDown, toolCallRefusal, unrestoredNotice, withheldContextBlocks, withheldToolResult, type SeedFile, type ToolCallDown } from "./redactor";
@@ -842,7 +843,7 @@ async function guardWindowsOf(dp: any): Promise<boolean> {
   }
 }
 
-// The module's own before guards for one call, the nine deny guards, built
+// The module's own before guards for one call, the ten deny guards, built
 // over the hook-bound `$` for hostOf's reason. They run beside the guards
 // runner.ts holds registered, in the same runBefore pass, after those.
 function moduleBeforeGuards(dp: any): BeforeGuard[] {
@@ -871,6 +872,7 @@ function moduleBeforeGuards(dp: any): BeforeGuard[] {
     gitCommitGateGuard({ lexHost, readFile: (path: string) => guardReadFileOf(dp, path), quote: (text: string) => bracketSafeText(oneLine(text)) }),
     emDashGuard({ quote: (text: string) => bracketSafeText(oneLine(text)) }),
     testHangGateGuard({ quote: (text: string) => bracketSafeText(oneLine(text)) }),
+    inplaceRewriteGuard({ windows: () => guardWindowsOf(dp), quote: (text: string) => bracketSafeText(oneLine(text)) }),
   ];
 }
 

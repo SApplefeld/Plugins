@@ -204,6 +204,43 @@ function longFlag(arg: string, full: string): boolean {
   return name.length >= 3 && name.startsWith("--") && full.startsWith(name);
 }
 
+// The xargs options whose next word is their value where the option stands
+// apart from it, the read-only guard's own list at its xargs reading.
+const XARGS_VALUE_OPTIONS = /^-(?:n|I|P|L|d|E|s|a)$/;
+
+// True when a simple command's words run sed or awk in place, the one
+// reading of in-place the docs-write guard and the inplace-rewrite guard
+// share: sed with an i anywhere in a short-flag cluster (-i, -i.bak, -ni) or
+// any spelling of --in-place, its =suffix and a three-character abbreviation
+// (--in-pl) included; awk or gawk with -i, -l, --include or --load, likewise
+// abbreviated, or an operand whose last path element is inplace or
+// inplace.awk. The verb is the first word, or, where the first word is
+// xargs, the first word after xargs's own short options, so xargs sed -i
+// reads as sed -i. A long option whose value stands apart (--max-args 1) ends
+// the step early and reads false, and a guard that finds the verb's own
+// command position, as inplace-rewrite does, catches that call there. Any
+// other verb reads false: the > redirect test the docs-write
+// guard holds awk to is a redirect check and stays with its caller.
+export function inPlaceRewrite(words: readonly string[]): boolean {
+  let k = 0;
+  if ((words[0] ?? "").toLowerCase() === "xargs") {
+    k = 1;
+    while (k < words.length && words[k].startsWith("-")) k += XARGS_VALUE_OPTIONS.test(words[k]) ? 2 : 1;
+  }
+  const verb = (words[k] ?? "").toLowerCase();
+  const args = words.slice(k + 1);
+  switch (verb) {
+    case "sed":
+      return args.some((a) => /^-[A-Za-z]*i/.test(a) || a.startsWith("--in-place") || longFlag(a, "--in-place"));
+    case "awk":
+    case "gawk":
+      return args.some((a) => /^-[il]/.test(a) || a.startsWith("--include") || a.startsWith("--load")
+        || longFlag(a, "--include") || longFlag(a, "--load") || /(^|[\\/])inplace(\.awk)?$/.test(a));
+    default:
+      return false;
+  }
+}
+
 // The characters a docs/ path cannot run across inside one word, so a path
 // standing inside a program text (python -c "open('docs/x.md','w')"), after an
 // = (of=docs/x.md) or after a : (-FilePath:docs/x.md, HEAD:docs/x.md) is read
@@ -412,15 +449,14 @@ function readsOnly(c: SimpleCommand, raw: string): boolean {
   const args = c.words.slice(1);
   switch (word) {
     case "sed":
-      return !args.some((a) => /^-[A-Za-z]*i/.test(a) || a.startsWith("--in-place") || longFlag(a, "--in-place"));
+      return !inPlaceRewrite(c.words);
     case "less":
       return !args.some((a) => /^-[A-Za-z]*[oO]/.test(a) || a.startsWith("--log-file") || a.startsWith("--LOG-FILE")
         || longFlag(a, "--log-file") || longFlag(a, "--LOG-FILE"));
     case "rg":
       return !args.some((a) => a.startsWith("--pre"));
     case "awk":
-      return !raw.includes(">") && !args.some((a) => /^-[il]/.test(a) || a.startsWith("--include") || a.startsWith("--load")
-        || longFlag(a, "--include") || longFlag(a, "--load") || /(^|[\\/])inplace(\.awk)?$/.test(a));
+      return !raw.includes(">") && !inPlaceRewrite(c.words);
     case "find":
       return !args.some((a) => FIND_WRITE_PRIMARIES.has(a));
     case "sort":
