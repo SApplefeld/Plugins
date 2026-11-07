@@ -65,9 +65,11 @@ export interface TurnCompleteContext extends SharedHandlerState {
   meterTurnComplete: (facts: MeterTurnInput) => Promise<void>;
   submitReplyBackstop: (answer: string) => Promise<SubmitOutcome>;
   // The [MID-TURN MESSAGE] re-prompt over the carried window, which opens
-  // at the closing turn's start stamp where no earlier one is still open;
-  // hooks/index.ts wires it over hooks/mid-turn-reprompt.ts.
-  queueMidTurnReprompt: (turnStartedAt: number) => Promise<void>;
+  // at the closing turn's start stamp where no earlier one is still open,
+  // handed the closing turn's end stamp too, the bound a link only a queued
+  // line booked carries up to; hooks/index.ts wires it over
+  // hooks/mid-turn-reprompt.ts.
+  queueMidTurnReprompt: (turnStartedAt: number, turnEndedAt: number) => Promise<void>;
   openWorkerAsk: (...args: AfterDeps<typeof openWorkerAskFromModule>) => ReturnType<typeof openWorkerAskFromModule>;
   persist: () => Promise<boolean>;
   activate: (nextId: string | null, reason: string) => void;
@@ -1945,11 +1947,14 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       // start where no earlier one is still open, is queued ahead of the
       // drain's submit. Its spawn runs here, off the hook chain, after the
       // previous owner turn end's re-prompt has settled, so two that
-      // overlap never take one record twice. A failure inside it is its
-      // own skip decision and never stops the drain, and a throw past that
-      // is one decision here.
+      // overlap never take one record twice. The next turn can start while
+      // the scan runs, so the link is handed this turn's end, read above
+      // before the first await: a link only a queued line booked carries
+      // no record past it. A failure inside it is its own skip decision
+      // and never stops the drain, and a throw past that is one decision
+      // here.
       try {
-        if (mapStartedAt !== undefined) await chainReprompt(sess, () => queueMidTurnReprompt(mapStartedAt));
+        if (mapStartedAt !== undefined) await chainReprompt(sess, () => queueMidTurnReprompt(mapStartedAt, turnEndedAtDelete));
       } catch (err) {
         sess.state.decisions.push({
           timestamp: Date.now(),

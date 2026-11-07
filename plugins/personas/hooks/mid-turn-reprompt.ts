@@ -15,6 +15,49 @@
 // hooks/index.ts reads as the operator's own for the effort gate, the
 // autonomy tool and the ask lift.
 //
+// The scan runs only where the turn end owes a re-prompt: a tool refused an
+// act in the window because the operator had not opened the turn, which the
+// deny notes on the session as repromptOwed, a blocking ask still stands
+// open, or the engine queued a channel message whose body opens [PAUSE] or
+// [RESUME] into the running turn, which the prompt.attachment hook notes as
+// repromptLineOwed. Where none holds, the message was answered in the turn
+// it landed in, and a second turn would answer it again, so the turn end
+// spawns no scan, submits nothing, logs nothing and clears the window. The
+// refusal texts in hooks/effort-texts.ts tell the session the message comes
+// back as a turn of its own, so the refusal is what books that turn. The
+// queued-line note authenticates nothing, so a link it alone booked is
+// bounded two ways: it carries only the taken messages whose body reads a
+// line, and only those recorded at or before its own turn's end, which
+// hooks/turn-complete.ts hands it. The link runs off the hook chain and the
+// scan reads to the transcript's end, so a later turn's records can be in
+// its result: they are neither carried nor covered. Such a link has read
+// its window whole only up to its own turn's end, so where it read fresh
+// records it leaves the window open from that end, whether it queued its
+// line messages or carried nothing, and a later turn's records stay in the
+// window for that turn's own link. Beside that move it covers every taken
+// record at or before its end, the plain messages it did not carry among
+// them, since the scan reads back 2,000 ms from the moved window and would
+// otherwise hand a message from the turn's last two seconds to a next link
+// that a refusal or an ask books to carry everything. Owner turns that
+// overlap, the later begun before the earlier ended, leave the later
+// turn's records stamped at or before that end covered, a refused one
+// included, so no later link takes them, since the transcript carries no
+// per-turn attribution. A faked line therefore books
+// only the scans a genuine line would book and re-prompts no message a
+// genuine line would not. Each flag is the link's that reads it: that link
+// takes both before its scan, so a refusal noted while the scan is in
+// flight books the next link, and one the scan served is gone. The line
+// note also records its time as repromptLineNotedAt, and every link at its
+// exit sets the line flag again where a note came at or after its own
+// turn's end, since a link that waited on the chain can have taken the flag
+// a later turn's note set, and nothing else would book that turn's end. A link that
+// leaves the window carried, by a failed read, a refused submit or a
+// throw, sets the debt again as it was booked: the line flag where the
+// line alone booked it, so the next scan is filtered the same way, else
+// repromptOwed whether a refusal or an open blocking ask booked it, since
+// the ask may close before the next owner turn end and the carried window
+// is still scanned there.
+//
 // Dedupe is by time, never by text: the newest record timestamp a queued
 // re-prompt covered is kept on the session as repromptCoveredUntil, and a
 // record at or before it is never taken again, so the scan's tolerance
@@ -26,7 +69,9 @@
 // turn end sets it when unset, a reply backstop's and an open turn's
 // included, which the drain gate otherwise skips. The scan's stamp is that
 // carried start, and only a scan whose every in-window record ended queued,
-// none, covered or participant clears it. A refused submit and a failed
+// none, covered or participant clears it, save a link only a queued line
+// booked, which on its queued and no-line exits moves it to its own turn's
+// end instead, so a later turn's records stay. A refused submit and a failed
 // read keep it, so the next owner turn end reads the same records again,
 // and the covered timestamp keeps any from being taken twice.
 //
@@ -84,8 +129,9 @@ export type RepromptSession = {
   // by a reload. Empty where none is held, and then workdir stands.
   memqLaunchDir: string;
   state: AgentState;
-  // The newest record timestamp a queued re-prompt covered, or null where
-  // none has been queued this session.
+  // The newest record timestamp a queued re-prompt covered, or that a link
+  // moving its window to its own turn's end read whole at or before that
+  // end, or null where neither has happened this session.
   repromptCoveredUntil: number | null;
   // The newest record timestamp whose operator line the re-prompt walk in
   // hooks/index.ts has applied, or null where none has; a record at or
@@ -94,6 +140,26 @@ export type RepromptSession = {
   // The start stamp of the oldest owner turn whose window has not been read
   // whole, or null where every window so far was.
   repromptWindowFrom: number | null;
+  // Whether a re-prompt is owed and no link has served it yet: true from a
+  // tool's refusal of an act because the operator had not opened the turn,
+  // taken by the link that reads it, and set again where that link left the
+  // window carried, whether a refusal or an open blocking ask booked it. A
+  // link the line flag alone booked restores that flag instead.
+  repromptOwed: boolean;
+  // Whether a queued channel message whose body opens [PAUSE] or [RESUME]
+  // owes a scan and no link has served it yet: set by the prompt.attachment
+  // note in hooks/index.ts, which authenticates nothing, taken by the link
+  // that reads it beside repromptOwed, and set again by a link at its exit
+  // where that link alone booked left the window carried, or where a note
+  // came at or after the link's own turn's end. A scan this flag alone
+  // booked carries only the taken messages whose body reads a line,
+  // recorded at or before its own turn's end.
+  repromptLineOwed: boolean;
+  // The clock at the newest queued-line note, or null where none has been
+  // made this session. A link whose turn ended at or before it sets the
+  // line flag again at its exit, since the note is a later turn's and that
+  // link may have taken the flag it set. Never cleared.
+  repromptLineNotedAt: number | null;
   // Whether the id-pending skip has been logged, which happens once at the
   // first owner turn end of a session whose id never resolved.
   repromptIdPendingLogged: boolean;
@@ -107,8 +173,10 @@ export type RepromptSession = {
 export type MidTurnMessage = { at: number; senderClass: "operator"; prompt: string };
 
 // The closed list of reasons a turn end that read the transcript queued no
-// re-prompt, as mid_turn_reprompt_skipped carries them.
-export type RepromptSkipReason = "participant" | "covered" | "read-failed" | "submit-refused" | "id-pending";
+// re-prompt, as mid_turn_reprompt_skipped carries them. no-line is a scan a
+// queued line alone booked, none of whose taken messages recorded at or
+// before the link's own turn's end opens a line.
+export type RepromptSkipReason = "participant" | "covered" | "read-failed" | "submit-refused" | "id-pending" | "no-line";
 
 export type RepromptScanOutcome =
   | { kind: "taken"; messages: MidTurnMessage[] }
@@ -223,13 +291,41 @@ export function openRepromptWindow(sess: RepromptSession, turnStartedAt: number)
   if (sess.repromptWindowFrom === null) sess.repromptWindowFrom = turnStartedAt;
 }
 
+// Whether the turn end owes a re-prompt: a tool refused an act in the window
+// because the operator had not opened the turn, a blocking ask is open at
+// this turn end, or a queued channel message whose body opens a line was
+// noted in the window. The ask is read here rather than stored, since the
+// re-prompt turn's start lifts every open blocking ask. Read before the
+// scan, so a turn end that owes nothing spawns no child. The two flags are
+// read here and taken by the link in queueMidTurnReprompt, which clears
+// both before its scan, so a refusal a later turn notes while that scan is
+// in flight is the next link's to serve and is not cleared with this link's
+// window. A link that leaves the window carried sets the flag it took
+// again, so a carried window is scanned even once the ask closes.
+export function repromptIsOwed(sess: RepromptSession): boolean {
+  return sess.repromptOwed || sess.repromptLineOwed || openBlockingAsks(sess.state).length > 0;
+}
+
+// Clears the carried window: a queued submit, a read whole and a turn end
+// that owes nothing each clear it. The refusal flag is not cleared here,
+// since the link that reads it has already taken it, and one set since then
+// belongs to the next link.
+export function closeRepromptWindow(sess: RepromptSession): void {
+  sess.repromptWindowFrom = null;
+}
+
+// Moves the covered timestamp to `newest` where that is later than it now
+// is, and never back, so a record at or before it is never taken again.
+function coverRepromptUntil(sess: RepromptSession, newest: number): void {
+  sess.repromptCoveredUntil = sess.repromptCoveredUntil === null ? newest : Math.max(sess.repromptCoveredUntil, newest);
+}
+
 // The queued decision, the covered timestamp moved to the newest record the
 // re-prompt carries, so the next turn end's scan takes none of them again,
 // and the window cleared, since every record in it is now queued or covered.
 export function noteRepromptQueued(sess: RepromptSession, messages: readonly MidTurnMessage[]): void {
-  const newest = Math.max(...messages.map((m) => m.at));
-  sess.repromptCoveredUntil = sess.repromptCoveredUntil === null ? newest : Math.max(sess.repromptCoveredUntil, newest);
-  sess.repromptWindowFrom = null;
+  coverRepromptUntil(sess, Math.max(...messages.map((m) => m.at)));
+  closeRepromptWindow(sess);
   sess.state.decisions.push({
     timestamp: Date.now(),
     loop: "monitor",
@@ -243,6 +339,38 @@ export function noteRepromptQueued(sess: RepromptSession, messages: readonly Mid
 // end scans from the same start and takes the same records again.
 export function noteRepromptRefused(sess: RepromptSession, how: string, reason: string): void {
   skipped(sess, "submit-refused", `${how}: ${reason}`);
+}
+
+// The no-line skip: the scan took `taken` operator records and the link,
+// which a queued line alone booked, carries none, since each was recorded
+// after the link's own turn end and is a later link's, or its body opens no
+// [PAUSE] or [RESUME] and the turn it landed in answered it. Neither the
+// window nor the covered timestamp is touched here: at its exit the link
+// moves the window to its own turn's end and covers the taken records at or
+// before it, through coverRepromptThroughTurnEnd, since the records up to
+// that end were read whole and the ones after it stay in the window.
+export function noteRepromptNoLine(sess: RepromptSession, taken: number): void {
+  skipped(sess, "no-line", `${taken} operator record(s) taken, none carried: a link a queued line alone booked carries only a record whose body opens [PAUSE] or [RESUME], recorded at or before its turn's end`);
+}
+
+// The coverage a link owes where it moves its window to its own turn's end
+// rather than closing it: the newest taken record stamped at or before that
+// end is covered, carried or not. Such a link read every record up to its
+// end whole and owed only the line messages among them, so none of the
+// rest is owed either. Without it the scan's tolerance, which reads back
+// 2,000 ms from the moved window, would hand a plain message from the
+// turn's last two seconds to the next link, and a refusal or an open ask
+// books that link to carry every fresh message, so an answered message
+// would come back. A record stamped after the end is a later turn's and
+// stays uncovered, and the covered timestamp never moves back, so a wider
+// coverage already set stands. Nothing moves where no taken record is at
+// or before the end.
+export function coverRepromptThroughTurnEnd(sess: RepromptSession, taken: readonly MidTurnMessage[], turnEndedAt: number): void {
+  let newest: number | null = null;
+  for (const message of taken) {
+    if (message.at <= turnEndedAt && (newest === null || message.at > newest)) newest = message.at;
+  }
+  if (newest !== null) coverRepromptUntil(sess, newest);
 }
 
 // Runs one turn end's re-prompt after the previous one has settled, on the
@@ -322,7 +450,7 @@ export async function readMidTurnMessages(host: RepromptHost, sess: RepromptSess
     const detail = `the scan's reach stopped short of the window start ${new Date(stamp).toISOString()}; the reach's floor is ${reachFloor}, and no later scan reads before it`;
     skipped(sess, "read-failed", detail);
     if (fresh.length === 0) {
-      sess.repromptWindowFrom = null;
+      closeRepromptWindow(sess);
       return { kind: "skip", reason: "read-failed", detail };
     }
   }
@@ -332,7 +460,7 @@ export async function readMidTurnMessages(host: RepromptHost, sess: RepromptSess
       .sort((a, b) => a.at - b.at);
     return { kind: "taken", messages };
   }
-  sess.repromptWindowFrom = null;
+  closeRepromptWindow(sess);
   if (covered > 0) {
     const detail = `${covered} record(s) at or before the covered timestamp ${new Date(coveredUntil as number).toISOString()}${parsed.participants > 0 ? `, and ${parsed.participants} participant-class record(s)` : ""}`;
     skipped(sess, "covered", detail);

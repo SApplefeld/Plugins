@@ -25,7 +25,7 @@
 // never that it exited. A claim is non-destructive: the epoch bump makes
 // the old holder yield on its next write.
 
-import type { AgentSpawnInput, AgentSpawnResult, CommandRunArgs, HttpInit, Next, ProcessRunInit, ProcessRunResult, PromptSubmitInput, PromptSubmitResult, Register, SessionUsageArgs, StateValue, ToolCallInput, ToolCallResult } from "claude-code";
+import type { AgentSpawnInput, AgentSpawnResult, CommandRunArgs, HttpInit, Next, ProcessRunInit, ProcessRunResult, PromptAttachmentInput, PromptSubmitInput, PromptSubmitResult, Register, SessionUsageArgs, StateValue, ToolCallInput, ToolCallResult } from "claude-code";
 import type { PluginHost } from "./host";
 import {
   createDefaultState,
@@ -242,7 +242,7 @@ import { recallInjection as recallInjectionFromModule, recognitionAsk as recogni
 import { controllerTick, drainInbox, heartbeatTick, type DrainChoice, type DrainOverrun, type TickContext } from "./controller-tick";
 import { persistAnswering, serveToolCall, type EffortAct, type ToolCallContext } from "./tool-call";
 import { serveTurnComplete, type TurnCompleteContext } from "./turn-complete";
-import { channelBodyOf, readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, liftHeldAsksForReprompt } from "./mid-turn-reprompt";
+import { channelBodyOf, readMidTurnMessages, repromptText, noteRepromptQueued, noteRepromptRefused, noteRepromptNoLine, coverRepromptThroughTurnEnd, liftHeldAsksForReprompt, repromptIsOwed, closeRepromptWindow, type MidTurnMessage } from "./mid-turn-reprompt";
 import { OPERATOR_LINE_PAUSED_TEXT, OPERATOR_LINE_RESUMED_TEXT } from "./effort-texts";
 // The relay adapter: the Channels broker's hook events, posted by the module
 // itself under the `plugin` hook owner, behind the relayAdapter option.
@@ -1590,6 +1590,9 @@ const sess: SessionState = {
   repromptCoveredUntil: null,
   repromptLineAppliedUntil: null,
   repromptWindowFrom: null,
+  repromptOwed: false,
+  repromptLineOwed: false,
+  repromptLineNotedAt: null,
   repromptIdPendingLogged: false,
   repromptChain: Promise.resolve(),
   cacheWarmUntil: null,
@@ -4146,6 +4149,51 @@ export const register: Register = async (on, options) => {
     if (currentTurnOriginKind === "channel" && currentTurnSenderClass === "participant") return false;
     return OPERATOR_ORIGIN_KINDS.has(currentTurnOriginKind);
   };
+  // The note a tool makes where it refuses an act, or lands it waiting,
+  // because the operator had not opened the turn: a re-prompt is now owed,
+  // so the next owner turn end's link that reads the note takes it and
+  // spawns the scan, whether that link is waiting on an earlier one's scan
+  // or not. Only the owner's turn end reads the flag, so a session that
+  // does not own the persona notes nothing. hooks/tool-call.ts calls it at
+  // each such site and nowhere else. The two readings above set nothing,
+  // since each is read at places that refuse nothing.
+  const noteStandingRefusal = (): void => {
+    if (sess.isOwner) sess.repromptOwed = true;
+  };
+  // The note the prompt.attachment hook makes where the engine queues a
+  // channel message into the running turn, on the main loop, whose envelope
+  // body opens with [PAUSE] or [RESUME]: a scan is now owed on the line
+  // flag, so the owner turn end's scan runs and its walk applies the line.
+  // The line is the one operator act a running turn cannot take and no tool
+  // refuses, so without this note the turn end would never read it. It
+  // authenticates nothing: the event carries no relay stamp, and the text is
+  // read as the engine hands it, framed ahead of the envelope. The scan it
+  // books keeps operator records alone by the relay stamp on the transcript,
+  // and a link only this note booked carries only the taken messages whose
+  // body reads a line, recorded at or before its own turn's end, so a faked
+  // trigger, a keyboard-typed queued message or a participant's line, books
+  // only the scans a genuine line would book and re-prompts no message a
+  // genuine line would not. The engine joins several text blocks with
+  // newlines, so one attachment can carry several envelopes: every `<channel`
+  // in the text is read, and any whose body opens a line books. A text with
+  // no envelope, or one the body reader cannot open, books nothing, and
+  // nothing here throws. The prompt.attachment handler calls it and nowhere
+  // else. The note also records its clock as repromptLineNotedAt, so a link
+  // whose turn ended at or before it, one that may have taken this flag
+  // while it waited on the chain, sets the flag again at its exit. No other
+  // note sets the line flag: a link sets it again only at that exit, or
+  // where the link it alone booked left the window carried.
+  const noteQueuedOperatorLine = (e: PromptAttachmentInput): void => {
+    if (!sess.isOwner || e.type !== "queued_command" || (typeof e.agentId === "string" && e.agentId.length > 0)) return;
+    if (typeof e.text !== "string") return;
+    for (let envelopeAt = e.text.indexOf("<channel"); envelopeAt >= 0; envelopeAt = e.text.indexOf("<channel", envelopeAt + 1)) {
+      if (operatorLineOf(channelBodyOf(e.text.slice(envelopeAt))) !== null) {
+        sess.repromptLineOwed = true;
+        sess.repromptLineNotedAt = Date.now();
+        return;
+      }
+    }
+  };
   // The operator's [PAUSE] and [RESUME] lines, read from one channel
   // message's own words. The caller has settled that the words are an
   // operator-class message from the persona's thread: at prompt.submit by the
@@ -4154,6 +4202,13 @@ export const register: Register = async (on, options) => {
   // and for a session that is not the persona's owner.
   const operatorLineOf = (body: string): OperatorLine | null =>
     sess.isOwner ? readOperatorLine(body.trim(), LEAD_REASON_MAX) : null;
+  // The line one message the scan took carries, read as prompt.submit reads
+  // a message's words: scrubbed, then stripped of the envelope. The
+  // re-prompt walk applies this reading, and the filter over a scan only a
+  // queued line booked keeps the messages it is non-null for, so the two
+  // cannot drift.
+  const operatorLineOfMessage = (message: MidTurnMessage): OperatorLine | null =>
+    operatorLineOf(channelBodyOf(scrubText(message.prompt).text));
   // The one context sentence a line that changed entries carries.
   const operatorLineSentence = (line: OperatorLine, changed: readonly string[]): string =>
     (line.kind === "pause" ? OPERATOR_LINE_PAUSED_TEXT : OPERATOR_LINE_RESUMED_TEXT).replace("{entries}", changed.join(", "));
@@ -7144,6 +7199,7 @@ export const register: Register = async (on, options) => {
         turnMayStartEffort,
         turnIsOperatorsOrCoordinators,
         turnIsOperators,
+        noteStandingRefusal,
         hookBudget,
         COMPACT_HOLD_REMINDER_TEXT,
         urgentCheckMinMs,
@@ -7511,7 +7567,7 @@ export const register: Register = async (on, options) => {
     return spawnStarted($, e.subagentType, await next(scrubbed), spawnTypes);
   });
 
-  // --- prompt.context, prompt.attachment: redactor work alone, .catch fails closed ---
+  // --- prompt.context, prompt.attachment: redactor work and the queued-line note, .catch fails closed ---
   on("prompt.context", async ($, e, next) => {
     const r = await next(e);
     return redactorOn ? scrubContextBlocks(r, next.budget.remainingMs) : r;
@@ -7520,6 +7576,9 @@ export const register: Register = async (on, options) => {
     return redactorOn ? withheldContextBlocks(r) : r;
   });
   on("prompt.attachment", async ($, e, next) => {
+    // Read before the chain, so the line is read off the text as the engine
+    // hands it, ahead of the redactor's scrub of what comes back.
+    noteQueuedOperatorLine(e);
     const r = await next(e);
     return redactorOn ? scrubAttachment(e, r, next.budget.remainingMs) : r;
   }).catch(async ($, e, next) => (redactorOn ? ATTACHMENT_WITHHELD : next(e)));
@@ -7576,48 +7635,128 @@ export const register: Register = async (on, options) => {
         // submit withdraws the follow-ups the blocks offered, as a refused
         // delivery does, and undoes no line: the operator's line is the act,
         // and only the delivery of its words is retried.
-        queueMidTurnReprompt: async (turnStartedAt: number) => {
-          const repromptHost = { getHome: hostOf($).getHome, run: (argv: readonly string[], init: ProcessRunInit) => runChild($, argv, init), pluginRoot: $.plugin.root };
-          const scanned = await readMidTurnMessages(repromptHost, sess, turnStartedAt);
-          if (scanned.kind !== "taken") return;
-          const repromptBody = repromptText(scanned.messages);
-          // Each taken message is the operator's, so one opening with
-          // [PAUSE] or [RESUME] acts on the tree here, oldest first, before
-          // the blocks are built, so the [GOAL TREE] block and the sentences
-          // read one tree. A refused submit moves no coverage and the next
-          // owner turn end takes the same message again, so the stamp
-          // repromptLineAppliedUntil marks the newest message walked and a
-          // message at or below it applies nothing and carries no sentence.
-          // Each message is judged against the stamp as it stood before this
-          // walk, which only moves forward, so two messages sharing one time
-          // both apply. The words are read as prompt.submit reads them,
-          // scrubbed and then stripped of the envelope. One store write
-          // follows the walk, and the sentences ride only where it landed,
-          // as at prompt.submit.
-          const lineSentences: string[] = [];
-          let lineApplied = false;
-          const appliedBefore = sess.repromptLineAppliedUntil;
-          for (const message of scanned.messages) {
-            if (!sess.isOwner) break;
-            if (appliedBefore !== null && message.at <= appliedBefore) continue;
-            if (sess.repromptLineAppliedUntil === null || message.at > sess.repromptLineAppliedUntil) sess.repromptLineAppliedUntil = message.at;
-            const line = operatorLineOf(channelBodyOf(scrubText(message.prompt).text));
-            if (line === null) continue;
-            lineApplied = true;
-            const changed = applyOperatorLine(sess.state, line, Date.now());
-            if (changed !== null) lineSentences.push(operatorLineSentence(line, changed));
+        // The scan runs only where this turn end owes a re-prompt: a tool
+        // refused an act in the window for the operator's standing, a
+        // blocking ask is open, or a queued channel message whose body opens
+        // a line was noted. Otherwise the message was answered in the turn
+        // it landed in, so nothing is spawned, submitted or logged, and the
+        // window clears as a window read whole does.
+        // Both flags are this link's: taken before the scan, so one a later
+        // turn notes while the scan is in flight stays for that turn's own
+        // link, which the chain runs after this one. Where the line flag
+        // alone booked the link, the note that set it authenticated
+        // nothing, so of the messages the scan took only those whose body
+        // reads a line and were recorded at or before this turn's end,
+        // `turnEndedAt`, are carried. The link runs off the hook chain and
+        // the scan reads to the transcript's end, so a later turn's records
+        // can be in its result: they are neither carried nor covered. A
+        // line-only link has read its window whole only up to its own
+        // turn's end, so where its scan took fresh records it leaves the
+        // window open from that end rather than closing it, whether it
+        // queued its line messages or carried nothing, and the later
+        // records stay in the window for the next link. Beside that move it
+        // covers every taken record at or before its end, carried or not,
+        // since none of them is owed and the next scan reads back 2,000 ms
+        // from the moved window. A link that carries nothing queues nothing
+        // and logs one no-line skip. Where a refusal or an open blocking ask held too,
+        // every taken message is carried. At the exit where this link left
+        // the window carried, a failed read, a refused submit or a throw,
+        // the debt is set again as it was booked: the line flag for a
+        // line-only link, so its next scan is filtered the same way, else
+        // repromptOwed whatever made it owed, a refusal or an open blocking
+        // ask, since the ask may close before the next owner turn end and
+        // the carried window is still scanned there from the same start. A
+        // window this link moved to its own end is not a carried one, so no
+        // debt is set for it. Whatever the exit, the line flag is set again
+        // where a line was noted at or after this turn's end: that note is a
+        // later turn's, this link may have taken the flag it set while
+        // waiting on the chain, and nothing else would book that turn's end.
+        queueMidTurnReprompt: async (turnStartedAt: number, turnEndedAt: number) => {
+          if (!repromptIsOwed(sess)) {
+            closeRepromptWindow(sess);
+            return;
           }
-          const repromptLineBlocks = lineApplied && await persist($) ? lineSentences : [];
-          const repromptFollowUps: string[] = [];
-          const repromptBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => true, operatorsWord: true }, repromptBody, contextSourcesOf($, undefined, repromptFollowUps));
-          const framedRepromptText = deliveryWithContext([...(repromptBlocks ?? []), ...repromptLineBlocks], repromptBody);
-          const repromptEntry = expectTurn({ kind: "reprompt", coveredAt: scanned.messages.map((m) => m.at), senderClass: "operator", text: framedRepromptText });
-          const repromptOutcome = await submitExpectedTurn($, expectedTurns, repromptEntry);
-          if (repromptOutcome.ok) {
-            noteRepromptQueued(sess, scanned.messages);
-          } else {
-            withdrawFollowUpsOffered(repromptFollowUps);
-            noteRepromptRefused(sess, repromptOutcome.how, repromptOutcome.reason);
+          const lineOnly = sess.repromptLineOwed && !sess.repromptOwed && openBlockingAsks(sess.state).length === 0;
+          sess.repromptOwed = false;
+          sess.repromptLineOwed = false;
+          // The start the window moves to at this link's exit: this turn's
+          // end where a line-only link read fresh records, else null and the
+          // window is left as the exit left it. `taken` is what that scan
+          // took, which the move covers up to the end.
+          let windowMovesTo: number | null = null;
+          let taken: readonly MidTurnMessage[] = [];
+          try {
+            const repromptHost = { getHome: hostOf($).getHome, run: (argv: readonly string[], init: ProcessRunInit) => runChild($, argv, init), pluginRoot: $.plugin.root };
+            const scanned = await readMidTurnMessages(repromptHost, sess, turnStartedAt);
+            if (scanned.kind !== "taken") return;
+            taken = scanned.messages;
+            const carried = lineOnly
+              ? scanned.messages.filter((message) => message.at <= turnEndedAt && operatorLineOfMessage(message) !== null)
+              : scanned.messages;
+            if (carried.length === 0) {
+              // Only a line-only link reaches here, since any other carries
+              // every taken message.
+              windowMovesTo = turnEndedAt;
+              noteRepromptNoLine(sess, scanned.messages.length);
+              return;
+            }
+            const repromptBody = repromptText(carried);
+            // Each taken message is the operator's, so one opening with
+            // [PAUSE] or [RESUME] acts on the tree here, oldest first, before
+            // the blocks are built, so the [GOAL TREE] block and the sentences
+            // read one tree. A refused submit moves no coverage and the next
+            // owner turn end takes the same message again, so the stamp
+            // repromptLineAppliedUntil marks the newest message walked and a
+            // message at or below it applies nothing and carries no sentence.
+            // Each message is judged against the stamp as it stood before this
+            // walk, which only moves forward, so two messages sharing one time
+            // both apply. The words are read as prompt.submit reads them,
+            // scrubbed and then stripped of the envelope. One store write
+            // follows the walk, and the sentences ride only where it landed,
+            // as at prompt.submit.
+            const lineSentences: string[] = [];
+            let lineApplied = false;
+            const appliedBefore = sess.repromptLineAppliedUntil;
+            for (const message of carried) {
+              if (!sess.isOwner) break;
+              if (appliedBefore !== null && message.at <= appliedBefore) continue;
+              if (sess.repromptLineAppliedUntil === null || message.at > sess.repromptLineAppliedUntil) sess.repromptLineAppliedUntil = message.at;
+              const line = operatorLineOfMessage(message);
+              if (line === null) continue;
+              lineApplied = true;
+              const changed = applyOperatorLine(sess.state, line, Date.now());
+              if (changed !== null) lineSentences.push(operatorLineSentence(line, changed));
+            }
+            const repromptLineBlocks = lineApplied && await persist($) ? lineSentences : [];
+            const repromptFollowUps: string[] = [];
+            const repromptBlocks = await assembleContext({ kind: "delivery", stillQuiet: () => true, operatorsWord: true }, repromptBody, contextSourcesOf($, undefined, repromptFollowUps));
+            const framedRepromptText = deliveryWithContext([...(repromptBlocks ?? []), ...repromptLineBlocks], repromptBody);
+            const repromptEntry = expectTurn({ kind: "reprompt", coveredAt: carried.map((m) => m.at), senderClass: "operator", text: framedRepromptText });
+            const repromptOutcome = await submitExpectedTurn($, expectedTurns, repromptEntry);
+            if (repromptOutcome.ok) {
+              noteRepromptQueued(sess, carried);
+              if (lineOnly) windowMovesTo = turnEndedAt;
+            } else {
+              withdrawFollowUpsOffered(repromptFollowUps);
+              noteRepromptRefused(sess, repromptOutcome.how, repromptOutcome.reason);
+            }
+          } finally {
+            // A window left set by an exit that chose no move is carried,
+            // and a moved one is this link's own end, not a carry. The move
+            // covers every taken record at or before that end, carried or
+            // not: the link read them whole and owed only the lines among
+            // them, and the next scan's tolerance reads back 2,000 ms from
+            // the moved window, so an uncovered plain message from the
+            // turn's last two seconds would come back through a next link
+            // that a refusal or an ask books. Records after the end stay
+            // uncovered for that next link.
+            const windowCarried = windowMovesTo === null && sess.repromptWindowFrom !== null;
+            if (windowMovesTo !== null) {
+              sess.repromptWindowFrom = windowMovesTo;
+              coverRepromptThroughTurnEnd(sess, taken, windowMovesTo);
+            }
+            if (windowCarried && !lineOnly) sess.repromptOwed = true;
+            if ((windowCarried && lineOnly) || (sess.repromptLineNotedAt !== null && sess.repromptLineNotedAt >= turnEndedAt)) sess.repromptLineOwed = true;
           }
         },
         openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),

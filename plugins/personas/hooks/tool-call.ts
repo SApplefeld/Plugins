@@ -119,6 +119,12 @@ export interface ToolCallContext extends SharedHandlerState {
   turnMayStartEffort: (act: EffortAct, autonomy?: string) => boolean;
   turnIsOperatorsOrCoordinators: () => boolean;
   turnIsOperators: () => boolean;
+  // The note a tool makes where it refuses an act, or lands it waiting,
+  // because the operator had not opened the turn: the re-prompt window owes
+  // a turn, so the turn end that scans reads it. Called at each such site,
+  // before its return, and nowhere else; the three readings above set
+  // nothing.
+  noteStandingRefusal: () => void;
   hookBudget: HookBudget;
   COMPACT_HOLD_REMINDER_TEXT: string;
   urgentCheckMinMs: number;
@@ -234,7 +240,7 @@ export function goalWriteFailedText(failed: string, repeatDoubles: boolean): str
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsOperators, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -546,6 +552,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // argument is read.
     if (!turnMayStartEffort("goal_create")) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      noteStandingRefusal();
       return { deny: EFFORT_REFUSED_TEXT };
     }
     if (!sess.isOwner) {
@@ -728,6 +735,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const autonomy = sess.state.autonomy;
     if (kind === "plan" && !turnMayStartEffort("goal_add_plan", autonomy)) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      noteStandingRefusal();
       return { deny: EFFORT_REFUSED_TEXT };
     }
     const maxRounds = Math.min(Math.max(parseInt(String((e as any).maxRounds || "10"), 10) || 10, 1), 50);
@@ -907,9 +915,16 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     }
     if (!added.ok) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      // An unprompted plan add is refused where the coordinator persona cannot
+      // be told of it, which a prompted add never needs, so that refusal
+      // turned on the turn's standing and a re-prompt is owed.
+      if (unprompted) noteStandingRefusal();
       return { deny: added.deny };
     }
     const newNode = added.node;
+    // An add that landed paused for the operator's yes was held for
+    // standing, so a re-prompt is owed as at a deny.
+    if (awaitingYes) noteStandingRefusal();
     {
       const nextActive = sess.state.activeGoalId
         ? sess.state.goals.find((g) => g.id === sess.state.activeGoalId)
@@ -982,6 +997,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       }
       if (node.awaitingYes && !turnIsOperatorsOrCoordinators()) {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        noteStandingRefusal();
         return { deny: AWAITING_YES_DROP_REFUSED_TEXT };
       }
       // A dropped plan's open closing leaf is abandoned with it, and the
@@ -1058,6 +1074,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // turn-origin gate runs before any argument is read.
     if (!turnMayStartEffort("goal_longterm")) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      noteStandingRefusal();
       return { deny: EFFORT_REFUSED_TEXT };
     }
     if (!sess.isOwner) {
@@ -1156,6 +1173,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     }
     if (!turnIsOperators()) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      noteStandingRefusal();
       return { deny: AUTONOMY_REFUSED_TEXT };
     }
     if (!sess.isOwner) {
@@ -1260,6 +1278,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         }
         if (!turnMayStartEffort("goal_done_root")) {
           setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+          noteStandingRefusal();
           return { deny: `Cannot complete ${byNameId}: it is the root, and the root closes only in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record opened. Retry in such a turn; this turn was not one.` };
         }
         // A root whose entries are all the planner's own and all done is the
@@ -1301,6 +1320,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       const awaitingAbove = awaitingEntryAtOrAbove(sess.state, named);
       if (awaitingAbove && !turnIsOperatorsOrCoordinators()) {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        noteStandingRefusal();
         return { deny: AWAITING_YES_DONE_REFUSED_TEXT };
       }
       // An allowed completion under an entry awaiting the operator's yes is
@@ -1956,6 +1976,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     if (budgetRoot) {
       if (!mayResumeAwaiting) {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        noteStandingRefusal();
         return { deny: AWAITING_YES_RESUME_REFUSED_TEXT };
       }
       const liftedAt = Date.now();
@@ -2007,6 +2028,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         && (g.status === "paused" || (g.status === "blocked" && g.blockedReason === "Max rounds reached")));
       if (target && awaitingEntryAtOrAbove(sess.state, target) && !mayResumeAwaiting) {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        noteStandingRefusal();
         return { deny: AWAITING_YES_RESUME_REFUSED_TEXT };
       }
     } else {
@@ -2020,6 +2042,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         .map((g) => awaitingEntryAtOrAbove(sess.state, g))
         .find((g) => g !== undefined);
       if (passedOver) {
+        // Passing over the awaiting entry is a refusal for standing, so the
+        // message that asked for the resume comes back as a turn of its own.
+        noteStandingRefusal();
         return { result: `No paused node to resume here: ${passedOver.id} "${passedOver.title}" waits for the operator's word, and so does anything under it.` };
       }
       return { result: "No paused nodes to resume." };

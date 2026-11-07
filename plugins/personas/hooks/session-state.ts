@@ -48,6 +48,34 @@ export interface SessionState {
   // window a refused submit, a failed read or a skipped turn end left open
   // is read again at the next owner turn end. In memory only, never persisted.
   repromptWindowFrom: number | null;
+  // Whether a re-prompt waits for a turn end's link: true from the moment a
+  // tool refuses an act because the operator had not opened the turn, taken
+  // by the link that reads it before its scan, and set again where that
+  // link left the window carried, whether a refusal or an open blocking
+  // ask booked it. The turn end that scans reads it beside the open
+  // blocking asks and repromptLineOwed below, and spawns the scan only where
+  // one of the three holds, since otherwise the message was answered in the
+  // turn it landed in. The field
+  // is the window's, not the turn's: a refusal in a turn whose end the drain
+  // gate skips waits, as the window does, for the next owner turn end that
+  // scans. In memory only, never persisted, and false at a restart.
+  repromptOwed: boolean;
+  // Whether a queued channel message whose body opens [PAUSE] or [RESUME]
+  // owes a scan at the next owner turn end's link: set by the
+  // prompt.attachment note in hooks/index.ts, taken by the link that reads
+  // it beside repromptOwed, and set again by a link at its exit where that
+  // link alone booked left the window carried, or where a note came at or
+  // after the link's own turn end. A scan this flag alone booked carries
+  // only the taken messages whose body reads a line and were recorded at or
+  // before the link's own turn end, since the note authenticates nothing.
+  // In memory only, never persisted, and false at a restart.
+  repromptLineOwed: boolean;
+  // The clock at the newest queued-line note, or null where none has been
+  // made this session. A link whose turn ended at or before it sets the
+  // line flag again at its exit, since the note is a later turn's and the
+  // link may have taken the flag it set while it waited on the chain.
+  // Never cleared. In memory only, never persisted.
+  repromptLineNotedAt: number | null;
   // Whether the re-prompt's id-pending skip has been logged, once per session.
   repromptIdPendingLogged: boolean;
   // The latest owner turn end's re-prompt, settled or in flight, which the
