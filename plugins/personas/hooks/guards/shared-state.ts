@@ -10,8 +10,8 @@
 // BLOCKED, where the ask runs up one hop.
 //
 // A denylist, not an allowlist: it denies the closed set of command shapes
-// below, and a heredoc the shared reader `offendingDelimiter` refuses, at any
-// depth, and lets everything else through, an unreadable command included. The
+// below, and a heredoc the shared walk `heredocWalk` refuses on either
+// reading, at any depth, and lets everything else through, an unreadable command included. The
 // shapes close ordinary mistakes, not adversarial spellings, so a kill or a
 // stash reachable only through a rewritten spelling (a verb assembled from a
 // variable, a control character forging a mask sentinel, an operand routed
@@ -63,8 +63,8 @@
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
   GIT_VALUE_FLAGS, cmdletOperands, cmdletPaths, commandPositions, delimiterFault, effectiveDirs, heredocBodies,
-  heredocExemption, maskQuoted, nestedPayloads, offendingDelimiter, repoRoot, resolveTarget, segment,
-  spliceContinuations, tokens, type LexHost,
+  heredocExemption, heredocWalk, maskExact, maskQuoted, nestedPayloads, offendingDelimiter, repoRoot, resolveTarget,
+  segment, spliceContinuations, tokens, type LexHost,
 } from "./readonly-agent";
 import { sharedStateAgentClass } from "./agent-class";
 
@@ -429,25 +429,41 @@ async function deleteAct(cmd: string, masked: string, cwd: string, host: LexHost
   return null;
 }
 
-// The shared-state act the command performs, or null. The preprocessing is
-// the read-only guard's, in its order: CRLF normalized, any heredoc fault
-// `offendingDelimiter` returns (a `DelimiterFault` kind) refused at every
-// depth before any body is read, naming the word or the delimiter through
-// the fold and bracket guard, heredoc bodies found on a body-blind mask, the
-// data-sink exemption decided over the whole string at the top level,
-// continuations spliced, then the mask the rules read, with an exempt body
-// blanked whole. The rules run,
+// The shared-state act the command performs under the reading `exact`
+// selects, or null. The preprocessing is the read-only guard's, in its order:
+// CRLF normalized, any heredoc fault refused at every depth before any body is
+// read, naming the word or the delimiter through the fold and bracket guard,
+// the heredoc bodies found, the data-sink exemption decided over the whole
+// string at the top level, continuations spliced, then the mask the rules
+// read, with an exempt body blanked whole. The legacy reading takes its fault
+// from `offendingDelimiter` (a `DelimiterFault` kind), its bodies from
+// `heredocBodies` on a body-blind mask and its mask from `maskQuoted`. The
+// exact reading takes its fault, its data bodies and its live bodies from
+// `heredocWalk`, splices no continuation inside either kind, and masks with
+// `maskExact`, which reads a word-start # as a comment and a body's quotes as
+// bytes, a live body's text staying command text. The guard reads a command
+// a second time, under the exact reading, where the legacy reading allowed it
+// and it holds a # or a <<, and refuses on either reading. The rules run,
 // then each substitution interior and nested payload is read one level deeper.
-async function sharedStateAct(cmd: string, cwd: string | null, depth: number, host: LexHost, quote: (text: string) => string): Promise<string | null> {
+async function sharedStateAct(cmd: string, cwd: string | null, depth: number, host: LexHost, quote: (text: string) => string, exact: boolean): Promise<string | null> {
   if (depth === 0) cmd = cmd.replace(/\r\n/g, "\n");
   const subs: Span[] = [];
-  const bare = maskQuoted(cmd);
-  const delimiter = offendingDelimiter(cmd, bare);
-  if (delimiter !== null) return delimiterFault(delimiter, quote);
-  const bodies = heredocBodies(cmd, bare);
+  let bodies: Span[];
+  let live: readonly Span[] = [];
+  if (exact) {
+    const walk = heredocWalk(cmd, "", true);
+    if (walk.fault !== null) return delimiterFault(walk.fault, quote);
+    bodies = walk.data;
+    live = walk.live;
+  } else {
+    const bare = maskQuoted(cmd);
+    const delimiter = offendingDelimiter(cmd, bare);
+    if (delimiter !== null) return delimiterFault(delimiter, quote);
+    bodies = heredocBodies(cmd, bare);
+  }
   const exemptBody = depth === 0 && cwd ? await heredocExemption(cmd, cwd, false, host) : null;
-  cmd = spliceContinuations(cmd, bodies);
-  let masked = maskQuoted(cmd, bodies, subs);
+  cmd = spliceContinuations(cmd, [...bodies, ...live]);
+  let masked = exact ? maskExact(cmd, bodies, live, subs) : maskQuoted(cmd, bodies, subs);
   if (exemptBody) {
     const chars = masked.split("");
     for (let i = exemptBody.from; i < exemptBody.to; i++) chars[i] = "\x00";
@@ -457,11 +473,11 @@ async function sharedStateAct(cmd: string, cwd: string | null, depth: number, ho
   if (act !== null) return act;
   if (depth >= DEPTH_BOUND) return null;
   for (const s of subs) {
-    const nested = await sharedStateAct(cmd.slice(s.from, s.to), cwd, depth + 1, host, quote);
+    const nested = await sharedStateAct(cmd.slice(s.from, s.to), cwd, depth + 1, host, quote, exact);
     if (nested !== null) return nested;
   }
   for (const payload of nestedPayloads(cmd, masked)) {
-    const nested = await sharedStateAct(payload, cwd, depth + 1, host, quote);
+    const nested = await sharedStateAct(payload, cwd, depth + 1, host, quote, exact);
     if (nested !== null) return `${nested}, inside a nested shell`;
   }
   return null;
@@ -504,7 +520,16 @@ export function sharedStateGuard(deps: SharedStateDeps): BeforeGuard {
       const cmd = e.command;
       if (typeof cmd !== "string" || !cmd.trim()) return {};
       const cwd = typeof ctx.cwd === "string" && ctx.cwd.trim() ? ctx.cwd.trim() : null;
-      const act = await sharedStateAct(cmd, cwd, 0, await deps.lexHost(), deps.quote);
+      const host = await deps.lexHost();
+      // The legacy reading runs first, so every refusal the guard gave before
+      // the exact reading existed keeps its reason byte for byte. The exact
+      // reading runs only where the legacy one allowed and the raw command
+      // holds a # or a <<, the only places the two readings differ, and a
+      // refusal from it is the guard's refusal.
+      let act = await sharedStateAct(cmd, cwd, 0, host, deps.quote, false);
+      if (act === null && (cmd.includes("#") || cmd.includes("<<"))) {
+        act = await sharedStateAct(cmd, cwd, 0, host, deps.quote, true);
+      }
       return act === null ? {} : { deny: refusalOf(t, cls, act) };
     },
   };

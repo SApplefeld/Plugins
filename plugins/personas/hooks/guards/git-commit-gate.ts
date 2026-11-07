@@ -81,7 +81,10 @@
 // file cannot be read.
 //
 // Every heredoc body is searched as command text, on a PowerShell call too,
-// where the lexer reads no <# block comment as a comment. The search
+// where the lexer reads no <# block comment as a comment. The gate reads a
+// command a second time, as bash reads comments and heredoc bodies, where the
+// first reading allowed it and it holds a # or a <<, and refuses on either
+// reading. The search
 // reads each { and } outside quotes as a ;, so a git word opening a PowerShell
 // script block stands in command position.
 //
@@ -165,8 +168,8 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, commandPositions, delimiterAdvice, delimiterWhat, heredocBodies, maskQuoted, nestedPayloads, offendingDelimiter,
-  resolveTarget, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
+  GIT_VALUE_FLAGS, commandPositions, delimiterAdvice, delimiterWhat, heredocBodies, heredocWalk, maskExact, maskQuoted, nestedPayloads,
+  offendingDelimiter, resolveTarget, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
 } from "./readonly-agent";
 
 // A half-open range of command indexes, the lexer's own span shape.
@@ -672,13 +675,24 @@ function gitCallAt(cmd: string, masked: string, at: number, depth: number, power
 }
 
 // A command read the read-only guard's way, in the shared-state guard's
-// order: a heredoc delimiter word `offendingDelimiter` refuses returned before
-// any body is read, as `delimiter`, with the text left unmasked; otherwise
-// heredoc bodies found on a body-blind mask, so a quote inside a body opens
-// no span that would hide the command text after it, continuations spliced,
-// then the quote mask, with each substitution interior collected into `subs`.
-// A heredoc body stays command text.
-function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+// order, under the reading `exact` selects. The legacy reading: a heredoc
+// delimiter word `offendingDelimiter` refuses returned before any body is
+// read, as `delimiter`, with the text left unmasked; otherwise heredoc bodies
+// found on a body-blind mask, so a quote inside a body opens no span that
+// would hide the command text after it, continuations spliced, then the quote
+// mask, with each substitution interior collected into `subs`. The exact
+// reading: the first fault `heredocWalk` returns, any `DelimiterFault` kind,
+// returned the same way; otherwise the walk's data and live bodies,
+// continuations spliced outside both, then `maskExact`, which reads a
+// word-start # as a comment and a body's quotes as bytes. A heredoc body
+// stays command text under either reading.
+function maskOf(cmd: string, subs: Span[], exact: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+  if (exact) {
+    const walk = heredocWalk(cmd, "", true);
+    if (walk.fault !== null) return { cmd, masked: cmd, delimiter: walk.fault };
+    const spliced = spliceContinuations(cmd, [...walk.data, ...walk.live]);
+    return { cmd: spliced, masked: maskExact(spliced, walk.data, walk.live, subs), delimiter: null };
+  }
   const bare = maskQuoted(cmd);
   const delimiter = offendingDelimiter(cmd, bare);
   if (delimiter !== null) return { cmd, masked: cmd, delimiter };
@@ -691,14 +705,14 @@ function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string; delim
 // of unknown verb: the top level's in reading order, then each substitution
 // interior and nested payload read one level deeper, to DEPTH_BOUND, as
 // command text whatever shell runs it, so only the top level reads a
-// PowerShell call's backslashes as separators. A nested text whose heredoc
-// delimiter word `offendingDelimiter` refuses ends the read there, as
-// `delimiter` with no calls, so the gate refuses on it before any git call is
-// judged.
+// PowerShell call's backslashes as separators, each read under the reading
+// `exact` selects. A nested text whose heredoc fault `maskOf` returns ends the
+// read there, as `delimiter` with no calls, so the gate refuses on it before
+// any git call is judged.
 // The search reads each { and } outside quotes as a ;, so a git word opening
 // a PowerShell script block, as in if (...) {git add .} or &{git add .},
 // stands in command position as PowerShell reads it.
-function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], depth: number, powershell: boolean): { calls: GitCall[]; delimiter: DelimiterFault | null } {
+function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], depth: number, powershell: boolean, exact: boolean): { calls: GitCall[]; delimiter: DelimiterFault | null } {
   const search = masked.replace(/[{}]/g, ";");
   const calls: GitCall[] = [];
   for (const hit of commandPositions(search, ["git"])) {
@@ -709,9 +723,9 @@ function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], depth: n
   const inner = [...subs.map((s) => cmd.slice(s.from, s.to)), ...nestedPayloads(cmd, search)];
   for (const text of inner) {
     const innerSubs: Span[] = [];
-    const read = maskOf(text, innerSubs);
+    const read = maskOf(text, innerSubs, exact);
     if (read.delimiter !== null) return { calls: [], delimiter: read.delimiter };
-    const nested = gitCallsOf(read.cmd, read.masked, innerSubs, depth + 1, powershell);
+    const nested = gitCallsOf(read.cmd, read.masked, innerSubs, depth + 1, powershell, exact);
     if (nested.delimiter !== null) return { calls: [], delimiter: nested.delimiter };
     calls.push(...nested.calls);
   }
@@ -760,9 +774,9 @@ async function loneReason(call: GitCall, cwd: string | null, host: () => Promise
   return rewritten === undefined ? null : unresolvedWord(call.unknown === null ? call.verb : "subcommand", rewritten.text, io);
 }
 
-// The refusal for a command, or null. A command carrying a heredoc fault
-// `offendingDelimiter` returns, at any depth read, is refused naming the
-// fault's text before any git call is judged. A command running no git add,
+// The refusal for a command under the reading `exact` selects, or null. A
+// command carrying a heredoc fault `maskOf` returns, at any depth read, is
+// refused naming the fault's text before any git call is judged. A command running no git add,
 // stage, commit or push, and no git call of unknown verb, passes. One running any is
 // refused by the two chain rules over every named verb it runs, then as
 // compound unless it is one lone plain git command, which then takes its own
@@ -772,11 +786,11 @@ async function loneReason(call: GitCall, cwd: string | null, host: () => Promise
 // the advice to quote the word. A compound command whose every git call is a
 // commit reading its message from standard input, as a heredoc or a pipe
 // feeds it, takes the standard-input refusal, whose advice it can follow.
-async function gateReason(cmd: string, cwd: string | null, powershell: boolean, host: () => Promise<LexHost>, io: GateIo): Promise<string | null> {
+async function gateReason(cmd: string, cwd: string | null, powershell: boolean, host: () => Promise<LexHost>, io: GateIo, exact: boolean): Promise<string | null> {
   const subs: Span[] = [];
-  const read = maskOf(cmd.replace(/\r\n/g, "\n"), subs);
+  const read = maskOf(cmd.replace(/\r\n/g, "\n"), subs, exact);
   if (read.delimiter !== null) return delimiterRefusal(read.delimiter, io);
-  const calls = gitCallsOf(read.cmd, read.masked, subs, 0, powershell);
+  const calls = gitCallsOf(read.cmd, read.masked, subs, 0, powershell, exact);
   if (calls.delimiter !== null) return delimiterRefusal(calls.delimiter, io);
   const found = calls.calls;
   if (found.length === 0) return null;
@@ -828,7 +842,15 @@ export function gitCommitGateGuard(deps: GitCommitGateDeps): BeforeGuard {
       let lexHost: Promise<LexHost> | null = null;
       const host = () => (lexHost ??= deps.lexHost());
       try {
-        const reason = await gateReason(cmd, cwd, e.tool === "PowerShell", host, deps);
+        // The legacy reading runs first, so every refusal the gate gave before
+        // the exact reading existed keeps its reason byte for byte. The exact
+        // reading runs only where the legacy one allowed and the raw command
+        // holds a # or a <<, the only places the two readings differ, and a
+        // refusal from it is the gate's refusal.
+        let reason = await gateReason(cmd, cwd, e.tool === "PowerShell", host, deps, false);
+        if (reason === null && (cmd.includes("#") || cmd.includes("<<"))) {
+          reason = await gateReason(cmd, cwd, e.tool === "PowerShell", host, deps, true);
+        }
         return reason === null ? {} : { deny: reason };
       } catch (err) {
         const failure = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").trim();

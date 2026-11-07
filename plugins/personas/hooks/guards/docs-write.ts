@@ -78,8 +78,8 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, QUOTED_HEREDOC_INTRO, delimiterAdvice, delimiterWhat, heredocBodies, maskQuoted, offendingDelimiter,
-  repoRoot, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
+  GIT_VALUE_FLAGS, QUOTED_HEREDOC_INTRO, delimiterAdvice, delimiterWhat, exactMasker, heredocBodies, heredocWalk, maskQuoted,
+  offendingDelimiter, repoRoot, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
 } from "./readonly-agent";
 
 type Span = { from: number; to: number };
@@ -256,32 +256,50 @@ function docsPathsIn(word: string): string[] {
 // stands in, and the span of the line it covers.
 type SimpleCommand = { words: string[]; outputs: string[]; bodies: string[]; pipeline: number; from: number; to: number };
 
-// The heredoc introductions `heredocBodies` took a body for, each mapped from
-// the index of its << to the index of its body. The introduction pattern is
-// that function's own, `QUOTED_HEREDOC_INTRO`, and its four skips are too,
-// read on the same text and mask, so
-// an introduction it passed over (an empty delimiter, one standing in a quoted
-// span, a substitution or a body, or one with no line after it) owns no body.
-// Each skip reads only local text: the introductions come in order and the
-// bodies are sorted by start, so one index walks the bodies once, and a line
-// break's continuation is judged by the backslashes just before it.
-function bodyIntros(cmd: string, masked: string, bodies: readonly Span[]): Map<number, number> {
+// The heredoc introductions the reading took a data body for, each mapped
+// from the index of its << to the index of its body in `bodies`. The
+// introduction pattern is `heredocBodies`'s own, `QUOTED_HEREDOC_INTRO`, read
+// on the same text through `maskAt`, the reading's own mask, and its four
+// skips are too, so an introduction the reading passed over owns no body: one
+// standing in a quoted span or a substitution, where the mask is NUL or the
+// substitution sentinel, one inside a body in `passed`, one with an empty
+// delimiter, or one with no line after it. Under the legacy reading, `exact`
+// null, `passed` is `bodies` and `maskAt` reads the body-blind mask. Under
+// the exact reading `maskAt` is the exact masker's own view, on which a
+// comment position reads as NUL, so an introduction inside a comment owns no
+// body; `passed` holds the walk's data and live bodies; and the walk's two
+// further skips apply, a << inside an arithmetic (( )), the shift bash reads,
+// and a << whose first < is escaped by a backslash, with the line after the
+// introduction ending at the first newline the mask leaves standing, as the
+// walk's body start does. Each skip reads only local text: the introductions
+// come in order and `passed` is sorted by start, so one index walks the
+// bodies once, and a line break's continuation is judged by the backslashes
+// just before it.
+type ExactIntroRules = { passed: readonly Span[]; arithOpenAt(i: number): boolean };
+function bodyIntros(cmd: string, maskAt: (i: number) => string, bodies: readonly Span[], exact: ExactIntroRules | null): Map<number, number> {
   const owners = new Map<number, number>();
   const intro = new RegExp(QUOTED_HEREDOC_INTRO, "g");
+  const passed = exact === null ? bodies : exact.passed;
   let next = 0;
   let inside = 0;
   let m: RegExpExecArray | null;
   while ((m = intro.exec(cmd)) !== null && next < bodies.length) {
     const at = m.index;
-    if (masked[at] === "\x00" || masked[at] === "\x02") continue;
-    while (inside < bodies.length && bodies[inside].to <= at) inside++;
-    if (inside < bodies.length && at >= bodies[inside].from) continue;
+    const mk = maskAt(at);
+    if (mk === "\x00" || mk === "\x02") continue;
+    while (inside < passed.length && passed[inside].to <= at) inside++;
+    if (inside < passed.length && at >= passed[inside].from) continue;
     if ((m[2] ?? m[3]) === "") continue;
+    if (exact !== null) {
+      let bs = 0;
+      while (at - bs - 1 >= 0 && cmd[at - bs - 1] === "\\") bs++;
+      if (bs % 2 === 1 || exact.arithOpenAt(at)) continue;
+    }
     let nl = cmd.indexOf("\n", at + m[0].length);
     while (nl >= 0) {
       let k = nl;
       while (k > 0 && cmd[k - 1] === "\\") k--;
-      if ((nl - k) % 2 === 0) break;
+      if ((nl - k) % 2 === 0 && (exact === null || maskAt(nl) === "\n")) break;
       nl = cmd.indexOf("\n", nl + 1);
     }
     if (nl < 0) continue;
@@ -455,8 +473,9 @@ function changesDirectory(c: SimpleCommand): boolean {
 // and whether any command in it, at any depth, names a docs/ path in the
 // project in its words, any heredoc body it receives (a lone cat's data
 // included, since a substitution hands that text on), or its substitutions.
-// `delimiter` is the heredoc fault `offendingDelimiter` refused, any
-// `DelimiterFault` kind, that stopped the read before any body was taken, at
+// `delimiter` is the heredoc fault the shared walk refused, any
+// `DelimiterFault` kind, through `offendingDelimiter` on the first reading or
+// `heredocWalk` directly on the exact one, that stopped the read before any body was taken, at
 // any depth, or null.
 type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault | null };
 
@@ -469,26 +488,48 @@ type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault
 // substitution inside it that names one at any depth, so
 // rm $(ls docs/x.md) refuses while echo $(cat docs/x.md) reads. Where any
 // command in the line changes directory, every target in the line is judged
-// by shape alone. The command is read the read-only guard's way: heredoc
-// bodies found on a body-blind mask, continuations spliced, then the quote
-// mask, each substitution's interior collected and read one level deeper to
-// DEPTH_BOUND, past which its text refuses on any docs/ path it names. A
-// nested shell's payload (bash -c "...") is a quoted word of a command word
-// off the list, so a docs/ path in it refuses. A heredoc fault
-// `offendingDelimiter` returns, any `DelimiterFault` kind, at any depth, ends
-// the read before any body is taken, with the fault as the reading's
-// refusal, since bash and the guard would bound that body at different
-// lines.
-async function readShell(command: string, placed: DocsJudge, depth: number): Promise<ShellReading> {
+// by shape alone. The command is read the read-only guard's way, under the
+// reading `exact` selects. The legacy reading: heredoc bodies found on a
+// body-blind mask through `heredocBodies`, continuations spliced, then the
+// quote mask `maskQuoted`. The exact reading: the data and live bodies
+// `heredocWalk` finds, continuations spliced outside both, then the exact
+// masker, which reads a word-start # as a comment and a body's quotes as
+// bytes, a live body walked as shell text since bash runs its substitutions.
+// Under either, each substitution's interior is collected and read one level
+// deeper to DEPTH_BOUND, past which its text refuses on any docs/ path it
+// names. A nested shell's payload (bash -c "...") is a quoted word of a
+// command word off the list, so a docs/ path in it refuses. A heredoc fault
+// the reading returns, `offendingDelimiter`'s or the walk's, any
+// `DelimiterFault` kind, at any depth, ends the read before any body is taken,
+// with the fault as the reading's refusal, since bash and the guard would
+// bound that body at different lines. The guard reads a command a second
+// time, under the exact reading, where the legacy reading allowed it and it
+// holds a # or a <<, and refuses on either reading.
+async function readShell(command: string, placed: DocsJudge, depth: number, exact: boolean): Promise<ShellReading> {
   const WRITES: ShellReading = { writes: true, names: true, delimiter: null };
   const subs: Span[] = [];
-  const bare = maskQuoted(command);
-  const delimiter = offendingDelimiter(command, bare);
-  if (delimiter !== null) return { writes: true, names: true, delimiter };
-  const bodies = heredocBodies(command, bare);
-  const intros = bodyIntros(command, bare, bodies);
-  const cmd = spliceContinuations(command, bodies);
-  const masked = maskQuoted(cmd, bodies, subs);
+  let bodies: Span[];
+  let cmd: string;
+  let masked: string;
+  let intros: Map<number, number>;
+  if (exact) {
+    const walk = heredocWalk(command, "", true);
+    if (walk.fault !== null) return { writes: true, names: true, delimiter: walk.fault };
+    bodies = walk.data;
+    const passed = [...walk.data, ...walk.live].sort((a, b) => a.from - b.from);
+    cmd = spliceContinuations(command, passed);
+    const masker = exactMasker(cmd, bodies, walk.live, subs);
+    masked = masker.full();
+    intros = bodyIntros(cmd, masker.at, bodies, { passed, arithOpenAt: (i) => masker.counter.arithOpenAt(i) });
+  } else {
+    const bare = maskQuoted(command);
+    const delimiter = offendingDelimiter(command, bare);
+    if (delimiter !== null) return { writes: true, names: true, delimiter };
+    bodies = heredocBodies(command, bare);
+    intros = bodyIntros(command, (i) => bare[i], bodies, null);
+    cmd = spliceContinuations(command, bodies);
+    masked = maskQuoted(cmd, bodies, subs);
+  }
   const commands = simpleCommands(cmd, masked, bodies, intros);
   const judge = commands.some(changesDirectory) ? SHAPE_JUDGE : placed;
   const subNames: boolean[] = [];
@@ -499,7 +540,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number): Pro
       subNames.push(false);
       continue;
     }
-    const inner = await readShell(text, judge, depth + 1);
+    const inner = await readShell(text, judge, depth + 1, exact);
     if (inner.delimiter !== null) return inner;
     if (inner.writes) return WRITES;
     subNames.push(inner.names);
@@ -573,7 +614,15 @@ export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
       // the way a bash backslash-newline does.
       const unix = e.command.replace(/\r\n/g, "\n");
       const command = e.tool === "PowerShell" ? unix.replace(/`\n/g, "  ") : unix;
-      const reading = await readShell(command, judge, 0);
+      // The legacy reading runs first, so every refusal the guard gave before
+      // the exact reading existed keeps its reason byte for byte. The exact
+      // reading runs only where the legacy one allowed and the raw command
+      // holds a # or a <<, the only places the two readings differ, and a
+      // refusal from it is the guard's refusal.
+      let reading = await readShell(command, judge, 0, false);
+      if (reading.delimiter === null && !reading.writes && (command.includes("#") || command.includes("<<"))) {
+        reading = await readShell(command, judge, 0, true);
+      }
       // A delimiter fault stops the read before any docs/ path is weighed, so
       // its refusal names the fault and its way around, never a docs/ write.
       if (reading.delimiter !== null) {

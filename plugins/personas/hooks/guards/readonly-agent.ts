@@ -673,6 +673,15 @@ function describeTarget(t: string): string {
   return String(t).replace(new RegExp(`${SUB_SPAN}+`, 'g'), '$(unresolved substitution)');
 }
 
+// This is the legacy reading of the command's quotes, kept byte for byte as the
+// trunk leaves it: it has no comment rule, so a `#` is an ordinary character and
+// a quote in a comment opens a span, and it blanks only the quoted-delimiter
+// heredoc bodies named in `bodies`. `maskExact` below is the exact reading,
+// added beside this one, which reads a word-start `#` to its line end as a
+// comment and takes every heredoc body `heredocWalk` finds, by the rules each
+// states. Each guard computes a verdict under this reading first; the exact
+// reading runs only where this one allowed, so this reading keeps every refusal
+// the trunk gives.
 export function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[]): string {
   const inBody = (i: number) => bodies !== undefined && bodies.some(b => i >= b.from && i < b.to);
   const chars = cmd.split('');
@@ -735,6 +744,191 @@ export function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[])
   return chars.join('');
 }
 
+// The exact reading of the command's quotes, beside the legacy reading
+// `maskQuoted` above, which is its floor. It differs from the legacy reading
+// in three ways. A word-start `#` at the top level, outside a quoted span, a
+// substitution span, an open `${`, `$[` or `(( ))` construct and every body
+// range, opens a comment that runs to the end of its line: inside it a `'`, a
+// `"`, a backtick, a `$(`, a `<(` and a `<<` are literal bytes, no span opens
+// and no substitution is collected. A `#` starts a word where the character
+// before it is the start of the text, a space, a tab, a newline or one of
+// `| & ; ( ) < >`, and that character is not itself escaped by a backslash.
+// Inside an open `${`, `$[` or `(( ))` no
+// comment opens, since bash reads the `#` there as part of the word or the
+// expression; the constructs are read by the `constructCounter` the masker
+// owns, which reads this mask as it is built. The comment's text is not
+// blanked; it stays as the characters it is, so a pattern scan reads it as it
+// reads a comment holding no quote. To `at` alone a comment position reads as
+// NUL, so the walk and the counter, which read the mask through `at`, read a
+// `<<` or a quote inside a comment as the byte bash reads and never as an
+// introduction or a span. A `data` range is a quoted-delimiter body, read
+// exactly as `maskQuoted`'s `bodies` are: quotes are bytes and nothing opens.
+// A `live` range is an unquoted, empty or backslashed body: quotes are bytes
+// and no comment opens, but every substitution is still collected, so its
+// text stays command text every scan reads. Bash runs a substitution only in
+// the unquoted body. In the empty and backslashed bodies the collection is
+// conservative and can refuse a call bash would allow, never allow one it
+// would refuse. An opener `$(` or `<(` split across a backslash-newline on an
+// introducing line is read joined, as bash joins it, so its span masks the
+// lines it spans, and the counter reads a split `${`, `$[` or `>(` joined the
+// same way. `substitutionEnd` is unchanged, so a substitution whose
+// interior holds a comment may close at a `)` inside that comment, earlier
+// than bash closes it; the interior is scanned on its own as command text,
+// where the comment rule applies afresh.
+// The resumable form of the exact mask. `at(i)` and `full()` drive one forward
+// scan that never revisits a character, so the walk reads its mask as it goes
+// and a long run of heredocs costs one pass, not a mask per body. `data` and
+// `live` are read live: the walk pushes a body before the scan reaches it, so
+// the body is honored with no rebuild. Membership is read through a forward
+// pointer since the scan queries only non-decreasing indices, and a body opens
+// no span, so the scan's state at a body's end is the top-level state the
+// current rebuild restarts to there. The scan skips the counter past each body
+// it enters, as the walk does for its own reading, so the counter's quote and
+// construct state restarts at the body's end for the one-shot `maskExact`
+// below as it does for the walk. `counter` is that counter, shared with the
+// walk so the two read one construct state. `maskExact` is the whole-command
+// one-shot, the same scan run to the end.
+type ExactMasker = { at(i: number): string; full(): string; counter: ConstructCounter };
+export function exactMasker(cmd: string, data: readonly Span[], live: readonly Span[], subs?: Span[]): ExactMasker {
+  const chars = cmd.split('');
+  const comment = new Uint8Array(cmd.length);
+  let dIdx = 0;
+  let lIdx = 0;
+  const inData = (i: number): boolean => { while (dIdx < data.length && data[dIdx].to <= i) dIdx++; return dIdx < data.length && i >= data[dIdx].from && i < data[dIdx].to; };
+  const inLive = (i: number): boolean => { while (lIdx < live.length && live[lIdx].to <= i) lIdx++; return lIdx < live.length && i >= live[lIdx].from && i < live[lIdx].to; };
+  const dqEscapes = /["\\$`]/;
+  const metaBefore = ' \t\n|&;()<>';
+  // The counter reads positions the scan has finished, so a query at the scan
+  // position extends nothing and the two never recurse into each other.
+  const at = (k: number): string => { if (k >= i) extendTo(k + 1); return comment[k] === 1 ? '\x00' : chars[k]; };
+  const counter = constructCounter(cmd, at, true);
+  // Whether a `#` at index `i` starts a word, so it opens a comment. The
+  // character before it must be the text start or one of bash's word-separating
+  // metacharacters, and must not itself be escaped by a backslash (an escaped
+  // space before the `#`, as in `echo a\ #x`, leaves the `#` mid-word, where
+  // bash runs any substitution after it). A newline escaped by a backslash is
+  // a continuation bash removes before it reads the line, so the character
+  // before that pair decides instead: `echo a \` then `#x` joins to
+  // `echo a #x`, a comment, while `echo a\` then `#x` joins to `echo a#x`,
+  // which is not. That holds on the walk's unspliced text. The final mask is
+  // built on text whose continuations are already spliced to two spaces, so
+  // there the second shape opens a comment bash does not. The legacy reading
+  // has run first on every call and its refusal stands, so the extra comment
+  // never turns a refusal into an allow.
+  const isCommentStart = (i: number): boolean => {
+    let p = i;
+    for (;;) {
+      if (p === 0) return true;
+      let k = p - 1, bs = 0;
+      while (k > 0 && cmd[k - 1] === '\\') { bs++; k--; }
+      if (cmd[p - 1] === '\n' && bs % 2 === 1) { p = k; continue; }
+      return metaBefore.indexOf(cmd[p - 1]) >= 0 && bs % 2 === 0;
+    }
+  };
+  // The index of the `(` an opener at `at` reaches, a backslash-newline allowed
+  // between the leading `$` or `<` and its `(` as bash allows, or -1 where `at`
+  // opens no `$(` or `<(` substitution. A backtick is its own opener.
+  const openerParen = (at: number): number => {
+    if (chars[at] === '`') return at;
+    if (chars[at] !== '$' && chars[at] !== '<') return -1;
+    let j = at + 1;
+    while (chars[j] === '\\' && chars[j + 1] === '\n') j += 2;
+    return chars[j] === '(' ? j : -1;
+  };
+  // The index just past a `(...)` substitution whose `(` stands at `p`, matching
+  // parentheses and stepping over inner quoted spans, as `substitutionEnd` does
+  // from a `$(`; written to start at the `(` itself so a split opener's `(`,
+  // which does not sit at the `$`+1 `substitutionEnd` assumes, is matched too.
+  const parenEnd = (p: number): number => {
+    let j = p + 1;
+    let depth = 1;
+    while (j < chars.length && depth > 0) {
+      const c = chars[j];
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      else if (c === "'") { j++; while (j < chars.length && chars[j] !== "'") j++; }
+      else if (c === '"') { j++; while (j < chars.length && chars[j] !== '"') { if (chars[j] === '\\') j++; j++; } }
+      j++;
+    }
+    return j;
+  };
+  const collectArithmetic = (from: number, to: number) => {
+    for (let k = from; k < to; k++) {
+      if (chars[k] === '`' || (chars[k] === '$' && chars[k + 1] === '(')) k = maskSub(k) - 1;
+    }
+  };
+  const maskSub = (at: number): number => {
+    let e: number;
+    let interiorFrom: number;
+    if (chars[at] === '`') { e = substitutionEnd(chars, at); interiorFrom = at + 1; }
+    else { const p = openerParen(at); e = parenEnd(p); interiorFrom = p + 1; }
+    if (subs !== undefined) {
+      if (chars[at] === '$' && chars[at + 1] === '(' && arithmeticSpan(chars, at, e)) collectArithmetic(interiorFrom, e - 1);
+      else subs.push({ from: interiorFrom, to: e - 1 });
+    }
+    for (let k = at; k < e && k < chars.length; k++) chars[k] = SUB_SPAN;
+    return e;
+  };
+  // The scan position, kept across `at` calls so the mask is built once from
+  // left to right. One iteration completes a comment, a substitution or a
+  // quoted span whole, so the scan stops only at a top-level boundary and a
+  // later `at` resumes cleanly. `skipped` is the end of the last body the
+  // counter was skipped past, so each body skips it once.
+  let i = 0;
+  let skipped = -1;
+  const extendTo = (limit: number): void => {
+    while (i < chars.length && i < limit) {
+      const data_ = inData(i);
+      const range = data_ ? data[dIdx] : inLive(i) ? live[lIdx] : null;
+      if (range !== null && range.to !== skipped) {
+        counter.openAt(range.from);
+        counter.skipTo(range.to);
+        skipped = range.to;
+      }
+      if (chars[i] === '\\' && i + 1 < chars.length) { i += 2; continue; }
+      if (range === null && chars[i] === '#' && isCommentStart(i) && !counter.openAt(i) && !counter.arithOpenAt(i)) {
+        while (i < chars.length && chars[i] !== '\n') comment[i++] = 1;
+        continue;
+      }
+      // A substitution runs at the top level and inside a live body, never
+      // inside a data body, where it is literal copy.
+      if (!data_ && (chars[i] === '`'
+        || (chars[i] === '$' && openerParen(i) >= 0)
+        || (chars[i] === '<' && chars[i - 1] !== '<' && openerParen(i) >= 0))) {
+        i = maskSub(i);
+        continue;
+      }
+      const q = chars[i];
+      if (q !== '"' && q !== "'") { i++; continue; }
+      if (inData(i) || inLive(i)) { i++; continue; }
+      let j = i + 1;
+      while (j < chars.length && chars[j] !== q) {
+        if (inData(j) || inLive(j)) break;
+        if (q === '"' && ((chars[j] === '$' && openerParen(j) >= 0) || chars[j] === '`')) {
+          j = maskSub(j);
+          continue;
+        }
+        if (q === '"' && chars[j] === '\\' && j + 1 < chars.length && dqEscapes.test(chars[j + 1])) {
+          chars[j] = '\x00';
+          j++;
+        }
+        chars[j] = '\x00';
+        j++;
+      }
+      i = j + 1;
+    }
+  };
+  return {
+    at,
+    full(): string { extendTo(chars.length); return chars.join(''); },
+    counter,
+  };
+}
+
+export function maskExact(cmd: string, data: readonly Span[], live: readonly Span[], subs?: Span[]): string {
+  return exactMasker(cmd, data, live, subs).full();
+}
+
 // The quoted heredoc introduction both body finders read: `heredocBodies` and
 // docs-write's `bodyIntros`, which maps each introduction to its body and
 // must read exactly the introductions `heredocBodies` takes. Groups: the
@@ -777,6 +971,12 @@ export const QUOTED_HEREDOC_INTRO = String.raw`(?<!<)<<(-?)[ \t]*(?:'([^'\n]*)'|
 // the reader passed that body. After a body holding a quote, the two readers
 // can therefore disagree on which introductions exist and where their bodies
 // run.
+//
+// This finds the bodies of the legacy reading, kept byte for byte, and serves
+// the legacy pass alone. The exact reading's bodies come from `heredocWalk`
+// below, which reads one forward mask that honors each body as the walk
+// passes it, so the two readers it replaces cannot disagree, and which reads a
+// word-start `#` as a comment and an unquoted body as a live range.
 export function heredocBodies(cmd: string, masked: string): Span[] {
   const bodies: Span[] = [];
   const memo = new Map<string, BodyEnd>();
@@ -817,7 +1017,7 @@ export function heredocBodies(cmd: string, masked: string): Span[] {
 // Introductions on one line share the line their bodies start after, so a
 // caller passes one `memo` per command and each distinct body start,
 // delimiter and dash is walked once rather than once per introduction.
-type BodyEnd = { body: Span; carriageReturn: boolean };
+type BodyEnd = { body: Span; carriageReturn: boolean; next?: number };
 function bodyAfter(cmd: string, introEnd: number, delim: string, dash: boolean, memo?: Map<string, BodyEnd>): BodyEnd | null {
   let nl = cmd.indexOf('\n', introEnd);
   while (nl >= 0) {
@@ -850,6 +1050,41 @@ function bodyEndFrom(cmd: string, from: number, delim: string, dash: boolean): B
   return { body: { from, to: cmd.length }, carriageReturn: false };
 }
 
+// The exact reading's body end for a heredoc whose delimiter word is unquoted
+// (`<<EOF`). Bash reads such a body's lines with every backslash-newline
+// removed before it tests a line against the delimiter (parse.y,
+// read_secondary_line with remove_quoted_newline), so a line ending in an odd
+// run of backslashes joins the next line first: `foo\` then `EOF` is one line
+// reading `fooEOF`, not a terminator, and `EO\` then `F` is the terminator
+// `EOF`. An even run leaves the newline standing, since each backslash in it
+// escapes the one after. The joined line is then compared character for
+// character as `bodyEndFrom` compares a physical one. `next` is the index
+// just past the terminator's last physical line, where command text resumes.
+// A quoted, empty-quoted or backslashed delimiter word quotes the body, where
+// bash removes nothing, so those bodies keep `bodyEndFrom`'s line-by-line
+// test, and the legacy reading never reads this.
+function liveBodyEndFrom(cmd: string, from: number, delim: string, dash: boolean): BodyEnd {
+  let pos = from;
+  while (pos <= cmd.length) {
+    let end = cmd.indexOf('\n', pos);
+    if (end < 0) end = cmd.length;
+    let line = cmd.slice(pos, end);
+    while (end < cmd.length && /(?<!\\)(?:\\\\)*\\$/.test(line)) {
+      let nextEnd = cmd.indexOf('\n', end + 1);
+      if (nextEnd < 0) nextEnd = cmd.length;
+      line = line.slice(0, -1) + cmd.slice(end + 1, nextEnd);
+      end = nextEnd;
+    }
+    const stripped = dash ? line.replace(/^\t+/, '') : line;
+    const next = end >= cmd.length ? cmd.length : end + 1;
+    if (stripped === delim) return { body: { from, to: pos }, carriageReturn: false, next };
+    if (stripped.endsWith('\r') && stripped.replace(/\r+$/, '') === delim) return { body: { from, to: pos }, carriageReturn: true, next };
+    if (end >= cmd.length) break;
+    pos = end + 1;
+  }
+  return { body: { from, to: cmd.length }, carriageReturn: false, next: cmd.length };
+}
+
 // The character class a heredoc delimiter word holding a quote or a backslash
 // must match whole, inside one pair of matching outer quotes or after one
 // leading backslash, for every guard that reads heredoc bodies to read the
@@ -870,6 +1105,17 @@ function bodyEndFrom(cmd: string, from: number, delim: string, dash: boolean): B
 export const PLAIN_DELIMITER_CLASS = '[A-Za-z0-9_.-]+';
 const QUOTED_PLAIN_DELIMITER = new RegExp(`^(['"])(${PLAIN_DELIMITER_CLASS})\\1$`);
 const ESCAPED_PLAIN_DELIMITER = new RegExp(`^\\\\${PLAIN_DELIMITER_CLASS}$`);
+// The live heredoc delimiter words the exact walk reads: a bare word of
+// PLAIN_DELIMITER_CLASS, the same word behind one leading backslash, or an
+// empty pair of quotes, each introducing a body whose quotes bash reads as
+// bytes. Bash runs the substitutions of the bare word's body alone, and the
+// walk reads all three bodies' substitutions as command text, which errs only
+// toward refusal. Exported beside
+// QUOTED_HEREDOC_INTRO so the walk reads the live forms through one spelling and
+// the quoted form through the module's existing one, with no third delimiter
+// pattern. A bare word outside this class (`<<$X`, `<<E*F`) is a fault the walk
+// names, since bash expands or matches it to a delimiter the walk cannot model.
+export const PLAIN_HEREDOC_DELIMITER = new RegExp(`^${PLAIN_DELIMITER_CLASS}$`);
 
 // What `offendingDelimiter` returns on a command it refuses: a delimiter
 // word holding a quote or a backslash outside the admitted forms, as the
@@ -880,8 +1126,11 @@ const ESCAPED_PLAIN_DELIMITER = new RegExp(`^\\\\${PLAIN_DELIMITER_CLASS}$`);
 // delimiter; the same open-span fault where a substitution follows the
 // introduction on its line, named the same way; or an introduction split by
 // a backslash-newline, named by its text from the first < through the
-// delimiter word read after the split.
-export type DelimiterFault = { kind: 'word' | 'carriage-return' | 'open-span' | 'open-span-substitution' | 'split'; text: string };
+// delimiter word read after the split. The exact reading adds two: an
+// unquoted delimiter word outside the plain class, which bash expands or
+// matches, named by that word; and an introducing line that leaves an
+// arithmetic `((` open, named by its delimiter.
+export type DelimiterFault = { kind: 'word' | 'carriage-return' | 'open-span' | 'open-span-substitution' | 'split' | 'bare' | 'open-arith'; text: string };
 
 // Whether a `${`, `$[` or `>(` construct is open before a given index of
 // `cmd`, counted left to right from the command's start on the masks
@@ -900,37 +1149,123 @@ export type DelimiterFault = { kind: 'word' | 'carriage-return' | 'open-span' | 
 // opener pushed inside the same span, an apostrophe inside a construct
 // opened there quotes up to the next apostrophe, and an opener left open at
 // the span's closing quote stays open past it, as `"${x:-"` leaves bash
-// reading. A passed body is skipped whole, by `skipTo`, and the quote state
-// restarts there, as the mask segment the walk rebuilds at that point does.
-// What the count reads at each index it passes is kept, so an index already
-// passed, such as the second introduction on one line, reads its own state.
-function constructCounter(cmd: string, masks: readonly { from: number; masked: string }[]): { openAt(i: number): boolean; skipTo(i: number): void } {
+// reading. A passed body is skipped whole, by `skipTo`, which restarts the
+// quote state there, since bash reads the text after a body at the top level.
+// The mask is read through `maskAt`, the walk's own mask reader, so the count
+// and the walk see one mask: the legacy walk's static segments, the exact
+// masker's one forward pass, on which a comment position reads as NUL and so
+// counts as nothing. What the count reads at each index it passes is kept, so
+// an index already passed, such as the second introduction on one line, reads
+// its own state.
+type ConstructCounter = { openAt(i: number): boolean; arithOpenAt(i: number): boolean; skipTo(i: number): void };
+function constructCounter(cmd: string, maskAt: (i: number) => string, exact = false): ConstructCounter {
   const open = new Uint8Array(cmd.length + 1);
+  // Arithmetic `(( ))` tracking, on only when `exact` is set, so the exact
+  // reading can read a `<<` inside `(( ))` as the shift bash reads it, open no
+  // comment there, and refuse a `((` left open on an introducing line. A `((`
+  // is decided by bash's own rule (parse.y, parse_dparen and parse_arith_cmd):
+  // `arithmeticEnd` reads from the inner `(` to its matching `)`, nesting
+  // parens and stepping over quoted spans and backslash pairs, and the pair is
+  // arithmetic only where the very next character is `)`. So `(( (1+(2)) ))`
+  // and `(((1+2)))` are arithmetic, while `((a) )` and `((a) || (b) )` are two
+  // subshell parens, which bash runs as commands, and are read here as
+  // ordinary parens. Each `(` is matched once per counter and the match kept
+  // in `parenMatch`, so a run of `((` that never forms arithmetic costs one
+  // scan of the text rather than one per `((`. An arithmetic region is marked whole, from its `((` to
+  // just past its `))`, in one step, so no quote or construct inside it can
+  // end it early: bash reads the whole region as one expression. Where no
+  // inner close exists before the end of the text, bash reports a syntax
+  // error and runs nothing, and the region is read as open to the end. The
+  // legacy caller leaves `exact` off, so `open` is counted byte for byte as it
+  // was before this query existed.
+  const arithOpen = new Uint8Array(cmd.length + 1);
+  // `parenMatch[q]` is the index of the `)` closing the `(` at `q`, `cmd.length`
+  // where nothing closes it, and 0 where it is not yet read, since no closer
+  // stands at index 0. The scan from a `(` is context-free, so the match of a
+  // nested `(` is the same whichever scan reaches it, and a scan steps over a
+  // nested `(` already read. Open indices sit on an explicit stack, never on
+  // the call stack, since a command can nest tens of thousands deep. The
+  // legacy counter never reads it, so it takes no table.
+  const parenMatch = new Int32Array(exact ? cmd.length + 1 : 0);
+  const matchOf = (q: number): number => {
+    if (parenMatch[q] !== 0) return parenMatch[q];
+    const opens = [q];
+    for (let k = q + 1; k < cmd.length; k++) {
+      const ch = cmd[k];
+      if (ch === '\\') { k++; continue; }
+      if (ch === "'" || ch === '"' || ch === '`') {
+        k++;
+        while (k < cmd.length && cmd[k] !== ch) { if (ch !== "'" && cmd[k] === '\\') k++; k++; }
+        continue;
+      }
+      if (ch === '(') {
+        const known = parenMatch[k];
+        if (known === 0) opens.push(k);
+        else if (known === cmd.length) break;
+        else k = known;
+      } else if (ch === ')') {
+        parenMatch[opens.pop() as number] = k;
+        if (opens.length === 0) return k;
+      }
+    }
+    for (const o of opens) parenMatch[o] = cmd.length;
+    return cmd.length;
+  };
+  const arithmeticEnd = (p: number): number => {
+    const m = matchOf(p + 1);
+    if (m === cmd.length) return cmd.length;
+    return cmd[m + 1] === ')' ? m + 2 : -1;
+  };
+  // The index of an opener's second character, a `{`, `[` or `(`, after the
+  // leading `$` or `>` at `p`. In the exact reading it is read past any
+  // backslash-newline pairs between the two, as bash removes the pairs before
+  // it reads the word, and as `openerParen` in the exact masker reads a `$(`
+  // or `<(`, so `$\` then `{` on the next line opens the `${` bash opens. The
+  // legacy reading reads the two characters side by side only, as it always
+  // has.
+  const openerEnd = (p: number): number => {
+    let j = p + 1;
+    if (exact) while (cmd[j] === '\\' && cmd[j + 1] === '\n') j += 2;
+    return j;
+  };
   const stack: string[] = [];
   let pos = 0;
-  let seg = 0;
   let quote = '';
   let local = 0;
   let single = false;
   const restart = () => { quote = ''; local = 0; single = false; };
   const closerOf = (c: string) => (c === '{' ? '}' : c === '[' ? ']' : ')');
+  // Push the closer an opener at `pos` wants, whose second character stands at
+  // `end`, and mark every index through `end` as inside the construct.
+  const pushOpener = (end: number) => {
+    stack.push(closerOf(cmd[end]));
+    for (let k = pos + 1; k <= end; k++) { open[k] = 1; arithOpen[k] = arithOpen[pos]; }
+    pos = end;
+  };
   const advance = (to: number) => {
     for (; pos < to; pos++) {
-      while (seg + 1 < masks.length && masks[seg + 1].from <= pos) { seg++; restart(); }
       open[pos] = stack.length > 0 ? 1 : 0;
-      const mk = masks[seg].masked[pos - masks[seg].from];
+      arithOpen[pos] = 0;
+      const mk = maskAt(pos);
       const c = cmd[pos];
       const next = cmd[pos + 1];
       const top = stack[stack.length - 1];
       if (quote === '') {
         if (mk !== c) continue;
         if (c === '"' || c === "'") { quote = c; continue; }
-        if (c === '\\') { pos++; open[pos] = open[pos - 1]; continue; }
-        if ((c === '$' && (next === '{' || next === '[')) || (c === '>' && next === '(')) {
-          stack.push(closerOf(next));
-          pos++;
-          open[pos] = 1;
-          continue;
+        if (c === '\\') { pos++; open[pos] = open[pos - 1]; arithOpen[pos] = arithOpen[pos - 1]; continue; }
+        if (exact && stack.length === 0 && c === '(' && next === '(') {
+          const end = arithmeticEnd(pos);
+          if (end >= 0) {
+            for (let k = pos; k < end; k++) { open[k] = 0; arithOpen[k] = 1; }
+            pos = end - 1;
+            continue;
+          }
+        }
+        if (c === '$' || c === '>') {
+          const end = openerEnd(pos);
+          const nx = cmd[end];
+          if ((c === '$' && (nx === '{' || nx === '[')) || (c === '>' && nx === '(')) { pushOpener(end); continue; }
         }
         if ((c === '(' && top === ')') || (c === '[' && top === ']')) stack.push(top);
         else if (c === top) stack.pop();
@@ -939,13 +1274,11 @@ function constructCounter(cmd: string, masks: readonly { from: number; masked: s
       if (mk === quote) { restart(); continue; }
       if (quote === "'" || mk !== '\x00') continue;
       if (single) { if (c === "'") single = false; continue; }
-      if (c === '\\') { pos++; open[pos] = open[pos - 1]; continue; }
-      if (c === '$' && (next === '{' || next === '[')) {
-        stack.push(closerOf(next));
-        local++;
-        pos++;
-        open[pos] = 1;
-        continue;
+      if (c === '\\') { pos++; open[pos] = open[pos - 1]; arithOpen[pos] = arithOpen[pos - 1]; continue; }
+      if (c === '$') {
+        const end = openerEnd(pos);
+        const nx = cmd[end];
+        if (nx === '{' || nx === '[') { pushOpener(end); local++; continue; }
       }
       if (local === 0) continue;
       if (c === "'") single = true;
@@ -953,9 +1286,11 @@ function constructCounter(cmd: string, masks: readonly { from: number; masked: s
       else if (c === top) { stack.pop(); local--; }
     }
     open[pos] = stack.length > 0 ? 1 : 0;
+    arithOpen[pos] = 0;
   };
   return {
     openAt(i: number): boolean { advance(i); return open[i] === 1; },
+    arithOpenAt(i: number): boolean { advance(i); return arithOpen[i] === 1; },
     skipTo(i: number): void { if (i > pos) { pos = i; restart(); } },
   };
 }
@@ -1052,15 +1387,61 @@ function constructCounter(cmd: string, masks: readonly { from: number; masked: s
 // a long run of plain heredocs walks in one pass where no body is masked and
 // none holds a trigger character, and in a pass per body otherwise.
 export function offendingDelimiter(cmd: string, masked: string): DelimiterFault | null {
+  return heredocWalk(cmd, masked, false).fault;
+}
+
+// The data ranges, the live ranges and the first fault of a command's heredocs.
+// The legacy reading (`exact` false) takes only the quoted-delimiter bodies as
+// data and raises exactly the faults the comment above `offendingDelimiter`
+// names, byte for byte, serving `offendingDelimiter` and every guard that reads
+// it unchanged. The exact reading (`exact` true) additionally takes the
+// unquoted, empty and backslashed bodies as live ranges, reads a `<<` inside a
+// `(( ))` as the shift bash reads it, splices a split opener on the introducing
+// line as bash joins it, and raises two faults the legacy reading does not: a
+// bare delimiter word outside PLAIN_DELIMITER_CLASS, which bash would expand or
+// match to a word the walk cannot know, and an arithmetic `((` left open on the
+// introducing line, which starts the body past the line the walk reads. In the
+// exact reading a body starts after the first newline the exact mask leaves
+// standing, so a quote or substitution that spans the introducing line is read
+// as bash reads it rather than desyncing the body. One quote in a passed body
+// cannot hide a later introduction, which is where `heredocBodies` and
+// `offendingDelimiter` could disagree; here they are one function. The legacy
+// reading rebuilds its body-blind mask after each body to get that; the exact
+// reading reads one forward pass that honors each body as the walk passes it,
+// so a long run of heredocs costs one pass, not a mask per body.
+type HeredocRanges = { data: Span[]; live: Span[]; fault: DelimiterFault | null };
+export function heredocWalk(cmd: string, masked: string, exact: boolean): HeredocRanges {
   const passed: Span[] = [];
+  const data: Span[] = [];
+  const live: Span[] = [];
   const memo = new Map<string, BodyEnd>();
+  // The exact reading reads one forward pass that honors `data` and `live` as
+  // the walk pushes to them, and never reads `masked`. The legacy reading keeps
+  // the body-blind mask it was handed and rebuilds the tail with `maskQuoted`
+  // after each body, looked up by segment. Both expose the same `maskAt` to the
+  // walk and the construct counter, which in the exact reading is the masker's
+  // own, so the comment rule and the walk read one construct state.
+  const exactMask = exact ? exactMasker(cmd, data, live) : null;
   const masks: { from: number; masked: string }[] = [{ from: 0, masked }];
   const segmentOf = (i: number): { from: number; masked: string } => {
     for (let k = masks.length - 1; k > 0; k--) if (i >= masks[k].from) return masks[k];
     return masks[0];
   };
-  const maskAt = (i: number): string => { const s = segmentOf(i); return s.masked[i - s.from]; };
-  const counter = constructCounter(cmd, masks);
+  const maskAt = exact
+    ? (i: number): string => exactMask!.at(i)
+    : (i: number): string => { const s = segmentOf(i); return s.masked[i - s.from]; };
+  const counter = exact ? exactMask!.counter : constructCounter(cmd, maskAt, false);
+  // Whether `at` lies in a body the walk has passed. The exact reading's
+  // bodies are taken in increasing order and the operator loop queries
+  // non-decreasing indices, so a forward pointer reads membership in one pass.
+  // The legacy reading's bodies can overlap, as two introductions on one line
+  // read from the same body start do, so it scans the list as it always has.
+  let pIdx = 0;
+  const inPassed = (at: number): boolean => {
+    if (!exact) return passed.some(b => at >= b.from && at < b.to);
+    while (pIdx < passed.length && passed[pIdx].to <= at) pIdx++;
+    return pIdx < passed.length && at >= passed[pIdx].from;
+  };
   const operator = /<(?:(?:\\\n)*<)+/g;
   const lead = /-?[ \t]*/y;
   const rawWord = /[^ \t\n|&;()<>]*/y;
@@ -1085,41 +1466,138 @@ export function offendingDelimiter(cmd: string, masked: string): DelimiterFault 
     while (splitAfter(start, word)) ({ start, word } = wordAt(start + word.length + 1));
     return { kind: 'split', text: cmd.slice(at, start + word.length) };
   };
+  // The first newline after `from` that the exact mask leaves standing: not
+  // inside a quoted or substitution span and not a backslash continuation, so
+  // bash and the walk start the body on the same line even where a quote or a
+  // substitution spans the introducing line. Returns -1 where no line follows.
+  // The last answer is kept: a `from` between the last query's `from` and its
+  // newline has that same newline as its first standing one, so a line holding
+  // many introductions searches the line once rather than once per `<<`.
+  let nlFrom = -1;
+  let nlFound = -1;
+  const exactBodyStartNL = (from: number): number => {
+    if (nlFrom >= 0 && from >= nlFrom && (nlFound < 0 || from <= nlFound)) return nlFound;
+    let nl = cmd.indexOf('\n', from);
+    while (nl >= 0) {
+      if (maskAt(nl) === '\n') {
+        let k = nl;
+        while (k > 0 && cmd[k - 1] === '\\') k--;
+        if ((nl - k) % 2 === 0) break;
+      }
+      nl = cmd.indexOf('\n', nl + 1);
+    }
+    nlFrom = from;
+    nlFound = nl;
+    return nl;
+  };
+  // Record a body the walk has read and honor it against later introductions.
+  // The exact forward mask reads `data` and `live` directly, so pushing the body
+  // there is enough; the counter skips over it, which restarts its quote state
+  // at the body's end. The legacy reading rebuilds the body-blind tail mask with
+  // `maskQuoted` only where the body itself holds one of the trunk's trigger
+  // characters, so a quote inside the body opens no span over what follows and
+  // a run of trigger-free bodies costs no rebuild at all.
+  const take = (body: Span, kind: 'data' | 'live'): void => {
+    passed.push(body);
+    (kind === 'data' ? data : live).push(body);
+    counter.skipTo(body.to);
+    if (exact) return;
+    if (body.to <= masks[masks.length - 1].from) return;
+    if (/['"`$\\<]/.test(cmd.slice(body.from, body.to))) {
+      masks.push({ from: body.to, masked: maskQuoted(cmd.slice(body.to)) });
+    }
+  };
+  // The exact reading's handling of one introduction past its delimiter word: a
+  // live body for `kind` 'live' and a data body for 'data'. Returns a fault, or
+  // null once the body is taken. A `((` open at the body-start newline, or a
+  // quote, substitution or `${`/`$[`/`>(` construct open at the introduction or
+  // that newline, starts the body past the line the walk reads, so each refuses.
+  // Two introductions on one line take their bodies in order, each starting on
+  // the line after the previous one's terminator. `sameLineNL` is the standing
+  // newline that ended the last introducing line and `sameLineNext` the line
+  // after the last body's terminator, so a second `<<` sharing that line reads
+  // its body past the first. `join` is set for an unquoted delimiter word
+  // alone, whose body bash reads with backslash-newlines removed before the
+  // terminator test, so that body ends by `liveBodyEndFrom`; every other word
+  // quotes the body and it ends by `bodyEndFrom`'s line-by-line test.
+  let sameLineNL = -1;
+  let sameLineNext = -1;
+  const exactBody = (at: number, afterWord: number, delim: string, kind: 'data' | 'live', join = false): DelimiterFault | null => {
+    const nl = exactBodyStartNL(afterWord);
+    if (nl < 0) return null;
+    if (counter.openAt(at) || counter.openAt(nl)) return { kind: 'open-span', text: delim };
+    if (counter.arithOpenAt(nl)) return { kind: 'open-arith', text: delim };
+    const from = (nl === sameLineNL && sameLineNext >= 0) ? sameLineNext : nl + 1;
+    const dash = cmd[at + 2] === '-';
+    const end = join ? liveBodyEndFrom(cmd, from, delim, dash) : bodyEndFrom(cmd, from, delim, dash);
+    if (end.carriageReturn) return { kind: 'carriage-return', text: delim };
+    take(end.body, kind);
+    sameLineNL = nl;
+    if (end.next !== undefined) { sameLineNext = end.next; return null; }
+    const termNL = cmd.indexOf('\n', end.body.to);
+    sameLineNext = termNL < 0 ? cmd.length : termNL + 1;
+    return null;
+  };
   let m: RegExpExecArray | null;
   while ((m = operator.exec(cmd)) !== null) {
     const at = m.index;
     const mk = maskAt(at);
+    // A `<<` inside a quoted span, a substitution span or, in the exact
+    // reading, a comment, whose positions the exact mask reads as NUL, is bytes.
     if (mk === '\x00' || mk === SUB_SPAN) continue;
-    if (passed.some(b => at >= b.from && at < b.to)) continue;
+    if (inPassed(at)) continue;
+    // In the exact reading a `<<` inside an open `(( ))` is a shift, so it
+    // introduces no body.
+    if (exact && counter.arithOpenAt(at)) continue;
+    // In the exact reading a `<<` whose first `<` carries an odd run of
+    // backslashes is escaped, so `\<<` introduces nothing: the shell reads the
+    // surviving single `<` as an input redirect, not a heredoc.
+    if (exact) {
+      let bs = 0;
+      while (at - bs - 1 >= 0 && cmd[at - bs - 1] === '\\') bs++;
+      if (bs % 2 === 1) continue;
+    }
     if (m[0].length > 2) {
-      if (m[0].includes('\n')) return splitFault(at, at + m[0].length);
+      if (m[0].includes('\n')) return { data, live, fault: splitFault(at, at + m[0].length) };
       continue;
     }
     const { start, word } = wordAt(at + 2);
-    if (!/['"\\]/.test(word)) continue;
+    if (!/['"\\]/.test(word)) {
+      if (!exact) continue;
+      if (!PLAIN_HEREDOC_DELIMITER.test(word)) return { data, live, fault: { kind: 'bare', text: word } };
+      const f = exactBody(at, start + word.length, word, 'live', true);
+      if (f !== null) return { data, live, fault: f };
+      continue;
+    }
     const quoted = QUOTED_PLAIN_DELIMITER.exec(word);
     if (quoted === null) {
-      if (word === "''" || word === '""' || ESCAPED_PLAIN_DELIMITER.test(word)) continue;
-      return { kind: 'word', text: word };
+      if (word === "''" || word === '""' || ESCAPED_PLAIN_DELIMITER.test(word)) {
+        if (!exact) continue;
+        const delim = word.charAt(0) === '\\' ? word.slice(1) : '';
+        const f = exactBody(at, start + word.length, delim, 'live');
+        if (f !== null) return { data, live, fault: f };
+        continue;
+      }
+      return { data, live, fault: { kind: 'word', text: word } };
+    }
+    if (exact) {
+      const f = exactBody(at, start + word.length, quoted[2], 'data');
+      if (f !== null) return { data, live, fault: f };
+      continue;
     }
     const end = bodyAfter(cmd, start + word.length, quoted[2], cmd[at + 2] === '-', memo);
     if (end === null) continue;
     const lineEnd = maskAt(end.body.from - 1);
     if (lineEnd === '\x00' || lineEnd === SUB_SPAN || counter.openAt(at) || counter.openAt(end.body.from - 1)) {
-      return { kind: 'open-span', text: quoted[2] };
+      return { data, live, fault: { kind: 'open-span', text: quoted[2] } };
     }
     if (/[$<>]\(/.test(cmd.slice(start + word.length, end.body.from - 1))) {
-      return { kind: 'open-span-substitution', text: quoted[2] };
+      return { data, live, fault: { kind: 'open-span-substitution', text: quoted[2] } };
     }
-    if (end.carriageReturn) return { kind: 'carriage-return', text: quoted[2] };
-    passed.push(end.body);
-    counter.skipTo(end.body.to);
-    if (end.body.to <= masks[masks.length - 1].from) continue;
-    if (/['"`$\\<]/.test(cmd.slice(end.body.from, end.body.to))) {
-      masks.push({ from: end.body.to, masked: maskQuoted(cmd.slice(end.body.to)) });
-    }
+    if (end.carriageReturn) return { data, live, fault: { kind: 'carriage-return', text: quoted[2] } };
+    take(end.body, 'data');
   }
-  return null;
+  return { data, live, fault: null };
 }
 
 // The description of a command refused for `fault`, as `offendingDelimiter`
@@ -1132,6 +1610,8 @@ export function delimiterWhat(fault: DelimiterFault, quote: (text: string) => st
   if (fault.kind === 'open-span') return `a heredoc whose delimiter ${quote(fault.text)} is introduced inside an open \${, $[ or >( construct, or on a line that ends inside an open quote, substitution or such construct, so the shell does not start the body at the line the gate reads`;
   if (fault.kind === 'open-span-substitution') return `a heredoc whose delimiter ${quote(fault.text)} is followed on its introducing line by a substitution, so the shell can start the body at a line the gate does not read`;
   if (fault.kind === 'split') return `a heredoc introduction ${quote(fault.text)} split across lines by a backslash-newline, which the shell joins into an operator and delimiter the gate does not read`;
+  if (fault.kind === 'bare') return `a heredoc whose unquoted delimiter ${quote(fault.text)} is not a plain word, so the shell expands or matches it to a delimiter the gate cannot know`;
+  if (fault.kind === 'open-arith') return `a heredoc whose delimiter ${quote(fault.text)} is introduced on a line that leaves an arithmetic (( open, so the shell starts the body past the line the gate reads`;
   return `a heredoc whose terminator line is ${quote(fault.text)} followed by a carriage return, which ends the body for one bash and not another`;
 }
 
@@ -1152,6 +1632,8 @@ export function delimiterAdvice(fault: DelimiterFault): string {
   if (fault.kind === 'open-span') return 'Close every quote, substitution and ${, $[ or >( construct before the << and on its introducing line, so the gate and the shell start the body at the same line';
   if (fault.kind === 'open-span-substitution') return 'Move every substitution after the << on the introducing line ahead of the <<, or into a variable set on an earlier line, so the gate and the shell start the body at the same line';
   if (fault.kind === 'split') return 'Write the << operator and its delimiter word on one line, with no backslash-newline inside them, so the gate and the shell read the same heredoc';
+  if (fault.kind === 'bare') return `Spell the delimiter as one plain word of ${PLAIN_DELIMITER_CLASS}, quoted where the body must stay literal, so the gate and the shell end the body at the same line`;
+  if (fault.kind === 'open-arith') return 'Close the arithmetic (( )) on the introducing line, or move the << to a line with no open ((, so the gate and the shell start the body at the same line';
   return 'End the terminator line with a bare newline, so the gate and the shell end the body at the same line';
 }
 
@@ -2611,7 +3093,7 @@ function unresolvableSplice(cmd: string, masked: string): string | null {
 // regex-per-heuristic over the whole string, so cost grows with the square of
 // command length (a 80 KB command takes seconds); the agent authoring that string
 // is the only party it delays.
-async function denyReason(cmd: string, cwd: string | null, strict: boolean, depth: number, host: LexHost, quote: (text: string) => string): Promise<string | null> {
+async function denyReason(cmd: string, cwd: string | null, strict: boolean, depth: number, host: LexHost, quote: (text: string) => string, exact: boolean): Promise<string | null> {
   // A CRLF pair is a line break the way a bare newline is, so it is normalized to
   // one before anything reads the command: a Windows-authored report or a
   // multi-line command carries \r\n between its lines, and the two rules that bound
@@ -2634,24 +3116,37 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
     return 'a control character in the command';
   }
 
-  // A heredoc fault `offendingDelimiter` returns, any `DelimiterFault` kind,
-  // refuses here, at every depth, before any body range, exemption or mask is
-  // built on the command, since bash and the guard would end or start its body
-  // at different lines and the commands between would be read as data or
-  // blanked by a stray quote.
+  // A heredoc fault the walk returns, any `DelimiterFault` kind, refuses here,
+  // at every depth, before any body range, exemption or mask is built on the
+  // command, since bash and the guard would end or start its body at different
+  // lines and the commands between would be read as data or blanked by a stray
+  // quote.
   // No carriage-return fault reaches here: the check above refuses every bare \r.
-  const bare = maskQuoted(cmd);
-  const delimiter = offendingDelimiter(cmd, bare);
-  if (delimiter !== null) return delimiterFault(delimiter, quote);
-
-  // Heredoc bodies are found first, on a body-blind quote mask, so the second
-  // mask can treat a body's own quotes as the literal data they are. The second
-  // mask also collects the interiors of command substitutions found inside
+  //
+  // The legacy reading finds bodies on a body-blind quote mask through
+  // `heredocBodies`, so the second mask can treat a body's own quotes as the
+  // literal data they are. The exact reading finds them through `heredocWalk`,
+  // which builds its own forward mask and reads no mask handed to it, so it is
+  // handed none; it also returns the live ranges, and reads a word-start `#`
+  // as a comment and an unquoted body as a live range whose quotes are bytes.
+  // Either reading collects the interiors of command substitutions found inside
   // double-quoted spans (`subs`), which are live command text scanned on their
   // own below rather than inline, so their delimiters never reshape an operand
   // list.
   const subs: Span[] = [];
-  const bodies = heredocBodies(cmd, bare);
+  let bodies: Span[];
+  let live: readonly Span[] = [];
+  if (exact) {
+    const walk = heredocWalk(cmd, '', true);
+    if (walk.fault !== null) return delimiterFault(walk.fault, quote);
+    bodies = walk.data;
+    live = walk.live;
+  } else {
+    const bare = maskQuoted(cmd);
+    const delimiter = offendingDelimiter(cmd, bare);
+    if (delimiter !== null) return delimiterFault(delimiter, quote);
+    bodies = heredocBodies(cmd, bare);
+  }
 
   // The data-sink exemption is decided over the whole command string, before and
   // independently of the quote mask, and holds only at the top level with a cwd
@@ -2666,10 +3161,16 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
   const exemptBody = (depth === 0 && cwd) ? await heredocExemption(cmd, cwd, strict, host) : null;
 
   // Line continuations are spliced out before the masks are built, so no
-  // heuristic reads a boundary the shell does not.
-  cmd = spliceContinuations(cmd, bodies);
+  // heuristic reads a boundary the shell does not. A live body is literal to
+  // the splice too, so its own backslash-newlines stay as they stand.
+  cmd = spliceContinuations(cmd, [...bodies, ...live]);
 
-  let masked = maskHeredocRedirects(maskQuoted(cmd, bodies, subs), bodies);
+  // The exact reading masks comments and takes the live ranges as command text
+  // with their quotes read as bytes; only the data ranges reach the body
+  // redirect blanking, so a live body keeps its redirects visible.
+  let masked = exact
+    ? maskHeredocRedirects(maskExact(cmd, bodies, live, subs), bodies)
+    : maskHeredocRedirects(maskQuoted(cmd, bodies, subs), bodies);
   if (exemptBody) {
     const chars = masked.split('');
     for (let i = exemptBody.from; i < exemptBody.to; i++) chars[i] = '\x00';
@@ -2745,7 +3246,7 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
   ];
   if (depth < 2) {
     for (const src of recursionSources) {
-      const nested = await denyReason(src.text, cwd, strict, depth + 1, host, quote);
+      const nested = await denyReason(src.text, cwd, strict, depth + 1, host, quote, exact);
       if (nested) return src.adorn(nested);
     }
   } else if (recursionSources.length) {
@@ -2810,7 +3311,15 @@ export function readonlyAgentGuard(deps: ReadonlyAgentDeps): BeforeGuard {
       const cmd = e.command;
       if (typeof cmd !== "string" || !cmd.trim()) return {};
       const cwd = typeof ctx.cwd === "string" && ctx.cwd.trim() ? ctx.cwd.trim() : null;
-      const reason = await denyReason(cmd, cwd, cls === "strict", 0, await deps.lexHost(), deps.quote);
+      const host = await deps.lexHost();
+      // The legacy reading runs first, so every refusal the trunk gives keeps
+      // its reason byte for byte. The exact reading runs only where the legacy
+      // one allowed and the raw command holds a `#` or a `<<`, the only places
+      // the two readings differ, and a refusal from it is the guard's refusal.
+      let reason = await denyReason(cmd, cwd, cls === "strict", 0, host, deps.quote, false);
+      if (reason === null && (cmd.includes("#") || cmd.includes("<<"))) {
+        reason = await denyReason(cmd, cwd, cls === "strict", 0, host, deps.quote, true);
+      }
       return reason === null ? {} : { deny: refusalOf(t, reason) };
     },
   };
