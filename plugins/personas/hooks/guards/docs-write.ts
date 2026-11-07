@@ -78,8 +78,9 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, QUOTED_HEREDOC_INTRO, delimiterAdvice, delimiterWhat, exactMasker, heredocBodies, heredocWalk, maskQuoted,
-  offendingDelimiter, repoRoot, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
+  CONTINUATION_CAP_ADVICE, GIT_VALUE_FLAGS, IN_WORD_PAIR_CAP, QUOTED_HEREDOC_INTRO, delimiterAdvice, delimiterWhat, exactMasker, exactReadingDiffers,
+  heredocBodies, heredocWalk, maskExact, maskQuoted, memoized, offendingDelimiter, readUnderContinuations, repoRoot, segment, spliceContinuations,
+  tokens, type DelimiterFault, type LexHost, type VerdictMemo,
 } from "./readonly-agent";
 
 type Span = { from: number; to: number };
@@ -510,10 +511,23 @@ function changesDirectory(c: SimpleCommand): boolean {
 // project in its words, any heredoc body it receives (a lone cat's data
 // included, since a substitution hands that text on), or its substitutions.
 // `delimiter` is the heredoc fault the shared walk refused, any
-// `DelimiterFault` kind, through `offendingDelimiter` on the first reading or
-// `heredocWalk` directly on the exact one, that stopped the read before any body was taken, at
-// any depth, or null.
-type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault | null };
+// `DelimiterFault` kind, through `offendingDelimiter` on the legacy reading or
+// `heredocWalk` directly on the exact one, that stopped the read before any
+// body was taken, at any depth, or null. `capped` is true where a text at any
+// depth carried more in-word line continuations than `IN_WORD_PAIR_CAP`, so
+// it was refused unread.
+type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault | null; capped: boolean };
+
+// The reading of a text refused unread for its in-word continuations.
+const CAPPED: ShellReading = { writes: true, names: true, delimiter: null, capped: true };
+
+// Whether a reading is a refusal rather than an allow.
+const refusedReading = (r: ShellReading): boolean => r.delimiter !== null || r.capped || r.writes;
+
+// The allow composed from the allows of every reading of one text: it names
+// a docs/ path where any reading does, so the caller weighing `names` loses
+// none.
+const allowedReading = (rs: readonly ShellReading[]): ShellReading => ({ writes: false, names: rs.some(r => r.names), delimiter: null, capped: false });
 
 // Reads a shell command for a docs/ write: a simple command whose output
 // redirect aims at the project's docs/, or a pipeline in which a command
@@ -528,9 +542,13 @@ type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault
 // reading `exact` selects. The legacy reading: heredoc bodies found on a
 // body-blind mask through `heredocBodies`, continuations spliced, then the
 // quote mask `maskQuoted`. The exact reading: the data and live bodies
-// `heredocWalk` finds, continuations spliced outside both, then the exact
-// masker, which reads a word-start # as a comment and a body's quotes as
-// bytes, a live body walked as shell text since bash runs its substitutions.
+// `heredocWalk` finds, continuations spliced outside the data bodies, a live
+// body's among them since bash removes them as it reads the body, then the
+// exact masker, which reads a word-start # as a comment and a body's quotes
+// as bytes, a live body walked as shell text since bash runs its
+// substitutions. Under either, the splice reads the reading's own quote mask
+// of the text as handed in, so a pair inside a single-quoted span stays as
+// typed.
 // Under either, each substitution's interior is collected and read one level
 // deeper to DEPTH_BOUND, past which its text refuses on any docs/ path it
 // names. A nested shell's payload (bash -c "...") is a quoted word of a
@@ -538,11 +556,20 @@ type ShellReading = { writes: boolean; names: boolean; delimiter: DelimiterFault
 // the reading returns, `offendingDelimiter`'s or the walk's, any
 // `DelimiterFault` kind, at any depth, ends the read before any body is taken,
 // with the fault as the reading's refusal, since bash and the guard would
-// bound that body at different lines. The guard reads a command a second
-// time, under the exact reading, where the legacy reading allowed it and it
-// holds a # or a <<, and refuses on either reading.
-async function readShell(command: string, placed: DocsJudge, depth: number, exact: boolean): Promise<ShellReading> {
-  const WRITES: ShellReading = { writes: true, names: true, delimiter: null };
+// bound that body at different lines.
+// `join` and `boundary` are the splice's reading of this text alone, as
+// `spliceContinuations` takes them, and `exact` is the reading the guard's
+// decide chose for this pass, carried unchanged to every depth. The joined
+// readings shorten the command, so every span found on the text as handed in,
+// the body spans and each introduction's << index among them, is read through
+// the splice's map onto its text; under the two-space reading the map is the
+// identity. Each substitution interior is read under `readUnderContinuations`
+// on its own text, and its composed reading is held in `memo`, the call's,
+// keyed on the text, its depth, its judge and `exact`. A call holds two
+// judges, the one placed against its cwd and `SHAPE_JUDGE`, so the key names
+// which of the two the interior is read under.
+async function readShell(command: string, placed: DocsJudge, depth: number, join: boolean, boundary: number, exact: boolean, memo: VerdictMemo): Promise<ShellReading> {
+  const WRITES: ShellReading = { writes: true, names: true, delimiter: null, capped: false };
   const subs: Span[] = [];
   let bodies: Span[];
   let cmd: string;
@@ -550,20 +577,31 @@ async function readShell(command: string, placed: DocsJudge, depth: number, exac
   let intros: Map<number, number>;
   if (exact) {
     const walk = heredocWalk(command, "", true);
-    if (walk.fault !== null) return { writes: true, names: true, delimiter: walk.fault };
-    bodies = walk.data;
-    const passed = [...walk.data, ...walk.live].sort((a, b) => a.from - b.from);
-    cmd = spliceContinuations(command, passed);
-    const masker = exactMasker(cmd, bodies, walk.live, subs);
+    if (walk.fault !== null) return { writes: true, names: true, delimiter: walk.fault, capped: false };
+    // The splice is handed the data bodies, and the data and live spans the
+    // masker reads are shifted through its map; the introduction map is built
+    // on the joined text, so its << indexes are the joined ones, and the
+    // bodies it passes over are every body the walk took, sorted by start.
+    const joined = spliceContinuations(command, walk.data, maskExact(command, walk.data, walk.live), join, boundary);
+    cmd = joined.cmd;
+    bodies = joined.bodies;
+    const live = walk.live.map((s) => ({ from: joined.at(s.from), to: joined.at(s.to) }));
+    const masker = exactMasker(cmd, bodies, live, subs);
     masked = masker.full();
+    const passed = [...bodies, ...live].sort((a, b) => a.from - b.from);
     intros = bodyIntros(cmd, masker.at, bodies, { passed, arithOpenAt: (i) => masker.counter.arithOpenAt(i) });
   } else {
     const bare = maskQuoted(command);
     const delimiter = offendingDelimiter(command, bare);
-    if (delimiter !== null) return { writes: true, names: true, delimiter };
-    bodies = heredocBodies(command, bare);
-    intros = bodyIntros(command, (i) => bare[i], bodies, null);
-    cmd = spliceContinuations(command, bodies);
+    if (delimiter !== null) return { writes: true, names: true, delimiter, capped: false };
+    // The introduction map is built on the text as handed in, where the
+    // body-blind mask reads, and each << index is then read through the
+    // splice's map onto the joined text.
+    const found = heredocBodies(command, bare);
+    const joined = spliceContinuations(command, found, maskQuoted(command, found), join, boundary);
+    cmd = joined.cmd;
+    bodies = joined.bodies;
+    intros = new Map([...bodyIntros(command, (i) => bare[i], found, null)].map(([at, body]) => [joined.at(at), body]));
     masked = maskQuoted(cmd, bodies, subs);
   }
   const commands = simpleCommands(cmd, masked, bodies, intros);
@@ -576,8 +614,9 @@ async function readShell(command: string, placed: DocsJudge, depth: number, exac
       subNames.push(false);
       continue;
     }
-    const inner = await readShell(text, judge, depth + 1, exact);
-    if (inner.delimiter !== null) return inner;
+    const inner = await memoized(memo, `${depth + 1}:${judge === SHAPE_JUDGE ? "shape" : "placed"}:${exact ? "exact" : "legacy"}`, text, () =>
+      readUnderContinuations(text, exact, (t, j, b) => readShell(t, judge, depth + 1, j, b, exact, memo), refusedReading, () => CAPPED, allowedReading));
+    if (inner.delimiter !== null || inner.capped) return inner;
     if (inner.writes) return WRITES;
     subNames.push(inner.names);
   }
@@ -601,7 +640,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number, exac
     pipelines.set(c.pipeline, { names: seen.names || names, reads: seen.reads && reads });
   }
   for (const { names, reads } of pipelines.values()) if (names && !reads) return WRITES;
-  return { writes: false, names: named, delimiter: null };
+  return { writes: false, names: named, delimiter: null, capped: false };
 }
 
 // The fixed words of the hook's refusal after the agent type, which the
@@ -650,23 +689,37 @@ export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
       // the way a bash backslash-newline does.
       const unix = e.command.replace(/\r\n/g, "\n");
       const command = e.tool === "PowerShell" ? unix.replace(/`\n/g, "  ") : unix;
-      // The legacy reading runs first, so every refusal the guard gave before
-      // the exact reading existed keeps its reason byte for byte. The exact
-      // reading runs only where the legacy one allowed and the raw command
-      // holds a # or a <<, the only places the two readings differ, and a
-      // refusal from it is the guard's refusal.
-      let reading = await readShell(command, judge, 0, false);
-      if (reading.delimiter === null && !reading.writes && (command.includes("#") || command.includes("<<"))) {
-        reading = await readShell(command, judge, 0, true);
-      }
+      // The command is read under every reading of its continuations, the
+      // two-space reading first so every refusal it gives keeps its reason
+      // byte for byte, and a refusal from any reading is the guard's refusal.
+      // That family runs under the legacy reading of comments and heredoc
+      // bodies first. Where it allows and the exact reading can differ, by
+      // `exactReadingDiffers`, it runs again under the exact reading, so a
+      // refusal from any pairing of a continuation reading with either
+      // stands. The memo holds each nested text's composed reading for this
+      // call.
+      const memo: VerdictMemo = new Map();
+      const under = (exact: boolean) => readUnderContinuations(command, exact, (text, join, boundary) => readShell(text, judge, 0, join, boundary, exact, memo), refusedReading, () => CAPPED, allowedReading);
+      let reading = await under(false);
+      if (!refusedReading(reading) && exactReadingDiffers(command)) reading = await under(true);
       // A delimiter fault stops the read before any docs/ path is weighed, so
       // its refusal names the fault and its way around, never a docs/ write.
+      // A text past the in-word continuation cap is refused unread the same
+      // way.
       if (reading.delimiter !== null) {
         const what = delimiterWhat(reading.delimiter, deps.quote);
         return {
           deny:
             `Blocked: the docs/ write guard cannot tell whether the ${t} subagent's command writes into docs/, ` +
             `because the command is ${what}, refused before its body is read. ${delimiterAdvice(reading.delimiter)}.\n`,
+        };
+      }
+      if (reading.capped) {
+        return {
+          deny:
+            `Blocked: the docs/ write guard cannot tell whether the ${t} subagent's command writes into docs/, ` +
+            `because the command carries more than ${IN_WORD_PAIR_CAP} line continuations inside its words, past what the guard reads. ` +
+            `${CONTINUATION_CAP_ADVICE}.\n`,
         };
       }
       if (reading.writes) return { deny: `${refusal} ${DOCS_READ_SENTENCE}\n` };

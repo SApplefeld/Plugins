@@ -83,7 +83,7 @@
 // Every heredoc body is searched as command text, on a PowerShell call too,
 // where the lexer reads no <# block comment as a comment. The gate reads a
 // command a second time, as bash reads comments and heredoc bodies, where the
-// first reading allowed it and it holds a # or a <<, and refuses on either
+// first reading allowed it and it holds a # or a <, and refuses on either
 // reading. The search
 // reads each { and } outside quotes as a ;, so a git word opening a PowerShell
 // script block stands in command position.
@@ -168,8 +168,9 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, commandPositions, delimiterAdvice, delimiterWhat, heredocBodies, heredocWalk, maskExact, maskQuoted, nestedPayloads,
-  offendingDelimiter, resolveTarget, segment, spliceContinuations, tokens, type DelimiterFault, type LexHost,
+  CONTINUATION_CAP_ADVICE, GIT_VALUE_FLAGS, IN_WORD_PAIR_CAP, commandPositions, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk,
+  maskExact, maskQuoted, memoized, nestedPayloads, offendingDelimiter, readUnderContinuations, resolveTarget, segment, spliceContinuations,
+  tokens, type DelimiterFault, type LexHost, type VerdictMemo,
 } from "./readonly-agent";
 
 // A half-open range of command indexes, the lexer's own span shape.
@@ -226,6 +227,14 @@ const ALIAS_DEFINED = refusal(
 function delimiterRefusal(fault: DelimiterFault, io: GateIo): string {
   return refusal(delimiterWhat(fault, io.quote), delimiterAdvice(fault), WINDOW_RULE);
 }
+
+// The refusal of a command whose text, at any depth, carries more in-word
+// line continuations than `IN_WORD_PAIR_CAP`, so the gate refuses it unread.
+const CAPPED_CONTINUATIONS = refusal(
+  `a command carrying more than ${IN_WORD_PAIR_CAP} line continuations inside its words, past what the gate reads`,
+  CONTINUATION_CAP_ADVICE,
+  WINDOW_RULE,
+);
 
 const MESSAGE_ADVICE = "Write the message to a file and pass -F with its path";
 const STDIN_MESSAGE = refusal("a commit message read from standard input (git commit -F -)", MESSAGE_ADVICE, TITLE_RULE);
@@ -683,23 +692,35 @@ function gitCallAt(cmd: string, masked: string, at: number, depth: number, power
 // mask, with each substitution interior collected into `subs`. The exact
 // reading: the first fault `heredocWalk` returns, any `DelimiterFault` kind,
 // returned the same way; otherwise the walk's data and live bodies,
-// continuations spliced outside both, then `maskExact`, which reads a
-// word-start # as a comment and a body's quotes as bytes. A heredoc body
-// stays command text under either reading.
-function maskOf(cmd: string, subs: Span[], exact: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+// continuations spliced outside the data bodies, a live body's among them
+// since bash removes them as it reads the body, then `maskExact`, which reads
+// a word-start # as a comment and a body's quotes as bytes. A heredoc body
+// stays command text under either reading. The splice reads the reading's
+// own quote mask of the text as handed in, so a pair inside a single-quoted
+// span stays as typed. `join` and `boundary` are the splice's reading of this
+// text, as `spliceContinuations` takes them; the joined readings shorten the
+// text, so the data spans come back shifted and the live spans are read
+// through the splice's map onto it.
+function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, exact: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
   if (exact) {
     const walk = heredocWalk(cmd, "", true);
     if (walk.fault !== null) return { cmd, masked: cmd, delimiter: walk.fault };
-    const spliced = spliceContinuations(cmd, [...walk.data, ...walk.live]);
-    return { cmd: spliced, masked: maskExact(spliced, walk.data, walk.live, subs), delimiter: null };
+    const joined = spliceContinuations(cmd, walk.data, maskExact(cmd, walk.data, walk.live), join, boundary);
+    const live = walk.live.map(s => ({ from: joined.at(s.from), to: joined.at(s.to) }));
+    return { cmd: joined.cmd, masked: maskExact(joined.cmd, joined.bodies, live, subs), delimiter: null };
   }
   const bare = maskQuoted(cmd);
   const delimiter = offendingDelimiter(cmd, bare);
   if (delimiter !== null) return { cmd, masked: cmd, delimiter };
   const bodies = heredocBodies(cmd, bare);
-  const spliced = spliceContinuations(cmd, bodies);
-  return { cmd: spliced, masked: maskQuoted(spliced, bodies, subs), delimiter: null };
+  const joined = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), join, boundary);
+  return { cmd: joined.cmd, masked: maskQuoted(joined.cmd, joined.bodies, subs), delimiter: null };
 }
+
+// What one text's read finds: its git calls, or the heredoc fault that ended
+// the read with none, or that the text was refused unread for its in-word
+// continuations.
+type GitCalls = { calls: GitCall[]; delimiter: DelimiterFault | null; capped: boolean };
 
 // Every git add, stage, commit and push the command runs, and every git call
 // of unknown verb: the top level's in reading order, then each substitution
@@ -711,25 +732,40 @@ function maskOf(cmd: string, subs: Span[], exact: boolean): { cmd: string; maske
 // any git call is judged.
 // The search reads each { and } outside quotes as a ;, so a git word opening
 // a PowerShell script block, as in if (...) {git add .} or &{git add .},
-// stands in command position as PowerShell reads it.
-function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], depth: number, powershell: boolean, exact: boolean): { calls: GitCall[]; delimiter: DelimiterFault | null } {
+// stands in command position as PowerShell reads it. Each nested text is read
+// under `readUnderContinuations` on its own text, under the same `exact`, and
+// the calls it yields are those every reading of it finds, so a call any
+// reading shows is judged; a heredoc fault or the continuation cap under any
+// reading ends the read. The read of each nested text is held in `memo`, the
+// call's, keyed on the text, its depth and `exact`, so the same text handed
+// down by several outer readings reads once and yields the same calls.
+async function gitCallsOf(cmd: string, masked: string, subs: readonly Span[], depth: number, powershell: boolean, exact: boolean, memo: VerdictMemo): Promise<GitCalls> {
   const search = masked.replace(/[{}]/g, ";");
   const calls: GitCall[] = [];
   for (const hit of commandPositions(search, ["git"])) {
     const call = gitCallAt(cmd, search, hit.at, depth, powershell && depth === 0);
     if (call !== null) calls.push(call);
   }
-  if (depth >= DEPTH_BOUND) return { calls, delimiter: null };
+  if (depth >= DEPTH_BOUND) return { calls, delimiter: null, capped: false };
   const inner = [...subs.map((s) => cmd.slice(s.from, s.to)), ...nestedPayloads(cmd, search)];
   for (const text of inner) {
-    const innerSubs: Span[] = [];
-    const read = maskOf(text, innerSubs, exact);
-    if (read.delimiter !== null) return { calls: [], delimiter: read.delimiter };
-    const nested = gitCallsOf(read.cmd, read.masked, innerSubs, depth + 1, powershell, exact);
-    if (nested.delimiter !== null) return { calls: [], delimiter: nested.delimiter };
+    const nested = await memoized(memo, `${depth + 1}:${exact ? "exact" : "legacy"}`, text, () => readUnderContinuations<GitCalls>(
+      text,
+      exact,
+      (t, join, boundary) => {
+        const innerSubs: Span[] = [];
+        const read = maskOf(t, innerSubs, join, boundary, exact);
+        if (read.delimiter !== null) return { calls: [], delimiter: read.delimiter, capped: false };
+        return gitCallsOf(read.cmd, read.masked, innerSubs, depth + 1, powershell, exact, memo);
+      },
+      (r) => r.delimiter !== null || r.capped,
+      () => ({ calls: [], delimiter: null, capped: true }),
+      (rs) => ({ calls: rs.flatMap((r) => r.calls), delimiter: null, capped: false }),
+    ));
+    if (nested.delimiter !== null || nested.capped) return nested;
     calls.push(...nested.calls);
   }
-  return { calls, delimiter: null };
+  return { calls, delimiter: null, capped: false };
 }
 
 // What makes a command compound, read on the masked command, where every
@@ -786,12 +822,19 @@ async function loneReason(call: GitCall, cwd: string | null, host: () => Promise
 // the advice to quote the word. A compound command whose every git call is a
 // commit reading its message from standard input, as a heredoc or a pipe
 // feeds it, takes the standard-input refusal, whose advice it can follow.
-async function gateReason(cmd: string, cwd: string | null, powershell: boolean, host: () => Promise<LexHost>, io: GateIo, exact: boolean): Promise<string | null> {
+// `join` and `boundary` are the splice's reading of the top-level text, as
+// `spliceContinuations` takes them, `exact` the reading of comments and
+// heredoc bodies the gate's decide chose for this pass, carried to every
+// depth, and `cmd` arrives with its CRLF pairs normalized once by the gate's
+// decide. A text at any depth past the in-word continuation cap is refused
+// unread. `memo` is the call's, holding each nested text's read.
+async function gateReason(cmd: string, cwd: string | null, powershell: boolean, join: boolean, boundary: number, exact: boolean, host: () => Promise<LexHost>, io: GateIo, memo: VerdictMemo): Promise<string | null> {
   const subs: Span[] = [];
-  const read = maskOf(cmd.replace(/\r\n/g, "\n"), subs, exact);
+  const read = maskOf(cmd, subs, join, boundary, exact);
   if (read.delimiter !== null) return delimiterRefusal(read.delimiter, io);
-  const calls = gitCallsOf(read.cmd, read.masked, subs, 0, powershell, exact);
+  const calls = await gitCallsOf(read.cmd, read.masked, subs, 0, powershell, exact, memo);
   if (calls.delimiter !== null) return delimiterRefusal(calls.delimiter, io);
+  if (calls.capped) return CAPPED_CONTINUATIONS;
   const found = calls.calls;
   if (found.length === 0) return null;
   const runs = (...verbs: string[]) => found.some((x) => verbs.includes(x.verb));
@@ -842,15 +885,26 @@ export function gitCommitGateGuard(deps: GitCommitGateDeps): BeforeGuard {
       let lexHost: Promise<LexHost> | null = null;
       const host = () => (lexHost ??= deps.lexHost());
       try {
-        // The legacy reading runs first, so every refusal the gate gave before
-        // the exact reading existed keeps its reason byte for byte. The exact
-        // reading runs only where the legacy one allowed and the raw command
-        // holds a # or a <<, the only places the two readings differ, and a
-        // refusal from it is the gate's refusal.
-        let reason = await gateReason(cmd, cwd, e.tool === "PowerShell", host, deps, false);
-        if (reason === null && (cmd.includes("#") || cmd.includes("<<"))) {
-          reason = await gateReason(cmd, cwd, e.tool === "PowerShell", host, deps, true);
-        }
+        // The command, its CRLF pairs normalized once here, is read under
+        // every reading of its continuations, the two-space reading first so
+        // every refusal it gives keeps its reason byte for byte, and a refusal
+        // from any reading is the gate's refusal. That family runs under the
+        // legacy reading of comments and heredoc bodies first. Where it allows
+        // and the exact reading can differ, by `exactReadingDiffers`, it runs
+        // again under the exact reading, so a refusal from any pairing of a
+        // continuation reading with either stands. The memo holds each nested
+        // text's read for this call.
+        const memo: VerdictMemo = new Map();
+        const unix = cmd.replace(/\r\n/g, "\n");
+        const under = (exact: boolean) => readUnderContinuations(
+          unix,
+          exact,
+          (text, join, boundary) => gateReason(text, cwd, e.tool === "PowerShell", join, boundary, exact, host, deps, memo),
+          (r) => r !== null,
+          () => CAPPED_CONTINUATIONS,
+        );
+        let reason = await under(false);
+        if (reason === null && exactReadingDiffers(unix)) reason = await under(true);
         return reason === null ? {} : { deny: reason };
       } catch (err) {
         const failure = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").trim();

@@ -929,6 +929,19 @@ export function maskExact(cmd: string, data: readonly Span[], live: readonly Spa
   return exactMasker(cmd, data, live, subs).full();
 }
 
+// Whether the exact reading of `text` can differ from the legacy one, so a
+// guard that allowed `text` under the legacy reading reads it again under the
+// exact one. The two differ only at a comment, which `#` spells, and at a
+// heredoc introduction, which `<<` spells. The test is a lone `<`, not `<<`,
+// because the `<<` a nested shell reads can form only after the text in hand
+// is changed: a continuation can split the operator, and a quote strip can
+// join a `<` closing one quoted segment to a `<` opening the next. Neither a
+// splice nor a quote strip makes a `<` or a `#` the text lacks, so the test is
+// sound at every depth.
+export function exactReadingDiffers(text: string): boolean {
+  return text.includes('#') || text.includes('<');
+}
+
 // The quoted heredoc introduction both body finders read: `heredocBodies` and
 // docs-write's `bodyIntros`, which maps each introduction to its body and
 // must read exactly the introductions `heredocBodies` takes. Groups: the
@@ -1840,36 +1853,262 @@ export async function heredocExemption(cmd: string, cwd: string, strict: boolean
   return { from: bodyStart, to: termStart };
 }
 
-// A copy of the command with every line continuation spliced out: a backslash
-// standing immediately before a newline joins the two lines into one, so the shell
-// reads no boundary there at all and `git \<newline>push` runs git push. Left in
-// place, that newline ends an operand list in `segment` and every
-// positional-subcommand reader loses its subcommand. The pair becomes two spaces
-// rather than being deleted, so every index into the command stays valid for the
-// masks, the heredoc body ranges, and the substitution ranges built alongside them,
-// and the join reads as the word boundary the shell also puts there.
-//
-// Only an odd-length run of backslashes continues a line: in an even run every
-// backslash is itself escaped and the newline after it is a real separator. That is
-// bash's rule and the one `heredocBodies` walks its intro line by. A quoted-delimiter
-// heredoc body is literal data where bash splices nothing, so a pair inside one of
-// `bodies` is left exactly as it stands. Bash splices nothing inside a single-quoted
-// span either, and a pair there is spliced anyway: a quoted span is blanked out of
-// every pattern the guard matches, so the only thing that reading changes is the
-// spelling of an operand whose own bytes carry a newline, which resolves to a path
-// in the same place either way.
-export function spliceContinuations(cmd: string, bodies: readonly Span[]): string {
-  const chars = cmd.split('');
-  for (let i = 1; i < chars.length; i++) {
-    if (chars[i] !== '\n' || chars[i - 1] !== '\\') continue;
+// The newline index of every genuine line continuation in the command: a
+// backslash standing immediately before a newline, where the shell removes the
+// pair and joins the text on either side. Only an odd-length run of backslashes
+// continues a line: in an even run every backslash is itself escaped and the
+// newline after it is a real separator. That is bash's rule and the one
+// `heredocBodies` walks its intro line by. A quoted-delimiter heredoc body is
+// literal data where bash splices nothing, so a pair inside one of `bodies` is
+// no continuation. Bash splices nothing inside a single-quoted span either;
+// `outsideSingleQuotes` below drops those pairs, reading the span off a quote
+// mask, since this rule carries no quote, comment or dialect state: it reads
+// every text, Bash or PowerShell, at every depth, the same way.
+function continuationPairs(cmd: string, bodies: readonly Span[]): number[] {
+  const pairs: number[] = [];
+  for (let i = 1; i < cmd.length; i++) {
+    if (cmd[i] !== '\n' || cmd[i - 1] !== '\\') continue;
     let run = 0;
-    while (run < i && chars[i - 1 - run] === '\\') run++;
+    while (run < i && cmd[i - 1 - run] === '\\') run++;
     if (run % 2 === 0) continue;
     if (bodies.some(b => i - 1 >= b.from && i - 1 < b.to)) continue;
-    chars[i - 1] = ' ';
-    chars[i] = ' ';
+    pairs.push(i);
   }
-  return chars.join('');
+  return pairs;
+}
+
+// Of `pairs`, newline indexes of continuations in `cmd`, those standing
+// inside a word: the character before the pair's backslash and the character
+// after its newline are both non-whitespace. Removing such a pair glues the
+// text on either side into one word, so these are the only pairs whose
+// removal can move a word start a reader keys on; a pair beside whitespace
+// leaves every word start where it was under either of the splice's
+// readings.
+export function inWordPairs(cmd: string, pairs: readonly number[]): number[] {
+  return pairs.filter(i => i >= 2 && i + 1 < cmd.length && !/\s/.test(cmd[i - 2]) && !/\s/.test(cmd[i + 1]));
+}
+
+// Of `pairs`, newline indexes of continuations in the text `masked` is the
+// quote mask of, those outside every single-quoted span. The mask is built on
+// the text as handed in, under the reading in force, with its heredoc bodies
+// blanked: a pair's backslash inside a quoted span is blanked, and the
+// blanked run it sits in opens on a single quote, where a run inside a
+// double-quoted span opens on a double quote or a substitution sentinel.
+// Bash reads a backslash-newline inside single quotes as two literal bytes,
+// so the splice leaves such a pair as typed under every reading and the
+// composer gives it no reading: a string a user quotes whole, with a
+// backslash ending each of its lines, holds any number of such pairs and
+// runs as one plain command, read once rather than refused or read per
+// pair. Where the span is an executor's payload, the pair reaches the next
+// depth as typed, and the composer there reads it as that text's own.
+export function outsideSingleQuotes(masked: string, pairs: readonly number[]): number[] {
+  if (pairs.length === 0) return [];
+  // The nearest unblanked index before each blanked one, read in one pass, so
+  // a string holding many pairs costs its length once rather than once per
+  // pair.
+  const opener = new Int32Array(masked.length);
+  let before = -1;
+  for (let k = 0; k < masked.length; k++) {
+    opener[k] = before;
+    if (masked[k] !== '\x00') before = k;
+  }
+  return pairs.filter(i => masked[i - 1] !== '\x00' || opener[i - 1] < 0 || masked[opener[i - 1]] !== "'");
+}
+
+// The command with every line continuation spliced out, in one of its readings,
+// with the heredoc body spans carried onto it and a map from any other index into
+// the command as it was handed in. A backslash standing immediately before a
+// newline is removed by the shell together with the newline, joining the text on
+// either side with no boundary between, so `git \<newline>push` runs git push.
+// Left in place, that newline ends an operand list in `segment` and every
+// positional-subcommand reader loses its subcommand.
+//
+// The continuations are `continuationPairs` outside `bodies`, less those
+// `outsideSingleQuotes` drops off `masked`, the quote mask of `cmd` as handed
+// in under the reading in force, with `bodies` blanked. `bodies` are the
+// quoted-delimiter bodies alone, literal data where bash splices nothing; an
+// unquoted body is live text whose backslash-newlines bash removes as it
+// reads the body, so a caller leaves those spans out and maps them through
+// `at`. A pair inside a single-quoted span stays as typed under every
+// reading, two literal bytes to bash, which a nested executor's payload
+// carries to the next depth for the composer there.
+//
+// `join` picks the reading. With `join` false the pair becomes two spaces, so the
+// command keeps its length, every index into it stays valid, `at` is the
+// identity, and the join reads as a word boundary. With `join` true the pair is
+// removed as the shell removes it, so a command word or a `$(` opener the pair
+// fell inside is whole once joined and `commandPositions` and the quoted-span
+// mask read it as the shell does, except the one pair whose newline index is
+// `boundary`, which takes two spaces as under the first reading. Removal shortens
+// the command, so `bodies` comes back shifted and `at` maps any other index: to
+// the joined index of that character where it survives, and to the index of the
+// next surviving character where the pair took it, so a half-open span maps end
+// for end onto the span of its surviving text. The data-sink exemption span and
+// docs-write's heredoc introduction indexes go through it.
+//
+// No single reading matches every reader downstream. Two spaces keep every word
+// start a reader keyed on `commandPositions` keys on, the mutation detectors
+// here and the gates' call finders among them, but split a word the shell
+// reads whole; docs-write's `simpleCommands` reads its command starts another
+// way, and the two spaces hold no such promise to it. Removal keeps every word
+// whole but can glue a word start onto the text before it where the shell
+// reads a word start, as a pair ending an unquoted comment or a pair after a
+// PowerShell path separator does, and a text can hold a pair of each kind, so
+// that the comment-ending pair hides the governed word under removal and the
+// in-word pair hides it under two spaces. A joined reading that keeps the
+// comment-ending pair as a boundary shows the reader the whole word at its word
+// start. `readUnderContinuations` below composes the readings a text takes:
+// two spaces, removal, and removal with each in-word pair as the boundary, a
+// refusal from any standing. The composer enumerates its pairs from the
+// bodies and the mask of the same reading the guard splices under, through
+// `readingSpans`, so a text's composer and each of its readings agree on
+// which pairs are continuations.
+export type Spliced = { cmd: string; bodies: Span[]; at: (i: number) => number };
+export function spliceContinuations(cmd: string, bodies: readonly Span[], masked: string, join: boolean, boundary = -1): Spliced {
+  const chars = cmd.split('');
+  const keep: boolean[] = new Array(chars.length).fill(true);
+  for (const i of outsideSingleQuotes(masked, continuationPairs(cmd, bodies))) {
+    if (join && i !== boundary) {
+      keep[i - 1] = false;
+      keep[i] = false;
+    } else {
+      chars[i - 1] = ' ';
+      chars[i] = ' ';
+    }
+  }
+  if (!join) return { cmd: chars.join(''), bodies: bodies.map(b => ({ from: b.from, to: b.to })), at: (i: number) => i };
+  // pos[i] is the count of surviving characters before index i, which is the
+  // joined index of cmd[i] where it survives and of the next survivor where not.
+  const pos: number[] = new Array(chars.length + 1);
+  const out: string[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    pos[i] = out.length;
+    if (keep[i]) out.push(chars[i]);
+  }
+  pos[chars.length] = out.length;
+  const at = (i: number) => pos[Math.min(Math.max(i, 0), chars.length)];
+  return { cmd: out.join(''), bodies: bodies.map(b => ({ from: at(b.from), to: at(b.to) })), at };
+}
+
+// The most in-word continuations outside single quotes a text may carry and
+// still be read. Each in-word pair adds one reading of its text, so the
+// readings grow linearly with the pairs, and a nested text composes once per
+// decide call whatever the outer readings, so a call's readings add over the
+// texts it reads rather than multiply. The bound holds the pairs a shell
+// splices to a small number; a pair inside single quotes, which bash leaves
+// as typed, is left as typed and adds no reading, since a quoted string with
+// a backslash ending each line is a plain command however many lines it has,
+// and a payload carrying such pairs is read at the next depth, where they
+// count toward that text's own bound. A text past the bound is refused unread
+// with `CONTINUATION_CAP_REASON`.
+export const IN_WORD_PAIR_CAP = 8;
+
+// The reason a guard whose refusal describes the command alone gives for a
+// text past `IN_WORD_PAIR_CAP`, in the shape of its neighbouring reasons.
+export const CONTINUATION_CAP_REASON =
+  `a text with more than ${IN_WORD_PAIR_CAP} line continuations inside its words, past what the guard reads (put each command on its own plain line)`;
+
+// The way around that refusal, for a guard whose refusal helper takes an
+// instead sentence.
+export const CONTINUATION_CAP_ADVICE = 'Put each command on its own plain line, with no backslash-newline inside a word';
+
+// One guard's reading of one text, `text`, under one reading of the splice:
+// `join` and `boundary` as `spliceContinuations` takes them.
+export type ContinuationRead<T> = (text: string, join: boolean, boundary: number) => T | Promise<T>;
+
+// The heredoc body spans and the quote mask of `cmd` as handed in, under the
+// reading `exact` selects: the two a guard's read of that text splices by,
+// and the two the composer below enumerates its readings from, so the pairs
+// it reads under are the pairs each reading splices. The legacy reading finds
+// the quoted-delimiter bodies on a body-blind mask through `heredocBodies` and
+// masks with those bodies blanked. The exact reading takes `heredocWalk`'s
+// data bodies, and masks with its live bodies read as command text whose
+// quotes are bytes, so a quote inside an unquoted body opens no span over the
+// pairs after it. A walk fault needs no handling here: the guard's read of the
+// text refuses on it under the first reading, and the composer returns that
+// refusal before it enumerates anything.
+function readingSpans(cmd: string, exact: boolean): { bodies: Span[]; masked: string } {
+  if (exact) {
+    const walk = heredocWalk(cmd, '', true);
+    return { bodies: walk.data, masked: maskExact(cmd, walk.data, walk.live) };
+  }
+  const bodies = heredocBodies(cmd, maskQuoted(cmd));
+  return { bodies, masked: maskQuoted(cmd, bodies) };
+}
+
+// A guard's verdict over `cmd` composed from every reading of its continuations,
+// so that a refusal under any stands. The first reading is two spaces, so every
+// refusal it gives keeps its reason byte for byte; where it allows and the text
+// holds no genuine continuation the splice would touch, that allow is the
+// verdict, since every reading writes the same bytes. Otherwise the text is
+// read joined, then joined with each in-word pair kept as a boundary, and the
+// first refusal is the verdict. A text with more than `IN_WORD_PAIR_CAP`
+// in-word pairs takes `capped` in place of those readings. The pairs are
+// enumerated through `readingSpans` under `exact`, the reading of comments and
+// heredoc bodies the guard reads `cmd` under, so a pair inside a body the
+// exact walk takes and the legacy reading does not, or the reverse, is read
+// as that reading splices it; a pair inside single quotes is left as typed by
+// every reading and so is given none, as `outsideSingleQuotes` states.
+// `refused` tells a refusal from an allow; `allowed` folds the
+// allows into the verdict where every reading allowed, the first one's by
+// default, which fits a reader whose allow carries nothing, while a reader whose
+// allow carries facts its caller still weighs, as docs-write's `names` does,
+// folds them so none is lost. The composer runs on the text in hand at every
+// depth, so a pair that forms only once an executor's payload has its quotes
+// stripped is read where it exists, and a nested text with no pair costs one
+// reading; a guard holds each nested text's composed verdict in a
+// `VerdictMemo` through `memoized` below, so a nested text composes once per
+// decide call however many outer readings hand it down, and the readings a
+// call makes add over its texts rather than multiply. `cmd` is the text
+// exactly as each reading splices it, its CRLF pairs already normalized to
+// newlines by the guard's decide, so the boundary indexes land on the text
+// the reading splices; a reading normalizes nothing itself, since a second
+// pass over a terminator ending in two carriage returns would collapse the
+// bare one the first pass left and lose the fault it marks.
+export async function readUnderContinuations<T>(
+  cmd: string,
+  exact: boolean,
+  read: ContinuationRead<T>,
+  refused: (result: T) => boolean,
+  capped: () => T,
+  allowed: (results: readonly T[]) => T = results => results[0],
+): Promise<T> {
+  const results: T[] = [await read(cmd, false, -1)];
+  if (refused(results[0])) return results[0];
+  const { bodies, masked } = readingSpans(cmd, exact);
+  const pairs = outsideSingleQuotes(masked, continuationPairs(cmd, bodies));
+  if (pairs.length === 0) return results[0];
+  const inWord = inWordPairs(cmd, pairs);
+  if (inWord.length > IN_WORD_PAIR_CAP) return capped();
+  for (const boundary of [-1, ...inWord]) {
+    const result = await read(cmd, true, boundary);
+    if (refused(result)) return result;
+    results.push(result);
+  }
+  return allowed(results);
+}
+
+// The composed verdicts of one decide call's nested texts, keyed by `memoized`
+// on the text and on whatever else its verdict depends on within the call, its
+// depth among them. A guard's decide makes one and hands it down every
+// recursion, so the same nested text handed down by several outer readings
+// composes once.
+export type VerdictMemo = Map<string, Promise<unknown>>;
+
+// The composed verdict of `text` under `compose`, from `memo` where the call
+// has composed that text under `key` before, and composed and stored there
+// otherwise. `key` names what the verdict depends on beside the text, so two
+// texts alike in bytes at different depths, or under different judges, hold
+// their own verdicts. The stored value is the promise, so a verdict in flight
+// is shared rather than composed twice.
+export function memoized<T>(memo: VerdictMemo, key: string, text: string, compose: () => Promise<T>): Promise<T> {
+  const k = JSON.stringify([key, text]);
+  let verdict = memo.get(k) as Promise<T> | undefined;
+  if (verdict === undefined) {
+    verdict = compose();
+    memo.set(k, verdict);
+  }
+  return verdict;
 }
 
 // One command out of a chain, pipeline, or multi-line script: the text from
@@ -1880,7 +2119,10 @@ export function spliceContinuations(cmd: string, bodies: readonly Span[]): strin
 // as a semicolon; without it the next line's command name reads as an operand of
 // this one. Every newline still standing here is one the shell reads, because a
 // continued line's backslash-newline pair is spliced out of both copies before the
-// masks are built. The `)` stays in the cut set for the subshell closer the mask
+// masks are built, under any of the splice's readings; a pair the splice
+// leaves standing, after an even backslash run or inside a quoted heredoc body,
+// keeps a newline the shell reads too. The `)` stays in the cut set for the
+// subshell closer the mask
 // leaves visible: in (git push), the operand list must end at the paren. A backtick is
 // not in it, because every live backtick span is blanked before this runs and a
 // tick still visible in the masked copy is a literal character (an escaped tick,
@@ -3093,21 +3335,48 @@ function unresolvableSplice(cmd: string, masked: string): string | null {
 // regex-per-heuristic over the whole string, so cost grows with the square of
 // command length (a 80 KB command takes seconds); the agent authoring that string
 // is the only party it delays.
-async function denyReason(cmd: string, cwd: string | null, strict: boolean, depth: number, host: LexHost, quote: (text: string) => string, exact: boolean): Promise<string | null> {
-  // A CRLF pair is a line break the way a bare newline is, so it is normalized to
-  // one before anything reads the command: a Windows-authored report or a
-  // multi-line command carries \r\n between its lines, and the two rules that bound
-  // a heredoc body's terminator (heredocBodies and heredocExemption) would
-  // otherwise disagree about a delimiter line's trailing \r and mask a live command
-  // past the terminator the shell reads.
-  if (depth === 0) cmd = cmd.replace(/\r\n/g, '\n');
+//
+// What one decide call holds fixed across every reading at every depth: the
+// cwd, the agent class, the lexer's host and the quote fold; the memo of
+// nested verdicts; the data-sink exemption span, decided once over the
+// top-level text, since every top-level reading is handed that same text; and
+// the git root above the cwd, walked once at the first reading that asks for
+// it.
+type Call = {
+  cwd: string | null;
+  strict: boolean;
+  host: LexHost;
+  quote: (text: string) => string;
+  memo: VerdictMemo;
+  exempt: Span | null;
+  root: (cwd: string) => Promise<string>;
+};
+
+// `join` and `boundary` are the splice's reading of this text alone, as
+// `spliceContinuations` takes them. `exact` selects the reading of comments
+// and heredoc bodies, legacy or exact, and is the one the guard's decide
+// chose for this pass, carried unchanged to every depth. A nested payload or
+// substitution interior is read under `readUnderContinuations` on its own
+// text, so its continuations are enumerated where they exist, a pair that
+// forms only once `tokens` strips the quotes around it among them, and its
+// composed verdict is held in the call's memo, keyed on the text, its depth
+// and `exact`.
+async function denyReason(cmd: string, depth: number, join: boolean, boundary: number, exact: boolean, call: Call): Promise<string | null> {
+  const { cwd, strict, host, quote } = call;
+  // A CRLF pair is a line break the way a bare newline is, so the guard's decide
+  // normalizes each to one before anything reads the command: a Windows-authored
+  // report or a multi-line command carries \r\n between its lines, and the two
+  // rules that bound a heredoc body's terminator (heredocBodies and
+  // heredocExemption) would otherwise disagree about a delimiter line's trailing
+  // \r and mask a live command past the terminator the shell reads. The text
+  // arrives here normalized once, at every depth, and is normalized no further.
 
   // A raw control character other than tab or newline has no legitimate place in a
   // governed command, and the guard's own masking sentinels (NUL and \x01) are
   // themselves control characters, so an input carrying one could forge a sentinel
   // and reshape an operand list where the shell reads no boundary at all
   // (rm <0x01> README.md). A bare carriage return joins them: after the CRLF
-  // normalization above every remaining \r sits mid-line, where bash reads an
+  // normalization every remaining \r sits mid-line, where bash reads an
   // ordinary word character, so admitting it would only invite the same
   // sentinel-shaped confusion (rm <CR> README.md) and reopen the heredoc
   // terminator desync the normalization closes. Refused at the boundary rather
@@ -3154,26 +3423,37 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
   // analysis is a payload some executor was handed, and what consumes that
   // executor's own stdout sits in the command around it, out of this string:
   // `sh -c "cat <<'EOF' ... EOF" | sh` runs the body while the payload alone
-  // reads as a sink copying stdin. It is decided here, ahead of the line splice
-  // below, so its intro line is the physical one the recognizer refuses a
-  // continuation on. A qualifying body is masked whole, the way a quoted span is,
-  // so every heuristic reading the masked copy passes over it.
-  const exemptBody = (depth === 0 && cwd) ? await heredocExemption(cmd, cwd, strict, host) : null;
+  // reads as a sink copying stdin. The guard's decide decides it over the
+  // top-level text before any reading, ahead of the line splice below, so its
+  // intro line is the physical one the recognizer refuses a continuation on. A
+  // qualifying body is masked whole, the way a quoted span is, so every
+  // heuristic reading the masked copy passes over it.
+  const exemptBody = depth === 0 ? call.exempt : null;
 
   // Line continuations are spliced out before the masks are built, so no
-  // heuristic reads a boundary the shell does not. A live body is literal to
-  // the splice too, so its own backslash-newlines stay as they stand.
-  cmd = spliceContinuations(cmd, [...bodies, ...live]);
+  // heuristic reads a boundary the shell does not. The splice is handed the
+  // data bodies alone and this reading's quote mask of the text as it stands:
+  // a quoted-delimiter body is literal data where bash splices nothing, while
+  // an unquoted body is live text whose backslash-newlines bash removes as it
+  // reads the body, so those are spliced as any command text is, and a pair
+  // inside a single-quoted span stays as typed. The joined readings shorten
+  // the command, so the data spans come back shifted and the live spans and
+  // the exemption span found above are read through the splice's map onto its
+  // text. Under the two-space reading the map is the identity.
+  const joined = spliceContinuations(cmd, bodies, exact ? maskExact(cmd, bodies, live) : maskQuoted(cmd, bodies), join, boundary);
+  cmd = joined.cmd;
+  const data = joined.bodies;
+  const liveJoined = live.map(s => ({ from: joined.at(s.from), to: joined.at(s.to) }));
 
   // The exact reading masks comments and takes the live ranges as command text
   // with their quotes read as bytes; only the data ranges reach the body
   // redirect blanking, so a live body keeps its redirects visible.
   let masked = exact
-    ? maskHeredocRedirects(maskExact(cmd, bodies, live, subs), bodies)
-    : maskHeredocRedirects(maskQuoted(cmd, bodies, subs), bodies);
+    ? maskHeredocRedirects(maskExact(cmd, data, liveJoined, subs), data)
+    : maskHeredocRedirects(maskQuoted(cmd, data, subs), data);
   if (exemptBody) {
     const chars = masked.split('');
-    for (let i = exemptBody.from; i < exemptBody.to; i++) chars[i] = '\x00';
+    for (let i = joined.at(exemptBody.from); i < joined.at(exemptBody.to); i++) chars[i] = '\x00';
     masked = chars.join('');
   }
 
@@ -3186,7 +3466,7 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
   if (stateChange) return stateChange;
 
   if (cwd) {
-    const root = await repoRoot(cwd, host);
+    const root = await call.root(cwd);
     // A gate-runner's build output directories are not the tree under review,
     // so neither writing nor destroying content there is a mutation of
     // reviewed state. The strict class writes only .kit/.
@@ -3246,7 +3526,13 @@ async function denyReason(cmd: string, cwd: string | null, strict: boolean, dept
   ];
   if (depth < 2) {
     for (const src of recursionSources) {
-      const nested = await denyReason(src.text, cwd, strict, depth + 1, host, quote, exact);
+      const nested = await memoized(call.memo, `${depth + 1}:${exact ? 'exact' : 'legacy'}`, src.text, () => readUnderContinuations(
+        src.text,
+        exact,
+        (text, j, b) => denyReason(text, depth + 1, j, b, exact, call),
+        reason => reason !== null,
+        () => CONTINUATION_CAP_REASON,
+      ));
       if (nested) return src.adorn(nested);
     }
   } else if (recursionSources.length) {
@@ -3312,14 +3598,33 @@ export function readonlyAgentGuard(deps: ReadonlyAgentDeps): BeforeGuard {
       if (typeof cmd !== "string" || !cmd.trim()) return {};
       const cwd = typeof ctx.cwd === "string" && ctx.cwd.trim() ? ctx.cwd.trim() : null;
       const host = await deps.lexHost();
-      // The legacy reading runs first, so every refusal the trunk gives keeps
-      // its reason byte for byte. The exact reading runs only where the legacy
-      // one allowed and the raw command holds a `#` or a `<<`, the only places
-      // the two readings differ, and a refusal from it is the guard's refusal.
-      let reason = await denyReason(cmd, cwd, cls === "strict", 0, host, deps.quote, false);
-      if (reason === null && (cmd.includes("#") || cmd.includes("<<"))) {
-        reason = await denyReason(cmd, cwd, cls === "strict", 0, host, deps.quote, true);
-      }
+      const strict = cls === "strict";
+      // The command, its CRLF pairs normalized once here, is read under every
+      // reading of its continuations, the two-space reading first so every
+      // refusal it gives keeps its reason byte for byte, and a refusal from
+      // any reading is the guard's refusal. That family runs under the legacy
+      // reading of comments and heredoc bodies first. Where it allows and the
+      // exact reading can differ, by `exactReadingDiffers`, it runs again
+      // under the exact reading, so a refusal from any pairing of a
+      // continuation reading with either stands. What every reading shares is
+      // decided once: the data-sink exemption over this text, and the git
+      // root above the cwd at the first reading that asks for it.
+      const unix = cmd.replace(/\r\n/g, '\n');
+      let root: Promise<string> | null = null;
+      const call: Call = {
+        cwd, strict, host, quote: deps.quote, memo: new Map(),
+        exempt: cwd ? await heredocExemption(unix, cwd, strict, host) : null,
+        root: dir => (root ??= repoRoot(dir, host)),
+      };
+      const under = (exact: boolean) => readUnderContinuations(
+        unix,
+        exact,
+        (text, join, boundary) => denyReason(text, 0, join, boundary, exact, call),
+        r => r !== null,
+        () => CONTINUATION_CAP_REASON,
+      );
+      let reason = await under(false);
+      if (reason === null && exactReadingDiffers(unix)) reason = await under(true);
       return reason === null ? {} : { deny: refusalOf(t, reason) };
     },
   };

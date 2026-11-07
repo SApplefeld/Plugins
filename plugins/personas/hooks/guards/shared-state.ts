@@ -62,9 +62,9 @@
 
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
-  GIT_VALUE_FLAGS, cmdletOperands, cmdletPaths, commandPositions, delimiterFault, effectiveDirs, heredocBodies,
-  heredocExemption, heredocWalk, maskExact, maskQuoted, nestedPayloads, offendingDelimiter, repoRoot, resolveTarget,
-  segment, spliceContinuations, tokens, type LexHost,
+  CONTINUATION_CAP_REASON, GIT_VALUE_FLAGS, cmdletOperands, cmdletPaths, commandPositions, delimiterFault, effectiveDirs,
+  exactReadingDiffers, heredocBodies, heredocExemption, heredocWalk, maskExact, maskQuoted, memoized, nestedPayloads, offendingDelimiter,
+  readUnderContinuations, repoRoot, resolveTarget, segment, spliceContinuations, tokens, type LexHost, type VerdictMemo,
 } from "./readonly-agent";
 import { sharedStateAgentClass } from "./agent-class";
 
@@ -374,11 +374,11 @@ function placeOf(resolved: string, root: string, globs: boolean, host: LexHost):
 // .\k*) and of find's \; terminator, whose lone backslash is refused as
 // unreadable; find -exec ... {} + is the passing form. Every reason
 // echoes the operand as the lexer read it, quotes removed and cut at a
-// separator or a closing parenthesis. The root is walked for on the first
-// name that needs a place, so a command holding no recursive delete costs
-// no .git walk.
-async function deleteAct(cmd: string, masked: string, cwd: string, host: LexHost): Promise<string | null> {
-  let root: string | null = null;
+// separator or a closing parenthesis. The root is `root`, the call's, walked
+// for on the first name in the call that needs a place, so a command holding
+// no recursive delete costs no .git walk and one holding several is walked
+// once across every reading.
+async function deleteAct(cmd: string, masked: string, cwd: string, host: LexHost, root: (cwd: string) => Promise<string>): Promise<string | null> {
   const judge = async (name: string, flag: string, operands: string[], globs: boolean, at: number): Promise<string | null> => {
     for (const operand of operands) {
       if (unreadable(operand)) continue;
@@ -392,8 +392,7 @@ async function deleteAct(cmd: string, masked: string, cwd: string, host: LexHost
           for (const base of await effectiveDirs(cmd, masked, at, cwd, host)) {
             const resolved = resolveTarget(reading, base, host);
             if (resolved === null) continue;
-            root ??= await repoRoot(cwd, host);
-            const place = placeOf(resolved, root, globs, host);
+            const place = placeOf(resolved, await root(cwd), globs, host);
             if (place === "root") return `a recursive delete of the session's whole checkout (${name} ${flag} ${operand})`;
             if (place === "kit") return `a recursive delete under .kit/ (${name} ${flag} ${operand})`;
             if (place === "outside") return `a recursive delete outside the session's checkout (${name} ${flag} ${operand})`;
@@ -429,24 +428,43 @@ async function deleteAct(cmd: string, masked: string, cwd: string, host: LexHost
   return null;
 }
 
+// What one decide call holds fixed across every reading at every depth: the
+// cwd, the lexer's host and the quote fold; the memo of nested verdicts; the
+// data-sink exemption span, decided once over the top-level text, since every
+// top-level reading is handed that same text; and the git root above the cwd,
+// walked once at the first reading that asks for it.
+type Call = {
+  cwd: string | null;
+  host: LexHost;
+  quote: (text: string) => string;
+  memo: VerdictMemo;
+  exempt: Span | null;
+  root: (cwd: string) => Promise<string>;
+};
+
 // The shared-state act the command performs under the reading `exact`
 // selects, or null. The preprocessing is the read-only guard's, in its order:
-// CRLF normalized, any heredoc fault refused at every depth before any body is
+// CRLF normalized once by the guard's decide before the text arrives, at
+// every depth, any heredoc fault refused at every depth before any body is
 // read, naming the word or the delimiter through the fold and bracket guard,
-// the heredoc bodies found, the data-sink exemption decided over the whole
-// string at the top level, continuations spliced, then the mask the rules
-// read, with an exempt body blanked whole. The legacy reading takes its fault
-// from `offendingDelimiter` (a `DelimiterFault` kind), its bodies from
-// `heredocBodies` on a body-blind mask and its mask from `maskQuoted`. The
-// exact reading takes its fault, its data bodies and its live bodies from
-// `heredocWalk`, splices no continuation inside either kind, and masks with
-// `maskExact`, which reads a word-start # as a comment and a body's quotes as
-// bytes, a live body's text staying command text. The guard reads a command
-// a second time, under the exact reading, where the legacy reading allowed it
-// and it holds a # or a <<, and refuses on either reading. The rules run,
-// then each substitution interior and nested payload is read one level deeper.
-async function sharedStateAct(cmd: string, cwd: string | null, depth: number, host: LexHost, quote: (text: string) => string, exact: boolean): Promise<string | null> {
-  if (depth === 0) cmd = cmd.replace(/\r\n/g, "\n");
+// the heredoc bodies found, the data-sink exemption the guard's decide
+// decided over the whole string, taken at the top level, continuations
+// spliced, then the mask the rules read, with an exempt body blanked whole.
+// The legacy reading takes its fault from `offendingDelimiter` (a
+// `DelimiterFault` kind), its bodies from `heredocBodies` on a body-blind mask
+// and its mask from `maskQuoted`. The exact reading takes its fault, its data
+// bodies and its live bodies from `heredocWalk`, splices no continuation
+// inside a data body, and masks with `maskExact`, which reads a word-start #
+// as a comment and a body's quotes as bytes, a live body's text staying
+// command text. The rules run, then each substitution interior and nested
+// payload is read one level deeper. `join` and `boundary` are the splice's
+// reading of this text alone, as `spliceContinuations` takes them, and
+// `exact` is the reading the guard's decide chose for this pass, carried
+// unchanged to every depth; each nested text is read under
+// `readUnderContinuations` on its own text, and its composed verdict is held
+// in the call's memo, keyed on the text, its depth and `exact`.
+async function sharedStateAct(cmd: string, depth: number, join: boolean, boundary: number, exact: boolean, call: Call): Promise<string | null> {
+  const { cwd, host, quote } = call;
   const subs: Span[] = [];
   let bodies: Span[];
   let live: readonly Span[] = [];
@@ -461,23 +479,41 @@ async function sharedStateAct(cmd: string, cwd: string | null, depth: number, ho
     if (delimiter !== null) return delimiterFault(delimiter, quote);
     bodies = heredocBodies(cmd, bare);
   }
-  const exemptBody = depth === 0 && cwd ? await heredocExemption(cmd, cwd, false, host) : null;
-  cmd = spliceContinuations(cmd, [...bodies, ...live]);
-  let masked = exact ? maskExact(cmd, bodies, live, subs) : maskQuoted(cmd, bodies, subs);
+  const exemptBody = depth === 0 ? call.exempt : null;
+  // The splice is handed the data bodies alone, where bash splices nothing,
+  // and this reading's quote mask of the text as it stands, so a pair inside
+  // a single-quoted span stays as typed; a live body's pairs are spliced as
+  // any command text's are, since bash removes them as it reads the body. The
+  // joined readings shorten the command, so the data spans come back shifted
+  // and the live spans and the exemption span found above are read through
+  // the splice's map onto its text. Under the two-space reading the map is
+  // the identity.
+  const joined = spliceContinuations(cmd, bodies, exact ? maskExact(cmd, bodies, live) : maskQuoted(cmd, bodies), join, boundary);
+  cmd = joined.cmd;
+  const data = joined.bodies;
+  const liveJoined = live.map(s => ({ from: joined.at(s.from), to: joined.at(s.to) }));
+  let masked = exact ? maskExact(cmd, data, liveJoined, subs) : maskQuoted(cmd, data, subs);
   if (exemptBody) {
     const chars = masked.split("");
-    for (let i = exemptBody.from; i < exemptBody.to; i++) chars[i] = "\x00";
+    for (let i = joined.at(exemptBody.from); i < joined.at(exemptBody.to); i++) chars[i] = "\x00";
     masked = chars.join("");
   }
-  const act = killAct(cmd, masked) || gitAct(cmd, masked) || (cwd ? await deleteAct(cmd, masked, cwd, host) : null);
+  const act = killAct(cmd, masked) || gitAct(cmd, masked) || (cwd ? await deleteAct(cmd, masked, cwd, host, call.root) : null);
   if (act !== null) return act;
   if (depth >= DEPTH_BOUND) return null;
+  const nestedAct = (text: string) => memoized(call.memo, `${depth + 1}:${exact ? "exact" : "legacy"}`, text, () => readUnderContinuations(
+    text,
+    exact,
+    (t, j, b) => sharedStateAct(t, depth + 1, j, b, exact, call),
+    r => r !== null,
+    () => CONTINUATION_CAP_REASON,
+  ));
   for (const s of subs) {
-    const nested = await sharedStateAct(cmd.slice(s.from, s.to), cwd, depth + 1, host, quote, exact);
+    const nested = await nestedAct(cmd.slice(s.from, s.to));
     if (nested !== null) return nested;
   }
   for (const payload of nestedPayloads(cmd, masked)) {
-    const nested = await sharedStateAct(payload, cwd, depth + 1, host, quote, exact);
+    const nested = await nestedAct(payload);
     if (nested !== null) return `${nested}, inside a nested shell`;
   }
   return null;
@@ -521,15 +557,32 @@ export function sharedStateGuard(deps: SharedStateDeps): BeforeGuard {
       if (typeof cmd !== "string" || !cmd.trim()) return {};
       const cwd = typeof ctx.cwd === "string" && ctx.cwd.trim() ? ctx.cwd.trim() : null;
       const host = await deps.lexHost();
-      // The legacy reading runs first, so every refusal the guard gave before
-      // the exact reading existed keeps its reason byte for byte. The exact
-      // reading runs only where the legacy one allowed and the raw command
-      // holds a # or a <<, the only places the two readings differ, and a
-      // refusal from it is the guard's refusal.
-      let act = await sharedStateAct(cmd, cwd, 0, host, deps.quote, false);
-      if (act === null && (cmd.includes("#") || cmd.includes("<<"))) {
-        act = await sharedStateAct(cmd, cwd, 0, host, deps.quote, true);
-      }
+      // The command, its CRLF pairs normalized once here, is read under every
+      // reading of its continuations, the two-space reading first so every
+      // refusal it gives keeps its reason byte for byte, and a refusal from
+      // any reading is the guard's refusal. That family runs under the legacy
+      // reading of comments and heredoc bodies first. Where it allows and the
+      // exact reading can differ, by `exactReadingDiffers`, it runs again
+      // under the exact reading, so a refusal from any pairing of a
+      // continuation reading with either stands. What every reading shares is
+      // decided once: the data-sink exemption over this text, and the git
+      // root above the cwd at the first reading that asks for it.
+      const unix = cmd.replace(/\r\n/g, "\n");
+      let root: Promise<string> | null = null;
+      const call: Call = {
+        cwd, host, quote: deps.quote, memo: new Map(),
+        exempt: cwd ? await heredocExemption(unix, cwd, false, host) : null,
+        root: dir => (root ??= repoRoot(dir, host)),
+      };
+      const under = (exact: boolean) => readUnderContinuations(
+        unix,
+        exact,
+        (text, join, boundary) => sharedStateAct(text, 0, join, boundary, exact, call),
+        r => r !== null,
+        () => CONTINUATION_CAP_REASON,
+      );
+      let act = await under(false);
+      if (act === null && exactReadingDiffers(unix)) act = await under(true);
       return act === null ? {} : { deny: refusalOf(t, cls, act) };
     },
   };

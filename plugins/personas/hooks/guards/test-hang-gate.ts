@@ -127,8 +127,8 @@
 
 import type { BeforeGuard, GuardCall } from "./runner";
 import {
-  commandPositions, delimiterAdvice, delimiterWhat, heredocBodies, heredocWalk, maskExact, maskQuoted, nestedPayloads, offendingDelimiter,
-  segment, spliceContinuations, tokens, type DelimiterFault,
+  CONTINUATION_CAP_ADVICE, IN_WORD_PAIR_CAP, commandPositions, delimiterAdvice, delimiterWhat, exactReadingDiffers, heredocBodies, heredocWalk, maskExact, maskQuoted,
+  memoized, nestedPayloads, offendingDelimiter, readUnderContinuations, segment, spliceContinuations, tokens, type DelimiterFault, type VerdictMemo,
 } from "./readonly-agent";
 
 // A half-open range of command indexes, the lexer's own span shape.
@@ -209,6 +209,13 @@ function delimiterRefusal(fault: DelimiterFault, quote: (text: string) => string
     [`${delimiterAdvice(fault)}.`],
   );
 }
+
+// The refusal of a command whose text, at any depth, carries more in-word
+// line continuations than `IN_WORD_PAIR_CAP`, so the gate refuses it unread.
+const CAPPED_CONTINUATIONS = refusal(
+  `a command carrying more than ${IN_WORD_PAIR_CAP} line continuations inside its words, past what the gate reads, rather than pass an unread dotnet test or node --test call`,
+  [`${CONTINUATION_CAP_ADVICE}.`],
+);
 
 // What the guard reaches through hooks/index.ts: the fold and bracket guard a
 // quoted token takes on its way to the model.
@@ -370,24 +377,31 @@ function runnerReasonAt(cmd: string, masked: string, hit: { name: string; at: nu
 // each substitution interior collected into `subs`. The exact reading: the
 // first fault `heredocWalk` returns, any `DelimiterFault` kind, returned the
 // same way; otherwise the walk's data and live bodies, continuations spliced
-// outside both, then `maskExact`, which reads a word-start # as a comment and
-// a body's quotes as bytes. A heredoc body stays command text under either
-// reading. The gate reads a command a second time, under the exact reading,
-// where the legacy reading allowed it and it holds a # or a <<, and refuses
-// on either reading.
-function maskOf(cmd: string, subs: Span[], exact: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
+// outside the data bodies, a live body's among them since bash removes them
+// as it reads the body, then `maskExact`, which reads a word-start # as a
+// comment and a body's quotes as bytes. A heredoc body stays command text
+// under either reading. The splice reads the reading's own quote mask of the
+// text as handed in, so a pair inside a single-quoted span stays as typed.
+// The gate reads a command under every continuation reading twice, under the
+// legacy reading and then, where that allowed and the exact reading can
+// differ, under the exact reading, and refuses on any. `join` and `boundary`
+// are the splice's reading of this text, as `spliceContinuations` takes them;
+// the joined readings shorten the text, so the data spans come back shifted
+// and the live spans are read through the splice's map onto it.
+function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number, exact: boolean): { cmd: string; masked: string; delimiter: DelimiterFault | null } {
   if (exact) {
     const walk = heredocWalk(cmd, "", true);
     if (walk.fault !== null) return { cmd, masked: cmd, delimiter: walk.fault };
-    const spliced = spliceContinuations(cmd, [...walk.data, ...walk.live]);
-    return { cmd: spliced, masked: maskExact(spliced, walk.data, walk.live, subs), delimiter: null };
+    const joined = spliceContinuations(cmd, walk.data, maskExact(cmd, walk.data, walk.live), join, boundary);
+    const live = walk.live.map(s => ({ from: joined.at(s.from), to: joined.at(s.to) }));
+    return { cmd: joined.cmd, masked: maskExact(joined.cmd, joined.bodies, live, subs), delimiter: null };
   }
   const bare = maskQuoted(cmd);
   const delimiter = offendingDelimiter(cmd, bare);
   if (delimiter !== null) return { cmd, masked: cmd, delimiter };
   const bodies = heredocBodies(cmd, bare);
-  const spliced = spliceContinuations(cmd, bodies);
-  return { cmd: spliced, masked: maskQuoted(spliced, bodies, subs), delimiter: null };
+  const joined = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), join, boundary);
+  return { cmd: joined.cmd, masked: maskQuoted(joined.cmd, joined.bodies, subs), delimiter: null };
 }
 
 // The first refusal any runner call in the command earns, or null: the top
@@ -402,8 +416,13 @@ function maskOf(cmd: string, subs: Span[], exact: boolean): { cmd: string; maske
 // unswapped mask, so a brace inside a word (${PROJ}, {A,B}) cuts no argument
 // list. Nested payloads are found on the swapped mask, so an iex opening a
 // script block stays in reach, at the cost of the payload false refusal the
-// header lists.
-function gateReason(cmd: string, masked: string, subs: readonly Span[], depth: number, quote: (text: string) => string, exact: boolean): string | null {
+// header lists. Each nested text is read under `readUnderContinuations` on
+// its own text, under the same `exact`, a refusal under any reading of it
+// standing, and one past the in-word continuation cap refused unread. The
+// read of each nested text is held in `memo`, the call's, keyed on the text,
+// its depth and `exact`, so the same text handed down by several outer
+// readings reads once.
+async function gateReason(cmd: string, masked: string, subs: readonly Span[], depth: number, quote: (text: string) => string, exact: boolean, memo: VerdictMemo): Promise<string | null> {
   const search = masked.replace(/[{}]/g, ";");
   for (const hit of commandPositions(search, RUNNERS)) {
     const reason = runnerReasonAt(cmd, masked, hit, quote);
@@ -412,10 +431,18 @@ function gateReason(cmd: string, masked: string, subs: readonly Span[], depth: n
   if (depth >= DEPTH_BOUND) return null;
   const inner = [...subs.map((s) => cmd.slice(s.from, s.to)), ...nestedPayloads(cmd, search)];
   for (const text of inner) {
-    const innerSubs: Span[] = [];
-    const read = maskOf(text, innerSubs, exact);
-    if (read.delimiter !== null) return delimiterRefusal(read.delimiter, quote);
-    const reason = gateReason(read.cmd, read.masked, innerSubs, depth + 1, quote, exact);
+    const reason = await memoized(memo, `${depth + 1}:${exact ? "exact" : "legacy"}`, text, () => readUnderContinuations(
+      text,
+      exact,
+      (t, join, boundary) => {
+        const innerSubs: Span[] = [];
+        const read = maskOf(t, innerSubs, join, boundary, exact);
+        if (read.delimiter !== null) return delimiterRefusal(read.delimiter, quote);
+        return gateReason(read.cmd, read.masked, innerSubs, depth + 1, quote, exact, memo);
+      },
+      (r) => r !== null,
+      () => CAPPED_CONTINUATIONS,
+    ));
     if (reason !== null) return reason;
   }
   return null;
@@ -434,26 +461,37 @@ export function testHangGateGuard(deps: TestHangGateDeps): BeforeGuard {
   return {
     name: "test-hang-gate",
     matches: (e: GuardCall) => (e.tool === "Bash" || e.tool === "PowerShell") && namesRunner(e.command),
-    decide: (e: GuardCall) => {
+    decide: async (e: GuardCall) => {
       const cmd = e.command;
       // The matcher's scan, repeated so the command narrows to a string here.
       if (!namesRunner(cmd)) return {};
       try {
-        // One whole reading of the command, legacy or exact, as the gate's
-        // refusal or null.
-        const reasonUnder = (exact: boolean): string | null => {
-          const subs: Span[] = [];
-          const read = maskOf(cmd.replace(/\r\n/g, "\n"), subs, exact);
-          if (read.delimiter !== null) return delimiterRefusal(read.delimiter, deps.quote);
-          return gateReason(read.cmd, read.masked, subs, 0, deps.quote, exact);
-        };
-        // The legacy reading runs first, so every refusal the gate gave before
-        // the exact reading existed keeps its reason byte for byte. The exact
-        // reading runs only where the legacy one allowed and the raw command
-        // holds a # or a <<, the only places the two readings differ, and a
-        // refusal from it is the gate's refusal.
-        let reason = reasonUnder(false);
-        if (reason === null && (cmd.includes("#") || cmd.includes("<<"))) reason = reasonUnder(true);
+        // The command, its CRLF pairs normalized once here, is read under
+        // every reading of its continuations, the two-space reading first so
+        // every refusal it gives keeps its reason byte for byte, and a refusal
+        // from any reading is the gate's refusal. Each reading is the
+        // delimiter refusal, then the runner calls to the depth bound. That
+        // family runs under the legacy reading of comments and heredoc bodies
+        // first. Where it allows and the exact reading can differ, by
+        // `exactReadingDiffers`, it runs again under the exact reading, so a
+        // refusal from any pairing of a continuation reading with either
+        // stands. The memo holds each nested text's read for this call.
+        const memo: VerdictMemo = new Map();
+        const unix = cmd.replace(/\r\n/g, "\n");
+        const under = (exact: boolean) => readUnderContinuations(
+          unix,
+          exact,
+          (text, join, boundary) => {
+            const subs: Span[] = [];
+            const read = maskOf(text, subs, join, boundary, exact);
+            if (read.delimiter !== null) return delimiterRefusal(read.delimiter, deps.quote);
+            return gateReason(read.cmd, read.masked, subs, 0, deps.quote, exact, memo);
+          },
+          (r) => r !== null,
+          () => CAPPED_CONTINUATIONS,
+        );
+        let reason = await under(false);
+        if (reason === null && exactReadingDiffers(unix)) reason = await under(true);
         return reason === null ? {} : { deny: reason };
       } catch (err) {
         const failure = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").trim();

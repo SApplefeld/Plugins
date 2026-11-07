@@ -63,7 +63,7 @@
 // path, so the guard takes no LexHost.
 
 import type { BeforeGuard, GuardCall } from "./runner";
-import { commandPositions, heredocBodies, maskQuoted, nestedPayloads, segment, spliceContinuations, tokens } from "./readonly-agent";
+import { CONTINUATION_CAP_ADVICE, IN_WORD_PAIR_CAP, commandPositions, heredocBodies, maskQuoted, memoized, nestedPayloads, readUnderContinuations, segment, spliceContinuations, tokens, type VerdictMemo } from "./readonly-agent";
 import { inPlaceRewrite } from "./docs-write";
 
 // A half-open range of command indexes, the lexer's own span shape.
@@ -94,6 +94,11 @@ function refusal(what: string): string {
   return `Blocked: inplace-rewrite refuses ${what} under Git Bash, whose sed and awk write the whole file with LF endings. Edit the file with the Edit tool, with perl -pi, or with a script that writes the file's own endings.\n`;
 }
 
+// The call named for a command whose text, at any depth, carries more in-word
+// line continuations than `IN_WORD_PAIR_CAP`, so the guard refuses it unread.
+const CAPPED_CONTINUATIONS =
+  `a command carrying more than ${IN_WORD_PAIR_CAP} line continuations inside its words, past what the guard reads, rather than pass an unread sed or awk call (${CONTINUATION_CAP_ADVICE.toLowerCase()})`;
+
 // What the guard reaches through hooks/index.ts: whether the host is
 // Windows, and the fold and bracket guard a quoted call takes on its way to
 // the model.
@@ -102,11 +107,14 @@ export type InplaceRewriteDeps = { windows(): Promise<boolean>; quote(text: stri
 // A command read the read-only guard's way, in the shared-state guard's
 // order: heredoc bodies found on a body-blind mask, continuations spliced,
 // then the quote mask, with each substitution interior collected into `subs`.
-// A heredoc body stays command text.
-function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string } {
+// A heredoc body stays command text. The splice reads the quote mask of the
+// text as handed in, so a pair inside a single-quoted span stays as typed.
+// `join` and `boundary` are the splice's reading of this text, as
+// `spliceContinuations` takes them.
+function maskOf(cmd: string, subs: Span[], join: boolean, boundary: number): { cmd: string; masked: string } {
   const bodies = heredocBodies(cmd, maskQuoted(cmd));
-  const spliced = spliceContinuations(cmd, bodies);
-  return { cmd: spliced, masked: maskQuoted(spliced, bodies, subs) };
+  const joined = spliceContinuations(cmd, bodies, maskQuoted(cmd, bodies), join, boundary);
+  return { cmd: joined.cmd, masked: maskQuoted(joined.cmd, joined.bodies, subs) };
 }
 
 // The text of the first in-place call in the command, or null: the top
@@ -115,8 +123,13 @@ function maskOf(cmd: string, subs: Span[]): { cmd: string; masked: string } {
 // substitution interior and nested payload read one level deeper, to
 // DEPTH_BOUND. The call is named as the verb and its segment, a substitution
 // span inside it named as what it stands for in the read-only guard's own
-// words, since its sentinel bytes mean nothing to a reader.
-function rewriteCall(cmd: string, masked: string, subs: readonly Span[], depth: number): string | null {
+// words, since its sentinel bytes mean nothing to a reader. Each nested text
+// is read under `readUnderContinuations` on its own text, a call under any
+// reading of it standing, and one past the in-word continuation cap named as
+// refused unread. The read of each nested text is held in `memo`, the call's,
+// keyed on the text and its depth, so the same text handed down by several
+// outer readings reads once.
+async function rewriteCall(cmd: string, masked: string, subs: readonly Span[], depth: number, memo: VerdictMemo): Promise<string | null> {
   for (const hit of commandPositions(masked, VERBS)) {
     const seg = segment(cmd, masked, hit.at);
     if (inPlaceRewrite([hit.name, ...tokens(seg)])) return `${hit.name}${seg}`.replace(/\x02+/g, "$(unresolved substitution)").trim();
@@ -124,9 +137,17 @@ function rewriteCall(cmd: string, masked: string, subs: readonly Span[], depth: 
   if (depth >= DEPTH_BOUND) return null;
   const inner = [...subs.map((s) => cmd.slice(s.from, s.to)), ...nestedPayloads(cmd, masked)];
   for (const text of inner) {
-    const innerSubs: Span[] = [];
-    const read = maskOf(text, innerSubs);
-    const call = rewriteCall(read.cmd, read.masked, innerSubs, depth + 1);
+    const call = await memoized(memo, `${depth + 1}`, text, () => readUnderContinuations(
+      text,
+      false,
+      (t, join, boundary) => {
+        const innerSubs: Span[] = [];
+        const read = maskOf(t, innerSubs, join, boundary);
+        return rewriteCall(read.cmd, read.masked, innerSubs, depth + 1, memo);
+      },
+      (r) => r !== null,
+      () => CAPPED_CONTINUATIONS,
+    ));
     if (call !== null) return call;
   }
   return null;
@@ -149,9 +170,23 @@ export function inplaceRewriteGuard(deps: InplaceRewriteDeps): BeforeGuard {
       if (!namesVerb(cmd)) return {};
       try {
         if (!(await deps.windows())) return {};
-        const subs: Span[] = [];
-        const read = maskOf(cmd.replace(/\r\n/g, "\n"), subs);
-        const call = rewriteCall(read.cmd, read.masked, subs, 0);
+        // The command, its CRLF pairs normalized once here, is read under
+        // every reading of its continuations, the two-space reading first so
+        // every refusal it gives keeps its reason byte for byte, and a call
+        // found under any reading is the guard's refusal. The memo holds each
+        // nested text's read for this call.
+        const memo: VerdictMemo = new Map();
+        const call = await readUnderContinuations(
+          cmd.replace(/\r\n/g, "\n"),
+          false,
+          (text, join, boundary) => {
+            const subs: Span[] = [];
+            const read = maskOf(text, subs, join, boundary);
+            return rewriteCall(read.cmd, read.masked, subs, 0, memo);
+          },
+          (r) => r !== null,
+          () => CAPPED_CONTINUATIONS,
+        );
         return call === null ? {} : { deny: refusal(deps.quote(call)) };
       } catch (err) {
         const failure = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").trim();
