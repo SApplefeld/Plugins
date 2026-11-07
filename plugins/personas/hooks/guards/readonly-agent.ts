@@ -771,9 +771,15 @@ export function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[])
 // would refuse. An opener `$(` or `<(` split across a backslash-newline on an
 // introducing line is read joined, as bash joins it, so its span masks the
 // lines it spans, and the counter reads a split `${`, `$[` or `>(` joined the
-// same way. `substitutionEnd` is unchanged, so a substitution whose
-// interior holds a comment may close at a `)` inside that comment, earlier
-// than bash closes it; the interior is scanned on its own as command text,
+// same way. `parenEnd` reads a word-start `#` comment to the end of its
+// line while matching parentheses, outside any `${` expansion opened in the
+// span, so a `)`, a backtick or a nested opener inside that comment is a byte
+// to the match. Its reading is narrower than bash's in an open set of ways,
+// two of them these: a backslash before a quote character outside quotes is
+// not read as an escape, so the quote still opens a span, and a heredoc body
+// inside the substitution is read as command text, so a `)` in it counts. A
+// `)` in a `case` pattern or inside a `${` expansion counts as a closer too.
+// Each can put the span's end where bash does not. The interior is then scanned on its own as command text,
 // where the comment rule applies afresh.
 // The resumable form of the exact mask. `at(i)` and `full()` drive one forward
 // scan that never revisits a character, so the walk reads its mask as it goes
@@ -835,19 +841,39 @@ export function exactMasker(cmd: string, data: readonly Span[], live: readonly S
     while (chars[j] === '\\' && chars[j + 1] === '\n') j += 2;
     return chars[j] === '(' ? j : -1;
   };
+  // Whether the `{` at `j` opens a `${` expansion as bash reads it: the run of
+  // `$` before it, less a first `$` escaped by an odd run of backslashes, must
+  // be odd, since `$$` pairs into the PID parameter and opens nothing.
+  const opensExpansion = (j: number): boolean => {
+    let k = j, run = 0;
+    while (chars[k - 1] === '$') { run++; k--; }
+    if (run === 0) return false;
+    let bs = 0;
+    while (chars[k - 1 - bs] === '\\') bs++;
+    if (bs % 2 === 1) run--;
+    return run % 2 === 1;
+  };
   // The index just past a `(...)` substitution whose `(` stands at `p`, matching
   // parentheses and stepping over inner quoted spans, as `substitutionEnd` does
   // from a `$(`; written to start at the `(` itself so a split opener's `(`,
   // which does not sit at the `$`+1 `substitutionEnd` assumes, is matched too.
+  // `braces` is the depth of `${` expansions opened inside the span, a nested
+  // `${` counted within one and a bare `{` not, as bash reads them, since bash
+  // closes the expansion at its first `}`; inside an expansion a `#` is part
+  // of the word, so no comment is skipped there.
   const parenEnd = (p: number): number => {
     let j = p + 1;
     let depth = 1;
+    let braces = 0;
     while (j < chars.length && depth > 0) {
       const c = chars[j];
       if (c === '(') depth++;
       else if (c === ')') depth--;
+      else if (c === '{' && opensExpansion(j)) braces++;
+      else if (c === '}' && braces > 0) braces--;
       else if (c === "'") { j++; while (j < chars.length && chars[j] !== "'") j++; }
       else if (c === '"') { j++; while (j < chars.length && chars[j] !== '"') { if (chars[j] === '\\') j++; j++; } }
+      else if (c === '#' && braces === 0 && isCommentStart(j)) { while (j < chars.length && chars[j] !== '\n') j++; continue; }
       j++;
     }
     return j;
