@@ -50,10 +50,13 @@ inbox/renamed-<name>. A renamed file reaches the ingest as a document under a
 name Claude Code does not load. A renamed folder stays in inbox/ as a folder,
 which the snapshot does not list and the ingest does not read. Every kept
 item is checked before any is renamed, so a refusal by a check leaves inbox/
-as it was: a reparse point is refused as on the move route, an
-inbox/renamed-<name> that already exists as a file or a folder is refused
-naming it, and each origin and destination must resolve inside the repo and
-clear of .git/ and .claude/. The rename reads no byte of any item. It clears
+as it was: a kept name that ends in a dot or a space is refused before any
+path is built from it, since Windows drops either when it resolves a path and
+the rename would then act on another path, and a person removes the item; a
+reparse point is refused as on the move route; an inbox/renamed-<name> that
+already exists as a file or a folder is refused naming it; and each origin
+and destination must resolve inside the repo and clear of .git/ and
+.claude/. The rename reads no byte of any item. It clears
 the hidden and system attributes, so a renamed file reaches
 `kb-status.ps1 -What Inbox`, sets no time stamp, and writes
 `renamed: inbox/renamed-<name>` to stdout, one line per item. Where no item
@@ -207,12 +210,16 @@ $claudePrefix = (Join-Path $repoRoot '.claude') + $sep
 # the snapshot does not list and the ingest does not read. The listing takes
 # -Force, since a hidden or system item is loaded as a plain one and would
 # otherwise be left in place, and takes folders, since a .claude folder is
-# loaded as one. The sweep resolves no name and reads no byte of any item: a
-# rename is not a read. Every kept item is checked before any is renamed, so
-# a refusal by a check leaves inbox/ as it was. A clear or rename that throws
-# on a later item refuses with the earlier renames made and their renamed:
-# lines written. The new name is renamed- and the old name, which no entry on
-# the list matches, since the list is anchored at the start of the name.
+# loaded as one. The sweep follows no link at an item it checks or renames and
+# reads no byte of any item: a rename is not a read. Every kept item is
+# checked before any is renamed, so a refusal by a check leaves inbox/ as it
+# was. A kept name that ends in a dot or a space is refused before any path is
+# built from it, since Windows drops either when it resolves a path, so the
+# path the later acts would use is another item's, or nobody's. A clear or
+# rename that throws on a later item refuses with the earlier renames made and
+# their renamed: lines written. The new name is renamed- and the old name,
+# which no entry on the list matches, since the list is anchored at the start
+# of the name.
 if ($PSCmdlet.ParameterSetName -eq 'Rename') {
     $inboxDir = Join-Path $repoRoot 'inbox'
     if (-not (Test-Path -LiteralPath $inboxDir -PathType Container)) {
@@ -222,6 +229,16 @@ if ($PSCmdlet.ParameterSetName -eq 'Rename') {
     $planned = @()
     foreach ($item in $kept) {
         $oldName  = $item.Name
+        # Windows drops a trailing dot or space when it resolves a path, so
+        # for a kept name such as CLAUDE~1.md. the paths built below end in
+        # CLAUDE~1.md, which is another item's name, long or short, where one
+        # exists, and nobody's otherwise, so the later acts would read, clear
+        # and rename that item or throw. The test is on the name the listing
+        # returned and builds no path, and this loop runs whole before any
+        # rename, so the refusal leaves inbox/ as it was.
+        if ($oldName.EndsWith('.', [StringComparison]::Ordinal) -or $oldName.EndsWith(' ', [StringComparison]::Ordinal)) {
+            Stop-WithReason "inbox/$oldName ends in a dot or a space, which Windows drops from a path, so it is not renamed and stays in inbox/; a person removes it."
+        }
         $newName  = "renamed-$oldName"
         $srcFull  = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $oldName))
         $destFull = [System.IO.Path]::GetFullPath((Join-Path $inboxDir $newName))
