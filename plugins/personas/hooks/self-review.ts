@@ -3,6 +3,7 @@
 // Covered by check-loader-rule.mjs (scans every hooks/*.ts).
 
 import type { MemoryEntry, MonitorState } from "./agent-state.ts";
+import { oneLine } from "./agent-state";
 import { heldForDrain } from "./operator";
 
 export interface SelfReviewOptions {
@@ -114,12 +115,12 @@ export function buildSelfReviewInput(
   // Known lessons (S5: pass as "do not repeat")
   const lessons = state.memory.filter((m) => m.kind === "lesson").slice(-5);
   const lessonBlock = lessons.length > 0
-    ? "Known lessons (do not repeat):\n" + lessons.map((m) => " - " + m.text).join("\n")
+    ? "Known lessons (do not repeat):\n" + lessons.map((m) => " - " + oneLine(m.text)).join("\n")
     : "No prior lessons.";
 
   const activeGoal = state.goals?.find((g) => g.id === state.activeGoalId);
   const goalContext = activeGoal
-    ? "Active goal: " + activeGoal.title + " (status: " + activeGoal.status + ")"
+    ? "Active goal: " + oneLine(activeGoal.title) + " (status: " + activeGoal.status + ")"
     : "No active goal.";
 
   const streak = state.monitor.env?.errors?.consecutiveErrorTurns ?? 0;
