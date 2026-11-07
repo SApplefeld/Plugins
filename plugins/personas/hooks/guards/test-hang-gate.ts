@@ -150,9 +150,20 @@ const RUNNERS = ["dotnet", "node"];
 // accepts on either side of a runner name is a non-word byte, and every text
 // the guard reads deeper is cut from the command at such a byte, so the word
 // bound drops no call the lexer would find, dotnet.exe and node.exe among
-// them.
+// them. The scan runs on the raw text and, where that misses, on the text
+// with every backslash-newline pair removed, a carriage return between the
+// two included, so a runner name split across a line continuation reaches the
+// lexer, which reads the joined name. The second scan only adds matches, so
+// no call the raw scan passed to the lexer is lost. It removes one backslash
+// per pair, so a name split by a doubled backslash and a newline inside a
+// double-quoted payload, which a nested shell joins once the outer shell
+// halves the run, still passes unlexed. On the PowerShell tool, where a
+// backslash-newline continues no line, the second scan can hand the lexer a
+// name PowerShell never forms, and the lexer's joined reading refuses it, an
+// over-deny accepted with the guard's reading of PowerShell text as bash.
 function namesRunner(cmd: unknown): cmd is string {
-  return typeof cmd === "string" && /\b(?:dotnet|node)\b/i.test(cmd);
+  const runner = /\b(?:dotnet|node)\b/i;
+  return typeof cmd === "string" && (runner.test(cmd) || runner.test(cmd.replace(/\\\r?\n/g, "")));
 }
 
 // The vendor's timespan form: a number, decimal allowed, and an optional unit

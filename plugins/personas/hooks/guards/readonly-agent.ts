@@ -792,12 +792,20 @@ export function maskQuoted(cmd: string, bodies?: readonly Span[], subs?: Span[])
 // it enters, as the walk does for its own reading, so the counter's quote and
 // construct state restarts at the body's end for the one-shot `maskExact`
 // below as it does for the walk. `counter` is that counter, shared with the
-// walk so the two read one construct state. `maskExact` is the whole-command
-// one-shot, the same scan run to the end.
-type ExactMasker = { at(i: number): string; full(): string; counter: ConstructCounter };
+// walk so the two read one construct state. `commentAt(i)` is whether the
+// scan read index `i` as a comment byte, at the top level or inside a `$( )`
+// or `<( )` substitution whose interior `parenEnd` reads a comment in, at
+// any depth of nesting it matches. `full()` leaves a top-level comment byte as
+// the character it is, and `at` and `full()` read a substitution's bytes as
+// its span mark whatever the comment test reads there. The splice reads
+// `commentAt` to leave a comment-ending backslash-newline as typed, so a
+// substitution interior keeps the newline its own read ends the comment at.
+// `maskExact` is the whole-command one-shot, the same scan run to the end.
+type ExactMasker = { at(i: number): string; commentAt(i: number): boolean; full(): string; counter: ConstructCounter };
 export function exactMasker(cmd: string, data: readonly Span[], live: readonly Span[], subs?: Span[]): ExactMasker {
   const chars = cmd.split('');
   const comment = new Uint8Array(cmd.length);
+  const subComment = new Uint8Array(cmd.length);
   let dIdx = 0;
   let lIdx = 0;
   const inData = (i: number): boolean => { while (dIdx < data.length && data[dIdx].to <= i) dIdx++; return dIdx < data.length && i >= data[dIdx].from && i < data[dIdx].to; };
@@ -807,6 +815,7 @@ export function exactMasker(cmd: string, data: readonly Span[], live: readonly S
   // The counter reads positions the scan has finished, so a query at the scan
   // position extends nothing and the two never recurse into each other.
   const at = (k: number): string => { if (k >= i) extendTo(k + 1); return comment[k] === 1 ? '\x00' : chars[k]; };
+  const commentAt = (k: number): boolean => { if (k >= i) extendTo(k + 1); return comment[k] === 1 || subComment[k] === 1; };
   const counter = constructCounter(cmd, at, true);
   // Whether a `#` at index `i` starts a word, so it opens a comment. The
   // character before it must be the text start or one of bash's word-separating
@@ -860,7 +869,8 @@ export function exactMasker(cmd: string, data: readonly Span[], live: readonly S
   // `braces` is the depth of `${` expansions opened inside the span, a nested
   // `${` counted within one and a bare `{` not, as bash reads them, since bash
   // closes the expansion at its first `}`; inside an expansion a `#` is part
-  // of the word, so no comment is skipped there.
+  // of the word, so no comment is skipped there. Each comment byte it skips is
+  // marked in `subComment`, which `commentAt` reads and `at` does not.
   const parenEnd = (p: number): number => {
     let j = p + 1;
     let depth = 1;
@@ -873,7 +883,7 @@ export function exactMasker(cmd: string, data: readonly Span[], live: readonly S
       else if (c === '}' && braces > 0) braces--;
       else if (c === "'") { j++; while (j < chars.length && chars[j] !== "'") j++; }
       else if (c === '"') { j++; while (j < chars.length && chars[j] !== '"') { if (chars[j] === '\\') j++; j++; } }
-      else if (c === '#' && braces === 0 && isCommentStart(j)) { while (j < chars.length && chars[j] !== '\n') j++; continue; }
+      else if (c === '#' && braces === 0 && isCommentStart(j)) { while (j < chars.length && chars[j] !== '\n') subComment[j++] = 1; continue; }
       j++;
     }
     return j;
@@ -946,6 +956,7 @@ export function exactMasker(cmd: string, data: readonly Span[], live: readonly S
   };
   return {
     at,
+    commentAt,
     full(): string { extendTo(chars.length); return chars.join(''); },
     counter,
   };
@@ -1941,6 +1952,29 @@ export function outsideSingleQuotes(masked: string, pairs: readonly number[]): n
   return pairs.filter(i => masked[i - 1] !== '\x00' || opener[i - 1] < 0 || masked[opener[i - 1]] !== "'");
 }
 
+// The pairs a caller excludes beside those inside single quotes, left as
+// typed by every reading and given none by the composer. `comment`: a pair
+// whose backslash is a comment byte under the exact reading, at the top level
+// or inside a `$( )` or `<( )` substitution, since bash ends a word-start `#`
+// comment at the newline whatever stands before it; the legacy reading knows
+// no comment and excludes nothing under it. `all`: every pair, for the
+// PowerShell tool, where a backslash continues no line on PowerShell's own
+// line. A pair inside a PowerShell string that bash then reads, a payload
+// handed to `bash -c` or piped into bash, is left as typed under `all` too,
+// though bash reads that payload byte for byte and joins the pair. A caller passing none reads
+// every pair outside single quotes as a continuation.
+export type PairExclusion = 'comment' | 'all';
+
+// The test on a pair's newline index that `exclusion` drops it by, given
+// `commentAt`, the exact masker's comment test on the text as handed in, or
+// null under the legacy reading. Undefined where nothing beyond single quotes
+// is excluded.
+export function excludedPairs(exclusion: PairExclusion | undefined, commentAt: ((i: number) => boolean) | null): ((i: number) => boolean) | undefined {
+  if (exclusion === 'all') return () => true;
+  if (exclusion === 'comment' && commentAt !== null) return i => commentAt(i - 1);
+  return undefined;
+}
+
 // The command with every line continuation spliced out, in one of its readings,
 // with the heredoc body spans carried onto it and a map from any other index into
 // the command as it was handed in. A backslash standing immediately before a
@@ -1951,7 +1985,9 @@ export function outsideSingleQuotes(masked: string, pairs: readonly number[]): n
 //
 // The continuations are `continuationPairs` outside `bodies`, less those
 // `outsideSingleQuotes` drops off `masked`, the quote mask of `cmd` as handed
-// in under the reading in force, with `bodies` blanked. `bodies` are the
+// in under the reading in force, with `bodies` blanked, and less those
+// `excluded` drops, the test `excludedPairs` builds from the caller's
+// `PairExclusion`. `bodies` are the
 // quoted-delimiter bodies alone, literal data where bash splices nothing; an
 // unquoted body is live text whose backslash-newlines bash removes as it
 // reads the body, so a caller leaves those spans out and maps them through
@@ -1979,21 +2015,25 @@ export function outsideSingleQuotes(masked: string, pairs: readonly number[]): n
 // way, and the two spaces hold no such promise to it. Removal keeps every word
 // whole but can glue a word start onto the text before it where the shell
 // reads a word start, as a pair ending an unquoted comment or a pair after a
-// PowerShell path separator does, and a text can hold a pair of each kind, so
-// that the comment-ending pair hides the governed word under removal and the
-// in-word pair hides it under two spaces. A joined reading that keeps the
-// comment-ending pair as a boundary shows the reader the whole word at its word
-// start. `readUnderContinuations` below composes the readings a text takes:
-// two spaces, removal, and removal with each in-word pair as the boundary, a
+// PowerShell path separator does. Neither is a continuation to its shell:
+// bash ends a word-start comment at the newline whatever stands before it,
+// and PowerShell continues a line on a backtick alone. A caller whose shell
+// reads such a pair as a line break excludes it through `excluded`, and the
+// pair is then left as typed under every reading, as a pair inside single
+// quotes is, so its newline stays the separator the shell reads and no
+// reading glues the word after it onto the text before.
+// `readUnderContinuations` below composes the readings a text takes: two
+// spaces, removal, and removal with each in-word pair as the boundary, a
 // refusal from any standing. The composer enumerates its pairs from the
 // bodies and the mask of the same reading the guard splices under, through
-// `readingSpans`, so a text's composer and each of its readings agree on
-// which pairs are continuations.
+// `readingSpans`, less the pairs the same exclusion drops, so a text's
+// composer and each of its readings agree on which pairs are continuations.
 export type Spliced = { cmd: string; bodies: Span[]; at: (i: number) => number };
-export function spliceContinuations(cmd: string, bodies: readonly Span[], masked: string, join: boolean, boundary = -1): Spliced {
+export function spliceContinuations(cmd: string, bodies: readonly Span[], masked: string, join: boolean, boundary = -1, excluded?: (i: number) => boolean): Spliced {
   const chars = cmd.split('');
   const keep: boolean[] = new Array(chars.length).fill(true);
   for (const i of outsideSingleQuotes(masked, continuationPairs(cmd, bodies))) {
+    if (excluded !== undefined && excluded(i)) continue;
     if (join && i !== boundary) {
       keep[i - 1] = false;
       keep[i] = false;
@@ -2050,16 +2090,19 @@ export type ContinuationRead<T> = (text: string, join: boolean, boundary: number
 // masks with those bodies blanked. The exact reading takes `heredocWalk`'s
 // data bodies, and masks with its live bodies read as command text whose
 // quotes are bytes, so a quote inside an unquoted body opens no span over the
-// pairs after it. A walk fault needs no handling here: the guard's read of the
-// text refuses on it under the first reading, and the composer returns that
-// refusal before it enumerates anything.
-function readingSpans(cmd: string, exact: boolean): { bodies: Span[]; masked: string } {
+// pairs after it. `commentAt` is the exact masker's comment test on `cmd`,
+// which the `comment` exclusion reads, and null under the legacy reading,
+// which knows no comment. A walk fault needs no handling here: the guard's
+// read of the text refuses on it under the first reading, and the composer
+// returns that refusal before it enumerates anything.
+function readingSpans(cmd: string, exact: boolean): { bodies: Span[]; masked: string; commentAt: ((i: number) => boolean) | null } {
   if (exact) {
     const walk = heredocWalk(cmd, '', true);
-    return { bodies: walk.data, masked: maskExact(cmd, walk.data, walk.live) };
+    const masker = exactMasker(cmd, walk.data, walk.live);
+    return { bodies: walk.data, masked: masker.full(), commentAt: masker.commentAt };
   }
   const bodies = heredocBodies(cmd, maskQuoted(cmd));
-  return { bodies, masked: maskQuoted(cmd, bodies) };
+  return { bodies, masked: maskQuoted(cmd, bodies), commentAt: null };
 }
 
 // A guard's verdict over `cmd` composed from every reading of its continuations,
@@ -2074,8 +2117,9 @@ function readingSpans(cmd: string, exact: boolean): { bodies: Span[]; masked: st
 // heredoc bodies the guard reads `cmd` under, so a pair inside a body the
 // exact walk takes and the legacy reading does not, or the reverse, is read
 // as that reading splices it; a pair inside single quotes is left as typed by
-// every reading and so is given none, as `outsideSingleQuotes` states.
-// `refused` tells a refusal from an allow; `allowed` folds the
+// every reading and so is given none, as `outsideSingleQuotes` states, and so
+// is a pair `exclusion` drops, which `read` must leave as typed too by
+// splicing under the same exclusion. `refused` tells a refusal from an allow; `allowed` folds the
 // allows into the verdict where every reading allowed, the first one's by
 // default, which fits a reader whose allow carries nothing, while a reader whose
 // allow carries facts its caller still weighs, as docs-write's `names` does,
@@ -2098,11 +2142,13 @@ export async function readUnderContinuations<T>(
   refused: (result: T) => boolean,
   capped: () => T,
   allowed: (results: readonly T[]) => T = results => results[0],
+  exclusion?: PairExclusion,
 ): Promise<T> {
   const results: T[] = [await read(cmd, false, -1)];
   if (refused(results[0])) return results[0];
-  const { bodies, masked } = readingSpans(cmd, exact);
-  const pairs = outsideSingleQuotes(masked, continuationPairs(cmd, bodies));
+  const { bodies, masked, commentAt } = readingSpans(cmd, exact);
+  const excluded = excludedPairs(exclusion, commentAt);
+  const pairs = outsideSingleQuotes(masked, continuationPairs(cmd, bodies)).filter(i => excluded === undefined || !excluded(i));
   if (pairs.length === 0) return results[0];
   const inWord = inWordPairs(cmd, pairs);
   if (inWord.length > IN_WORD_PAIR_CAP) return capped();
@@ -2144,12 +2190,13 @@ export function memoized<T>(memo: VerdictMemo, key: string, text: string, compos
 // commit) does not truncate the operand list. A newline ends a command as surely
 // as a semicolon; without it the next line's command name reads as an operand of
 // this one. Every newline still standing here is one the shell reads, because a
-// continued line's backslash-newline pair is spliced out of both copies before the
-// masks are built, under any of the splice's readings; a pair the splice
-// leaves standing, after an even backslash run or inside a quoted heredoc body,
-// keeps a newline the shell reads too. The `)` stays in the cut set for the
-// subshell closer the mask
-// leaves visible: in (git push), the operand list must end at the paren. A backtick is
+// continued line's backslash-newline pair is spliced out of both copies before
+// the masks are built, under any of the splice's readings. The splice leaves a
+// pair standing in four places, and each keeps a newline the shell reads as
+// typed: after an even backslash run, inside a quoted heredoc body, inside
+// single quotes, and where the caller's `excludedPairs` test drops it. The `)`
+// stays in the cut set for the subshell closer the mask leaves visible: in
+// (git push), the operand list must end at the paren. A backtick is
 // not in it, because every live backtick span is blanked before this runs and a
 // tick still visible in the masked copy is a literal character (an escaped tick,
 // or data inside a heredoc body), where a cut would truncate the operand list at

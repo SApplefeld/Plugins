@@ -847,9 +847,21 @@ async function gateReason(cmd: string, cwd: string | null, powershell: boolean, 
 }
 
 // The no-git test the matcher and decide share: a plain scan, in any letter
-// case, since the lexer matches the git name in any case.
+// case, since the lexer matches the git name in any case. It runs on the raw
+// text and, where that misses, on the text with every backslash-newline pair
+// removed, a carriage return between the two included, so a git name split
+// across a line continuation reaches the lexer, which reads the joined name.
+// The second scan only adds matches, so no call the raw scan passed to the
+// lexer is lost. It removes one backslash per pair, so a name split by a
+// doubled backslash and a newline inside a double-quoted payload, which a
+// nested shell joins once the outer shell halves the run, still passes
+// unlexed. On the PowerShell tool, where a backslash-newline continues no
+// line, the second scan can hand the lexer a name PowerShell never forms,
+// and the lexer's joined reading refuses it, an over-deny accepted with the
+// guard's reading of PowerShell text as bash.
 function namesGit(cmd: unknown): cmd is string {
-  return typeof cmd === "string" && /git/i.test(cmd);
+  const git = /git/i;
+  return typeof cmd === "string" && (git.test(cmd) || git.test(cmd.replace(/\\\r?\n/g, "")));
 }
 
 // What the guard reaches through hooks/index.ts: the lexer's host for one

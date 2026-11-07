@@ -28,6 +28,19 @@
 // command around it name one, so rm $(ls docs/x.md) refuses while
 // echo $(cat docs/x.md) runs.
 //
+// A line continuation is read as the tool's shell reads it. On Bash a
+// backslash-newline is joined as bash joins it, so the next line's words are
+// operands of the command before it, except the pair ending a word-start #
+// comment, at the top level or inside a $( ) or <( ) substitution, which is a
+// line break, since bash ends the comment at the newline and the next line is
+// its own command. On PowerShell every backslash-newline is left as typed and
+// read as a line break, as PowerShell reads its own line, since it continues a
+// line on a trailing backtick alone, so a Windows path ending in a backslash
+// never glues the next line's command onto the one naming it. That holds
+// inside a PowerShell string handed to bash -c or piped into bash too: the
+// pair is left as typed there, though bash reads such a payload byte for byte
+// and joins the pair.
+//
 // Two writes stay out of reach. A path assembled at run time is one: a
 // variable or function (echo hi > $TARGET/x.md), a substitution standing as
 // a redirect's target (echo hi > $(echo docs/x.md)), a path list xargs reads
@@ -49,7 +62,8 @@
 // against the session's directory. A session whose working directory is
 // inside docs/ is a residual too: only a word shaped like a docs/ path is
 // judged, so a bare relative target there (echo hi > y.md) runs unjudged.
-// Five false denies are accepted. An option's value ending in a docs
+// Six false denies are accepted. A line that is wholly a # comment naming a
+// docs/ path refuses, though bash runs nothing on it. An option's value ending in a docs
 // directory is read as that directory on any command off the read list, so
 // node --test --test-name-pattern=docs x.test.js refuses. A clustered short
 // option whose leading letters end in docs is read as the docs directory,
@@ -79,8 +93,8 @@
 import type { BeforeGuard, GuardCall, GuardContext } from "./runner";
 import {
   CONTINUATION_CAP_ADVICE, GIT_VALUE_FLAGS, IN_WORD_PAIR_CAP, QUOTED_HEREDOC_INTRO, delimiterAdvice, delimiterWhat, exactMasker, exactReadingDiffers,
-  heredocBodies, heredocWalk, maskExact, maskQuoted, memoized, offendingDelimiter, readUnderContinuations, repoRoot, segment, spliceContinuations,
-  tokens, type DelimiterFault, type LexHost, type VerdictMemo,
+  excludedPairs, heredocBodies, heredocWalk, maskQuoted, memoized, offendingDelimiter, readUnderContinuations, repoRoot, segment, spliceContinuations,
+  tokens, type DelimiterFault, type LexHost, type PairExclusion, type VerdictMemo,
 } from "./readonly-agent";
 
 type Span = { from: number; to: number };
@@ -559,7 +573,10 @@ const allowedReading = (rs: readonly ShellReading[]): ShellReading => ({ writes:
 // bound that body at different lines.
 // `join` and `boundary` are the splice's reading of this text alone, as
 // `spliceContinuations` takes them, and `exact` is the reading the guard's
-// decide chose for this pass, carried unchanged to every depth. The joined
+// decide chose for this pass, carried unchanged to every depth, as is
+// `exclusion`, the pairs the tool's shell reads as line breaks: under the
+// exact reading a comment-ending pair, since bash reads a comment inside
+// `$( )` by the same rule, and on PowerShell every pair. The joined
 // readings shorten the command, so every span found on the text as handed in,
 // the body spans and each introduction's << index among them, is read through
 // the splice's map onto its text; under the two-space reading the map is the
@@ -568,7 +585,7 @@ const allowedReading = (rs: readonly ShellReading[]): ShellReading => ({ writes:
 // keyed on the text, its depth, its judge and `exact`. A call holds two
 // judges, the one placed against its cwd and `SHAPE_JUDGE`, so the key names
 // which of the two the interior is read under.
-async function readShell(command: string, placed: DocsJudge, depth: number, join: boolean, boundary: number, exact: boolean, memo: VerdictMemo): Promise<ShellReading> {
+async function readShell(command: string, placed: DocsJudge, depth: number, join: boolean, boundary: number, exact: boolean, exclusion: PairExclusion, memo: VerdictMemo): Promise<ShellReading> {
   const WRITES: ShellReading = { writes: true, names: true, delimiter: null, capped: false };
   const subs: Span[] = [];
   let bodies: Span[];
@@ -578,11 +595,14 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
   if (exact) {
     const walk = heredocWalk(command, "", true);
     if (walk.fault !== null) return { writes: true, names: true, delimiter: walk.fault, capped: false };
-    // The splice is handed the data bodies, and the data and live spans the
-    // masker reads are shifted through its map; the introduction map is built
-    // on the joined text, so its << indexes are the joined ones, and the
-    // bodies it passes over are every body the walk took, sorted by start.
-    const joined = spliceContinuations(command, walk.data, maskExact(command, walk.data, walk.live), join, boundary);
+    // The splice is handed the data bodies and the exact mask of the text as
+    // handed in, whose comment test the exclusion reads, and the data and
+    // live spans the masker reads are shifted through its map; the
+    // introduction map is built on the joined text, so its << indexes are the
+    // joined ones, and the bodies it passes over are every body the walk
+    // took, sorted by start.
+    const before = exactMasker(command, walk.data, walk.live);
+    const joined = spliceContinuations(command, walk.data, before.full(), join, boundary, excludedPairs(exclusion, before.commentAt));
     cmd = joined.cmd;
     bodies = joined.bodies;
     const live = walk.live.map((s) => ({ from: joined.at(s.from), to: joined.at(s.to) }));
@@ -598,7 +618,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
     // body-blind mask reads, and each << index is then read through the
     // splice's map onto the joined text.
     const found = heredocBodies(command, bare);
-    const joined = spliceContinuations(command, found, maskQuoted(command, found), join, boundary);
+    const joined = spliceContinuations(command, found, maskQuoted(command, found), join, boundary, excludedPairs(exclusion, null));
     cmd = joined.cmd;
     bodies = joined.bodies;
     intros = new Map([...bodyIntros(command, (i) => bare[i], found, null)].map(([at, body]) => [joined.at(at), body]));
@@ -615,7 +635,7 @@ async function readShell(command: string, placed: DocsJudge, depth: number, join
       continue;
     }
     const inner = await memoized(memo, `${depth + 1}:${judge === SHAPE_JUDGE ? "shape" : "placed"}:${exact ? "exact" : "legacy"}`, text, () =>
-      readUnderContinuations(text, exact, (t, j, b) => readShell(t, judge, depth + 1, j, b, exact, memo), refusedReading, () => CAPPED, allowedReading));
+      readUnderContinuations(text, exact, (t, j, b) => readShell(t, judge, depth + 1, j, b, exact, exclusion, memo), refusedReading, () => CAPPED, allowedReading, exclusion));
     if (inner.delimiter !== null || inner.capped) return inner;
     if (inner.writes) return WRITES;
     subNames.push(inner.names);
@@ -686,9 +706,13 @@ export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
       if (fp && (await judge(fp))) return { deny: `${refusal}\n` };
       if (typeof e.command !== "string") return {};
       // A PowerShell line ending in a backtick continues onto the next line,
-      // the way a bash backslash-newline does.
+      // the way a bash backslash-newline does, and a backslash-newline there
+      // continues nothing, so every such pair is excluded from the splice and
+      // the newline stays a line break. On Bash the pair ending a word-start
+      // comment is excluded, since bash ends the comment at the newline.
       const unix = e.command.replace(/\r\n/g, "\n");
       const command = e.tool === "PowerShell" ? unix.replace(/`\n/g, "  ") : unix;
+      const exclusion: PairExclusion = e.tool === "PowerShell" ? "all" : "comment";
       // The command is read under every reading of its continuations, the
       // two-space reading first so every refusal it gives keeps its reason
       // byte for byte, and a refusal from any reading is the guard's refusal.
@@ -699,7 +723,7 @@ export function docsWriteGuard(deps: DocsWriteDeps): BeforeGuard {
       // stands. The memo holds each nested text's composed reading for this
       // call.
       const memo: VerdictMemo = new Map();
-      const under = (exact: boolean) => readUnderContinuations(command, exact, (text, join, boundary) => readShell(text, judge, 0, join, boundary, exact, memo), refusedReading, () => CAPPED, allowedReading);
+      const under = (exact: boolean) => readUnderContinuations(command, exact, (text, join, boundary) => readShell(text, judge, 0, join, boundary, exact, exclusion, memo), refusedReading, () => CAPPED, allowedReading, exclusion);
       let reading = await under(false);
       if (!refusedReading(reading) && exactReadingDiffers(command)) reading = await under(true);
       // A delimiter fault stops the read before any docs/ path is weighed, so

@@ -83,9 +83,18 @@ const VERBS = ["sed", "awk", "gawk", "xargs"];
 // byte commandPositions accepts on either side of a name is a non-word byte,
 // and every text the guard reads deeper is cut from the command at such a
 // byte, so the word bound drops no call the lexer would find, sed.exe among
-// them. An xargs call rewrites nothing without one of the three.
+// them. An xargs call rewrites nothing without one of the three. The scan
+// runs on the raw text and, where that misses, on the text with every
+// backslash-newline pair removed, a carriage return between the two included,
+// so a verb split across a line continuation reaches the lexer, which reads
+// the joined name. The second scan only adds matches, so no call the raw scan
+// passed to the lexer is lost. It removes one backslash per pair, so a verb
+// split by a doubled backslash and a newline inside a double-quoted payload,
+// which a nested shell joins once the outer shell halves the run, still
+// passes unlexed.
 function namesVerb(cmd: unknown): cmd is string {
-  return typeof cmd === "string" && /\b(?:sed|awk|gawk)\b/i.test(cmd);
+  const verb = /\b(?:sed|awk|gawk)\b/i;
+  return typeof cmd === "string" && (verb.test(cmd) || verb.test(cmd.replace(/\\\r?\n/g, "")));
 }
 
 // One refusal line: the call, the reason the rewrite loses the file's
