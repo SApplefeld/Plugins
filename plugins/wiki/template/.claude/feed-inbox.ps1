@@ -147,8 +147,8 @@ unknown key is refused so a misspelt "exclude" cannot silently feed everything.
 {
   "sources": [
     {
-      "name": "grimoire",
-      "url": "git@github.com:SApplefeld/Grimoire.git",
+      "name": "handbook",
+      "url": "git@github.com:acme/handbook.git",
       "branch": "main",
       "include": ["docs/*.md", "**/SKILL.md", "**/README.md"],
       "exclude": ["docs/archive/**"]

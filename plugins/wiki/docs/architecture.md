@@ -38,7 +38,12 @@ drives the trust writer against a throwaway profile and a stub in place of
 and permission allowlist. `tests/Test-FeedInbox.ps1` drives the feeder against
 a throwaway repository and KB. `tests/Test-ReconcileGate.ps1` drives the status
 helper's liveness read and the move helper's stamp against a throwaway KB, and
-checks that the writing skills emit the liveness read. `tests/Test-KbRun.ps1`
+checks that the writing skills emit the liveness read. It also checks that the
+three move-helper lines the ingest skill reads, `renamed: inbox/renamed-`,
+`duplicate: sources/` and `already exists with different content`, are built
+by `kb-move.ps1`'s parsed code, its comment help aside, and appear in the
+skill's text with whitespace runs collapsed, so a wording change on either side
+alone fails it. `tests/Test-KbRun.ps1`
 drives the run wrapper against a stub in place of `claude`.
 `tests/Test-KbMove.ps1` drives the handle routes of the status, move and
 commit helpers and `kb-commit.ps1 -Reconcile` against a throwaway KB, and

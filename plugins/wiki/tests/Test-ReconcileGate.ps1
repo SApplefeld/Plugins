@@ -19,8 +19,10 @@ that kb-move.ps1 stamps a file planted two days back so it reads as live at
 age 0, and that the four writing skills emit the Live read exactly, ingest and
 lint twice each and query and merge once, with no -Minutes, ingest's last read
 inside step 4b before its move, lint's last inside its write pass and merge's
-inside its live check. It also checks that a child outliving the test's own
-run bound reads TimedOut and has its process tree stopped, so a hung child
+inside its live check. It checks that the three kb-move.ps1 output tokens the
+ingest skill reads are held by the helper's code, its comments excluded, and
+appear in the skill's text. It also checks that a child outliving the test's
+own run bound reads TimedOut and has its process tree stopped, so a hung child
 fails a check instead of hanging the suite.
 
 Each refusal check reads the refusal's own text, so it fails when a different
@@ -358,6 +360,144 @@ try {
         }
         Test-Check "$($skill[0]) emits the exact Live command $($skill[1]) time(s), its last read at the step that needs it, and never passes -Minutes" $passed
     }
+
+    # --- The ingest skill reads three tokens from kb-move.ps1's output. The
+    # helper side reads the helper's parsed code, so its comment help never
+    # counts, and finds the code that builds each printed line: for
+    # 'renamed: inbox/renamed-', a Write-Output whose string, quoted or joined
+    # with +, has 'renamed: inbox/' followed at once by a variable whose every
+    # assignment is a string beginning 'renamed-', or by a member whose name is
+    # a hashtable key every one of whose values is such a variable; for
+    # 'duplicate: sources/', a Write-Output whose string has 'duplicate: '
+    # followed at once by a variable whose every assignment begins 'sources/';
+    # for the third, a string holding the phrase. Requiring every assignment
+    # means an = or += assignment statement to another prefix anywhere in the
+    # helper fails the case, though the link is by name rather than traced
+    # data flow, so a write by Set-Variable, a foreach binding or a [ref]
+    # goes unseen. The skill
+    # side reads the skill's text with whitespace runs collapsed, since the
+    # skill wraps lines inside a code span, and finds each whole token. A
+    # missing or unparsable file fails the case.
+    $moveTokens = @('renamed: inbox/renamed-', 'duplicate: sources/', 'already exists with different content')
+    if ($MoveScript) {
+        $moveFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($MoveScript)
+    } else {
+        $moveFile = Join-Path $script:engineRoot 'template\.claude\kb-move.ps1'
+    }
+    $ingestFile = Join-Path $SkillRoot 'wiki-ingest\SKILL.md'
+    $helperHas = @{}
+    $skillHas = @{}
+    foreach ($token in $moveTokens) { $helperHas[$token] = $false; $skillHas[$token] = $false }
+    $helperReason = 'helper, whose file is missing'
+    if (Test-Path -LiteralPath $moveFile -PathType Leaf) {
+        $moveParseTokens = $null
+        $moveParseErrors = $null
+        $moveAst = [System.Management.Automation.Language.Parser]::ParseFile($moveFile, [ref]$moveParseTokens, [ref]$moveParseErrors)
+        if (@($moveParseErrors).Count -gt 0) {
+            $helperReason = 'helper, which does not parse'
+        } else {
+            $helperReason = 'helper code'
+            $constantAst = [System.Management.Automation.Language.StringConstantExpressionAst]
+            $expandableAst = [System.Management.Automation.Language.ExpandableStringExpressionAst]
+            $variableAst = [System.Management.Automation.Language.VariableExpressionAst]
+            $memberAst = [System.Management.Automation.Language.MemberExpressionAst]
+            $binaryAst = [System.Management.Automation.Language.BinaryExpressionAst]
+            $assignmentAst = [System.Management.Automation.Language.AssignmentStatementAst]
+            # Strips a statement, parentheses or a one-statement $( ) to the expression inside.
+            $unwrap = {
+                param($node)
+                while ($true) {
+                    if ($node -is [System.Management.Automation.Language.PipelineAst]) {
+                        $pure = $node.GetPureExpression()
+                        if ($null -eq $pure) { return $node }
+                        $node = $pure
+                    } elseif ($node -is [System.Management.Automation.Language.CommandExpressionAst]) {
+                        $node = $node.Expression
+                    } elseif ($node -is [System.Management.Automation.Language.ParenExpressionAst]) {
+                        $node = $node.Pipeline
+                    } elseif (($node -is [System.Management.Automation.Language.SubExpressionAst]) -and ($node.SubExpression.Statements.Count -eq 1)) {
+                        $node = $node.SubExpression.Statements[0]
+                    } else {
+                        return $node
+                    }
+                }
+            }
+            # The text a string begins with: its own, or a + join's left operand's.
+            $leadingText = {
+                param($node)
+                $node = & $unwrap $node
+                if (($node -is $constantAst) -or ($node -is $expandableAst)) { return $node.Value }
+                if (($node -is $binaryAst) -and ($node.Operator -eq 'Plus')) { return (& $leadingText $node.Left) }
+                return $null
+            }
+            # The expression that follows a prefix at once: the first expansion of
+            # a string that reads the prefix then a $, or the right operand of a
+            # + join whose left operand is the prefix alone.
+            $afterPrefix = {
+                param($node, $prefix)
+                $node = & $unwrap $node
+                if (($node -is $expandableAst) -and $node.Value.StartsWith($prefix + '$', [System.StringComparison]::Ordinal) -and ($node.NestedExpressions.Count -ge 1)) {
+                    return (& $unwrap $node.NestedExpressions[0])
+                }
+                if (($node -is $binaryAst) -and ($node.Operator -eq 'Plus')) {
+                    $left = & $unwrap $node.Left
+                    if (($left -is $constantAst) -and [string]::Equals($left.Value, $prefix, [System.StringComparison]::Ordinal)) { return (& $unwrap $node.Right) }
+                }
+                return $null
+            }
+            $codeStrings = @($moveAst.FindAll({ param($node) ($node -is $constantAst) -or ($node -is $expandableAst) }, $true))
+            $printed = @($moveAst.FindAll({
+                param($node)
+                ($node -is [System.Management.Automation.Language.CommandAst]) -and ($node.GetCommandName() -eq 'Write-Output') -and ($node.CommandElements.Count -ge 2)
+            }, $true) | ForEach-Object { $_.CommandElements[1] })
+            $assignments = @($moveAst.FindAll({ param($node) $node -is $assignmentAst }, $true))
+            # True where a value is a string beginning with the prefix.
+            $beginsWith = {
+                param($node, $prefix)
+                $text = & $leadingText $node
+                ($null -ne $text) -and $text.StartsWith($prefix, [System.StringComparison]::Ordinal)
+            }
+            # Each variable assigned at least once, every assignment a string beginning with the prefix.
+            $variablesAssigned = {
+                param($prefix)
+                @($assignments | Where-Object { $_.Left -is $variableAst } | Group-Object { $_.Left.VariablePath.UserPath } | Where-Object {
+                    @($_.Group | Where-Object { -not (& $beginsWith $_.Right $prefix) }).Count -eq 0
+                } | ForEach-Object { $_.Name })
+            }
+            $sourcesVariables = & $variablesAssigned 'sources/'
+            $renamedVariables = & $variablesAssigned 'renamed-'
+            # Each hashtable key every one of whose values is a renamed- variable,
+            # and which no member assignment sets to anything else.
+            $renamedKeys = @($moveAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $true) |
+                ForEach-Object { $_.KeyValuePairs } | Where-Object { $_.Item1 -is $constantAst } | Group-Object { $_.Item1.Value } | Where-Object {
+                    $key = $_.Name
+                    (@($_.Group | Where-Object { $value = & $unwrap $_.Item2; -not (($value -is $variableAst) -and ($renamedVariables -contains $value.VariablePath.UserPath)) }).Count -eq 0) -and
+                    (@($assignments | Where-Object { ($_.Left -is $memberAst) -and ($_.Left.Member -is $constantAst) -and ($_.Left.Member.Value -eq $key) -and -not (& $beginsWith $_.Right 'renamed-') }).Count -eq 0)
+                } | ForEach-Object { $_.Name })
+            $helperHas['renamed: inbox/renamed-'] = @($printed | Where-Object {
+                $next = & $afterPrefix $_ 'renamed: inbox/'
+                (($next -is $variableAst) -and ($renamedVariables -contains $next.VariablePath.UserPath)) -or
+                (($next -is $memberAst) -and ($next.Member -is $constantAst) -and ($renamedKeys -contains $next.Member.Value))
+            }).Count -gt 0
+            $helperHas['duplicate: sources/'] = @($printed | Where-Object {
+                $next = & $afterPrefix $_ 'duplicate: '
+                ($next -is $variableAst) -and ($sourcesVariables -contains $next.VariablePath.UserPath)
+            }).Count -gt 0
+            $helperHas['already exists with different content'] = @($codeStrings | Where-Object { $_.Value.Contains('already exists with different content') }).Count -gt 0
+        }
+    }
+    if (Test-Path -LiteralPath $ingestFile -PathType Leaf) {
+        $ingestText = [regex]::Replace([System.IO.File]::ReadAllText($ingestFile), '\s+', ' ')
+        foreach ($token in $moveTokens) { $skillHas[$token] = $ingestText.IndexOf($token, [System.StringComparison]::Ordinal) -ge 0 }
+    }
+    $moveProblems = @()
+    foreach ($token in $moveTokens) {
+        if (-not $helperHas[$token]) { $moveProblems += "'$token' missing from the $helperReason, $moveFile" }
+        if (-not $skillHas[$token]) { $moveProblems += "'$token' missing from the skill text, $ingestFile" }
+    }
+    $passed = ($moveProblems.Count -eq 0)
+    Test-Check "kb-move.ps1's code and the wiki-ingest skill both hold 'renamed: inbox/renamed-', 'duplicate: sources/' and 'already exists with different content', the helper read without its comments and the skill with whitespace collapsed" $passed
+    if (-not $passed) { foreach ($problem in $moveProblems) { Write-Host "  $problem" } }
 
     # --- The helper's own bound. A child that outlives a short bound reads
     # TimedOut, and its tree is stopped: the child and the grandchild it waits
