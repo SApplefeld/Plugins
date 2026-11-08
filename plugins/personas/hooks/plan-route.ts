@@ -158,8 +158,9 @@ export const PLAN_CHECKOUT_TIMEOUT_MS = 5_000;
 
 // The objective a plan's closing leaf carries, exactly, with the plan's own
 // planPath. The walk up adds one such leaf under a plan it holds open, so the
-// plan keeps an entry the controller can activate and nudge on, and this text
-// alone tells the leaf apart from any other child.
+// entry the controller activates and nudges is one goal_done refuses to
+// complete until the document reads Complete, a refusal the plan entry itself
+// never gets. This text alone tells the leaf apart from any other child.
 export function closingLeafObjective(planPath: string): string {
   return `Set ${planPath} Status to Complete`;
 }

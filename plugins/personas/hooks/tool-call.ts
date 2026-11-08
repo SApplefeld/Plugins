@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, activateNext, awaitingEntryAtOrAbove, bracketSafeText, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, activateNext, awaitingEntryAtOrAbove, bracketSafeText, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -1490,7 +1490,24 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         return { result: `Complete: "${completedTitle}".${leftOpenText} Nothing was activated: ${heldBy}.${healthText}${writeFailed}` };
       }
       if (leftOpenText !== "") return { result: `Complete: "${completedTitle}".${leftOpenText}${healthText}${writeFailed}` };
-      return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${healthText}${writeFailed}` };
+      // Nothing started, so the result says why by the tree's shape. With
+      // no pending entry, the planner runs. With one or more, the walk could
+      // not reach them: under a budget-blocked root activateNext returns null
+      // whatever the tree holds, so the budget is named as the cause; else a
+      // pending entry sits under a paused, blocked, abandoned or complete
+      // ancestor, or over a child the round budget blocked, and the sentence
+      // names no one cause but points at the [GOAL QUEUE] block, which lists
+      // them. The count carries no node title, so it needs no bracket guard.
+      const pendingCount = openGoals(sess.state).filter((g) => g.status === "pending").length;
+      if (pendingCount === 0) {
+        return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${healthText}${writeFailed}` };
+      }
+      const one = pendingCount === 1;
+      if (rootBudgetBlocked(sess.state)) {
+        return { result: `Complete: "${completedTitle}". Nothing started by itself: the root's turn budget holds ${pendingCount} pending ${one ? "entry" : "entries"} until goal_resume naming the root restarts it.${healthText}${writeFailed}` };
+      }
+      const them = one ? "it" : "them";
+      return { result: `Complete: "${completedTitle}". Nothing started by itself: ${pendingCount} pending ${one ? "entry sits" : "entries sit"} where the controller's walk cannot reach ${them}; the [GOAL QUEUE] block names ${them}.${healthText}${writeFailed}` };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };

@@ -1406,7 +1406,7 @@ export function serializeState(state: AgentState): string {
 // own clear leaves behind) and completedRounds reset to 0, since a node left
 // at its maxRounds re-blocks on its first scored round. The ancestor rule
 // rather than kind is what it keys on: the scorer blocks the active LEAF and
-// a plan node with children is never the active leaf, so the frozen entry is
+// a plan node with an open child is never the active leaf, so the frozen entry is
 // usually a task under a plan node. goal_resume by id reopens an entry
 // blocked with this literal, and goal_done's walk reopens a "Child task
 // blocked" ancestor.
@@ -1419,15 +1419,16 @@ export function serializeState(state: AgentState): string {
 // that is complete, abandoned or blocked. That test reuses the exact three
 // statuses isPlanningDue already names, and the root is found the way every
 // other helper here finds it: state.goals.find(g => g.parentId === null).
-// And a freed node is consumed through a leaf. A childless node is that leaf.
-// A node WITH children is reached through them, since activateNext's DFS
-// filters each level on "pending", tries isActivationEligible on each
-// candidate and descends where it fails, so a pending parent yields its
-// pending leaf. Such a node is freed only when at least one child is pending
-// once this pass has been applied. Where every child is complete, abandoned
-// or still blocked, freeing it yields no activatable leaf while isPlanningDue
-// reads the pending node as work in hand and holds the planner back, so it
-// stays blocked.
+// And a freed node is consumed through a leaf. A node with no open child is
+// that leaf. A node WITH an open child is reached through it, since
+// activateNext's DFS filters each level on "pending", tries
+// isActivationEligible on each candidate and descends where it fails, so a
+// pending parent yields its pending leaf. This pass frees a parent only
+// where at least one child is pending once the pass has been applied, by
+// its own choice: a blocked parent whose children are all complete or
+// abandoned is the round budget's question, not this recovery's, so it stays
+// blocked here. The walk itself would start such a parent once freed, since
+// a node whose children are all settled is a leaf to isActivationEligible.
 //
 // The fill and the recovery run as two passes over state.goals, and the
 // recovery is computed whole to a fixpoint before any of it is applied. The
@@ -1473,7 +1474,7 @@ export function blockedAncestorsToFree(state: AgentState, node: GoalNode): GoalN
       toFree.push(parent);
     } else if (parent.status !== "pending" && parent.status !== "active") {
       // "active" is accepted because enforceInvariants, which demotes an
-      // active node that has children, runs after this.
+      // active node with an open child, runs after this.
       return undefined;
     }
     current = parent;
@@ -2081,11 +2082,12 @@ function enforceInvariants(state: AgentState): void {
       g.status = "pending";
     });
   }
-  // If the active node is not a leaf, demote it.
+  // If the active node is not a leaf, demote it. A node is a leaf while it
+  // has no open child, so an active plan whose children are all complete or
+  // abandoned stays active across a load.
   const active = state.goals.find((g) => g.status === "active");
   if (active) {
-    const hasChildren = state.goals.some((g) => g.parentId === active.id);
-    if (hasChildren) {
+    if (hasOpenChild(state, active.id)) {
       active.status = "pending";
       state.activeGoalId = null;
     } else {
@@ -2431,17 +2433,33 @@ export function rootBudgetBlocked(state: AgentState): boolean {
   return state.goals.some((g) => g.parentId === null && g.status === "blocked" && g.blockedReason === TURN_BUDGET_REASON);
 }
 
+// Whether any child of the node is still open: pending, active, paused or
+// blocked, the four statuses openGoals calls open. A complete or abandoned
+// child is settled and counts for nothing here, so a node whose children are
+// all settled has no open child. The leaf tests in isActivationEligible,
+// activateNext and enforceInvariants read this one predicate, so the walk
+// and the load agree on what a leaf is.
+export function hasOpenChild(state: Pick<AgentState, "goals">, id: string): boolean {
+  return state.goals.some(
+    (g) =>
+      g.parentId === id &&
+      (g.status === "pending" || g.status === "active" || g.status === "paused" || g.status === "blocked")
+  );
+}
+
 // Section 10 fix round: whether a single node is eligible to become the
 // active leaf. A node is eligible when its own status is "pending", it has
-// no children (the leaf invariant), and every ancestor between it and the
-// root also has status "pending" - the root itself is exempt, since
-// activateNext's own DFS starts there without testing its status. This is
-// activateNext's own DFS rule, extracted so a second caller (goal_add) reads
-// the same rule rather than reimplementing it by hand.
+// no open child (the leaf invariant: a node is a leaf while it has no open
+// child, so a complete or abandoned child leaves its parent startable), and
+// every ancestor between it and the root also has status "pending" - the
+// root itself is exempt, since activateNext's own DFS starts there without
+// testing its status. This is activateNext's own DFS rule, extracted so a
+// second caller (goal_add) reads the same rule rather than reimplementing it
+// by hand.
 export function isActivationEligible(state: AgentState, node: GoalNode): boolean {
   if (node.status !== "pending") return false;
   if (rootBudgetBlocked(state)) return false;
-  if (state.goals.some((g) => g.parentId === node.id)) return false;
+  if (hasOpenChild(state, node.id)) return false;
   // The walk is bounded by the node count. A parentId cycle, which the
   // tree's shape rules do not permit but nothing here re-checks, exhausts the
   // bound and reads as not eligible rather than spinning.
@@ -2512,9 +2530,9 @@ export function nextStartableLeaf(state: AgentState): GoalNode | null {
       // ancestor chain (the level-by-level status filter above), so the
       // eligibility predicate's ancestor test is trivially satisfied and
       // this reduces to the leaf check - reusing it rather than repeating
-      // "no children" inline.
+      // "no open child" inline.
       if (isActivationEligible(state, c)) return c;
-      // Has children: descend.
+      // Has an open child: descend.
       const child = dfs(c.id);
       if (child) return child;
     }
@@ -2544,13 +2562,11 @@ export function hasStartableWork(state: AgentState): boolean {
   return nextStartableLeaf(state) !== null;
 }
 
-// M6: Activate the next pending leaf (a node with no children).
+// M6: Activate the next pending leaf (a node with no open child).
 // Prefers the completed node's siblings, then nextStartableLeaf's walk from
-// the root. Only activates nodes that have no children (leaf invariant).
+// the root. Only activates nodes that have no open child (leaf invariant).
 export function activateNext(state: AgentState, completedId?: string): string | null {
   if (rootBudgetBlocked(state)) return null;
-  const hasChildren = (id: string): boolean =>
-    state.goals.some((g) => g.parentId === id);
 
   const activate = (g: GoalNode): string => {
     g.status = "active";
@@ -2568,7 +2584,7 @@ export function activateNext(state: AgentState, completedId?: string): string | 
           (g) =>
             g.parentId === completed.parentId &&
             g.status === "pending" &&
-            !hasChildren(g.id) &&
+            !hasOpenChild(state, g.id) &&
             // A node under an entry awaiting the operator's yes starts only
             // once that entry is resumed.
             awaitingEntryAtOrAbove(state, g) === undefined
