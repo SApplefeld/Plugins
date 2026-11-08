@@ -63,7 +63,11 @@
 //      2, and its evidence times are legitimately written at minute precision,
 //      so reading 1 over it would fire on honest lines. Its stamps are found by
 //      their ISO shape inside the prose, the board having no field grammar to
-//      read them out of.
+//      read them out of. A board stamp written as `until <ISO>`, the form the
+//      coordinator skill gives a window's close or a wait's end, is a declared
+//      bound rather than a reading, and sits ahead of the clock by design: one
+//      past the skew is listed under its own heading as information, never
+//      among the findings, and leaves the exit code as the findings set it.
 //
 // The board read is the directory contract's `board.md`; where it holds no
 // file the run says the board leg did not run.
@@ -293,23 +297,58 @@ function futureStamps(text, nowMs, skewMs) {
     return out;
 }
 
-// The same reading over prose. A board line's stamp has no field name, so the
-// finding names the value itself, which is what a seat searches the board for.
-function futureStampsInProse(text, nowMs, skewMs) {
+// The text that makes a board stamp a declared bound when it stands right
+// before the stamp: `until` and one space, lower case, as its own word. The
+// word starts the text or follows whitespace, a backtick, an opening bracket or
+// a quote, so `rununtil ` and `valid-until ` stay findings. The match is this
+// narrow because every stamp it takes is one the future reading stops
+// reporting, and a wider form would excuse composed stamps the coordinator
+// skill's board rule never wrote.
+const DECLARED_BOUND_LEAD = /(?:^|[\s`(["'])until $/;
+// How far back the lead is read: the word, its space and the one character
+// before it.
+const DECLARED_BOUND_LEAD_CHARS = 'until '.length + 1;
+
+// Every stamp in prose sitting ahead of nowMs past the skew, as { value, at,
+// declared }, where `declared` says the declared-bound lead stands right
+// before it. A stamp behind the clock is left out whatever precedes it: a
+// bound already passed is history, as any past stamp is.
+function proseStampsAhead(text, nowMs, skewMs) {
     const skew = skewMs === undefined ? FUTURE_SKEW_MS : skewMs;
+    const prose = String(text);
     const out = [];
-    for (const match of String(text).match(ISO_IN_PROSE) || []) {
-        const at = Date.parse(match);
+    for (const match of prose.matchAll(ISO_IN_PROSE)) {
+        const at = Date.parse(match[0]);
         if (!Number.isFinite(at) || at - nowMs <= skew) continue;
-        out.push({
-            kind: 'future',
-            field: null,
-            value: match,
-            what: 'a stamp reading ' + shortValue(match) + ' sits ' + minutes(at - nowMs)
-                + ' minutes ahead of the clock'
-        });
+        const lead = prose.slice(Math.max(0, match.index - DECLARED_BOUND_LEAD_CHARS), match.index);
+        out.push({ value: match[0], at, declared: DECLARED_BOUND_LEAD.test(lead) });
     }
     return out;
+}
+
+// The same reading over prose. A board line's stamp has no field name, so the
+// finding names the value itself, which is what a seat searches the board for.
+// A declared bound is not a finding here, and declaredBoundsInProse lists it.
+function futureStampsInProse(text, nowMs, skewMs) {
+    return proseStampsAhead(text, nowMs, skewMs).filter((s) => !s.declared).map((s) => ({
+        kind: 'future',
+        field: null,
+        value: s.value,
+        what: 'a stamp reading ' + shortValue(s.value) + ' sits ' + minutes(s.at - nowMs)
+            + ' minutes ahead of the clock'
+    }));
+}
+
+// The board's declared bounds ahead of the clock, in the finding's shape so the
+// report prints them through the same line guard, under a kind no finding takes.
+function declaredBoundsInProse(text, nowMs, skewMs) {
+    return proseStampsAhead(text, nowMs, skewMs).filter((s) => s.declared).map((s) => ({
+        kind: 'declared-bound',
+        field: null,
+        value: s.value,
+        what: 'a declared bound reading ' + shortValue(s.value) + ' falls ' + minutes(s.at - nowMs)
+            + ' minutes ahead of the clock'
+    }));
 }
 
 // Every finding one registry entry carries.
@@ -482,9 +521,11 @@ function findingLine(subject, finding) {
     return '  ' + sanitize(subject) + ': ' + sanitize(finding.what, 300);
 }
 
-// Every finding under one coordinator directory, as { findings, scanned }.
-// `scanned` carries what each artifact was, so a run always says what it read
-// rather than leaving a caller to infer coverage from silence.
+// Every finding under one coordinator directory, as { findings, scanned,
+// bounds }. `scanned` carries what each artifact was, so a run always says what
+// it read rather than leaving a caller to infer coverage from silence. `bounds`
+// holds the board's declared bounds ahead of the clock, which are information
+// and never findings.
 //
 // Entries are read through the shared screen the mechanical stampers read them
 // through, the board included: that screen is a property of the channel rather
@@ -492,6 +533,7 @@ function findingLine(subject, finding) {
 // widest-writer form.
 function auditDir(dir, nowMs) {
     const findings = [];
+    const bounds = [];
     const scanned = { entries: 0, registry: null, board: null };
 
     const registryDir = path.join(dir, 'registry');
@@ -542,7 +584,7 @@ function auditDir(dir, nowMs) {
     if (boardThere === 'absent') {
         scanned.board = 'not run';
         scanned.boardTried = [boardPath];
-        return { findings, scanned };
+        return { findings, scanned, bounds };
     }
     scanned.board = boardThere === 'present' ? 'read' : boardThere;
     if (boardThere === 'unreadable') {
@@ -567,10 +609,13 @@ function auditDir(dir, nowMs) {
             for (const finding of futureStampsInProse(read.text, nowMs)) {
                 findings.push({ subject: boardSubject, finding });
             }
+            for (const finding of declaredBoundsInProse(read.text, nowMs)) {
+                bounds.push({ subject: boardSubject, finding });
+            }
         }
     }
 
-    return { findings, scanned };
+    return { findings, scanned, bounds };
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +700,22 @@ function scannedPhrase(scanned) {
     return parts.join(', ');
 }
 
+// The board's declared bounds, under their own heading after the findings and
+// only where there are some. They print through the findings' line guard and
+// under a cap of their own, the same size as the findings' cap, since board
+// text any local session can write produces them as it produces findings.
+function printDeclaredBounds(bounds) {
+    if (bounds.length === 0) return;
+    process.stdout.write('declared bounds:\n');
+    for (const { subject, finding } of bounds.slice(0, FINDING_PRINT_CAP)) {
+        process.stdout.write(findingLine(subject, finding) + '\n');
+    }
+    if (bounds.length > FINDING_PRINT_CAP) {
+        process.stdout.write('and ' + (bounds.length - FINDING_PRINT_CAP)
+            + ' further declared bounds, not printed\n');
+    }
+}
+
 function cmdAudit(rest) {
     let raw = null;
     if (rest.length === 2 && rest[0] === '--dir') {
@@ -687,10 +748,11 @@ function cmdAudit(rest) {
         return;
     }
 
-    const { findings, scanned } = auditDir(scope.dir, Date.now());
+    const { findings, scanned, bounds } = auditDir(scope.dir, Date.now());
     process.stdout.write('scanned ' + scannedPhrase(scanned) + '\n');
     if (findings.length === 0) {
         process.stdout.write('no stamp findings in what was scanned\n');
+        printDeclaredBounds(bounds);
         process.exitCode = 0;
         return;
     }
@@ -709,6 +771,7 @@ function cmdAudit(rest) {
         process.stdout.write('a whole-second stamp is a population reading, not a verdict on one entry:'
             + ' an honest clock read lands on one about once in a thousand\n');
     }
+    printDeclaredBounds(bounds);
     process.exitCode = 1;
 }
 
@@ -762,7 +825,7 @@ module.exports = {
     HEARTBEAT_LEAD_MS, FUTURE_SKEW_MS,
     field, stampMs,
     roundSecondStamps, stampsLeadingHeartbeat, futureStamps, futureStampsInProse,
-    auditEntry, auditDir,
+    declaredBoundsInProse, auditEntry, auditDir,
     coordinatorRoot, coordinatorDir, machineDirScope, resolveScope, stampRegistryStatus,
     FINDING_PRINT_CAP
 };

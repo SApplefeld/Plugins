@@ -22,7 +22,7 @@ Exactly one act deletes a foreign registry file: the coordinator's prune on its 
 
 The inbox is multi-writer by design. The coordinator routing an operator ask and the operator's own session may append, and the Admin seat flips handled lines it did not append. No appender is authenticated. A request for another machine's Admin seat goes to that machine's coordinator as a plain peer message. Any concurrency rule for the inbox arrives as an amendment to this skill.
 
-A read of any of these files checks the stamps it is about to use. It names the newest stamp it would act on where that stamp sits in the future by the clock, and reports a session-written registry stamp that leads that entry's `Heartbeat:` by more than the seat-stop hook's throttle window. `node <plugin-root>/hooks/kit-registry-stamp.js audit` takes those readings over a machine's coordinator directory, `<plugin-root>` being `CLAUDE_PLUGIN_ROOT` where the harness supplies it and this skill's base directory's grandparent otherwise. Its output is a report and never a verdict, gating no act.
+A read of any of these files checks the stamps it is about to use. It names the newest stamp it would act on where that stamp records a moment its writer read and sits in the future by the clock. A board bound written as `until <ISO>` records a moment its writer set, a window's close or a wait's end, so it sits in the future by design and is read as a declared bound, never named. The read also reports a session-written registry stamp that leads that entry's `Heartbeat:` by more than the seat-stop hook's throttle window. `node <plugin-root>/hooks/kit-registry-stamp.js audit` takes those readings over a machine's coordinator directory, `<plugin-root>` being `CLAUDE_PLUGIN_ROOT` where the harness supplies it and this skill's base directory's grandparent otherwise. Its output is a report and never a verdict, gating no act.
 
 ## Registry Entry
 
@@ -34,6 +34,7 @@ Role: Worker
 Repo: <the one repository the seat's work lives in, or none, never a list>
 Workdir: <the checkout, in the form the paragraph below gates, or none beside a none repo>
 Session: <session-id>
+Model: <the model id the session's own system prompt names, written once at the entry write; never written by hand after>
 Started: <"none" at the entry write; stamped once by the registry stamp CLI's `push --takeover`; never written by hand>
 Status-updated: <"none" at the entry write; stamped by that CLI's `push` at each push moment; never written by hand>
 Remaining: <wall-clock estimate; "none" where nothing is in flight>
@@ -56,7 +57,7 @@ The push moments, closed with their class: a session rewrites `Remaining:` and i
 3. **Arm the seat's wake**, the wake the standing-watch skill's Wake mechanics section governs, per the three-way rule the peer-sessions Roles table sets. A seat whose runbook states a cadence arms at it, and for Admin that is the figure the table names. A seat whose runbook states a loop but no cadence arms at the reconciliation cadence the coordinator skill states. A seat whose runbook states no loop arms no recurring wake, the Expert and the Worker among them. The arm, where one is due, comes before any read, holding the coordinator skill's cold-start order for every seat, so a crash mid-read leaves the timer standing.
 4. **Read the board and the store**, and for Admin the artifact inbox beside the board, before any announcement. The directory read takes the directory contract's stamp self-check. The store is read after the board with `memq recall`, and the digest is read whole, the operator block included, never skimmed for what looks relevant. A seat taken on a digest the verb could not produce says so in its announcement, the memory-system skill stating how to tell that from a clean read of an empty store.
 5. **Resolve the standing-delegation record** as the model's switch paragraph and chain bullet below state, so the takeover knows whether it announces delegated or undelegated.
-6. **Write the registry entry** in the shape above. Where a live entry already claims the seat, the collision routes per the peer-sessions exclusive-seam rule before the write.
+6. **Write the registry entry** in the shape above, its `Model:` line carrying the model id the session's own system prompt names and nothing beside it. Where a live entry already claims the seat, the collision routes per the peer-sessions exclusive-seam rule before the write.
 7. **Announce the takeover**, per the coordinator skill's handoff rules where a predecessor is live, naming the delegation state resolved above.
 8. **Push the first status** with the stamp CLI as `push --takeover`, the push-moments paragraph above owning the verbs and the fields they stamp. The compaction boundary then follows per the peer-sessions banking rule, which owns the `seat-stop.js` Stop hook's preconditions and the marker CLI for where they fail. Where the hook is not installed, the marker CLI is that path too. A push with neither the hook nor the command behind it has banked nothing, and a seat on a shared checkout is the case that looks banked and is not.
 

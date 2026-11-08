@@ -44,7 +44,10 @@
 //      stays consent-gated at the agent layer. The one change made to it
 //      unprompted is step 0's swap of a line that is exactly the former import
 //      token, which is reported after it lands. Where step 0 kept a temp file in
-//      place of a missing CLAUDE.md, no offer is made.
+//      place of a missing CLAUDE.md, no offer is made. A CLAUDE.md saved as
+//      UTF-16 draws no offer either: the harness reads it as UTF-8, so nothing
+//      in it loads, and the hook names re-saving it as UTF-8 as the remedy
+//      instead, after which the import check reads it as any UTF-8 file.
 //
 // SAFETY: fails OPEN and silent. Missing skill, unreadable/unwritable paths, an
 // up-to-date file with the import already present, or any error -> exit 0, no
@@ -144,6 +147,15 @@ function renameIfFree(dir, from, to) {
 // The UTF-8 byte order mark as latin1 text, which a file read as latin1 can
 // carry ahead of line 1.
 const LATIN1_BOM = '\xEF\xBB\xBF';
+
+// True where a file's bytes are UTF-16: a UTF-16 byte order mark, FF FE or
+// FE FF, or, in a file with no byte order mark, a null byte in its first 64
+// bytes. A file opening with the UTF-8 mark is UTF-8.
+function isUtf16(bytes) {
+    if (bytes.length >= 2 && ((bytes[0] === 0xFF && bytes[1] === 0xFE) || (bytes[0] === 0xFE && bytes[1] === 0xFF))) return true;
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return false;
+    return bytes.subarray(0, 64).includes(0);
+}
 
 // A line of CLAUDE.md split with /(?<=\n)/, less its \r\n or \n terminator.
 const lineText = (seg) => seg.replace(/\r?\n$/, '');
@@ -294,10 +306,24 @@ function main() {
 
     // 2. Offer to wire the import if the user's CLAUDE.md does not have it,
     //    unless step 0 kept a temp file in place of a missing CLAUDE.md, whose
-    //    line already names it.
+    //    line already names it. A CLAUDE.md saved as UTF-16 gets the re-save
+    //    remedy in place of the offer, since its text cannot be read for the
+    //    token the way the harness reads it.
     let userClaudeMd = null;
-    try { userClaudeMd = fs.readFileSync(path.join(claudeDir, 'CLAUDE.md'), 'utf8'); } catch { /* absent */ }
-    if (!migrated.kept && (userClaudeMd === null || !userClaudeMd.includes(IMPORT_TOKEN))) {
+    let utf16 = false;
+    try {
+        const bytes = fs.readFileSync(path.join(claudeDir, 'CLAUDE.md'));
+        utf16 = isUtf16(bytes);
+        userClaudeMd = bytes.toString('utf8');
+    } catch { /* absent */ }
+    if (utf16) {
+        lines.push(
+            `Kit doctrine not loading: ~/.claude/CLAUDE.md is saved as UTF-16, and Claude Code reads it as ` +
+            `UTF-8, so nothing in it loads, its "${IMPORT_TOKEN}" import included. Tell the user that ` +
+            `re-saving the file as UTF-8 is the fix, and change it ONLY on their explicit approval - it is ` +
+            `their personal config. Once it is UTF-8, the next session's import check reads it again and ` +
+            `offers the line where it is missing.`);
+    } else if (!migrated.kept && (userClaudeMd === null || !userClaudeMd.includes(IMPORT_TOKEN))) {
         lines.push(
             `Kit doctrine not wired in: the operating doctrine is installed and auto-refreshed at ` +
             `~/.claude/${DOCTRINE_FILE}, but ~/.claude/CLAUDE.md does not import it, so it is not loading ` +

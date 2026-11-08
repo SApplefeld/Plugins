@@ -539,8 +539,21 @@ $doctrineFile = Join-Path $claudeDir "grimoire-doctrine.md"
 $doctrineSkill = Join-Path $pluginRoot "skills\operating-instructions\SKILL.md"
 $claudeMdRaw = $null
 $claudeMdReadError = $null
+# Claude Code reads CLAUDE.md as UTF-8, so nothing in a file saved as UTF-16
+# loads, its import included. The bytes are sniffed before the text is
+# read: a UTF-16 byte order mark (FF FE or FE FF), or a null byte in the first
+# 64 bytes of a file with no byte order mark, is UTF-16. A file opening with
+# the UTF-8 mark is UTF-8.
+$claudeMdUtf16 = $false
 if (Test-Path $claudeMd) {
     try {
+        $claudeMdBytes = [System.IO.File]::ReadAllBytes($claudeMd)
+        if ($claudeMdBytes.Length -ge 2 -and (($claudeMdBytes[0] -eq 0xFF -and $claudeMdBytes[1] -eq 0xFE) -or ($claudeMdBytes[0] -eq 0xFE -and $claudeMdBytes[1] -eq 0xFF))) {
+            $claudeMdUtf16 = $true
+        }
+        elseif (-not ($claudeMdBytes.Length -ge 3 -and $claudeMdBytes[0] -eq 0xEF -and $claudeMdBytes[1] -eq 0xBB -and $claudeMdBytes[2] -eq 0xBF)) {
+            $claudeMdUtf16 = [System.Array]::IndexOf($claudeMdBytes, [byte]0, 0, [Math]::Min($claudeMdBytes.Length, 64)) -ge 0
+        }
         $claudeMdRaw = Get-Content $claudeMd -Raw -Encoding UTF8 -ErrorAction Stop
     }
     catch {
@@ -550,6 +563,9 @@ if (Test-Path $claudeMd) {
 $importPresent = ($null -ne $claudeMdRaw) -and ($claudeMdRaw -match "@grimoire-doctrine\.md")
 if ($null -ne $claudeMdReadError) {
     Report "WARN" "Doctrine import" @("$claudeMd is unreadable: $claudeMdReadError")
+}
+elseif ($claudeMdUtf16) {
+    Report "WARN" "Doctrine import" @("$claudeMd is saved as UTF-16, and Claude Code reads it as UTF-8, so nothing in it loads, its import included. Fix: re-save it as UTF-8; the next doctor run then reads the import line and names it where it is missing.")
 }
 elseif (-not $importPresent) {
     Report "WARN" "Doctrine import" @("Add this line to $claudeMd so the doctrine loads always-on:  @grimoire-doctrine.md")
