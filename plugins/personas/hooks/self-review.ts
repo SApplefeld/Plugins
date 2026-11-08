@@ -106,10 +106,12 @@ export function buildSelfReviewInput(
     (d) => !NOISE_ACTIONS.has(d.action),
   );
 
-  // Build the decision window (most recent 20 worker-facing actions)
+  // Build the decision window (most recent 20 worker-facing actions). Each
+  // detail folds to one line at the join, since the rows are newline-separated
+  // and a detail holding a newline would otherwise read as a row of its own.
   const recent = workerDecisions.slice(-20);
   const window = recent
-    .map((d) => new Date(d.timestamp).toISOString().slice(11, 19) + " " + d.loop + " | " + d.action + " | " + d.detail)
+    .map((d) => new Date(d.timestamp).toISOString().slice(11, 19) + " " + d.loop + " | " + d.action + " | " + oneLine(d.detail))
     .join("\n");
 
   // Known lessons (S5: pass as "do not repeat")

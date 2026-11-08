@@ -74,6 +74,47 @@ let minted: Set<string> | null = null
 const TAG = /\[REDACTED-(?:SECRET|EMAIL|LITERAL)-[0-9a-f]{8}\]/g
 const WHOLE_TAG = /^\[REDACTED-(?:SECRET|EMAIL|LITERAL)-[0-9a-f]{8}\]$/
 
+// The session's own id, trimmed and lowercased, which the vault never keeps
+// however a value equal to it arrives: the harness prints that id on every
+// transcript line, and every registry entry a seat reads carries one. It is
+// undefined until index.ts hands it in at the session-start seed, and where
+// the session has none. The first value refused for being the id leaves one
+// note; this module has no log handle, so index.ts drains the note after a
+// scrub and logs it, and the line appears once per seeded id.
+let ownSessionId: string | undefined
+let ownIdNoted = false
+let ownIdNote: string | null = null
+const OWN_ID_NOTE = 'redactor: the detector met the session id, which is not kept'
+
+// Seeding an id starts its note afresh: the flag and any pending note reset,
+// so the first refusal under the new id leaves its own note.
+export function setOwnSessionId(id: string | undefined): void {
+  const own = id?.trim().toLowerCase()
+  ownSessionId = own === undefined || own === '' ? undefined : own
+  ownIdNoted = false
+  ownIdNote = null
+}
+
+// True where `value` is the session's own id, compared trimmed and in any
+// case, as seedVault in redactor.ts compares a seed against the same id, and
+// the caller then refuses it. The first refusal records the note.
+function refuseOwnId(value: string): boolean {
+  if (ownSessionId === undefined || value.trim().toLowerCase() !== ownSessionId) return false
+  if (!ownIdNoted) {
+    ownIdNoted = true
+    ownIdNote = OWN_ID_NOTE
+  }
+  return true
+}
+
+// The note the first own-id refusal left, handed over once: the note, then
+// null until the session ends.
+export function drainOwnIdNote(): string | null {
+  const note = ownIdNote
+  ownIdNote = null
+  return note
+}
+
 // The tag is a keyed hash, and the key is drawn fresh for every session. So
 // nobody can work out a value from its tag, and a crafted token cannot be
 // aimed at a placeholder that is already on screen.
@@ -125,8 +166,10 @@ function keyedHash(text: string): string {
 // holds a placeholder from an earlier pass (a key inside a URL password) is
 // stored with that placeholder put back, so one restore gives the real text.
 // Two different values never share a placeholder: on a clash the hash is
-// taken again with a counter until the tag is free.
+// taken again with a counter until the tag is free. A secret equal to the
+// session's own id comes back as it is: no placeholder, no echo, not counted.
 export function mint(kind: Kind, raw: string): string {
+  if (kind === 'SECRET' && refuseOwnId(raw)) return raw
   hidden++
   const value = kind === 'LITERAL' ? raw : restore(unpark(raw, false))
   const seen = byValue.get(value)
@@ -168,8 +211,10 @@ export function restore(text: string): string {
 
 // Hides a value the caller knows is secret wherever it turns up for the rest
 // of the session, even one too short or too plain for the echo rule (a word
-// password from .env). Values under PREFIX characters can't be indexed.
+// password from .env). Values under PREFIX characters can't be indexed. The
+// session's own id comes back as it is and joins nothing.
 export function keepSecret(value: string): string {
+  if (refuseOwnId(value)) return value
   const tag = mint('SECRET', value)
   if (value.length >= PREFIX && !echo.has(value)) {
     echo.add(value)
@@ -999,10 +1044,17 @@ function lettersLookRandom(token: string, named: boolean, h: number): boolean {
 }
 
 // Claude Code transcripts and most analytics put a `sessionId` UUID on every
-// line. A UUID beside that name is an identifier, not a credential; a real
-// session cookie is random text, and the cookie rules hide it on their own.
+// line, and a persona registry entry puts one after `Session:`. A UUID beside
+// a session name is an identifier, not a credential; a real session cookie is
+// random text, and the cookie rules hide it on their own. A name ending in
+// `id` (`sessionId`, `session_id`, `X-Session-Id`, `sessid`) counts wherever
+// it stands. The bare `session`, `sess` or `sid` counts only where no letter,
+// digit, `_` or `-` stands before it, so `Session:`, `session=` and `sid=`
+// pass while `X-Session:`, `client_session=`, `account_sid=` and `assess:`
+// are judged as any other named token, as is a UUID after a key, token,
+// secret or password name.
 const SESSION_UUID = new RegExp(`^${UUID}$`, 'i')
-const SESSION_ID_NAME = new RegExp(String.raw`sess(?:ion)?[_-]?id(?:${Q}|\s){0,6}[:=]{1,2}(?:${Q}|\s){0,4}$`, 'i')
+const SESSION_ID_NAME = new RegExp(String.raw`(?:sess(?:ion)?[_-]?id|(?<![A-Za-z0-9_-])sess(?:ion)?|(?<![A-Za-z0-9_-])sid)(?:${Q}|\s){0,6}[:=]{1,2}(?:${Q}|\s){0,4}$`, 'i')
 
 // A persona record id has the shape of the id operator.ts mints for an inbox
 // record: `<persona>-<session uuid>-<seq>`, a name, a lowercase session UUID

@@ -227,6 +227,7 @@ import { inplaceRewriteGuard } from "./guards/inplace-rewrite";
 // The memq grant, answered on tool.check.
 import { MEMQ_GRANT_REASON, memqGrantMatches, memqGrantable, type MemqGrantDeps } from "./guards/memq-grant";
 import { ATTACHMENT_WITHHELD, BLOCK_WITHHELD, bodyFileRefusal, PROMPT_WITHHELD, REFUSED_TOOLS, REFUSED_TOOL_REASON, SPAWN_WITHHELD, scrubAttachment, scrubContextBlocks, scrubPrompt, scrubServed, scrubSpawn, scrubText, seedFiles, seedVault, serverOf, setRedactorOn, setRestoreTools, toolCallBack, toolCallDown, toolCallRefusal, unrestoredNotice, withheldContextBlocks, withheldToolResult, type SeedFile, type ToolCallDown } from "./redactor";
+import { drainOwnIdNote, setOwnSessionId } from "./redactor-detect";
 import { type ExpectedTurn, turnTextEquals, findExpectedTurn, type ChannelSender as ChannelSenderFromModule, OPERATOR_SENDER, ASKED_BY_MAX_CHARS as ASKED_BY_MAX_CHARSFromModule, channelSenderOf as channelSenderOfFromModule, TASK_TEXT_MAX_CHARS as TASK_TEXT_MAX_CHARSFromModule, TASK_ID_MAX_CHARS as TASK_ID_MAX_CHARSFromModule, type SubmitOutcome, removeExpectedTurn, CHANNEL_SEGMENT_PATTERN, CHANNEL_SEGMENT_MAX_BYTES, channelSegmentPath } from "./channel-text";
 import { TURN_PLAN_EDITS_MAX as TURN_PLAN_EDITS_MAXFromModule, namesPlanDocument, planPathUnderCwd as planPathUnderCwdFromModule, reactivateAskedEntry, isPlanEntry, PLAN_CHECKOUT_TIMEOUT_MS, closingLeafObjective, planStatusText } from "./plan-route";
 import { MEMQ_WRITE_TIMEOUT_MS, type RecallInjection, recallGetNamesOf as recallGetNamesOfFromModule, RECOGNITION_CHECK_EVERY_MS, type NudgePrepared, nudgeToolPayload } from "./recall-text";
@@ -1056,6 +1057,18 @@ let redactorOn = true;
 // which sends nothing. completeRoot sits at module level and reads it here.
 let goalRetireTo: { coordinatorPersona: string; architectPersona: string } | null = null;
 
+// The detector's note that it met the session's own id and kept nothing,
+// logged once per session. The detector module has no log handle, so each
+// hook drains the note after its scrub helper ran. A note left under a path
+// that returned before its drain is logged by logDetectorNote at the next
+// hook that calls it. A failed log is non-fatal.
+function logDetectorNote(dp: any): void {
+  try {
+    const note = drainOwnIdNote();
+    if (note !== null) dp.ui.log(note);
+  } catch { /* non-fatal */ }
+}
+
 // next(e) for a tool call with the redactor around it: placeholders restored
 // on the way down, the answer scrubbed before this module reads it. A step
 // that throws refuses the call before the tool ran and withholds after.
@@ -1067,6 +1080,7 @@ async function redactedToolNext(dp: any, e: ToolCallInput, next: Next<"tool.call
   const r = await next(down.input);
   try {
     const back = toolCallBack(e.tool, r, down.handed, next.budget.remainingMs);
+    logDetectorNote(dp);
     if (back.hidden > 0) dp.ui.notice(e.tool_use_id, `redactor: hid ${back.hidden} value(s)`);
     return back.r;
   } catch { return withheldToolResult(r); }
@@ -1105,6 +1119,7 @@ function servedAnswer(dp: any, e: ToolCallInput, next: Next<"tool.call">, r: Too
       }
     }
     const back = scrubServed(r, !nextRan.has(e), next.budget?.remainingMs ?? Infinity);
+    logDetectorNote(dp);
     if (back.hidden > 0) dp.ui.notice(e.tool_use_id, `redactor: hid ${back.hidden} value(s)`);
     return back.r;
   } catch { return withheldToolResult(r); }
@@ -1116,6 +1131,7 @@ async function redactedSubmitNext(dp: any, e: PromptSubmitInput, next: Next<"pro
   if (!redactorOn) return next(e);
   let down: { e: PromptSubmitInput; hidden: number };
   try { down = scrubPrompt(e, next.budget.remainingMs); } catch { return PROMPT_WITHHELD; }
+  logDetectorNote(dp);
   if (down.hidden > 0) dp.ui.toast(`redactor: hid ${down.hidden} value(s) from the prompt`);
   return next(down.e);
 }
@@ -2377,6 +2393,7 @@ async function spawnWithNudge(dp: any, e: AgentSpawnInput, next: Next<"agent.spa
   // The redactor's scrub; a scan that throws starts no subagent.
   let scrubbed: AgentSpawnInput;
   try { scrubbed = scrubSpawn(down, next.budget.remainingMs); } catch { return SPAWN_WITHHELD; }
+  logDetectorNote(dp);
   return spawnStarted(dp, e.subagentType, await next(scrubbed), spawnTypes);
 }
 
@@ -4689,6 +4706,9 @@ export const register: Register = async (on, options) => {
         // answer counts as none.
         const idOf = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v : undefined);
         const ownId = idOf(await (async () => $.session.id())().catch(() => undefined)) ?? idOf(await (async () => $.env.get("CLAUDE_CODE_SESSION_ID"))().catch(() => undefined));
+        // The detector refuses the same id wherever it meets it, so the seed
+        // and the detection share one reading of it.
+        setOwnSessionId(ownId);
         const home = await (async () => hostOf($).getHome())().catch(() => undefined);
         const read = async (f: SeedFile) => (f.skip || !(await $.fs.exists(f.path)) ? undefined : String(await $.fs.read(f.path)));
         const files = await Promise.all(seedFiles(home, cfg.credentialFiles).map(async (f) => ({ ...f, text: await read(f).catch(() => null) })));
@@ -7564,13 +7584,17 @@ export const register: Register = async (on, options) => {
     if (!redactorOn || next.called) return spawnStarted($, e.subagentType, await next(e), spawnTypes);
     let scrubbed: AgentSpawnInput;
     try { scrubbed = scrubSpawn(e, next.budget.remainingMs); } catch { return SPAWN_WITHHELD; }
+    logDetectorNote($);
     return spawnStarted($, e.subagentType, await next(scrubbed), spawnTypes);
   });
 
   // --- prompt.context, prompt.attachment: redactor work and the queued-line note, .catch fails closed ---
   on("prompt.context", async ($, e, next) => {
     const r = await next(e);
-    return redactorOn ? scrubContextBlocks(r, next.budget.remainingMs) : r;
+    if (!redactorOn) return r;
+    const scrubbed = scrubContextBlocks(r, next.budget.remainingMs);
+    logDetectorNote($);
+    return scrubbed;
   }).catch(async ($, e, next) => {
     const r = await next(e);
     return redactorOn ? withheldContextBlocks(r) : r;
@@ -7580,7 +7604,10 @@ export const register: Register = async (on, options) => {
     // hands it, ahead of the redactor's scrub of what comes back.
     noteQueuedOperatorLine(e);
     const r = await next(e);
-    return redactorOn ? scrubAttachment(e, r, next.budget.remainingMs) : r;
+    if (!redactorOn) return r;
+    const scrubbed = scrubAttachment(e, r, next.budget.remainingMs);
+    logDetectorNote($);
+    return scrubbed;
   }).catch(async ($, e, next) => (redactorOn ? ATTACHMENT_WITHHELD : next(e)));
 
   // --- tool.check: the memq grant, under the guards option in every tier ---
