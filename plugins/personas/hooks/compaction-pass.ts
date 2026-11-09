@@ -52,11 +52,16 @@ import { boundedText, safeErrorText } from "./text";
 // compaction's command run, and the members the journal and the seam reach
 // through shadowAsk and shadowOutcome. Those two take the host whole, so the
 // Pick names every member PluginHost declares, and it stays a Pick so a
-// member added to PluginHost reaches the pass only by being named here.
+// member added to PluginHost reaches the pass only by being named here. A
+// member left unnamed is a type error at the three shadowAsk and shadowOutcome
+// calls below, which test/personas-type-check.test.js reads by running the
+// plugin's compiler.
 export type CompactionPassHost = Pick<PluginHost,
   | "getCompactionVerdicts" | "setCompactionVerdicts" | "getStore" | "setStore" | "deleteStore"
   | "sessionUsage" | "sessionMessages" | "runCommand"
-  | "getApiKey" | "getHome" | "readFile" | "writeFile" | "fileExists" | "listDir" | "fetch" | "sleep">;
+  | "getApiKey" | "getHome" | "readFile" | "writeFile" | "fileExists" | "listDir" | "fetch" | "sleep"
+  | "getChannelProcessToken" | "getChannelSession" | "getChannelLineage" | "getChannelSessionMirror"
+  | "getLocalAppData" | "readUserSettings" | "logDebug">;
 
 // What hooks/index.ts hands the pass at each call: the host, the session's
 // pass state, the persona and session its journal lines name, a writer that
