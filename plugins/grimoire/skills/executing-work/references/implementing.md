@@ -53,6 +53,9 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        fails only on the input the guard was there for
      - Pin tests + new expected values, when the section changes a counted
        cross-cutting set
+     - Lists as computed: a list the orchestrator computed rides in the brief
+       as data with its derivation named, never as a description the agent
+       re-derives
      - Standing Brief Amendments: every entry from the plan doc's block, when one exists
      - The standing working-class directive, in every brief, naming a
        subfolder unique to this dispatch,
@@ -95,10 +98,13 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        whose subject is a class states what would catch a member you did not
        name, a structural pattern over the class's shape where one exists.
        Where the class can be neither enumerated nor shaped, report the named
-       members swept and the class not, never a clean sweep. Build the control
-       in the agent's subfolder. A control that must touch the tree under
-       review is a tree-mutating probe, carried here because an agent holds no
-       skills: no other agent reads the tree while it
+       members swept and the class not, never a clean sweep.
+       A completeness claim, a set reported whole, names its predicate and its
+       scope the same way, since the claim reads identically whether the set
+       was established or guessed. Build the control in the agent's subfolder.
+       A control that must touch the tree under review is a tree-mutating
+       probe, carried here because an agent holds no skills: no other agent
+       reads the tree while it
        runs, it restores from copies taken before the first mutation, and it
        runs as the wrapper `<root>/skills/testing-discipline/SKILL.md` states,
        under the runner's own hang limit with its restore in the exit path
@@ -109,7 +115,9 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        source files>`, run before you report, with its closing line and every
        promise over 0.6 carried in the report
      - When returning NEEDS_CONTEXT on a hard question, state it consult-shaped:
-       the decision, the options you see, the evidence, and your lean
+       the decision, the options you see, the evidence, and your lean. Where
+       two directives in this brief collide on one act, return NEEDS_CONTEXT
+       naming both rather than resolving the collision by ordering
      - Style-skill file paths (agents inherit no skills): resolve the plugin
        root at brief-writing time by the ladder `kit-doctor/SKILL.md` uses:
        `CLAUDE_PLUGIN_ROOT` where the harness provides it, which a session's
@@ -119,7 +127,10 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        A versioned cache path under a marketplace install is correct when
        resolved this session. Resolve fresh every time, and never write a
        resolved root into this bullet as a literal
-     - Build + test commands
+     - Build + test commands, each verbatim as the repository's runner takes
+       it, flags before paths, since `node --test` reads a flag after a path
+       as a file. Source that carries backslash escapes is written with the
+       Write tool, never a Bash heredoc, which collapses them
      - [any section whose work may spawn a suite, build, or embedding pass]
        The standing box-budget clause, an act at the spawn step rather than a
        preamble constraint, because a brief is minutes stale by its first
@@ -134,12 +145,15 @@ Part of the executing-work skill: steps 1 and 2 of the section loop, and the rul
        verbatim from `<root>/agents/security-reviewer.md` by the same ladder. A
        grant failing either screen is narrowed, or returned to the main thread
        with the reason, rather than written
+     - [section pinning a file's line endings] The instrument that reads
+       them, `file` or a byte count, since `grep -c $'\r'` can reach grep as
+       an empty pattern and count every line
      - [below-fable session, fable tier] The explicit fable model override,
        passed only after step 1's capacity reading; the spec's tier
        assignment is the authorization
      ```
 
-     Every dispatch carries every REQUIRED field and each conditional field whose condition holds. An older spec's header may carry a legacy spend-authorization line (an expected Fable surface, a Fable-led-session marker, or a hold at the session model). It is inert: read past it, note it in the first Chapter that touches the spec, and honor nothing it says. The orchestrator stays lean. It reads no file beyond the approach-confirmation read above and never re-implements the agent's work. It reads the agent's diff only to verify and adjudicate it.
+     Every dispatch carries every REQUIRED field and each conditional field whose condition holds. The orchestrator stays lean. It reads no file beyond the approach-confirmation read above and never re-implements the agent's work. It reads the agent's diff only to verify and adjudicate it.
    - **Before any dispatch that passes a `fable` model override, take the capacity reading.** Run `node <plugin-root>/hooks/capacity-read.js`, resolving `<plugin-root>` by the style-skill bullet's ladder above, and act on the one line it prints. `-> dispatch` proceeds unchanged. `-> ladder governs`, or a run printing no verdict line whatever its exit code, proceeds under the never-started rules of finishing-work's unavailability rule. `-> downgrade` measures the fable tier exhausted for this dispatch. A reviewer or judge site takes `references/review.md`'s dispatch table row "Gate compensation" where finishing-work's ladder leaves it open, a consultant site dispatch table row "Consultant stand-in", the plan review and the altitude interview wait for fable per brainstorming, and an implementer site takes the stall raise rather than a lower model: `SKILL.md`'s `BLOCKED:` stop handing me the section, its first line quoting the reader's line. Quote the reader's line verbatim in the dispatch record and the Chapter. Take the reading immediately before each dispatch and never reuse it, because the machine's account rotator can change the active seat between any two dispatches.
    - **`Locus: inline` (or no tier recorded):** implement in the main thread at the session's own model. Inline is for sections the plan marked unbriefable or too small to brief. Dispatch a clearly briefable untiered section at the tier it would have earned. Read an older decorated `Model:` value (`fable (inline)`) as `Locus: inline` at that tier, correcting the line while in the file. Follow the csharp-style and sql-style skills and each one's precedence rule. Surgical changes only.
    - **Handle the implementer's status.** A NEEDS_CONTEXT whose add-decision line names a mechanism no Goal sentence, Intent clause or acceptance bullet names goes to step 4's design stop and its judge. A question the spec or the conversation answers is answered, and the section re-dispatched at the same tier. A genuinely hard one, the spec silent because nobody foresaw it, convenes a consult. The adopted ruling goes to the plan doc's `Standing Brief Amendments` block under step 4's adoption trigger, then into the re-dispatch brief. A preference fork that survives the ruling comes to me, ruling attached.

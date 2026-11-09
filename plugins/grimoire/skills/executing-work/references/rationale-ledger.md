@@ -6161,7 +6161,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 0, 1 and 2 of the section loop and the rules for delegating to subagents. It owns closing the previous boundary, confirming a section's approach, the Dispatch Brief template and tier routing, the capacity reading, the implementer status and escalation ladder, awaiting a dispatched agent and stopping one before replacing it, the evidence check of step 2 and its promises check, and the orchestrator's delegation rules, the disjoint-files rule and scout banding among them. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 0 to 2 tell a session to read it before a section opens and before any implementer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: c3.C001 and c3.C002 rewritten to their passages as they now read, and F001 to F005 added under the plan's letter F for the inline start-of-work statement, the brief's `Verify:` field and step 2's instrument run. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: R007, c2.C095, B002, R009, T166 and Z001 rewritten to their passages as they now read, defining the stall raise, naming the four statuses, pointing the self-surfacing gate at its definition, naming the files that hold step 3's roster, step 4 and the dispatch table, and making the promise check field required. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_opus-default-tier_spec_v1.md` section 1 on 2026-10-29, which made opus the default tier: c2.C096, R007 and R009 rewritten to their passages as they now read, and c2.C095's reason amended. Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30: c2.C020's key narrowed to three tiers, c2.C095 and c2.C096 retired with the haiku field, and AI001 added under the plan's letter AI for the stale-line reading. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30: c2.C065 rewritten to its passage as it now reads, and AK001 added under the plan's letter AK for the probe wrapper clause. Amended by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 (AO001 to AO003 below). Amended by `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1: c2.C015, c2.C017 and c4.C092 rewritten to their passages as they now read, and AP001 added under the plan's letter AP for the brief's held-files field, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_docs-guard-every-route_spec_v1.md` section 2: c2.C015, c2.C022 and AP001 rewritten to their passages as they now read, and DG001 added under the plan's letter DG for the Files in scope field's shape and the `dispatch-docs` guard beneath it; no line of the source moved.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: step 0 left the file, so c1.C119, c1.C120, c1.C121, c1.C122, c1.C125 and c4.C053 are deleted with their passages; I020, c2.C048 and Z001 rewritten to their passages as they now read; and W013's reason reworded. Amended by `docs/plans/claude-kit_haiku-implementer-promotion_spec_v1.md` section 2 on 2026-10-10 (c2.C095, c2.C096 and R007 below, amended in place for the widened haiku band and the refusal stop). Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: R009 and R027 rewritten to their passages as they now read and R015 retired. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: c3.C001 and c3.C002 rewritten to their passages as they now read, and F001 to F005 added under the plan's letter F for the inline start-of-work statement, the brief's `Verify:` field and step 2's instrument run. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: R007, c2.C095, B002, R009, T166 and Z001 rewritten to their passages as they now read, defining the stall raise, naming the four statuses, pointing the self-surfacing gate at its definition, naming the files that hold step 3's roster, step 4 and the dispatch table, and making the promise check field required. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_opus-default-tier_spec_v1.md` section 1 on 2026-10-29, which made opus the default tier: c2.C096, R007 and R009 rewritten to their passages as they now read, and c2.C095's reason amended. Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30: c2.C020's key narrowed to three tiers, c2.C095 and c2.C096 retired with the haiku field, and AI001 added under the plan's letter AI for the stale-line reading. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30: c2.C065 rewritten to its passage as it now reads, and AK001 added under the plan's letter AK for the probe wrapper clause. Amended by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 (AO001 to AO003 below). Amended by `docs/plans/claude-kit_docs-held-by-orchestrator_spec_v1.md` section 1: c2.C015, c2.C017 and c4.C092 rewritten to their passages as they now read, and AP001 added under the plan's letter AP for the brief's held-files field, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_docs-guard-every-route_spec_v1.md` section 2: c2.C015, c2.C022 and AP001 rewritten to their passages as they now read, and DG001 added under the plan's letter DG for the Files in scope field's shape and the `dispatch-docs` guard beneath it; no line of the source moved. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 1 on 2026-11-04: c2.C099 retired with the two sentences on a legacy spend-authorization line, cut to pay for the added text, and AW001 to AW006 added under the plan's letter AW for the Dispatch Brief's six added checks. Its finishing pass on 2026-11-09 rewrote AW003's reason and passage to the condition the tool shows, and dropped c2.C099's `passage:` line, whose sentences the section cut, moving no line. Section 1's edits moved later lines of the source, and every other `source:` line keeps the line it was read at.
 
 ### I019
 - key: Title the reference file carrying steps 0, 1 and 2 of the section loop and the rules for delegating to subagents `Implementing a Section`.
@@ -6863,11 +6863,10 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Treat a spec's legacy spend-authorization line as inert: read past it, note it in the first Chapter that touches the spec, and honor nothing it says.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/implementing.md:140
-- provenance: 53d9040 2026-08-15, the consult plan retired the Fable Spend header and the cost holds because a tier is no longer a spend decision.
-- verdict: rewrite
-- landed: 3a09c25 section 4
-- reason: Older specs in the archive still carry the line, so the tolerance holds; the rewrite is a sentence split that keeps the three values as a parenthetical, since the enumeration is how a session recognizes the line.
-- passage: An older spec's header may carry a legacy spend-authorization line (an expected Fable surface, a Fable-led-session marker, or a hold at the session model). It is inert: read past it, note it in the first Chapter that touches the spec, and honor nothing it says.
+- provenance: 53d9040 2026-08-15, the consult plan retired the Fable Spend header and the cost holds because a tier is no longer a spend decision; rewritten at 3a09c25 section 4; retired by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 1 2026-11-04, which cut the two sentences to pay for the Dispatch Brief's added checks.
+- verdict: retire
+- landed: 3b79ec8 section 1
+- reason: Only archived specs carry the line: a header grep for `Fable Spend`, `Expected Fable` and `Fable-led` over `docs/plans/*.md` matched no plan on 2026-11-04, against 34 archived files matching `Fable Spend`. An archived plan is closed and no session executes it, so the tolerance has nothing left to read past.
 
 ### c2.C100
 - key: Keep the orchestrator lean: do not pre-read the implementer's files, do not re-implement its work, and do not read its full diff unless adjudicating.
@@ -8021,11 +8020,71 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: - Files in scope: one path per line, none under docs/
 - passage: The `dispatch-docs` guard refuses an implementer brief listing a `docs/` file under Files in scope.
 
+### AW001
+- key: Write each build and test command into the brief verbatim as the repository's runner takes it, flags before paths.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:130
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 1 2026-11-04, from kit issue 362, where a brief named a runner flag without its position and the implementer put the pattern flag after the path.
+- verdict: keep
+- landed: 3b79ec8 section 1
+- reason: `node --test` reads an argument after a path as another file, so a flag in that position runs the wrong set or none, and the agent holds nothing but the brief to place it by.
+- passage: - Build + test commands, each verbatim as the repository's runner takes it, flags before paths, since `node --test` reads a flag after a path as a file.
+
+### AW002
+- key: Tell the agent to write source that carries backslash escapes with the Write tool, never a Bash heredoc.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:132
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 1 2026-11-04, from kit issue 368, where a fixture written through a heredoc carried a real NUL where its source spelled an escape.
+- verdict: keep
+- landed: 3b79ec8 section 1
+- reason: The Bash tool collapses backslash escapes inside a heredoc, so the file on disk differs from the text the agent wrote, and the difference shows only when the escaped byte is read.
+- passage: Source that carries backslash escapes is written with the Write tool, never a Bash heredoc, which collapses them
+
+### AW003
+- key: Where a section pins a file's line endings, name in the brief the instrument that reads them, `file` or a byte count.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:148
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 1 2026-11-04, from kit issue 410, where a brief said "keep its CRLF" and the implementer's `grep -c $'\r'` read green on a file holding no CR.
+- verdict: keep
+- landed: 3b79ec8 section 1
+- reason: `grep -c $'\r'` counts every line where the CR reaches grep as an empty pattern, and counts 0 on a CRLF file where it reaches grep without `-U`, so its reading depends on how the byte travels, while `file` and a byte count discriminate. The field is conditional because most sections pin no line endings.
+- passage: - [section pinning a file's line endings] The instrument that reads them, `file` or a byte count, since `grep -c $'\r'` can reach grep as an empty pattern and count every line
+
+### AW004
+- key: Hand a list the orchestrator computed to the agent as data with its derivation named, never as a description the agent re-derives.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:56
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 1 2026-11-04, from kit issue 414, where corpus-rewrite briefs described sites the controller's census already held as data, and two sections' implementers corrected four and then five attributions each.
+- verdict: keep
+- landed: 3b79ec8 section 1
+- reason: A description re-derived by the agent drifts from the list it describes, and the orchestrator then reviews a second list it never computed. A required element takes a structural slot in the template it fills, per the writing-skills rule-forms table.
+- passage: - Lists as computed: a list the orchestrator computed rides in the brief as data with its derivation named, never as a description the agent re-derives
+
+### AW005
+- key: Have a completeness claim name its predicate and its scope as the absence-check clause asks of a sweep.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:102
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 1 2026-11-04, from kit issue 431, where a pin file claimed a whole-directory grep it had not run and listed seven of eleven reads.
+- verdict: keep
+- landed: 3b79ec8 section 1
+- reason: A set reported whole reads the same whether it was established or guessed, so the predicate and scope are what let a reader tell the two apart. It sits in the absence-check clause because the clause already asks the same of a sweep, and the doctrine-parity pins on the clause's class sentences are left untouched.
+- passage: A completeness claim, a set reported whole, names its predicate and its scope the same way, since the claim reads identically whether the set was established or guessed.
+
+### AW006
+- key: Where two directives in a brief collide on one act, return NEEDS_CONTEXT naming both rather than resolving the collision by ordering.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/implementing.md:118
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 1 2026-11-04, from kit issue 783, where the baseline-copy directive and a project directive barring a credential literal under `.kit/` collided on one test file and the implementer resolved it by ordering alone.
+- verdict: keep
+- landed: 3b79ec8 section 1
+- reason: Each collision needs the orchestrator's read, and the plan refused a precedence table since the collisions are rare. The rule names no pair, since the one seen is an instance and the class is any two directives meeting on one act.
+- passage: Where two directives in this brief collide on one act, return NEEDS_CONTEXT naming both rather than resolving the collision by ordering
+
 ## plugins/grimoire/skills/executing-work/references/review.md
 
 This document is the reference file of the executing-work skill that carries step 3 of the section loop. It owns the review round: the correctness and advisory lenses and their triggers, the reviewer tier rule, the round's tree-state bracket, the Document Review Brief, the dispatch table, the Workflow route with its Reviewer Dispatch template, and the compensation route. Load class: `plan-run` - the main file's contents table and its skeleton line for step 3 tell a session to read it before any reviewer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at.
 
 ### I021
 - key: Title the reference file carrying step 3 of the section loop, with the dispatch table and the review templates `Reviewing a Section`.
@@ -8179,10 +8238,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Never omit agentType, since omitting it yields a workflow-subagent, a type readonly-agent-guard does not govern, handing the tree under review to an agent free to rewrite it.
 - class: rationale-example
 - source: plugins/grimoire/skills/executing-work/references/review.md:95
-- provenance: 5ecd99a 2026-08-11, which designed each REQUIRED field to carry the concrete failure its omission causes.
-- verdict: keep
-- reason: The consequence is the guard's reach stated as a property of a security boundary; the three fields are one class by design and the REQUIRED marking is not boilerplate without it.
-- passage: govern, which hands the tree under review to an agent free to rewrite it
+- provenance: 5ecd99a 2026-08-11, which designed each REQUIRED field to carry the concrete failure its omission causes; retired by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 2026-11-04, which cut the sentence to pay for the review step's added sentences.
+- verdict: retire
+- superseded-by: c4.C093 under the implementing.md heading
+- landed: cbc6129 section 2
+- reason: The sentence restated the read-only guard's reach, which c4.C093 carries in `references/implementing.md`: a Workflow `agent()` call naming no `agentType` is a type the guard never reads. The template's REQUIRED marking still makes the field mandatory.
 
 ### c3.C078
 - key: Name `model` explicitly and never leave it to inherit.
@@ -8705,7 +8765,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - source: plugins/grimoire/skills/executing-work/references/review.md:64
 - provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 changed the model cell from fable to opus.
 - verdict: rewrite
-- reason: The row names round 1 explicitly, since the security lens never runs a decayed round, and a re-raised round takes round 1's rows rather than a row of its own. Its model is its lens's ceiling, opus (U001).
+- reason: The row names round 1 explicitly, since the security lens runs a decayed round only on AW008's summons, and a re-raised round takes round 1's rows rather than a row of its own. Its model is its lens's ceiling, opus (U001).
 - proposed: | **Round 1 security** over an opus or fable writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
 - passage: | **Round 1 security** over an opus or fable writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
 - landed: f9389aff section 1
@@ -8767,13 +8827,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Tier keys on the lens, never the finding.
 
 ### T173
-- key: Ride both advisory lenses on round 1's roster where their triggers hold and on a re-raised round on the same triggers, and join them to no decayed round.
+- key: Ride both advisory lenses on round 1's roster where their triggers hold and on a re-raised round on the same triggers, and join them to a decayed round only where AW008 summons the security lens.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/review.md
-- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 1 2026-09-20.
-- verdict: keep
-- reason: Carries U004's decay rule for both lenses. A decayed round re-checks owed findings over a fix delta of a few lines, and an advisory lens owes no round, so it has nothing to read there. Supersedes U004, whose trigger-sentence ground went with the fix-delta bar's third trigger (T190).
-- passage: The advisory lenses ride round 1 and re-raised rounds where their triggers hold, never a decayed round.
+- source: plugins/grimoire/skills/executing-work/references/review.md:13
+- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 1 2026-09-20; rewritten by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 2026-11-04, which admitted AW008's summons.
+- verdict: rewrite
+- landed: cbc6129 section 2
+- reason: Carries U004's decay rule for both lenses. A decayed round re-checks owed findings over a fix delta of a few lines, and an advisory lens owes no round, so it has nothing to read there. Supersedes U004, whose trigger-sentence ground went with the fix-delta bar's third trigger (T190). The security lens's exception is AW008's: a fix delta meeting its trigger is a read the finishing pass's all-prose waiver can skip, which is the tail U004's own plan named and left open.
+- passage: The advisory lenses ride round 1 and re-raised rounds where their triggers hold, and a decayed round only by the security summons below.
 
 ### T174
 - key: Dispatch round 1's performance-reviewer over a section whose writer tier is opus or fable at model opus, effort `medium` (frontmatter default), via the Agent tool.
@@ -8906,13 +8967,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: From the fourth round a `Step back:` line names the rounds run and asks first whether the remaining findings share a cause in the approach, and that round reads the whole changeset.
 
 ### E004
-- key: Keep the `Fix delta:`, `Adjudicated findings:` and `Step back:` lines off every blind dispatch, and carry them on the adversarial dispatch alone, a re-raised round's included.
+- key: Keep the `Fix delta:`, `Adjudicated findings:` and `Step back:` lines off every blind dispatch, carry the last two on the adversarial dispatch alone, a re-raised round's included, and carry `Fix delta:` on the same dispatches and the security summons.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:15
-- provenance: docs/plans/claude-kit_review-convergence_spec_v1.md section 1 2026-10-16, stage 1 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 3: "Review converges or stops."
-- verdict: keep
-- reason: Each line changes with the section, so each fails the blind-reviewer's property test stated in the blind brief paragraph at the top of this file, and would contaminate the blind lens. A re-raised round's blind lens rides as it does on round 1.
-- passage: The `Fix delta:`, `Adjudicated findings:` and `Step back:` lines ride the adversarial dispatch alone, a re-raised round's included.
+- provenance: docs/plans/claude-kit_review-convergence_spec_v1.md section 1 2026-10-16, stage 1 of the review-verification program (docs/plans/claude-kit_review-verification_program_v1.md), carrying its decision 3: "Review converges or stops."; rewritten by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 round 1 fix 2026-11-04, from kit issue 392, which carried `Fix delta:` to AW008's summons.
+- verdict: rewrite
+- landed: 23933ec section 2
+- reason: Each line changes with the section, so each fails the blind-reviewer's property test stated in the blind brief paragraph at the top of this file, and would contaminate the blind lens. A re-raised round's blind lens rides as it does on round 1. The security summons is a sighted dispatch, so the property test does not bar it. It takes `Fix delta:` because the delta's files are what met its trigger, and without the line it cannot tell which files those are.
+- passage: The `Adjudicated findings:` and `Step back:` lines ride the adversarial dispatch alone, a re-raised round's included. `Fix delta:` rides the same dispatches and the security summons, since its files met that lens's trigger.
 
 ### E005
 - key: Treat an `Adjudicated findings:` line as no pre-judging, since it reports the section's record and rates nothing new.
@@ -8968,6 +9030,36 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - verdict: keep
 - reason: A fable writer's section still earns a Fable check at round 1, since these lenses' ceiling is Fable (U001) and the operator's ruling moved only the opus writer's round. The row takes its own short name so the opus row keeps the name other text already used for round 1's pair.
 - passage: | **Fable round 1 pair** over a fable writer: `adversarial-reviewer`, `blind-reader`, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
+
+### AW007
+- key: Carry the standing absence-check clause, as the Dispatch Brief states it up to `Build the control`, into every reviewer dispatch, the blind lens included, its control-building and probe sentences binding a writer alone.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:21
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 2 2026-11-04, from kit issue 354, where a review round reported a clean dash sweep after its own grep had failed on a malformed escape, and neither reviewer brief carried the absence clause the implementer's does.
+- verdict: keep
+- landed: cbc6129 section 2
+- reason: A reviewer's sweep is the last check before a section closes, so a clear verdict from a predicate narrower than its class goes unread by anyone after it. The clause reads the same for every diff, so it passes the blind-reviewer's property test and rides the blind dispatch too.
+- passage: **Every reviewer dispatch carries the standing absence-check clause as the Dispatch Brief states it, each sentence before `Build the control`, the blind lens included.** The clause changes with no section, and a reviewer's clean sweep is the last check there is. The control-building and probe sentences from there on bind a writer alone, since every reviewer runs read-only and the adversarial charter asks for the author's control rather than building one.
+
+### AW008
+- key: Summon the security lens at its ceiling beside a later round's one dispatch where the round's fix delta meets the lens's section-time trigger.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:25
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 2 2026-11-04 and its round 1 fix, from kit issue 392, where later review rounds dropped the security lens and leaned on the finishing pass.
+- verdict: keep
+- landed: 23933ec section 2
+- reason: The finishing pass's all-prose waiver keys on a different predicate from the section-time trigger, so a trigger-meeting fix delta could pass with no security read at either point. The summons keys on the trigger rather than joining every later round, since most fix deltas miss it. The lens runs at its Opus ceiling (U001) whatever the writer's tier, since a fable writer's tier sits above that ceiling. AW009's row gives the summons its effort and route.
+- passage: A later round whose fix delta meets the security lens's trigger above summons that lens at its ceiling beside the one dispatch. The finishing pass is no stand-in, since its all-prose waiver does not share the trigger.
+
+### AW009
+- key: Dispatch the security-reviewer that AW008 summons beside a later round at model opus, effort `medium` (frontmatter default), via the Agent tool, whatever the writer's tier.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:70
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 2 round 1 fix 2026-11-04, from kit issue 392, where AW008's summons named no tier and the dispatch table held no row for it.
+- verdict: keep
+- landed: 23933ec section 2
+- reason: Each kit dispatch takes its effort and route from its dispatch table row, and the table's rows covered round 1 and a later round's one lens, so the summoned lens had none. Its model is the lens's ceiling, opus (U001), and holds over a fable writer, whose tier the later-round rows would otherwise give it. Its effort is the security-reviewer's frontmatter default, as on the "Round 1 security" row (U009).
+- passage: | **Later-round security summons** over any writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
 
 ## plugins/grimoire/skills/executing-work/references/findings.md
 
@@ -10997,7 +11089,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries steps 5 to 8 of the section loop and the Chapter format. It owns closing a section: the plan doc update, the applied-stamp adjudication and the Chapter, the commit model's application, the compaction boundary declaration, the compaction deferral in a session no `/goal` or `/loop` drives, the interim boundary a closure drought earns, and the Chapter template and its machine contract. Load class: `plan-run` - the main file's contents table and its skeleton lines for steps 5 to 8 tell a session to read it at a section's close and at an interim boundary.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c4.C054 deleted with its passage, and c4.C051, c4.C052, c4.C055, c4.C058, c4.C061, c4.C064, c4.C067, S136 and S137 rewritten to their passages as they now read. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the deferral paragraph's first two sentences and its native-trigger sentence, step 8's Review-Only sentence, and its sentence on how long a declaration holds). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 4 on 2026-10-06, which removed the pre-push whole gate: c4.C035, S097, S101 and S113 rewritten to their passages as they now read, and c4.C045, c4.C136, S098, S099, S102 and S103 retired to S097. Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 on 2026-10-06: S115 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c4.C051, c4.C058, c4.C059, c4.C061, J001 and J004 rewritten to their passages as they now read, and J002 retired to J001. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: c4.C108 and S107 rewritten to their passages as they now read and c4.C014 retired. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: E009 added under the plan's letter E for the `reposted <n>` part. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 added under the plan's letter F for the `verify:` token. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: c4.C004, c4.C006, c4.C055, c4.C067, J004, S113, S114, S115, S116, S119, S121, S122, S136 and S137 rewritten to their passages as they now read, and W021, which stays under the `SKILL.md` heading, rewritten to its passage on this file's Gate line, pointing step 4's bar and bullets at `references/findings.md`, naming the file holding the `<plugin-root>` ladder, and splitting the Gate line into sentences with the kit-only probe reading last. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: R185 rewritten to its passage as it now reads, and AC001 and AC002 added under the plan's letter AC for the verifier tally and the refuted record.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c4.C054 deleted with its passage, and c4.C051, c4.C052, c4.C055, c4.C058, c4.C061, c4.C064, c4.C067, S136 and S137 rewritten to their passages as they now read. Amended again by that section's fix round on 2026-10-06 (`J` entries below: J001 to J004, the deferral paragraph's first two sentences and its native-trigger sentence, step 8's Review-Only sentence, and its sentence on how long a declaration holds). Amended by `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` section 4 on 2026-10-06, which removed the pre-push whole gate: c4.C035, S097, S101 and S113 rewritten to their passages as they now read, and c4.C045, c4.C136, S098, S099, S102 and S103 retired to S097. Amended by `docs/archive/claude-kit_base-head-baseline_spec_v1.md` section 2 on 2026-10-06: S115 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_core-compaction_spec_v1.md` at its finishing pass on 2026-10-08, for the text its section 2 changed: c4.C051, c4.C058, c4.C059, c4.C061, J001 and J004 rewritten to their passages as they now read, and J002 retired to J001. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: c4.C108 and S107 rewritten to their passages as they now read and c4.C014 retired. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: E009 added under the plan's letter E for the `reposted <n>` part. Amended by `docs/plans/claude-kit_verification-instrument_spec_v1.md` section 1 on 2026-10-17: F001 added under the plan's letter F for the `verify:` token. Amended by `docs/plans/claude-kit_skill-terms-defined_spec_v1.md` section 1 on 2026-10-17: c4.C004, c4.C006, c4.C055, c4.C067, J004, S113, S114, S115, S116, S119, S121, S122, S136 and S137 rewritten to their passages as they now read, and W021, which stays under the `SKILL.md` heading, rewritten to its passage on this file's Gate line, pointing step 4's bar and bullets at `references/findings.md`, naming the file holding the `<plugin-root>` ladder, and splitting the Gate line into sentences with the kit-only probe reading last. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: R185 rewritten to its passage as it now reads, and AC001 and AC002 added under the plan's letter AC for the verifier tally and the refuted record. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 3 on 2026-11-04: AW010 added under the plan's letter AW for the constraint-scope sentence, appended to the paragraph at line 55 so no later line of the source moved. The trim effort cut no sentence, so no entry was rewritten or retired, and every other `source:` line keeps the line it was read at.
 
 ### I025
 - key: Title the reference file carrying steps 5 to 8 of the section loop, the interim boundary and the Chapter format `Closing a Section`.
@@ -12205,6 +12297,16 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` finishing pass
 - reason: Brainstorming step 12 says the `Gate:` line records each draw, and this template owns that line's fields, so the slot sits here and the rule stays there (brainstorming AG005).
 - passage: Each draw on the plan's `Test Reserve:` and the reserve left, per brainstorming step 12.
+
+### AW010
+- key: Name, for each constraint a Chapter records, what it bound: this run or its dispatched agents.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/closing.md:55
+- provenance: docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md section 3 2026-11-04, from kit issue 620, where a finishing Chapter's `Stamps:` line wrote that the session's standing bars every memq write, a bar that bound one run, and later sessions copied it as live.
+- verdict: keep
+- landed: 80680a7 section 3
+- reason: A later session writing a Chapter reads sibling Chapters for their shape, so a constraint recorded with no subject reads as a standing rule and gets copied forward after the run it bound has ended. Naming the run or the dispatch it bound lets that reader see the bar expired with it.
+- passage: A constraint a Chapter records names what it bound, this run or its dispatched agents. A later session reads sibling Chapters for their shape, so a constraint left bare reads as standing.
 
 ## plugins/grimoire/agents/prose-reviewer.md
 

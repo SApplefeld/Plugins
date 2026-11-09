@@ -52,7 +52,7 @@ Commit Model: <Review-Only | Branch-and-PR | Commit-and-Push>
 Delta: <the moment-pin for the reading below, since its output carries no machine or contention of its own; then what `node <plugin-root>/scripts/kit-size.js report --repo <the project's root>` prints, quoted whole and exactly in a fenced block below this line>
 ```
 
-Write each Chapter so a fresh or compacted session recovers full working state from the plan doc alone.
+Write each Chapter so a fresh or compacted session recovers full working state from the plan doc alone. A constraint a Chapter records names what it bound, this run or its dispatched agents. A later session reads sibling Chapters for their shape, so a constraint left bare reads as standing.
 
 A spawning test's modelled price goes in the Chapter body under testing-discipline's Price the Shape at Authoring section, never on the Gate line.
 
