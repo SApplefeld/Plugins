@@ -3100,10 +3100,10 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Rotate anything a deleted record carried, because deletion keeps the row with a deleted mark and leaves any body copy a machine's snapshot fetched earlier.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:164
-- provenance: 752dbce 2026-08-22, written when the shared tiers gained a delete so that a delete is never read as a redaction; rewritten 2026-10-04 by the finishing pass of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`.
+- provenance: 752dbce 2026-08-22, written when the shared tiers gained a delete so that a delete is never read as a redaction; rewritten 2026-10-04 by the finishing pass of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, and 2026-11-03 by section 1 of `docs/archive/claude-kit_nudge-live-record_spec_v1.md`.
 - verdict: rewrite
-- reason: The owner of the rotation rule; the trigger section points at it, and a secret in a shared store recurs (A065 to A067). A delete marks the database row and keeps it, and a body copy under a machine's snapshot `records/` is never pruned (plugins/grimoire/scripts/memory-database.js), so the passage names both places the content survives.
-- passage: **Deletion marks a record's row deleted and erases nothing.** The row stays in the memory database with the deleted mark, and a body copy a machine's snapshot fetched earlier stays on that machine's disk. Rotate anything it carried that it should not have, since the delete is not a redaction.
+- reason: The owner of the rotation rule; the trigger section points at it, and a secret in a shared store recurs (A065 to A067). A delete marks the database row and keeps it, and a machine's snapshot body copy goes only at a get there finding the name gone, or a confirmed delete (`dropSnapshotRows` in plugins/grimoire/scripts/memory-database.js), so the passage names both places the content survives.
+- passage: **Deletion marks a record's row deleted and erases nothing.** The database row keeps its deleted mark, and a machine's snapshot body copy stays until a get there the memory database answers absent for, or a confirmed delete there, unlinks it. Rotate anything it carried that it should not have, since deleting is not redacting.
 
 ### c3.C033
 - key: Expect the prompt-free grant in `hooks/memq-grant.js` to own the list of shapes withheld on the engine's write-gated spawn vector with the store signals set.
@@ -3678,7 +3678,7 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - source: plugins/grimoire/skills/memory-system/SKILL.md:261
 - provenance: 0d1e610 2026-08-30, the project tier's hand delete, widened to the two copies a rewrite can leave; respelled by the persona-memory-port plan's section 5, which gave the project tier the `forget` verb.
 - verdict: keep
-- reason: The remedy list needs the verb and the rotation beside it. `cmdForget` (`scripts/memq.js`) sends one `mem.usp_ArchiveRecord` row with the deleted mark through `writeThrough`, the queue behind it, and removes no file, which is E009's row. The host keeps the marked row, so the record's text outlives the removal and a secret it carried needs rotating. Rewritten on 2026-10-04 by the finishing pass of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, whose reason named a file sweep under the tier lock that `forget` no longer performs; the verdict before it was keep.
+- reason: The remedy list needs the verb and the rotation beside it. `cmdForget` (`scripts/memq.js`) sends one `mem.usp_ArchiveRecord` row with the deleted mark through `writeThrough`, the queue behind it, and removes only its snapshot copy, which is E009's row. The host keeps the marked row, so the record's text outlives the removal and a secret it carried needs rotating. Rewritten on 2026-10-04 by the finishing pass of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, whose reason named a file sweep under the tier lock that `forget` no longer performs; the verdict before it was keep.
 - passage: Remove it outright with `memq forget <name> --confirm`, and rotate any secret it carried.
 - flag: stale
 
@@ -6388,13 +6388,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: **A checkout can declare a space**, one label of lowercase letters, digits and hyphens, in `.kit/memory-space` in the directory its project resolves to, which is a worktree's own top, the filed project's top, or else the working directory, or in `KIT_MEMORY_SPACE`, which wins.
 
 ### E007
-- key: Delete a shared record that was never true with `delete-type` or `delete-operator` under `--confirm-shared`, which marks its database row deleted so no database read serves it, removes no file, and queues where the host does not answer.
+- key: Delete a shared record that was never true with `delete-type` or `delete-operator` under `--confirm-shared`, which marks its database row deleted so no database read serves it, removes only its snapshot copy, and queues where the host does not answer.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:172, the Delete bullet under Shared-Tier Repair and Removal
 - provenance: the memory-in-sql plan's section 6, which sends the shared-tier deletes through `mem.usp_ArchiveRecord` the way `memq forget` sends a project one.
 - verdict: keep
-- reason: An undeleted row is served by every read verb and session start on every machine, so a delete that removed only this machine's files left the record live everywhere. The row is kept with the deleted mark, which no read procedure serves. Session start and the recognition nudge read a machine's snapshot on every session and tool call, host up or not, so the record shows there until that snapshot is next refreshed, and the bullet says so. The queue stands behind the call as it does behind every write, so an outage never loses the deletion. `mem.usp_ArchiveRecord` resolves the newest undeleted row of the name, archived or not, so an archived record is deleted like a live one. The host answers a name it holds no undeleted row of as absent, and the verb refuses it with exit 1, so a mistyped name is caught rather than reported deleted.
-- passage: **Delete** is `delete-type <type> <name> --confirm-shared`, and the operator twin. It marks the record's row deleted in the memory database, which no database read serves, and it removes no file. Session start and the recognition nudge read each machine's snapshot whether the host is up or not, so they keep showing the record on a machine until its snapshot is next refreshed. Where the host does not answer, the deletion waits on the local queue like any other write. When the host answers, a name it holds no undeleted record of is refused, and an archived record is deleted like a live one.
+- reason: An undeleted row is served by every read verb and session start on every machine, so a delete that removed only this machine's files left the record live everywhere. The row is kept with the deleted mark, which no read procedure serves. Session start and the recognition nudge read a machine's snapshot on every session and tool call, host up or not, so the delete drops the deleting machine's row, and another machine shows it until a refresh or a missed get there, as the bullet says. The queue stands behind the call as it does behind every write, so an outage never loses the deletion. `mem.usp_ArchiveRecord` resolves the newest undeleted row of the name, archived or not, so an archived record is deleted like a live one. The host answers a name it holds no undeleted row of as absent, and the verb refuses it with exit 1, so a mistyped name is caught rather than reported deleted.
+- passage: **Delete** is `delete-type <type> <name> --confirm-shared`, and the operator twin. It marks the record's database row deleted, which no read serves. The deleting machine's snapshot drops the row and body copy at once, and another machine's shows it until its next refresh or a get there the memory database answers absent for. With the host down, the deletion queues like any other write. A name the host holds no undeleted record of is refused, and an archived record is deleted like a live one.
 
 ### E008
 - key: Retire a type-tier record with `memq delete-type <type> <name> --confirm-shared`, which marks its database row deleted after naming the projects declaring the type, and sends nothing without the flag.
@@ -6406,13 +6406,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: `memq delete-type <type> <name> --confirm-shared` | Mark a type-tier record's row deleted in the memory database. Names the projects declaring the type before it acts. Without the flag it refuses, having sent nothing.
 
 ### E009
-- key: Retire a project-tier record with `memq forget <name> --confirm`, which marks its database row deleted with the queue behind it, removes no file, and sends nothing without the flag.
+- key: Retire a project-tier record with `memq forget <name> --confirm`, which marks its database row deleted with the queue behind it, removes only its snapshot copy, and sends nothing without the flag.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:38
 - provenance: the memory-in-sql plan's section 3, which sent `forget` through `mem.usp_ArchiveRecord`; the row was respelled to match by its section 6.
 - verdict: keep
-- reason: The row is the verb's reference entry. `cmdForget` (`scripts/memq.js`) sends one `usp_ArchiveRecord` row with the deleted mark through `writeThrough`, so a host that does not answer queues it, and it touches no file. The flag is `--confirm` rather than `--confirm-shared` because a project-tier removal has no reach across projects, and the refusal without it sends nothing.
-- passage: `memq forget <name> --confirm` | Mark a project-tier record's row deleted in the memory database, with the local queue behind it where the host does not answer. It removes no file. Without the flag it refuses, having sent nothing.
+- reason: The row is the verb's reference entry. `cmdForget` (`scripts/memq.js`) sends one `usp_ArchiveRecord` row with the deleted mark through `writeThrough`, so a host that does not answer queues it, and only a confirmed one drops the snapshot copy. The flag is `--confirm` rather than `--confirm-shared` because a project-tier removal has no reach across projects, and the refusal without it sends nothing.
+- passage: `memq forget <name> --confirm` | Mark a project-tier record's row deleted in the memory database, with the local queue behind it where the host does not answer. Confirmed, it drops the snapshot copy. Without the flag it refuses, having sent nothing.
 
 ### E010
 - key: Expect no memory database under a store root that is not this machine's own: record writes refuse with exit 1, the four read verbs serve no shared record with exit 0, a verb reaching for the shared tiers names the root on one stderr line, session start prints that line once, and a run's pending tier works as anywhere.
@@ -6532,3 +6532,12 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - verdict: keep
 - reason: The test-gates skill says the map is recorded in the project's memory tier, and this skill owns where each tier's facts go, so the routing sentence sits here and the map's shape stays in test-gates. The map is about one codebase's tests and holds on no other project, so the routing test in the same paragraph sends it to the project tier and not to the type or operator tier. A rung's clock figure carries a moment-pin and so expires against the machine configuration epoch like any other measurement, while its test count is a property of the tree and does not.
 - passage: A repository's test layer map is a project-tier fact beside its lane commands, held as `layers` in its committed lane map where it has one.
+
+### N012
+- key: Expect `memq get` to drop a name the memory database answers absent for from this machine's snapshot.
+- class: mechanic
+- source: plugins/grimoire/skills/memory-system/SKILL.md:28, the `memq get` row
+- provenance: docs/archive/claude-kit_nudge-live-record_spec_v1.md section 1 2026-11-03; kit issues 739, 797, 804 and 814.
+- verdict: keep
+- reason: The recognition nudge reads the snapshot and spawns nothing, so a row outliving its record named a dead record. `mem.usp_GetRecord` answers an archived record too, so a miss proves the name deleted or absent, and an outage drops nothing (`cmdGet` in `scripts/memq.js`).
+- passage: A name the memory database answers absent for leaves this machine's snapshot.

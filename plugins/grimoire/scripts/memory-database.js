@@ -682,6 +682,13 @@ function writeAtomically(file, text) {
     }
 }
 
+// Whether two project keys name one store folder: on Windows the store
+// matches a project folder caselessly, so keys equal under lowercase do, and
+// elsewhere only equal keys do.
+function projectKeysFold(a, b) {
+    return a === b || (process.platform === 'win32' && a.toLowerCase() === b.toLowerCase());
+}
+
 // The rows of every other section whose key differs from `key` only by letter
 // case, less any name the fresh rows already hold, with those sections taken
 // out of the index. On Windows the store matches a project folder caselessly,
@@ -693,11 +700,10 @@ function writeAtomically(file, text) {
 // Elsewhere a path's case is part of its name, and nothing is folded.
 function caseTwinRows(index, key, rows) {
     if (process.platform !== 'win32') return [];
-    const folded = key.toLowerCase();
     const seen = new Set(rows.map((r) => (r !== null && typeof r === 'object' ? r.name : undefined)));
     const extra = [];
     for (const other of Object.keys(index.projects)) {
-        if (other === key || other.toLowerCase() !== folded) continue;
+        if (other === key || !projectKeysFold(other, key)) continue;
         for (const r of index.projects[other].rows) {
             const name = r !== null && typeof r === 'object' ? r.name : undefined;
             if (seen.has(name)) continue;
@@ -915,6 +921,92 @@ function readSnapshotRecord(tier, key, name) {
     }
     const ms = Date.parse(parsed.takenAt);
     return { ok: true, record: parsed.record, takenAt: parsed.takenAt, takenAtMs: Number.isFinite(ms) ? ms : null };
+}
+
+// Drop a name the memory database answers absent for from this machine's
+// snapshot, as {ok: true, dropped, copies, asks} or {ok: false, detail}. Each
+// ask is {tier, key, name}, the key being the project key for a project ask,
+// the type name for a type ask and null for an operator ask. A row goes where
+// its name equals the ask's without regard to case: from the key's project
+// section and every section whose key folds with it (projectKeysFold), from
+// the type tier's rows of that type name, or from the operator tier's rows.
+// The body copies go too, each path from snapshotRecordPath: under the ask's
+// key and every folded key the index holds, since a copy's folder hashes the
+// exact key, and under the ask's spelling of the name and each dropped row's.
+// A name that gate refuses drops nothing. index.json is written only where a
+// row went, so a drop of nothing leaves its bytes and modification time, and
+// with them the recognition hook's cache, alone. An absent copy is silent. A
+// copy that will not unlink stays and sets its ask's `kept`, and the rows'
+// drop still stands and is counted. `dropped` and `copies` are the totals,
+// and `asks` is one {dropped, copy, kept} per ask in order, so a caller can
+// name the tiers that held the name. It throws for nothing,
+// writeSnapshotIndex's posture: the drop is housekeeping, and a failed one
+// costs the next pointer's accuracy and nothing else.
+//
+// It reads index.json, then writes it whole, under no lock, as
+// writeSnapshotIndex does, at the same declared cost: an overlapping writer
+// can leave a section stale until its next refresh, never a torn file.
+function dropSnapshotRows(asks) {
+    const sameName = (row, name) => row !== null && typeof row === 'object' && typeof row.name === 'string'
+        && row.name.toLowerCase() === name.toLowerCase();
+    const read = readSnapshotIndex();
+    const index = read.ok ? read.index : null;
+    const counted = [];
+    const files = new Map();
+    for (const ask of asks) {
+        const done = { dropped: 0, copy: false, kept: false };
+        counted.push(done);
+        if (snapshotRecordPath(ask.tier, ask.key, ask.name) === null) continue;
+        const keys = [ask.key];
+        const names = [ask.name];
+        const keep = (section, also) => {
+            if (section === undefined) return;
+            const rows = [];
+            for (const r of section.rows) {
+                if (sameName(r, ask.name) && also(r)) names.push(r.name);
+                else rows.push(r);
+            }
+            done.dropped += section.rows.length - rows.length;
+            section.rows = rows;
+        };
+        // An index that will not read drops no row, and the asked copy still goes.
+        if (index !== null) {
+            if (ask.tier === 'project') {
+                for (const key of Object.keys(index.projects)) {
+                    if (!projectKeysFold(key, ask.key)) continue;
+                    if (key !== ask.key) keys.push(key);
+                    keep(index.projects[key], () => true);
+                }
+            } else if (ask.tier === 'type') {
+                keep(index.tiers.type, (r) => r.typeName === ask.key);
+            } else if (ask.tier === 'operator') {
+                keep(index.tiers.operator, () => true);
+            }
+        }
+        for (const key of keys) {
+            for (const name of names) {
+                const file = snapshotRecordPath(ask.tier, key, name);
+                if (file !== null && !files.has(file)) files.set(file, done);
+            }
+        }
+    }
+    const dropped = counted.reduce((sum, done) => sum + done.dropped, 0);
+    if (dropped > 0) {
+        try {
+            writeAtomically(snapshotIndexPath(), JSON.stringify(index) + '\n');
+        } catch (err) {
+            return { ok: false, detail: errText(err) };
+        }
+    }
+    for (const [file, done] of files) {
+        try {
+            fs.unlinkSync(file);
+            done.copy = true;
+        } catch (err) {
+            if (!err || err.code !== 'ENOENT') done.kept = true;
+        }
+    }
+    return { ok: true, dropped, copies: counted.filter((done) => done.copy).length, asks: counted };
 }
 
 // Whether any snapshot has been taken on this machine: an index file, or a
@@ -6048,6 +6140,7 @@ module.exports = {
     SNAPSHOT_DIR,
     readSnapshotIndex,
     writeSnapshotIndex,
+    dropSnapshotRows,
     REFRESH_RESULT_FILE,
     REFRESH_DETAIL_CAP,
     REFRESH_STEPS,

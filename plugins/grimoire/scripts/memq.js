@@ -8341,6 +8341,11 @@ function cmdGet(argv, options) {
         if (hit === null) {
             process.stderr.write('memq: nothing named \'' + sanitize(target, NAME_CAP) + '\'\n');
             process.exitCode = 1;
+            // The database holds no live or archived row of the name in any
+            // tier asked, so the snapshot's rows and copies of it are dead,
+            // and dropping them stops the recognition nudge naming it here.
+            reportSnapshotDrop(memoryDatabase.dropSnapshotRows(rungs.map((r) => ({ tier: r.tier, key: r.key, name: target }))),
+                rungs.map((r) => r.label), target);
             return;
         }
         const row = rows[hit.at];
@@ -13420,8 +13425,9 @@ function putPending(cwd, pendingDir, name, file, content) {
 // way `memq forget` retires a project one, through mem.usp_ArchiveRecord with
 // the deleted mark and the queue behind it. The host keeps the row and no read
 // procedure serves it, so a deleted shared record stops reaching every session
-// that reads the database. No file is removed, renamed or rewritten, since a machine's
-// memory files are history from its migration publish on. This is the path for
+// that reads the database. No memory file is removed, renamed or rewritten, since a
+// machine's memory files are history from its migration publish on; a delivered
+// delete drops this machine's snapshot row and body copy (reportSnapshotDrop). This is the path for
 // the record that should never have existed; `decay-prune`'s archive remains
 // the path for the record that was once right and has stopped being useful,
 // and the deleted mark is what holds the two apart.
@@ -13547,12 +13553,38 @@ function retireSharedRecord(tier, store, name, where, options) {
     }
     process.stdout.write('deleted ' + shown + where
         + ' (the row is marked deleted in the memory database and no read serves it)\n');
+    if (answered.answer.status === 'deleted') {
+        const rung = tier === 'type' ? typeRung(store.typeName) : operatorRung();
+        reportSnapshotDrop(memoryDatabase.dropSnapshotRows([{ tier, key: rung.key, name }]), [rung.label], name);
+    }
+}
+
+// The line a read or delete prints after it dropped a name the memory
+// database answers absent for from this machine's snapshot (dropSnapshotRows),
+// naming each label in `labels`, one per ask, whose section held a row or a
+// body copy of it, the last joined with "and" so the list ends before the
+// clause that follows it. A copy that would not unlink counts as held, and
+// then the closing clause says the copy stays, saying the snapshot dropped the
+// name only where a row went. A drop that found nothing, or failed, prints
+// nothing: the verb's own answer is already on stdout and stderr, and its exit
+// code stands.
+function reportSnapshotDrop(drop, labels, name) {
+    const holds = (ask) => ask.dropped > 0 || ask.copy || ask.kept;
+    if (!drop.ok || !drop.asks.some(holds)) return;
+    const held = labels.filter((label, at) => holds(drop.asks[at]));
+    const list = held.length > 1 ? held.slice(0, -1).join(', ') + ' and ' + held[held.length - 1] : held.join('');
+    const kept = drop.asks.some((ask) => ask.kept);
+    process.stderr.write('memq: the snapshot listed \'' + sanitize(name, NAME_CAP) + '\' in ' + list
+        + ', and the memory database answers absent for it, '
+        + (!kept ? "so this machine's copy was dropped\n"
+            : (drop.dropped > 0 ? 'so the snapshot dropped it, but ' : 'but ')
+                + "this machine's copy would not unlink and stays\n"));
 }
 
 // memq forget: retire one project-tier record, the project tier's counterpart
 // of the shared tiers' deletes, through mem.usp_ArchiveRecord with the deleted
-// mark under the working project's key, a store pin included. No file is
-// removed.
+// mark under the working project's key, a store pin included. No memory file
+// is removed; a delivered delete drops this machine's snapshot row and body copy.
 //
 // The consent flag is --confirm rather than --confirm-shared, because that
 // flag's word names a reach across projects that a project-tier removal does
@@ -13601,7 +13633,7 @@ function cmdForget(argv, options) {
     }
     // The retirement goes through mem.usp_ArchiveRecord with the deleted mark,
     // the queue behind it: a host that does not answer now takes the row at
-    // the next write or refresh, and no file is removed or renamed.
+    // the next write or refresh, and no memory file is removed or renamed.
     const answered = memoryDatabase.writeThrough(memoryDatabase.archiveEntry({
         tier: 'project', projectKey: projectKey(process.cwd()), name, delete: true
     }), { config: opts.config, deps: opts.deps });
@@ -13614,6 +13646,10 @@ function cmdForget(argv, options) {
     }
     process.stdout.write('deleted ' + shown + where
         + ' (the row is marked deleted in the memory database and no read serves it)\n');
+    if (answered.answer.status === 'deleted') {
+        const rung = projectRung(process.cwd());
+        reportSnapshotDrop(memoryDatabase.dropSnapshotRows([{ tier: 'project', key: rung.key, name }]), [rung.label], name);
+    }
 }
 
 // Both shared-tier delete verbs are refused outright under the engine's store

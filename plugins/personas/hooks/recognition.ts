@@ -1339,16 +1339,17 @@ export function nudgeShown(text: string, elisions: NudgeElisions): string {
   return headPoints(shown, NUDGE_SHOWN_MAX);
 }
 
-// One claimed hit's pointer line: the record, its tier where not the
-// project's, its machine scope where it names another machine, the trigger,
-// the reason, and the command that reads the record.
+// One claimed hit's pointer line: the record, its tier, its machine scope
+// where it names another machine, the trigger, the reason, and the command
+// that reads the record. A project record's command names the launch
+// directory, since memq reads the project key from the directory it runs in.
 function nudgeLine(hit: NudgeHit, elisions: NudgeElisions): string {
   return nudgeShown(hit.name, elisions)
-    + (hit.tier === "project" ? "" : " in the " + hit.tier + " tier")
+    + " in the " + hit.tier + " tier"
     + (hit.machine ? " (recorded for machine:" + nudgeShown(hit.machine, elisions) + ")" : "")
     + " carries " + nudgeShown(hit.type + ":" + hit.pattern, elisions)
     + ", and " + hit.why + "; read it with: memq get " + nudgeShown(hit.name.slice(0, -3), elisions)
-    + (hit.tier === "project" ? "" : " --" + hit.tier) + ".";
+    + (hit.tier === "project" ? " from this session's launch directory" : " --" + hit.tier) + ".";
 }
 
 function nudgeSubject(boundary: NudgeBoundary): string {
