@@ -4,7 +4,7 @@
 
 import { headPoints } from "./agent-state";
 import type { MemoryEntry, MonitorState } from "./agent-state.ts";
-import { oneLine } from "./agent-state";
+import { bracketSafeText, oneLine } from "./agent-state";
 import { heldForDrain } from "./operator";
 
 export interface SelfReviewOptions {
@@ -110,20 +110,25 @@ export function buildSelfReviewInput(
   // Build the decision window (most recent 20 worker-facing actions). Each
   // detail folds to one line at the join, since the rows are newline-separated
   // and a detail holding a newline would otherwise read as a row of its own.
+  // Each detail is also text a worker or a model wrote, so its square brackets
+  // become parentheses at the join and it forges no plugin label, as the kit's
+  // bracket rule (the comment above the helper in agent-state.ts) has every
+  // site that puts such text in front of a model do. The lesson line and the
+  // goal title below take the same two helpers.
   const recent = workerDecisions.slice(-20);
   const window = recent
-    .map((d) => new Date(d.timestamp).toISOString().slice(11, 19) + " " + d.loop + " | " + d.action + " | " + oneLine(d.detail))
+    .map((d) => new Date(d.timestamp).toISOString().slice(11, 19) + " " + d.loop + " | " + d.action + " | " + bracketSafeText(oneLine(d.detail)))
     .join("\n");
 
   // Known lessons (S5: pass as "do not repeat")
   const lessons = state.memory.filter((m) => m.kind === "lesson").slice(-5);
   const lessonBlock = lessons.length > 0
-    ? "Known lessons (do not repeat):\n" + lessons.map((m) => " - " + oneLine(m.text)).join("\n")
+    ? "Known lessons (do not repeat):\n" + lessons.map((m) => " - " + bracketSafeText(oneLine(m.text))).join("\n")
     : "No prior lessons.";
 
   const activeGoal = state.goals?.find((g) => g.id === state.activeGoalId);
   const goalContext = activeGoal
-    ? "Active goal: " + oneLine(activeGoal.title) + " (status: " + activeGoal.status + ")"
+    ? "Active goal: " + bracketSafeText(oneLine(activeGoal.title)) + " (status: " + activeGoal.status + ")"
     : "No active goal.";
 
   const streak = state.monitor.env?.errors?.consecutiveErrorTurns ?? 0;
