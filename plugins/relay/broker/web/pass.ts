@@ -442,7 +442,9 @@ export function createWebPass(options: WebPassOptions): WebPass {
     if (rolloutState === null || (rolloutState.attempted && !noGit)) {
       const state = rolloutState;
       attempt("rollout", rollout, at, () =>
-        state === null || state.held ? UNREADABLE : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, publish: state.publish, readAt: state.readAt },
+        state === null || state.held
+          ? UNREADABLE
+          : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, publish: state.publish, readAt: state.readAt, branches: state.branches },
       );
     }
     // The setting where it is set, else the folders of the roster's last good reading. The page joins

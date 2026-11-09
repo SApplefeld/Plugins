@@ -16,13 +16,23 @@
 // branch, and nothing is ever written into one. Per group, no more often than `ROLLOUT_FETCH_MS`,
 // the reader asks the remote which branch its HEAD names with `ls-remote --symref`, then fetches
 // the client branches, the plan branches, that default branch, the rollout tags and the publish
-// tags, and nothing else; it reads the refs on every cycle. Those two are its outward acts on a
-// read. The fetch prunes, so a tag the operator removes from the remote leaves the rows on the next
-// fetch, and a prune reaches only the broker's own refs.
+// tags, then, in a second fetch, every branch head into `refs/open/`, and nothing else; it reads
+// the refs on every cycle. Those are its outward acts on a read. Both fetches prune, so a tag the
+// operator removes from the remote leaves the rows on the next fetch, a branch deleted on the
+// remote leaves `refs/open/`, and a prune reaches only the broker's own refs.
 //
 // The plan branches are fetched so a queued plan whose document lives on an unmerged branch can be
 // read: `readBranchFiles` reads a file's blob from the bare repository at the branch's commit, under
 // the local read limits, with nothing checked out anywhere.
+//
+// Each repository with a default branch also publishes its open branches: every branch under
+// `refs/open/` the default branch does not contain, with the start time of the last read whose
+// two fetches both succeeded. Nothing else reads `refs/open/`, so a second fetch that fails holds
+// that record alone: the rows, the publish rows and the taps read the first fetch's refs as they
+// would without it. A remote holding two branch names that differ only in case is one such
+// failure on a file system that ignores case. A review item reads the record to leave once its
+// branch has merged or been deleted. The names come from the remote and serve only as a set to
+// test membership in: none is shown, logged or handed to git.
 //
 // A repository that ships by publish tags on its default branch, `publish-*` with no client branch,
 // reads one publish row instead of client rows: the default branch's first-parent commits past its
@@ -46,14 +56,15 @@ import { MAX_PLAN_FILE_BYTES } from "../board/plans.ts";
 import { MAX_INTAKE_REF_LENGTH } from "../board/queues.ts";
 import { LOCAL_READ, OVERFLOW, REMOTE_CALL, runGit } from "./git.ts";
 import type { GitLimits, GitRunner } from "./git.ts";
-import type { PublishRow, RolloutCheckout, RolloutCommit, RolloutRow, SharedRow } from "./views.ts";
+import type { OpenBranches, PublishRow, RolloutCheckout, RolloutCommit, RolloutRow, SharedRow } from "./views.ts";
 
 /** How often a repository is fetched at most. */
 export const ROLLOUT_FETCH_MS = 5 * 60 * 1000;
 
 /**
- * How long the first fetch into an empty bare repository may run: it brings the whole history of
- * every client branch, since the ancestry reads need it. Every later fetch keeps `REMOTE_CALL`.
+ * How long each namespace's first fetch may run: the first fetch while the remote-tracking refs
+ * hold nothing, and the second while `refs/open/` holds nothing. Each brings the whole history of
+ * the branches it names, since the ancestry reads need it. Every later fetch keeps `REMOTE_CALL`.
  */
 export const ROLLOUT_FIRST_FETCH_MS = 10 * 60 * 1000;
 
@@ -76,6 +87,8 @@ export const CLIENT_PREFIX = "clients/";
 /** The prefix a plan branch's name opens with: the one branch family `readBranchFiles` reads from. */
 export const PLAN_PREFIX = "plan/";
 const REMOTE_PREFIX = "refs/remotes/origin/";
+/** Where the second fetch puts every branch head; only the open branches read it. */
+const OPEN_PREFIX = "refs/open/";
 const TAG_PREFIX = "refs/tags/rollout/";
 const PUBLISH_PREFIX = "refs/tags/publish-";
 const PUBLISH_NAME = /^publish-[A-Za-z0-9._-]+$/;
@@ -92,6 +105,8 @@ export type RolloutState = {
   publish: readonly PublishRow[];
   /** The latest time any repository's refs were read well, null before any has been. */
   readAt: string | null;
+  /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
+  branches: readonly OpenBranches[];
   /** Whether a read cycle has completed at all; the pass leaves the source unread until one has. */
   attempted: boolean;
   /** Whether any repository's latest fetch or read failed, or none has ever read. */
@@ -435,9 +450,21 @@ type Group = {
   bare: string;
   /** When the last fetch was started, success or not, so a failing remote is retried on the cadence. */
   fetchedAt: number | null;
+  /**
+   * When the last read whose two fetches both succeeded was started, null before one has. It is
+   * the start of the cycle or refresh that ran them, taken before the first fetch, so it is a lower
+   * bound on what the fetches saw.
+   */
+  fetchedWellAt: number | null;
   rows: RolloutRow[];
   shared: SharedRow[];
   publish: PublishRow[];
+  /**
+   * The open branches and the successful fetch they stand on, null with no default branch or no
+   * successful fetch. It is kept until `fetchedWellAt` moves, so its names and its time always
+   * come from one fetch.
+   */
+  branches: OpenBranches | null;
   readAt: string | null;
   failed: boolean;
   everRead: boolean;
@@ -471,8 +498,9 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   const skippedRoots = new Set<string>();
   const skippedDuplicates = new Set<string>();
   const unprepared = new Set<string>();
+  const unfetchedOpen = new Set<string>();
   const refusedClients = new Set<string>();
-  let state: RolloutState = { rows: [], checkouts: [], shared: [], publish: [], readAt: null, attempted: false, held: true, reachedGit: false };
+  let state: RolloutState = { rows: [], checkouts: [], shared: [], publish: [], readAt: null, branches: [], attempted: false, held: true, reachedGit: false };
   let inFlight: Promise<void> | null = null;
   /**
    * Whether the last cycle could ask git about its roots: true where it had none, or git answered
@@ -575,6 +603,37 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       limits,
     );
     if (branch !== null) await git(group.bare, ["remote", "set-head", "origin", "--", branch], LOCAL_READ);
+  }
+
+  /**
+   * The second fetch, of every branch head into `refs/open/`, a namespace only `openOf` reads. The
+   * negative spec leaves out a branch named `HEAD`. The empty `--refmap=` stops git from also
+   * updating the remote-tracking ref `remote.origin.fetch` maps each fetched branch to, so this
+   * fetch writes nothing under `refs/remotes/`. It prunes, so a branch deleted on the remote
+   * leaves `refs/open/` on the next fetch. `--quiet` keeps git's line per updated ref off stderr,
+   * which counts against the runner's byte cap as stdout does, however many branches arrive. While
+   * `refs/open/` holds no ref it brings the whole history and takes `FIRST_FETCH`, whatever the
+   * first fetch's refs hold, and every later one takes `REMOTE_CALL`.
+   */
+  async function fetchOpen(group: Group): Promise<void> {
+    const present = lines(await git(group.bare, ["for-each-ref", "--count=1", "--format=%(refname)", OPEN_PREFIX], LOCAL_READ));
+    await git(
+      group.bare,
+      [
+        "fetch",
+        "--no-tags",
+        "--prune",
+        "--quiet",
+        "--refmap=",
+        "--no-write-fetch-head",
+        "--no-auto-maintenance",
+        "--no-recurse-submodules",
+        "origin",
+        `+refs/heads/*:${OPEN_PREFIX}*`,
+        "^refs/heads/HEAD",
+      ],
+      present.length === 0 ? FIRST_FETCH : REMOTE_CALL,
+    );
   }
 
   /**
@@ -747,6 +806,23 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     ];
   }
 
+  /**
+   * The open branches: every branch under `refs/open/` whose tip the default branch does not
+   * contain, from one `for-each-ref --no-merged`, by name past `refs/open/`, without `HEAD` or the
+   * default branch's own name, sorted. The default branch is the first fetch's `defaultRef`. Only
+   * that ref, which the reader resolved, reaches the command line; the names git prints are never
+   * handed to git.
+   */
+  async function openOf(root: string, defaultRef: string): Promise<string[]> {
+    const own = defaultRef.slice(REMOTE_PREFIX.length);
+    const listed = lines(await git(root, ["for-each-ref", `--no-merged=${defaultRef}`, "--format=%(refname)", OPEN_PREFIX], LOCAL_READ));
+    return listed
+      .filter((name) => name.startsWith(OPEN_PREFIX))
+      .map((name) => name.slice(OPEN_PREFIX.length))
+      .filter((name) => name !== "HEAD" && name !== own)
+      .sort();
+  }
+
   async function computeGroup(group: Group): Promise<void> {
     const readAt = new Date(now()).toISOString();
     const refs = await refsOf(group.bare);
@@ -766,9 +842,28 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     const shared = await sharedOf(group.bare, group.name, refs, tags);
     // A repository ships one way: one with client branches, admitted or refused, reads no publish row.
     const publishRows = refs.clients.length === 0 && refs.refused === 0 && refs.defaultRef !== null ? await publishOf(group.bare, group.name, refs.defaultRef, readAt) : [];
+    // The record stands on the last successful fetch's start, never on this read's time, and is
+    // read again only once that start has moved; with no default branch or no such fetch there is
+    // no record. A read of the open branches that fails keeps the record the group had, so it never
+    // marks the group failed or holds its rows.
+    const fetchedWellAt = group.fetchedWellAt;
+    let branches: OpenBranches | null = null;
+    if (refs.defaultRef !== null && fetchedWellAt !== null) {
+      const fetchedAt = new Date(fetchedWellAt).toISOString();
+      if (group.branches?.fetchedAt === fetchedAt) {
+        branches = group.branches;
+      } else {
+        try {
+          branches = { repo: group.name, fetchedAt, open: await openOf(group.bare, refs.defaultRef) };
+        } catch {
+          branches = group.branches;
+        }
+      }
+    }
     group.rows = rows;
     group.shared = shared;
     group.publish = publishRows;
+    group.branches = branches;
     group.readAt = readAt;
   }
 
@@ -778,8 +873,14 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
    * never its URL, and waits out the fetch interval like a failed fetch, so a group that cannot be
    * prepared does not spawn git on every pass tick. A fetch that fails leaves the refs as they
    * stand and marks the group failed until the next good read. Either failure answers its kind.
+   * With `open`, the second fetch, into `refs/open/`, runs after the first and its `set-head`
+   * succeed; a tap passes no `open`, so it waits on the first fetch alone. The second fetch's
+   * failure is not the group's: the group is not marked failed, nothing is answered, and the rows
+   * are read from the first fetch's refs, with one log line naming the group and the kind while the
+   * failure lasts. Only a read whose two fetches both succeed moves the start time the open
+   * branches are stamped with.
    */
-  async function fetchDue(group: Group, at: number, force: boolean): Promise<string | null> {
+  async function fetchDue(group: Group, at: number, force: boolean, open: boolean): Promise<string | null> {
     if (!force && group.fetchedAt !== null && at - group.fetchedAt < fetchMs) return null;
     try {
       await prepareGroup(group);
@@ -798,6 +899,16 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       group.failed = true;
       return kindOf(error);
     }
+    if (!open) return null;
+    try {
+      await fetchOpen(group);
+    } catch (error) {
+      if (!unfetchedOpen.has(group.folded)) log(`web rollout: ${group.name} could not fetch its open branches (${kindOf(error)})`);
+      unfetchedOpen.add(group.folded);
+      return null;
+    }
+    unfetchedOpen.delete(group.folded);
+    group.fetchedWellAt = at;
     return null;
   }
 
@@ -814,9 +925,9 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     return null;
   }
 
-  /** One repository's fetch where due or forced, then its rows; the rows are recomputed only after a fetch that succeeded or was not due. */
+  /** One repository's fetches where due or forced, then its rows; the rows are recomputed only after a first fetch that succeeded or was not due. */
   async function readGroup(group: Group, at: number, force: boolean): Promise<string | null> {
-    return (await fetchDue(group, at, force)) ?? recompute(group);
+    return (await fetchDue(group, at, force, true)) ?? recompute(group);
   }
 
   /**
@@ -978,6 +1089,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       shared: listed.flatMap((group) => group.shared),
       publish: listed.flatMap((group) => group.publish),
       readAt,
+      branches: listed.flatMap((group) => (group.branches === null ? [] : [group.branches])),
       attempted: true,
       // Roots that hold no repository are a good read with no rows; a machine where git never
       // answered, a root whose origin read failed for any reason but git's own `exit <n>`, or a
@@ -1049,9 +1161,11 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
             url,
             bare: path.join(stateRoot, ROLLOUT_STATE_FOLDER, folded),
             fetchedAt: null,
+            fetchedWellAt: null,
             rows: [],
             shared: [],
             publish: [],
+            branches: null,
             readAt: null,
             failed: false,
             everRead: false,
@@ -1094,7 +1208,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       const group = groups.get(repo.toLowerCase());
       if (group === undefined) return Promise.resolve({ status: "unknown-repo" });
       return underRepoLock(group.folded, async () => {
-        const kind = await fetchDue(group, now(), true);
+        const kind = await fetchDue(group, now(), true, false);
         if (kind !== null) throw new Error(kind);
         const marked = await tagAndPush(group, branch, login);
         // The step's answer stands whatever the rows do next: a read that fails here holds the
@@ -1107,7 +1221,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       const group = groups.get(repo.toLowerCase());
       if (group === undefined) return Promise.resolve({ status: "unknown-repo" });
       return underRepoLock(group.folded, async () => {
-        const kind = await fetchDue(group, now(), true);
+        const kind = await fetchDue(group, now(), true, false);
         if (kind !== null) throw new Error(kind);
         const marked = await publishTagAndPush(group, login, head);
         // As in `mark`: the step's answer stands whatever the rows do next.

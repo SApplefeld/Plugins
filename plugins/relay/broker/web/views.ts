@@ -131,6 +131,14 @@ export type SharedRow = {
 /** Which branch a root has checked out, for the repo page's row; null where HEAD is detached. */
 export type RolloutCheckout = { root: string; repo: string; branch: string | null };
 
+/**
+ * One repository's open branches as its mirror last saw them. `repo` is the name the rows carry,
+ * `fetchedAt` is when the last successful fetch started, as ISO, and `open` holds every branch
+ * the default branch does not contain, its name without `refs/open/`. The names come from
+ * the remote and serve only as a set to test membership in.
+ */
+export type OpenBranches = { repo: string; fetchedAt: string; open: readonly string[] };
+
 /** The rollout reader's last good computation: every repository's rows and every root's checkout. */
 export type RolloutReading = {
   rows: readonly RolloutRow[];
@@ -141,6 +149,8 @@ export type RolloutReading = {
   publish: readonly PublishRow[];
   /** The latest time any repository's refs were read, null where none has been. */
   readAt: string | null;
+  /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
+  branches: readonly OpenBranches[];
 };
 
 /** The standup page's rollout card: every row, with the counts the card's heading draws. */
@@ -1179,10 +1189,15 @@ function timelineOf(readings: Readings, lineage: string): TimelineEvent[] {
 /**
  * The reviews waiting in one repo: each queue entry with a `pr-ready` line among `lines` on its plan,
  * the entry's `planSegment` and the line's plan compared by `eventPlanName`, and whose pull request
- * number no review mark hides. The newest such line keys the review whatever lines follow it, since
- * the kit writes `goal-complete` minutes after `pr-ready` in the same finishing pass: the mark alone
- * retires a review. An entry with no number cannot be marked, so it stands while its `pr-ready` line
- * is in the fold. A done entry still counts: a merged pull request's plan is complete.
+ * number no review mark hides. An entry that names a branch also leaves once a fetch newer than the
+ * newest such line shows that branch's tip contained in the default branch or the branch absent from
+ * the mirror, as `branchGone` reads it. A squash or rebase merge leaves the tip outside the default
+ * branch, so such an entry stands until its branch is deleted on the remote and pruned.
+ * The newest line keys the review whatever lines follow it, since the kit writes `goal-complete`
+ * minutes after `pr-ready` in the same finishing pass: a later line never retires a review. An entry
+ * with no number cannot be marked, so it stands while its `pr-ready` line is in the fold and the
+ * mirror does not show its branch gone. A done entry still counts: a merged pull request's plan is
+ * complete.
  */
 function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent[]): ReviewItem[] {
   const queue = repo.queue;
@@ -1200,6 +1215,8 @@ function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent
     if (newest === null) continue;
     const pullRequest = entry.pullRequest ?? null;
     if (pullRequest !== null && handled.get(reviewHandledKey(repo.persona.name, pullRequest))?.kind === "review") continue;
+    const branch = entry.branch ?? null;
+    if (branch !== null && branch !== "" && branchGone(readings, repo.persona.workdir, branch, newest.tsMs)) continue;
     const reading = queue.readings.get(entry.id);
     items.push({
       kind: "review",
@@ -1208,12 +1225,54 @@ function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent
       planPath: reading === undefined ? null : planRelative(reading),
       pullRequest,
       pullRequestUrl: entry.pullRequestUrl ?? null,
-      branch: entry.branch ?? null,
+      branch,
       readyAt: newest.ts,
       entryId: entry.id,
     });
   }
   return items;
+}
+
+/**
+ * Whether the mirror shows `branch` gone from the repository the checkout at `workdir` reads: that
+ * repository's branch record was fetched strictly after `readyMs`, the review's newest `pr-ready`
+ * stamp, and does not list the branch as open. The record lists a branch as open while the mirror
+ * holds it and the default branch does not contain its tip, so the branch counts as gone when its
+ * tip is contained in the default branch or the mirror no longer holds it. A squash or rebase merge
+ * leaves the tip outside the default branch, so such a branch stays open until it is deleted on the
+ * remote and pruned from the mirror. A fetch at or before the ready line may predate the push, so it
+ * proves nothing. A missing checkout or record, or an unreadable fetch time, answers false and the
+ * review stands. The record's names come from the remote and serve only as a set to test the
+ * entry's branch in, as written and by its short name, ignoring letter case: on a file system that
+ * ignores case, two remote branches differing only in case land in the mirror under one name, so an
+ * exact match could read the other one gone. Folding only adds matches, so it can keep an item
+ * listed and never retires one.
+ */
+function branchGone(readings: Readings, workdir: string, branch: string, readyMs: number): boolean {
+  const reading = readings.rollout.value;
+  if (reading === null) return false;
+  const checkout = reading.checkouts.find((candidate) => sameFolder(candidate.root, workdir));
+  if (checkout === undefined) return false;
+  const record = reading.branches.find((one) => one.repo === checkout.repo);
+  if (record === undefined) return false;
+  const fetchedMs = Date.parse(record.fetchedAt);
+  if (Number.isNaN(fetchedMs) || fetchedMs <= readyMs) return false;
+  // The name as written first, so a remote branch whose own name opens `origin/` still reads open.
+  const open = new Set(record.open.map((name) => name.toLowerCase()));
+  return !open.has(branch.toLowerCase()) && !open.has(shortBranch(branch).toLowerCase());
+}
+
+/** The ref prefixes a queue entry's branch may carry where the record's open list holds the short name. */
+const BRANCH_PREFIXES: readonly string[] = ["refs/heads/", "refs/remotes/origin/", "origin/"];
+
+/**
+ * `branch` without one leading `refs/heads/`, `refs/remotes/origin/` or `origin/`, the short name
+ * the record's open list holds. A queue entry's branch comes from a hand-written queue record, and
+ * the personas plugin's branch shape check on that record admits these prefixed forms.
+ */
+function shortBranch(branch: string): string {
+  const prefix = BRANCH_PREFIXES.find((one) => branch.startsWith(one));
+  return prefix === undefined ? branch : branch.slice(prefix.length);
 }
 
 /** The standup page's state order, a paused row taking an idle row's place. */
