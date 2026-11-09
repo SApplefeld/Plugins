@@ -75,7 +75,21 @@ param(
     [string]$WebSummaryPeers,
 
     [ValidatePattern('^[^\r\n\x00]*\z')]
-    [string]$WebSiblings
+    [string]$WebSiblings,
+
+    # The Duet server's keys, forwarded to Install-Host.ps1 as the web keys are: the switch when set,
+    # the others only when given. The approval port also goes to the elevated step, which opens it on
+    # the Tailscale interface as it opens the web port. Install-Host.ps1 documents the four.
+    [switch]$Duet,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$DuetPublicUrl,
+
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$DuetPort,
+
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$DuetApprovePort
 )
 
 . (Join-Path $PSScriptRoot 'Install-Functions.ps1')
@@ -146,6 +160,9 @@ leak into the task principal.
 
 -Marketplace is passed to the child only when given, so the private route's launch is unchanged.
 -WebPort is passed the same way, and the child opens that port for the web surface only when it has it.
+-Duet is passed when set, and the child then registers the Duet task beside the broker's and opens
+the Duet approval page's port. -DuetApprovePort is passed when given; without it the child takes the
+port broker.env records, else the server's default.
 
 -Launcher exists so a test can capture the launch instead of raising a real UAC prompt.
 #>
@@ -156,6 +173,8 @@ function Invoke-ChannelElevatedInstall {
         [Parameter(Mandatory)][string]$RepoRoot,
         [string]$Marketplace,
         [ValidateRange(1, 65535)][Nullable[int]]$WebPort,
+        [switch]$Duet,
+        [ValidateRange(1, 65535)][Nullable[int]]$DuetApprovePort,
         [scriptblock]$Launcher
     )
 
@@ -174,6 +193,10 @@ function Invoke-ChannelElevatedInstall {
     if ($Marketplace) { $arguments += @('-Marketplace', (& $quote $Marketplace)) }
     if ($null -ne $WebPort) {
         $arguments += @('-WebPort', (& $quote $WebPort.ToString([cultureinfo]::InvariantCulture)))
+    }
+    if ($Duet) { $arguments += '-Duet' }
+    if ($null -ne $DuetApprovePort) {
+        $arguments += @('-DuetApprovePort', (& $quote $DuetApprovePort.ToString([cultureinfo]::InvariantCulture)))
     }
     if (-not $Launcher) {
         $Launcher = {
@@ -196,6 +219,8 @@ function Invoke-ChannelElevatedInstall {
         $remedy = "install\Install-Elevated.ps1 -User '$User' -EnvFile '$EnvFile'"
         if ($Marketplace) { $remedy += " -Marketplace '$Marketplace'" }
         if ($null -ne $WebPort) { $remedy += " -WebPort '$WebPort'" }
+        if ($Duet) { $remedy += " -Duet" }
+        if ($null -ne $DuetApprovePort) { $remedy += " -DuetApprovePort '$DuetApprovePort'" }
         throw "Install-All: the elevated install step exited $exitCode. Re-run it alone from an " +
             "elevated session: $remedy."
     }
@@ -476,6 +501,10 @@ function Get-ChannelHostArguments {
         [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebDevices,
         [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebSummaryPeers,
         [ValidatePattern('^[^\r\n\x00]*\z')][string]$WebSiblings,
+        [switch]$Duet,
+        [ValidatePattern('^[^\r\n\x00]*\z')][string]$DuetPublicUrl,
+        [Nullable[int]]$DuetPort,
+        [Nullable[int]]$DuetApprovePort,
         [string]$ExistingTokenFile = (Join-Path (Get-ChannelStateRoot) 'discord-token.txt')
     )
 
@@ -507,6 +536,12 @@ function Get-ChannelHostArguments {
     if ($WebDevices) { $hostArgs.WebDevices = $WebDevices }
     if ($WebSummaryPeers) { $hostArgs.WebSummaryPeers = $WebSummaryPeers }
     if ($WebSiblings) { $hostArgs.WebSiblings = $WebSiblings }
+    # The Duet keys on the same rule; the switch is passed only when set, so Install-Host.ps1 runs
+    # no Duet step on a host without it.
+    if ($Duet) { $hostArgs.Duet = $true }
+    if ($DuetPublicUrl) { $hostArgs.DuetPublicUrl = $DuetPublicUrl }
+    if ($null -ne $DuetPort) { $hostArgs.DuetPort = $DuetPort }
+    if ($null -ne $DuetApprovePort) { $hostArgs.DuetApprovePort = $DuetApprovePort }
     return $hostArgs
 }
 
@@ -524,7 +559,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     $hostArgs = Get-ChannelHostArguments -Identity $identity -RepoRoot $RepoRoot `
         -BotToken $BotToken -BotTokenFile $BotTokenFile -HookOwner $HookOwner -Marketplace $Marketplace `
         -WebBind $WebBind -WebPort $WebPort -WebOperators $WebOperators -WebDevices $WebDevices `
-        -WebSummaryPeers $WebSummaryPeers -WebSiblings $WebSiblings
+        -WebSummaryPeers $WebSummaryPeers -WebSiblings $WebSiblings `
+        -Duet:$Duet -DuetPublicUrl $DuetPublicUrl -DuetPort $DuetPort -DuetApprovePort $DuetApprovePort
     & (Join-Path $PSScriptRoot 'Install-Host.ps1') @hostArgs
 
     Install-ChannelPlugin -RepoRoot $RepoRoot -Marketplace $effectiveMarketplace
@@ -534,6 +570,13 @@ if ($MyInvocation.InvocationName -ne '.') {
     $elevatedArgs = @{ User = $user; EnvFile = $envFile; RepoRoot = $RepoRoot }
     if ($effectiveMarketplace -cne 'sapplefeld-channels') { $elevatedArgs.Marketplace = $effectiveMarketplace }
     if ($null -ne $WebPort) { $elevatedArgs.WebPort = $WebPort }
+    # With -Duet the elevated step registers the Duet task and opens the approval page's port on the
+    # Tailscale interface: the port given here, else the one broker.env records, which the child
+    # reads, else the server's default.
+    if ($Duet) {
+        $elevatedArgs.Duet = $true
+        if ($null -ne $DuetApprovePort) { $elevatedArgs.DuetApprovePort = $DuetApprovePort }
+    }
     Invoke-ChannelElevatedInstall @elevatedArgs
 
     $brokerPort = if ($null -ne $identity.Port) { $identity.Port } else { 8787 }

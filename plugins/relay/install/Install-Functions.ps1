@@ -707,17 +707,30 @@ $script:ChannelBrokerEnvAllowlist = @(
     'CHANNEL_VOICE_TURN_HOLD',
     'CHANNEL_VOICE_TURN_HOLD_MS',
     'CHANNEL_VOICE_COMPLETE_THRESHOLD',
-    # The web surface's eight. The bind is an address or the word tailscale, the three lists are
-    # tailnet logins and node names, the CLI entry is a path, and the siblings are names with tailnet
-    # addresses: none is a credential, and the surface has no token to carry here.
+    # The web surface's ten. The bind is an address or the word tailscale, the four lists are
+    # tailnet logins and node names, the CLI entry and the reader key file are paths, and the
+    # siblings are names with tailnet addresses: none is a credential, since the reader key lives in
+    # its own protected file and never in this one.
     'CHANNEL_WEB_BIND',
     'CHANNEL_WEB_PORT',
     'CHANNEL_WEB_OPERATORS',
     'CHANNEL_WEB_DEVICES',
     'CHANNEL_WEB_SUMMARY_PEERS',
+    'CHANNEL_WEB_READERS',
+    'CHANNEL_WEB_READER_KEY_FILE',
     'CHANNEL_WEB_TAILSCALE',
     'CHANNEL_WEB_STATIC_ROOT',
     'CHANNEL_WEB_SIBLINGS',
+    # The Duet server's seven, read by Start-Duet.ps1 from the same file. The switch, two ports, the
+    # node's public URL, a redirect allowlist, source ranges and the state file's path: none is a
+    # credential, since the server's tokens live hashed in the state file and never in this one.
+    'CHANNEL_DUET_ENABLED',
+    'CHANNEL_DUET_PORT',
+    'CHANNEL_DUET_APPROVE_PORT',
+    'CHANNEL_DUET_PUBLIC_URL',
+    'CHANNEL_DUET_REDIRECT_URIS',
+    'CHANNEL_DUET_CLIENT_RANGES',
+    'CHANNEL_DUET_STATE',
     'CHANNEL_BROKER_LOG_FILE',
     'CHANNEL_BROKER_LOG_MAX_BYTES',
     'CHANNEL_BROKER_LOG_MAX_FILES',

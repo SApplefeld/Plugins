@@ -28,7 +28,17 @@ param(
     # The web surface's TCP port, typed as the broker's own $Port is. Given, the inbound rule that
     # admits it on the Tailscale interface is ensured; absent, no rule is touched.
     [ValidateRange(1, 65535)]
-    [Nullable[int]]$WebPort
+    [Nullable[int]]$WebPort,
+
+    # Registers the Duet server's task beside the broker's, with the same -User and -EnvFile, and
+    # ensures the Duet approval page's inbound rule on the Tailscale interface.
+    [switch]$Duet,
+
+    # The Duet approval page's TCP port. Given, its inbound rule is ensured under its own name and
+    # moved to this port where it names another. Absent, -Duet takes CHANNEL_DUET_APPROVE_PORT from
+    # -EnvFile, else the server's default, 8791; without -Duet no rule is touched.
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$DuetApprovePort
 )
 
 . (Join-Path $PSScriptRoot 'Install-Functions.ps1')
@@ -203,12 +213,17 @@ may have edited it, and a missing one is created for that TCP port on the 'Tails
 alias, the rule docs/install.md shows. Only the cmdlet's own "no such rule" answer reads as missing;
 any other failure of the lookup, and any failure of the create, propagates.
 
-The seams exist so a test can drive the three cases without touching this machine's firewall.
+-FollowPort is the Duet approval rule's: an existing rule whose local port is not -Port alone is
+moved to -Port, since that port is the one the install recorded for the server, and any failure of
+the read or the move propagates. The web rule is called without it.
+
+The seams exist so a test can drive the cases without touching this machine's firewall.
 #>
 function Install-ChannelWebFirewallRule {
     param(
         [Nullable[int]]$Port,
         [string]$DisplayName = 'Channels web surface',
+        [switch]$FollowPort,
         [scriptblock]$GetRule = {
             param($Name)
             try {
@@ -222,12 +237,63 @@ function Install-ChannelWebFirewallRule {
             param($Name, $LocalPort)
             New-NetFirewallRule -DisplayName $Name -Direction Inbound -Protocol TCP -LocalPort $LocalPort `
                 -InterfaceAlias 'Tailscale' -Action Allow -ErrorAction Stop | Out-Null
+        },
+        [scriptblock]$GetRulePort = {
+            param($Rule)
+            ($Rule | Get-NetFirewallPortFilter -ErrorAction Stop).LocalPort
+        },
+        [scriptblock]$SetRulePort = {
+            param($Name, $LocalPort)
+            Set-NetFirewallRule -DisplayName $Name -LocalPort $LocalPort -ErrorAction Stop | Out-Null
         }
     )
 
     if ($null -eq $Port) { return }
-    if (& $GetRule $DisplayName) { return }
-    & $NewRule $DisplayName $Port
+    $rule = & $GetRule $DisplayName
+    if (-not $rule) {
+        & $NewRule $DisplayName $Port
+        return
+    }
+    if (-not $FollowPort) { return }
+    $current = @(& $GetRulePort $rule)
+    $wanted = $Port.ToString([cultureinfo]::InvariantCulture)
+    if ($current.Count -eq 1 -and [string]$current[0] -ceq $wanted) { return }
+    & $SetRulePort $DisplayName $Port
+}
+
+<#
+.SYNOPSIS
+The Duet approval page's port: -Port where given, else CHANNEL_DUET_APPROVE_PORT from the env file,
+else the server's default, 8791. Null without -Duet and -Port, so no rule is touched.
+
+.DESCRIPTION
+A recorded value that is not a whole number from 1 to 65535 throws, naming the key and the file,
+since the server refuses to start on it too and a rule for it would open the wrong port.
+#>
+function Resolve-ChannelDuetApprovePort {
+    param(
+        [Nullable[int]]$Port,
+        [string]$EnvFile,
+        [switch]$Duet
+    )
+
+    if ($null -ne $Port) { return $Port }
+    if (-not $Duet) { return $null }
+    if ($EnvFile -and (Test-Path -LiteralPath $EnvFile)) {
+        $recorded = Get-ChannelEnvFile -Path $EnvFile
+        if ($recorded.Contains('CHANNEL_DUET_APPROVE_PORT')) {
+            $text = ([string]$recorded['CHANNEL_DUET_APPROVE_PORT']).Trim()
+            if ($text -ne '') {
+                $value = 0
+                if ($text -cnotmatch '^\d{1,5}$' -or -not [int]::TryParse($text, [ref]$value) -or $value -lt 1 -or $value -gt 65535) {
+                    throw "Install-Elevated.ps1: CHANNEL_DUET_APPROVE_PORT in '$EnvFile' is '$text', " +
+                        "which is not a TCP port from 1 to 65535. Fix that line and re-run."
+                }
+                return $value
+            }
+        }
+    }
+    return 8791
 }
 
 <#
@@ -257,6 +323,9 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
     Assert-ChannelInstallElevated
     & (Join-Path $PSScriptRoot 'Register-BrokerTask.ps1') -User $User -EnvFile $EnvFile
+    if ($Duet) {
+        & (Join-Path $PSScriptRoot 'Register-DuetTask.ps1') -User $User -EnvFile $EnvFile
+    }
     Install-ChannelManagedSettings -Marketplace $Marketplace
     Install-ChannelProfileBlock -RepoRoot $RepoRoot
     # $PSHOME above is this elevated child's own Windows PowerShell; a host that also runs
@@ -266,6 +335,8 @@ if ($MyInvocation.InvocationName -ne '.') {
         Install-ChannelProfileBlock -RepoRoot $RepoRoot -ProfilePath (Join-Path $pwshProfileDir 'profile.ps1')
     }
     Install-ChannelWebFirewallRule -Port $WebPort
+    $approvePort = Resolve-ChannelDuetApprovePort -Port $DuetApprovePort -EnvFile $EnvFile -Duet:$Duet
+    Install-ChannelWebFirewallRule -Port $approvePort -DisplayName 'Channels Duet approval' -FollowPort
     Restart-ChannelBroker
     Write-Host "Managed settings written, cchat launcher installed, broker restarted under the task."
 }

@@ -3,7 +3,10 @@
 One broker per host, one Discord bot identity per host, one channel per host. A broker reaches its
 sessions over localhost. Its one optional second listener, the web surface, binds a Tailscale
 address and serves the operator's own pages to the tailnet devices the keys under "The web surface
-(optional)" name. Nothing else is reachable from another machine.
+(optional)" name. Nothing else is reachable from another machine, save one. Where
+the operator enables it, one more process, the Duet server, is the one route open to the public
+internet, through Tailscale Funnel. Its tool calls are admitted from Claude's servers alone and only
+under a sign-in the operator approves from a tailnet device.
 
 `operations.md` and `security-model.md`, named in this guide, live in the source repository and
 do not ship in the public folder.
@@ -565,12 +568,16 @@ CHANNEL_WEB_DEVICES=your-phone,your-desktop
 from `tailscale ip -4` at each bind attempt. A broker that starts before Tailscale has an address
 waits for it and binds the pages within 30 seconds of the address appearing. A written address outside 100.64.0.0/10 refuses the start, and a
 `tailscale` answer outside it counts as no address, so the pages can never be served on loopback,
-a LAN or a public interface. `CHANNEL_WEB_OPERATORS` is the
+a LAN or a public interface. The Duet server is the one listener reached from off the tailnet, on
+loopback behind Funnel, and its approval page binds this same address and admits the same operators
+and devices. `CHANNEL_WEB_OPERATORS` is the
 comma-separated list of tailnet logins admitted, at least one. `CHANNEL_WEB_DEVICES` is optional.
 When it is set, a device must be on it by its tailnet node name as well as signed in under an
 admitted login, since a fleet machine signed in under your login would otherwise be admitted too.
 Set it, and leave this host off it. A process run by any account on this host can reach the pages
-as this host's node, so a list without the host refuses it (T5 in `docs/security-model.md`). A
+as this host's node, so a list without the host refuses it (T5 in `docs/security-model.md`).
+With Duet on, `CHANNEL_WEB_READERS` names this host's node, but it admits a `GET` view only
+with the key in `CHANNEL_WEB_READER_KEY_FILE`, which only this host's Duet process reads. A
 browser on this host is refused too, so open the pages from the phone or another desktop.
 `CHANNEL_WEB_PORT` (default 8788), `CHANNEL_WEB_TAILSCALE` (the CLI, default `tailscale` on PATH)
 and `CHANNEL_WEB_STATIC_ROOT` (the pages' directory, an absolute path) rarely need setting.
@@ -583,10 +590,10 @@ sandboxes on one tailnet" below sets out.
 `direction.md` file under the kit's coordinator directory. With it set, the standup page draws
 the ledger's newest item as the sandbox's heading. Unset, the page draws no sandbox heading.
 
-Every request is identified by `tailscale whois`, so there is no token and no password. All nine
+Every request is identified by `tailscale whois`, so there is no token and no password. All eleven
 keys are on the installer's allowlist, so a value set by hand survives the next install. The
 installer writes six of them from its `-Web` parameters, and a run that omits a parameter leaves
-that key's value as it is. `CHANNEL_WEB_TAILSCALE`, `CHANNEL_WEB_STATIC_ROOT` and
+that key's value as it is. It writes `CHANNEL_WEB_READERS` and `CHANNEL_WEB_READER_KEY_FILE` with `-Duet` alone. `CHANNEL_WEB_TAILSCALE`, `CHANNEL_WEB_STATIC_ROOT` and
 `CHANNEL_DIRECTION_LEDGER` stay hand-set.
 
 The pages' rollout cards, which show what each `clients/*` branch has merged since its last
@@ -673,7 +680,7 @@ also allows comments and trailing commas.
     {
       "action": "accept",
       "src": ["operator-phone", "operator-desktop"],
-      "dst": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788"]
+      "dst": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788", "sandbox-a:8791", "sandbox-b:8791", "sandbox-c:8791"]
     },
     {
       "action": "accept",
@@ -684,7 +691,7 @@ also allows comments and trailing commas.
   "tests": [
     {
       "src": "operator-phone",
-      "accept": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788"]
+      "accept": ["sandbox-a:8788", "sandbox-b:8788", "sandbox-c:8788", "sandbox-a:8791", "sandbox-b:8791", "sandbox-c:8791"]
     },
     {
       "src": "sandbox-a",
@@ -825,6 +832,10 @@ image or template exists. In order:
    and open any screen from your phone. The row at the top of the list shows one pill per
    sibling.
 
+### Claude Duet (optional)
+
+`Install-Host.ps1 -Duet` sets `CHANNEL_DUET_ENABLED` to `1`. It sets `CHANNEL_DUET_PUBLIC_URL` to `-DuetPublicUrl` where given, else keeps the URL `broker.env` records, else takes this node's MagicDNS name under `https://`. Where `broker.env` holds no value, it sets `CHANNEL_DUET_STATE` to `duet-state.json` under the state root and `CHANNEL_WEB_READER_KEY_FILE` to `web-reader-key.txt` there. It adds this host's own tailnet node, the part of its MagicDNS name before the first dot, to `CHANNEL_WEB_READERS`, keeping any node already there. Where the key file is missing, it writes a 32-byte random reader key there, protected as the bot token file is. A recorded key file or state file outside the state root stops the install. The broker admits that node to its read-only views, and nothing else, only on a request carrying the key, which the Duet process reads at start. `CHANNEL_DUET_PORT` (default 8790) is the loopback port Funnel forwards to, and `CHANNEL_DUET_APPROVE_PORT` (default 8791) is the approval page's port on the web surface's address. Pass `-DuetPort` or `-DuetApprovePort` to change either. The admin-console steps, the sign-in and the off switch are under "Claude Duet" below.
+
 ## 3. Install the service
 
 Elevated, once:
@@ -899,6 +910,72 @@ Confirm the session registered:
 ```powershell
 curl.exe -s http://127.0.0.1:8787/sessions
 ```
+
+## Claude Duet
+
+Claude Duet, your assistant in Anthropic's cloud, can read this fleet through a connector that
+can change nothing. It sees what the pages show: the standup, the needs-me list, the workers,
+each ask, each repository's plans and briefs, the health view, the sibling sandboxes' counts and
+up to 50 recent lines of a persona's talk. It cannot post, answer an ask, approve a prompt, steer
+a session or open a file. The server runs on one host, beside that host's broker, and needs the
+web surface set up there first ("The web surface", above).
+
+### Before the install
+
+Two settings in the Tailscale admin console are yours, and the install cannot make either:
+
+1. Enable HTTPS certificates for the tailnet, under DNS.
+2. Grant this node the `funnel` attribute in the tailnet policy, as `tailscale funnel` prompts.
+
+Paste the amended policy fragment under "Three sandboxes on one tailnet" too. Its operator grant
+names port 8791 beside 8788, so your devices reach the approval page.
+
+### Install
+
+Run the one-command install with the host's usual parameters and `-Duet` added:
+
+```powershell
+install\Install-All.ps1 -HostName <host> -ChannelId <channel id> -AllowedUserId <your user id> <your web parameters> -Duet
+```
+
+The run writes the keys "Claude Duet (optional)" above names. It runs `tailscale funnel --bg
+--https=443 http://127.0.0.1:8790` and prints `tailscale funnel status`. Its elevated step then
+registers the scheduled task `SapplefeldChannelsDuet` after the broker's task and opens the approval
+port in the firewall. A node missing either admin-console setting gets a warning naming the step,
+and the run skips Funnel and carries on. Enable the setting, then run the install again with
+`-Duet`. A node whose `tailscale status` names no MagicDNS name refuses the install, since the
+reader entry is the part of that name before its first dot. The run ends by restarting the broker, which then reads the
+new reader list and key. The Duet task starts within two minutes on its own, from its repeat
+trigger.
+
+The state file, `duet-state.json` under the state root unless `CHANNEL_DUET_STATE` names another
+file there, appears when Duet first registers. It takes the state root's protection by
+inheritance, as the broker's own state file does, and a later `-Duet` run hardens and checks it
+where it already exists. The install refuses `-SkipAcl` beside `-Duet`, since `-Duet` writes the reader key file.
+
+### Connect Duet
+
+1. In your personal Claude account's connector settings, add a custom connector with the URL
+   `https://<node>.<tailnet>.ts.net/mcp`, the `CHANNEL_DUET_PUBLIC_URL` in `broker.env` with `/mcp` added.
+2. Sign in. The page that opens shows a six-character code and waits.
+3. From a phone or desktop on the tailnet, open `http://<bind>:8791/approve`, check the code,
+   the client and the redirect host, and approve it. The first page then finishes the sign-in.
+4. Ask Duet for the fleet summary. It should match the Standup page.
+
+A sign-in waits ten minutes for the approval. Approve only a code you started yourself, since
+the code is all that names a sign-in.
+
+### Revoke or turn off
+
+Every grant lives in the state file, so deleting it revokes them all. Hold the task off while
+you do, in the order "The Duet server" in [`operations.md`](operations.md) gives. Duet then asks
+for a new sign-in on its next call.
+
+To turn Duet off, run `tailscale funnel --https=443 off` and set `CHANNEL_DUET_ENABLED` to `0` in
+`broker.env`, then run `Disable-ScheduledTask SapplefeldChannelsDuet`. The task
+would otherwise start every two minutes and exit at once. Disabling leaves a running process up, so
+end it with the task's stop and the port check the revoke steps in `operations.md` give. Remove this host's node from
+`CHANNEL_WEB_READERS` and restart the broker to close the reader path too.
 
 ## The launch dialog
 

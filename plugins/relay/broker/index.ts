@@ -1229,7 +1229,7 @@ export async function startBroker(
     sttKey = config.voice ? readVoiceSttKey(config.voiceSttKeyFile, stateRoot) : null;
     speechKey = config.voice ? readSpeechKey(config.speechKeyFile, stateRoot) : null;
     fastKey = config.voice ? readVoiceFastKey(config.voiceFastKeyFile, stateRoot) : null;
-    web = loadWebConfig(config, options.web);
+    web = loadWebConfig(config, { warn, ...options.web });
   } catch (error) {
     const message = `broker: refusing to start: ${String(error)}`;
     console.error(message);

@@ -139,9 +139,21 @@ export const SETTINGS: readonly Setting[] = [
   { key: "CHANNEL_WEB_OPERATORS", kind: "broker", meaning: "Comma-separated tailnet logins admitted to the pages", scope: "fleet", switch: ["CHANNEL_WEB_BIND"], unset: "off", stays: "the whole broker, which refuses to start with the bind set and no admitted login" },
   { key: "CHANNEL_WEB_DEVICES", kind: "broker", meaning: "Comma-separated tailnet node names a peer must be on", scope: "fleet", switch: ["CHANNEL_WEB_BIND"], unset: "off", stays: "the device check, so any node under an admitted login is admitted" },
   { key: "CHANNEL_WEB_SUMMARY_PEERS", kind: "broker", meaning: "Tailnet node names of sibling sandboxes admitted to the summary route alone", scope: "host", switch: ["CHANNEL_WEB_BIND"], unset: "off", stays: "the sibling summary route" },
+  { key: "CHANNEL_WEB_READERS", kind: "broker", meaning: "Tailnet node names admitted to a GET under /web/ other than /web/file/ and nothing else, the host's own node for the Duet process", scope: "host", switch: ["CHANNEL_WEB_BIND"], unset: "off", stays: "the reader route class, so the Duet tools are refused the views" },
+  { key: "CHANNEL_WEB_READER_KEY_FILE", kind: "broker", meaning: "Path of the file holding the key a reader node must send in X-Channels-Reader, inside the state root; the Duet process reads the same file", scope: "host", unset: "default" },
   { key: "CHANNEL_WEB_TAILSCALE", kind: "broker", meaning: "The Tailscale CLI the surface identifies peers with", scope: "host", unset: "default" },
   { key: "CHANNEL_WEB_STATIC_ROOT", kind: "broker", meaning: "Absolute path of the directory the pages are served from", scope: "host", unset: "default" },
   { key: "CHANNEL_WEB_SIBLINGS", kind: "broker", meaning: "Name=address:port entries for the sibling sandboxes this broker polls", scope: "host", switch: ["CHANNEL_WEB_BIND"], unset: "off", stays: "the sibling poll and the rail on every page" },
+
+  // The Duet server, the read-only MCP process beside the broker, which reads these from the same
+  // file through the same allowlist.
+  { key: "CHANNEL_DUET_ENABLED", kind: "broker", meaning: "Whether the Duet process starts its two listeners; every other Duet key rides on it", scope: "host", unset: "off", stays: "the Duet server, whose process exits at once" },
+  { key: "CHANNEL_DUET_PORT", kind: "broker", meaning: "The loopback port the Duet public listener binds, which Tailscale Funnel forwards to", scope: "host", unset: "default" },
+  { key: "CHANNEL_DUET_APPROVE_PORT", kind: "broker", meaning: "The port the Duet approval page listens on at the web surface's bind", scope: "host", unset: "default" },
+  { key: "CHANNEL_DUET_PUBLIC_URL", kind: "broker", meaning: "The node's public HTTPS origin, the OAuth issuer and the MCP endpoint's host", scope: "host", switch: ["CHANNEL_DUET_ENABLED"], unset: "off", stays: "the Duet server, which refuses to start without it" },
+  { key: "CHANNEL_DUET_REDIRECT_URIS", kind: "broker", meaning: "Comma-separated redirect URIs a Duet client may register", scope: "fleet", unset: "default" },
+  { key: "CHANNEL_DUET_CLIENT_RANGES", kind: "broker", meaning: "Comma-separated IPv4 ranges a machine call to the Duet public listener is admitted from", scope: "fleet", unset: "default" },
+  { key: "CHANNEL_DUET_STATE", kind: "broker", meaning: "Path of the Duet state file holding clients and hashed tokens", scope: "host", unset: "default" },
 
   // The four keys the launcher or the installer reads from the file.
   { key: "CHANNEL_NODE_EXE", kind: "launcher", meaning: "Absolute path to node, pinned at install time and read by the launcher", scope: "host", unset: "default" },
@@ -173,6 +185,7 @@ export const SWITCH_RULES: Readonly<Record<string, (value: string) => boolean>> 
   CHANNEL_RESPONSE_GATE: isGateOn,
   CHANNEL_WEB_BIND: isPresent,
   CHANNEL_DISCORD_CHANNEL: isPresent,
+  CHANNEL_DUET_ENABLED: isFlagOn,
 };
 
 /**

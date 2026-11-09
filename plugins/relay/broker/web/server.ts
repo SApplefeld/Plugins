@@ -35,6 +35,7 @@
 // A refused request answers with an empty body whatever the reason, so nothing about the lists
 // or the resolver leaks to whoever was refused. Nothing from a header reaches the log: a refusal
 // line carries the socket's own peer address and a fixed reason.
+import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
@@ -44,12 +45,12 @@ import { MAX_ASKS_PER_LIST, MAX_ASK_FIELD_LENGTH, questionOf } from "../decision
 import type { AskEntry } from "../decisions/ledger.ts";
 import type { Logger } from "../log.ts";
 import { fit, oneLine } from "../sanitize.ts";
-import { foldRootName } from "./config.ts";
+import { READER_KEY_HEADER, foldRootName } from "./config.ts";
 import type { WebConfig } from "./config.ts";
 import type { TailnetPeer, WebIdentity } from "./identity.ts";
 import { summaryView } from "./summary.ts";
 import type { SiblingsView } from "./siblings.ts";
-import { lineageKnown, talkView } from "./talk.ts";
+import { RING_CAPACITY, lineageKnown, talkView } from "./talk.ts";
 import type { TalkRing, TalkViewInput } from "./talk.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
@@ -104,6 +105,8 @@ const REPO_PREFIX = "/repo/";
 const ROUTE_PREFIX = "/web/";
 /** The one path the summary peer list admits a node to, the summary `registerViewHandlers` serves. */
 const SUMMARY_PATH = `${ROUTE_PREFIX}summary`;
+/** The one route name under `/web/` the reader list never admits, the attachment upload and download. */
+const READER_EXCLUDED_ROUTE = "file";
 
 /** The file kinds the static handler serves, by extension, and what each is sent as. */
 export const STATIC_TYPES: Readonly<Record<string, string>> = {
@@ -250,19 +253,53 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
   const staticRoot = path.resolve(config.staticRoot);
 
   /**
-   * The login and node check against the lists, lower-cased to match the lists' own form. The login
-   * rule is the same on every path. The node rule takes the path: the summary route admits a node on
-   * the device list or on the summary peer list, and every other path, pages and files included,
-   * admits a node on the device list alone, so a sibling sandbox's node reads the summary and
-   * nothing else. With no device list the node is not checked anywhere, and the peer list adds
-   * nothing.
+   * Whether a path is one the reader list admits: a JSON route under `/web/` other than the file
+   * route, exact and under its subpath alike, so a reader never reaches a served attachment.
    */
-  function admitted(login: string, node: string, pathname: string): boolean {
+  function readerPath(pathname: string): boolean {
+    if (!pathname.startsWith(ROUTE_PREFIX)) return false;
+    const rest = pathname.slice(ROUTE_PREFIX.length);
+    return rest !== READER_EXCLUDED_ROUTE && !rest.startsWith(`${READER_EXCLUDED_ROUTE}/`);
+  }
+
+  /**
+   * The login and node check against the lists, lower-cased to match the lists' own form. The login
+   * rule is the same on every path. The node rule takes the path and the method: the summary route
+   * admits a node on the device list or on the summary peer list; a GET on a reader path admits a
+   * node on the device list or on the reader list; and every other request, pages, files and every
+   * POST included, admits a node on the device list alone. So a sibling sandbox's node reads the
+   * summary and nothing else, and the host's own node reads the JSON views and nothing else. A node
+   * admitted through the reader list alone must also carry the reader key in `X-Channels-Reader`,
+   * since the node names a machine rather than an account; without it, or with a wrong value, it is
+   * refused as a node off the device list is. With no device list the node is not checked anywhere,
+   * and neither list adds anything.
+   */
+  function admitted(
+    login: string,
+    node: string,
+    method: string | undefined,
+    pathname: string,
+    readerHeader: string | string[] | undefined,
+  ): boolean {
     if (!config.operators.includes(login.toLowerCase())) return false;
     if (config.devices === null) return true;
     const named = node.toLowerCase();
     if (config.devices.includes(named)) return true;
-    return pathname === SUMMARY_PATH && config.summaryPeers.includes(named);
+    if (pathname === SUMMARY_PATH && config.summaryPeers.includes(named)) return true;
+    if (method !== "GET" || !readerPath(pathname) || !config.readers.includes(named)) return false;
+    return readerKeyMatches(readerHeader);
+  }
+
+  /**
+   * Whether a request's `X-Channels-Reader` equals the reader key: one header value, equal length
+   * and equal bytes, read in constant time so the comparison leaks nothing by its duration. No key
+   * loaded matches nothing.
+   */
+  function readerKeyMatches(header: string | string[] | undefined): boolean {
+    if (config.readerKey === null || typeof header !== "string") return false;
+    const given = Buffer.from(header, "utf8");
+    const expected = Buffer.from(config.readerKey, "utf8");
+    return given.length === expected.length && timingSafeEqual(given, expected);
   }
 
   /**
@@ -389,11 +426,11 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
       return;
     }
     const pathname = (request.url ?? "/").split("?")[0];
-    if (!admitted(peer.login, peer.node, pathname)) {
+    if (!admitted(peer.login, peer.node, request.method, pathname, request.headers[READER_KEY_HEADER])) {
       // The login and the node are the peer's own identifiers and stay out of the line: the
       // address is enough to find the node in the admin console, and a line the operator reads
-      // should not become a list of who tried. One reason covers the device list and the peer list,
-      // since a summary peer refused a page is a node the page's list does not admit.
+      // should not become a list of who tried. One reason covers the device list, the peer list and
+      // the reader list, since a peer or reader refused a page is a node the page's list does not admit.
       request.resume();
       refusals.warn("peer is not an admitted operator on an admitted device", address);
       empty(response, 403);
@@ -734,14 +771,25 @@ export type TalkHandlerOptions = {
 
 /** A `since` value is a count the ring handed out: digits only, and short enough to stay exact. */
 const SINCE_SHAPE = /^[0-9]{1,15}$/;
+/** A `limit` value is a line count: digits only, read as 1 to the ring's capacity. */
+const LIMIT_SHAPE = /^[0-9]{1,3}$/;
+/** A `clip` value is a code point count: digits only, read as 1 to `MAX_CLIP`. */
+const CLIP_SHAPE = /^[0-9]{1,5}$/;
+/** The largest `clip` the talk route accepts, in code points. */
+const MAX_CLIP = 65_536;
 
 /**
- * Registers `GET /web/talk?lineage=<name>&since=<seq>`. It answers the lines of that lineage's ring
- * newer than `since`, which omitted reads as the whole ring, with the live session that carries the
- * lineage or null where none does. A missing or repeated `lineage`, one that is not valid percent
- * encoding, a `since` that is not a plain count, and a lineage that no registry record carries and
- * the roster, where one is read, does not name, each answer 400 with an empty body. A request string
- * reaches no response and no log.
+ * Registers `GET /web/talk?lineage=<name>&since=<seq>&limit=<count>&clip=<points>`. It answers the
+ * lines of that lineage's ring newer than `since`, which omitted reads as the whole ring, with the
+ * live session that carries the lineage or null where none does. An optional `limit`, 1 to the
+ * ring's capacity, keeps that many of those lines: the newest where `since` is omitted, the oldest
+ * after it where it is given. An optional `clip`, 1 to 65536, cuts each line's text at that many
+ * code points and marks a cut line `clipped: true`, so a reader bounds the body by its own request
+ * whatever a line holds. The operator's page sends neither and reads every line whole. A missing or
+ * repeated `lineage`, one that is not valid percent encoding, a `since` that is not a plain count, a
+ * `limit` or `clip` that is not one inside its range or is repeated, and a lineage that no registry
+ * record carries and the roster, where one is read, does not name, each answer 400 with an empty
+ * body. A request string reaches no response and no log.
  */
 export function registerTalkHandlers(register: WebHandler["register"], ring: TalkRing, options: TalkHandlerOptions): void {
   const now = options.now ?? Date.now;
@@ -758,6 +806,21 @@ export function registerTalkHandlers(register: WebHandler["register"], ring: Tal
     if (lineage === null || lineage === "") return empty(response, 400);
     const rawSince = query.has("since") ? single(query, "since") : "0";
     if (rawSince === null || !SINCE_SHAPE.test(rawSince)) return empty(response, 400);
+    let limit: { count: number; newest: boolean } | undefined;
+    if (query.has("limit")) {
+      const rawLimit = single(query, "limit");
+      if (rawLimit === null || !LIMIT_SHAPE.test(rawLimit)) return empty(response, 400);
+      const count = Number(rawLimit);
+      if (count < 1 || count > RING_CAPACITY) return empty(response, 400);
+      limit = { count, newest: !query.has("since") };
+    }
+    let clip: number | undefined;
+    if (query.has("clip")) {
+      const rawClip = single(query, "clip");
+      if (rawClip === null || !CLIP_SHAPE.test(rawClip)) return empty(response, 400);
+      clip = Number(rawClip);
+      if (clip < 1 || clip > MAX_CLIP) return empty(response, 400);
+    }
     const readings = options.source();
     if (!lineageKnown(readings.records, readings.roster.value, lineage)) return empty(response, 400);
     sendJson(
@@ -765,6 +828,8 @@ export function registerTalkHandlers(register: WebHandler["register"], ring: Tal
       talkView(ring, {
         lineage,
         since: Number(rawSince),
+        ...(limit === undefined ? {} : { limit }),
+        ...(clip === undefined ? {} : { clip }),
         records: readings.records,
         threadFor: options.threadFor,
         guildId: options.guildId,

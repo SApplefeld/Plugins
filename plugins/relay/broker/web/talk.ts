@@ -13,7 +13,7 @@ import type { ReceiptStage } from "../routing/receipts.ts";
 import type { QuestionEntryView } from "../question-desk.ts";
 import type { PendingPermission } from "../security/permission.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
-import { visible, withoutInvisible } from "../sanitize.ts";
+import { sliceCodePoints, visible, withoutInvisible } from "../sanitize.ts";
 
 /** How many lines a lineage's ring keeps; the oldest is dropped when a newer one would pass it. */
 export const RING_CAPACITY = 200;
@@ -61,6 +61,8 @@ export type TalkLine = {
   text: string;
   files: TalkFile[];
   receipt: TalkReceipt;
+  /** True where a view's `clip` cut the text; absent where the text is whole. */
+  clipped?: true;
 };
 
 /**
@@ -208,6 +210,13 @@ export type TalkPermission = PendingPermission;
 export type TalkViewInput = {
   lineage: string;
   since: number;
+  /**
+   * At most this many of the lines after `since`: the newest where `newest` holds, else the oldest.
+   * Absent, every line after `since`. `nextSeq` is the ring's newest seq either way.
+   */
+  limit?: { count: number; newest: boolean };
+  /** Each line's text cut at this many code points, a cut line marked `clipped`. Absent, every text whole. */
+  clip?: number;
   records: readonly SessionRecord[];
   threadFor: (sessionId: string) => string | null;
   guildId: () => string | null;
@@ -275,11 +284,23 @@ function viewPermission(request: PendingPermission): TalkPermission {
   };
 }
 
-/** The line as the view carries it: the receipt read now from the tracker, and the key left out. */
-function viewLine(line: HeldLine, stageOf: TalkViewInput["stageOf"]): TalkLine {
+/**
+ * The line as the view carries it: the receipt read now from the tracker, the key left out, and the
+ * text cut at `clip` code points where one is given and the text runs past it.
+ */
+function viewLine(line: HeldLine, stageOf: TalkViewInput["stageOf"], clip: number | undefined): TalkLine {
   const { tracked, ...shown } = line;
   const receipt = tracked === null || stageOf === undefined ? null : stageOf(tracked.threadId, tracked.messageId);
-  return { ...shown, receipt };
+  if (clip === undefined) return { ...shown, receipt };
+  // A cut text is always shorter, so an equal one was not cut.
+  const text = sliceCodePoints(shown.text, clip);
+  return text === shown.text ? { ...shown, receipt } : { ...shown, text, receipt, clipped: true };
+}
+
+/** The lines a view's `limit` keeps, in the ring's order, oldest first. */
+function limited(lines: HeldLine[], limit: TalkViewInput["limit"]): HeldLine[] {
+  if (limit === undefined || lines.length <= limit.count) return lines;
+  return limit.newest ? lines.slice(-limit.count) : lines.slice(0, limit.count);
 }
 
 export function talkView(ring: TalkRing, input: TalkViewInput): TalkView {
@@ -306,7 +327,7 @@ export function talkView(ring: TalkRing, input: TalkViewInput): TalkView {
   return {
     lineage: input.lineage,
     session,
-    lines: ring.since(input.lineage, input.since).map((line) => viewLine(line, input.stageOf)),
+    lines: limited(ring.since(input.lineage, input.since), input.limit).map((line) => viewLine(line, input.stageOf, input.clip)),
     nextSeq: ring.newestSeq(input.lineage),
     ringStart: ring.startedAt,
     pending,

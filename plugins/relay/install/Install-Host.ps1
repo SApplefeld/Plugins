@@ -133,6 +133,35 @@ CHANNEL_WEB_SUMMARY_PEERS.
 .PARAMETER WebSiblings
 The sibling sandboxes this host polls for the rail, as Name=address:port entries, written as
 CHANNEL_WEB_SIBLINGS.
+
+.PARAMETER Duet
+Installs the Duet server, the read-only MCP endpoint Claude's connector reads this host through.
+Writes CHANNEL_DUET_ENABLED=1, CHANNEL_DUET_PUBLIC_URL, CHANNEL_DUET_STATE under the state root,
+and CHANNEL_WEB_READERS naming this host's own tailnet node, read from `tailscale status`, so the
+Duet tools are admitted to the broker's read-only views. Writes the web reader key, 32 random bytes
+as hex, to web-reader-key.txt under the state root where that file is missing, protected as the
+token file is, and names it in CHANNEL_WEB_READER_KEY_FILE; the broker admits the reader node only
+with that key in X-Channels-Reader. Hardens duet/ as the other trees are, and the Duet state file
+where one exists. Then runs `tailscale funnel --bg --https=443` forwarding the node's HTTPS name to
+the Duet port and reads `tailscale funnel status` back. Where `tailscale status` shows the node
+without the `https` capability or the `funnel` attribute the command is not run, and a refusal is
+a warning, since the operator enables both in the admin console. Requires CHANNEL_WEB_BIND, given
+here or recorded, since the approval page binds there, and cannot be combined with -SkipAcl.
+Omitted, no Duet key is written and no Funnel command runs.
+
+.PARAMETER DuetPublicUrl
+The node's HTTPS origin, written as CHANNEL_DUET_PUBLIC_URL. Defaults to https:// and the node's
+MagicDNS name as `tailscale status` reports it. Read only with -Duet.
+
+.PARAMETER DuetPort
+The Duet public listener's loopback TCP port, 1 to 65535, written as CHANNEL_DUET_PORT, and the
+port Funnel forwards to. Omitted, the key is left as the file has it and the server's default,
+8790, applies. Read only with -Duet.
+
+.PARAMETER DuetApprovePort
+The Duet approval page's TCP port on the tailnet bind, 1 to 65535, written as
+CHANNEL_DUET_APPROVE_PORT. Omitted, the key is left as the file has it and the server's default,
+8791, applies. Read only with -Duet.
 #>
 param(
     [Parameter(Mandatory)]
@@ -193,10 +222,25 @@ param(
     [string]$WebSummaryPeers,
 
     [ValidatePattern('^[^\r\n\x00]*\z')]
-    [string]$WebSiblings
+    [string]$WebSiblings,
+
+    [switch]$Duet,
+
+    [ValidatePattern('^[^\r\n\x00]*\z')]
+    [string]$DuetPublicUrl,
+
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$DuetPort,
+
+    [ValidateRange(1, 65535)]
+    [Nullable[int]]$DuetApprovePort
 )
 
 . (Join-Path $PSScriptRoot 'Install-Functions.ps1')
+
+# The Duet server's defaults, as duet/config.ts sets them: the Funnel command below names the public
+# port, so the value the server will run on is resolved here when none is given.
+$DefaultDuetPort = 8790
 
 # Before anything is written or prompted for: a config with no operator is one the broker refuses
 # to start on. This checks only that an operator is named; an ID given two classes across the two
@@ -215,6 +259,10 @@ if ($SkipAcl -and ($BotToken -or $BotTokenFile)) {
     throw "Install-Host: -SkipAcl cannot be combined with a token. A credential file this " +
         "installer left unprotected is worse than one it never wrote; run without -SkipAcl, or " +
         "without a token for a dry run against a fixture tree."
+}
+if ($SkipAcl -and $Duet) {
+    throw "Install-Host: -SkipAcl cannot be combined with -Duet, which writes the web reader key file, " +
+        "a credential this installer protects as it protects the token file."
 }
 
 if (-not $StateRoot) { $StateRoot = Get-ChannelStateRoot }
@@ -281,6 +329,62 @@ if ($Marketplace) {
     $Marketplace = $defaultMarketplace
 }
 
+# The Duet server's prerequisites, checked before the token prompt so a run that cannot install Duet
+# stops with nothing written. The approval page binds on the web surface's address, so the server
+# refuses to start without CHANNEL_WEB_BIND; the Tailscale CLI names this node and opens the Funnel.
+$tailscalePath = $null
+$tailscaleSelf = $null
+if ($Duet) {
+    $recordedBind = $null
+    # The file as the last install and the operator left it, read once here. A Duet path or URL it
+    # already records is kept by a re-run that does not name it, as every web key is.
+    $recordedForDuet = @{}
+    if (Test-Path -LiteralPath $envFile) {
+        $recordedForDuet = Get-ChannelEnvFile -Path $envFile
+        if ($recordedForDuet.ContainsKey('CHANNEL_WEB_BIND')) {
+            $recordedBind = ([string]$recordedForDuet['CHANNEL_WEB_BIND']).Trim()
+        }
+    }
+    if (-not $WebBind -and -not $recordedBind) {
+        throw "Install-Host: -Duet needs the web surface: pass -WebBind and -WebOperators, or install " +
+            "the web surface first. The Duet approval page binds on CHANNEL_WEB_BIND, and the server " +
+            "refuses to start without it."
+    }
+    $tailscaleCommand = Get-Command tailscale -ErrorAction SilentlyContinue
+    if ($tailscaleCommand) {
+        $tailscalePath = $tailscaleCommand.Source
+    } elseif (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe')) {
+        $tailscalePath = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
+    } else {
+        throw "Install-Host: -Duet needs the Tailscale CLI, and no 'tailscale' is on PATH or under " +
+            "'$env:ProgramFiles\Tailscale'. Install Tailscale on this host first."
+    }
+    # The node's MagicDNS name, which gives the reader entry and the public URL. Read here, before
+    # anything is written, so a CLI that cannot answer stops the run. The reader entry is the name's
+    # first label, lower-cased: that label is the node name `tailscale whois` answers as
+    # Node.ComputedName, which the broker's gate compares. The OS host name in Self.HostName can
+    # differ from it in case, spacing and suffix, so it is never the entry.
+    $global:LASTEXITCODE = $null
+    $statusText = & $tailscalePath status --self --json 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Install-Host: 'tailscale status --self --json' failed (exit code $LASTEXITCODE): $statusText"
+    }
+    $tailscaleSelf = (ConvertFrom-Json -InputObject ($statusText -join "`n")).Self
+    $selfDnsName = ''
+    if ($tailscaleSelf) { $selfDnsName = ([string]$tailscaleSelf.DNSName).Trim().TrimEnd('.') }
+    $duetReaderNode = ($selfDnsName -split '\.', 2)[0].ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($duetReaderNode)) {
+        throw "Install-Host: 'tailscale status --self --json' named no DNSName for this node, so neither " +
+            "its node name for CHANNEL_WEB_READERS nor its public URL is known. Is Tailscale signed in " +
+            "on this host, with MagicDNS on for the tailnet?"
+    }
+    # -DuetPublicUrl where given, else the URL the file records, else the node's own HTTPS name.
+    if (-not $DuetPublicUrl) {
+        $recordedUrl = [string]$recordedForDuet['CHANNEL_DUET_PUBLIC_URL']
+        $DuetPublicUrl = if ([string]::IsNullOrWhiteSpace($recordedUrl)) { 'https://' + $selfDnsName } else { $recordedUrl.Trim() }
+    }
+}
+
 if (-not $BotToken -and -not $BotTokenFile) {
     $BotToken = Read-Host -AsSecureString -Prompt 'Discord bot token'
 }
@@ -330,8 +434,13 @@ $brokerDir = Join-Path $RepoRoot 'broker'
 # The module holding the protection check the verification pass below runs. Resolved under
 # -RepoRoot rather than from $PSScriptRoot so a run pointed at a fixture tree uses that tree's copy.
 $credentialsScript = Join-Path $brokerDir 'discord\credentials.ts'
-foreach ($required in @($sessionStartScript, $relayScript, $wrapperScript, $credentialsScript,
-        $hooksDir, $relayDir, $wrapperDir, $installDir, $brokerDir)) {
+# The Duet server's tree, which its scheduled task executes as the broker's task executes broker/.
+# Required and hardened only with -Duet: a checkout without it installs the broker as before.
+$duetDir = Join-Path $RepoRoot 'duet'
+$requiredPaths = @($sessionStartScript, $relayScript, $wrapperScript, $credentialsScript,
+    $hooksDir, $relayDir, $wrapperDir, $installDir, $brokerDir)
+if ($Duet) { $requiredPaths += @($duetDir, (Join-Path $duetDir 'index.ts')) }
+foreach ($required in $requiredPaths) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Install-Host: expected path not found at '$required'. Is -RepoRoot correct?"
     }
@@ -391,6 +500,47 @@ if (-not $nodeCommand) {
 }
 $nodePath = $nodeCommand.Source
 
+# A Duet file's path: the one the env file records under $Key where it records one, since the broker
+# and the server read the file from that path, else $DefaultName under the state root. A recorded
+# path outside the state root is refused, as a token file outside the root is refused: hardening it
+# could strip a directory this installer does not own. $Why names who else refuses the path there.
+function Resolve-DuetRecordedPath {
+    param([string]$Key, [string]$DefaultName, [string]$Why)
+    $recorded = [string]$recordedForDuet[$Key]
+    if ([string]::IsNullOrWhiteSpace($recorded)) { return (Join-Path $StateRoot $DefaultName) }
+    $recorded = $recorded.Trim()
+    $full = [System.IO.Path]::GetFullPath($recorded)
+    if (-not $full.StartsWith("$resolvedStateRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Install-Host: $Key in '$envFile' is '$recorded', which is outside the state root " +
+            "'$resolvedStateRoot'. $Why Point that line inside the state root, or remove it to take " +
+            "the default, and re-run."
+    }
+    return $recorded
+}
+
+# The web reader key, which the broker requires of the Duet process's view reads in
+# X-Channels-Reader, so a node name alone admits nothing. Written only where missing, so a re-run
+# keeps the key the broker and the server already hold: 32 bytes from the system's cryptographic
+# generator, as hex. Written after every precondition above and hardened on the next line, with
+# nothing run in between, as the token file is; an existing file is hardened again below. The Duet
+# state file, which holds every client's token hashes, is resolved here too, so the path hardened
+# and verified below is the one the server writes.
+$readerKeyFile = Join-Path $StateRoot 'web-reader-key.txt'
+$duetStateFile = Join-Path $StateRoot 'duet-state.json'
+if ($Duet) {
+    $readerKeyFile = Resolve-DuetRecordedPath -Key 'CHANNEL_WEB_READER_KEY_FILE' `
+        -DefaultName 'web-reader-key.txt' -Why 'The broker refuses a reader key file there.'
+    $duetStateFile = Resolve-DuetRecordedPath -Key 'CHANNEL_DUET_STATE' -DefaultName 'duet-state.json' `
+        -Why 'The install hardens the state file, and refuses to harden a path it does not own.'
+}
+if ($Duet -and -not (Test-Path -LiteralPath $readerKeyFile)) {
+    $keyBytes = New-Object byte[] 32
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $generator.GetBytes($keyBytes) } finally { $generator.Dispose() }
+    Set-Utf8NoBomFile -Path $readerKeyFile -Content (-join ($keyBytes | ForEach-Object { $_.ToString('x2') }))
+    Protect-ChannelPath -Path $readerKeyFile
+}
+
 if (-not $SkipAcl) {
     # The whole execution surface a scheduled task and a Bypass-executed hook depend on: the hook
     # script and the wrapper (Chapter 3/4), and now install/ and broker/ too, since Register-
@@ -404,6 +554,15 @@ if (-not $SkipAcl) {
     Protect-ChannelPath -Path $wrapperDir
     Protect-ChannelPath -Path $installDir
     Protect-ChannelPath -Path $brokerDir
+    if ($Duet) {
+        Protect-ChannelPath -Path $duetDir
+        # The Duet state file holds every client's token hashes, so it takes the same grant the token file
+        # does, in its own right rather than through the state root's inheritance alone. The server
+        # creates it at its first sign-in, so a first install finds none and the root's grant covers
+        # the file once written.
+        if (Test-Path -LiteralPath $duetStateFile) { Protect-ChannelPath -Path $duetStateFile }
+        Protect-ChannelPath -Path $readerKeyFile
+    }
     Protect-ChannelPath -Path $tokenFile
     # The state root unconditionally, not only "the token's parent directory": with -BotTokenFile
     # pointed elsewhere inside the root, or with no token at all, broker.env, the broker's state
@@ -438,7 +597,16 @@ if (-not $SkipAcl) {
     # needs proven is its own list, and the token file's check covers that as its parent, which is
     # also precisely the check the broker itself runs at every start.
     $verifyTargets = @($tokenFile)
-    foreach ($tree in @($hooksDir, $relayDir, $wrapperDir, $installDir, $brokerDir)) {
+    # The reader key file, and the Duet state file holding hashed client tokens where one exists,
+    # are read back as the token file is. The check reads each file's access list, never its
+    # contents, and a refusal names the path alone.
+    if ($Duet) {
+        $verifyTargets += $readerKeyFile
+        if (Test-Path -LiteralPath $duetStateFile) { $verifyTargets += $duetStateFile }
+    }
+    $verifyTrees = @($hooksDir, $relayDir, $wrapperDir, $installDir, $brokerDir)
+    if ($Duet) { $verifyTrees += $duetDir }
+    foreach ($tree in $verifyTrees) {
         $verifyTargets += @(Get-ChildItem -LiteralPath $tree -Recurse -Force | ForEach-Object { $_.FullName })
     }
     try {
@@ -523,6 +691,41 @@ $webValues = [ordered]@{
 foreach ($key in $webValues.Keys) {
     if ($webValues[$key]) { $envValues[$key] = $webValues[$key] }
 }
+# The Duet keys, with -Duet alone. The switch is written on every Duet install. The public URL is
+# -DuetPublicUrl, else the recorded URL, else the node's name, so a re-run naming none writes back
+# what the file holds. The state file and the reader key file are written only where the file holds
+# no value, and the two ports only when given, as the web port is, so a hand-set value survives a
+# re-run. The reader entry is this node's own name as read above, lower-cased as the broker folds
+# every node list, so the Duet tools, which read the broker's views from this host, are admitted to
+# the read-only route class and nothing else.
+if ($Duet) {
+    $envValues['CHANNEL_DUET_ENABLED'] = '1'
+    $envValues['CHANNEL_DUET_PUBLIC_URL'] = $DuetPublicUrl
+    if ([string]::IsNullOrWhiteSpace([string]$recordedForDuet['CHANNEL_DUET_STATE'])) {
+        $envValues['CHANNEL_DUET_STATE'] = $duetStateFile
+    }
+    # Joined to any reader the file already names rather than replacing the list, so a node the
+    # operator added by hand survives a rerun.
+    $readers = [System.Collections.Generic.List[string]]::new()
+    if (Test-Path -LiteralPath $envFile) {
+        $recorded = (Get-ChannelEnvFile -Path $envFile)['CHANNEL_WEB_READERS']
+        if ($recorded) {
+            foreach ($entry in ($recorded -split ',')) {
+                $name = $entry.Trim().ToLowerInvariant()
+                if ($name -and -not $readers.Contains($name)) { $readers.Add($name) }
+            }
+        }
+    }
+    if (-not $readers.Contains($duetReaderNode)) { $readers.Add($duetReaderNode) }
+    $envValues['CHANNEL_WEB_READERS'] = $readers -join ','
+    if ([string]::IsNullOrWhiteSpace([string]$recordedForDuet['CHANNEL_WEB_READER_KEY_FILE'])) {
+        $envValues['CHANNEL_WEB_READER_KEY_FILE'] = $readerKeyFile
+    }
+    if ($null -ne $DuetPort) { $envValues['CHANNEL_DUET_PORT'] = $DuetPort.ToString([cultureinfo]::InvariantCulture) }
+    if ($null -ne $DuetApprovePort) {
+        $envValues['CHANNEL_DUET_APPROVE_PORT'] = $DuetApprovePort.ToString([cultureinfo]::InvariantCulture)
+    }
+}
 Set-ChannelEnvFile -Path $envFile -Values $envValues
 
 $fragment = Get-SubstitutedFragment -FragmentPath $fragmentPath -SessionStartScriptPath $sessionStartScript
@@ -557,3 +760,50 @@ Write-Host "Provisioned '$HostName': config at '$envFile', $hooksApplied."
 # the task's broker has no user profile of its own to fall back on.
 Write-Host ("Run install\Register-BrokerTask.ps1 -User '$([Security.Principal.WindowsIdentity]::GetCurrent().Name)' " +
     "-EnvFile '$envFile' from an elevated session to install the scheduled task.")
+
+if ($Duet) {
+    # The Funnel route: the node's HTTPS name on 443 forwarded to the Duet public listener on
+    # loopback. Funnel is the one path from outside the tailnet to this host, and it reaches that
+    # port alone. The port is the one the server will bind: -DuetPort where given, else the key the
+    # file already holds, else the server's default. `--bg` records the route in Tailscale's own
+    # serve configuration, so it survives a reboot without this script. A refusal is a warning
+    # rather than a failure: Funnel needs the tailnet's policy to grant `funnel` to this node, which
+    # the operator does in the admin console, and the rest of the install is sound without it.
+    $written = Get-ChannelEnvFile -Path $envFile
+    $funnelPort = $DefaultDuetPort
+    if ($written.Contains('CHANNEL_DUET_PORT') -and -not [string]::IsNullOrWhiteSpace($written['CHANNEL_DUET_PORT'])) {
+        $funnelPort = [int]$written['CHANNEL_DUET_PORT']
+    }
+    # The node's capabilities are read first, from the status read above, since the command on a node
+    # without them may print an enable link and wait rather than exit. The CLI's own check needs the
+    # `https` capability and the `funnel` node attribute, so a missing one skips the command.
+    $selfCaps = @()
+    if ($tailscaleSelf.CapMap) { $selfCaps = @($tailscaleSelf.CapMap.PSObject.Properties | ForEach-Object { $_.Name }) }
+    $missingCaps = @(@('https', 'funnel') | Where-Object { $selfCaps -cnotcontains $_ })
+    $funnelCommand = "tailscale funnel --bg --https=443 http://127.0.0.1:$funnelPort"
+    if ($missingCaps.Count -gt 0) {
+        Write-Warning ("Install-Host: '$funnelCommand' was not run, since this node lacks the " +
+            "$(($missingCaps | ForEach-Object { "'$_'" }) -join ' and ') capability in 'tailscale status'. " +
+            "Enable HTTPS certificates and Funnel for this node in the Tailscale admin console, then " +
+            "re-run with -Duet.")
+    } else {
+        $global:LASTEXITCODE = $null
+        $funnelOutput = & $tailscalePath funnel --bg --https=443 "http://127.0.0.1:$funnelPort" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning ("Install-Host: '$funnelCommand' was refused (exit code $LASTEXITCODE): " +
+                "$funnelOutput. Enable Funnel for this node in the Tailscale admin console, then run " +
+                "that command yourself.")
+        }
+    }
+    $global:LASTEXITCODE = $null
+    $funnelStatus = & $tailscalePath funnel status 2>&1
+    $funnelStatusText = ($funnelStatus -join "`n")
+    Write-Host "tailscale funnel status:"
+    Write-Host $funnelStatusText
+    if ($LASTEXITCODE -ne 0 -or $funnelStatusText -notmatch [regex]::Escape("http://127.0.0.1:$funnelPort")) {
+        Write-Warning ("Install-Host: 'tailscale funnel status' does not name http://127.0.0.1:$funnelPort, so " +
+            "$DuetPublicUrl does not reach the Duet server yet.")
+    }
+    Write-Host ("Run install\Register-DuetTask.ps1 -User '$([Security.Principal.WindowsIdentity]::GetCurrent().Name)' " +
+        "-EnvFile '$envFile' from an elevated session to install the Duet scheduled task.")
+}

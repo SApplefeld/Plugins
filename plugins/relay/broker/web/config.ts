@@ -4,11 +4,17 @@
 //
 // Where this departs from broker/discord/config.ts: the values arrive already read from the
 // environment by broker/config.ts, never as the environment itself, so the installer's env
-// allowlist pin, which scans that one file for the knobs it must carry, sees all eight.
+// allowlist pin, which scans that one file for the knobs it must carry, sees all ten.
 import path from "node:path";
-import { namesOneDirectory } from "../config.ts";
+import { namesOneDirectory, readWebReaderKey } from "../config.ts";
 import type { BrokerConfig } from "../config.ts";
 import { isTailnetAddress, tailnetAddress } from "./identity.ts";
+
+/**
+ * The request header a node admitted through the reader list alone carries the reader key in,
+ * lower-cased as Node presents a request's header names. The Duet tools send it.
+ */
+export const READER_KEY_HEADER = "x-channels-reader";
 
 /** A root's name as a request addresses it: compared without regard to case. */
 export function foldRootName(name: string): string {
@@ -44,6 +50,16 @@ export type WebConfig = {
    * admitted login is admitted everywhere already.
    */
   summaryPeers: readonly string[];
+  /**
+   * Tailnet node names admitted to a `GET` under `/web/` other than `/web/file/` and to nothing
+   * else, lower-cased; empty where none is set. Read beside a device list as the summary peers are.
+   */
+  readers: readonly string[];
+  /**
+   * The key a node admitted through `readers` alone must send in `X-Channels-Reader`, or null where
+   * the list is empty or the key file could not be read, in which case no reader is admitted.
+   */
+  readerKey: string | null;
   /** The Tailscale CLI, a path or a name on PATH. */
   tailscale: string;
   /** Absolute path of the directory pages are served from. */
@@ -53,8 +69,9 @@ export type WebConfig = {
 };
 
 /**
- * The values `loadConfig` reads for this surface: its eight knobs, and the project root list, which
- * the page addresses by last folder name.
+ * The values `loadConfig` reads for this surface: its ten knobs, the project root list, which the
+ * page addresses by last folder name, and the state file, whose directory the reader key file must
+ * sit inside.
  */
 export type WebConfigValues = Pick<
   BrokerConfig,
@@ -63,10 +80,13 @@ export type WebConfigValues = Pick<
   | "webOperators"
   | "webDevices"
   | "webSummaryPeers"
+  | "webReaders"
+  | "webReaderKeyFile"
   | "webTailscale"
   | "webStaticRoot"
   | "webSiblings"
   | "boardProjects"
+  | "stateFile"
 >;
 
 /** The most siblings one broker polls; the program names three sandboxes. */
@@ -129,6 +149,17 @@ export type WebConfigContext = {
    * which no test host has; the default runs `tailscale ip -4`.
    */
   tailnetAddress?: (cli: string) => string | null;
+  /**
+   * How the reader key is read from its file under the state root: the key, or a throw naming the
+   * file and the cause. Injected so a test reaches a loaded key without a hardened file; the
+   * default is `readWebReaderKey`.
+   */
+  readReaderKey?: (file: string, stateRoot: string) => string;
+  /**
+   * Where a reader key that cannot be read is reported. The broker passes the warning that writes
+   * its log file too, since a scheduled task has no console; the default is `console.warn`.
+   */
+  warn?: (message: string) => void;
 };
 
 /** The one spelling of the bind that is resolved rather than taken as an address. */
@@ -191,6 +222,21 @@ export function loadWebConfig(
   }
   const devices = values.webDevices === null ? null : values.webDevices.map((node) => node.toLowerCase());
   const summaryPeers = values.webSummaryPeers.map((node) => node.toLowerCase());
+  const readers = values.webReaders.map((node) => node.toLowerCase());
+  // Read only while the list names a node. A key that cannot be read admits no reader rather than
+  // refusing the start, since the readers are the Duet process alone and the operator's pages do not
+  // depend on them; the warning names the file and the cause, never the contents.
+  let readerKey: string | null = null;
+  if (readers.length > 0) {
+    const read = context.readReaderKey ?? readWebReaderKey;
+    try {
+      readerKey = read(values.webReaderKeyFile, path.dirname(values.stateFile));
+    } catch (error) {
+      (context.warn ?? console.warn)(
+        `broker: ${(error as Error).message}; no node on CHANNEL_WEB_READERS is admitted`,
+      );
+    }
+  }
 
   // Refused here rather than at the bind, which runs after the broker has logged in to Discord.
   if (values.webPort > 65_535) {
@@ -230,6 +276,8 @@ export function loadWebConfig(
     operators,
     devices,
     summaryPeers,
+    readers,
+    readerKey,
     tailscale: values.webTailscale,
     staticRoot: values.webStaticRoot,
     siblings,

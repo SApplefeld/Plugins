@@ -319,6 +319,21 @@ export type BrokerConfig = {
    * `webDevices`. With `webDevices` null the node is not checked, so the list adds nothing.
    */
   webSummaryPeers: readonly string[];
+  /**
+   * The tailnet node names the web surface admits to a `GET` under `/web/` other than `/web/file/`,
+   * and to nothing else, as `CHANNEL_WEB_READERS` names them, split on commas and trimmed; empty
+   * when unset. The install writes the host's own node here, so the Duet process on the host reads
+   * the JSON views without the device list admitting every process on the host to every page and
+   * act route. With `webDevices` null the node is not checked, so the list adds nothing.
+   */
+  webReaders: readonly string[];
+  /**
+   * The file holding the key a node on `webReaders` must send in `X-Channels-Reader`, as
+   * `CHANNEL_WEB_READER_KEY_FILE` names it, else `web-reader-key.txt` beside the state file. The
+   * path alone: the file is read where the web surface is configured, by `readWebReaderKey`, and
+   * only while the reader list names a node.
+   */
+  webReaderKeyFile: string;
   /** The Tailscale CLI the web surface resolves peers with: a path, or a name found on PATH. */
   webTailscale: string;
   /** Absolute path to the directory the web surface's pages are served from. */
@@ -578,8 +593,11 @@ const DEFAULT_MAX_SESSIONS = 500;
 const DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_LOG_MAX_FILES = 5;
 // One above the loopback port, so a host reading its own process list tells the two apart at a
-// glance. A bare `tailscale` is found on PATH, which is where the installer puts the CLI.
-const DEFAULT_WEB_PORT = 8788;
+// glance. A bare `tailscale` is found on PATH, which is where the installer puts the CLI. Exported
+// for the Duet server, whose tools read the views at the port the broker defaults to.
+export const DEFAULT_WEB_PORT = 8788;
+/** The reader key file's name, beside the state file, where `Install-Host.ps1 -Duet` writes it. */
+const WEB_READER_KEY_FILE_NAME = "web-reader-key.txt";
 /**
  * How often the web surface tries its bind again while its address is not available yet, as at
  * boot before Tailscale is up. Thirty seconds because it is the relay reconnect ceiling,
@@ -1165,7 +1183,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
       MAX_VOICE_HOLD_SECOND_MS,
       DEFAULT_VOICE_HOLD_SECOND_MS,
     ),
-    // The web surface's eight, read here and only here so the installer's env allowlist pin sees
+    // The web surface's ten, read here and only here so the installer's env allowlist pin sees
     // them, and validated in broker/web/config.ts, where the surface is: the bind is kept as
     // written because the tailnet range check and the `tailscale` literal belong to that module.
     // Unset by default, and unset is the absence of the machinery: no second listener is created.
@@ -1174,6 +1192,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BrokerConfig {
     webOperators: webList(env.CHANNEL_WEB_OPERATORS) ?? [],
     webDevices: webList(env.CHANNEL_WEB_DEVICES),
     webSummaryPeers: webList(env.CHANNEL_WEB_SUMMARY_PEERS) ?? [],
+    webReaders: webList(env.CHANNEL_WEB_READERS) ?? [],
+    webReaderKeyFile:
+      env.CHANNEL_WEB_READER_KEY_FILE?.trim() ||
+      path.join(path.dirname(env.CHANNEL_BROKER_STATE?.trim() || defaultStateFile(env)), WEB_READER_KEY_FILE_NAME),
     webTailscale: env.CHANNEL_WEB_TAILSCALE?.trim() || DEFAULT_WEB_TAILSCALE,
     webStaticRoot: env.CHANNEL_WEB_STATIC_ROOT?.trim() || defaultWebStaticRoot(),
     webSiblings: webList(env.CHANNEL_WEB_SIBLINGS) ?? [],
@@ -1262,6 +1284,32 @@ export function readSpeechKey(
   protect: (file: string) => void = assertTokenFileIsProtected,
 ): string | null {
   return readVoiceKey("speech", file, stateRoot, protect);
+}
+
+/**
+ * The web surface's reader key, read from the file `webReaderKeyFile` names, which a node admitted
+ * through the reader list alone must send in `X-Channels-Reader`. The broker and the Duet process
+ * read it here, so both hold the file to one rule: inside the state root, under the rule
+ * `readVoiceSttKey` states, and then held to the Discord token file's protection check. A file that
+ * is outside the root, unprotected, missing, unreadable, empty or holds a character a request header
+ * cannot carry throws, naming the file and the cause, never the contents. What a throw costs is the
+ * caller's: the broker admits no reader, and the Duet process refuses to start.
+ */
+export function readWebReaderKey(
+  file: string,
+  stateRoot: string,
+  // Injectable so a test reaches each refusal without a hardened file; the default is the check
+  // the token file is held to.
+  protect: (file: string) => void = assertTokenFileIsProtected,
+): string {
+  if (!isInside(file, stateRoot)) {
+    throw new Error(`the web reader key file ${file} is outside the state root ${stateRoot}`);
+  }
+  try {
+    return readKeyFile(file, protect);
+  } catch (error) {
+    throw new Error(`the web reader key file ${file} ${(error as Error).message}`);
+  }
 }
 
 /**
