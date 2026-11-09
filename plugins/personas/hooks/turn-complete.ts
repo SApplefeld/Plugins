@@ -718,7 +718,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           timestamp: Date.now(),
           loop: "goal",
           action: "lead_set",
-          detail: `${turnLeaf.id}: ${leadLine.state}: ${leadLine.reason.slice(0, 150)}`,
+          detail: `${turnLeaf.id}: ${leadLine.state}: ${leadLine.reason}`,
         });
         const leadHolder = planHolderOf(sess.state, turnLeaf);
         if (leadHolder?.planPath) {
