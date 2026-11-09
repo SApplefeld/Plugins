@@ -157,15 +157,16 @@ export interface ToolCallContext extends SharedHandlerState {
 // persist yielded, and the error text where it threw.
 export type GoalWriteOutcome = boolean | { failed: string };
 
-// A goal tool's store write. persist reads and writes the store with no try
-// of its own, so a store that does not parse or a disk that refuses the write
-// throws here, and a throw left to unwind would leave the caller unanswered
-// while the change stands in memory. A settled write returns persist's
-// boolean, with `rollBack` handed to persist for the yield path. A throw runs
-// `rollBack` where one was given, pushes one goal_write_failed decision naming
-// the tool, the ids the change touched and the error, and returns the error
-// text, bounded and bracket-safe, for the tool's answer. The decision waits
-// in memory with the change, and both land on the next write that succeeds.
+// A goal tool's or the ask tool's store write. persist reads and writes the
+// store with no try of its own, so a store that does not parse or a disk that
+// refuses the write throws here, and a throw left to unwind would leave the
+// caller unanswered while the change stands in memory. A settled write
+// returns persist's boolean, with `rollBack` handed to persist for the yield
+// path. A throw runs `rollBack` where one was given, pushes one
+// goal_write_failed decision naming the tool, the ids the change touched and
+// the error, and returns the error text, bounded and bracket-safe, for the
+// tool's answer. The decision waits in memory with the change, and both land
+// on the next write that succeeds.
 export async function persistAnswering(
   ctx: Pick<ToolCallContext, "persist" | "sess">,
   tool: string,
@@ -1524,10 +1525,14 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // "Recommend:". A refusal writes no entry and no commons record, logs
   // the decision the line route logs for its guard, and names the guard.
   // A subagent's call is refused, as turn.complete refuses a subagent's
-  // closing text, since only the main loop files an ask. A save that
-  // fails takes the entry back off the ledger before the yield's own
-  // write and marks its commons record withdrawn, so the deny saying the
-  // write was not saved is true.
+  // closing text, since only the main loop files an ask. The save goes
+  // through persistAnswering, so a save that yields or throws takes the
+  // entry back off the ledger, marks its commons record withdrawn where
+  // the commons store takes that write, and denies: the yield's deny says
+  // the persona is held, and the throw's names the error from the one
+  // goal_write_failed decision the helper logs. A record the commons store
+  // refuses to withdraw stays open until the owner's next start expires
+  // it, and the throw's deny says so.
   if ((e as any).tool === "mcp__personas__ask_open") {
     if (inSubagent) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -1577,13 +1582,15 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       };
       return { deny: `ask_open: refused, ${refusedBy[opened]}.` };
     }
-    const openWriteOk = await persist(() => {
+    const written = await persistAnswering(ctx, "ask_open", opened.id, () => {
       sess.state.asks = sess.state.asks.filter((a) => a !== opened);
       sess.state.askBriefOwed = owedBeforeOpen;
       sess.asksOpenedThisTurn -= 1;
     });
-    if (!openWriteOk) {
+    if (written !== true) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      // True once no open record is left for a reader to answer into.
+      let recordClosed = false;
       try {
         const store = commonsStore();
         const askRecord = await readAskRecord(store, sess.persona, opened.id);
@@ -1591,7 +1598,14 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
           askRecord.status = "withdrawn";
           await store.set(askKey(sess.persona, opened.id), askRecord);
         }
+        recordClosed = true;
       } catch { /* non-fatal: the owner start expires an open record no ledger entry names */ }
+      if (written !== false) {
+        if (!recordClosed) {
+          return { deny: `ask_open: the store write failed with ${written.failed}; nothing was saved, and the ask's record could not be withdrawn and expires at the owner's next start. Ask again once the store takes a write.` };
+        }
+        return { deny: `ask_open: the store write failed with ${written.failed}; the ask was withdrawn and nothing was saved. Ask again once the store takes a write.` };
+      }
       return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
     }
     return { result: JSON.stringify({ id: opened.id, blocking: opened.blocking, open: openAskEntries(sess.state).map((a) => a.id) }, null, 2) };
