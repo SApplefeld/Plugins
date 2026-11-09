@@ -33,11 +33,17 @@ export type ThreadWriter = {
    * stamps the floor `notice` keeps. Reports the outcome, because the model is told whether it
    * landed, and the id it carries on success, when Discord's response yielded one, is the target
    * of a later `edit` on the same message.
+   *
+   * `mentionUserIds` is the roster IDs a reply tool call resolved its names to, passed on the
+   * run's first message alone and left off everywhere else, so a reply pings exactly the members
+   * the broker resolved and a reply naming nobody carries no mention field at all, as it always
+   * has. The outbound router is the one caller that passes it, under its own per-thread window.
    */
   reply: (
     threadId: string,
     text: string,
     file?: { name: string; data: Uint8Array; contentType: string },
+    mentionUserIds?: readonly string[],
   ) => Promise<CallOutcome<{ messageId: string | null }>>;
   /**
    * Rewrites a message this writer posted. Spends its own budget, separate from `reply`, `notice`,
@@ -61,8 +67,8 @@ export type ThreadWriter = {
    */
   notice: (threadId: string, text: string) => Promise<boolean>;
   /**
-   * Posts a message that mentions exactly the users passed, every operator on the ping tier, or
-   * nobody when the caller passes an empty list.
+   * Posts a broker-authored alert that mentions exactly the users passed, every operator on the
+   * ping tier, or nobody when the caller passes an empty list.
    *
    * The same bucket as `reply` and `notice`, deliberately: this is the write that reaches a phone,
    * so a flood of them is the loudest failure available here, and it is bounded by the budget
@@ -196,7 +202,7 @@ export function createThreadWriter(options: ThreadWriterOptions): ThreadWriter {
   }
 
   return {
-    reply: (threadId, text, file) => post(threadId, text, [], file),
+    reply: (threadId, text, file, mentionUserIds = []) => post(threadId, text, mentionUserIds, file),
     edit,
 
     async notice(threadId, text) {

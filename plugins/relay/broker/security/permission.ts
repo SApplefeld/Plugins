@@ -168,6 +168,19 @@ export const MAX_MODEL_CHANGE_PINGS_PER_WINDOW = 1;
 export const MAX_MODEL_CHANGE_ALERTS_PER_WINDOW = 4;
 
 /**
+ * Ping-bearing replies one thread may post in a window.
+ *
+ * One, because a ping sends a person to the thread, where they then read everything it holds: a
+ * second ping inside a minute reaches someone who is already reading. The reply tool's list is the
+ * one mention a session's own call can cause, resolved against the roster and nothing else, and a
+ * steered session with no window could ping every roster member on every reply, bounded only by
+ * the post budget. Past it the reply still posts, with no pills and no mention list, exactly as a
+ * reply naming nobody does, and the session is told its pings were quieted. There is no post
+ * ceiling and no drop tier: a reply is conversation, and the thread must still show it.
+ */
+export const MAX_REPLY_PINGS_PER_WINDOW = 1;
+
+/**
  * The volume window's shape: the callable spends a slot and answers the level, and `refund`
  * returns one for a write that never landed.
  *
@@ -181,8 +194,10 @@ export type AlertVolume = {
    *
    * The window counts messages that reached the channel, so a refusal that kept its stamp would
    * quiet or drop the write that finally lands: a caller retrying through an outage would arrive
-   * mentionless for no message anyone ever saw. The newest stamp is the one popped, which under
-   * one caller per instance is the slot the failed write itself spent. A refund with nothing
+   * mentionless for no message anyone ever saw. The newest stamp is the one popped, which is the
+   * slot the failed write itself spent so long as no other spend on the thread falls between that
+   * write's spend and its refund: one caller per instance, taking each thread's spend and refund
+   * in turn rather than interleaved. A refund with nothing
    * spent is a no-op rather than a credit: the window can never hold fewer stamps than the
    * messages that landed.
    */

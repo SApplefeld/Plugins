@@ -41,11 +41,14 @@ export type RawRequest = (input: {
 }) => Promise<RawResult>;
 
 /**
- * No mention of any kind is ever resolved, on any message this bot writes.
+ * No mention class is ever resolved from the content of any message this bot writes.
  *
  * A session name and a tool name arrive from a local process that can announce itself as
  * `@everyone`, and the text of a card is assembled from them. An empty `parse` list is what makes
- * every such string inert: it renders as the characters it contains and pings nobody.
+ * every such string inert: it renders as the characters it contains and pings nobody. The only
+ * mentions any write resolves are roster IDs the broker itself placed on a users whitelist beside
+ * this list, in `postToThread` below: the operators on an alert, and the roster members a reply's
+ * resolved list names, each under a per-thread window. Every other write carries this list alone.
  */
 const NO_MENTIONS = { parse: [] as string[] };
 
@@ -387,12 +390,13 @@ export function createDiscordTransport(
         {
           content: text,
           // The empty `parse` list still stands: no mention class is resolved from the content, so
-          // `@everyone`, `@here`, a role, and any user the text happens to name all stay inert. An
-          // alert adds the operators' IDs to the users list, which is a whitelist and not a
-          // widening: those IDs are the only mentions Discord will resolve, and the renderer has
-          // escaped the mention syntax out of every untrusted field, so the only mentions in the
-          // message are the ones the broker wrote. An empty list resolves nobody, as an absent one
-          // does.
+          // `@everyone`, `@here`, a role, and any user the text happens to name all stay inert. A
+          // caller adds roster IDs to the users list, which is a whitelist and not a widening: an
+          // alert names the operators, and a reply names the roster members its resolved list
+          // matched, each under a per-thread window, and the broker placed every one of them.
+          // Those IDs are the only mentions Discord will resolve, and the renderer has escaped the
+          // mention syntax out of every untrusted field, so the only mentions in the message are
+          // the ones the broker wrote. An empty list resolves nobody, as an absent one does.
           allowed_mentions:
             mentionUserIds === undefined || mentionUserIds.length === 0
               ? NO_MENTIONS

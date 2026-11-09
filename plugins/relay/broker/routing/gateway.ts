@@ -42,9 +42,79 @@ export type MessageSource = {
    * life.
    */
   guildId: () => string | null;
+  /**
+   * The label a member of the configured channel's guild currently goes by, read by ID through the
+   * library's single-member fetch and held for `MEMBER_NAME_TTL_MS`, or null where it cannot be
+   * read. What the reply tool's names resolve against, so it is the inbound author ladder's result
+   * and nothing looser: the name the session saw on that member's events.
+   */
+  memberName: (userId: string) => Promise<string | null>;
   /** What the voice module reads off this connection, or null while `CHANNEL_VOICE` is off. */
   voice: VoiceGateway | null;
 };
+
+/**
+ * How long a member's label is held before it is read from Discord again.
+ *
+ * Five minutes, so a roster of thirty costs one round of single-member fetches per window however
+ * many replies name someone inside it, and a member who changes their nickname is seen under the
+ * new one within minutes. A failure to read a member is held for the same window: that member
+ * resolves nothing until it passes, and the failure is logged once per member per window rather
+ * than once per reply. A guild the connection has not cached yet is no failure and is not held.
+ */
+export const MEMBER_NAME_TTL_MS = 5 * 60 * 1000;
+
+/** The three names the library reports for a guild member, which the author ladder weighs. */
+export type MemberNames = { nickname: string | null; globalName: string | null; username: string };
+
+/**
+ * The member lookup behind `MessageSource.memberName`, over an injected fetch and clock so the
+ * cache, its window and its once-per-window log are driven without a connection.
+ *
+ * `fetchMember` reads one member by ID. It answers the member's names, or `"no-guild"` where the
+ * guild is not in the connection's cache yet, and throws where the read fails, a guild that holds
+ * no such member among them, since the library's single-member read rejects on Discord's refusal.
+ * A read that throws resolves the label to null for the window and logs one line naming the ID and
+ * the cause: the ID is roster data and the cause is the library's, so nothing a session wrote
+ * reaches the log. A `"no-guild"` read also resolves null, but is neither held nor logged,
+ * because it is the connection still warming rather than anything about the member: a lookup made
+ * before the guild arrives would otherwise leave the whole roster unresolvable for a window, so
+ * the next reply asks again. The in-flight read is what the cache holds, so two replies naming the
+ * same member inside one tick share one fetch.
+ *
+ * The label is the author ladder's result only where it is a name. With every name bounding to
+ * nothing the ladder answers the member's ID, which names an inbound author but is no display
+ * name, so the label is null: a session that sends a raw ID resolves nobody.
+ */
+export function createMemberLookup(options: {
+  fetchMember: (userId: string) => Promise<MemberNames | "no-guild">;
+  now: () => number;
+  log: (message: string) => void;
+}): (userId: string) => Promise<string | null> {
+  const held = new Map<string, { at: number; label: Promise<string | null> }>();
+  return (userId) => {
+    const at = options.now();
+    const entry = held.get(userId);
+    if (entry !== undefined && at - entry.at < MEMBER_NAME_TTL_MS) return entry.label;
+    const label: Promise<string | null> = options
+      .fetchMember(userId)
+      .then((member) => {
+        if (member === "no-guild") {
+          // Only this read's own entry is let go: a later read may already hold the slot.
+          if (held.get(userId)?.label === label) held.delete(userId);
+          return null;
+        }
+        const name = authorName({ id: userId, ...member });
+        return name === userId ? null : name;
+      })
+      .catch((error: unknown) => {
+        options.log(`gateway: member ${userId} could not be read: ${describe(error)}`);
+        return null;
+      });
+    held.set(userId, { at, label });
+    return label;
+  };
+}
 
 /** One account's voice-channel move in the configured channel's guild, by channel id. */
 export type VoiceStateChange = { userId: string; before: string | null; after: string | null };
@@ -811,12 +881,34 @@ export function createGatewayMessageSource(options: GatewayOptions): MessageSour
     return typeof resolved === "string" ? resolved : null;
   };
 
+  const guild = () => {
+    const id = guildId();
+    return id === null ? null : (client.guilds.cache.get(id) ?? null);
+  };
+
+  // One member per fetch, by ID, and forced: a single resolvable user goes to the library's REST
+  // read of that member, which the Guilds intent admits, where a list of users goes to the
+  // gateway's bulk request, which the privileged GuildMembers intent governs and this bot does not
+  // hold. Forced because the library's own member cache never updates without member events, so
+  // an unforced read would answer the first name it ever saw; the broker's own cache above is what
+  // bounds how often the read runs.
+  const memberName = createMemberLookup({
+    fetchMember: async (userId) => {
+      const target = guild();
+      if (target === null) return "no-guild";
+      const member = await target.members.fetch({ user: userId, force: true });
+      return {
+        nickname: member.nickname,
+        globalName: member.user.globalName,
+        username: member.user.username,
+      };
+    },
+    now: Date.now,
+    log,
+  });
+
   let voice: VoiceGateway | null = null;
   if (options.voice === true) {
-    const guild = () => {
-      const id = guildId();
-      return id === null ? null : (client.guilds.cache.get(id) ?? null);
-    };
     const listeners = new Set<(change: VoiceStateChange) => void>();
     client.on(Events.VoiceStateUpdate, (before, after) => {
       if (after.guild.id !== guildId()) return;
@@ -866,6 +958,7 @@ export function createGatewayMessageSource(options: GatewayOptions): MessageSour
       await client.destroy();
     },
     guildId,
+    memberName,
     voice,
   };
 }

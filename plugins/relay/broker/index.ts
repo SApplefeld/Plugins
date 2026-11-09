@@ -80,6 +80,7 @@ import {
 } from "./security/permission.ts";
 import type { PermissionDesk } from "./security/permission.ts";
 import { loadSenderGate } from "./security/senders.ts";
+import type { SenderGate } from "./security/senders.ts";
 import { createQuestionDesk, recommendedAnswer } from "./question-desk.ts";
 import { RESOLVE_LITERAL, loadWebConfig, resolveWebBind, webBindLabel } from "./web/config.ts";
 import type { WebConfig, WebConfigContext } from "./web/config.ts";
@@ -1516,6 +1517,13 @@ export async function startBroker(
     // Read through the closure for the reason the registry's seam reads it: the inbound router,
     // which builds the response gate, exists only once Discord is configured below.
     gate: { reply: (sessionId, text) => inbound?.noteReply(sessionId, text) },
+    // Both read through closures for the same reason: the sender gate loads and the gateway
+    // connects inside the Discord block below, after this router exists, and a broker without
+    // Discord has neither, so every name a reply asks to ping is reported unresolved there.
+    roster: {
+      gate: () => senderGate,
+      memberName: (userId) => (gateway === null ? Promise.resolve(null) : gateway.memberName(userId)),
+    },
     // Read through the closure for the reason `threadFor` is: the tracker is built inside the
     // Discord block below, once the transport it paints reactions through exists.
     receipts: {
@@ -1941,6 +1949,10 @@ export async function startBroker(
   let refresh: NodeJS.Timeout | null = null;
   let inFlight: Promise<void> = Promise.resolve();
   let gateway: MessageSource | null = null;
+  // The sender gate as the outbound router's roster seam reads it: null until the Discord block
+  // below loads it, which is the one place it is loaded, so a broker without Discord resolves no
+  // reply mention.
+  let senderGate: SenderGate | null = null;
   // The web surface's own listener, opened after the loopback one binds and only where `web` is
   // configured. Declared here, with the other optional surfaces, because the teardown closes it.
   let webServer: WebServer | null = null;
@@ -2139,6 +2151,7 @@ export async function startBroker(
       logger.error(message);
       throw error;
     }
+    senderGate = gate;
     permissions = createPermissionDesk({
       registry,
       relays,

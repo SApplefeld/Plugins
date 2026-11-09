@@ -14,16 +14,30 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { DEFAULT_PORT } from "../broker/config.ts";
 import { runDirectly } from "../broker/entrypoint.ts";
 import { createBrokerClient, holdsControlCharacter } from "./broker.ts";
-import type { BrokerClient, ReplyStatus, RestartOutcome } from "./broker.ts";
+import type { BrokerClient, ReplyOutcome, ReplyStatus, RestartOutcome } from "./broker.ts";
 import {
   PermissionRequestNotificationSchema,
   channelCapabilities,
   permissionNotification,
 } from "./permission.ts";
-import { INSTRUCTIONS, REPLY_TOOL_NAME, RESTART_TOOL_NAME, TOOLS, channelNotification } from "./protocol.ts";
+import {
+  INSTRUCTIONS,
+  MAX_MENTION_LENGTH,
+  MAX_REPLY_MENTIONS,
+  REPLY_TOOL_NAME,
+  RESTART_TOOL_NAME,
+  TOOLS,
+  channelNotification,
+  isMentionList,
+} from "./protocol.ts";
 
 /** The longest file path a reply may name, the same bound the broker reads a path under. */
 const MAX_FILE_PATH_LENGTH = 1024;
+
+/** What the model is told when its mentions argument is not a list the schema admits. */
+export const MENTIONS_SHAPE_SENTENCE =
+  `mentions must be a list of at most ${String(MAX_REPLY_MENTIONS)} display names, each a ` +
+  `non-empty name of at most ${String(MAX_MENTION_LENGTH)} characters.`;
 
 /** What the model is told when a reply had nowhere to land. */
 const REPLY_FAILURES: Record<string, string> = {
@@ -41,10 +55,29 @@ const REPLY_FAILURES: Record<string, string> = {
  * is the whole of this tool's model-facing behavior, and `isError` is the load-bearing half of it.
  * An error is the signal that invites another attempt, so it is set on every outcome that had
  * nowhere to land and withheld from the one that may already be part-way up the thread.
+ *
+ * `report` is what the broker said about a sent reply's names: the ones that matched no single
+ * account on this host's allowlist, and whether the thread's ping window quieted the rest. Each adds one
+ * sentence after the sent sentence and never an error, since the message is in the thread and an
+ * error would have the model send it again. An unresolved name is the model's own word handed
+ * back, quoted as a JSON string so a name with spaces reads whole and any control character in
+ * it is escaped rather than written into the result.
  */
-export function replyToolResult(status: ReplyStatus, reason?: string): CallToolResult {
+export function replyToolResult(
+  status: ReplyStatus,
+  reason?: string,
+  report?: { unresolved?: readonly string[]; quieted?: boolean },
+): CallToolResult {
   if (status === "sent") {
-    return { content: [{ type: "text", text: "Sent to this session's thread." }] };
+    const sentences = ["Sent to this session's thread."];
+    if (report?.unresolved !== undefined && report.unresolved.length > 0) {
+      const names = report.unresolved.map((name) => JSON.stringify(name)).join(", ");
+      sentences.push(`These names matched no single account on this host's allowlist and pinged nobody: ${names}.`);
+    }
+    if (report?.quieted === true) {
+      sentences.push("The pings were quieted for volume, so the names were not pinged.");
+    }
+    return { content: [{ type: "text", text: sentences.join(" ") }] };
   }
   if (status === "still-posting") {
     // The broker was answering right up to the moment the wait ran out, so the messages may be
@@ -105,6 +138,13 @@ export async function replyToolCall(
   ) {
     return { content: [{ type: "text", text: "file must be a path of at most 1,024 characters." }], isError: true };
   }
+  // Absent is no names. Present, only its shape is judged here, for the same reason the file's is:
+  // which names match an account on the allowlist is the broker's to decide. Judged after the file
+  // and before the launch wrapper, since the model can fix this argument too.
+  const mentions = args?.mentions;
+  if (mentions !== undefined && !isMentionList(mentions)) {
+    return { content: [{ type: "text", text: MENTIONS_SHAPE_SENTENCE }], isError: true };
+  }
   if (!watched) {
     // Answered here rather than by opening a socket the broker would have nothing to match: this
     // session was started without the launch wrapper, so no thread exists anywhere for it.
@@ -120,8 +160,8 @@ export async function replyToolCall(
   }
   // Whatever chat_id was passed is left where it is. The broker routes by session, which is what
   // lets an unprompted reply, sent with no chat_id at all, still reach the right thread.
-  const result = await reply(message, file);
-  return replyToolResult(result.status, result.reason);
+  const result: ReplyOutcome = await reply(message, file, mentions);
+  return replyToolResult(result.status, result.reason, { unresolved: result.unresolved, quieted: result.quieted });
 }
 
 /** What the model is told when the restart tool was called by a session no broker watches. */

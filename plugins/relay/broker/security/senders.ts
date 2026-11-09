@@ -26,13 +26,16 @@ export type SenderGate = {
   /** True for every user the roster names, whatever their class. */
   allows: (senderId: string) => boolean;
   /**
-   * Every operator, in roster order. The only IDs any message this broker writes is allowed to
-   * resolve as mentions, which is what keeps a deliberate ping from becoming a mention primitive for
-   * untrusted text. Empty when the roster names no operator, which loadSenderGate never returns.
-   * Nothing caps its length. Every alert mentions each operator, and the two long enough to reach
-   * the message ceiling, the permission prompt and the question prompt, take each further mention's
-   * room out of their own longest field. Each alert stays one message on a roster of up to thirty
-   * operators, the smallest bound any alert's arithmetic states (the question notice's).
+   * Every operator, in roster order. The IDs every alert this broker writes mentions, and with the
+   * participants below the whole of what any message it writes is allowed to resolve as a mention:
+   * the operators on an alert, and the roster members a reply's resolved list names through
+   * `resolveMentions`, each under a per-thread window. The broker places every such ID itself,
+   * which is what keeps a deliberate ping from becoming a mention primitive for untrusted text.
+   * Empty when the roster names no operator, which loadSenderGate never returns. Nothing caps its
+   * length. Every alert mentions each operator, and the two long enough to reach the message
+   * ceiling, the permission prompt and the question prompt, take each further mention's room out of
+   * their own longest field. Each alert stays one message on a roster of up to thirty operators,
+   * the smallest bound any alert's arithmetic states (the question notice's).
    */
   operatorIds: readonly string[];
   /** Every participant, in roster order. */
@@ -127,4 +130,62 @@ export function loadSenderGate(env: NodeJS.ProcessEnv): SenderGate {
     );
   }
   return gate;
+}
+
+/**
+ * The label a roster member currently goes by, or null where it cannot be read. The gateway's
+ * member lookup is the one producer: it applies the inbound author ladder, nickname, else global
+ * name, else username, each bounded, so the label here is the name the session saw on the author
+ * attribute of that member's events.
+ */
+export type MemberNameLookup = (id: string) => Promise<string | null>;
+
+export type ResolvedMentions = {
+  /** The roster IDs the requested names resolved to, each once, in roster order. */
+  resolved: string[];
+  /** The requested names that resolved to nobody, as sent, each once, in request order. */
+  unresolved: string[];
+};
+
+/**
+ * Turns a reply's requested display names into the roster IDs it may ping. The one path by which a
+ * session's words become a mention, so it is bounded on every side: a name is matched against the
+ * roster alone, the operators in the gate's order and then the participants in theirs, on each
+ * member's current label as `lookup` reads it, compared trimmed and case-folded and nothing more. A
+ * name matching exactly one member resolves to that member's ID. A name matching nobody, or two or
+ * more members sharing a label, resolves to nothing and comes back as sent, so the session can
+ * correct it. A member whose label cannot be read matches nothing.
+ *
+ * An account off the roster is unreachable whatever it is called: the lookup is asked about roster
+ * members and never about who holds a name. An empty request asks the lookup nothing.
+ */
+export async function resolveMentions(
+  gate: SenderGate,
+  lookup: MemberNameLookup,
+  requested: readonly string[],
+): Promise<ResolvedMentions> {
+  if (requested.length === 0) return { resolved: [], unresolved: [] };
+  const roster = [...gate.operatorIds, ...gate.participantIds];
+  const labels = await Promise.all(roster.map((id) => lookup(id)));
+  // Each folded label to the members carrying it, so a label two members share is seen as shared
+  // rather than won by roster order.
+  const holders = new Map<string, string[]>();
+  roster.forEach((id, index) => {
+    const label = labels[index];
+    if (label === null) return;
+    const key = label.trim().toLowerCase();
+    if (key === "") return;
+    holders.set(key, [...(holders.get(key) ?? []), id]);
+  });
+  const resolvedIds = new Set<string>();
+  const unresolved: string[] = [];
+  for (const name of requested) {
+    const held = holders.get(name.trim().toLowerCase());
+    if (held !== undefined && held.length === 1) {
+      resolvedIds.add(held[0]);
+    } else if (!unresolved.includes(name)) {
+      unresolved.push(name);
+    }
+  }
+  return { resolved: roster.filter((id) => resolvedIds.has(id)), unresolved };
 }

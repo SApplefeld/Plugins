@@ -846,18 +846,22 @@ function promptPreview(label: string, value: string, limit: number): string {
 }
 
 /**
- * The mention every broker-written ping opens with: each operator's ID as `<@id>`, in roster order,
- * joined by single spaces and followed by one, or nothing at all for an empty list, which is the
- * quiet tier. The only place a renderer composes mention syntax, so every mentioning message spells
- * its mentions the same way.
+ * The mention every broker-written ping opens with: each ID as `<@id>`, in roster order, joined by
+ * single spaces and followed by one, or nothing at all for an empty list, which is the quiet tier.
+ * The only place a renderer composes mention syntax, so every mentioning message spells its
+ * mentions the same way. The IDs are always roster IDs the broker itself placed: the operators on
+ * an alert, and the roster members a reply's resolved list names through `renderAnswer`, each
+ * under a per-thread window. No ID here ever comes from a session's text, which every renderer of
+ * untrusted text escapes the mention syntax out of.
  */
-export function mentionPrefix(operatorIds: readonly string[]): string {
-  return operatorIds.length === 0 ? "" : `${operatorIds.map((id) => `<@${id}>`).join(" ")} `;
+export function mentionPrefix(userIds: readonly string[]): string {
+  return userIds.length === 0 ? "" : `${userIds.map((id) => `<@${id}>`).join(" ")} `;
 }
 
 /**
- * The permission prompt: one of the two messages this broker writes that deliberately mention
- * someone, the question alert below being the other.
+ * The permission prompt: one of the messages this broker writes that deliberately mention someone,
+ * beside the question alert below, the model-change and blocked alerts, and the reply tool's
+ * answer when its resolved list names a roster member.
  *
  * The mentions are composed here from the operators' own IDs, and every untrusted field goes
  * through `inertText`, which escapes the angle brackets Discord's mention syntax lives inside. So
@@ -1778,9 +1782,16 @@ export function renderMirror(kind: MirrorKind, text: string): string[] {
  *
  * Uncapped at any length, like the mirror's reply: the paste cap protects the thread from the
  * operator's own log dumps and has no business touching text written to be read.
+ *
+ * `mentionUserIds` is the roster IDs the outbound router resolved the reply's names to, and the
+ * broker writes their pills itself: `mentionPrefix` of the list sits ahead of the label on the
+ * first message alone, charged against the ceiling by the same fit test as the label, so a long
+ * first message splits one pill-width earlier rather than being cut. Later messages keep the label
+ * alone. The body is escaped before the prefix is added, so the escape still removes every chip
+ * the session's own text carried, and an empty list draws the answer exactly as it always was.
  */
-export function renderAnswer(text: string): string[] {
-  return attributed(withoutInvisible(text).trim(), ANSWER_ATTRIBUTION);
+export function renderAnswer(text: string, mentionUserIds: readonly string[] = []): string[] {
+  return attributed(withoutInvisible(text).trim(), ANSWER_ATTRIBUTION, mentionPrefix(mentionUserIds));
 }
 
 /** Whose spoken line a voice post carries: the operator's, or the persona's own. */
@@ -2013,13 +2024,21 @@ export function appendNarration(existing: string, text: string): string | null {
  *
  * For Claude's own text, which is the mirror and the answer. Peer chatter is drawn in a register of
  * its own and assembled by `chattered` below, which composes the same pieces in a different order.
+ *
+ * `firstLead` is what the first message alone carries ahead of `prefix`, the reply's mention
+ * pills, and it rides `split`'s per-index decoration so the fit test charges it against the first
+ * message and nothing against the rest. With none, every message is prefixed as it always was.
  */
-function attributed(seen: string, prefix: string): string[] {
+function attributed(seen: string, prefix: string, firstLead = ""): string[] {
   const body = mirrorBody(seen);
   // Nothing at all to say. Reported as no messages rather than as one empty message, which Discord
   // refuses and which would read as the session having answered with silence.
   if (body === "") return [];
-  return split(body, prefix);
+  if (firstLead === "") return split(body, prefix);
+  // The whole opening travels as the decoration's lead, since a lead is drawn after the prefix and
+  // the pills must sit ahead of the label: the prefix is empty and each message's lead is the
+  // label, with the pills in front of it on the first.
+  return split(body, "", (index) => ({ lead: `${index === 0 ? firstLead : ""}${prefix}`, tail: "" }));
 }
 
 /**

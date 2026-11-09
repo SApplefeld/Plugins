@@ -141,10 +141,10 @@ export type ThreadMessenger = {
      */
     file?: { name: string; data: Uint8Array; contentType: string };
     /**
-     * The Discord users this one message may resolve as mentions: every operator, or none. Left
-     * unset on every write but the broker's alerts (the permission prompt, the question alert, the
-     * blocked alert and the model-change alert), the messages in this system meant to reach a
-     * phone before an operator next looks at the thread.
+     * The Discord users this one message may resolve as mentions, always roster IDs the broker
+     * itself placed: every operator on the broker's alerts (the permission prompt, the question
+     * alert, the blocked alert and the model-change alert), and the roster members a reply's
+     * resolved list names on that reply's first message. Left unset on every other write.
      */
     mentionUserIds?: readonly string[];
   }) => Promise<CallOutcome<{ messageId: string | null }>>;

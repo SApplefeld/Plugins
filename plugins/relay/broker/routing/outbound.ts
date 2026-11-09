@@ -27,6 +27,13 @@ import type { AttachmentMode } from "./attachments.ts";
 import { REPLY_FILE_REASONS, readReplyFile } from "./reply-file.ts";
 import type { ReplyFile, ReplyFileCause, ReplyFileSystem } from "./reply-file.ts";
 import type { ThreadWriter } from "./writer.ts";
+import {
+  ALERT_WINDOW_MS,
+  MAX_REPLY_PINGS_PER_WINDOW,
+  createAlertVolume,
+} from "../security/permission.ts";
+import { resolveMentions } from "../security/senders.ts";
+import type { MemberNameLookup, SenderGate } from "../security/senders.ts";
 import type { CallOutcome } from "../discord/transport.ts";
 import type { TalkFile, TalkInput, TalkTap } from "../web/talk.ts";
 
@@ -224,6 +231,18 @@ export type OutboundRouterOptions = {
     platform: NodeJS.Platform;
     mode: AttachmentMode;
     maxBytes: number;
+  };
+  /**
+   * What a reply's `mentions` names resolve against: the sender gate, which is the roster, and the
+   * gateway's member lookup, which reads a roster member's current label. Both are read through
+   * closures at each reply rather than taken at construction, because the broker builds this
+   * router before it loads the gate or connects the gateway, and a broker without Discord never
+   * has either. A gate that reads null, or a router built without this seam, resolves every name
+   * to nothing and the reply posts as one naming nobody does, with every name reported unresolved.
+   */
+  roster?: {
+    gate: () => SenderGate | null;
+    memberName: MemberNameLookup;
   };
 };
 
@@ -495,7 +514,21 @@ function isTaskNotification(text: string): boolean {
  * alone. Its `cause` is the bare cause word, which is what a log line carries in place of the reason.
  */
 export type ReplyResult =
-  | { status: "sent" }
+  | {
+      status: "sent";
+      /**
+       * The requested names that resolved to no roster member, as sent, each once. Present only
+       * when there is one, so a reply naming nobody, or whose every name resolved, reports the
+       * bare `sent` it always has.
+       */
+      unresolved?: string[];
+      /**
+       * Set when the thread's reply-ping window was already spent, so the reply posted with no
+       * pills and no mention list: the names it resolved were not pinged. Present only then, and
+       * beside `unresolved` where a name also resolved to nobody.
+       */
+      quieted?: true;
+    }
   | { status: "no-session" }
   | { status: "no-thread" }
   | { status: "failed"; error: string }
@@ -513,9 +546,12 @@ export type OutboundRouter = {
   /**
    * Posts one reply from the session currently held by this process token. `file` is a path the
    * session named, read under its own working directory and attached to the reply's last message;
-   * a file the reader refuses is reported as `file-refused` and nothing posts.
+   * a file the reader refuses is reported as `file-refused` and nothing posts. `mentions` is the
+   * list of display names the session asked to ping, as the session gave them, resolved against
+   * the roster through `roster` and pinged on the first message under the thread's reply-ping
+   * window; a sent result names what did not resolve and whether the pings were quieted.
    */
-  reply: (processToken: string, text: string, file?: string) => Promise<ReplyResult>;
+  reply: (processToken: string, text: string, file?: string, mentions?: readonly string[]) => Promise<ReplyResult>;
   /**
    * Posts one mirrored prompt or reply from the session currently held by this process token.
    *
@@ -818,7 +854,8 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
    * One loop for every posting path on purpose: the landed count and the error wording are part
    * of what the callers log and report, and two copies would let those drift. Not chained here,
    * because the interim path runs it inside a chain task of its own, where taking a second place
-   * on the same chain would deadlock; `deliver` below is the chained doorway everything else uses.
+   * on the same chain would deadlock; `deliver` below, and `deliverReply` for the reply tool, are
+   * the chained doorways everything else uses.
    * The thread's ordering chain is held for the whole of a paced run, which is the order a thread
    * reads correctly in: what a session posts after a report belongs below it.
    *
@@ -830,11 +867,17 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
    * the text stands above the attachment the way Discord draws a paste. A run that lands its text
    * and fails on that message reports the count it reached like any other, and that count is what
    * tells the model the file did not land while the text did.
+   *
+   * `mentionUserIds`, which only the reply tool passes, rides the run's first message and no later
+   * one: that is the message the renderer drew the pills on, and the transport whitelists exactly
+   * those IDs for it. Every other message of the run, and every run from any other caller, carries
+   * no mention list at all.
    */
   async function postRun(
     threadId: string,
     messages: string[],
     file?: ReplyFile,
+    mentionUserIds?: readonly string[],
   ): Promise<{ landed: number; error: string | null; lastMessageId: string | null }> {
     let landed = 0;
     let lastMessageId: string | null = null;
@@ -848,9 +891,12 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         file !== undefined && index === messages.length - 1
           ? { name: file.name, data: file.bytes, contentType: file.contentType }
           : undefined;
+      // The writer leaves the field off for an empty list, so an undefined list and an empty one
+      // post the same message.
+      const mentioned = index === 0 ? mentionUserIds : undefined;
       // The waiting is the run's: what one message's refusals cost counts against the next's.
       const attempt = await postThroughRateLimits(
-        () => options.mirrorWriter.reply(threadId, message, attached),
+        () => options.mirrorWriter.reply(threadId, message, attached, mentioned),
         waited,
         { now, sleep },
       );
@@ -886,12 +932,89 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   async function deliver(
     threadId: string,
     messages: string[],
-    file?: ReplyFile,
   ): Promise<{ landed: number; error: string | null; lastMessageId: string | null }> {
     return inOrder(threadId, () => {
       narration.delete(threadId);
-      return postRun(threadId, messages, file);
+      return postRun(threadId, messages);
     });
+  }
+
+  /**
+   * How loudly a thread's next ping-bearing reply may land, spending a slot in the thread's window
+   * to say so. This router's own window instance, never an alert desk's: shared stamps would let a
+   * run of replies spend the permission prompt's slots, or the prompts spend a reply's. The post
+   * ceiling is unbounded because the window has no drop tier: a reply is conversation and always
+   * posts, so the only level past `ping` is `quiet`.
+   */
+  const replyPings = createAlertVolume({
+    now,
+    pingCeiling: MAX_REPLY_PINGS_PER_WINDOW,
+    postCeiling: Number.POSITIVE_INFINITY,
+    windowMs: ALERT_WINDOW_MS,
+  });
+
+  /**
+   * Posts one reply tool answer as one task on the thread's chain, deciding there whether it rings.
+   *
+   * The window counts a ping when it posts with pills, so the slot is spent as the run goes on the
+   * wire rather than as the reply arrived: a reply queued behind a long run can wait past the
+   * window's length, and a decision taken at arrival would let a second reply ring seconds after
+   * it. The slot is asked only when the names resolved someone. Past the ceiling the reply renders
+   * and posts with no pills and no mention list, and hands back the slot its own answer just spent,
+   * since it pinged nobody and the window is measured from the last ping that rang. A run whose
+   * first message never landed hands its slot back too, because the pills ride that message: a
+   * stamp kept for a refusal would quiet the retry that finally lands. A run that landed its first
+   * message and stopped later did ping, and keeps its stamp. The chain runs one task per thread at a
+   * time, so no other reply spends on this thread between this task's spend and its refund, and the
+   * newest stamp a refund pops is always this task's own.
+   *
+   * The run ends the thread's narration block inside the task, as one through `deliver` does and
+   * for the same reason. `total` is the count of messages the run was rendered into, which the pills can change.
+   * `plain` is the reply already rendered without pills, posted as it is unless the reply rings.
+   */
+  async function deliverReply(
+    threadId: string,
+    text: string,
+    plain: string[],
+    file: ReplyFile | undefined,
+    resolved: readonly string[],
+  ): Promise<{
+    landed: number;
+    error: string | null;
+    lastMessageId: string | null;
+    total: number;
+    pinged: boolean;
+    quieted: boolean;
+  }> {
+    return inOrder(threadId, async () => {
+      narration.delete(threadId);
+      const asked = resolved.length > 0;
+      const quieted = asked && replyPings(threadId) !== "ping";
+      if (quieted) replyPings.refund(threadId);
+      const pinged = asked && !quieted;
+      const mentionUserIds = pinged ? resolved : [];
+      const messages = pinged ? renderAnswer(text, mentionUserIds) : plain;
+      const run = await postRun(threadId, messages, file, mentionUserIds);
+      if (pinged && run.landed === 0) replyPings.refund(threadId);
+      return { ...run, total: messages.length, pinged, quieted };
+    });
+  }
+
+  /**
+   * The roster IDs a reply's requested names resolve to, and the names that resolved to nobody,
+   * for a request naming at least one. With no roster seam or no gate loaded every name is
+   * unresolved, each once: a broker without Discord cannot ping, and says so per name rather than
+   * failing the reply. The names are never logged, since they are conversation content the
+   * session wrote; the log carries counts alone.
+   */
+  async function resolveReplyMentions(
+    requested: readonly string[],
+  ): Promise<{ resolved: string[]; unresolved: string[] }> {
+    const gate = options.roster?.gate() ?? null;
+    if (options.roster === undefined || gate === null) {
+      return { resolved: [], unresolved: [...new Set(requested)] };
+    }
+    return resolveMentions(gate, options.roster.memberName, requested);
   }
 
   /**
@@ -1258,7 +1381,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
   }
 
   return {
-    async reply(processToken, text, file) {
+    async reply(processToken, text, file, mentions = []) {
       const located = locate(processToken);
       // Rebuilt rather than passed along, so the session `locate` resolved for the log line below
       // stays here: this result is serialized back to the relay and read by the model, and the
@@ -1298,16 +1421,46 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         attachment = read.file;
       }
 
+      // The names, resolved after the file so a refused file spends no lookup and no ping slot, and
+      // against the roster alone: the broker decides whom a reply pings from a structured list,
+      // never from the text. The thread's reply-ping window is asked only by a reply that resolved
+      // someone, and only as its run goes on the wire, in `deliverReply`: a reply naming nobody, or
+      // only names that match nobody, counts nothing against it. Past the ceiling the reply posts
+      // with no pills and no mention list, exactly as one naming nobody does, and the session is
+      // told its pings were quieted rather than that the reply failed.
+      //
+      // A reply naming nobody never awaits here, not even a settled promise: its place on the
+      // thread's chain is taken on the tick it arrived, which is what orders it against a mirror
+      // accepted right behind it. A reply naming someone takes its place once its names resolve,
+      // the rule a reply with a file already follows once its file is read.
+      const names =
+        mentions.length === 0 ? { resolved: [], unresolved: [] } : await resolveReplyMentions(mentions);
+      // Counts only, logged once the chain has decided whether the reply rang.
+      const noteNames = (outcome: string): void => {
+        if (mentions.length === 0) return;
+        log(
+          `routing: the reply from session ${located.sessionId} named ${String(mentions.length)}, ` +
+            `resolved ${String(names.resolved.length)}, ${outcome}`,
+        );
+      };
+
       // Rendered by the same machinery the mirror below is rendered by, and for the same reasons:
       // both paths post into the one thread, so a reply tool call is the other way a line that
       // renders as the mirror's attribution, or a mention pill, or a timestamp chip, could reach it,
       // and a reply longer than one message is split rather than cut. The text of a reply is written
       // by a model that has read whatever the session read, which is what makes this an untrusted
-      // string rather than the broker's own.
-      const messages = renderAnswer(text);
-      // Nothing visible once the invisible class is stripped. Reported to the relay, which is read
-      // by the model that called the tool, rather than posted: Discord refuses an empty message.
-      if (messages.length === 0) return { status: "failed", error: "the message was empty" };
+      // string rather than the broker's own. The pills the broker resolved are drawn by the
+      // renderer after that escape, on the first message alone, inside `deliverReply` once the
+      // window has answered. Whether there is anything to post turns on the text alone, so it is
+      // judged here from a render without pills, and a reply with nothing visible spends nothing.
+      // Nothing visible once the invisible class is stripped is reported to the relay, which is
+      // read by the model that called the tool, rather than posted: Discord refuses an empty
+      // message.
+      const plain = renderAnswer(text);
+      if (plain.length === 0) {
+        noteNames("pinged nobody");
+        return { status: "failed", error: "the message was empty" };
+      }
 
       // Spent against the conversation writer, never an alert-tier one, because an answer is
       // conversation volume: it can run many messages, and a rate-limit block earned by one long
@@ -1315,7 +1468,16 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       // on. Alert paths hold their own writer and never come through this router.
       // The reply's arrival, read before the run so a prompt typed while it lands is later than it.
       const arrivedAt = now();
-      const run = await deliver(located.threadId, messages, attachment);
+      const run = await deliverReply(located.threadId, text, plain, attachment, names.resolved);
+      // A run whose first message never landed handed its slot back and pinged nobody.
+      noteNames(
+        run.pinged && run.landed > 0 ? "pinged" : run.quieted ? "quieted for volume" : "pinged nobody",
+      );
+      // What the relay is told beside `sent`, each field present only when it has something to say.
+      const report = {
+        ...(names.unresolved.length === 0 ? {} : { unresolved: names.unresolved }),
+        ...(run.quieted ? { quieted: true as const } : {}),
+      };
       if (run.error === null) {
         // The raw pre-render text, recorded only now that the run landed whole, the same rule
         // the mirror's own record follows: an answer the transport refused is not in front of
@@ -1333,14 +1495,14 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         tapGate(located.sessionId, text);
         options.receipts?.answered(located.threadId, arrivedAt);
         if (copy !== null) writeForPage(located.sessionId, copy.write);
-        return { status: "sent" };
+        return { status: "sent", ...report };
       }
 
       // The counts and the transport's error class only. The text is Claude's own words to the
       // operator, and conversation content never appears in the broker log at any level.
       log(
         `routing: the reply from session ${located.sessionId} stopped after ` +
-          `${run.landed} of ${messages.length} messages: ${run.error}`,
+          `${run.landed} of ${run.total} messages: ${run.error}`,
       );
       // The count rides back to the relay too, because the model reads this result and decides
       // whether to try again: a bare error invites resending the whole answer, and the first
@@ -1351,7 +1513,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         error:
           run.landed === 0
             ? run.error
-            : `stopped after ${run.landed} of ${messages.length} messages: ${run.error}`,
+            : `stopped after ${run.landed} of ${run.total} messages: ${run.error}`,
       };
     },
 

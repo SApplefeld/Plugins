@@ -70,9 +70,11 @@ install\Install-All.ps1 -HostName <host> -ChannelId <channel id> -AllowedUserId 
 The installer writes the list to `CHANNEL_SENDERS` in `broker.env`, checks each entry the way the
 broker will, and refuses a list that gives one ID two classes or leaves the host with no operator.
 Every operator holds the whole of your authority, so name as operators only the people you would hand
-your own Discord account. A change to the roster takes a broker restart. A display name decides
-nothing: the class comes from the account's ID, and any member with Manage Nicknames can rename an
-account.
+your own Discord account. A change to the roster takes a broker restart. A display name decides no
+standing: the class comes from the account's ID, and any member with Manage Nicknames can rename an
+account. A display name does decide which roster account a session's reply pings when the reply
+names that person. A renamed account can therefore draw or block such a ping, though never one
+for an account off the roster.
 
 **A client host is its own server, bot and broker.** Everyone who can see the channel reads every
 prompt, reply and tool approval in it, a participant included, because the roster governs who writes

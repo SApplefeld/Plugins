@@ -49,6 +49,21 @@ export type VerdictHandler = (verdict: PermissionVerdict) => void;
 export type ReplyStatus = "sent" | "no-session" | "no-thread" | "failed" | "file-refused" | "still-posting";
 
 /**
+ * What one reply comes back as. `error` is why a request failed and `reason` is the broker's
+ * sentence for a refusal, each present only where one was written. On a sent reply that named
+ * people, `unresolved` holds the names the broker matched to nobody on this host's allowlist, as
+ * the session sent them, and `quieted` is set where the thread's ping window quieted every ping;
+ * both are left off a reply whose names all pinged, and off any reply that named nobody.
+ */
+export type ReplyOutcome = {
+  status: ReplyStatus;
+  error?: string;
+  reason?: string;
+  unresolved?: readonly string[];
+  quieted?: true;
+};
+
+/**
  * What one restart request came to. The first two are the broker's own answers, read out of the
  * response body with the reason the broker gave; `failed` is every way the request did not reach a
  * decision, with the relay's or the broker's words for it.
@@ -117,11 +132,12 @@ export type BrokerClient = {
   start: () => void;
   stop: () => void;
   /**
-   * Posts one reply, with the file at `file` attached where one is named. The path is sent as
-   * given and the broker decides whether it may leave; `reason` is the broker's sentence for a
-   * refusal, present only where the broker wrote one.
+   * Posts one reply, with the file at `file` attached where one is named and the people in
+   * `mentions` pinged where the broker resolves them. The path and the names are sent as given and
+   * the broker decides whether the file may leave and which names match its allowlist; `reason`
+   * is the broker's sentence for a refusal, present only where the broker wrote one.
    */
-  reply: (text: string, file?: string) => Promise<{ status: ReplyStatus; error?: string; reason?: string }>;
+  reply: (text: string, file?: string, mentions?: readonly string[]) => Promise<ReplyOutcome>;
   /**
    * Hands the broker one permission prompt to put in front of the operator. It resolves when the
    * broker has taken the prompt, not when the operator answers: the answer arrives whenever they
@@ -384,7 +400,7 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
     body: Record<string, unknown>,
     idleMs: number,
     ceilingMs?: number,
-  ): Promise<{ status: string; error?: string; reason?: string }> {
+  ): Promise<{ status: string; error?: string; reason?: string; unresolved?: string[]; quieted?: true }> {
     if (replyKey === null) {
       // No pipe, so no standing to write. Reported locally rather than attempted, because the
       // broker would refuse it and the model is waiting on the answer either way.
@@ -398,7 +414,13 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       // tool call awaiting it forever, and the turn parked with it.
       let settled = false;
       let ceiling: NodeJS.Timeout | null = null;
-      const finish = (result: { status: string; error?: string; reason?: string }): void => {
+      const finish = (result: {
+        status: string;
+        error?: string;
+        reason?: string;
+        unresolved?: string[];
+        quieted?: true;
+      }): void => {
         if (settled) return;
         settled = true;
         if (ceiling !== null) clearTimeout(ceiling);
@@ -432,14 +454,29 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
           );
           response.on("end", () => {
             try {
-              const parsed = JSON.parse(raw) as { status?: unknown; error?: unknown; reason?: unknown };
+              const parsed = JSON.parse(raw) as {
+                status?: unknown;
+                error?: unknown;
+                reason?: unknown;
+                unresolved?: unknown;
+                quieted?: unknown;
+              };
               // `error` is why a request failed and `reason` is why a decided one was refused.
               // The restart route and a reply whose file was refused give a reason, and it is
-              // carried as the broker wrote it, since the model reads it as the answer.
+              // carried as the broker wrote it, since the model reads it as the answer. A sent
+              // reply's `unresolved` names and `quieted` flag are carried on the same terms, and
+              // only in the shape the broker writes them, a list of strings and a literal true;
+              // anything else is read as absent.
+              const unresolved = parsed.unresolved;
               finish({
                 status: typeof parsed.status === "string" ? parsed.status : "failed",
                 error: typeof parsed.error === "string" ? parsed.error : undefined,
                 reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+                unresolved:
+                  Array.isArray(unresolved) && unresolved.every((name) => typeof name === "string")
+                    ? (unresolved as string[])
+                    : undefined,
+                quieted: parsed.quieted === true ? true : undefined,
               });
             } catch {
               finish({ status: "failed", error: "the broker's answer was not JSON" });
@@ -484,15 +521,20 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
       request = null;
     },
 
-    async reply(text, file) {
-      // The key is left off rather than sent empty when no file is named, so a reply without one is
-      // the body an older broker's route has always read.
-      const body = file === undefined ? { text } : { text, file };
+    async reply(text, file, mentions) {
+      // Each key is left off rather than sent empty when no file is named and when no names are,
+      // so a reply without either is the body an older broker's route has always read. An empty
+      // list of names is a value the call carried, and it is sent.
+      const body: Record<string, unknown> = { text };
+      if (file !== undefined) body.file = file;
+      if (mentions !== undefined) body.mentions = mentions;
       const answer = await post("/relay/reply", body, replyIdleMs, replyCeilingMs);
       return {
         status: answer.status as ReplyStatus,
         error: answer.error,
         ...(answer.reason === undefined ? {} : { reason: answer.reason }),
+        ...(answer.unresolved === undefined ? {} : { unresolved: answer.unresolved }),
+        ...(answer.quieted === undefined ? {} : { quieted: answer.quieted }),
       };
     },
 

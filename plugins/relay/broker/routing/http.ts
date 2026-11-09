@@ -10,19 +10,24 @@
 //   POST /relay/reply
 //     X-Channel-Process-Token: the same token
 //     X-Channel-Reply-Key:     the key the stream's `hello` carried
-//     body: {"text": "...", "file": "<absolute path>"}, the file optional and left off when none
+//     body: {"text": "...", "file": "<absolute path>", "mentions": ["<display name>", ...]}, the
+//        file and the mentions each optional and left off when none; a mention is a display name
+//        the router resolves against this host's allowlist
 //     -> 200 {"status": "sent" | "no-session" | "no-thread" | "failed" | "file-refused"}, with the
 //        head written before the run starts and a newline heartbeat every REPLY_HEARTBEAT_MS until
 //        it resolves. A file-refused body carries the "reason" sentence the relay shows the model
-//        and the "cause" word it was refused for, and means nothing was posted.
+//        and the "cause" word it was refused for, and means nothing was posted. A sent body may
+//        carry "unresolved", the mentions that matched no single roster member, and "quieted": true where the
+//        thread's ping window quieted the pings; each is left off when it has nothing to say.
 //        The outcome rides the body alone, because the status line is on the wire long before the
 //        outcome is known; the heartbeats are insignificant leading whitespace to the JSON parser
 //        at the other end, and they are what the relay's idle timer measures instead of run length.
 //        A caller that is already gone gets no head and no heartbeat: the run goes ahead and its
 //        outcome is logged, since nothing written to a closed connection reaches anyone.
 //     -> 403 when the key does not match the pipe currently held for that token
-//     -> 400 or 413 on a body that is unreadable, past the cap, or carries a file that is not a
-//        string, each decided before the head
+//     -> 400 or 413 on a body that is unreadable, past the cap, carries a file that is not a
+//        string, or carries mentions that are not a list of non-blank names inside the reply
+//        tool's count and length bounds, each decided before the head
 //
 //   POST /relay/permission
 //     the same two headers
@@ -58,6 +63,7 @@
 // are composed in front of it and would otherwise be reachable without either.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RestartAnswer } from "../index.ts";
+import { isMentionList } from "../../relay/protocol.ts";
 import { isAllowedHost, isLoopback } from "../intake.ts";
 import type { PermissionDesk } from "../security/permission.ts";
 import type { OutboundRouter } from "./outbound.ts";
@@ -325,6 +331,15 @@ export function createRelayRoutes(
         send(response, 400, { error: "file is not a string" });
         return;
       }
+      // Optional on the same terms as the file: which names match an account on this host's
+      // allowlist is the router's to decide, and only the shape is judged here, by the relay's own
+      // check, so a caller that went around the relay meets the same count and length bounds. A
+      // present field outside that shape is a malformed body and refused before the head.
+      const mentions = fields.mentions;
+      if (mentions !== undefined && !isMentionList(mentions)) {
+        send(response, 400, { error: "mentions is not a list of display names in bounds" });
+        return;
+      }
 
       // The head goes out before the run does. A reply waits on its thread's ordering chain and
       // nothing bounds what is queued ahead of it, so a route that wrote nothing until the run
@@ -355,7 +370,7 @@ export function createRelayRoutes(
         response.on("close", () => clearInterval(beating));
       }
 
-      const result = await options.outbound.reply(processToken, text, file).finally(() => {
+      const result = await options.outbound.reply(processToken, text, file, mentions).finally(() => {
         if (heartbeat !== null) clearInterval(heartbeat);
       });
       // A run paces itself and can outlive the relay's wait for it, and the relay destroys the
