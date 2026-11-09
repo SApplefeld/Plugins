@@ -686,9 +686,10 @@ const PW_WORD = String.raw`(?:password|passwd|passphrase|secret|secret[_-]?key|c
 // the whole key or after a separator, so `compass` and `bypass` are left.
 const SHORT_PW = String.raw`(?:pass(?:[_-]?code)?|pwd?)`
 const SHORT_KEY = new RegExp(String.raw`(?:^|[_.-])${SHORT_PW}$`, 'i')
-// A short key (`pass:`) with a number or a short word after it is a count
-// or a status, not a password.
-const shortKeyStatus = (key: string, v: string): boolean => SHORT_KEY.test(key) && (/^[0-9]+$/.test(v) || /^[a-z]{1,8}$/.test(v))
+// A short key (`pass:`) with a number, a lowercase word or an all-caps word
+// of up to eight letters after it is a count, a status or a constant, not a
+// password. A mixed-case word (`Summer`) or a longer caps run is hidden.
+const shortKeyStatus = (key: string, v: string): boolean => SHORT_KEY.test(key) && (/^[0-9]+$/.test(v) || /^[a-z]{1,8}$/.test(v) || /^[A-Z]{1,8}$/.test(v))
 const STRONG_QUOTED = new RegExp(
   String.raw`((?:^|[\s{,;(\[])(\\?["']?)((?:[A-Za-z0-9._-]*[_.-]|pg)?${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})\2[ \t]*[:=][ \t]*)(\\?["'])([^\n]{3,200}?)\4`,
   'gim',
