@@ -3,11 +3,13 @@
 // synchronous open can hang on for the SMB timeout when the host is
 // unreachable, rather than failing fast the way a missing local path does.
 //
-// Beside it sits screenRecordedPath, the path screen the peer-sessions skill
-// states for every directory-sourced path, applied to a path a store record
-// carries for a tool to open later (a `board:` value). It is built on the
-// predicate above rather than restating it, so the two cannot disagree about
-// what a share looks like.
+// Beside it sits screenRecordedPath, which states the refusal legs of the
+// path screen the peer-sessions skill owns: a network share, a
+// parent-directory segment that survives normalization, a relative path and,
+// on win32, a path with no drive. No kit code calls it on a path; memq
+// re-exports it and the tests pin its contract, and the screen's placement
+// leg runs in prose alone. It is built on the predicate above rather than
+// restating it, so the two cannot disagree about what a share looks like.
 //
 // This is its own module, holding these two path checks and nothing else, because scripts/memq.js is
 // 11,880 lines and a hot hook path cannot afford to pay to load it just to
