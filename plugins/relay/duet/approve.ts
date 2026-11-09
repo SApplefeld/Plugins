@@ -83,7 +83,9 @@ function sendHtml(response: ServerResponse, status: number, html: string): void 
     "content-length": Buffer.byteLength(html),
     "cache-control": "no-store",
     "content-security-policy": PAGE_CSP,
-    "referrer-policy": "no-referrer",
+    // same-origin, not no-referrer: the page is plain HTTP, so its form POST carries no Sec-Fetch-Site,
+    // and under no-referrer a browser sends Origin: null, which the POST rule refuses.
+    "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
   });
