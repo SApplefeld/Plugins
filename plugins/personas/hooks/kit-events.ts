@@ -135,7 +135,7 @@ export function emitKitEvent(deps: KitEventDeps, events: KitEventsState, kind: K
     plan,
     session: deps.sessionId(),
   };
-  if (detail !== undefined && detail !== "") record.detail = scrubText(detail).text.slice(0, KIT_EVENT_DETAIL_MAX);
+  if (detail !== undefined && detail !== "") record.detail = headPoints(scrubText(detail).text, KIT_EVENT_DETAIL_MAX);
   events.chain = events.chain.then(() => appendOne(deps, events, record)).catch(() => undefined);
   return events.chain;
 }

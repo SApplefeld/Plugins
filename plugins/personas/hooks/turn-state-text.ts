@@ -6,6 +6,7 @@
 // reads as arguments, so the tick harness, which loads a fresh hooks/index.ts per
 // case, shares nothing through it.
 
+import { headPoints } from "./agent-state";
 import { kaizenLine, type TurnScoreTools } from "./question-catalog";
 
 // The most characters of the arriving message the turn-open question's state
@@ -74,8 +75,8 @@ export function turnScoreToolsOf(flags: TurnToolFlags, ring: readonly string[], 
 // for. The two cuts are applied before the guard, which changes no length.
 export function turnDispositionStateText(activeGoal: string, asked: string, finalMessage: string, activity: string): string {
   return `active_goal: ${kaizenLine(activeGoal)}\n` +
-    `this_turn_was_asked: ${kaizenLine(asked.slice(0, TURN_DISPOSITION_ASKED_MAX))}\n` +
-    `agent_final_message: ${kaizenLine(finalMessage.slice(0, TURN_DISPOSITION_MESSAGE_MAX))}\n` +
+    `this_turn_was_asked: ${kaizenLine(headPoints(asked, TURN_DISPOSITION_ASKED_MAX))}\n` +
+    `agent_final_message: ${kaizenLine(headPoints(finalMessage, TURN_DISPOSITION_MESSAGE_MAX))}\n` +
     `turn_tool_activity: ${kaizenLine(activity)}`;
 }
 

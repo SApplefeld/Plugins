@@ -8,7 +8,7 @@
 // declares a FREE_TEXT_MAX and a TEXT_CUT_MARK of its own for the journal's
 // lines, and no module imports both.
 
-import { bracketSafeText } from "./agent-state";
+import { bracketSafeText, headPoints } from "./agent-state";
 
 // The bound on one piece of free text this plugin carries between a file or a
 // caller and a model: the note agentic_resolve writes into the shared commons
@@ -37,7 +37,8 @@ export function safeErrorText(err: unknown): string {
 // fleet prompt neutralizes every field it splices, the mark among them, so a
 // cut field reads "(cut at the bound)" there.
 export function boundedText(text: string): string {
-  return text.length <= FREE_TEXT_MAX ? text : text.slice(0, FREE_TEXT_MAX - TEXT_CUT_MARK.length) + TEXT_CUT_MARK;
+  const head = headPoints(text, FREE_TEXT_MAX);
+  return head === text ? text : headPoints(text, FREE_TEXT_MAX - TEXT_CUT_MARK.length) + TEXT_CUT_MARK;
 }
 
 // A byte-order mark leads a UTF-8 file written through PowerShell's own

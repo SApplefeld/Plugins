@@ -63,27 +63,37 @@ export function oneLine(text: string): string {
  * a literal `.slice(0, n)` landing between the two units of an emoji or any
  * other character past the basic plane leaves a lone surrogate, which a
  * reader of the journal, a decisions card or a prompt shows as a replacement
- * mark or refuses as text. Every head cut by a literal bound of 30 or more on
- * a string under hooks/ runs through this one helper, and the suite
- * test-personas/string-head-unit-test.mjs refuses a literal cut that does not.
- * A cut bounded by a named constant is outside that sweep.
+ * mark or refuses as text. Every head cut on a string under hooks/ whose
+ * bound is a literal or a named constant of 30 or more runs through this one
+ * helper, and the suite test-personas/string-head-unit-test.mjs
+ * refuses a cut that does not: it reads a literal bound as written and
+ * prices a named bound from the constant's declaration in the sources. A cut
+ * bounded by a lowercase parameter or local is outside that sweep and still
+ * counts units.
  * The pre-cut at twice the bound keeps the array small on a long receiver such
  * as a planner's raw output, and is exact by two facts: a text of at most
  * `max` code points has at most `2 * max` units, so the pre-cut never shortens
  * it, and a longer text's first `2 * max` units hold at least `max` whole
  * points before any unit the pre-cut split, which falls past the head and is
  * dropped.
- * Its callers are the seventeen other hook modules that cut a string by a
- * literal bound at the threshold. Thirteen already import from this module for other helpers:
- * ask-layer, context-assembly, controller-tick, drains, goal-persona, index,
- * memq-boundary, mid-turn-reprompt, plan-record, plan-route, records,
- * tool-call and turn-complete. Four import from it for this helper alone:
- * recognition, redactor, self-review and store-files.
+ * Its callers are every hook module that cuts a string at the threshold.
  */
 export function headPoints(text: string, max: number): string {
   if (!(max > 0)) return "";
   if (text.length <= max) return text;
   return Array.from(text.slice(0, max * 2)).slice(0, max).join("");
+}
+
+/**
+ * The first `max` items of a list, as a copy, and an empty list at a bound of
+ * zero or less: the sibling of headPoints for an array. A list cut by a named
+ * bound of 30 or more reads as this call rather than a slice the string-head
+ * sweep would have to tell from a string cut, so the sweep prices every named
+ * bound alike and never has to know a receiver's type.
+ */
+export function headItems<T>(items: readonly T[], max: number): T[] {
+  if (!(max > 0)) return [];
+  return items.slice(0, max);
 }
 
 /**
@@ -506,8 +516,7 @@ export const TURN_RECORD_TEXT_MAX = 80;
 // line needs no bracket. The order is the one every other guarded field takes:
 // cut to length, fold to one line, then neutralize the brackets.
 export function clampTurnRecordText(text: string): string {
-  const cut = text.length > TURN_RECORD_TEXT_MAX ? text.slice(0, TURN_RECORD_TEXT_MAX) : text;
-  return bracketSafeText(oneLine(cut));
+  return bracketSafeText(oneLine(headPoints(text, TURN_RECORD_TEXT_MAX)));
 }
 
 // A record id, minted in the goal nodes' shape: a prefix, the clock in base 36,
@@ -1034,7 +1043,7 @@ export function closeAsk(state: AgentState, id: string, status: AskClosedStatus,
   entry.status = status;
   entry.closedAt = now;
   entry.closedBy = closedBy;
-  entry.answer = answer === null ? null : answer.slice(0, ASK_ANSWER_MAX);
+  entry.answer = answer === null ? null : headPoints(answer, ASK_ANSWER_MAX);
   return entry;
 }
 
@@ -1361,7 +1370,7 @@ export function recordPreviousSession(state: AgentState, outgoingId: unknown, ow
 // length, fold to one line, then neutralize the brackets.
 export function previousSessionsText(state: AgentState): string {
   if (state.previousSessionIds.length === 0) return "Previous sessions: none recorded.";
-  return `Previous sessions, newest first: ${state.previousSessionIds.map((id) => bracketSafeText(oneLine(id.slice(0, PREVIOUS_SESSION_ID_TEXT_MAX)))).join(", ")}.`;
+  return `Previous sessions, newest first: ${state.previousSessionIds.map((id) => bracketSafeText(oneLine(headPoints(id, PREVIOUS_SESSION_ID_TEXT_MAX)))).join(", ")}.`;
 }
 
 // Default state (per persona)

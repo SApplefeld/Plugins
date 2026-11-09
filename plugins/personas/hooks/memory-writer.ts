@@ -10,7 +10,7 @@
 // decisions and the drain's fork watch, and hooks/index.ts the model calls,
 // as closures.
 
-import { MEMORY_KINDS, MEMORY_OWED_MAX, oneLine, type ForkUsage, type MemoryKind, type MemoryOwed } from "./agent-state";
+import { MEMORY_KINDS, MEMORY_OWED_MAX, headPoints, oneLine, type ForkUsage, type MemoryKind, type MemoryOwed } from "./agent-state";
 
 export { MEMORY_OWED_MAX, type ForkUsage, type MemoryKind, type MemoryOwed };
 
@@ -88,18 +88,6 @@ export type MemoryWriterReply = {
   followups: Array<{ subject: string; text: string }>;
 };
 
-// The first max code points of text, so a surrogate pair is never split.
-function firstCodePoints(text: string, max: number): string {
-  let out = "";
-  let n = 0;
-  for (const ch of text) {
-    if (n === max) break;
-    out += ch;
-    n += 1;
-  }
-  return out;
-}
-
 // One surrounding code fence, with or without a language word, removed.
 function unfenced(text: string): string {
   const fence = /^```[A-Za-z0-9_-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```$/.exec(text);
@@ -129,7 +117,7 @@ export function parseMemoryWriterReply(text: string, gateKind: MemoryKind): Memo
     if (typeof record !== "object" || Array.isArray(record)) return null;
     const { kind, text: recordText } = record as { kind?: unknown; text?: unknown };
     if (typeof recordText !== "string") return null;
-    const heldText = firstCodePoints(recordText.trim(), MEMORY_RECORD_TEXT_MAX);
+    const heldText = headPoints(recordText.trim(), MEMORY_RECORD_TEXT_MAX);
     const heldKind = (MEMORY_KINDS as readonly unknown[]).includes(kind) ? kind as MemoryKind : gateKind;
     heldRecord = heldText === "" ? null : { kind: heldKind, text: heldText };
   }
@@ -156,8 +144,8 @@ export function memoryWriterFollowUps(followups: readonly { subject: string; tex
   const kept: Array<{ subject: string; text: string }> = [];
   for (const f of followups) {
     if (kept.length === MEMORY_FOLLOWUPS_MAX) break;
-    const subject = firstCodePoints(oneLine(f.subject).trim(), FOLLOWUP_SUBJECT_MAX);
-    const text = firstCodePoints(oneLine(f.text).trim(), FOLLOWUP_TEXT_MAX);
+    const subject = headPoints(oneLine(f.subject).trim(), FOLLOWUP_SUBJECT_MAX);
+    const text = headPoints(oneLine(f.text).trim(), FOLLOWUP_TEXT_MAX);
     if (subject !== "" && text !== "") kept.push({ subject, text });
   }
   return kept;

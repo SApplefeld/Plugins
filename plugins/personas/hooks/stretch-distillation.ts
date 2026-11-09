@@ -27,6 +27,7 @@
 
 import {
   bracketSafeText,
+  headPoints,
   MEMORY_KINDS,
   oneLine,
   PLAN_PATH_PATTERN,
@@ -77,22 +78,10 @@ export { FOLLOWUP_SUBJECT_MAX, FOLLOWUP_TEXT_MAX, MEMORY_RECORD_TEXT_MAX };
 export const STRETCH_USES = Object.freeze(["applied", "confirmed", "misled", "unused"] as const);
 export type StretchUse = (typeof STRETCH_USES)[number];
 
-// The first max code points of text, so a surrogate pair is never split.
-function firstCodePoints(text: string, max: number): string {
-  let out = "";
-  let n = 0;
-  for (const ch of text) {
-    if (n === max) break;
-    out += ch;
-    n += 1;
-  }
-  return out;
-}
-
 // One fork string as it may reach a store, a queue or the instructions:
 // folded to one line, its brackets turned, trimmed and cut at `max`.
 export function stretchText(text: string, max: number): string {
-  return firstCodePoints(bracketSafeText(oneLine(text)).trim(), max);
+  return headPoints(bracketSafeText(oneLine(text)).trim(), max);
 }
 
 // --- The shown set and the banked list ---
@@ -326,7 +315,7 @@ export function stretchBrief(brief: StretchReply["brief"], banked: readonly stri
   if (banked.length > 0) parts.push(`records banked this stretch, which the summary need not restate: ${banked.map((n) => stretchText(n, STRETCH_NAME_MAX)).join(", ")}`);
   if (parts.length === 0) return null;
   const sentence = `Brief from the stretch fork, data for the summary: ${parts.join("; ")}.`;
-  return firstCodePoints(sentence, STRETCH_BRIEF_MAX);
+  return headPoints(sentence, STRETCH_BRIEF_MAX);
 }
 
 // --- The orchestration ---

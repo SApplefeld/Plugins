@@ -1425,7 +1425,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         // closingText and the recent list carry: the journal's state
         // column is exempt from the field clamp, so what bounds a call
         // line and the request body is this cut alone.
-        const closingText = e.answer.slice(0, PLAN_HEALTH_TEXT_MAX);
+        const closingText = headPoints(e.answer, PLAN_HEALTH_TEXT_MAX);
         record.closingTexts.push(closingText);
         while (record.closingTexts.length > PLAN_HEALTH_RECENT_MAX) record.closingTexts.shift();
         const stampId = shadowAskPlanHealth(host(), closingText, [...record.closingTexts], jevMode, hookBudget);
@@ -1464,7 +1464,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         });
       } else {
         // The exchange, cut once: the kind state's last part.
-        const exchangeText = `User asked: ${currentPrompt().slice(0, PROMPT_HEAD_MAX)}\nWorker answered: ${headPoints(e.answer, 500)}`;
+        const exchangeText = `User asked: ${headPoints(currentPrompt(), PROMPT_HEAD_MAX)}\nWorker answered: ${headPoints(e.answer, 500)}`;
         // Bound to a name so the same bytes reach Haiku and Jev, whether
         // Jev is asked live ahead of Haiku or in shadow beside it.
         const memoryKindState =
@@ -1563,9 +1563,9 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           const dropped = pushMemoryOwed(sess.state.memoryOwed, {
             turnId: typeof e.turnId === "string" ? e.turnId : "",
             kind: memqKindOf(kind),
-            promptHead: currentPrompt().slice(0, PROMPT_HEAD_MAX),
+            promptHead: headPoints(currentPrompt(), PROMPT_HEAD_MAX),
             answerHead: headPoints(answerScrubbed, 500),
-            turnHead: deliveredRecordText(turnOpeningText(askedTextAtDelete)).trim().slice(0, PROMPT_HEAD_MAX),
+            turnHead: headPoints(deliveredRecordText(turnOpeningText(askedTextAtDelete)).trim(), PROMPT_HEAD_MAX),
             at: Date.now(),
           });
           for (const old of dropped) noteMemoryOwedDropped(old, `the queue held ${MEMORY_OWED_MAX}, so the oldest item made way for the newest`);

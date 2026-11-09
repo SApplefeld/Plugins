@@ -30,7 +30,7 @@
 // where `$` crosses an import, so the reads here take a CompactionFs, four
 // members hooks/index.ts builds over `$.fs` in a top-level adapter.
 
-import { bracketSafeText, oneLine } from "./agent-state";
+import { bracketSafeText, headPoints, oneLine } from "./agent-state";
 import { COMPACT_CACHE_LIFE_S, COMPACT_CACHE_MARGIN_S } from "./cache-clock";
 import { fnv1aHash } from "./cost-ledger";
 import { jsonTextOf, TOOL_RESULT_STALE_INPUT_MAX, TOOL_RESULT_STALE_RESULT_MAX } from "./question-catalog";
@@ -631,7 +631,7 @@ export function keysPrefix(keys: readonly string[], messages: readonly PassMessa
 // A tool input's head: its JSON on one line, cut at the input bound, with its
 // brackets folded, since the head reaches a question's state and a cut line.
 export function inputHeadOf(input: unknown): string {
-  return bracketSafeText(oneLine(jsonTextOf(input))).slice(0, COMPACT_INPUT_HEAD_MAX);
+  return headPoints(bracketSafeText(oneLine(jsonTextOf(input))), COMPACT_INPUT_HEAD_MAX);
 }
 
 // The characters a message costs in the context: its text, each tool call's
@@ -762,7 +762,7 @@ export function referenceTokensOf(input: unknown): string[] {
     if (tokens.length >= COMPACT_REFERENCE_TOKENS_MAX) return;
     if (typeof value === "string") {
       for (const raw of value.split(/[\s"'`]+/)) {
-        const token = raw.replace(/^[(\[{<]+|[)\]}>,;:]+$/g, "").slice(0, COMPACT_REFERENCE_TOKEN_CHARS);
+        const token = headPoints(raw.replace(/^[(\[{<]+|[)\]}>,;:]+$/g, ""), COMPACT_REFERENCE_TOKEN_CHARS);
         if (token.length < 6) continue;
         if (!/[/\\._-]/.test(token) && token.length < 8) continue;
         if (!/[A-Za-z0-9]/.test(token)) continue;
@@ -867,7 +867,7 @@ export function surveyTranscript(
       id,
       tool: call.tool,
       inputHead: inputHeadOf(call.input),
-      resultHead: result.text.slice(0, COMPACT_RESULT_HEAD_MAX),
+      resultHead: headPoints(result.text, COMPACT_RESULT_HEAD_MAX),
       resultChars: result.text.length,
       errored: result.errored,
       messagesOld: rows.length - 1 - result.resultRow,
@@ -1029,7 +1029,7 @@ export function cutWorthStarting(droppedTokens: number): boolean {
 // name and the head are text the model wrote, so each is folded to one line
 // with its brackets turned, and the head is already cut at its bound.
 export function cutLine(tool: string, inputHead: string, size: number): string {
-  return `Result of ${bracketSafeText(oneLine(tool))} ${bracketSafeText(oneLine(inputHead)).slice(0, COMPACT_INPUT_HEAD_MAX)} (${Math.max(0, Math.floor(size))} characters) dropped at compaction.`;
+  return `Result of ${bracketSafeText(oneLine(tool))} ${headPoints(bracketSafeText(oneLine(inputHead)), COMPACT_INPUT_HEAD_MAX)} (${Math.max(0, Math.floor(size))} characters) dropped at compaction.`;
 }
 
 // Whether a result text is already a cut line in cutLine's shape: one line

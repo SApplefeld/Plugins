@@ -22,7 +22,7 @@
 // the skills it held, and a throw from a function the caller handed in ends
 // that call's step alone.
 
-import { bracketSafeText, oneLine } from "./agent-state";
+import { bracketSafeText, headPoints, oneLine } from "./agent-state";
 import { SKILL_TOOL } from "./compaction";
 import type { QuestionResolver } from "./decision-seam";
 import { skillPickResolverOf, skillPickStateText, SKILL_PICK, SKILL_PICK_NONE } from "./question-catalog";
@@ -200,7 +200,7 @@ export async function skillPickStart(
     if ("skip" in kit) parts.push(`kit: ${kit.skip}`);
     else if (kitSkills !== null && built.unlisted.includes(kitSkills)) parts.push("kit skills did not list");
     if (parts.length === 0) return [];
-    const detail = bracketSafeText(oneLine(parts.join("; "))).slice(0, SKILL_PICK_DETAIL_MAX);
+    const detail = headPoints(bracketSafeText(oneLine(parts.join("; "))), SKILL_PICK_DETAIL_MAX);
     return [{ timestamp: Date.now(), loop: "monitor", action: "skill_pick_catalog", detail }];
   } catch {
     return [];

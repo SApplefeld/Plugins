@@ -27,7 +27,7 @@
 // hooks/index.ts builds over `$`. Nothing here throws: a store or file call
 // that rejects costs the read or the entry it served.
 
-import { bracketSafeText, oneLine } from "./agent-state";
+import { bracketSafeText, headPoints, oneLine } from "./agent-state";
 import { followUpsKey, type CommonsStore } from "./commons";
 
 // The store key of one session's queue. It is spelled in hooks/commons.ts,
@@ -74,7 +74,7 @@ export function followUpId(source: string, subject: string): string {
 // folded to one line, bracket-safe and cut.
 const DECISION_DETAIL_MAX = 200;
 function detailText(text: string): string {
-  return bracketSafeText(oneLine(text)).slice(0, DECISION_DETAIL_MAX);
+  return headPoints(bracketSafeText(oneLine(text)), DECISION_DETAIL_MAX);
 }
 
 // The entries of a stored value, read by shape: an entry with a field of the

@@ -142,7 +142,7 @@ export const SECTION_HEADING = new RegExp(`^###\\s+\\d+\\.(?:\\s${NON_TERMINATOR
 
 function nextValue(raw: string): string | null {
   const collapsed = oneLine(raw).replace(/\s+/g, " ").trim();
-  const cut = Array.from(collapsed.slice(0, NEXT_LINE_MAX_CHARS * 2)).slice(0, NEXT_LINE_MAX_CHARS).join("");
+  const cut = headPoints(collapsed, NEXT_LINE_MAX_CHARS);
   return cut === "" ? null : cut;
 }
 

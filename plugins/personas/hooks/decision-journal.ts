@@ -85,6 +85,7 @@ import type { SeamResult, SeamSetResult } from "./decision-seam";
 // reads that column against this set.
 import { QUESTION_PRIMITIVES } from "./decision-seam";
 import { fnv1aHash } from "./cost-ledger";
+import { headPoints } from "./agent-state";
 
 // What the journal needs from the host: the home directory, the three file
 // calls an append costs, and the folder listing the first append on a journal
@@ -249,7 +250,8 @@ export function journalText(value: unknown): string {
   } catch {
     text = "unconvertible value";
   }
-  return text.length <= FREE_TEXT_MAX ? text : text.slice(0, FREE_TEXT_MAX - TEXT_CUT_MARK.length) + TEXT_CUT_MARK;
+  const head = headPoints(text, FREE_TEXT_MAX);
+  return head === text ? text : headPoints(text, FREE_TEXT_MAX - TEXT_CUT_MARK.length) + TEXT_CUT_MARK;
 }
 
 // --- Stamp ids and the split ---
@@ -268,7 +270,7 @@ let counter = 0;
 // the guard of the channel rather than of this module: the meter's file names
 // under the same home take a session id through it too.
 export function segment(value: string): string {
-  const out = value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, SEGMENT_MAX);
+  const out = headPoints(value.replace(/[^A-Za-z0-9_-]/g, "_"), SEGMENT_MAX);
   return out.length > 0 ? out : "_";
 }
 

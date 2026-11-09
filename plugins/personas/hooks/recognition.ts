@@ -31,7 +31,7 @@
 // test-personas/fixtures/recognition-containment.json holds the containment
 // verdicts the `cmd:` matcher gives.
 
-import { headPoints } from "./agent-state";
+import { headItems, headPoints } from "./agent-state";
 import { STRICT_SEAT } from "./guards/agent-class";
 
 // Characters of command text one match runs over, a script write's text and
@@ -241,7 +241,11 @@ function cmdPatternAdmitted(pattern: string): boolean {
 // first character that is not a space, to RECOGNITION_VALUE_MAX, splits it at
 // each comma, trims each piece, skips an empty one, reads at most
 // RECOGNITION_ENTRIES_MAX, and keeps each `cmd:` entry whose pattern it
-// admits.
+// admits. A value cut at the bound loses its last piece, the one the cut may
+// have split. The hook counts that bound in code points where memq counts
+// UTF-16 units, so on a value holding astral characters and past the bound in
+// units, the hook can read triggers that memq drops as past its bound, up to
+// RECOGNITION_ENTRIES_MAX.
 function cmdTriggersOf(row: Record<string, unknown>): Array<{ entry: string; folded: string }> {
   const list = (value: unknown): string[] => (Array.isArray(value)
     ? value.filter((e): e is string => typeof e === "string" && e !== "" && !/[\r\n\u2028\u2029]/.test(e) && !e.includes(","))
@@ -252,8 +256,9 @@ function cmdTriggersOf(row: Record<string, unknown>): Array<{ entry: string; fol
   const lines = ["---", `triggers: ${triggers.join(", ")}`, ...(anchors.length > 0 ? [`anchors: ${anchors.join(", ")}`] : []), "---", ""];
   if (lines.join("\n").length - 1 > RECOGNITION_ROW_TEXT_MAX) return [];
   const value = triggers.join(", ").replace(/^\s+/, "");
-  const pieces = value.slice(0, RECOGNITION_VALUE_MAX).split(",");
-  if (value.length > RECOGNITION_VALUE_MAX) pieces.pop();
+  const head = headPoints(value, RECOGNITION_VALUE_MAX);
+  const pieces = head.split(",");
+  if (head !== value) pieces.pop();
   const out: Array<{ entry: string; folded: string }> = [];
   let read = 0;
   for (const piece of pieces) {
@@ -274,11 +279,10 @@ function cmdTriggersOf(row: Record<string, unknown>): Array<{ entry: string; fol
 // and which carries at least one admitted `cmd:` trigger.
 function sectionRecords(tier: RecognitionTier, rows: unknown, keep: (row: Record<string, unknown>) => boolean, scope: RecognitionScope): RecognitionRecord[] {
   if (!Array.isArray(rows)) return [];
-  const named = rows
+  const named = headItems(rows
     .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object" && typeof r.name === "string")
     .filter(keep)
-    .sort((a, b) => (a.name as string) < (b.name as string) ? -1 : (a.name as string) > (b.name as string) ? 1 : 0)
-    .slice(0, RECOGNITION_ROWS_MAX);
+    .sort((a, b) => (a.name as string) < (b.name as string) ? -1 : (a.name as string) > (b.name as string) ? 1 : 0), RECOGNITION_ROWS_MAX);
   const out: RecognitionRecord[] = [];
   for (const row of named) {
     const name = row.name as string;
@@ -608,13 +612,13 @@ function nudgeFoldText(text: unknown, cap: number): string {
 // A name folded for comparison: its first NUDGE_NAME_CAP characters, lowercased.
 function nudgeFoldName(text: unknown): string {
   if (typeof text !== "string" || text === "") return "";
-  return text.slice(0, NUDGE_NAME_CAP).toLowerCase();
+  return headPoints(text, NUDGE_NAME_CAP).toLowerCase();
 }
 
 // A path folded for comparison: forward slashes, lowercased.
 function nudgeFoldPath(text: unknown): string {
   if (typeof text !== "string" || text === "") return "";
-  return text.slice(0, NUDGE_NAME_CAP).replace(/\\/g, "/").toLowerCase();
+  return headPoints(text, NUDGE_NAME_CAP).replace(/\\/g, "/").toLowerCase();
 }
 
 // One glob segment against one path segment: `*` any run, `?` one character.
@@ -759,7 +763,7 @@ function nudgeTouchedPaths(payload: NudgePayload): string[] {
   const push = (value: unknown): void => {
     if (typeof value !== "string" || value === "") return;
     if (out.length >= NUDGE_PATH_CANDIDATES_MAX) return;
-    out.push(value.slice(0, NUDGE_NAME_CAP));
+    out.push(headPoints(value, NUDGE_NAME_CAP));
   };
   const input = nudgeObject(payload.tool_input);
   if (input !== null) {
@@ -1053,11 +1057,10 @@ function nudgeUtf8(text: string): number[] {
 // NUDGE_INDEX_SERIALIZED_MAX.
 function nudgeSectionRecords(tier: RecognitionTier, key: string, rows: unknown, keep: (row: Record<string, unknown>) => boolean, scope: RecognitionScope): NudgeRecord[] {
   if (!Array.isArray(rows)) return [];
-  const named = rows
+  const named = headItems(rows
     .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object" && typeof r.name === "string")
     .filter(keep)
-    .sort((a, b) => (a.name as string) < (b.name as string) ? -1 : (a.name as string) > (b.name as string) ? 1 : 0)
-    .slice(0, RECOGNITION_ROWS_MAX);
+    .sort((a, b) => (a.name as string) < (b.name as string) ? -1 : (a.name as string) > (b.name as string) ? 1 : 0), RECOGNITION_ROWS_MAX);
   const out: NudgeRecord[] = [];
   let serialized = 2;
   for (const row of named) {
@@ -1333,7 +1336,7 @@ export function nudgeShown(text: string, elisions: NudgeElisions): string {
   const reduced = given.replace(/[^\x20-\x7E]/g, "").replace(/"/g, "");
   let shown = reduced;
   for (const elision of reduced.length !== given.length ? elisions.relaxed : elisions.elisions) shown = shown.replace(elision.pattern, elision.shown);
-  return shown.slice(0, NUDGE_SHOWN_MAX);
+  return headPoints(shown, NUDGE_SHOWN_MAX);
 }
 
 // One claimed hit's pointer line: the record, its tier where not the

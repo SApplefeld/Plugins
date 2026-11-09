@@ -6,7 +6,7 @@
 // reads as arguments, so the tick harness, which loads a fresh hooks/index.ts per
 // case, shares nothing through it.
 
-import { bracketSafeText } from "./agent-state";
+import { bracketSafeText, headPoints } from "./agent-state";
 import { type GuardCall, type GuardResult } from "./guards/runner";
 import { type KitMemqResult } from "./memq-boundary";
 import { memqNameAndTierOf, memqVerbArgsOf } from "./memq-command";
@@ -34,19 +34,6 @@ export const PROMPT_HEAD_MAX = 300;
 // also the most records its memq recall-candidates read asks for, as memq's
 // own limit flag takes it.
 export const RECALL_ASK_MAX = 10;
-
-// The first max code points of text, read without copying the rest, so a
-// surrogate pair is never split and a very long prompt costs max steps.
-export function firstCodePoints(text: string, max: number): string {
-  let out = "";
-  let n = 0;
-  for (const ch of text) {
-    if (n === max) break;
-    out += ch;
-    n += 1;
-  }
-  return out;
-}
 
 // The memory kind a record is written under: fact, preference or lesson as
 // given, and fact for anything else.
@@ -154,7 +141,7 @@ export function procedureCandidatesOf(res: KitMemqResult | null): { rows: Recall
       typeName: typeof r.typeName === "string" && r.typeName !== "" ? r.typeName : null,
       description: typeof r.description === "string" ? r.description : "",
       tags: Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === "string") : [],
-      bodyHead: typeof r.bodyHead === "string" ? firstCodePoints(r.bodyHead, RECALL_BODY_HEAD_MAX) : "",
+      bodyHead: typeof r.bodyHead === "string" ? headPoints(r.bodyHead, RECALL_BODY_HEAD_MAX) : "",
       body: null,
       bodyLength: typeof r.bodyLength === "number" && Number.isSafeInteger(r.bodyLength) && r.bodyLength >= 0 ? r.bodyLength : null,
     });
@@ -332,7 +319,7 @@ export const RECOGNITION_READ_MAX = 4 * 1024 * 1024;
 export function memoryRecognitionStateText(m: RecognitionMatch): string {
   return `${MEMORY_RECOGNITION_STATE_TRIGGER}: ${kaizenLine(m.trigger)}\n` +
     `${MEMORY_RECOGNITION_STATE_RECORD}: ${kaizenLine(m.name)}\n` +
-    `${MEMORY_RECOGNITION_STATE_DESCRIPTION}: ${kaizenLine(firstCodePoints(m.description, PROMPT_HEAD_MAX))}`;
+    `${MEMORY_RECOGNITION_STATE_DESCRIPTION}: ${kaizenLine(headPoints(m.description, PROMPT_HEAD_MAX))}`;
 }
 
 // One boundary's matched hits, read against the marker as it stands, with

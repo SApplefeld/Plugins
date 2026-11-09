@@ -159,8 +159,8 @@ export const DONE_STATEMENT_SHOWN_MAX = 300;
 // split.
 export function shownDoneStatement(statement: string): string {
   const text = safeText(statement);
-  const points = Array.from(text);
-  return points.length > DONE_STATEMENT_SHOWN_MAX ? `${points.slice(0, DONE_STATEMENT_SHOWN_MAX - 1).join("")}…` : text;
+  const head = headPoints(text, DONE_STATEMENT_SHOWN_MAX);
+  return head === text ? text : `${headPoints(text, DONE_STATEMENT_SHOWN_MAX - 1)}…`;
 }
 
 export function goalContextText(root: GoalNode | undefined): string {

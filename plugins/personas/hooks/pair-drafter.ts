@@ -10,7 +10,7 @@
 // the drain, the reads and the decisions, and hooks/index.ts the owe, the
 // fork call, as a closure, and the delivery.
 
-import { bracketSafeText, LINE_TERMINATOR, oneLine } from "./agent-state";
+import { bracketSafeText, headItems, headPoints, LINE_TERMINATOR, oneLine } from "./agent-state";
 
 // The most pairs one scan's drafts cover: the scan's three tiers, project,
 // a declared type and operator, at its own listing cap of 10 each. The rest
@@ -49,18 +49,6 @@ export type PairDraft = {
   reason: string;
   command: string | null;
 };
-
-// The first max code points of text, so a surrogate pair is never split.
-function firstCodePoints(text: string, max: number): string {
-  let out = "";
-  let n = 0;
-  for (const ch of text) {
-    if (n === max) break;
-    out += ch;
-    n += 1;
-  }
-  return out;
-}
 
 // One surrounding code fence, with or without a language word, removed. The
 // fence may sit on the reply's one line, with no line break after its opener
@@ -124,7 +112,7 @@ export function parseScanPairs(text: string): { pairs: ScanPair[]; notDrafted: n
     const pinned = pinnedText === undefined ? [] : pinnedText.split(", ").filter((name) => name === a || name === b);
     listed.push({ tier: tier.tier, typeName: tier.typeName, a, b, score: Number(score), pinned });
   }
-  return { pairs: listed.slice(0, PAIR_DRAFTS_MAX), notDrafted: Math.max(0, listed.length - PAIR_DRAFTS_MAX) + skipped };
+  return { pairs: headItems(listed, PAIR_DRAFTS_MAX), notDrafted: Math.max(0, listed.length - PAIR_DRAFTS_MAX) + skipped };
 }
 
 // The tier as the scan's heading labels it.
@@ -138,7 +126,7 @@ function tierLabel(pair: ScanPair): string {
 // pair line of this prompt nor a delivery label. A body the drain could not
 // read is `(not read)`.
 function promptBody(body: string | null): string {
-  return body === null ? "(not read)" : bracketSafeText(oneLine(firstCodePoints(body, PAIR_BODY_MAX)));
+  return body === null ? "(not read)" : bracketSafeText(oneLine(headPoints(body, PAIR_BODY_MAX)));
 }
 
 // The one user message the fork answers over the session's transcript. It
@@ -244,7 +232,7 @@ export function parsePairDrafterReply(text: string, asked: ScanPair[]): PairDraf
       pair,
       disposition: held,
       member: heldMember,
-      reason: firstCodePoints(because, PAIR_REASON_MAX),
+      reason: headPoints(because, PAIR_REASON_MAX),
       command: pairDraftCommand(pair, held, heldMember),
     });
   }

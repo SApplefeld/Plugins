@@ -6,7 +6,7 @@
 // reads as arguments, so the tick harness, which loads a fresh hooks/index.ts per
 // case, shares nothing through it.
 
-import { type AgentState, type AskEntry, type AskOpener, type AskOpenRefusal, type GoalNode, openAskEntries } from "./agent-state";
+import { type AgentState, type AskEntry, type AskOpener, type AskOpenRefusal, type GoalNode, headPoints, openAskEntries } from "./agent-state";
 
 // The worker's ASK: marker, a line reading `ASK: <question>? Recommend:
 // <choice>` anywhere in an answer, in any case. turn.complete opens an ask
@@ -128,6 +128,6 @@ export function readStatusLine(text: unknown): { state: "working" | "blocked" | 
   if (!m) return null;
   const state = m[1] === "WORKING" ? "working" : m[1] === "BLOCKED" ? "blocked" : "waiting";
   const reason = m[2].trim();
-  const points = Array.from(reason.slice(0, LEAD_REASON_MAX * 2 + 2));
-  return { state, reason: points.length > LEAD_REASON_MAX ? `${points.slice(0, LEAD_REASON_MAX - 1).join("")}…` : reason };
+  const head = headPoints(reason, LEAD_REASON_MAX);
+  return { state, reason: head === reason ? reason : `${headPoints(reason, LEAD_REASON_MAX - 1)}…` };
 }

@@ -29,7 +29,7 @@
 
 import type { PluginHost } from "./host";
 import { SCORE_MIN_LEVELS, SCORE_MAX_LEVELS, type ChoiceQuestion, type ResolvedQuestion, type QuestionResolver } from "./decision-seam";
-import { bracketSafeText, LINE_TERMINATOR } from "./agent-state";
+import { bracketSafeText, headPoints, LINE_TERMINATOR } from "./agent-state";
 
 // --- The label arrays the three classify sites pass to Haiku ---
 //
@@ -618,8 +618,8 @@ function stateValue(text: string): string {
 // external and model text and the objective stored text, so no value can
 // write a fifth part.
 export function turnScoreStateText(prompt: string, answer: string, objective: string, tools: TurnScoreTools): string {
-  return `Turn opened with: ${stateValue(turnOpeningText(prompt)).slice(0, TURN_SCORE_PROMPT_MAX)}\n\n` +
-    `Worker answered: ${stateValue(answer).slice(0, TURN_SCORE_ANSWER_MAX)}\n\n` +
+  return `Turn opened with: ${headPoints(stateValue(turnOpeningText(prompt)), TURN_SCORE_PROMPT_MAX)}\n\n` +
+    `Worker answered: ${headPoints(stateValue(answer), TURN_SCORE_ANSWER_MAX)}\n\n` +
     `Goal objective: ${stateValue(objective)}\n\n` +
     `Tools: ${stateValue(turnScoreToolsLine(tools))}`;
 }
@@ -655,7 +655,7 @@ export function jsonTextOf(input: unknown): string {
 
 function stepEffortToolText(use: StepEffortToolUse): string {
   const name = stateValue(String(use.name));
-  const head = stateValue(jsonTextOf(use.input)).slice(0, STEP_EFFORT_INPUT_MAX);
+  const head = headPoints(stateValue(jsonTextOf(use.input)), STEP_EFFORT_INPUT_MAX);
   return head.length > 0 ? `${name} ${head}` : name;
 }
 
@@ -666,7 +666,7 @@ export function stepEffortStateText(
   toolUses: readonly StepEffortToolUse[],
   stopReason: string | null,
 ): string {
-  const answerHead = stateValue(answer).slice(0, STEP_EFFORT_ANSWER_MAX);
+  const answerHead = headPoints(stateValue(answer), STEP_EFFORT_ANSWER_MAX);
   const tools = toolUses.map(stepEffortToolText);
   return `Goal objective: ${objective === null ? "none" : stateValue(objective)}\n\n` +
     `Step index: ${index}\n\n` +
@@ -700,8 +700,8 @@ export type ToolResultStaleFacts = {
 
 export function toolResultStaleStateText(facts: ToolResultStaleFacts): string {
   return `Tool: ${stateValue(facts.tool)}\n\n` +
-    `Input head: ${stateValue(facts.inputHead).slice(0, TOOL_RESULT_STALE_INPUT_MAX)}\n\n` +
-    `Result head: ${stateValue(facts.resultHead).slice(0, TOOL_RESULT_STALE_RESULT_MAX)}\n\n` +
+    `Input head: ${headPoints(stateValue(facts.inputHead), TOOL_RESULT_STALE_INPUT_MAX)}\n\n` +
+    `Result head: ${headPoints(stateValue(facts.resultHead), TOOL_RESULT_STALE_RESULT_MAX)}\n\n` +
     `Result size: ${Math.max(0, Math.floor(facts.resultChars))} characters\n\n` +
     `Errored: ${facts.errored ? "yes" : "no"}\n\n` +
     `Messages since: ${Math.max(0, Math.floor(facts.messagesOld))}\n\n` +
@@ -746,7 +746,7 @@ export type ControllerPendingPlan = { id: string | null; title: string };
 // none where no answer is held. The controller's skip hash reads this too, so
 // an answer that changes only past the cut sends the same bytes and skips.
 export function controllerLastAnswerText(lastAnswer: string | null): string {
-  return lastAnswer === null ? CONTROLLER_NO_ANSWER : stateValue(lastAnswer).slice(0, CONTROLLER_LAST_ANSWER_MAX);
+  return lastAnswer === null ? CONTROLLER_NO_ANSWER : headPoints(stateValue(lastAnswer), CONTROLLER_LAST_ANSWER_MAX);
 }
 
 // `lastAnswer` is the worker's most recent answer, raw, or null where none

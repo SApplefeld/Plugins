@@ -165,7 +165,7 @@ export function personaStoreId(persona: string): string {
   const prefix = "persona-";
   if (MEMQ_NAME_CHARSET.test(persona) && prefix.length + persona.length <= MEMQ_TAG_CAP) return persona;
   const hash = fnv1aHash(persona).toString(36);
-  const kept = persona.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, MEMQ_TAG_CAP - prefix.length - 1 - hash.length);
+  const kept = headPoints(persona.replace(/[^A-Za-z0-9_.-]/g, ""), MEMQ_TAG_CAP - prefix.length - 1 - hash.length);
   return `${kept}-${hash}`;
 }
 

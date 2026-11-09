@@ -41,6 +41,7 @@
 
 import type { PluginHost } from "./host";
 import { scrubText } from "./redactor";
+import { headPoints } from "./agent-state";
 
 // The live contract, endpoint included: https://docs.typesafe.ai/api.md
 export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -867,7 +868,7 @@ async function send(
     answers: validatedAnswers,
     usage: { input_tokens: countOf(usage.input_tokens), output_tokens: countOf(usage.output_tokens) },
     latencyMs,
-    model: isRecord(parsed) && typeof parsed.model === "string" ? parsed.model.slice(0, MODEL_MAX_CHARS) : null,
+    model: isRecord(parsed) && typeof parsed.model === "string" ? headPoints(parsed.model, MODEL_MAX_CHARS) : null,
     state: sentText,
   };
 }

@@ -22,7 +22,8 @@ import type { PluginHost } from "./host";
 import type { HookBudget, LiveAskResult } from "./jev-live";
 import { MEMQ_TIMEOUT_SLACK_MS, type KitMemqOptions, type KitMemqResult } from "./memq-boundary";
 import { MEMORY_RECALL, MEMORY_RECALL_OPTIONS, MEMORY_RECOGNITION, MEMORY_RECOGNITION_OPTIONS } from "./question-catalog";
-import { fetchedRecordOf, firstCodePoints, memoryRecallStateText, memoryRecognitionStateText, MEMQ_READ_TIMEOUT_MS, MEMQ_SITUATION_MAX, procedureCandidatesOf, PROMPT_HEAD_MAX, RECALL_ASK_MAX, RECALL_BODY_HEAD_MAX, RECALL_BODY_MAX, RECALL_SHOW_MAX, RECALL_SHOW_THRESHOLD, recallRecordText, RECOGNITION_CHECK_EVERY_MS, RECOGNITION_READ_MAX, RECOGNITION_SKIP_THRESHOLD, RECOGNITION_SNAPSHOT_FILE, touchStampsCandidate, type MemqGetTier, type RecallCandidate, type RecallInjection } from "./recall-text";
+import { headPoints } from "./agent-state";
+import { fetchedRecordOf, memoryRecallStateText, memoryRecognitionStateText, MEMQ_READ_TIMEOUT_MS, MEMQ_SITUATION_MAX, procedureCandidatesOf, PROMPT_HEAD_MAX, RECALL_ASK_MAX, RECALL_BODY_HEAD_MAX, RECALL_BODY_MAX, RECALL_SHOW_MAX, RECALL_SHOW_THRESHOLD, recallRecordText, RECOGNITION_CHECK_EVERY_MS, RECOGNITION_READ_MAX, RECOGNITION_SKIP_THRESHOLD, RECOGNITION_SNAPSHOT_FILE, touchStampsCandidate, type MemqGetTier, type RecallCandidate, type RecallInjection } from "./recall-text";
 import { nudgeIndexOf, recognitionIndexOf, recognitionKeyOf, recognitionMatches, recognitionScopeOf, RECOGNITION_ACT_WINDOW, RECOGNITION_SCOPE_RETRY_MS, RECOGNITION_SCOPE_SCRIPT, type RecognitionScope, type RecognitionTier } from "./recognition";
 import type { SessionState } from "./session-state";
 import { MEMQ_NAME_CHARSET, noteStretchShown } from "./stretch-distillation";
@@ -128,7 +129,7 @@ export async function recallInjection(deps: RecallDeps, promptText: string, mode
   const host = deps.host;
   const persona = deps.session.persona;
   const session = deps.session.mySessionId;
-  const promptHead = firstCodePoints(promptText, PROMPT_HEAD_MAX);
+  const promptHead = headPoints(promptText, PROMPT_HEAD_MAX);
   const skip = (reason: string, skippedFor: number | null): null => {
     void writeRendering(host, {
       persona, session, promptSeq: seq, promptHead, procedure: null, procedureAbsent: null, namedFailed: null, shown: [], calls: {}, rendering: "",
@@ -157,7 +158,7 @@ export async function recallInjection(deps: RecallDeps, promptText: string, mode
     const chainBudget: HookBudget = { get live() { return budget.live; }, remainingMs: () => Math.min(hookLeftMs(), leftMs() + HOLD_HEADROOM_MS) };
     const recall = await deps.kitMemq([
       "recall-candidates",
-      "--situation", firstCodePoints(promptText, MEMQ_SITUATION_MAX),
+      "--situation", headPoints(promptText, MEMQ_SITUATION_MAX),
       "--limit", MEMQ_RECALL_LIMIT,
     ], { timeoutMs: MEMQ_READ_TIMEOUT_MS });
     if (seq !== deps.session.recallPromptSeq) return skip("overtaken", deps.session.recallPromptSeq);

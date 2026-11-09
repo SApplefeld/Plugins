@@ -632,7 +632,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     };
     // A root created on a channel turn records who asked, where the
     // envelope named them, cut to ASKED_BY_MAX_CHARS.
-    if (currentTurnOriginKind() === "channel" && currentTurnAuthor() !== "") root.askedBy = currentTurnAuthor().slice(0, ASKED_BY_MAX_CHARS);
+    if (currentTurnOriginKind() === "channel" && currentTurnAuthor() !== "") root.askedBy = headPoints(currentTurnAuthor(), ASKED_BY_MAX_CHARS);
 
     // Every open ask belongs to the tree being replaced, and an open
     // blocking one would hold goal_add's activation on the new tree. Each
@@ -716,7 +716,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       sourceTask = sess.state.tasks.find((t) => t.id === taskId);
       if (sourceTask === undefined) {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
-        return { deny: `taskId "${taskId.slice(0, TASK_ID_MAX_CHARS)}" not found in the task list.` };
+        return { deny: `taskId "${headPoints(taskId, TASK_ID_MAX_CHARS)}" not found in the task list.` };
       }
     }
     const title = givenTitle || (sourceTask === undefined ? "" : sourceTask.text);
@@ -1753,7 +1753,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const task: TaskItem = {
       id: newTaskId(now),
       goalId: active.id,
-      text: rawText.slice(0, TASK_TEXT_MAX_CHARS),
+      text: headPoints(rawText, TASK_TEXT_MAX_CHARS),
       done: false,
       addedAt: now,
     };
@@ -2454,7 +2454,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   if ((e as any).tool === "mcp__personas__fleet_restart") {
     const now = Date.now();
     const target = String((e as any).persona || "").trim();
-    const reason = String((e as any).reason || "").trim().slice(0, FLEET_RESTART_REASON_MAX);
+    const reason = headPoints(String((e as any).reason || "").trim(), FLEET_RESTART_REASON_MAX);
     // The caller's own argument, as every refusal and the result echo it.
     const shown = boundedText(bracketSafeText(target));
     const refuse = (why: string) => {
@@ -2540,7 +2540,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   if ((e as any).tool === "mcp__personas__fleet_interrupt") {
     const now = Date.now();
     const target = String((e as any).persona || "").trim();
-    const reason = String((e as any).reason || "").trim().slice(0, FLEET_RESTART_REASON_MAX);
+    const reason = headPoints(String((e as any).reason || "").trim(), FLEET_RESTART_REASON_MAX);
     const shown = boundedText(bracketSafeText(target));
     const refuse = (why: string) => {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -2723,7 +2723,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   if ((e as any).tool === "mcp__personas__fleet_retire") {
     const now = Date.now();
     const target = String((e as any).persona || "").trim();
-    const reason = String((e as any).reason || "").trim().slice(0, FLEET_RESTART_REASON_MAX);
+    const reason = headPoints(String((e as any).reason || "").trim(), FLEET_RESTART_REASON_MAX);
     const shown = boundedText(bracketSafeText(target));
     const refuse = (why: string) => {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);

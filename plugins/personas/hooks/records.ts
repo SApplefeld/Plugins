@@ -187,7 +187,7 @@ export async function holdMessageAsRecord(
     ? deps.session.state.goals.find((g) => g.id === deps.session.state.activeGoalId)
     : undefined;
   const activeEntry = activeNode && activeNode.status === "active" ? activeNode : null;
-  const excerpt = message.slice(0, TURN_OPEN_MESSAGE_MAX);
+  const excerpt = headPoints(message, TURN_OPEN_MESSAGE_MAX);
 
   // One decision per act, each naming the record it acted on. Where the detail
   // carries the record's text it goes through kaizenLine first, as every
