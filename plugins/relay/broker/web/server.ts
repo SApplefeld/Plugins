@@ -32,8 +32,10 @@
 //      403, and carry `Content-Type: application/octet-stream` and no other, else 415. A form post
 //      cannot set that type either, and a cross-origin fetch with it needs a preflight, as JSON does.
 //
-// A refused request answers with an empty body whatever the reason, so nothing about the lists
-// or the resolver leaks to whoever was refused. Nothing from a header reaches the log: a refusal
+// A request the gate refuses answers with an empty body whatever the reason, so nothing about the
+// lists or the resolver leaks to whoever was refused. A route's own answer after the gate admits
+// the reader may carry a body, as the plan route's reason words and some 409s do. Nothing from a
+// header reaches the log: a refusal
 // line carries the socket's own peer address and a fixed reason.
 import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -54,8 +56,9 @@ import { RING_CAPACITY, lineageKnown, talkView } from "./talk.ts";
 import type { TalkRing, TalkViewInput } from "./talk.ts";
 import type { WebFiles } from "../routing/attachments.ts";
 import type { WebAnswerStatus, WebDeliveryStatus } from "../routing/inbound.ts";
-import { CLIENT_PREFIX } from "./rollout.ts";
-import type { PublishMark, RolloutMark, RolloutReader } from "./rollout.ts";
+import { CLIENT_PREFIX, planBranchFault } from "./rollout.ts";
+import type { BranchRead, PublishMark, RolloutMark, RolloutReader } from "./rollout.ts";
+import { planStem } from "../board/plans.ts";
 import { appendDirection, calendarDate, steerText } from "./direction.ts";
 import type { SteerOutcome } from "./direction.ts";
 import { liveByLineage } from "../registry.ts";
@@ -64,7 +67,7 @@ import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
 import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { askView, blockKey, blockedReasons, drawnAsk, healthView, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
+import { askView, blockKey, blockedReasons, branchPlanView, checkoutRepoOf, drawnAsk, healthView, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
 import type { Readings } from "./views.ts";
 import type { HandledHow, HandledMark, WatermarkStore } from "./watermarks.ts";
 
@@ -564,9 +567,13 @@ export function createWebServer(options: WebHandlerOptions): WebServer {
 // The JSON views
 // ---------------------------------------------------------------------------------------------
 
+/** The folder a live plan sits in, the one folder a plan read from its branch may name. */
+const LIVE_PLANS_DIRECTORY = "docs/plans/";
 /** The folders a plan path may name, and the file kind it must end in. */
-const PLAN_DIRECTORIES = ["docs/plans/", "docs/archive/plans/"];
+const PLAN_DIRECTORIES = [LIVE_PLANS_DIRECTORY, "docs/archive/plans/"];
 const PLAN_SUFFIX = ".md";
+/** The folder a plan's brief sits in beside a live plan, under the plan's stem. */
+const BRIEFS_DIRECTORY = "docs/briefs/";
 
 /** The rule that refused a plan path, so a test can tell which of the rules did it. */
 export type PlanPathRule = "decode" | "backslash" | "leading-slash" | "dotdot" | "prefix" | "suffix";
@@ -594,8 +601,11 @@ export function screenPlanPath(raw: string): PlanPathScreen {
  * named: it holds no backslash, which Windows reads as a separator; it has no leading slash; no
  * segment of it is `..`; it starts with a plans folder; it ends in `.md`.
  *
- * What passes is a shape and nothing more. The handler never opens it: the plan is looked up by exact
- * match among the plans the pass swept, so a path no sweep named is a 404 whatever its shape.
+ * What passes is a shape and nothing more. Without `branch` the handler opens nothing: the plan is
+ * looked up by exact match among the plans the pass swept, so a path no sweep named is a 404 whatever
+ * its shape. With `branch` the path, under `docs/plans/` alone, names a blob the rollout reader shows
+ * from its bare repository at the branch's commit, as `<sha>:<path>`, and a path the commit does not
+ * hold is a 404 there too; no path reaches a file system.
  */
 export function screenPlanShape(decoded: string): PlanPathScreen {
   if (decoded.includes("\\")) return { ok: false, rule: "backslash" };
@@ -658,12 +668,32 @@ function sendJson(response: ServerResponse, body: unknown, status = 200): void {
 
 /**
  * Registers `/web/standup`, `/web/today`, `/web/needs-me`, `/web/workers`, `/web/ask`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`.
- * Each answers a GET from the readings `source` hands back, the pass's latest, and reads no file of its own. A
- * request string reaches no response and no log: it is compared with names the broker holds and dropped.
+ * Each answers a GET from the readings `source` hands back, the pass's latest, and reads no file of its own,
+ * save the plan route's branch read below. A request string reaches no log: it is compared with names the
+ * broker holds and dropped. It reaches no response either, save one: a branch read's 200 answers
+ * `source.branch` as the name the caller sent and `path` and `title` from the path the caller sent, once
+ * the screens have admitted both, the branch has matched by its exact ref name a plan branch the last
+ * fetch brought, and git has shown a file at that path.
  *
  * A refused shape answers 400 and a well-shaped request for something the readings do not hold
- * answers 404, both with an empty body. A reader failing is not a failure here: the view says which
- * source is held and serves what the pass last read.
+ * answers 404 with an empty body. The plan route alone answers a refusal with a reason body, each
+ * word fixed vocabulary and never the request's text, since the gate has admitted the reader by
+ * then: its three shape refusals, 400 `{"refused":"unknown-root"}`,
+ * `{"refused":"plan-path","rule":"<rule>"}` or `{"refused":"plan-branch"}`; a branch read's 404
+ * `{"refused":"<reason>"}`, the reason one of `unknown-repo`, `unknown-branch`, `too-large`,
+ * `missing` and `not-a-plan`; and a branch read's 502 `{"refused":"read-failed"}`. A swept miss
+ * without `branch` stays an empty 404. Every refusal the gate itself makes stays empty, as the
+ * header above states. A reader failing is not a failure here: the view says which source is held
+ * and serves what the pass last read.
+ *
+ * The plan route is the one view that reads past the readings: with `branch`, it asks `rollout`,
+ * the rollout reader, for the plan file and its brief from that plan branch of the root's
+ * repository, read from the reader's bare repository and never from a checkout. A read the reader
+ * answers with a reason, `unknown-repo`, `unknown-branch` or `too-large`, a plan file the commit
+ * does not hold, `missing`, or a text that is no plan doc, `not-a-plan`, is 404 with that word as
+ * `{"refused":"<reason>"}`, since the shape was admitted and the thing is not there. A git command
+ * that fails is 502 `{"refused":"read-failed"}`, as the mark routes answer a failed fetch. Without
+ * `rollout`, every request with `branch` is `unknown-repo`.
  *
  * `threads` gives the ask view its thread link, through the same two lookups the talk view takes;
  * without it, or with no guild configured, every ask's `thread` reads null.
@@ -672,8 +702,9 @@ export function registerViewHandlers(
   register: WebHandler["register"],
   source: () => Readings,
   threads?: Pick<TalkViewInput, "threadFor" | "guildId">,
+  rollout?: Pick<RolloutReader, "readBranchFiles">,
 ): void {
-  const get = (name: string, answer: (request: IncomingMessage, response: ServerResponse) => void): void => {
+  const get = (name: string, answer: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>): void => {
     register(name, (request, response) => {
       request.resume();
       if (request.method !== "GET") {
@@ -681,7 +712,7 @@ export function registerViewHandlers(
         response.end();
         return;
       }
-      answer(request, response);
+      return answer(request, response);
     }, { operatorWord: false });
   };
 
@@ -716,17 +747,44 @@ export function registerViewHandlers(
     sendJson(response, view);
   });
 
-  get("plan", (request, response) => {
+  get("plan", async (request, response) => {
     const query = queryOf(request.url ?? "");
     const rawRoot = single(query, "root");
     const rawPath = single(query, "path");
     const readings = source();
     const root = rawRoot === null ? null : decodeParam(rawRoot);
-    if (root === null || !rootConfigured(readings, root)) return empty(response, 400);
-    const screened = rawPath === null ? null : screenPlanPath(rawPath);
-    if (screened === null || !screened.ok) return empty(response, 400);
-    const view = planView(readings, root, screened.path);
-    if (view === null) return empty(response, 404);
+    if (root === null || !rootConfigured(readings, root)) return sendJson(response, { refused: "unknown-root" }, 400);
+    // An absent path, or one given twice, is screened as the empty path, which the prefix rule refuses.
+    const screened = screenPlanPath(rawPath ?? "");
+    if (!screened.ok) return sendJson(response, { refused: "plan-path", rule: screened.rule }, 400);
+    if (!query.has("branch")) {
+      // The swept plan, as before `branch` existed: a miss is the empty 404 every view answers.
+      const view = planView(readings, root, screened.path);
+      if (view === null) return empty(response, 404);
+      sendJson(response, view);
+      return;
+    }
+    // A queued plan is never read from an archive folder, so the prefix rule narrows to the live one.
+    if (!screened.path.startsWith(LIVE_PLANS_DIRECTORY)) return sendJson(response, { refused: "plan-path", rule: "prefix" }, 400);
+    // A branch given twice, undecodable or refused by shape is one refusal: the name never reaches git.
+    const rawBranch = single(query, "branch");
+    const branch = rawBranch === null ? null : decodeParam(rawBranch);
+    if (branch === null || planBranchFault(branch) !== null) return sendJson(response, { refused: "plan-branch" }, 400);
+    const checkout = checkoutRepoOf(readings, root);
+    if (checkout === null || rollout === undefined) return sendJson(response, { refused: "unknown-repo" }, 404);
+    const briefPath = BRIEFS_DIRECTORY + planStem(screened.path.slice(screened.path.lastIndexOf("/") + 1)) + PLAN_SUFFIX;
+    let read: BranchRead;
+    try {
+      read = await rollout.readBranchFiles(checkout.repo, branch, screened.path, [briefPath]);
+    } catch {
+      // A timeout or a git exit: the kind names nothing of the request, and neither does this word.
+      return sendJson(response, { refused: "read-failed" }, 502);
+    }
+    if (read.status !== "read") return sendJson(response, { refused: read.status }, 404);
+    const text = read.files.get(screened.path) ?? null;
+    if (text === null) return sendJson(response, { refused: "missing" }, 404);
+    const view = branchPlanView(readings, root, screened.path, text, read.files.get(briefPath) ?? null, { branch, commit: read.commit, committedAt: read.committedAt });
+    if (view === null) return sendJson(response, { refused: "not-a-plan" }, 404);
     sendJson(response, view);
   });
 }

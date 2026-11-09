@@ -173,7 +173,7 @@ function hostHelperList(): Promise<GitConfigEntry[]> {
  * Node API bounds a spawned child's output; it is spelled as a `spawn <code>` so it stays inside
  * the closed set of kinds a caller may see.
  */
-const OVERFLOW = "spawn ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+export const OVERFLOW = "spawn ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 
 /**
  * How long an ended call waits for the child's exit after the kill. A git that outlives this still

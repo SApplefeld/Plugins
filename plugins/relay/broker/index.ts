@@ -2690,10 +2690,17 @@ export async function startBroker(
     // the queues reading no longer shows blocked for the same reason, before it hands the marks on.
     const readings = () => withMarks(pass.readings(), marks, blockedReasons);
     // The ask page's thread link takes the two lookups the talk view takes, through the same closures.
-    registerViewHandlers(webServer.register, readings, {
-      threadFor: (sessionId) => threadFor(sessionId),
-      guildId: () => (gateway === null ? null : gateway.guildId()),
-    });
+    // The plan route reads a queued plan from its branch through the pass's own rollout reader, so
+    // the read runs in the same bare repository as the fetch, taking no lock of its own.
+    registerViewHandlers(
+      webServer.register,
+      readings,
+      {
+        threadFor: (sessionId) => threadFor(sessionId),
+        guildId: () => (gateway === null ? null : gateway.guildId()),
+      },
+      sources.rollout,
+    );
     // The sibling sandboxes' summaries, polled on the pass's cadence and never on a request, so a
     // page's poll of this origin costs the siblings nothing. The route serves the last poll's state.
     const siblings = createSiblingPoller({

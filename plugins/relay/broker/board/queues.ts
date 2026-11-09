@@ -277,7 +277,7 @@ function statFile(file: string): PlanStat | null {
 // The flag reaches the suffix alone, both character classes already holding either case. It folds
 // there because the sweep's own listing in `plans.ts` lists `SPEC_V1.MD` as a plan: a name the
 // folder view draws and the join refuses would be two answers to what a plan file is called.
-const PLAN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,250}\.md$/i;
+export const PLAN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,250}\.md$/i;
 
 // The name a queue entry's free text names, matched non-greedily and stopped before a trailing name
 // character, so `docs/plans/a_b_v1.md, which lives on a branch` and `... a_b_v1.md.` both keep

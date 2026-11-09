@@ -15,10 +15,14 @@
 // by exactly two commands, `remote get-url origin` to group it and `symbolic-ref HEAD` to learn its
 // branch, and nothing is ever written into one. Per group, no more often than `ROLLOUT_FETCH_MS`,
 // the reader asks the remote which branch its HEAD names with `ls-remote --symref`, then fetches
-// the client branches, that default branch, the rollout tags and the publish tags, and nothing
-// else; it reads the refs on every cycle. Those two are its outward acts on a read. The fetch
-// prunes, so a tag the operator removes from the remote leaves the rows on the next fetch, and a
-// prune reaches only the broker's own refs.
+// the client branches, the plan branches, that default branch, the rollout tags and the publish
+// tags, and nothing else; it reads the refs on every cycle. Those two are its outward acts on a
+// read. The fetch prunes, so a tag the operator removes from the remote leaves the rows on the next
+// fetch, and a prune reaches only the broker's own refs.
+//
+// The plan branches are fetched so a queued plan whose document lives on an unmerged branch can be
+// read: `readBranchFiles` reads a file's blob from the bare repository at the branch's commit, under
+// the local read limits, with nothing checked out anywhere.
 //
 // A repository that ships by publish tags on its default branch, `publish-*` with no client branch,
 // reads one publish row instead of client rows: the default branch's first-parent commits past its
@@ -38,7 +42,9 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { comparablePath } from "../board/events.ts";
-import { LOCAL_READ, REMOTE_CALL, runGit } from "./git.ts";
+import { MAX_PLAN_FILE_BYTES } from "../board/plans.ts";
+import { MAX_INTAKE_REF_LENGTH } from "../board/queues.ts";
+import { LOCAL_READ, OVERFLOW, REMOTE_CALL, runGit } from "./git.ts";
 import type { GitLimits, GitRunner } from "./git.ts";
 import type { PublishRow, RolloutCheckout, RolloutCommit, RolloutRow, SharedRow } from "./views.ts";
 
@@ -67,6 +73,8 @@ const FIRST_FETCH: GitLimits = { timeoutMs: ROLLOUT_FIRST_FETCH_MS, maxBytes: RE
 
 /** The prefix a client branch's name opens with; the route refuses any other branch before the reader sees it. */
 export const CLIENT_PREFIX = "clients/";
+/** The prefix a plan branch's name opens with: the one branch family `readBranchFiles` reads from. */
+export const PLAN_PREFIX = "plan/";
 const REMOTE_PREFIX = "refs/remotes/origin/";
 const TAG_PREFIX = "refs/tags/rollout/";
 const PUBLISH_PREFIX = "refs/tags/publish-";
@@ -109,6 +117,18 @@ export type PublishMark =
   | { status: "pushed"; tag: string; sha: string }
   | { status: "push-failed"; tag: string; kind: string };
 
+/**
+ * What `readBranchFiles` found for one repository and plan branch. `files` holds each asked path's
+ * text, or null where the commit holds no file at that path or, for a path other than the plan
+ * file, where the runner cut its read; every text comes from `commit`, whose committer date is
+ * `committedAt` as ISO.
+ */
+export type BranchRead =
+  | { status: "unknown-repo" }
+  | { status: "unknown-branch" }
+  | { status: "too-large" }
+  | { status: "read"; commit: string; committedAt: string; files: ReadonlyMap<string, string | null> };
+
 export type RolloutReader = {
   /** Starts a cycle over `roots` where none is running, and hands back the last completed one. */
   read(roots: readonly string[]): RolloutState;
@@ -140,6 +160,20 @@ export type RolloutReader = {
    * or the tag command failed, with nothing tagged or pushed.
    */
   markPublished(repo: string, login: string, head: string): Promise<PublishMark>;
+  /**
+   * Reads the plan file `plan` and the files `others` from the plan branch `branch` of `repo` with
+   * no fetch of its own: the refs are as the last fetch left them. The read takes no repository
+   * lock, so it runs beside a timed fetch or a tap and never waits behind one. That is safe because
+   * the branch is resolved once to a commit and every file is read from that commit by sha, and the
+   * fetch runs no maintenance, so a ref it moves reads as the old tip or the new one. The answer
+   * names the commit the text came from. Answers `unknown-repo` for a name the reader has not
+   * grouped, `unknown-branch` for a name `planBranchFault` refuses or one the fetch did not bring,
+   * `too-large` where the plan file passes `MAX_PLAN_FILE_BYTES` or the runner cut its read, and
+   * otherwise `read` with each path's text or null where the commit holds no file there. A file in
+   * `others` takes no cap here, so its caller applies its own, and one the runner cut reads as null.
+   * Rejects with the runner's kind where a git command failed any other way.
+   */
+  readBranchFiles(repo: string, branch: string, plan: string, others: readonly string[]): Promise<BranchRead>;
   /** The bare repository one repository's git commands run in, or null for a name the reader has not grouped. */
   rootOf(repo: string): string | null;
   /** Resolves, with the state as it then stands, once no cycle is running. */
@@ -328,6 +362,53 @@ export function clientBranchSafe(branch: string): boolean {
     .every((segment) => /^[A-Za-z0-9._-]+$/.test(segment));
 }
 
+/** The rule that refused a plan branch name, so a test can tell which of the rules did it. */
+export type PlanBranchRule =
+  | "length"
+  | "prefix"
+  | "control"
+  | "space"
+  | "character"
+  | "at-brace"
+  | "dotdot"
+  | "double-slash"
+  | "trailing-slash"
+  | "trailing-dot"
+  | "lock"
+  | "dot-segment"
+  | "dash"
+  | "device";
+
+/**
+ * Why `branch` cannot be a plan branch `readBranchFiles` reads, or null where it can. The name
+ * comes from a request and becomes part of a ref argument to git, so it is screened by shape here
+ * rather than by spawning `check-ref-format`. The rules run in this order and the first to refuse is
+ * named: it is under `MAX_INTAKE_REF_LENGTH`, the bound the queue reader holds a branch to; it
+ * opens `plan/` with at least one character after the slash; it holds no ASCII control character,
+ * no space, none of `~`, `^`, `:`, `?`, `*`, `[` or `\`, no `@{`, no `..` and no `//`; it ends in
+ * neither `/` nor `.`; no `/`-separated segment ends in `.lock`, opens with `.` or opens with `-`,
+ * so no part of the name can read as an option whatever position it reaches, and none is a Windows
+ * device name, since the bare repository keeps a fetched ref as a file under its branch's path.
+ */
+export function planBranchFault(branch: string): PlanBranchRule | null {
+  if (branch.length >= MAX_INTAKE_REF_LENGTH) return "length";
+  if (!branch.startsWith(PLAN_PREFIX) || branch.length === PLAN_PREFIX.length) return "prefix";
+  if (/[\x00-\x1f\x7f]/.test(branch)) return "control";
+  if (branch.includes(" ")) return "space";
+  if (/[~^:?*[\\]/.test(branch)) return "character";
+  if (branch.includes("@{")) return "at-brace";
+  if (branch.includes("..")) return "dotdot";
+  if (branch.includes("//")) return "double-slash";
+  if (branch.endsWith("/")) return "trailing-slash";
+  if (branch.endsWith(".")) return "trailing-dot";
+  const segments = branch.split("/");
+  if (segments.some((segment) => segment.endsWith(".lock"))) return "lock";
+  if (segments.some((segment) => segment.startsWith("."))) return "dot-segment";
+  if (segments.some((segment) => segment.startsWith("-"))) return "dash";
+  if (segments.some((segment) => RESERVED_DEVICE.test(segment))) return "device";
+  return null;
+}
+
 type Refs = {
   defaultRef: string | null;
   clients: string[];
@@ -470,7 +551,11 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
 
   /**
    * The remote's HEAD query, the fetch into the group's bare repository, then `set-head` naming the
-   * branch the remote's HEAD named, so `refs/remotes/origin/HEAD` names the default branch. The first
+   * branch the remote's HEAD named, so `refs/remotes/origin/HEAD` names the default branch. The
+   * fetch names five ref families: the client branches, the plan branches, the default branch, the
+   * rollout tags and the publish tags, each under the same prune, so a plan branch deleted on the
+   * remote leaves the bare repository on the next fetch, and no dynamic spec ever names a branch
+   * the prune would then stop covering. The first
    * fetch into an empty repository brings the whole history and takes `FIRST_FETCH`, and every later
    * one takes `REMOTE_CALL`. `set-head` with a branch named contacts no remote, so it is a local
    * read; the `--` before the branch keeps a name the remote chose from reading as an option.
@@ -480,7 +565,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     const limits = refs.empty ? FIRST_FETCH : REMOTE_CALL;
     // A remote that names no HEAD keeps the default branch already held.
     const branch = (await remoteHeadOf(group.bare)) ?? refs.defaultRef?.slice(REMOTE_PREFIX.length) ?? null;
-    const specs = [`+refs/heads/${CLIENT_PREFIX}*:${REMOTE_PREFIX}${CLIENT_PREFIX}*`];
+    const specs = [`+refs/heads/${CLIENT_PREFIX}*:${REMOTE_PREFIX}${CLIENT_PREFIX}*`, `+refs/heads/${PLAN_PREFIX}*:${REMOTE_PREFIX}${PLAN_PREFIX}*`];
     if (branch !== null) specs.push(`+refs/heads/${branch}:${REMOTE_PREFIX}${branch}`);
     specs.push(`+${TAG_PREFIX}*:${TAG_PREFIX}*`);
     specs.push(`+${PUBLISH_PREFIX}*:${PUBLISH_PREFIX}*`);
@@ -824,6 +909,54 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     return { status: "pushed", tag, sha };
   }
 
+  /**
+   * The branch read's own step, run with no lock and no fetch of its own, beside any fetch or tap
+   * on the same repository. It holds no lock because it reads nothing a fetch can tear: the one ref
+   * read sees the ref's old tip or its new one, every file is then read by that sha, and the fetch
+   * runs with `--no-auto-maintenance`, so no gc or ref packing runs under it. The branch is already
+   * a name `planBranchFault` admits, and it reaches git only as the fully qualified
+   * `refs/remotes/origin/<branch>`, so no argument opens with a dash. That ref is resolved by its
+   * exact name, as `tagAndPush` matches a client branch: `for-each-ref` lists the refs at or under
+   * it, and only a line whose refname is the ref itself names the commit. It is never handed to
+   * `rev-parse`, whose revision syntax reads a name like `plan/x-1-g<hex>` as a describe string and
+   * resolves it to any commit holding that prefix, so a name naming no fetched plan branch answers
+   * `unknown-branch` and nothing outside the fetched plan family can be read. Each file is then read
+   * as `<sha>:<path>` rather than `<ref>:<path>`, so the commit the answer names is the one every
+   * text came from as a fact, at one more spawn per read. Each read is `cat-file blob`, which takes
+   * a blob alone. A ref the listing does not hold is one the fetch did not bring; exit 128 from
+   * `cat-file` is a path the commit does not hold or one that names a folder. The plan file
+   * over `MAX_PLAN_FILE_BYTES`, the cap a swept plan takes, or cut by the runner at its own cap,
+   * answers `too-large` and ends the read. Another file the runner cut reads as null, and one past
+   * that cap reads as its text, the caller's own cap to apply.
+   */
+  async function branchFilesOf(group: Group, branch: string, plan: string, others: readonly string[]): Promise<BranchRead> {
+    const ref = REMOTE_PREFIX + branch;
+    let commit: string | null = null;
+    for (const line of lines(await git(group.bare, ["for-each-ref", "--format=%(refname)%09%(objectname)", ref], LOCAL_READ))) {
+      const [refname = "", object = ""] = line.split("\t");
+      if (refname === ref) commit = object;
+    }
+    if (commit === null) return { status: "unknown-branch" };
+    const committedAt = iso((await git(group.bare, ["log", "-1", "--format=%cI", commit], LOCAL_READ)).trim());
+    const files = new Map<string, string | null>();
+    for (const file of [plan, ...others]) {
+      const isPlan = file === plan;
+      let text: string;
+      try {
+        text = await git(group.bare, ["cat-file", "blob", `${commit}:${file}`], LOCAL_READ);
+      } catch (error) {
+        const kind = kindOf(error);
+        if (kind === OVERFLOW && isPlan) return { status: "too-large" };
+        if (kind !== "exit 128" && kind !== OVERFLOW) throw error;
+        files.set(file, null);
+        continue;
+      }
+      if (isPlan && Buffer.byteLength(text, "utf8") > MAX_PLAN_FILE_BYTES) return { status: "too-large" };
+      files.set(file, text);
+    }
+    return { status: "read", commit, committedAt, files };
+  }
+
   async function checkoutOf(root: string, repo: string): Promise<RolloutCheckout> {
     try {
       const ref = (await git(root, ["symbolic-ref", "--quiet", "HEAD"], LOCAL_READ)).trim();
@@ -981,6 +1114,14 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
         await recompute(group);
         return marked;
       }).finally(() => publish(state.checkouts));
+    },
+    readBranchFiles(repo, branch, plan, others) {
+      const group = groups.get(repo.toLowerCase());
+      if (group === undefined) return Promise.resolve({ status: "unknown-repo" });
+      // Screened here as well as at the route, so a refused name reaches no git argument whatever
+      // the caller did.
+      if (planBranchFault(branch) !== null) return Promise.resolve({ status: "unknown-branch" });
+      return branchFilesOf(group, branch, plan, others);
     },
     rootOf(repo) {
       return groups.get(repo.toLowerCase())?.bare ?? null;

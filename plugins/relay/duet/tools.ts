@@ -73,6 +73,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** The shape of a reason word a refusal body may carry: a fixed vocabulary word, never free text. */
+const REASON_WORD = /^[a-z][a-z0-9-]{0,63}$/;
+
+/**
+ * The reason a refusal body names, as `: <refused>` with ` <rule>` appended where the body carries
+ * one, or the empty string where the body is not a JSON object whose `refused` is a reason word. The
+ * broker writes each as fixed vocabulary, so a value off that shape is dropped rather than reported,
+ * and the text reaching the assistant holds at most two words the broker's own code wrote.
+ */
+function reasonOf(body: string): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    return "";
+  }
+  if (!isRecord(value) || typeof value.refused !== "string" || !REASON_WORD.test(value.refused)) return "";
+  const rule = typeof value.rule === "string" && REASON_WORD.test(value.rule) ? ` ${value.rule}` : "";
+  return `: ${value.refused}${rule}`;
+}
+
 function failure(error: string): CallToolResult {
   return { isError: true, content: [{ type: "text", text: error }] };
 }
@@ -152,9 +173,9 @@ export function createRegisterTools(options: ToolsOptions): RegisterTools {
 
   /**
    * One GET of `view` with the given query parameters, an absent one left out, its body read under
-   * `maxBytes`. Resolves with the parsed body, or with an error naming the view's path; it never
-   * rejects. `cancel` is the MCP request's own signal, so a client that drops its request ends the
-   * broker read with it.
+   * `maxBytes`. Resolves with the parsed body, or with an error naming the view's path and, on a
+   * refusal whose body names its reason, that reason word and its rule; it never rejects. `cancel`
+   * is the MCP request's own signal, so a client that drops its request ends the broker read with it.
    */
   function readView(
     view: string,
@@ -198,18 +219,15 @@ export function createRegisterTools(options: ToolsOptions): RegisterTools {
           },
           (incoming) => {
             const status = incoming.statusCode ?? 0;
-            if (status < 200 || status > 299) {
-              fail(`answered ${String(status)}`);
-              outgoing.destroy();
-              return;
-            }
+            const refused = status < 200 || status > 299;
             const chunks: Buffer[] = [];
             let size = 0;
             incoming.on("data", (chunk: Buffer) => {
               if (settled) return;
               size += chunk.length;
               if (size > maxBytes) {
-                fail(`answered more than ${String(maxBytes)} bytes`);
+                // A refusal's body past the cap is dropped and the status alone is reported.
+                fail(refused ? `answered ${String(status)}` : `answered more than ${String(maxBytes)} bytes`);
                 outgoing.destroy();
                 return;
               }
@@ -217,9 +235,14 @@ export function createRegisterTools(options: ToolsOptions): RegisterTools {
             });
             incoming.on("end", () => {
               if (settled) return;
+              const body = Buffer.concat(chunks).toString("utf8");
+              if (refused) {
+                fail(`answered ${String(status)}${reasonOf(body)}`);
+                return;
+              }
               let value: unknown;
               try {
-                value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                value = JSON.parse(body);
               } catch {
                 fail("answered a body that is not JSON");
                 return;
@@ -315,11 +338,11 @@ export function createRegisterTools(options: ToolsOptions): RegisterTools {
       "plan",
       {
         description:
-          "Read-only. One plan with its brief: title, status, goal, the brief's parts, the sections and which are done, the chapters, the next step and its open asks. `root` and `path` are as `repo` lists the plan; the broker refuses a path outside its plan folders. Changes nothing.",
-        inputSchema: { root: z.string().min(1), path: z.string().min(1) },
+          "Read-only. One plan with its brief: title, status, goal, the brief's parts, the sections and which are done, the chapters, the next step and its open asks. `root` and `path` are as `repo` lists the plan; the broker refuses a path outside its plan folders. A `repo` row with a `branch` is a queued plan read from that branch: pass its `branch` too, and the answer's `source` names the branch and the commit it was read at. A `repo` row whose `root` and `path` are null is a queued plan the broker has not read, and it cannot be opened from its title or a guessed path. Changes nothing.",
+        inputSchema: { root: z.string().min(1), path: z.string().min(1), branch: z.string().min(1).optional() },
         annotations: READ_ONLY,
       },
-      async ({ root, path }, extra) => answer(await readView("/web/plan", extra.signal, { root, path })),
+      async ({ root, path, branch }, extra) => answer(await readView("/web/plan", extra.signal, { root, path, branch })),
     );
 
     server.registerTool(

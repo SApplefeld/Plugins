@@ -15,7 +15,9 @@ import path from "node:path";
 import { eventPlanName, lastSegment, planName } from "../board/card.ts";
 import { MAX_TIMELINE_EVENTS_PER_SESSION, comparablePath, initialEventState } from "../board/events.ts";
 import type { EventReaderState, TimelineEvent, TimelineEventKind, TimelineReaderState } from "../board/events.ts";
+import { isReadmeStem, parsePlan, planStem } from "../board/plans.ts";
 import type { PlanReading } from "../board/plans.ts";
+import { PLAN_NAME } from "../board/queues.ts";
 import type { PersonaQueue, QueueEntry, QueuePlanReading } from "../board/queues.ts";
 import type { RosterPersona } from "../board/roster.ts";
 import { personaStatus } from "../board/status.ts";
@@ -31,11 +33,12 @@ import { clean, fit, oneLine } from "../sanitize.ts";
 import type { UsageAccount } from "../usage/cache.ts";
 import { PACE_PERIOD_MS, aheadOfPace, measuredAt, projectExhaustion, rolledWeekly } from "../usage/pace.ts";
 import { foldRootName } from "./config.ts";
+import { MAX_BRIEF_FILE_BYTES, parseBrief } from "./brief.ts";
 import type { Brief } from "./brief.ts";
 import { headingOf } from "./direction.ts";
 import type { DirectionReading, Heading } from "./direction.ts";
 import type { InstalledRelease } from "./plugins.ts";
-import { SHARED_ROW_CAP } from "./rollout.ts";
+import { SHARED_ROW_CAP, planBranchFault } from "./rollout.ts";
 import { EMPTY_MARKS, blockedHandledKey, blockedHides, handledHides, handledKey, planMarkKey, reviewHandledKey } from "./watermarks.ts";
 import type { BlockedReasons, HandledHow, Marks } from "./watermarks.ts";
 
@@ -232,10 +235,16 @@ export type RepoRow = {
   held: readonly SourceName[];
 };
 
-/** A plan as a row. A queue entry whose plan is in no swept root has null root, path and counts. */
+/**
+ * A plan as a row. A queue entry whose plan is in no swept root has null counts, and null root and
+ * path unless the entry names its plan file and the repository's root is configured, in which case
+ * they address the file under `docs/plans/` for a read from `branch`.
+ */
 export type PlanRow = {
   root: string | null;
   path: string | null;
+  /** The entry's branch, the one a queued plan is read from; null on a swept plan and an entry with none. */
+  branch: string | null;
   title: string;
   status: string | null;
   section: number | null;
@@ -352,6 +361,9 @@ export type RepoView = {
   held: readonly SourceName[];
 };
 
+/** Where a plan read from its branch came from: the branch, and the commit it was read at. */
+export type PlanSource = { branch: string; commit: string; committedAt: string };
+
 export type PlanView = {
   root: string;
   path: string;
@@ -366,6 +378,8 @@ export type PlanView = {
   chapters: { number: number; completed: string | null; next: string | null }[];
   next: string | null;
   openAsks: Item[];
+  /** The branch and commit the plan was read from; null on a plan the pass swept from disk. */
+  source: PlanSource | null;
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -869,6 +883,7 @@ function planRow(plan: FoundPlan): PlanRow {
   return {
     root: rootName(reading.root),
     path: plan.rel,
+    branch: null,
     title: reading.stem,
     status: reading.status,
     section: reading.chapterList.length,
@@ -880,18 +895,41 @@ function planRow(plan: FoundPlan): PlanRow {
   };
 }
 
-/** The row for a queue entry: its swept plan where the path joins one, else what the queue holds. */
+/**
+ * The row for a queue entry: its swept plan where the path joins one, else what the queue holds.
+ * `workdir` is the repository's folder. A joined row is the swept plan's row with a null branch, so
+ * its link opens the swept copy and never a branch read that fails once the branch is deleted. An
+ * unjoined entry carries its branch, and is addressed under `docs/plans/` only where its branch is
+ * one `planBranchFault` admits, its plan segment passes the queue join's own test of a plan file
+ * name, `PLAN_NAME` and no README stem, and ends in a lower-case `.md` as the route's suffix rule
+ * reads it, and that folder is a configured root, so the row can be opened from its branch.
+ * Otherwise the root and path stay null: the plan route reads a branch plan only from a branch that
+ * screen admits, and admits a configured root alone, so a row it would refuse is never linked.
+ */
 function entryRow(
+  readings: Readings,
+  workdir: string,
   entry: QueueEntry,
   reading: QueuePlanReading | undefined,
   swept: ReadonlyMap<string, FoundPlan>,
 ): PlanRow {
   const joined = reading === undefined ? undefined : swept.get(folderKey(reading.path));
   if (joined !== undefined) return planRow(joined);
+  const branch = entry.branch ?? null;
   const parsed = reading !== undefined && !reading.archived ? reading : null;
+  const segment = entry.planSegment ?? null;
+  const addressed =
+    branch !== null &&
+    planBranchFault(branch) === null &&
+    segment !== null &&
+    segment.endsWith(".md") &&
+    PLAN_NAME.test(segment) &&
+    !isReadmeStem(segment) &&
+    rootMatches(readings, workdir);
   return {
-    root: null,
-    path: null,
+    root: addressed ? rootName(workdir) : null,
+    path: addressed ? PLANS_DIR + segment : null,
+    branch,
     title: entry.title,
     status: parsed?.status ?? null,
     section: entry.chapterCount ?? null,
@@ -1877,7 +1915,7 @@ export function repoView(readings: Readings, name: string): RepoView | null {
     for (const status of repo.status.entries) {
       if (status.word !== "up next" && status.word !== "queued") continue;
       const entry = entries.get(status.id);
-      if (entry !== undefined) upNext.push(entryRow(entry, queue.readings.get(status.id), swept));
+      if (entry !== undefined) upNext.push(entryRow(readings, workdir, entry, queue.readings.get(status.id), swept));
     }
   }
 
@@ -1923,6 +1961,62 @@ export function planView(readings: Readings, root: string, relativePath: string)
     chapters: [...reading.chapterList],
     next: reading.next,
     openAsks,
+    source: null,
+    asOf: asOf(readings),
+    held: readings.held,
+  };
+}
+
+/**
+ * The repository a configured root's checkout was grouped under by the rollout reader, with the
+ * root's configured path, or null: where no configured root goes by `root`, where the source has
+ * never read, or where the reader skipped that root, so it has no checkout entry. The entry is the
+ * one `checkoutOf` writes for every grouped root whatever branch it is on, so a worker on its trunk
+ * still names its repository.
+ */
+export function checkoutRepoOf(readings: Readings, root: string): { workdir: string; repo: string } | null {
+  const workdir = readings.roots.find((configured) => foldRootName(rootName(configured)) === foldRootName(root));
+  if (workdir === undefined) return null;
+  const checkout = readings.rollout.value?.checkouts.find((candidate) => sameFolder(candidate.root, workdir));
+  return checkout === undefined ? null : { workdir, repo: checkout.repo };
+}
+
+/**
+ * The view of a plan read from its branch: `text` is the plan file's text at `source`'s commit and
+ * `briefText` its brief's, null where the commit holds no brief. Null where the text is no plan
+ * doc, one with no `Status:` header. The brief takes the cap a swept brief takes, so a file over it
+ * is no brief here either. The open asks are the asks on this root whose plan path names this file,
+ * as a swept plan's are. `root` is answered in its configured spelling.
+ */
+export function branchPlanView(readings: Readings, root: string, relativePath: string, text: string, briefText: string | null, source: PlanSource): PlanView | null {
+  const parsed = parsePlan(text);
+  if (parsed === null) return null;
+  const workdir = readings.roots.find((configured) => foldRootName(rootName(configured)) === foldRootName(root)) ?? root;
+  const wanted = comparablePath(path.resolve(workdir, relativePath));
+  const openAsks = fleet(readings)
+    .filter((repo) => sameFolder(repo.persona.workdir, workdir))
+    .flatMap((repo) =>
+      repo.asks
+        .filter((ask) => {
+          const file = askPlanFile(repo.persona.workdir, ask);
+          return file !== null && comparablePath(file) === wanted;
+        })
+        .map((ask) => askItem(repo, ask)),
+    );
+  const brief = briefText === null || Buffer.byteLength(briefText, "utf8") > MAX_BRIEF_FILE_BYTES ? null : parseBrief(briefText);
+  return {
+    root: rootName(workdir),
+    path: relativePath,
+    title: planStem(relativePath.slice(relativePath.lastIndexOf("/") + 1)),
+    status: parsed.status,
+    goal: parsed.goal,
+    serves: parsed.serves ?? null,
+    brief,
+    sections: [...parsed.sectionList],
+    chapters: [...parsed.chapterList],
+    next: parsed.next,
+    openAsks,
+    source,
     asOf: asOf(readings),
     held: readings.held,
   };

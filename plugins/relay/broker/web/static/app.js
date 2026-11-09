@@ -60,7 +60,7 @@
   const PATH_ALIASES = { "/": "today", "/needs-me": "today" };
 
   /** The query keys each screen reads, in the order a path the shell builds carries them; a key off the list is dropped. */
-  const SCREEN_KEYS = { today: ["item"], standup: [], ask: ["repo", "id"], plan: ["root", "path", "repo"], health: [], talk: ["lineage", "root", "path"], repo: [], workers: ["name"] };
+  const SCREEN_KEYS = { today: ["item"], standup: [], ask: ["repo", "id"], plan: ["root", "path", "repo", "branch"], health: [], talk: ["lineage", "root", "path"], repo: [], workers: ["name"] };
 
   /** The list row a query selects: the Today screen's `item`, or the Workers screen's `name`, the persona's; null where it names none. */
   function selectedOf(query) {
@@ -1291,13 +1291,16 @@
 
   /**
    * A plan's row: a link to the plan screen, through the route table, carrying the repo the row is
-   * drawn under so that screen lists the repo's plans beside it, and marked where it is the plan the
-   * detail pane shows.
+   * drawn under so that screen lists the repo's plans beside it, and the branch a queued plan is read
+   * from where the row names one, and marked where it is the plan the detail pane shows. A row with no
+   * root or path draws unlinked.
    */
   function planRow(plan, now, upNext, repo, selected) {
     const key = "plan:" + txt(plan.root) + ":" + (txt(plan.path) || txt(plan.title));
     const cls = selected ? "plan-row sel" : "plan-row";
-    const href = pathOf({ screen: "plan", name: null, query: { root: txt(plan.root), path: txt(plan.path), repo } });
+    const query = { root: txt(plan.root), path: txt(plan.path), repo };
+    if (txt(plan.branch) !== "") query.branch = txt(plan.branch);
+    const href = pathOf({ screen: "plan", name: null, query });
     const row = plan.root && plan.path ? link(cls, href, null, key) : h("div", cls, null, key);
     if (selected) row.setAttribute("aria-current", "true");
     const status = txt(plan.status).toLowerCase();
@@ -1448,14 +1451,19 @@
     return root && path ? { root: root, path: path } : null;
   }
 
-  /** The plan reading's address for a configured root and a plan path, route text plus the encoded values. */
-  function planUrlOf(root, path) {
-    return "/web/plan?root=" + encodeURIComponent(root) + "&path=" + encodeURIComponent(path);
+  /**
+   * The plan reading's address for a configured root and a plan path, route text plus the encoded
+   * values, and the encoded branch where one is given, which has the broker read the plan from it.
+   */
+  function planUrlOf(root, path, branch) {
+    const url = "/web/plan?root=" + encodeURIComponent(root) + "&path=" + encodeURIComponent(path);
+    return typeof branch === "string" && branch !== "" ? url + "&branch=" + encodeURIComponent(branch) : url;
   }
 
+  /** The plan screen's reading, from the address's root and path, and its branch where it names one. */
   function planUrl() {
     const params = planParams();
-    return params === null ? null : planUrlOf(params.root, params.path);
+    return params === null ? null : planUrlOf(params.root, params.path, new URLSearchParams(location.search).get("branch"));
   }
 
   /**
@@ -1555,6 +1563,19 @@
     return card;
   }
 
+  /**
+   * "Read from <branch> at <short sha>, <age> ago" for a plan the broker read from its branch, the age
+   * left out where the commit's date does not parse, or null where the view carries no usable source,
+   * as on a plan swept from disk. Every value is set as text.
+   */
+  function sourceLine(source, now) {
+    if (!isObject(source) || txt(source.branch) === "" || txt(source.commit) === "") return null;
+    const line = h("div", "meta", "Read from " + txt(source.branch) + " at " + txt(source.commit).slice(0, 7), "plan-source");
+    const at = parse(source.committedAt);
+    if (at !== null) line.append(", ", clockText("span", null, span(now - at)), " ago");
+    return line;
+  }
+
   function renderPlan(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
@@ -1576,6 +1597,9 @@
     chips.append(h("span", "meta mono", txt(view.path)));
     top.append(chips);
     out.append(top);
+
+    const source = sourceLine(view.source, now);
+    if (source !== null) out.append(source);
 
     const brief = briefCard(view.brief);
     if (brief !== null) out.append(brief);
@@ -5437,8 +5461,9 @@
 
   /**
    * Marks the plan seen: once per open, after the plan has been drawn once, never on a poll. A plan
-   * that could not be read is never drawn, so a link to one that does not exist marks nothing. The
-   * answer is ignored; the mark only moves what the standup page counts as unseen.
+   * that could not be read is never drawn, so a link to one that does not exist marks nothing. The seen
+   * route marks only a plan a sweep holds, so the post for a branch read whose address no sweep holds
+   * marks nothing. The answer is ignored; the mark only moves what the standup page counts as unseen.
    */
   function sendSeen() {
     if (seenSent || screen !== "plan") return;
