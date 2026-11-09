@@ -412,10 +412,25 @@ const ANCHOR_ENTRY_CAP = ANCHOR_PATH_CAP + 41;
 // the row `get` prints and the class the scan counts cannot drift apart.
 const ANCHOR_TRUNCATED_TEXT = 'the rest of the line is unread past '
     + ANCHOR_ENTRIES_MAX + ' entries';
-// Characters of the whole anchors: value. The line is one field of a
+// Code points of the whole anchors: value. The line is one field of a
 // hand-written record, and the split that reads it allocates a piece per
 // comma, so the value is bounded before that runs rather than after.
 const ANCHOR_VALUE_CAP = (ANCHOR_ENTRY_CAP + 2) * ANCHOR_ENTRIES_MAX;
+// The first `max` code points of a text, an empty string at a bound of zero
+// or less, and the text itself where its length is within the bound. `slice`
+// counts UTF-16 code units, so a unit cut can land between the two halves of
+// a character past the basic plane, and a value cap counted in units is a
+// different cap from the persona hook's, which counts code points for the
+// same triggers line under a constant pinned equal to TRIGGER_VALUE_CAP. This
+// is that hook's `headPoints` contract and construction. The pre-cut at twice
+// the bound keeps the array small on a long line and never shortens the head:
+// `max` code points span at most `2 * max` units, and a point the pre-cut
+// splits falls past the head and is dropped.
+function headCodePoints(text, max) {
+    if (!(max > 0)) return '';
+    if (text.length <= max) return text;
+    return Array.from(text.slice(0, max * 2)).slice(0, max).join('');
+}
 const ANCHOR_READ_CAP = 4194304;        // bytes of an anchored file hashed; a larger one is unchecked
 // The recognition triggers a record may declare, the sibling field to
 // anchors:. An anchor names a file at the bytes it held, so it has a sha and a
@@ -431,7 +446,7 @@ const TRIGGER_ENTRIES_MAX = 32;    // triggers read from one record's line
 // unbounded store text, which is ANCHOR_ENTRY_CAP's reason as well.
 const TRIGGER_ENTRY_CAP = TRIGGER_PATTERN_CAP + 1
     + TRIGGER_TYPES.reduce((n, t) => Math.max(n, t.length), 0);
-// Characters of the whole triggers: value, bounded before the comma split
+// Code points of the whole triggers: value, bounded before the comma split
 // that reads it allocates a piece per comma, exactly as ANCHOR_VALUE_CAP is.
 const TRIGGER_VALUE_CAP = (TRIGGER_ENTRY_CAP + 2) * TRIGGER_ENTRIES_MAX;
 // What a line cut at TRIGGER_ENTRIES_MAX says about itself, on the one
@@ -3753,11 +3768,13 @@ function parseAnchors(value) {
     if (typeof value === 'string') {
         // The line is one field of a hand-written record and has no length
         // this file can assume, and the split allocates a piece per comma, so
-        // the cap answers before it. A line cut here loses its last piece
-        // whole rather than a partial one, which would otherwise be split
-        // text presented as an entry the record does not carry.
-        const pieces = value.slice(0, ANCHOR_VALUE_CAP).split(',');
-        if (value.length > ANCHOR_VALUE_CAP) {
+        // the cap answers before it, counted in code points. A line cut here
+        // loses its last piece whole rather than a partial one, which would
+        // otherwise be split text presented as an entry the record does not
+        // carry, and a cut happened only where the head is not the value.
+        const head = headCodePoints(value, ANCHOR_VALUE_CAP);
+        const pieces = head.split(',');
+        if (head !== value) {
             pieces.pop();
             truncated = true;
         }
@@ -4020,12 +4037,14 @@ function parseTriggers(value) {
     const items = [];
     let truncated = false;
     if (typeof value === 'string') {
-        // Bounded before the split, which allocates a piece per comma over a
-        // line of hand-written text with no length this file can assume. A
-        // line cut here loses its last piece whole rather than as a fragment
-        // presented as an entry the record does not carry.
-        const pieces = value.slice(0, TRIGGER_VALUE_CAP).split(',');
-        if (value.length > TRIGGER_VALUE_CAP) {
+        // Bounded in code points before the split, which allocates a piece per
+        // comma over a line of hand-written text with no length this file can
+        // assume. A line cut here loses its last piece whole rather than as a
+        // fragment presented as an entry the record does not carry, and a cut
+        // happened only where the head is not the value.
+        const head = headCodePoints(value, TRIGGER_VALUE_CAP);
+        const pieces = head.split(',');
+        if (head !== value) {
             pieces.pop();
             truncated = true;
         }
@@ -14950,6 +14969,7 @@ module.exports = {
     ANCHOR_ENTRIES_MAX,
     ANCHOR_READ_CAP,
     ANCHOR_ENTRY_CAP,
+    ANCHOR_VALUE_CAP,
     ANCHOR_TRUNCATED_TEXT,
     frontmatterTriggers,
     readFrontmatterTriggers,
@@ -14962,6 +14982,7 @@ module.exports = {
     TRIGGER_ENTRIES_MAX,
     TRIGGER_ENTRY_CAP,
     TRIGGER_VALUE_CAP,
+    headCodePoints,
     TRIGGER_TRUNCATED_TEXT,
     anchorStatesFrom,
     anchorStates,
