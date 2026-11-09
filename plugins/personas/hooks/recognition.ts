@@ -975,12 +975,13 @@ function nudgeTriggerEntry(entry: string): { type: string; pattern: string } | n
 }
 
 // A frontmatter value split as memq's parseTriggers and parseAnchors split
-// one: the first `valueMax` characters, the last piece dropped where the value
-// ran past them, each piece trimmed, empty ones skipped, and at most
+// one: the first `valueMax` code points, the last piece dropped where the
+// value ran past them, each piece trimmed, empty ones skipped, and at most
 // `entriesMax` read, a refused entry counting.
 function nudgeValueEntries(value: string, valueMax: number, entriesMax: number): string[] {
-  const pieces = value.slice(0, valueMax).split(",");
-  if (value.length > valueMax) pieces.pop();
+  const head = headPoints(value, valueMax);
+  const pieces = head.split(",");
+  if (head !== value) pieces.pop();
   const out: string[] = [];
   for (const piece of pieces) {
     const entry = piece.trim();
