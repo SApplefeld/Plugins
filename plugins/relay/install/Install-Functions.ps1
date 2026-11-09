@@ -1056,20 +1056,23 @@ Throws unless every path given is protected to the same standard broker/discord/
 enforces on the bot token file at every broker start.
 
 .DESCRIPTION
-Shells out to Node and calls assertTokenFileIsProtected directly, rather than restating its SDDL
-rules a second time in PowerShell: the two are the same check, on the same kind of path, and a
-second implementation is a second place for the allowlist to drift out of step with the first.
-Named generically because nothing about the check is specific to a bot token; it is exactly as
-applicable to the SessionStart hook script wrapper/Enter-ClaudeSession.ps1's launch-time check
-would need to assert its own protection, which is why this lives here rather than inline in
-Install-Host.ps1.
+Shells out to Node and calls assertTokenFilesAreProtected, the batch form of the check the broker
+runs at start, rather than restating its SDDL rules a second time in PowerShell: the two are the
+same check, on the same kind of path, and a second implementation is a second place for the
+allowlist to drift out of step with the first. Named generically because nothing about the check is
+specific to a bot token; it is exactly as applicable to the launch-time check that
+wrapper/Enter-ClaudeSession.ps1 would need to assert its own protection, which is why this lives
+here rather than inline in Install-Host.ps1.
 
 Takes the whole set of paths in one call because the caller checks every file under the trees it
-hardened, and a Node process per file is most of the cost of doing that. The check reads a path and
-the directory holding it, so a directory is covered by any file in it; a directory passed in its own
-right is checked against its parent, which is why the caller passes trees from the inside rather
-than passing a tree root whose parent it does not own. The first path that fails ends the run, and
-the message names it: the failures this catches are configuration, not a list to triage.
+hardened, and a Node process per file is most of the cost of doing that. The check reads every
+descriptor in one PowerShell process for the same reason: PowerShell is the only access control
+reader on the platform, and one process per path is most of what remains once Node is spawned
+once. The check reads a path and the directory holding it, so a directory is covered by any file in
+it; a directory passed in its own right is checked against its parent, which is why the caller
+passes trees from the inside rather than passing a tree root whose parent it does not own. The
+first path that fails ends the run, and the message names it: the failures this catches are
+configuration, not a list to triage.
 
 $NodePath and $CredentialsScriptPath are overridable so a test can point this at a fixture without
 depending on where this checkout's own broker/ lives.
@@ -1092,9 +1095,9 @@ function Assert-ChannelPathProtected {
             "it reports success without having looked at anything."
     }
 
-    # A tiny inline module: import the real check and run it against each path in turn, so the exit
+    # A tiny inline module: import the real check and run it once over every path, so the exit
     # code alone tells the caller pass or refuse and the message names the path that failed.
-    $script = 'import(process.argv[1]).then(m => { for (const p of process.argv.slice(2)) m.assertTokenFileIsProtected(p); }).catch(e => { console.error(String(e && e.message || e)); process.exit(1); })'
+    $script = 'import(process.argv[1]).then(m => { m.assertTokenFilesAreProtected(process.argv.slice(2)); }).catch(e => { console.error(String(e && e.message || e)); process.exit(1); })'
     $moduleUrl = ([uri]([System.IO.Path]::GetFullPath($CredentialsScriptPath))).AbsoluteUri
 
     $output = & $NodePath '--input-type=module' '-e' $script $moduleUrl @Path 2>&1

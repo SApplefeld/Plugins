@@ -133,18 +133,24 @@ export function powershellEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv
 
 /** The security descriptors of several paths, in the order asked for. */
 function windowsSddl(paths: string[]): string[] {
-  // One spawn, at broker start, only when a token file is configured. PowerShell is the only
+  // One spawn per call, whoever calls: the broker's start checks its token and key files one at a
+  // time, and Assert-ChannelPathProtected in install/Install-Functions.ps1, which the installer and
+  // the launch wrapper call, checks every path it is handed at once. PowerShell is the only
   // access-control reader on the platform, and the SDDL form is what makes the result parseable.
   //
   // Each path goes in as a single-quoted PowerShell literal, where the only escape is a doubled
-  // quote, so nothing in a path is interpreted. ErrorActionPreference makes a missing or
-  // unreadable path a terminating error: by default Get-Acl reports one to stderr and exits zero,
-  // which would hand this check an empty string and read as "nothing foreign here".
+  // quote, so nothing in a path is interpreted. PowerShell reads five characters as a single
+  // quote, the ASCII apostrophe and U+2018 through U+201B, and each of them is doubled in place,
+  // since any one left single would close the literal early.
+  //
+  // ErrorActionPreference makes a missing or unreadable path a terminating error: by default
+  // Get-Acl reports one to stderr and exits zero, which would hand this check an empty string and
+  // read as "nothing foreign here".
   //
   // The child gets no PSModulePath. Windows PowerShell 5.1 builds its own default module path when
   // the variable is absent, and under an inherited PowerShell 7 path it loads PowerShell 7's
   // Microsoft.PowerShell.Security and Get-Acl fails.
-  const literals = paths.map((value) => `'${value.replace(/'/g, "''")}'`).join(",");
+  const literals = paths.map((value) => `'${value.replace(/['\u2018-\u201B]/g, "$&$&")}'`).join(",");
   const output = execFileSync(
     "powershell.exe",
     [
@@ -169,7 +175,7 @@ function windowsSddl(paths: string[]): string[] {
 /**
  * Throws unless the token file and the directory holding it are reachable only by their owner and
  * the machine's administrative identities. The message names the path and the offending trustee,
- * never the contents.
+ * never the contents. This is the one-file case of `assertTokenFilesAreProtected`.
  */
 export function assertTokenFileIsProtected(
   file: string,
@@ -179,100 +185,164 @@ export function assertTokenFileIsProtected(
   // instead.
   currentUserSid: () => string | null = currentWindowsUserSid,
 ): void {
-  const directory = path.dirname(path.resolve(file));
+  assertTokenFilesAreProtected([file], platform, currentUserSid);
+}
+
+/**
+ * "the token file <a>" for one file, "the 3 token files starting with <a>" for several: the
+ * subject of a message about a batch whose descriptors could not be read at all, where no single
+ * path is known to be the one at fault. Several are named by count and first path, since an
+ * install verifies hundreds and a message listing them all runs to tens of kilobytes.
+ */
+function describeTokenFiles(files: string[]): string {
+  return files.length === 1
+    ? `the token file ${files[0]}`
+    : `the ${files.length} token files starting with ${files[0]}`;
+}
+
+/**
+ * Throws unless every token file given, and every directory holding one, is reachable only by its
+ * owner and the machine's administrative identities. On Windows every descriptor is read in one
+ * call, since the installer verifies hundreds of paths at once and a PowerShell process per path is
+ * most of what that costs. The first failing file ends the run, and the message names it.
+ */
+export function assertTokenFilesAreProtected(
+  files: string[],
+  platform: string = process.platform,
+  currentUserSid: () => string | null = currentWindowsUserSid,
+  // Injectable so a test can count the reads: a verification that passes looks the same whether it
+  // spawned one process or one per path, so the work is counted through the reader instead.
+  readDescriptors: (paths: string[]) => string[] = windowsSddl,
+): void {
+  // A batch that verified nothing would report success without having looked.
+  if (files.length === 0) {
+    throw new Error("no token files to check; a verification that looked at nothing has not passed");
+  }
+
+  const directoryOf = new Map<string, string>();
+  for (const file of files) directoryOf.set(file, path.dirname(path.resolve(file)));
 
   // Checked on both platforms, before anything else: a reparse point (a symlink or, on Windows, a
   // junction or mount point) can pass every check below against its current target and then be
   // re-pointed at an attacker-controlled file the moment after. lstat, not stat, is what tells the
   // two apart, since stat follows the link.
-  for (const target of [file, directory]) {
-    let info;
-    try {
-      info = lstatSync(target);
-    } catch (error) {
-      // A missing or unreadable path is reported the same way the rest of this function reports
-      // one: naming the token file, not the internal target that happened to fail, since a
-      // directory that vanished out from under its file is still the token file's problem.
-      throw new Error(`cannot read the access control list of the token file ${file}: ${String(error)}`);
-    }
-    if (info.isSymbolicLink()) {
-      throw new Error(
-        `${target} is a reparse point (a symlink, junction, or mount point); refusing to trust a ` +
-          `path whose target can change after this check runs`,
-      );
+  for (const file of files) {
+    for (const target of [file, directoryOf.get(file)!]) {
+      let info;
+      try {
+        info = lstatSync(target);
+      } catch (error) {
+        // A missing or unreadable path is reported the same way the rest of this function reports
+        // one: naming the token file, not the internal target that happened to fail, since a
+        // directory that vanished out from under its file is still the token file's problem.
+        throw new Error(`cannot read the access control list of the token file ${file}: ${String(error)}`);
+      }
+      if (info.isSymbolicLink()) {
+        throw new Error(
+          `${target} is a reparse point (a symlink, junction, or mount point); refusing to trust a ` +
+            `path whose target can change after this check runs`,
+        );
+      }
     }
   }
 
   if (platform !== "win32") {
     const uid = typeof process.getuid === "function" ? process.getuid() : null;
-    for (const target of [file, directory]) {
-      const stat = statSync(target);
-      // Ownership, not just mode: chmod 600 set by an account that is not this process's own, or
-      // root, still means that other account controls the file's mode and could loosen it again a
-      // moment after this check passes.
-      if (uid !== null && stat.uid !== 0 && stat.uid !== uid) {
-        throw new Error(
-          `${target} is owned by uid ${stat.uid}, neither this process's account (uid ${uid}) nor ` +
-            `root; take ownership of it as the broker's own account before starting`,
-        );
-      }
-      if (unsafePosixMode(stat.mode)) {
-        throw new Error(
-          `${target} is readable, writable, or listable beyond its owner; restrict it to the ` +
-            `broker's account (chmod 600 on the token file, 700 on its directory) before starting`,
-        );
+    for (const file of files) {
+      for (const target of [file, directoryOf.get(file)!]) {
+        const stat = statSync(target);
+        // Ownership, not just mode: chmod 600 set by an account that is not this process's own, or
+        // root, still means that other account controls the file's mode and could loosen it again a
+        // moment after this check passes.
+        if (uid !== null && stat.uid !== 0 && stat.uid !== uid) {
+          throw new Error(
+            `${target} is owned by uid ${stat.uid}, neither this process's account (uid ${uid}) nor ` +
+              `root; take ownership of it as the broker's own account before starting`,
+          );
+        }
+        if (unsafePosixMode(stat.mode)) {
+          throw new Error(
+            `${target} is readable, writable, or listable beyond its owner; restrict it to the ` +
+              `broker's account (chmod 600 on the token file, 700 on its directory) before starting`,
+          );
+        }
       }
     }
     return;
   }
 
-  let descriptors: string[];
-  try {
-    descriptors = windowsSddl([file, directory]);
-  } catch (error) {
-    // A check that cannot run is not a check that passed.
-    throw new Error(`cannot read the access control list of the token file ${file}: ${String(error)}`);
+  // One list, read once, judged by index: every file in input order, then each distinct directory
+  // in first-seen order. Each path's answer is taken from the position it was asked at, never
+  // found by name, so the only way a file meets the wrong descriptor is a short or long answer,
+  // which the count check below refuses.
+  const directoryIndex = new Map<string, number>();
+  const targets = [...files];
+  for (const file of files) {
+    const directory = directoryOf.get(file)!;
+    if (!directoryIndex.has(directory)) {
+      directoryIndex.set(directory, targets.length);
+      targets.push(directory);
+    }
   }
 
-  if (descriptors.length !== 2) {
+  let descriptors: string[];
+  try {
+    descriptors = readDescriptors(targets);
+  } catch (error) {
+    // A check that cannot run is not a check that passed. The spawn error's own text repeats the
+    // whole command, every path in it, so the reason is the reader's stderr where it has one, which
+    // names the path that failed.
+    const stderr = (error as { stderr?: unknown }).stderr;
+    const reason = typeof stderr === "string" && stderr.trim() !== "" ? stderr.trim() : String(error);
+    throw new Error(`cannot read the access control list of ${describeTokenFiles(files)}: ${reason}`);
+  }
+
+  if (descriptors.length !== targets.length) {
     throw new Error(
-      `the access control lists of the token file ${file} and its directory could not be read`,
+      `the access control lists of ${describeTokenFiles(files)} and ` +
+        `${files.length === 1 ? "its directory" : "their directories"} could not be read`,
     );
   }
 
   const currentSid = currentUserSid();
 
-  for (const [index, target] of [file, directory].entries()) {
-    const sddl = descriptors[index];
-    // A descriptor with no DACL section is not one this check understood, and an unrecognized
-    // answer is not a passing one.
-    if (!/D:/.test(sddl)) {
-      throw new Error(`the access control list of ${target} could not be read as a security descriptor`);
-    }
+  for (const [fileIndex, file] of files.entries()) {
+    const directory = directoryOf.get(file)!;
+    const judged: Array<[string, string]> = [
+      [file, descriptors[fileIndex]],
+      [directory, descriptors[directoryIndex.get(directory)!]],
+    ];
+    for (const [target, sddl] of judged) {
+      // A descriptor with no DACL section is not one this check understood, and an unrecognized
+      // answer is not a passing one.
+      if (!/D:/.test(sddl)) {
+        throw new Error(`the access control list of ${target} could not be read as a security descriptor`);
+      }
 
-    // The owner is exempt from the grant scan below by construction (foreignGrants skips its own
-    // trustee), so an unverified owner turns that exemption into a hole: a file planted by any
-    // account on a shared root is owned by that account, hardened to itself with a clean ACL, and
-    // would otherwise pass. The owner must be this process's own account or an administrative
-    // identity, not merely whoever happened to create the file.
-    const owner = descriptorOwner(sddl);
-    if (owner === null) {
-      throw new Error(`the access control list of ${target} names no owner`);
-    }
-    if (owner !== currentSid && !PERMITTED_TRUSTEES.has(owner)) {
-      throw new Error(
-        `${target} is owned by ${owner}, which is neither this process's account nor an ` +
-          `administrative identity; it may have been planted by another account, so take ` +
-          `ownership of it as the broker's own account before starting`,
-      );
-    }
+      // The owner is exempt from the grant scan below by construction (foreignGrants skips its own
+      // trustee), so an unverified owner turns that exemption into a hole: a file planted by any
+      // account on a shared root is owned by that account, hardened to itself with a clean ACL, and
+      // would otherwise pass. The owner must be this process's own account or an administrative
+      // identity, not merely whoever happened to create the file.
+      const owner = descriptorOwner(sddl);
+      if (owner === null) {
+        throw new Error(`the access control list of ${target} names no owner`);
+      }
+      if (owner !== currentSid && !PERMITTED_TRUSTEES.has(owner)) {
+        throw new Error(
+          `${target} is owned by ${owner}, which is neither this process's account nor an ` +
+            `administrative identity; it may have been planted by another account, so take ` +
+            `ownership of it as the broker's own account before starting`,
+        );
+      }
 
-    const foreign = foreignGrants(sddl);
-    if (foreign.length > 0) {
-      throw new Error(
-        `${target} grants access to ${foreign.join(", ")}, which is broader than its owner and ` +
-          `the machine's administrators; remove the inherited permissions before starting`,
-      );
+      const foreign = foreignGrants(sddl);
+      if (foreign.length > 0) {
+        throw new Error(
+          `${target} grants access to ${foreign.join(", ")}, which is broader than its owner and ` +
+            `the machine's administrators; remove the inherited permissions before starting`,
+        );
+      }
     }
   }
 }
