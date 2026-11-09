@@ -1,9 +1,10 @@
 // The summary the web listener serves at `GET /web/summary`: four counts, the capacity verdict's word
 // with the number of accounts behind it, the sandbox name and the oldest source time. It names no
 // session, repo, plan or person, and no path or ask text, so what it gives a reader is the fleet's
-// size and state. The counts and the word come from the standup and health views of the same
-// reading, so they agree with the pages a reader opens next.
-import { asOf, healthView, standupView } from "./views.ts";
+// size and state. `needsYou` counts the Today items, so it equals the length of the Today list.
+// `yourHands` counts the standup view's hands items, and the other counts and the word come from
+// the health view. All read the same reading, so they agree with the pages a reader opens next.
+import { asOf, healthView, standupView, todayItems } from "./views.ts";
 import type { AsOf, Readings, Verdict } from "./views.ts";
 
 /** The longest sandbox name the summary carries; a longer `CHANNEL_HOST_NAME` is cut to this. */
@@ -25,7 +26,7 @@ export function summaryView(readings: Readings): SummaryView {
   const health = healthView(readings);
   return {
     sandbox: readings.host.slice(0, SANDBOX_MAX),
-    needsYou: standup.needsYou.length,
+    needsYou: todayItems(readings).length,
     yourHands: standup.needsYou.filter((item) => item.kind === "hands").length,
     expected: health.expected,
     reporting: health.reporting,

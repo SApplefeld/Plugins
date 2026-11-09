@@ -1733,16 +1733,14 @@ function ledeOf(items: readonly { item: Item | ReviewItem }[], now: number): str
 }
 
 /**
- * The Today page's view. `first` holds what waits on the operator, from the readings the Needs me
- * view draws: each blocked entry and each account needing sign-in as `unblock`, each review as
- * `approve`, each blocking ask as `decide` and each other ask as `answer`. A hands item drawn from a
- * blocked entry is left out, since the entry stands as its own unblock item. The kinds run in that
+ * What waits on the operator, ranked and numbered as the Today list draws it, from the readings the
+ * Needs me view draws: each blocked entry and each account needing sign-in as `unblock`, each review
+ * as `approve`, each blocking ask as `decide` and each other ask as `answer`. A hands item drawn from
+ * a blocked entry is left out, since the entry stands as its own unblock item. The kinds run in that
  * order whatever their ages, and within a kind the item that came up first leads, an undated one
- * after every dated one. `running` is the Workers rows that read working, asking or paused, in the
- * Workers view's order; `finished` the plans whose newest `goal-complete` line is inside
- * `FINISHED_WINDOW_MS` of the request, newest first, at most `FINISHED_CAP`. It writes no mark.
+ * after every dated one. The Today view's `first` and the summary's `needsYou` both read it.
  */
-export function todayView(readings: Readings): TodayView {
+export function todayItems(readings: Readings): TodayItem[] {
   const repos = fleet(readings);
   const folders = new Map(repos.map((repo) => [repo.persona.name, rootName(repo.persona.workdir)] as const));
   const who = (persona: string, pullRequest: number | null = null): string =>
@@ -1799,7 +1797,7 @@ export function todayView(readings: Readings): TodayView {
     }
   }
 
-  const ranked = items
+  return items
     .map((one, index) => ({ one, index, at: cameUpAt(one.item) }))
     .sort((left, right) => {
       const kind = TODAY_KIND_ORDER.indexOf(left.one.kind) - TODAY_KIND_ORDER.indexOf(right.one.kind);
@@ -1812,7 +1810,17 @@ export function todayView(readings: Readings): TodayView {
       return left.index - right.index;
     })
     .map(({ one }, index): TodayItem => ({ kind: one.kind, number: index + 1, who: one.who, title: one.title, effect: one.effect, acts: one.acts, item: one.item, ...(one.root === undefined ? {} : { root: one.root }) }));
+}
 
+/**
+ * The Today page's view. `first` is `todayItems`, what waits on the operator in list order.
+ * `running` is the Workers rows that read working, asking or paused, in the Workers view's order;
+ * `finished` the plans whose newest `goal-complete` line is inside `FINISHED_WINDOW_MS` of the
+ * request, newest first, at most `FINISHED_CAP`. It writes no mark.
+ */
+export function todayView(readings: Readings): TodayView {
+  const repos = fleet(readings);
+  const ranked = todayItems(readings);
   const running = workersView(readings)
     .rows.filter((row) => RUNNING_STATES.includes(row.state))
     .map(({ name, state, title, step, lastTurnAt }): RunningRow => ({ name, state, title, step, lastTurnAt }));
