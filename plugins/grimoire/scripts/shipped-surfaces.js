@@ -8,8 +8,10 @@
 // test/em-dash-sweep.test.js walk with ledgers false, since they sweep the
 // markdown as instruction surfaces. test/markdown-marker-parity.test.js walks
 // with ledgers true, since a ledger renders as ordinary markdown and its bold
-// markers must balance like any other file's. doctrine-parity's own boundary
-// walker also calls isRationaleLedger directly.
+// markers must balance like any other file's. Four sweeps call
+// isRationaleLedger directly: doctrine-parity's own boundary walker,
+// test/heading-shape.test.js, test/review-loop-provenance.test.js and
+// test/skill-compaction-fit.test.js.
 //
 // liveLedgerText is the verdict filter over a ledger entry. Two tests read
 // entries through it: doctrine-parity's passage pin, which reads a rewrite
