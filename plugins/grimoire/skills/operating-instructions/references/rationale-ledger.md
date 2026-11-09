@@ -4086,7 +4086,7 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 - flag: stale
 
 ### T002
-- key: Read `branch-hygiene`'s Hard rules for deleting a stranded branch once its commits are recovered, the one `git branch -D` licensed outside the merged set.
+- key: Read `branch-hygiene`'s Hard rules for deleting a stranded branch once its commits are recovered, the one delete licensed outside the merged set.
 - class: pointer
 - source: plugins/grimoire/skills/operating-instructions/references/ownership-map.md:68
 - provenance: docs/backlog.md 2026-09-13, batch 2 ruling 21 part A of the corpus rewrite's rulings, landed by the corpus-rewrite follow-up plan's section 2; the moment had sat under Unowned or contested since 5cd8f22 2026-09-01 (C072).

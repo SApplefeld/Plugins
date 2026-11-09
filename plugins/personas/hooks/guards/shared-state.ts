@@ -15,8 +15,11 @@
 // shapes close ordinary mistakes, not adversarial spellings, so a kill or a
 // stash reachable only through a rewritten spelling (a verb assembled from a
 // variable, a control character forging a mask sentinel, an operand routed
-// through a variable) is out of its reach. A dispatch naming no agentType sits
-// under no class and is out of its reach too.
+// through a variable) is out of its reach. So is a branch delete through
+// update-ref fed by --stdin, by a write of the zero value, or on a symbolic
+// ref other than HEAD that points into refs/heads/, or run by GNU parallel,
+// which Git for Windows does not ship. A dispatch naming no
+// agentType sits under no class and is out of its reach too.
 //
 // It denies:
 //   a kill selecting by image or name: taskkill with /IM, //IM or -IM, or with
@@ -31,8 +34,12 @@
 //     --force, with ., ./ or .\ as an operand, or with two operands (a
 //     tree-ish and a path); switch with --discard-changes, -f or --force;
 //     restore, unless it carries --staged without --worktree; clean; branch
-//     with --delete or a short-flag cluster holding d or D; worktree remove or
-//     prune;
+//     with --delete or a short-flag cluster holding d or D; update-ref with -d
+//     alone or in a short-flag cluster, unless its first operand is a readable
+//     ref under refs/ and no operand opens refs/heads/ in any case, names
+//     HEAD, holds a brace or is unreadable, and no xargs sits ahead of it in
+//     its segment or anywhere in a command whose nested shell carries it;
+//     worktree remove or prune;
 //   a recursive delete (rm with r or R in a short-flag cluster or
 //     --recursive, Remove-Item and its aliases with -Recurse or a unique
 //     prefix of it, or cmd's rd, rmdir, del or erase with /s) whose target is
@@ -227,7 +234,7 @@ function killAct(cmd: string, masked: string): string | null {
 // The act a git invocation in the command performs on the checkout, or null.
 // The global flags between git and its subcommand are stepped over as the
 // read-only guard steps over them.
-function gitAct(cmd: string, masked: string): string | null {
+function gitAct(cmd: string, masked: string, fed: boolean): string | null {
   for (const hit of commandPositions(masked, ["git"])) {
     const toks = tokens(segment(cmd, masked, hit.at));
     let i = 0;
@@ -268,6 +275,39 @@ function gitAct(cmd: string, masked: string): string | null {
       // A short-flag cluster holding d or D deletes (-d, -D, -df, -Df).
       const del = rest.find((a) => a === "--delete" || /^-[A-Za-z]*[dD][A-Za-z]*$/.test(a));
       if (del !== undefined) return `a branch delete (git branch ${del})`;
+    }
+    if (sub === "update-ref") {
+      // -d deletes, the compare-and-delete form branch-hygiene teaches (git
+      // update-ref -d refs/heads/<name> <sha> --no-deref). update-ref reads its
+      // options with git's parse-options, so -d also deletes inside a short-flag
+      // cluster, read up to its first d since -m takes the rest of the cluster
+      // as its reason (-dm"reap merged"). A delete is let through only where its
+      // first operand is a ref the guard can read under refs/ and outside
+      // refs/heads/, and no operand is a branch or unreadable: refs/notes/x
+      // passes. Every other delete is refused, since its ref is a branch or
+      // arrives where the guard cannot see it: refs/heads/ in any case (loose
+      // refs on this host's case-insensitive filesystem answer to any spelling),
+      // HEAD (git follows it to the checked-out branch, and with --no-deref it is
+      // the shared checkout's own HEAD), no operand, a variable, an operand
+      // holding a brace, or a delete an xargs runs. An xargs replace string can
+      // be any word and sit under a refs/ prefix (xargs -I REF ... -d refs/REF
+      // fed heads/<name>), so an update-ref with an xargs ahead of it in its
+      // segment is refused whatever its operands read as, and so is one in a
+      // nested shell read from a command holding an xargs (`fed`), as in
+      // xargs -I REF sh -c "git update-ref -d refs/REF". Every word not opening
+      // a dash is read as an operand, a reflog reason included, so -m reap
+      // refs/notes/x is refused too, a cluster whose -m reason holds a d
+      // (-mdone) is read as a delete, and a notes delete an xargs runs is
+      // refused: false denies kept rather than a narrower reading that could
+      // open a hole.
+      // update-ref with no d in a short-flag cluster is left alone.
+      const del = rest.find((a) => /^-[A-Za-z0-9]*d/.test(a));
+      const branch = (o: string) => /^refs\/heads\//i.test(o) || /^head$/i.test(o);
+      const operands = rest.filter((o) => !o.startsWith("-"));
+      const target = operands[0];
+      const seen = target !== undefined && /^refs\//i.test(target);
+      const viaXargs = fed || commandPositions(masked, ["xargs"]).some((x) => x.at < hit.at && !/[;&|\n]/.test(masked.slice(x.at, hit.at)));
+      if (del !== undefined && (viaXargs || !seen || operands.some((o) => branch(o) || unreadable(o) || /[{}]/.test(o)))) return `a branch delete (git update-ref ${del})`;
     }
     if (sub === "worktree" && (subverb === "remove" || subverb === "prune")) return `a worktree removal (git worktree ${subverb})`;
   }
@@ -462,8 +502,9 @@ type Call = {
 // `exact` is the reading the guard's decide chose for this pass, carried
 // unchanged to every depth; each nested text is read under
 // `readUnderContinuations` on its own text, and its composed verdict is held
-// in the call's memo, keyed on the text, its depth and `exact`.
-async function sharedStateAct(cmd: string, depth: number, join: boolean, boundary: number, exact: boolean, call: Call): Promise<string | null> {
+// in the call's memo, keyed on the text, its depth, `exact` and whether an
+// xargs feeds it (`fed`).
+async function sharedStateAct(cmd: string, depth: number, join: boolean, boundary: number, exact: boolean, call: Call, fed = false): Promise<string | null> {
   const { cwd, host, quote } = call;
   const subs: Span[] = [];
   let bodies: Span[];
@@ -498,22 +539,26 @@ async function sharedStateAct(cmd: string, depth: number, join: boolean, boundar
     for (let i = joined.at(exemptBody.from); i < joined.at(exemptBody.to); i++) chars[i] = "\x00";
     masked = chars.join("");
   }
-  const act = killAct(cmd, masked) || gitAct(cmd, masked) || (cwd ? await deleteAct(cmd, masked, cwd, host, call.root) : null);
+  const act = killAct(cmd, masked) || gitAct(cmd, masked, fed) || (cwd ? await deleteAct(cmd, masked, cwd, host, call.root) : null);
   if (act !== null) return act;
   if (depth >= DEPTH_BOUND) return null;
-  const nestedAct = (text: string) => memoized(call.memo, `${depth + 1}:${exact ? "exact" : "legacy"}`, text, () => readUnderContinuations(
+  // A nested payload read from a command holding an xargs is read as fed by
+  // it, since the xargs may run the shell that runs the payload; a false
+  // deny where it does not is kept over a narrower reading.
+  const fedPayload = fed || commandPositions(masked, ["xargs"]).length > 0;
+  const nestedAct = (text: string, f: boolean) => memoized(call.memo, `${depth + 1}:${exact ? "exact" : "legacy"}${f ? ":fed" : ""}`, text, () => readUnderContinuations(
     text,
     exact,
-    (t, j, b) => sharedStateAct(t, depth + 1, j, b, exact, call),
+    (t, j, b) => sharedStateAct(t, depth + 1, j, b, exact, call, f),
     r => r !== null,
     () => CONTINUATION_CAP_REASON,
   ));
   for (const s of subs) {
-    const nested = await nestedAct(cmd.slice(s.from, s.to));
+    const nested = await nestedAct(cmd.slice(s.from, s.to), fed);
     if (nested !== null) return nested;
   }
   for (const payload of nestedPayloads(cmd, masked)) {
-    const nested = await nestedAct(payload);
+    const nested = await nestedAct(payload, fedPayload);
     if (nested !== null) return `${nested}, inside a nested shell`;
   }
   return null;
