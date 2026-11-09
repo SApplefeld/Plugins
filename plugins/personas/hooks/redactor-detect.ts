@@ -690,10 +690,55 @@ const SHORT_KEY = new RegExp(String.raw`(?:^|[_.-])${SHORT_PW}$`, 'i')
 // of up to eight letters after it is a count, a status or a constant, not a
 // password. A mixed-case word (`Summer`) or a longer caps run is hidden.
 const shortKeyStatus = (key: string, v: string): boolean => SHORT_KEY.test(key) && (/^[0-9]+$/.test(v) || /^[a-z]{1,8}$/.test(v) || /^[A-Z]{1,8}$/.test(v))
+// The value ends at its own quote, an empty value included, so the pair after
+// it is read on its own. The callers decide what a short value does.
 const STRONG_QUOTED = new RegExp(
-  String.raw`((?:^|[\s{,;(\[])(\\?["']?)((?:[A-Za-z0-9._-]*[_.-]|pg)?${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})\2[ \t]*[:=][ \t]*)(\\?["'])([^\n]{3,200}?)\4`,
+  String.raw`((?:^|[\s{,;(\[])(\\?["']?)((?:[A-Za-z0-9._-]*[_.-]|pg)?${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})\2[ \t]*[:=][ \t]*)(\\?["'])((?:(?!\4)[^\n]){0,200})\4`,
   'gim',
 )
+// A strong quoted pair as both callers read it, with the span it covers.
+type StrongPair = { head: string; key: string; quote: string; v: string; start: number; end: number }
+// What follows a short capture's closing quote when the value is a real
+// short value: a separator, a closing bracket, whitespace, or the end.
+const SHORT_CLOSE = /^[\s,;\])}]/
+// The pairs STRONG_QUOTED finds in a text, each with the value the callers
+// act on. A capture under three characters is a short value where its
+// closing quote is followed by a separator or the end: it is left as written
+// and its pair is consumed. A capture ending in an odd run of backslashes is
+// never short, since the regex stopped at an escaped quote. Any other short
+// capture is read as the base read it, which covers a value opening with its
+// own quote type, such as an escaped quote or a triple quote. Its value then
+// runs to the first opening quote string at least three characters in, with
+// no newline and at most two hundred characters. Where no such close exists the text is left as written.
+// Values of three characters or more end where the regex ended them.
+function strongQuotedPairs(text: string): StrongPair[] {
+  const pairs: StrongPair[] = []
+  STRONG_QUOTED.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = STRONG_QUOTED.exec(text)) !== null) {
+    const [whole, head, , key, quote, v] = m as unknown as string[]
+    const start = m.index
+    let end = start + whole!.length
+    let value = v!
+    if (value.length < 3) {
+      // A capture ending in an odd run of backslashes stopped at an escaped
+      // quote, not its own closing quote, so it is never a short value.
+      let slashes = 0
+      while (slashes < value.length && value[value.length - 1 - slashes] === '\\') slashes++
+      if (slashes % 2 === 0 && (end >= text.length || SHORT_CLOSE.test(text[end]!))) continue
+      const from = start + head!.length + quote!.length
+      const close = text.indexOf(quote!, from + 3)
+      if (close < 0) continue
+      value = text.slice(from, close)
+      if (value.length > 200 || value.includes('\n')) continue
+      end = close + quote!.length
+      STRONG_QUOTED.lastIndex = end
+    }
+    pairs.push({ head: head!, key: key!, quote: quote!, v: value, start, end })
+  }
+  STRONG_QUOTED.lastIndex = 0
+  return pairs
+}
 // A YAML list item (`- password: x`, compose `- DB_PASS=x`) counts too.
 const STRONG_LINE = new RegExp(
   String.raw`^([ \t]*(?:-[ \t]+)?(?:export[ \t]+)?([A-Za-z0-9._-]*${PW_WORD}|(?:[A-Za-z0-9._-]*[_.-])?${SHORT_PW})[ \t]*[:=][ \t]*)([^\s"'#;][^\s"';]{2,199})[ \t]*$`,
@@ -1267,7 +1312,17 @@ function scrubAssignments(text: string, cfg: Config): string {
     return head + v + tail
   }
   if (/pass|secret|key|token|pw/i.test(out)) {
-    out = clocked(out).replace(STRONG_QUOTED, (_m, head: string, _q: string, key: string, quote: string, v: string) => value(head + quote, key, v, quote))
+    // Each pair strongQuotedPairs reads is hidden in place; a short value
+    // yields no pair and stays as written. The pairs are collected before any
+    // value is minted, so the shared regex is never read mid-scan.
+    out = clocked(out)
+    let at = 0
+    let built = ''
+    for (const p of strongQuotedPairs(out)) {
+      built += out.slice(at, p.start) + value(p.head + p.quote, p.key, p.v, p.quote)
+      at = p.end
+    }
+    out = built + out.slice(at)
     out = clocked(out).replace(APP_PASSWORD, (_m, head: string, v: string) => pairOut(cfg, head, v))
     out = clocked(out).replace(STRONG_LINE, (_m, head: string, key: string, v: string) => value(head, key, v))
     out = clocked(out).replace(ENV_PASS, (_m, head: string, _k: string, v: string) => value(head, '', v))
@@ -1425,7 +1480,7 @@ function decodedHoldsSecret(d: string): boolean {
   }
   if (/pass|secret|key|token/i.test(d)) {
     for (const m of d.matchAll(STRONG_LINE)) if (!isStandIn(m[3]!) && !WHOLE_TAG.test(m[3]!) && !shortKeyStatus(m[2]!, m[3]!)) return true
-    for (const m of d.matchAll(STRONG_QUOTED)) if (!isStandIn(m[5]!) && !WHOLE_TAG.test(m[5]!) && !shortKeyStatus(m[3]!, m[5]!)) return true
+    for (const p of strongQuotedPairs(d)) if (!isStandIn(p.v) && !WHOLE_TAG.test(p.v) && !shortKeyStatus(p.key, p.v)) return true
   }
   if (d.includes('://')) for (const m of d.matchAll(URL_PASSWORD)) if (!URL_PASSWORD_WORD.test(m[2]!)) return true
   return false
