@@ -31,6 +31,7 @@
 // test-personas/fixtures/recognition-containment.json holds the containment
 // verdicts the `cmd:` matcher gives.
 
+import { headPoints } from "./agent-state";
 import { STRICT_SEAT } from "./guards/agent-class";
 
 // Characters of command text one match runs over, a script write's text and
@@ -1148,9 +1149,9 @@ function nudgeBoundaryTypes(boundary: NudgeBoundary): readonly string[] {
 // tier, the name, the type and the pattern, NUL-separated, the recipient and
 // class left out where empty, as 32 hex digits.
 export function nudgeDedupKey(hit: { tier: RecognitionTier; name: string; type: string; pattern: string }, recipient: string, boundaryClass: string): string {
-  return nudgeSha256Hex((recipient ? recipient + "\u0000" : "")
+  return headPoints(nudgeSha256Hex((recipient ? recipient + "\u0000" : "")
     + (boundaryClass ? boundaryClass + "\u0000" : "")
-    + hit.tier + "\u0000" + hit.name + "\u0000" + hit.type + "\u0000" + hit.pattern).slice(0, 32);
+    + hit.tier + "\u0000" + hit.name + "\u0000" + hit.type + "\u0000" + hit.pattern), 32);
 }
 
 // The triggers and anchors a boundary matches, in index order, skipping each
@@ -1367,7 +1368,7 @@ export function nudgeText(hits: readonly NudgeHit[], boundary: NudgeBoundary, el
 // its tier, the trigger type, the pattern as printable ASCII without the
 // double quote cut at 256 characters, and the boundary.
 export function nudgeEventDetail(hit: NudgeHit, boundary: NudgeBoundary): { name: string; tier: string; type: string; pattern: string; boundary: string } {
-  return { name: hit.name, tier: hit.tier, type: hit.type, pattern: hit.pattern.replace(/[^\x20-\x7E]/g, "").replace(/"/g, "").slice(0, 256), boundary };
+  return { name: hit.name, tier: hit.tier, type: hit.type, pattern: headPoints(hit.pattern.replace(/[^\x20-\x7E]/g, "").replace(/"/g, ""), 256), boundary };
 }
 
 // --- The recognition gate ---

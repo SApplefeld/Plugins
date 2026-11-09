@@ -45,7 +45,7 @@
 // overrun means a blocked disk or a stalled node start.
 
 import type { ProcessRunInit, ProcessRunResult } from "claude-code";
-import { planHolderOf, type AgentState, type GoalNode } from "./agent-state";
+import { headPoints, planHolderOf, type AgentState, type GoalNode } from "./agent-state";
 import { scrubText } from "./redactor";
 
 export const KIT_EVENTS_FILENAME = "kit-events.jsonl";
@@ -158,7 +158,7 @@ async function appendOne(deps: KitEventDeps, events: KitEventsState, record: Kit
       if (exitCode !== 0) failure = `exit ${exitCode === null ? "unknown" : exitCode}`;
     }
   } catch (err) {
-    failure = `run failed: ${String(err).slice(0, 150)}`;
+    failure = `run failed: ${headPoints(String(err), 150)}`;
   }
   if (failure === null) {
     events.failureLogged = false;
@@ -166,7 +166,7 @@ async function appendOne(deps: KitEventDeps, events: KitEventsState, record: Kit
   }
   if (events.failureLogged) return;
   events.failureLogged = true;
-  deps.decide("kit_event_failed", `${record.event} for ${record.plan.slice(0, 120)} was lost: ${failure}`);
+  deps.decide("kit_event_failed", `${record.event} for ${headPoints(record.plan, 120)} was lost: ${failure}`);
 }
 
 // The plan holders: the entries carrying planPath. A task leaf under one has

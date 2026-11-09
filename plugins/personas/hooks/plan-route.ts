@@ -6,7 +6,7 @@
 // reads as arguments, so the tick harness, which loads a fresh hooks/index.ts per
 // case, shares nothing through it.
 
-import { type AgentState, bracketSafeText, type GoalNode, oneLine, PLAN_PATH_PATTERN, resolvePlanPath } from "./agent-state";
+import { type AgentState, bracketSafeText, type GoalNode, headPoints, oneLine, PLAN_PATH_PATTERN, resolvePlanPath } from "./agent-state";
 
 // The plan health request: block-owner, asked at a plan entry's turn end.
 // The journal site its call line carries.
@@ -169,7 +169,7 @@ export function closingLeafObjective(planPath: string): string {
 // line, its brackets neutralized, cut to 80 characters, since the value is
 // text a repository supplies and reaches the model.
 export function planStatusText(status: string): string {
-  return bracketSafeText(oneLine(status)).slice(0, 80);
+  return headPoints(bracketSafeText(oneLine(status)), 80);
 }
 
 // The finish-the-document sentence goal_done's answer carries for a plan held

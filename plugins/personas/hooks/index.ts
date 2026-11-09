@@ -63,6 +63,8 @@ import {
   reapTurnRecords,
   openTurnRecord,
   bracketSafeText,
+  headPoints,
+  tailPoints,
   LINE_TERMINATOR,
   oneLine,
   recordPreviousSession,
@@ -1335,7 +1337,7 @@ async function liveTopLevelAgentRunning(dp: any): Promise<boolean> {
       timestamp: Date.now(),
       loop: "monitor",
       action: "agent_list_unreadable",
-      detail: `$.agent.list() ${kaizenLine(what).slice(0, 150)}; read as no live agent`,
+      detail: `$.agent.list() ${headPoints(kaizenLine(what), 150)}; read as no live agent`,
     });
   };
   let listed: unknown;
@@ -1411,7 +1413,7 @@ function proposeFrameNoTreeClause(coordinatorPersona: string): string {
 // only inside the no-goal-tree fallback, the one case goal_add cannot cover.
 export function proposeFrame(longTermGoals: LongTermGoal[], coordinatorPersona: string, level: AutonomyLevel): string {
   const goalLines = longTermGoals.map((g) =>
-    `- ${bracketSafeText(oneLine(String(g?.title ?? "").slice(0, 80)))}: ${bracketSafeText(oneLine(String(g?.objective ?? "").slice(0, 500)))}`).join("\n");
+    `- ${bracketSafeText(oneLine(headPoints(String(g?.title ?? ""), 80)))}: ${bracketSafeText(oneLine(headPoints(String(g?.objective ?? ""), 500)))}`).join("\n");
   const noTreeClause = proposeFrameNoTreeClause(coordinatorPersona);
   const levelClause = level === "plan-and-ask"
     ? PROPOSE_FRAME_PLAN_AND_ASK_TEXT + noTreeClause
@@ -1836,7 +1838,7 @@ async function runHealth(dp: any, forNodeId: string | null): Promise<void> {
     const health = {
       command: argv,
       exitCode: res.exitCode,
-      tail: tail.slice(-500),
+      tail: tailPoints(tail, 500),
       ranAt: Date.now(),
       forNodeId,
     };
@@ -1992,7 +1994,7 @@ function meterFailed(cause: "write" | "drain", reason: string): void {
     timestamp: Date.now(),
     loop: "monitor",
     action: "meter_write_failed",
-    detail: `cause ${cause}; ${reason}`.slice(0, 200),
+    detail: headPoints(`cause ${cause}; ${reason}`, 200),
   });
 }
 
@@ -2492,12 +2494,12 @@ async function restartRecapBlock(dp: any): Promise<string | null> {
       { cwd: launchDirOf(sess), timeoutMs: RECAP_TIMEOUT_MS },
     );
   } catch (err) {
-    return skipped(`run failed: ${String(err).slice(0, 150)}`);
+    return skipped(`run failed: ${headPoints(String(err), 150)}`);
   }
   const exitCode = res && typeof res.exitCode === "number" ? res.exitCode : null;
   if (exitCode !== 0) {
     const stderr = res && typeof res.stderr === "string" ? res.stderr : "";
-    const firstStderr = (stderr.split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim().slice(0, 150);
+    const firstStderr = headPoints((stderr.split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim(), 150);
     return skipped(`exit ${exitCode === null ? "unknown" : exitCode}; stderr: ${firstStderr || "none"}`);
   }
   const stdout = res && typeof res.stdout === "string" ? res.stdout : "";
@@ -2509,7 +2511,7 @@ async function restartRecapBlock(dp: any): Promise<string | null> {
     header = undefined;
   }
   if (header === null || typeof header !== "object" || Array.isArray(header)) {
-    return skipped(`bad header: ${lines[0].trim().slice(0, 150) || "no output"}`);
+    return skipped(`bad header: ${headPoints(lines[0].trim(), 150) || "no output"}`);
   }
   const fields = header as Record<string, unknown>;
   const digest = bracketSafeText(lines.slice(1).join("\n").trim());
@@ -2624,7 +2626,7 @@ function completionText(value: unknown): string | null {
 function completionShape(value: unknown): string {
   const keys = value !== null && typeof value === "object" ? Object.keys(value as object) : [];
   const reason = value !== null && typeof value === "object" ? (value as { reason?: unknown }).reason : undefined;
-  const reasonText = typeof reason === "string" ? `, reason: ${bracketSafeText(reason).slice(0, 40)}` : "";
+  const reasonText = typeof reason === "string" ? `, reason: ${headPoints(bracketSafeText(reason), 40)}` : "";
   return `(${typeof value}, keys: ${keys.length > 0 ? keys.slice(0, 12).map((k) => bracketSafeText(k)).join(",") : "none"}${reasonText})`;
 }
 
@@ -2940,7 +2942,7 @@ async function foldSettledPlans(dp: any): Promise<void> {
         timestamp: Date.now(),
         loop: "goal",
         action: "plan_fold_failed",
-        detail: `${planId}: the history copy in ${GOAL_HISTORY_FILENAME} could not be written, so no child was folded: ${boundedText(safeErrorText(err))}`.slice(0, 300),
+        detail: headPoints(`${planId}: the history copy in ${GOAL_HISTORY_FILENAME} could not be written, so no child was folded: ${boundedText(safeErrorText(err))}`, 300),
       });
     }
   };
@@ -3424,7 +3426,7 @@ const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean)
       timestamp: now,
       loop: "goal",
       action: "goal_seed_skipped",
-      detail: `${goalFile}: ${bracketSafeText(oneLine(read.problem)).slice(0, 150)}`,
+      detail: `${goalFile}: ${headPoints(bracketSafeText(oneLine(read.problem)), 150)}`,
     });
     return;
   }
@@ -3447,7 +3449,7 @@ const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean)
         timestamp: now,
         loop: "goal",
         action: "goal_seed_skipped",
-        detail: `${goalFile}: ${decision} refused, the history copy in ${GOAL_HISTORY_FILENAME} could not be written: ${bracketSafeText(oneLine(safeErrorText(err))).slice(0, 150)}`,
+        detail: `${goalFile}: ${decision} refused, the history copy in ${GOAL_HISTORY_FILENAME} could not be written: ${headPoints(bracketSafeText(oneLine(safeErrorText(err))), 150)}`,
       });
       return;
     }
@@ -3475,7 +3477,7 @@ const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean)
     timestamp: now,
     loop: "goal",
     action: "goal_seeded",
-    detail: `${decision}: root ${root.id} "${bracketSafeText(oneLine(root.objective)).slice(0, 80)}" seeded from ${goalFile}${root.turnBudget !== undefined ? ` (budget ${root.turnBudget} turns)` : ""}`,
+    detail: `${decision}: root ${root.id} "${headPoints(bracketSafeText(oneLine(root.objective)), 80)}" seeded from ${goalFile}${root.turnBudget !== undefined ? ` (budget ${root.turnBudget} turns)` : ""}`,
   });
 };
 
@@ -3631,7 +3633,7 @@ async function readPlanDocument(dp: any, planPath: string): Promise<{ reading: P
       reason = `live directory unavailable: $.session.cwd() answered ${typeof cwd === "string" ? "an empty string" : typeof cwd}`;
     }
   } catch (err) {
-    reason = `live directory unavailable: ${String(err).slice(0, 150)}`;
+    reason = `live directory unavailable: ${headPoints(String(err), 150)}`;
   }
   if (liveDir === null) return { reading: { kind: "unreadable", reason }, liveDir, planDir: null };
   const planFs = { exists: (p: string) => dp.fs.exists(p), read: (p: string) => dp.fs.read(p) };
@@ -3710,7 +3712,7 @@ function addClosingLeaf(plan: GoalNode, status: string): GoalNode {
     id: `task-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     parentId: plan.id,
     kind: "task",
-    title: objective.slice(0, 80),
+    title: headPoints(objective, 80),
     objective,
     status: "pending",
     source: "controller",
@@ -3730,7 +3732,7 @@ function addClosingLeaf(plan: GoalNode, status: string): GoalNode {
     timestamp: now,
     loop: "goal",
     action: "add",
-    detail: `${leaf.id} (task) under ${plan.id}: "${leaf.title.slice(0, 50)}"`,
+    detail: `${leaf.id} (task) under ${plan.id}: "${headPoints(leaf.title, 50)}"`,
   });
   return leaf;
 }
@@ -3819,7 +3821,7 @@ function queueMemoryCheck(dp: any, expectedTurns: ExpectedTurn[], goalId: string
     clearShownUnder(goalIds);
     return;
   }
-  const safeTitle = bracketSafeText(oneLine(String(title).slice(0, 80)));
+  const safeTitle = bracketSafeText(oneLine(headPoints(String(title), 80)));
   const nameLines = names.map((name) => bracketSafeText(oneLine(name))).join("\n");
   const memoryCheckText =
     `[MEMORY CHECK] These records were shown while you worked ${safeTitle}:\n` +
@@ -3835,7 +3837,7 @@ function queueMemoryCheck(dp: any, expectedTurns: ExpectedTurn[], goalId: string
       timestamp: Date.now(),
       loop: "memory",
       action: "memory_check_refused",
-      detail: `${goalId}: submit ${outcome.how}: ${outcome.reason}`.slice(0, 200),
+      detail: headPoints(`${goalId}: submit ${outcome.how}: ${outcome.reason}`, 200),
     });
   });
 }
@@ -3906,7 +3908,7 @@ async function answerMemoryCheck(dp: any, goalId: string, goalIds: string[], ans
       failureLogged = true;
       const reason = res === null
         ? "memq did not run to an exit"
-        : (res.stderr.split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim().slice(0, 150) ||
+        : headPoints((res.stderr.split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim(), 150) ||
           `memq exited ${res.exitCode === null ? "unknown" : res.exitCode}`;
       sess.state.decisions.push({
         timestamp: Date.now(),
@@ -4009,7 +4011,7 @@ export const register: Register = async (on, options) => {
       timestamp: Date.now(),
       loop: "monitor",
       action: "operator_delivery_failed",
-      detail: `record ${rec.id} submit ${outcome.how}; ${fate}: ${outcome.reason}`.slice(0, 200),
+      detail: headPoints(`record ${rec.id} submit ${outcome.how}; ${fate}: ${outcome.reason}`, 200),
     });
   };
   // Item 2 backstop safety (Round 28): true only when the real
@@ -4269,12 +4271,26 @@ export const register: Register = async (on, options) => {
   // are still running, and the tick then nudges into a live turn. A completion
   // for an id not in the map removes nothing and leaves the reading alone.
   //
-  // The map holds no entry a live process cannot account for. A turn.complete
-  // is delivered whatever the turn's reason, an abort included, so an id is
-  // left behind only by a failure below the harness, and a failure that takes
-  // the host down takes this in-process map with it. That is why the reading
-  // needs no age-out: there is no state a running process can reach in which
-  // an entry here is not a turn.
+  // An entry is a turn only once a main-loop turn.step carries its id. The
+  // engine can raise a turn.start it never runs as a model turn, and that
+  // turn.start's id then receives no completion, so an entry can sit here
+  // with no process behind it and hold the inbox drain and the idle tick for
+  // the life of the session. A real turn's first step reaches the turn.step
+  // handler before its first model request leaves, so an entry that has
+  // shown no step after four heartbeat ticks, UNSTEPPED_TURN_DROP_TICKS in
+  // hooks/controller-tick.ts, is probably not a model turn, and the
+  // heartbeat tick drops it through dropUnsteppedTurns there. The bound is counted in ticks rather than read
+  // from the clock, so a machine that sleeps between a turn.start and its
+  // first step ages nothing. An entry that has shown a step is never dropped,
+  // under any bound: a slow turn is not a wedge.
+  //
+  // A real turn can still pass the bound with no step: a hook's budget clock
+  // stops while any `$` call of its is in flight, so a turn.start hook chain
+  // can run for minutes before the first model request leaves. A dropped id
+  // therefore keeps its original start in droppedTurns below, and a main-loop
+  // step carrying it puts the entry back with that start, so the published
+  // stamp and the long-turn record read the turn's true length. Nothing
+  // submitted while the entry was out is undone.
   //
   // The value is that turn's own start time. turn.complete reads it two ways:
   // the long-turn record measures against the completing turn's own entry, and
@@ -4282,6 +4298,35 @@ export const register: Register = async (on, options) => {
   // earliest entry left after the delete.
   const openTurns = new Map<string, number>();
   const turnIsOpen = () => openTurns.size > 0;
+  // The ids in openTurns that a main-loop step has carried, added by the
+  // turn.step handler on its way down. A subagent's step proves nothing, as a
+  // subagent's completion closes nothing. Each id leaves with its entry, at
+  // the completion's delete or at the drop. A session whose monitor is off
+  // registers no turn.step hook, so it marks nothing, and its one timer runs
+  // the compaction pass's step rather than heartbeatTick, so it drops
+  // nothing.
+  const steppedTurns = new Set<string>();
+  // The heartbeat ticks each unmarked entry has sat through, keyed by id.
+  // Cleared by the mark and removed with the entry.
+  const unsteppedTicks = new Map<string, number>();
+  // The marked ids for which turn.complete has already logged
+  // open_turn_outlived, so a stepped entry left behind by a later turn's end
+  // is logged once however many later turns end. Removed with the entry.
+  const outlivedLogged = new Set<string>();
+  // The ids the drop removed, each against its entry's original start, read
+  // by the turn.step handler to put a real turn's entry back. A completion
+  // carrying one removes it. Bounded at DROPPED_TURNS_MAX in
+  // hooks/controller-tick.ts, the oldest evicted first, since a true strand
+  // never completes and would otherwise hold its id for the session's life.
+  const droppedTurns = new Map<string, number>();
+  // Removes everything the reading holds under an id beside its openTurns
+  // entry, so a turn.start under a reused id begins with none of it.
+  const clearTurnReading = (turnId: string): void => {
+    steppedTurns.delete(turnId);
+    unsteppedTicks.delete(turnId);
+    outlivedLogged.delete(turnId);
+    droppedTurns.delete(turnId);
+  };
   // The inbox drain, which the session.start hook defines beside the
   // controller tick and publishes here so the turn.complete body in hooks/turn-complete.ts can call
   // it. It is defined there because it uses that hook's `$`, and the loader
@@ -5772,7 +5817,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "goal",
         action: "autonomy_invalid",
-        detail: `stored level ${bracketSafeText(String(JSON.stringify(storedAutonomy)).slice(0, 50))} read as propose`,
+        detail: `stored level ${bracketSafeText(headPoints(String(JSON.stringify(storedAutonomy)), 50))} read as propose`,
       });
     }
 
@@ -5786,7 +5831,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "monitor",
         action: "jev_live_invalid",
-        detail: `jevLive dropped ${bracketSafeText(JSON.stringify(jevLiveDropped).slice(0, 50))}`,
+        detail: `jevLive dropped ${bracketSafeText(headPoints(JSON.stringify(jevLiveDropped), 50))}`,
       });
       jevLiveDropped = [];
     }
@@ -5813,7 +5858,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "monitor",
         action: "setting_clamped",
-        detail: `compactionPass ${bracketSafeText(oneLine(compactionPassInvalid)).slice(0, 50)} is not off, shadow or live; using off`,
+        detail: `compactionPass ${headPoints(bracketSafeText(oneLine(compactionPassInvalid)), 50)} is not off, shadow or live; using off`,
       });
       compactionPassInvalid = null;
     }
@@ -5825,7 +5870,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "monitor",
         action: "setting_clamped",
-        detail: `guards ${bracketSafeText(oneLine(guardsInvalid)).slice(0, 50)} is not off, shadow or live; using live`,
+        detail: `guards ${headPoints(bracketSafeText(oneLine(guardsInvalid)), 50)} is not off, shadow or live; using live`,
       });
       guardsInvalid = null;
     }
@@ -5837,7 +5882,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "monitor",
         action: "setting_clamped",
-        detail: `lifetime ${bracketSafeText(oneLine(lifetimeInvalid)).slice(0, 50)} is not standing or goal; using standing`,
+        detail: `lifetime ${headPoints(bracketSafeText(oneLine(lifetimeInvalid)), 50)} is not standing or goal; using standing`,
       });
       lifetimeInvalid = null;
     }
@@ -5871,7 +5916,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "goal",
         action: "goal_seed_skipped",
-        detail: `${goalFile}: store-not-loaded: ${bracketSafeText(oneLine(sess.stateNotLoaded)).slice(0, 150)}`,
+        detail: `${goalFile}: store-not-loaded: ${headPoints(bracketSafeText(oneLine(sess.stateNotLoaded)), 150)}`,
       });
     } else if (sess.isOwner && goalFile !== "") {
       try {
@@ -5881,7 +5926,7 @@ export const register: Register = async (on, options) => {
           timestamp: Date.now(),
           loop: "goal",
           action: "goal_seed_skipped",
-          detail: `${goalFile}: the seed threw: ${bracketSafeText(oneLine(safeErrorText(err))).slice(0, 150)}`,
+          detail: `${goalFile}: the seed threw: ${headPoints(bracketSafeText(oneLine(safeErrorText(err))), 150)}`,
         });
       }
     }
@@ -5901,7 +5946,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "monitor",
         action: "persona_store_unreadable",
-        detail: `${startStoreProblem.composed} ${startStoreProblem.carried ?? ""}`.slice(0, 400),
+        detail: headPoints(`${startStoreProblem.composed} ${startStoreProblem.carried ?? ""}`, 400),
       });
     }
     // The empty store's size and modified time are read here, for the line
@@ -5916,7 +5961,7 @@ export const register: Register = async (on, options) => {
         timestamp: Date.now(),
         loop: "monitor",
         action: "store_empty_at_start",
-        detail: `${bracketSafeText(oneLine(sess.storePath))} ${STORE_EMPTY_AT_START} (${statText}), so it came up on a fresh state and carries none of what the last session recorded`.slice(0, 400),
+        detail: headPoints(`${bracketSafeText(oneLine(sess.storePath))} ${STORE_EMPTY_AT_START} (${statText}), so it came up on a fresh state and carries none of what the last session recorded`, 400),
       });
     }
 
@@ -6305,6 +6350,11 @@ export const register: Register = async (on, options) => {
       cfg,
       expectedTurns,
       openTurns,
+      steppedTurns,
+      unsteppedTicks,
+      outlivedLogged,
+      droppedTurns,
+      deriveTurnStartedAt,
       turnIsOpen,
       MAX_CONSECUTIVE_NUDGES,
       staleAfterMs,
@@ -6867,6 +6917,7 @@ export const register: Register = async (on, options) => {
     if (arming === "off") {
       const at = Date.now();
       lastTurnStartAt = at;
+      clearTurnReading(e.turnId);
       openTurns.set(e.turnId, at);
       return next(e);
     }
@@ -6878,6 +6929,9 @@ export const register: Register = async (on, options) => {
     lastTurnStartAt = at;
     sess.state.monitor.lastTurnId = e.turnId;
     // The turn is open from here until a completion carrying this same id.
+    // A reused id starts clean: nothing an earlier turn of that id left in
+    // the mark, the count, the outlived set or the dropped map carries over.
+    clearTurnReading(e.turnId);
     openTurns.set(e.turnId, at);
     // The step watch opens this turn's reading under its id, before any
     // await, so no step of this turn can land on the last turn's reading.
@@ -7199,7 +7253,7 @@ export const register: Register = async (on, options) => {
         addGoalEntry: (entry) => addGoalEntry($, entry),
         readPlanDocument: (planPath) => readPlanDocument($, planPath),
         completeRootByGoalDone: async (named, note) => {
-          await completeRoot($, named.id, note ? `Root ${named.id} marked complete by goal_done: ${note.slice(0, 200)}` : `Root ${named.id} marked complete by goal_done`);
+          await completeRoot($, named.id, note ? `Root ${named.id} marked complete by goal_done: ${headPoints(note, 200)}` : `Root ${named.id} marked complete by goal_done`);
         },
         closeAsksOnCompletedNodes: (nodeIds, closedBy, now) => closeAsksOnCompletedNodes($, nodeIds, closedBy, now),
         openWorkerAsk: (opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs) => openWorkerAsk($, opener, session, nodeId, storedQuestion, question, recommend, blocking, reaskSuppressMs),
@@ -7803,6 +7857,7 @@ export const register: Register = async (on, options) => {
         answerMemoryCheck: (goalId, goalIds, answer) => answerMemoryCheck($, goalId, goalIds, answer),
         followUpsAtTurnEnd: (turnId, reply, hitIds) => followUpsAtTurnEnd($, turnId, reply, hitIds),
         liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt,
+        steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns,
         compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget,
         jevTurnCalls: () => jevTurnCalls,
         setJevTurnCalls: (value) => { jevTurnCalls = value; },
@@ -7932,6 +7987,39 @@ export const register: Register = async (on, options) => {
         const subagentStep = typeof e.agentId === "string" && e.agentId.length > 0;
         // A main-loop step is a model request, which renews the prompt cache.
         if (!subagentStep) cacheClock.lastMainRequestAt = Date.now();
+        // A main-loop step for an id the drop removed is a real turn that
+        // passed the bound inside its hook chain, so its entry goes back
+        // with its original start and the published stamp follows. A reader
+        // session restores and pushes no decision, as at the drop.
+        if (!subagentStep) {
+          const droppedStart = droppedTurns.get(e.turnId);
+          if (droppedStart !== undefined) {
+            droppedTurns.delete(e.turnId);
+            openTurns.set(e.turnId, droppedStart);
+            sess.turnStartedAt = deriveTurnStartedAt();
+            // Published now rather than at the next heartbeat, so the commons
+            // entry and the supervisor's file read the turn open from this
+            // step. Not awaited, since this handler wraps the model call, and
+            // stampBeat catches each of its own writes.
+            void stampBeat(beatHostOf($), sess, Date.now(), beatFilesOf(supervisorHeartbeatPath));
+            if (sess.isOwner) {
+              sess.state.decisions.push({
+                timestamp: Date.now(),
+                loop: "monitor",
+                action: "open_turn_restored",
+                detail: `turn ${kaizenLine(e.turnId)} restored: a model step arrived ${Date.now() - droppedStart} ms after its start`,
+              });
+            }
+          }
+        }
+        // A main-loop step of an open turn is the proof that its entry is a
+        // model turn: the entry is marked here, on the way down, before the
+        // heartbeat tick can count another tick against it. A step for an id
+        // the map does not hold and the drop never removed reopens nothing.
+        if (!subagentStep && openTurns.has(e.turnId)) {
+          steppedTurns.add(e.turnId);
+          unsteppedTicks.delete(e.turnId);
+        }
         const reading = watch.effortReading;
         if (sess.isOwner && !subagentStep && watch.turnId !== null && e.turnId === watch.turnId
           && reading !== null && reading.forIndex === e.index) {

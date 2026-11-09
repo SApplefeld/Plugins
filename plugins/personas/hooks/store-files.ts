@@ -6,6 +6,7 @@
 // reads as arguments, so the tick harness, which loads a fresh hooks/index.ts per
 // case, shares nothing through it.
 
+import { headPoints } from "./agent-state";
 import { fnv1aHash } from "./cost-ledger";
 import { deliveryRecordProblem } from "./operator";
 import { MEMQ_TAG_CAP } from "./recall-text";
@@ -187,7 +188,7 @@ export function parseSupervisorMailboxLine(line: string): SupervisorMailboxRecor
   for (const field of ["id", "kind", "at", "text"]) {
     if (!(field in o)) return { problem: `lacks the ${field} field` };
   }
-  if (o.kind !== "probe" && o.kind !== "shutdown") return { problem: `has kind ${JSON.stringify(o.kind).slice(0, 40)}, outside probe and shutdown` };
+  if (o.kind !== "probe" && o.kind !== "shutdown") return { problem: `has kind ${headPoints(JSON.stringify(o.kind), 40)}, outside probe and shutdown` };
   if (typeof o.at !== "number" || !Number.isFinite(o.at)) return { problem: "has an at that is not a number" };
   const recordProblem = deliveryRecordProblem({ id: o.id, text: o.text });
   if (recordProblem !== null) return { problem: recordProblem };

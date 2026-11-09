@@ -23,7 +23,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { bracketSafeText, LINE_TERMINATOR, oneLine } from "./agent-state";
+import { bracketSafeText, headPoints, LINE_TERMINATOR, oneLine } from "./agent-state";
 import { askBriefPrompt, parseAskBrief, renderAskBrief, takeAskBriefOwed } from "./ask-brief";
 import { meterSessionKnown } from "./beat";
 import { cacheReading, type CacheClockState } from "./cache-clock";
@@ -123,7 +123,7 @@ export async function writeMemoryRecord(
     .replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g, " ")
     .replace(/"/g, "'")
     .replace(/\\/g, "/");
-  const description = " " + Array.from(firstLine).slice(0, 120).join("");
+  const description = " " + headPoints(firstLine, 120);
   const date = new Date(Number.isFinite(createdAt) ? createdAt : Date.now()).toISOString().slice(0, 10);
   const body = `Written by persona ${deps.session.persona} from source ${source} in session ${deps.session.mySessionId} on ${date}.\n\n${text}`;
   const put: { cause?: "start" | "timeout" } = {};
@@ -149,7 +149,7 @@ export async function writeMemoryRecord(
   if (refusal !== undefined) {
     return { outcome: "duplicate", name, retired: refusal.includes("retired under archive/") };
   }
-  const reasonLine = (lines.find((line: string) => line.trim() !== "") ?? "").trim().slice(0, 150);
+  const reasonLine = headPoints((lines.find((line: string) => line.trim() !== "") ?? "").trim(), 150);
   return { outcome: "failed", name, reason: reasonLine || `memq exited ${res.exitCode === null ? "unknown" : res.exitCode}`, ran: true };
 }
 
@@ -168,7 +168,7 @@ export function noteMemoryWrite(deps: DrainNoteDeps, written: MemoryWriteOutcome
     timestamp: Date.now(),
     loop: "memory",
     action: written.outcome === "written" ? "remember" : written.outcome === "duplicate" ? "memory_duplicate" : "memory_write_failed",
-    detail: written.outcome === "failed" ? `${written.name}: ${bracketSafeText(written.reason)}` :`${written.name}: ${text.slice(0, 80)}`,
+    detail: written.outcome === "failed" ? `${written.name}: ${bracketSafeText(written.reason)}` :`${written.name}: ${headPoints(text, 80)}`,
   });
 }
 
@@ -291,7 +291,7 @@ export async function drainMemoryOwed(deps: DrainsDeps): Promise<void> {
         // empty-reply and aborted; a result carrying none reads as a reply
         // with no text.
         const reason = forked !== null && typeof forked === "object" ? (forked as { reason?: unknown }).reason : undefined;
-        fallback = typeof reason === "string" ? bracketSafeText(oneLine(reason)).slice(0, 40) : "empty-reply";
+        fallback = typeof reason === "string" ? headPoints(bracketSafeText(oneLine(reason)), 40) : "empty-reply";
       }
     } else {
       fallback = "cold";
@@ -438,7 +438,7 @@ export async function drainAskBriefOwed(deps: DrainsDeps, cfg: Record<string, un
         // The result's own reason word, one of nothing-to-fork, api-error,
         // empty-reply and aborted; a result carrying none reads as a reply
         // with no text.
-        fallback = typeof result.reason === "string" ? bracketSafeText(oneLine(result.reason)).slice(0, 40) : "empty-reply";
+        fallback = typeof result.reason === "string" ? headPoints(bracketSafeText(oneLine(result.reason)), 40) : "empty-reply";
       }
     }
     // The owner reading and the entry are taken again after the fork, a wait
@@ -584,7 +584,7 @@ export async function drainPairDraftOwed(deps: DrainsDeps, turnOpen: (turnId: st
           else block = pairDraftsBlock(drafts, owed.pairs, owed.notDrafted);
         } else {
           const reason = forked !== null && typeof forked === "object" ? (forked as { reason?: unknown }).reason : undefined;
-          fallback = typeof reason === "string" ? bracketSafeText(oneLine(reason)).slice(0, 40) : "empty-reply";
+          fallback = typeof reason === "string" ? headPoints(bracketSafeText(oneLine(reason)), 40) : "empty-reply";
         }
       }
     } else {
@@ -707,7 +707,7 @@ export async function drainSupervisorMailbox(
           timestamp: Date.now(),
           loop: "monitor",
           action: "supervisor_mailbox_line_skipped",
-          detail: `mailbox line ${index + 1} ${rec.problem}; skipped and not acknowledged`.slice(0, 200),
+          detail: headPoints(`mailbox line ${index + 1} ${rec.problem}; skipped and not acknowledged`, 200),
         });
         outcome.logged = true;
       }
@@ -731,7 +731,7 @@ export async function drainSupervisorMailbox(
     // beside it, so the ack file does not claim a delivery that never reached
     // the session. The supervisor's probe reading counts only ack lines.
     if (!shutdownOutcome.ok) {
-      newAcks.push(JSON.stringify({ id: rec.id, at: Date.now(), action: "failed", reason: `${shutdownOutcome.how}: ${shutdownOutcome.reason}`.slice(0, 200) }));
+      newAcks.push(JSON.stringify({ id: rec.id, at: Date.now(), action: "failed", reason: headPoints(`${shutdownOutcome.how}: ${shutdownOutcome.reason}`, 200) }));
       await writeAcks();
     }
     deps.session.state.decisions.push(shutdownOutcome.ok
@@ -745,7 +745,7 @@ export async function drainSupervisorMailbox(
         timestamp: Date.now(),
         loop: "monitor",
         action: "supervisor_shutdown_failed",
-        detail: `mailbox record ${rec.id} submit ${shutdownOutcome.how}; left delivered: ${shutdownOutcome.reason}`.slice(0, 200),
+        detail: headPoints(`mailbox record ${rec.id} submit ${shutdownOutcome.how}; left delivered: ${shutdownOutcome.reason}`, 200),
       });
     outcome.delivered = true;
     outcome.logged = true;
@@ -1006,7 +1006,7 @@ async function drainRecordFile(
           timestamp: Date.now(),
           loop: "monitor",
           action: `${drain.action}_line_skipped`,
-          detail: `${drain.noun} line ${index + 1} ${rec.problem}; skipped and not acknowledged`.slice(0, 200),
+          detail: headPoints(`${drain.noun} line ${index + 1} ${rec.problem}; skipped and not acknowledged`, 200),
         });
         outcome.logged = true;
       }
@@ -1068,7 +1068,7 @@ async function drainRecordFile(
   // beside it, so the ack file does not claim a delivery that never reached
   // the session.
   if (!submitOutcome.ok) {
-    const reason = `${submitOutcome.how}: ${submitOutcome.reason}`.slice(0, 200);
+    const reason = headPoints(`${submitOutcome.how}: ${submitOutcome.reason}`, 200);
     try {
       await deps.appendLines(ackPath, batch.map((f) => JSON.stringify({ id: f.id, at: Date.now(), action: "failed", reason })));
     } catch { /* the delivered lines stand; the decision below names the failure */ }
@@ -1084,7 +1084,7 @@ async function drainRecordFile(
       timestamp: Date.now(),
       loop: "monitor",
       action: `${drain.action}_failed`,
-      detail: `${batch.length} ${drain.noun} submit ${submitOutcome.how}; left delivered: ${submitOutcome.reason}`.slice(0, 200),
+      detail: headPoints(`${batch.length} ${drain.noun} submit ${submitOutcome.how}; left delivered: ${submitOutcome.reason}`, 200),
     });
   outcome.delivered = true;
   outcome.logged = true;

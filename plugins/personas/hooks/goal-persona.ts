@@ -9,7 +9,7 @@
 // readGoalFile takes a GoalHost the caller builds from `$`, so this module
 // loads without the engine's loader following `$` across the import.
 import { goalProblem } from "./roster";
-import { TURN_BUDGET_REASON, bracketSafeText, oneLine, type AgentState, type GoalNode } from "./agent-state";
+import { TURN_BUDGET_REASON, bracketSafeText, headPoints, oneLine, type AgentState, type GoalNode } from "./agent-state";
 import { safeErrorText } from "./text";
 
 export type GoalHost = { readFile(path: string): Promise<string> };
@@ -122,7 +122,7 @@ export function seedRootFrom(block: GoalBlock, now: number): GoalNode {
     id: `root-${now.toString(36)}`,
     parentId: null,
     kind: "root",
-    title: objective.slice(0, 80),
+    title: headPoints(objective, 80),
     objective,
     status: "pending",
     source: ROSTER_SOURCE,

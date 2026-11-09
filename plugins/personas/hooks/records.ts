@@ -20,7 +20,7 @@
 // holds no state of its own, since the tick harness evaluates it once per
 // process while it loads a fresh hooks/index.ts per case.
 
-import { AWAITING_YES_REASON, clampTurnRecordText, isActivationEligible, newTurnRecordId, openBlockingAsks, openTurnRecord, PLAN_PATH_PATTERN, reapTurnRecords, type AgentState, type GoalNode, type TurnRecord } from "./agent-state";
+import { AWAITING_YES_REASON, clampTurnRecordText, headPoints, isActivationEligible, newTurnRecordId, openBlockingAsks, openTurnRecord, PLAN_PATH_PATTERN, reapTurnRecords, type AgentState, type GoalNode, type TurnRecord } from "./agent-state";
 import type { CommonsStore } from "./commons";
 import { estimateTokens } from "./cost-ledger";
 import type { OutcomeKind } from "./decision-journal";
@@ -666,8 +666,8 @@ export async function addGoalEntry(
     id: `${kind}-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     parentId,
     kind,
-    title: a.title.slice(0, 80),
-    objective: a.objective.slice(0, 500),
+    title: headPoints(a.title, 80),
+    objective: headPoints(a.objective, 500),
     status: awaitingYes ? "paused" : "pending",
     ...(awaitingYes ? { blockedReason: AWAITING_YES_REASON, awaitingYes: true } : {}),
     source: "worker",
@@ -721,7 +721,7 @@ export async function addGoalEntry(
     timestamp: now,
     loop: "goal",
     action: "add",
-    detail: `${newNode.id} (${kind}) under ${parentId}: "${a.title.slice(0, 50)}"`,
+    detail: `${newNode.id} (${kind}) under ${parentId}: "${headPoints(a.title, 50)}"`,
   };
   deps.session.state.decisions.push(addDecision);
   addDecisions.push(addDecision);
@@ -1005,7 +1005,7 @@ export async function promotePlanTouchingRecord(
       timestamp: Date.now(),
       loop: "monitor",
       action,
-      detail: detail.slice(0, 300),
+      detail: headPoints(detail, 300),
     });
   };
   const noted = (rule: string): void => {

@@ -58,6 +58,49 @@ export function oneLine(text: string): string {
   return text.split(LINE_TERMINATOR).join(" ");
 }
 
+/**
+ * The first `max` code points of a text. `slice` counts UTF-16 code units, so
+ * a literal `.slice(0, n)` landing between the two units of an emoji or any
+ * other character past the basic plane leaves a lone surrogate, which a
+ * reader of the journal, a decisions card or a prompt shows as a replacement
+ * mark or refuses as text. Every head cut by a literal bound of 30 or more on
+ * a string under hooks/ runs through this one helper, and the suite
+ * test-personas/string-head-unit-test.mjs refuses a literal cut that does not.
+ * A cut bounded by a named constant is outside that sweep.
+ * The pre-cut at twice the bound keeps the array small on a long receiver such
+ * as a planner's raw output, and is exact by two facts: a text of at most
+ * `max` code points has at most `2 * max` units, so the pre-cut never shortens
+ * it, and a longer text's first `2 * max` units hold at least `max` whole
+ * points before any unit the pre-cut split, which falls past the head and is
+ * dropped.
+ * Its callers are the seventeen other hook modules that cut a string by a
+ * literal bound at the threshold. Thirteen already import from this module for other helpers:
+ * ask-layer, context-assembly, controller-tick, drains, goal-persona, index,
+ * memq-boundary, mid-turn-reprompt, plan-record, plan-route, records,
+ * tool-call and turn-complete. Four import from it for this helper alone:
+ * recognition, redactor, self-review and store-files.
+ */
+export function headPoints(text: string, max: number): string {
+  if (!(max > 0)) return "";
+  if (text.length <= max) return text;
+  return Array.from(text.slice(0, max * 2)).slice(0, max).join("");
+}
+
+/**
+ * The last `max` code points of a text, the mirror of headPoints for a tail
+ * cut. The pre-cut from the end is exact by the same arithmetic: a text of at
+ * most `max` points is never shortened, and a longer text's last `2 * max`
+ * units hold at least `max` whole points after any lone low surrogate the
+ * pre-cut opens on, which sits first in the array and falls off the front.
+ * Its one caller is the health check in index.ts, on the tail of a probe's
+ * captured output.
+ */
+export function tailPoints(text: string, max: number): string {
+  if (!(max > 0)) return "";
+  if (text.length <= max) return text;
+  return Array.from(text.slice(-max * 2)).slice(-max).join("");
+}
+
 export interface MemoryEntry {
   id: string;
   kind: "fact" | "preference" | "lesson" | "goal" | "eval";
@@ -1749,7 +1792,7 @@ export function parseState(json: string): AgentState {
         id: rootId,
         parentId: null,
         kind: "root",
-        title: g.objective.slice(0, 80),
+        title: headPoints(g.objective, 80),
         objective: g.objective,
         status: rootStatus,
         source: "operator",
@@ -1770,7 +1813,7 @@ export function parseState(json: string): AgentState {
         id: planId,
         parentId: rootId,
         kind: "plan",
-        title: g.objective.slice(0, 80),
+        title: headPoints(g.objective, 80),
         objective: g.objective,
         status: planStatus,
         source: "operator",
@@ -2318,7 +2361,7 @@ export function completeLeaf(state: AgentState, id: string, note: string, openPl
         timestamp: Date.now(),
         loop: "goal",
         action: "plan_parent_left_open",
-        detail: `${parent.id}: ${(parent.planPath ?? "").slice(0, 150)} reads Status: ${openPlans.get(parent.id)}`,
+        detail: `${parent.id}: ${headPoints(parent.planPath ?? "", 150)} reads Status: ${openPlans.get(parent.id)}`,
       });
       break;
     } else if (allDone && parent.status !== "complete") {

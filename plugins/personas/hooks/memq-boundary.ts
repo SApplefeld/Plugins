@@ -17,7 +17,7 @@
 // loads a fresh hooks/index.ts per case.
 
 import type { ProcessRunInit, ProcessRunResult } from "claude-code";
-import { LINE_TERMINATOR, type AgentState } from "./agent-state";
+import { headPoints, LINE_TERMINATOR, type AgentState } from "./agent-state";
 import { stripBom } from "./text";
 
 // What the kit boundary reads of `$`: the module's one spawn, through which
@@ -68,7 +68,7 @@ export async function boundaryKitInstallPathOf(deps: KitBoundaryDeps): Promise<{
     if (!(await deps.exists(file))) return { skip: "installed_plugins.json is absent" };
     text = await deps.read(file);
   } catch (err) {
-    return { skip: `installed_plugins.json could not be read: ${String(err).slice(0, 150)}` };
+    return { skip: `installed_plugins.json could not be read: ${headPoints(String(err), 150)}` };
   }
   if (typeof text !== "string") return { skip: "installed_plugins.json is not text" };
   let parsed: unknown;
@@ -137,19 +137,19 @@ export async function boundaryBankCompactionBoundary(deps: KitBoundaryDeps, sess
     });
     const exitCode = res && typeof res.exitCode === "number" ? res.exitCode : null;
     const stderr = res && typeof res.stderr === "string" ? res.stderr : "";
-    const firstStderr = (stderr.split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim().slice(0, 150);
+    const firstStderr = headPoints((stderr.split(LINE_TERMINATOR).find((line: string) => line.trim() !== "") ?? "").trim(), 150);
     session.state.decisions.push({
       timestamp: deps.now(),
       loop: "monitor",
       action: exitCode === 0 ? "compaction_boundary_banked" : "compaction_boundary_failed",
-      detail: `exit ${exitCode === null ? "unknown" : exitCode}; stderr: ${firstStderr || "none"}; turn ${turnKind}; ${script.slice(0, 150)}`,
+      detail: `exit ${exitCode === null ? "unknown" : exitCode}; stderr: ${firstStderr || "none"}; turn ${turnKind}; ${headPoints(script, 150)}`,
     });
   } catch (err) {
     session.state.decisions.push({
       timestamp: deps.now(),
       loop: "monitor",
       action: "compaction_boundary_failed",
-      detail: `run failed: ${String(err).slice(0, 150)}; turn ${turnKind}; ${script.slice(0, 150)}`,
+      detail: `run failed: ${headPoints(String(err), 150)}; turn ${turnKind}; ${headPoints(script, 150)}`,
     });
   }
 }
@@ -319,7 +319,7 @@ export async function boundaryKitMemq(
         timestamp: deps.now(),
         loop: "memory",
         action: "memq_spawn_failed",
-        detail: `cause ${cause}; ${reason.slice(0, 150)}; verb ${verb}`,
+        detail: `cause ${cause}; ${headPoints(reason, 150)}; verb ${verb}`,
       });
     }
     if (cause !== "start" && purpose === "read") session.memqStandDownUntil = deps.now() + MEMQ_STAND_DOWN_MS;

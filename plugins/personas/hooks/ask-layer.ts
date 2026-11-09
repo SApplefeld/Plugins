@@ -17,7 +17,7 @@
 // holds no state of its own, since the tick harness evaluates it once per
 // process while it loads a fresh hooks/index.ts per case.
 
-import { type AgentState, type AskEntry, type AskOpener, type AskOpenRefusal, closeAsk, liftAsk, openAsk, openAskEntries, openBlockingAsks, oweAskBrief } from "./agent-state";
+import { type AgentState, type AskEntry, type AskOpener, type AskOpenRefusal, closeAsk, headPoints, liftAsk, openAsk, openAskEntries, openBlockingAsks, oweAskBrief } from "./agent-state";
 import type { ExpectedTurn } from "./channel-text";
 import type { CommonsStore } from "./commons";
 import { newStampId, writeAnswers, writeCall, writeOutcome, type JournalWrite, type OutcomeKind } from "./decision-journal";
@@ -518,7 +518,7 @@ export async function tickOpenAsk(
         timestamp: now,
         loop: "monitor",
         action: "ask_reraised",
-        detail: `${contextId ? contextId + ": " : ""}ask ${entry.id} re-raised after ${Math.round((now - entry.openedAt) / 1000)}s: ${entry.question.slice(0, 100)}`,
+        detail: `${contextId ? contextId + ": " : ""}ask ${entry.id} re-raised after ${Math.round((now - entry.openedAt) / 1000)}s: ${headPoints(entry.question, 100)}`,
       });
     }
     await deps.submitStillWaitingReraise(expectedTurns, due);
@@ -612,7 +612,7 @@ export async function openWorkerAsk(
       timestamp: Date.now(),
       loop: "monitor",
       action: "ask_marker_placeholder_refused",
-      detail: `worker's ${route === "line" ? "ASK line" : "ask_open question"} still carries a template placeholder, refused: ${storedQuestion.slice(0, 100)}`,
+      detail: `worker's ${route === "line" ? "ASK line" : "ask_open question"} still carries a template placeholder, refused: ${headPoints(storedQuestion, 100)}`,
     });
     return "placeholder";
   }
@@ -622,7 +622,7 @@ export async function openWorkerAsk(
       timestamp: Date.now(),
       loop: "monitor",
       action: "ask_reask_suppressed",
-      detail: `${nodeId}: suppressed identical question closed ${Math.round((Date.now() - (askedNode?.lastAskClosedAt || Date.now())) / 1000)}s ago: ${storedQuestion.slice(0, 80)}`,
+      detail: `${nodeId}: suppressed identical question closed ${Math.round((Date.now() - (askedNode?.lastAskClosedAt || Date.now())) / 1000)}s ago: ${headPoints(storedQuestion, 80)}`,
     });
     return "reask";
   }
@@ -634,7 +634,7 @@ export async function openWorkerAsk(
       timestamp: Date.now(),
       loop: "monitor",
       action: "ask_reask_suppressed",
-      detail: `${nodeId}: the same question is already open: ${storedQuestion.slice(0, 80)}`,
+      detail: `${nodeId}: the same question is already open: ${headPoints(storedQuestion, 80)}`,
     });
     return "already-open";
   }
@@ -662,9 +662,9 @@ export async function openWorkerAsk(
     timestamp: Date.now(),
     loop: "monitor",
     action: "ask_opened",
-    detail: `${nodeId}: worker-stated fork${route === "tool" ? " by ask_open" : ""}${blocking ? " (blocking)" : ""}: ${storedQuestion.slice(0, 100)} (ask ${opened.id})`,
+    detail: `${nodeId}: worker-stated fork${route === "tool" ? " by ask_open" : ""}${blocking ? " (blocking)" : ""}: ${headPoints(storedQuestion, 100)} (ask ${opened.id})`,
   });
-  try { deps.toast(`Agentic: ${storedQuestion.slice(0, 100)}`); } catch { /* non-fatal */ }
+  try { deps.toast(`Agentic: ${headPoints(storedQuestion, 100)}`); } catch { /* non-fatal */ }
   // A blocking entry is itself the hold on the idle branch, so the entry
   // keeps its status and carries no reason; the ask record carries the
   // question.

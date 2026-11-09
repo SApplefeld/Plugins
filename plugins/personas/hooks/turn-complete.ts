@@ -6,7 +6,7 @@
 // engine calls, the two model calls with their scrub, the reply backstop's
 // submit and the register-scope values behind closures, so this module
 // never receives the engine object and holds no state of its own.
-import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
+import { ASKS_OPEN_MAX, activateNext, applyTurnToErrors, headPoints, openBlockingAsks, planHolderOf, reapTurnRecords, stampAskBriefTurnEnd, type GoalNode, type TurnRecordStamp } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, openWorkerAsk as openWorkerAskFromModule, shadowAsk as shadowAskFromModule, shadowAskPlanHealth as shadowAskPlanHealthFromModule, shadowOutcome as shadowOutcomeFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { meterSessionKnown } from "./beat";
 import type { ChannelSender, ExpectedTurn, SubmitOutcome } from "./channel-text";
@@ -95,6 +95,12 @@ export interface TurnCompleteContext extends SharedHandlerState {
   openClosingLeafOf: (plan: GoalNode) => GoalNode | undefined;
   turnIsOpen: () => boolean;
   deriveTurnStartedAt: () => number | null;
+  // The open-turn reading's mark, tick counts and outlived set, as
+  // hooks/index.ts keeps them beside openTurns.
+  steppedTurns: Set<string>;
+  unsteppedTicks: Map<string, number>;
+  outlivedLogged: Set<string>;
+  droppedTurns: Map<string, number>;
   compactionPass: CompactionPassState;
   memoryCheckTurns: Map<string, { goalId: string; goalIds: string[] }>;
   planCompleteHeldLogged: Map<string, string>;
@@ -156,7 +162,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -172,6 +178,15 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // removes nothing, so it cannot clear a different turn that is still open.
   // Whether it removed one is what lets the completion drain run below.
   const removedOwnEntry = openTurns.delete(e.turnId);
+  // The entry's mark, its tick count and its outlived line go with it. An id
+  // the map did not hold has none of the three, so this removes nothing for
+  // a completion that removed nothing. A completion for an id the drop
+  // removed closes its wait for a late step, and still removes nothing from
+  // openTurns and fires no completion drain.
+  steppedTurns.delete(e.turnId);
+  unsteppedTicks.delete(e.turnId);
+  outlivedLogged.delete(e.turnId);
+  droppedTurns.delete(e.turnId);
   // The compaction boundary step's facts, read together here at the delete
   // and before any await, because the awaits below can let the next
   // turn.start in and that start rewrites every one of them: whether this
@@ -186,6 +201,26 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // persona's own turn end, whatever turn id it carries. The scorer reads
   // the same fact: a subagent's report is not the worker's answer.
   const completesSubagentLoop = typeof e.agentId === "string" && e.agentId.length > 0;
+  // The observation the drop rests on: an entry a main-loop step marked is a
+  // real turn, and a real turn that started before this completing turn and
+  // is still open after it has been left behind by a later turn's end. That
+  // is either two real turns at once or a strand the drop does not reach,
+  // and a line of this name on any persona says which the fleet is seeing.
+  // Logged once per entry, across every later completion, and it drops
+  // nothing: a stepped entry is never dropped, under any bound. The owner
+  // alone pushes it, as at the drop, since a reader owns no store.
+  if (sess.isOwner && removedOwnEntry && !completesSubagentLoop && mapStartedAt !== undefined) {
+    for (const [olderId, olderStartedAt] of openTurns) {
+      if (olderStartedAt >= mapStartedAt || !steppedTurns.has(olderId) || outlivedLogged.has(olderId)) continue;
+      outlivedLogged.add(olderId);
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "monitor",
+        action: "open_turn_outlived",
+        detail: `turn ${kaizenLine(olderId)} outlived turn ${kaizenLine(String(e.turnId))}: stepped, still open ${Date.now() - olderStartedAt} ms after its start`,
+      });
+    }
+  }
   const completesGateTurn = currentGateTurnId() !== null && e.turnId === currentGateTurnId()
     && !completesSubagentLoop;
   const turnKindAtStart: string = currentTurnKind();
@@ -565,7 +600,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   const noActiveRoot = !currentRoot || currentRoot.status === "complete" || currentRoot.status === "abandoned";
   if (!skipped && sess.isOwner && !isPrimingTurn() && !wasNudged && noActiveRoot && toolCallsThisTurn() > 0) {
     const untrackedNow = Date.now();
-    const excerpt = (currentPrompt() || "Untitled request").slice(0, 80);
+    const excerpt = headPoints(currentPrompt() || "Untitled request", 80);
     const heldAt = sess.untrackedWorkAt;
     if (heldAt !== null) {
       const decisions = sess.state.decisions;
@@ -876,7 +911,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
                 timestamp: Date.now(),
                 loop: "goal",
                 action: "turn_score_haiku_failed",
-                detail: `${g.id}: stamp ${live.stampId}, ${safeErrorText(haiku.err).slice(0, 150)}`,
+                detail: `${g.id}: stamp ${live.stampId}, ${headPoints(safeErrorText(haiku.err), 150)}`,
               });
               result = null;
             }
@@ -1026,7 +1061,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
             timestamp: Date.now(),
             loop: "goal",
             action: "score_failed",
-            detail: `${g.id}: ${String(err).slice(0, 150)}`,
+            detail: `${g.id}: ${headPoints(String(err), 150)}`,
           });
         }
         spendTurnLeaf();
@@ -1151,7 +1186,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         timestamp: Date.now(),
         loop: "goal",
         action: "plan_complete_held",
-        detail: `${holder.id}: ${docPath.slice(0, 150)}: held until the checkout at ${planDir.slice(0, 200)} is clean and pushed: ${reason}`,
+        detail: `${holder.id}: ${headPoints(docPath, 150)}: held until the checkout at ${headPoints(planDir, 200)} is clean and pushed: ${reason}`,
       });
     }
     return true;
@@ -1243,7 +1278,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
             timestamp: Date.now(),
             loop: "goal",
             action: "plan_record_dir_resolved",
-            detail: `${holder.id}: ${planPath.slice(0, 150)}: resolved to ${planDir.slice(0, 200)} for live directory ${liveDir.slice(0, 200)}`,
+            detail: `${holder.id}: ${headPoints(planPath, 150)}: resolved to ${headPoints(planDir, 200)} for live directory ${headPoints(liveDir, 200)}`,
           });
         }
       } else if (planDir !== null) {
@@ -1256,7 +1291,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
             timestamp: Date.now(),
             loop: "goal",
             action: "plan_record_unreadable",
-            detail: `${holder.id}: ${planPath.slice(0, 150)}: ${reading.reason}${liveDir !== null ? `; live directory ${liveDir.slice(0, 200)}` : ""}`,
+            detail: `${holder.id}: ${headPoints(planPath, 150)}: ${reading.reason}${liveDir !== null ? `; live directory ${headPoints(liveDir, 200)}` : ""}`,
           });
         }
       } else {
@@ -1307,7 +1342,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         timestamp: Date.now(),
         loop: "goal",
         action: "plan_record_failed",
-        detail: `${holder.id}: ${String(err).slice(0, 150)}`,
+        detail: `${holder.id}: ${headPoints(String(err), 150)}`,
       });
     }
   }
@@ -1348,7 +1383,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           timestamp: Date.now(),
           loop: "goal",
           action: "plan_record_failed",
-          detail: `${plan.id}: ${String(err).slice(0, 150)}`,
+          detail: `${plan.id}: ${headPoints(String(err), 150)}`,
         });
       }
     }
@@ -1429,7 +1464,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         });
       } else {
         // The exchange, cut once: the kind state's last part.
-        const exchangeText = `User asked: ${currentPrompt().slice(0, PROMPT_HEAD_MAX)}\nWorker answered: ${e.answer.slice(0, 500)}`;
+        const exchangeText = `User asked: ${currentPrompt().slice(0, PROMPT_HEAD_MAX)}\nWorker answered: ${headPoints(e.answer, 500)}`;
         // Bound to a name so the same bytes reach Haiku and Jev, whether
         // Jev is asked live ahead of Haiku or in shadow beside it.
         const memoryKindState =
@@ -1529,7 +1564,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
             turnId: typeof e.turnId === "string" ? e.turnId : "",
             kind: memqKindOf(kind),
             promptHead: currentPrompt().slice(0, PROMPT_HEAD_MAX),
-            answerHead: answerScrubbed.slice(0, 500),
+            answerHead: headPoints(answerScrubbed, 500),
             turnHead: deliveredRecordText(turnOpeningText(askedTextAtDelete)).trim().slice(0, PROMPT_HEAD_MAX),
             at: Date.now(),
           });
@@ -1616,7 +1651,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           timestamp: Date.now(),
           loop: "monitor",
           action: "operator_reply_failed",
-          detail: `record ${record.id} reply refused, left ${record.status}: ${err instanceof Error ? err.message : String(err)}`.slice(0, 200),
+          detail: headPoints(`record ${record.id} reply refused, left ${record.status}: ${err instanceof Error ? err.message : String(err)}`, 200),
         });
       }
     }
@@ -1960,7 +1995,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           timestamp: Date.now(),
           loop: "monitor",
           action: "mid_turn_reprompt_skipped",
-          detail: `read-failed: the re-prompt at a turn's end threw: ${safeErrorText(err)}`.slice(0, 200),
+          detail: headPoints(`read-failed: the re-prompt at a turn's end threw: ${safeErrorText(err)}`, 200),
         });
       }
       try {
@@ -1970,7 +2005,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
           timestamp: Date.now(),
           loop: "monitor",
           action: "operator_delivery_error",
-          detail: `the inbox drain at a turn's end stopped: ${safeErrorText(err)}`.slice(0, 200),
+          detail: headPoints(`the inbox drain at a turn's end stopped: ${safeErrorText(err)}`, 200),
         });
         try { await persist(); } catch { /* the store refused; the line above waits in memory */ }
       }

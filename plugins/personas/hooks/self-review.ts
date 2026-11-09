@@ -2,6 +2,7 @@
 // No `import $`, no side effects. Takes data only.
 // Covered by check-loader-rule.mjs (scans every hooks/*.ts).
 
+import { headPoints } from "./agent-state";
 import type { MemoryEntry, MonitorState } from "./agent-state.ts";
 import { oneLine } from "./agent-state";
 import { heldForDrain } from "./operator";
@@ -284,11 +285,11 @@ function collectEvents(input: OwnRecordInput): Record<KaizenSignal, KaizenEvent[
         if (askIdsCounted.has(d.askId)) continue;
         askIdsCounted.add(d.askId);
       }
-      out.asks_unresolved.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
+      out.asks_unresolved.push({ at: d.timestamp, note: headPoints(d.detail, 80) });
     } else if (d.action === "turn_over_hour") {
-      out.long_turns.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
+      out.long_turns.push({ at: d.timestamp, note: headPoints(d.detail, 80) });
     } else if (d.action === "memory_lesson_refused" && d.detail.startsWith("self-scoring")) {
-      out.memory_quality.push({ at: d.timestamp, note: d.detail.slice(0, 80) });
+      out.memory_quality.push({ at: d.timestamp, note: headPoints(d.detail, 80) });
     }
   }
   const lessons = input.memory.filter((m) => m.source === "self-review" && m.kind === "lesson");
@@ -300,7 +301,7 @@ function collectEvents(input: OwnRecordInput): Record<KaizenSignal, KaizenEvent[
   }
   for (const group of byLead.values()) {
     if (group.length < 2) continue;
-    for (const m of group) out.memory_quality.push({ at: m.createdAt, note: "duplicate lesson: " + m.text.slice(0, 60) });
+    for (const m of group) out.memory_quality.push({ at: m.createdAt, note: "duplicate lesson: " + headPoints(m.text, 60) });
   }
   for (const r of input.inbox) {
     // The delivery rule holds a coordinator-ground or architect-ground record

@@ -12,7 +12,7 @@
 // turn for the entry that was active when the turn started, when that entry
 // has a plan.
 
-import { PLAN_PATH_PATTERN, oneLine } from "./agent-state";
+import { PLAN_PATH_PATTERN, headPoints, oneLine } from "./agent-state";
 
 export interface PlanRecord {
   complete: boolean;
@@ -257,7 +257,7 @@ export async function readPlanRecord(
     }
     return { kind: "unreadable", reason: "no file at planPath or at any archive place" };
   } catch (err) {
-    return { kind: "unreadable", reason: `read failed: ${String(err).slice(0, 150)}` };
+    return { kind: "unreadable", reason: `read failed: ${headPoints(String(err), 150)}` };
   }
 }
 

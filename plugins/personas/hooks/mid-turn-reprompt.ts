@@ -101,7 +101,7 @@
 // hooks/index.ts builds over `$`, as the beat and the catalog do.
 
 import type { PluginHost } from "./host";
-import { type AgentState, LINE_TERMINATOR, liftAsk, openBlockingAsks } from "./agent-state";
+import { type AgentState, headPoints, LINE_TERMINATOR, liftAsk, openBlockingAsks } from "./agent-state";
 import { launchDirOf } from "./beat";
 import { reactivateAskedEntry } from "./plan-route";
 import { quoteCarriedLines } from "./operator";
@@ -278,7 +278,7 @@ function skipped(sess: RepromptSession, reason: RepromptSkipReason, detail: stri
     timestamp: Date.now(),
     loop: "monitor",
     action: "mid_turn_reprompt_skipped",
-    detail: `${reason}: ${detail}`.slice(0, 200),
+    detail: headPoints(`${reason}: ${detail}`, 200),
   });
 }
 
@@ -330,7 +330,7 @@ export function noteRepromptQueued(sess: RepromptSession, messages: readonly Mid
     timestamp: Date.now(),
     loop: "monitor",
     action: "mid_turn_reprompt_queued",
-    detail: `${messages.length} message(s) re-prompted, recorded at ${messages.map((m) => new Date(m.at).toISOString()).join(", ")}`.slice(0, 200),
+    detail: headPoints(`${messages.length} message(s) re-prompted, recorded at ${messages.map((m) => new Date(m.at).toISOString()).join(", ")}`, 200),
   });
 }
 
@@ -411,7 +411,7 @@ export async function readMidTurnMessages(host: RepromptHost, sess: RepromptSess
   try {
     home = await host.getHome();
   } catch (err) {
-    skipped(sess, "read-failed", `home unreadable: ${String(err).slice(0, 150)}`);
+    skipped(sess, "read-failed", `home unreadable: ${headPoints(String(err), 150)}`);
     return { kind: "skip", reason: "read-failed", detail: "home unreadable" };
   }
   if (typeof home !== "string" || home === "") {
@@ -423,7 +423,7 @@ export async function readMidTurnMessages(host: RepromptHost, sess: RepromptSess
     const scanDir = launchDirOf(sess);
     res = await host.run(repromptScanArgv(host.pluginRoot, home, scanDir, sess.mySessionId, stamp), { cwd: scanDir, timeoutMs: RECAP_TIMEOUT_MS });
   } catch (err) {
-    const detail = `run failed: ${String(err).slice(0, 150)}`;
+    const detail = `run failed: ${headPoints(String(err), 150)}`;
     skipped(sess, "read-failed", detail);
     return { kind: "skip", reason: "read-failed", detail };
   }
@@ -431,7 +431,7 @@ export async function readMidTurnMessages(host: RepromptHost, sess: RepromptSess
   const exitCode = typeof fields.exitCode === "number" ? fields.exitCode : null;
   if (exitCode !== 0) {
     const stderr = typeof fields.stderr === "string" ? fields.stderr : "";
-    const firstStderr = (stderr.split(LINE_TERMINATOR).find((line) => line.trim() !== "") ?? "").trim().slice(0, 150);
+    const firstStderr = headPoints((stderr.split(LINE_TERMINATOR).find((line) => line.trim() !== "") ?? "").trim(), 150);
     const detail = `exit ${exitCode === null ? "unknown" : exitCode}; stderr: ${firstStderr || "none"}`;
     skipped(sess, "read-failed", detail);
     return { kind: "skip", reason: "read-failed", detail };

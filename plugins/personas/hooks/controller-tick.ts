@@ -27,7 +27,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
+import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
@@ -174,6 +174,14 @@ export interface TickContext extends SharedHandlerState {
   PROPOSAL_EVERY_MS: number;
   PLAN_RECORD_MAX_RESENDS: number;
   turnIsOpen: () => boolean;
+  // The open-turn reading's mark, tick counts and outlived set, as
+  // hooks/index.ts keeps them beside openTurns, and the stamp derivation
+  // the drop runs after it removes an entry.
+  steppedTurns: Set<string>;
+  unsteppedTicks: Map<string, number>;
+  outlivedLogged: Set<string>;
+  droppedTurns: Map<string, number>;
+  deriveTurnStartedAt: () => number | null;
   MAX_CONSECUTIVE_NUDGES: number;
   staleAfterMs: number;
   controllerTickMs: number;
@@ -237,6 +245,61 @@ export interface TickContext extends SharedHandlerState {
   setGitUnavailable: (value: boolean) => void;
 }
 
+// The heartbeat ticks an open-turn entry may sit through with no main-loop
+// step before the tick drops it. At the default 30,000 ms tick a stranded
+// entry lives between 90 and 120 seconds, and a roster that sets heartbeatMs
+// lower shortens the bound in step. The bound is a heuristic: a hook's
+// budget clock stops during a $ call, so a real turn's first step can land
+// past it, and the restore in the turn.step handler in index.ts corrects a
+// drop that proves wrong.
+export const UNSTEPPED_TURN_DROP_TICKS = 4;
+// The most dropped ids the reading remembers for a late step to restore.
+// A true strand never completes, so without a bound each one would hold
+// its id for the session's life; the oldest goes when the bound is passed.
+export const DROPPED_TURNS_MAX = 64;
+
+// The open-turn reading's drop, run once per heartbeat tick, before the
+// compaction pass's step reads whether a turn is open, and from nowhere
+// else. Each entry no main-loop step has marked counts one more tick, and
+// at the bound it is removed with its count and its outlived mark, and its
+// id and start go to droppedTurns, since a real turn can pass the bound
+// inside its hook chain and its first step then puts the entry back. A
+// marked entry is never touched, under any bound. Each drop pushes one
+// decision naming the id and its age, on the owner alone, since a reader
+// owns no store, and the published stamp is derived again from what is
+// left, so the fleet reading follows the map. The drop calls no drain: the
+// next controller tick reads no turn open and its idle part drains.
+export function dropUnsteppedTurns(ctx: Pick<TickContext, "sess" | "openTurns" | "steppedTurns" | "unsteppedTicks" | "outlivedLogged" | "droppedTurns" | "deriveTurnStartedAt">, at: number): void {
+  const { sess, openTurns, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns, deriveTurnStartedAt } = ctx;
+  let dropped = false;
+  for (const [turnId, startedAt] of openTurns) {
+    if (steppedTurns.has(turnId)) continue;
+    const ticks = (unsteppedTicks.get(turnId) ?? 0) + 1;
+    if (ticks < UNSTEPPED_TURN_DROP_TICKS) {
+      unsteppedTicks.set(turnId, ticks);
+      continue;
+    }
+    openTurns.delete(turnId);
+    unsteppedTicks.delete(turnId);
+    outlivedLogged.delete(turnId);
+    // Deleted before the set, so a re-dropped id takes the newest place and
+    // the map's first key is always its oldest drop.
+    droppedTurns.delete(turnId);
+    droppedTurns.set(turnId, startedAt);
+    if (droppedTurns.size > DROPPED_TURNS_MAX) droppedTurns.delete(droppedTurns.keys().next().value as string);
+    dropped = true;
+    if (sess.isOwner) {
+      sess.state.decisions.push({
+        timestamp: at,
+        loop: "monitor",
+        action: "open_turn_dropped",
+        detail: `turn ${kaizenLine(turnId)} dropped: no model step in ${UNSTEPPED_TURN_DROP_TICKS} heartbeat ticks, ${at - startedAt} ms after its start`,
+      });
+    }
+  }
+  if (dropped) sess.turnStartedAt = deriveTurnStartedAt();
+}
+
 // --- Heartbeat: refresh the sidecar every heartbeatMs ---
 // Only the owner stamps its own heartbeat. A passive reader must NOT
 // overwrite the holder's heartbeat, or it will (a) mask the real holder's
@@ -262,6 +325,11 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
   // checks below can return from the tick and never awaited, so a host
   // that stalls never delays this session's yield.
   try { ctx.meterDrainStep(at); } catch { /* the meter never fails a tick */ }
+  // The open-turn reading's drop, for every armed session, ahead of the
+  // compaction pass's step and the cache clock's tick, which both read
+  // whether a turn is open, and ahead of the beat below, which publishes the
+  // stamp the drop derives again.
+  try { dropUnsteppedTurns(ctx, at); } catch { /* the reading stands as it was for one more tick */ }
   // The compaction pass's step, for every armed session, owner or
   // reader: this timer is the one registered before the reader gate
   // the controller tick sits behind. It awaits engine reads alone and
@@ -627,7 +695,7 @@ export async function drainInboxIdle(ctx: TickContext): Promise<boolean> {
       timestamp: Date.now(),
       loop: "monitor",
       action: "inbox_drain_overrun",
-      detail: `drain still in flight after ${idleTicks} idle ticks, no lift since the last overrun: slot cleared and held; ${record === null ? "no record chosen" : `record ${record.id} held as it stands`}`.slice(0, 200),
+      detail: headPoints(`drain still in flight after ${idleTicks} idle ticks, no lift since the last overrun: slot cleared and held; ${record === null ? "no record chosen" : `record ${record.id} held as it stands`}`, 200),
     });
     return !(await ctx.persist());
   }
@@ -671,7 +739,7 @@ async function drainAfterOverrun(ctx: TickContext, idleTicks: number, record: Dr
     timestamp: Date.now(),
     loop: "monitor",
     action: "inbox_drain_overrun",
-    detail: `drain still in flight after ${idleTicks} idle ticks, slot cleared; ${fate}`.slice(0, 200),
+    detail: headPoints(`drain still in flight after ${idleTicks} idle ticks, slot cleared; ${fate}`, 200),
   });
   if (!(await ctx.persist())) return true;
   return drainInboxOnce(ctx, owns);
@@ -1065,7 +1133,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: Date.now(),
           loop: "monitor",
           action: "store_lost_prompt_failed",
-          detail: `the [STORE LOST] turn was ${storeLostOutcome.how}, so the line stands for the next idle tick: ${storeLostOutcome.reason}`.slice(0, 200),
+          detail: headPoints(`the [STORE LOST] turn was ${storeLostOutcome.how}, so the line stands for the next idle tick: ${storeLostOutcome.reason}`, 200),
         });
         // Attempted rather than depended on, as at the [FLEET] submit below:
         // the store may be the thing refusing, and the line waits in memory.
@@ -1144,7 +1212,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: fleetNow,
           loop: "monitor",
           action: "fleet_skipped_turn_in_flight",
-          detail: `a turn opened while the fleet was being read, so the reading is back at the one before it and the next quiet tick reports it: ${[...changed.map(({ row, from, to }) => `${row.name}: ${from} -> ${to}`), ...notes.map((note) => note.composed)].join("; ")}`.slice(0, 400),
+          detail: headPoints(`a turn opened while the fleet was being read, so the reading is back at the one before it and the next quiet tick reports it: ${[...changed.map(({ row, from, to }) => `${row.name}: ${from} -> ${to}`), ...notes.map((note) => note.composed)].join("; ")}`, 400),
         });
         // Attempted rather than depended on, as at the submit below. The
         // store is a file a watched persona can leave unparseable, and a
@@ -1165,7 +1233,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: fleetNow,
           loop: "monitor" as const,
           action: "fleet_health_changed",
-          detail: [...changed.map(({ row, from, to }) => `${row.name}: ${from} -> ${to}`), ...notes.map((note) => note.composed)].join("; ").slice(0, 400),
+          detail: headPoints([...changed.map(({ row, from, to }) => `${row.name}: ${from} -> ${to}`), ...notes.map((note) => note.composed)].join("; "), 400),
         };
         sess.state.decisions.push(changeDecision);
         // The submit runs on a persist that landed, and a persist that did
@@ -1230,7 +1298,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             timestamp: Date.now(),
             loop: "monitor",
             action: "fleet_store_write_failed",
-            detail: `the store refused the write that carries this tick's fleet line, so the report went out and both lines wait for a store that parses: ${safeErrorText(err)}`.slice(0, 400),
+            detail: headPoints(`the store refused the write that carries this tick's fleet line, so the report went out and both lines wait for a store that parses: ${safeErrorText(err)}`, 400),
           };
           sess.state.decisions.push(storeRefusedDecision);
           // The line the prompt carries, composed the way the roster read's
@@ -1268,7 +1336,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             timestamp: Date.now(),
             loop: "monitor",
             action: "fleet_prompt_failed",
-            detail: `the [FLEET] prompt was ${fleetOutcome.how}, so the reading is back at the one before it: ${fleetOutcome.reason}`.slice(0, 200),
+            detail: headPoints(`the [FLEET] prompt was ${fleetOutcome.how}, so the reading is back at the one before it: ${fleetOutcome.reason}`, 200),
           });
           // Attempted rather than depended on: a store that refuses the
           // write is one of the things this tick reaches this line for, and
@@ -1393,7 +1461,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             timestamp: Date.now(),
             loop: "monitor",
             action: "reconcile_store_write_failed",
-            detail: `the store refused the write that carries the cadence stamp, so the pass was asked for and the stamp stands in memory alone: ${safeErrorText(err)}`.slice(0, 400),
+            detail: headPoints(`the store refused the write that carries the cadence stamp, so the pass was asked for and the stamp stands in memory alone: ${safeErrorText(err)}`, 400),
           };
           sess.state.decisions.push(reconcileStoreRefusedDecision);
           // The line the operator reads, composed the way the fleet
@@ -1451,7 +1519,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             timestamp: Date.now(),
             loop: "monitor",
             action: "reconcile_prompt_failed",
-            detail: `the [RECONCILE] prompt was ${reconcileOutcome.how}, so the cadence stamp is back at its previous value: ${reconcileOutcome.reason}`.slice(0, 200),
+            detail: headPoints(`the [RECONCILE] prompt was ${reconcileOutcome.how}, so the cadence stamp is back at its previous value: ${reconcileOutcome.reason}`, 200),
           });
           // Attempted rather than depended on, as at the fleet submit
           // above: the store may be the thing that failed, and the
@@ -1515,7 +1583,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: trunkGateNow,
           loop: "monitor",
           action: "trunk_gate_failed",
-          detail: `submit ${trunkGateOutcome.how}, ${gate.date} already spent: ${trunkGateOutcome.reason}`.slice(0, 200),
+          detail: headPoints(`submit ${trunkGateOutcome.how}, ${gate.date} already spent: ${trunkGateOutcome.reason}`, 200),
         });
       sess.state.updatedAt = Date.now();
       try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
@@ -1947,14 +2015,14 @@ export async function idleTick(ctx: TickContext): Promise<void> {
                 timestamp: Date.now(),
                 loop: "memory",
                 action: "memory_lesson_refused",
-                detail: `closure-timing lesson refused: ${lesson.slice(0, 80)}`,
+                detail: `closure-timing lesson refused: ${headPoints(lesson, 80)}`,
               });
             } else if (isSelfScoringLesson(lesson)) {
               sess.state.decisions.push({
                 timestamp: Date.now(),
                 loop: "memory",
                 action: "memory_lesson_refused",
-                detail: `self-scoring lesson refused: ${lesson.slice(0, 80)}`,
+                detail: `self-scoring lesson refused: ${headPoints(lesson, 80)}`,
               });
             } else if (!dedupeSelfReview(sess.state.memory, lesson)) {
               const entryId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1983,7 +2051,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
                 timestamp: Date.now(),
                 loop: "monitor",
                 action: "self-review",
-                detail: `${trigger}: ${lesson.slice(0, 80)}`,
+                detail: `${trigger}: ${headPoints(lesson, 80)}`,
               });
             } else {
               sess.state.decisions.push({
@@ -2019,7 +2087,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             // An Error whose name itself throws.
           }
         }
-        const foldedMessage = message.split(LINE_TERMINATOR).join(" ").slice(0, 200) || "unprintable error";
+        const foldedMessage = headPoints(message.split(LINE_TERMINATOR).join(" "), 200) || "unprintable error";
         sess.state.decisions.push({
           timestamp: Date.now(),
           loop: "monitor",
@@ -2200,7 +2268,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: planRecordNow,
           loop: "monitor",
           action: "plan_record_resend_failed",
-          detail: `${entry.nodeId}: record ${rec.id} to '${coordinatorPersona}' was skipped and not sent again: ${safeErrorText(err)}`.slice(0, 200),
+          detail: headPoints(`${entry.nodeId}: record ${rec.id} to '${coordinatorPersona}' was skipped and not sent again: ${safeErrorText(err)}`, 200),
         });
       }
     }
@@ -2418,7 +2486,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         sess.state.monitor.cost.planner.count += 1;
         sess.state.monitor.cost.planner.estTokens += estimateTokens(planPrompt.length, 1500);
       } catch (e) {
-        await registerPlanningFailure(root!.id, `Planner call failed: ${String(e).slice(0, 150)}`);
+        await registerPlanningFailure(root!.id, `Planner call failed: ${headPoints(String(e), 150)}`);
         return;
       }
       // The root may have closed while the call was out: goal_done on the
@@ -2467,7 +2535,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
 
       if (!parsedOk) {
         // H4: parse failure is not "objective met".
-        await registerPlanningFailure(root!.id, `Planner parse failure: ${raw.slice(0, 100)}`);
+        await registerPlanningFailure(root!.id, `Planner parse failure: ${headPoints(raw, 100)}`);
         return;
       }
 
@@ -2506,8 +2574,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             id: `plan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
             parentId: root!.id,
             kind: "plan",
-            title: p.title.slice(0, 80),
-            objective: p.objective.slice(0, 500),
+            title: headPoints(p.title, 80),
+            objective: headPoints(p.objective, 500),
             status: "pending",
             source: "controller",
             maxRounds: perPlanMaxRounds,
@@ -2533,7 +2601,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: Date.now(),
           loop: "goal",
           action: "planning_created",
-          detail: `${plans.length} plans under root ${root!.id}: ${plans.map((p) => p.title.slice(0, 30)).join("; ")}${budgetBlockedAfterCall ? `; none started, the root is blocked (${TURN_BUDGET_REASON})` : ""}`,
+          detail: `${plans.length} plans under root ${root!.id}: ${plans.map((p) => headPoints(p.title, 30)).join("; ")}${budgetBlockedAfterCall ? `; none started, the root is blocked (${TURN_BUDGET_REASON})` : ""}`,
         });
 
         // BM2: Check planner variance (flag, not trim)
@@ -2671,7 +2739,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             timestamp: proposalNow,
             loop: "monitor",
             action: "proposal_resend_failed",
-            detail: `record ${rec.id} to '${coordinatorPersona}' was skipped and not sent again: ${safeErrorText(err)}`.slice(0, 200),
+            detail: headPoints(`record ${rec.id} to '${coordinatorPersona}' was skipped and not sent again: ${safeErrorText(err)}`, 200),
           });
         }
       }
@@ -2722,7 +2790,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           timestamp: proposalNow,
           loop: "monitor",
           action: "proposal_failed",
-          detail: `submit ${proposalOutcome.how}, interval already spent: ${proposalOutcome.reason}`.slice(0, 200),
+          detail: headPoints(`submit ${proposalOutcome.how}, interval already spent: ${proposalOutcome.reason}`, 200),
         });
       proposalChanged = true;
     }
@@ -2897,7 +2965,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
     const sr = sess.state.memory.filter((m) => m.source === "self-review" && m.kind === "lesson");
     if (sr.length > 0) {
       const newest = sr.sort((a, b) => b.createdAt - a.createdAt)[0];
-      facts.push(["LESSON", newest.text.slice(0, 120)]);
+      facts.push(["LESSON", headPoints(newest.text, 120)]);
     }
   }
   if (envText !== null) facts.push(["Environment", envText]);
@@ -3093,7 +3161,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             const sr = sess.state.memory.filter((m) => m.source === "self-review" && m.kind === "lesson");
             if (sr.length === 0) return "";
             const newest = sr.sort((a, b) => b.createdAt - a.createdAt)[0];
-            return `LESSON: ${newest.text.slice(0, 120)}\n`;
+            return `LESSON: ${headPoints(newest.text, 120)}\n`;
           })() +
           envLine +
           `Last answer: ${controllerLastAnswerText(lastAnswer)}\n`;
@@ -3181,7 +3249,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
             timestamp: Date.now(),
             loop: "monitor",
             action: "controller_haiku_failed",
-            detail: `${g.id}: stamp ${live.stampId}, ${safeErrorText(haiku.err).slice(0, 150)}`,
+            detail: `${g.id}: stamp ${live.stampId}, ${headPoints(safeErrorText(haiku.err), 150)}`,
           });
           decision = null;
         }
@@ -3387,7 +3455,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           const reasonText = completionText(reason);
           if (reasonText === null) noteCompletionShape("controller-reason", reason);
           fullReason = (reasonText ?? "").trim().replace(/\*{1,2}/g, "");
-          finalReason = fullReason.slice(0, 100);
+          finalReason = headPoints(fullReason, 100);
         } catch { /* reason call failed; non-fatal */ }
       }
 
@@ -3444,7 +3512,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
               timestamp: tickTs,
               loop: "monitor",
               action: "nudge_failed",
-              detail: `${g.id}: submit ${nudgeOutcome.how}, floor already spent: ${nudgeOutcome.reason}`.slice(0, 200),
+              detail: headPoints(`${g.id}: submit ${nudgeOutcome.how}, floor already spent: ${nudgeOutcome.reason}`, 200),
             });
             // No nudged turn is coming, so the controller call's acted
             // outcome is none, written at once, and the stamp submitNudge held
@@ -3514,7 +3582,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           ? ""
           : ` | round ${currentActive.completedRounds}/${currentActive.maxRounds}`;
         try {
-          ctx.status(`Goal: ${currentActive.title.slice(0, 50)} | ${currentActive.kind} | ${currentActive.id}${roundText}`);
+          ctx.status(`Goal: ${headPoints(currentActive.title, 50)} | ${currentActive.kind} | ${currentActive.id}${roundText}`);
         } catch { /* non-fatal */ }
       }
 

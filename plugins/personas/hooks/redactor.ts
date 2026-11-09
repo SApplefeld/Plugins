@@ -131,6 +131,7 @@ import type {
   ToolCallInput,
   ToolCallResult,
 } from "claude-code";
+import { headPoints } from "./agent-state";
 import {
   collect,
   escapeLiteralTags,
@@ -633,7 +634,7 @@ export async function bodyFileRefusal(e: ToolCallInput, fs: { read: (path: strin
     try {
       text = String(await fs.read(words[i + 1]));
     } catch {
-      return `redactor: could not read the file this command's --body-file names (${Array.from(scanBudget(remainingMs).scrub(words[i + 1])).slice(0, 200).join("")}), so the call was refused before it ran. Write the file in its own call first, then run memq.`;
+      return `redactor: could not read the file this command's --body-file names (${headPoints(scanBudget(remainingMs).scrub(words[i + 1]), 200)}), so the call was refused before it ran. Write the file in its own call first, then run memq.`;
     }
     // The charge would refuse these files anyway, so stop reading once they
     // pass SCAN_CAP: a command naming one large file hundreds of times then

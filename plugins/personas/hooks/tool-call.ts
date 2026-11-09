@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, activateNext, awaitingEntryAtOrAbove, bracketSafeText, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -613,7 +613,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       id: rootId,
       parentId: null,
       kind: "root",
-      title: objective.slice(0, 80),
+      title: headPoints(objective, 80),
       objective,
       status: "pending",
       source: "operator",
@@ -663,7 +663,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       timestamp: now,
       loop: "goal",
       action: "create",
-      detail: `Root ${rootId} "${objective.slice(0, 80)}" created (max ${maxRounds} rounds)`,
+      detail: `Root ${rootId} "${headPoints(objective, 80)}" created (max ${maxRounds} rounds)`,
     });
     // Route two of the promotion routes: the message this turn is answering
     // is what the operator turned into this tree, so its record is marked
@@ -936,8 +936,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       const writeFailed = added.writeFailed === undefined ? "" : goalWriteFailedText(added.writeFailed, true);
       return {
         result: (nextActive
-          ? `Added ${kind} "${title.slice(0, 50)}". Now active: ${nextActive.id} "${nextActive.title}".`
-          : `Added ${kind} "${title.slice(0, 50)}". No active goal; planning or activation will occur at the next tick.`) + told + fromTask + writeFailed,
+          ? `Added ${kind} "${headPoints(title, 50)}". Now active: ${nextActive.id} "${nextActive.title}".`
+          : `Added ${kind} "${headPoints(title, 50)}". No active goal; planning or activation will occur at the next tick.`) + told + fromTask + writeFailed,
       };
     }
   }
@@ -1112,8 +1112,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       // prompt as plans are.
       const entry: LongTermGoal = {
         id: `lt-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        title: title.slice(0, 80),
-        objective: objective.slice(0, 500),
+        title: headPoints(title, 80),
+        objective: headPoints(objective, 500),
         createdAt: now,
       };
       list.push(entry);
@@ -1121,7 +1121,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         timestamp: now,
         loop: "goal",
         action: "longterm_added",
-        detail: `${entry.id} "${entry.title.slice(0, 50)}"`,
+        detail: `${entry.id} "${headPoints(entry.title, 50)}"`,
       });
       resultText = `Long-term goal added: ${entry.id} "${entry.title}".`;
       changedId = entry.id;
@@ -1135,7 +1135,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         return {
           deny:
             `goal_longterm drop needs the id of a held long-term goal, and ` +
-            `${id ? `"${id.slice(0, 50)}" is not one` : "no id was given"}. Held: ${held}.`,
+            `${id ? `"${headPoints(id, 50)}" is not one` : "no id was given"}. Held: ${held}.`,
         };
       }
       if (!reason) {
@@ -1147,7 +1147,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         timestamp: now,
         loop: "goal",
         action: "longterm_dropped",
-        detail: `${dropped.id} "${String(dropped.title ?? "").slice(0, 50)}": ${reason.slice(0, 80)}`,
+        detail: `${dropped.id} "${headPoints(String(dropped.title ?? ""), 50)}": ${headPoints(reason, 80)}`,
       });
       resultText = `Long-term goal dropped: ${dropped.id} "${String(dropped.title ?? "")}".`;
       changedId = dropped.id;
@@ -1250,7 +1250,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       const named = sess.state.goals.find((g) => g.id === byNameId);
       if (!named) {
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
-        return { deny: `nodeId "${byNameId.slice(0, 50)}" not found in goal tree.` };
+        return { deny: `nodeId "${headPoints(byNameId, 50)}" not found in goal tree.` };
       }
       if (named.parentId === null) {
         // The root completes by name on one admission: every descendant
@@ -1387,7 +1387,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       timestamp: Date.now(),
       loop: "goal",
       action: "done",
-      detail: `${completedId} "${completedTitle.slice(0, 50)}" marked complete${byNameId ? " by name" : ""}${note ? `: ${note.slice(0, 80)}` : ""}`,
+      detail: `${completedId} "${headPoints(completedTitle, 50)}" marked complete${byNameId ? " by name" : ""}${note ? `: ${headPoints(note, 80)}` : ""}`,
     });
     queueMemoryCheck(expectedTurns, completedId, completedTitle, closedIds);
     // A completion by name can finish a blocked child, so the ancestors it
@@ -1623,7 +1623,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const entry = sess.state.asks.find((a) => a.id === askId);
     if (!entry) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
-      return { deny: `ask_close: no ask on this persona's ledger has id "${askId.slice(0, 50)}".` };
+      return { deny: `ask_close: no ask on this persona's ledger has id "${headPoints(askId, 50)}".` };
     }
     if (entry.status !== "open") {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
@@ -1787,7 +1787,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     if (!task) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
       return {
-        deny: `task_done refused: "${id.slice(0, 50)}" is unknown under the active goal ${active.id}.`,
+        deny: `task_done refused: "${headPoints(id, 50)}" is unknown under the active goal ${active.id}.`,
       };
     }
     if (task.done) {
@@ -2224,7 +2224,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       timestamp: Date.now(),
       loop: "worker",
       action: "say_sent",
-      detail: `${persona}: "${text.slice(0, 80)}" (id: ${id}${urgent ? ", urgent" : ""})`,
+      detail: `${persona}: "${headPoints(text, 80)}" (id: ${id}${urgent ? ", urgent" : ""})`,
     });
     // Inside the idle proposal's own turn, the first message to the
     // coordinator persona is the proposal. It is entered in
@@ -2897,7 +2897,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       timestamp: Date.now(),
       loop: "worker",
       action: "operator_resolved",
-      detail: `record ${id} resolved ${outcome}${note ? `: "${note.slice(0, 80)}"` : ""}`,
+      detail: `record ${id} resolved ${outcome}${note ? `: "${headPoints(note, 80)}"` : ""}`,
     });
     // The resolve has landed; nothing below may turn it into a throw or a
     // refusal. An answer-leg push is stamped with the resolved record's id

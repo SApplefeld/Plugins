@@ -20,7 +20,7 @@
 // which contextSourcesOf in hooks/index.ts builds.
 
 import type { AgentState, AskEntry, AutonomyLevel, GoalNode, TaskItem } from "./agent-state";
-import { ASKS_OPEN_MAX, TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
+import { ASKS_OPEN_MAX, TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, headPoints, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
 import { TURN_END_SOURCE } from "./follow-ups";
 import { DONE_HOLD_REASON, goalContextText } from "./goal-persona";
 import { STRETCH_SOURCE } from "./stretch-distillation";
@@ -181,7 +181,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
   const now = Date.now();
   const openAsks = openAskEntries(state).slice().sort((a, b) => b.openedAt - a.openedAt);
   const askLine = (entry: AskEntry): string =>
-    `${entry.id} · ${askAgeText(now - entry.openedAt)} · ${entry.blocking ? "blocking" : entry.recommend.trim() === "" ? "proceeding" : `proceeding on ${bracketSafeText(oneLine(entry.recommend).slice(0, 60))}`} · ${bracketSafeText(oneLine(entry.question).slice(0, 120))}\n`;
+    `${entry.id} · ${askAgeText(now - entry.openedAt)} · ${entry.blocking ? "blocking" : entry.recommend.trim() === "" ? "proceeding" : `proceeding on ${bracketSafeText(headPoints(oneLine(entry.recommend), 60))}`} · ${bracketSafeText(headPoints(oneLine(entry.question), 120))}\n`;
   const openAskLines = openAsks.slice(0, GOAL_TREE_ASK_LINES).map(askLine).join("");
   const openAskCountLine = openAsks.length > GOAL_TREE_ASK_LINES
     ? `and ${openAsks.length - GOAL_TREE_ASK_LINES} more\n`
@@ -204,13 +204,13 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
     // before the cut, so it reads the whole stored value rather than whatever
     // the cut happened to leave.
     const path = parent
-      ? `root > ${oneLine(parent.title).slice(0, 40)} > ${oneLine(activeNode.title).slice(0, 40)}`
-      : `root > ${oneLine(activeNode.title).slice(0, 40)}`;
+      ? `root > ${headPoints(oneLine(parent.title), 40)} > ${headPoints(oneLine(activeNode.title), 40)}`
+      : `root > ${headPoints(oneLine(activeNode.title), 40)}`;
     const siblings = activeNode.parentId
       ? state.goals.filter((g) => g.parentId === activeNode.parentId && g.id !== activeNode.id && g.status === "pending")
       : [];
     const siblingLine = siblings.length > 0
-      ? `Pending siblings: ${siblings.map((s) => oneLine(s.title).slice(0, 30)).join("; ")}\n`
+      ? `Pending siblings: ${siblings.map((s) => headPoints(oneLine(s.title), 30)).join("; ")}\n`
       : "";
     const lastNote = activeNode.notes.length > 0
       ? `Last note: ${oneLine(activeNode.notes[activeNode.notes.length - 1])}\n`
@@ -267,7 +267,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       const listed = open.slice(0, GOAL_QUEUE_MAX_LINES);
       const queueLines =
         listed
-          .map((g) => `- ${g.status} ${g.kind} ${g.id} | ${oneLine(g.title).slice(0, 40)}${g.blockedReason ? ` | ${oneLine(g.blockedReason).slice(0, 60)}` : ""}\n`)
+          .map((g) => `- ${g.status} ${g.kind} ${g.id} | ${headPoints(oneLine(g.title), 40)}${g.blockedReason ? ` | ${headPoints(oneLine(g.blockedReason), 60)}` : ""}\n`)
           .join("") +
         (open.length > listed.length ? `...and ${open.length - listed.length} more open ${open.length - listed.length === 1 ? "entry" : "entries"}.\n` : "");
       // A root the turn budget blocks holds every entry, and goal_resume
@@ -450,7 +450,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
           timestamp: Date.now(),
           loop: "monitor",
           action: "lesson_inject",
-          detail: `lesson_inject: ${newest.text.slice(0, 80)}`,
+          detail: `lesson_inject: ${headPoints(newest.text, 80)}`,
         });
         sr.lastInjectAt = Date.now();
         try { log(`Agentic: [LESSON] injected`); } catch { /* non-fatal */ }
