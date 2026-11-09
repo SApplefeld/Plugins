@@ -27,7 +27,7 @@ import { deriveSurfaceState, toView } from "../discord/state.ts";
 import type { StateThresholds, SurfaceState, ViewSignals } from "../discord/state.ts";
 import { liveByLineage } from "../registry.ts";
 import type { SessionRecord } from "../registry.ts";
-import { clean } from "../sanitize.ts";
+import { clean, fit, oneLine } from "../sanitize.ts";
 import type { UsageAccount } from "../usage/cache.ts";
 import { PACE_PERIOD_MS, aheadOfPace, measuredAt, projectExhaustion, rolledWeekly } from "../usage/pace.ts";
 import { foldRootName } from "./config.ts";
@@ -407,6 +407,61 @@ export type WorkersView = {
   sandbox: string;
   tiles: { working: number; asking: number; blocked: number; ready: number };
   rows: WorkerRow[];
+  asOf: AsOf;
+  held: readonly SourceName[];
+};
+
+/**
+ * A Today item's kind, in the order acting on it unblocks the most: a stopped worker or an account
+ * needing sign-in, then a pull request marked ready, then a blocking ask, then a non-blocking one.
+ */
+export type TodayKind = "unblock" | "approve" | "decide" | "answer";
+
+/** An act a Today item takes, as the Needs me detail draws it for the same item, a review's Dismiss read as Done. */
+export type TodayAct = "agree" | "answer" | "discuss" | "dismiss" | "open-pr" | "done";
+
+/**
+ * One item of the Today list. `number` runs from 1 in list order. `who` names the repository's
+ * folder, the persona and, on an approve item, the pull request number; `title` is the ask's
+ * question, the plan's title or the blocked entry's title; `effect` says what acting on it does.
+ * `item` is the Needs me item it stands for, unchanged, so an act posts the body it posts today.
+ */
+export type TodayItem = {
+  kind: TodayKind;
+  number: number;
+  who: string;
+  title: string;
+  effect: string;
+  acts: TodayAct[];
+  item: Item | ReviewItem;
+  /**
+   * On an approve item alone: the configured root the plan reading takes for the plan, the
+   * repository's folder. The roster keeps only a persona whose workdir names a folder, so every
+   * review's persona has one. The page reads no plan for an empty root.
+   */
+  root?: string;
+};
+
+/** A worker the Today screen lists as running: its Workers row's name, state, entry title, step and last turn. */
+export type RunningRow = { name: string; state: WorkerState; title: string | null; step: RepoStep | null; lastTurnAt: string | null };
+
+/**
+ * A plan finished recently: the persona, the title of the queue entry on the plan where the queue
+ * still holds one, the plan's file name and the newest `goal-complete` line's stamp.
+ */
+export type FinishedRow = { name: string; title: string | null; plan: string; at: string };
+
+/**
+ * The Today page's view: the line above the list, the items waiting on the operator in the order
+ * acting on them unblocks the most, the workers running, the plans finished in the last 48 hours,
+ * and the capacity verdict's word.
+ */
+export type TodayView = {
+  lede: string;
+  first: TodayItem[];
+  running: RunningRow[];
+  finished: FinishedRow[];
+  health: Verdict["word"];
   asOf: AsOf;
   held: readonly SourceName[];
 };
@@ -1412,7 +1467,7 @@ function rolloutWaiting(readings: Readings): RolloutRow[] | null {
   return reading.rows.filter((row) => row.toRollOut > 0);
 }
 
-/** The publish rows with something to publish, the Needs-me page's, or null while the source has never read. */
+/** The publish rows with something to publish, the Needs-me view's, or null while the source has never read. */
 function publishWaiting(readings: Readings): PublishRow[] | null {
   const reading = readings.rollout.value;
   if (reading === null) return null;
@@ -1583,6 +1638,181 @@ export function needsMeView(readings: Readings): NeedsMeView {
     asOf: asOf(readings),
     held: readings.held,
   };
+}
+
+/** The Today kinds in list order, the order acting on them unblocks the most. */
+const TODAY_KIND_ORDER: readonly TodayKind[] = ["unblock", "approve", "decide", "answer"];
+
+/** The states a Workers row reads in that put it on the Today screen's Running list. */
+const RUNNING_STATES: readonly WorkerState[] = ["working", "asking", "paused"];
+
+/** How far back a `goal-complete` line puts its plan on the Finished list, and how many the list holds. */
+export const FINISHED_WINDOW_MS = 48 * 60 * 60 * 1000;
+export const FINISHED_CAP = 5;
+
+/** The effect sentences the Today items carry, page copy held here so the page and the view agree. */
+export const APPROVE_EFFECT = "Approving on GitHub lands it on main. Nothing on this page merges.";
+export const NOTHING_NEEDS_YOU = "Nothing needs you.";
+/** The longest blocked reason an unblock item's effect quotes, in code points, as the Dismiss line cuts one. */
+export const MAX_STOPPED_REASON = 200;
+
+/** A duration in the short form the page draws: 40s, 40m, 3h, 2d, as the shell's own `span` writes it. */
+function shortSpan(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${String(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${String(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${String(hours)}h`;
+  return `${String(Math.floor(hours / 24))}d`;
+}
+
+/**
+ * A worker-written blocked reason as an unblock item's effect quotes it: one line with its double
+ * quotes made single, its closing stops dropped so the sentence ends once, and cut to
+ * `MAX_STOPPED_REASON` code points, so the text reads as the worker's words and never as the page's own.
+ */
+function stoppedReason(text: string): string {
+  return fit(oneLine(text).replace(/[.!?\s]+$/u, ""), MAX_STOPPED_REASON);
+}
+
+/** When a Today item came up, in epoch milliseconds: a review's ready time, any other item's opening time; null where it names none. */
+function cameUpAt(item: Item | ReviewItem): number | null {
+  const at = Date.parse((item.kind === "review" ? item.readyAt : item.openedAt) ?? "");
+  return Number.isFinite(at) ? at : null;
+}
+
+/** The line above the Today list: how many items wait and how old the oldest is, or that nothing does. */
+function ledeOf(items: readonly { item: Item | ReviewItem }[], now: number): string {
+  if (items.length === 0) return NOTHING_NEEDS_YOU;
+  const count = items.length === 1 ? "1 thing needs you." : `${String(items.length)} things need you.`;
+  let oldest: number | null = null;
+  for (const { item } of items) {
+    const at = cameUpAt(item);
+    if (at !== null && (oldest === null || at < oldest)) oldest = at;
+  }
+  return oldest === null ? count : `${count} Oldest ${shortSpan(now - oldest)}.`;
+}
+
+/**
+ * The Today page's view. `first` holds what waits on the operator, from the readings the Needs me
+ * view draws: each blocked entry and each account needing sign-in as `unblock`, each review as
+ * `approve`, each blocking ask as `decide` and each other ask as `answer`. A hands item drawn from a
+ * blocked entry is left out, since the entry stands as its own unblock item. The kinds run in that
+ * order whatever their ages, and within a kind the item that came up first leads, an undated one
+ * after every dated one. `running` is the Workers rows that read working, asking or paused, in the
+ * Workers view's order; `finished` the plans whose newest `goal-complete` line is inside
+ * `FINISHED_WINDOW_MS` of the request, newest first, at most `FINISHED_CAP`. It writes no mark.
+ */
+export function todayView(readings: Readings): TodayView {
+  const repos = fleet(readings);
+  const folders = new Map(repos.map((repo) => [repo.persona.name, rootName(repo.persona.workdir)] as const));
+  const who = (persona: string, pullRequest: number | null = null): string =>
+    [folders.get(persona) ?? persona, persona, ...(pullRequest === null ? [] : [`PR ${String(pullRequest)}`])].join(" · ");
+  const items: Omit<TodayItem, "number">[] = [];
+
+  for (const repo of repos) {
+    for (const blocked of blockedEntries(readings, repo)) {
+      items.push({
+        kind: "unblock",
+        who: who(blocked.repo),
+        title: blocked.title !== "" ? blocked.title : (blocked.item.entryId ?? blocked.item.text),
+        effect: `${blocked.repo} stopped: "${stoppedReason(blocked.item.text)}".`,
+        acts: ["discuss", "dismiss"],
+        item: blocked.item,
+      });
+    }
+  }
+  // An account's item names no persona; a hands item that does stands for a blocked entry listed above.
+  for (const hands of handsItems(readings, repos)) {
+    if (hands.repo !== null) continue;
+    items.push({ kind: "unblock", who: "Hands", title: hands.text, effect: hands.text, acts: [], item: hands });
+  }
+  for (const repo of repos) {
+    for (const review of reviewsOf(readings, repo, timelineOf(readings, repo.persona.name))) {
+      items.push({
+        kind: "approve",
+        who: who(review.repo, review.pullRequest),
+        title: review.title,
+        effect: APPROVE_EFFECT,
+        acts: [
+          ...(review.pullRequestUrl !== null ? (["open-pr"] as const) : []),
+          ...(review.pullRequest !== null ? (["done"] as const) : []),
+        ],
+        item: review,
+        root: folders.get(review.repo) ?? "",
+      });
+    }
+  }
+  for (const repo of repos) {
+    for (const ask of repo.asks) {
+      const item = askItem(repo, ask);
+      const persona = repo.persona.name;
+      items.push({
+        kind: item.blocking ? "decide" : "answer",
+        who: who(persona),
+        title: item.text,
+        effect: item.blocking
+          ? `${persona} is stopped until you answer. Agree takes the recommendation.`
+          : `${persona} proceeds on the recommendation. Answer only to change it.`,
+        acts: [...((item.recommend ?? "").trim() !== "" ? (["agree"] as const) : []), "answer", "discuss", "dismiss"],
+        item,
+      });
+    }
+  }
+
+  const ranked = items
+    .map((one, index) => ({ one, index, at: cameUpAt(one.item) }))
+    .sort((left, right) => {
+      const kind = TODAY_KIND_ORDER.indexOf(left.one.kind) - TODAY_KIND_ORDER.indexOf(right.one.kind);
+      if (kind !== 0) return kind;
+      if (left.at !== right.at) {
+        if (left.at === null) return 1;
+        if (right.at === null) return -1;
+        return left.at - right.at;
+      }
+      return left.index - right.index;
+    })
+    .map(({ one }, index): TodayItem => ({ kind: one.kind, number: index + 1, who: one.who, title: one.title, effect: one.effect, acts: one.acts, item: one.item, ...(one.root === undefined ? {} : { root: one.root }) }));
+
+  const running = workersView(readings)
+    .rows.filter((row) => RUNNING_STATES.includes(row.state))
+    .map(({ name, state, title, step, lastTurnAt }): RunningRow => ({ name, state, title, step, lastTurnAt }));
+
+  return {
+    lede: ledeOf(ranked, readings.now),
+    first: ranked,
+    running,
+    finished: finishedOf(readings, repos),
+    health: verdictOver(readings, repos).word,
+    asOf: asOf(readings),
+    held: readings.held,
+  };
+}
+
+/**
+ * The plans finished recently: per persona, each plan named by a `goal-complete` line inside
+ * `FINISHED_WINDOW_MS` of the request, once, at its newest such line, with the title of the queue
+ * entry whose plan segment names it where one does. Newest first across the fleet, at most
+ * `FINISHED_CAP`. A line carries its plan's file name alone, as a Workers row's timeline does.
+ */
+function finishedOf(readings: Readings, repos: readonly Repo[]): FinishedRow[] {
+  const rows: (FinishedRow & { atMs: number })[] = [];
+  for (const repo of repos) {
+    const newest = new Map<string, TimelineEvent>();
+    for (const line of timelineOf(readings, repo.persona.name)) {
+      if (line.event !== "goal-complete" || !Number.isFinite(line.tsMs) || readings.now - line.tsMs > FINISHED_WINDOW_MS) continue;
+      const name = eventPlanName(line.plan);
+      const held = newest.get(name);
+      if (held === undefined || line.tsMs >= held.tsMs) newest.set(name, line);
+    }
+    for (const [name, line] of newest) {
+      const entry = repo.queue?.entries.find((one) => one.planSegment !== null && one.planSegment !== undefined && eventPlanName(one.planSegment) === name);
+      rows.push({ name: repo.persona.name, title: entry?.title ?? null, plan: lastSegment(line.plan), at: line.ts, atMs: line.tsMs });
+    }
+  }
+  rows.sort((left, right) => right.atMs - left.atMs);
+  return rows.slice(0, FINISHED_CAP).map(({ atMs: _atMs, ...row }) => row);
 }
 
 /**

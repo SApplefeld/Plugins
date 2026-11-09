@@ -112,7 +112,6 @@ button:focus-visible {
 .pill,
 .back,
 .sub,
-.need-row,
 .rec-text,
 .empty,
 .rollup,
@@ -144,10 +143,10 @@ button:focus-visible {
 .ask-console,
 .perm-allow,
 .perm-deny,
-.nm-sort-button,
 .nm-agree,
 .nm-correct,
 .nm-dismiss,
+.nm-done,
 .nm-discuss,
 .nm-open-pr,
 .nm-context,
@@ -168,7 +167,6 @@ button:focus-visible {
 .ro-lead,
 .ro-commits,
 .ro-button,
-.ro-need,
 .toast,
 .nav,
 .sheet-head {
@@ -178,7 +176,6 @@ button:focus-visible {
 /* The meta type: stamps, ages, notes, counts and the mono lines. */
 .pill .count.down,
 .stamp,
-.need-row .age,
 .rec,
 .chapter-next,
 .badge,
@@ -250,6 +247,12 @@ h1,
   overflow-x: hidden;
   overflow-y: auto;
   overflow-wrap: anywhere;
+}
+
+/* A pane's parts keep their full height, so a pane taller than its box scrolls. A part that clips its
+   overflow, as a card does, would otherwise shrink to fit the pane's fixed height and cut its own lines. */
+.pane > * {
+  flex-shrink: 0;
 }
 
 /* On a phone the list fills the column, and the detail is hidden until a row is selected. */
@@ -676,7 +679,6 @@ h1 {
 }
 
 /* The header's rule stands in for the top border of the row or line drawn straight under it. */
-.card-h + .need-list > .need-row:first-child,
 .card-h + .empty,
 .card-h + .ro-full > .ro-line:first-child,
 .card-h + .ro-foot {
@@ -722,41 +724,6 @@ h1 {
 .dot.hollow {
   background: transparent;
   border: 2px solid var(--muted);
-}
-
-/* Needs you */
-.band-head {
-  padding: var(--space-3) var(--space-3) var(--space-1);
-}
-
-.need-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.need-row {
-  display: grid;
-  grid-template-columns: 84px minmax(0, 1fr) auto;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  min-height: 44px;
-  border-top: 1px solid var(--line);
-  color: var(--ink);
-  text-decoration: none;
-  align-items: baseline;
-}
-
-a.need-row:hover {
-  color: var(--ink);
-  background: var(--bg);
-}
-
-.need-row .who {
-  font-weight: 600;
-}
-
-.need-row .age {
-  color: var(--muted);
 }
 
 .tag {
@@ -824,15 +791,13 @@ a.need-row:hover {
   gap: 8px;
 }
 
-/* The standup's two columns, the repo page's two columns, the repo list on a phone and the Needs me
-   groups draw no box of their own, so their sections, cards and rows stack as one column in the pane
-   that holds them. */
+/* The standup's two columns, the repo page's two columns and the repo list on a phone draw no box of
+   their own, so their sections, cards and rows stack as one column in the pane that holds them. */
 .standup-cols,
 .standup-main,
 .standup-side,
 .repo-cols,
-.repo-list,
-.nm-groups {
+.repo-list {
   display: contents;
 }
 
@@ -1047,7 +1012,7 @@ a.plan-row:hover {
 }
 
 /* The row, plan row or repo card whose detail the detail pane draws: tinted and edged in the accent,
-   as the Needs me list marks its selected row. The edge is an inset shadow, so the row keeps its size. */
+   as the Today list marks its selected card. The edge is an inset shadow, so the row keeps its size. */
 .row.sel,
 .plan-row.sel,
 .repo-card.sel {
@@ -1799,7 +1764,7 @@ button.chip {
   overflow-y: auto;
 }
 
-/* Needs me screen: the list pane's groups and rows, and the detail pane's item. */
+/* Today screen: the list pane's cards and rows, and the detail pane's item. */
 .nm {
   display: flex;
   flex-direction: column;
@@ -1807,21 +1772,10 @@ button.chip {
   min-width: 0;
 }
 
-.nm-count {
-  color: var(--muted);
-  font-weight: 400;
-}
-
-.nm-sort {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.nm-sort-button,
 .nm-agree,
 .nm-correct,
 .nm-dismiss,
+.nm-done,
 .nm-discuss,
 .nm-open-pr,
 .nm-context,
@@ -1843,7 +1797,6 @@ button.chip {
   text-decoration: none;
 }
 
-.nm-sort-button.on,
 .nm-agree,
 .nm-send,
 .nm-batch-button {
@@ -1960,7 +1913,7 @@ a.nm-text {
   padding: 4px 0 8px;
 }
 
-/* The ask screen's step row: Previous, the ask's place in the Needs me order, then Next. */
+/* The ask screen's step row: Previous, the ask's place in the Today order, then Next. */
 .ask-step {
   display: flex;
   align-items: center;
@@ -1991,6 +1944,7 @@ a.nm-text {
 
 .nm-correct:disabled,
 .nm-dismiss:disabled,
+.nm-done:disabled,
 .nm-discuss:disabled,
 .nm-cancel:disabled {
   opacity: 0.5;
@@ -2095,16 +2049,6 @@ a.nm-text {
   width: 100%;
 }
 
-/* The Needs me chips: each carries the count it lists, in the meta colour. */
-.nm-chip-n {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.chip.on .nm-chip-n {
-  color: var(--on-ink);
-}
-
 /* The detail pane: the headline as the heading, the meta line, then each part under a small uppercase head. */
 .nm-heading {
   margin: 4px 0 0;
@@ -2189,6 +2133,152 @@ a.nm-text {
 .tag-blue {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+.tag-ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+/* The Today list: each Do first card a bordered card, the first edged in the accent, its tag, who line
+   and number on one row above the title and the effect sentence. */
+.td-cards,
+.td-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.td-cards {
+  gap: 8px;
+}
+
+.nm-row.td-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: var(--space-3);
+}
+
+.nm-row.td-card + .nm-row.td-card {
+  border-top: 1px solid var(--line);
+}
+
+.nm-row.td-card.first {
+  border-color: var(--accent);
+}
+
+.nm-row.td-card.sel {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.td-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.td-head .tag {
+  margin-right: 0;
+  letter-spacing: 0.04em;
+}
+
+.td-who {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  overflow-wrap: anywhere;
+}
+
+.td-num {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.td-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.td-effect {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.td-lede {
+  margin: 0;
+}
+
+/* The Running and Finished rows: the words at the left, the step, age or time at the right. */
+.td-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-2) 2px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.td-row:last-child {
+  border-bottom: 0;
+}
+
+a.td-row:hover {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.td-l {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.td-l b {
+  font-weight: 600;
+}
+
+.td-l .dot {
+  margin-right: 6px;
+}
+
+.td-r {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+}
+
+/* The health line closes the list as one link to the health screen. */
+.td-health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: var(--space-2) 2px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+a.td-health:hover {
+  color: var(--ink);
+}
+
+/* The batch row sits in the list's flow on Today, between the cards and Running. */
+.td .nm-batch {
+  position: static;
+}
+
+.td-ready {
+  margin: var(--space-2) 0 0;
 }
 
 /* A row follows a finger sideways on the phone, the browser keeping the vertical drag to scroll the list. */
@@ -2498,7 +2588,7 @@ a.wk-row:hover {
   align-items: center;
 }
 
-/* Rollout: the sandbox card, the repo screen's card, the Needs me group and the toast they share. */
+/* Rollout: the sandbox card, the repo screen's card and the toast they share. */
 .ro-head {
   padding: var(--space-3) var(--space-3) var(--space-1);
 }
@@ -2611,37 +2701,11 @@ a.wk-row:hover {
   color: var(--on-ink);
 }
 
-.ro-button-need {
-  min-height: 44px;
-  min-width: 44px;
-  border: 1px solid var(--line-strong);
-  background: var(--panel);
-  color: var(--ink);
-}
-
 .ro-button:disabled {
   border-color: var(--line-strong);
   background: var(--track);
   color: var(--muted);
   cursor: default;
-}
-
-.ro-need {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  min-width: 0;
-}
-
-.ro-need > div {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.ro-need + .ro-need {
-  border-top: 1px solid var(--line);
 }
 
 .toast {
@@ -2788,19 +2852,6 @@ a.wk-row:hover {
   .toast {
     left: calc(var(--rail-fold) + 12px);
     bottom: 12px;
-  }
-
-  /* The Needs you rows stack at full width, each on a fixed persona column, so every question starts at one x. */
-  .need-row {
-    grid-template-columns: 12ch minmax(0, 1fr) auto;
-    align-content: center;
-    border-top: 0;
-    gap: var(--space-2);
-    padding: var(--space-1) 16px;
-  }
-
-  .band-head {
-    padding: var(--space-3) 16px var(--space-1);
   }
 
   .repo-list {

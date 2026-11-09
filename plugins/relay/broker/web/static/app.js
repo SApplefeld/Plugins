@@ -34,11 +34,11 @@
   }
 
   const PAGES = {
+    today: { render: renderToday, url: () => "/web/today" },
     standup: { render: renderStandupScreen, url: () => "/web/standup", accept: standupAccept },
     repo: { render: renderRepoScreen, url: repoUrl },
     plan: { render: renderPlanScreen, url: planUrl, accept: planAccept },
     health: { render: renderHealth, url: () => "/web/health" },
-    "needs-me": { render: renderNeedsMe, url: () => "/web/needs-me" },
     ask: { render: renderAsk, url: askUrl, gone: askGone },
     talk: { render: renderTalkScreen, url: talkUrl, accept: talkAccept, follow: true },
     workers: { render: renderWorkers, url: () => "/web/workers" },
@@ -49,13 +49,20 @@
   // ---------------------------------------------------------------------------------------------
 
   /** The fixed path of each screen, the paths the broker serves the shell on; the repo screen is `REPO_PREFIX` plus the name. */
-  const SCREEN_PATHS = { standup: "/", "needs-me": "/needs-me", ask: "/ask", plan: "/plan", health: "/health", talk: "/talk", workers: "/workers" };
+  const SCREEN_PATHS = { today: "/today", standup: "/repos", ask: "/ask", plan: "/plan", health: "/health", talk: "/talk", workers: "/workers" };
   const REPO_PREFIX = "/repo/";
 
-  /** The query keys each screen reads, in the order a path the shell builds carries them; a key off the list is dropped. */
-  const SCREEN_KEYS = { standup: [], "needs-me": ["item", "chip"], ask: ["repo", "id"], plan: ["root", "path", "repo"], health: [], talk: ["lineage", "root", "path"], repo: [], workers: ["name"] };
+  /**
+   * The other paths that open a screen: the root opens Today, and so does the former Needs me path, so
+   * a link into the old inbox lands on Today. Each reads its screen's query keys, so such a link keeps
+   * its `item` and loses any key Today does not read, its `chip` among them.
+   */
+  const PATH_ALIASES = { "/": "today", "/needs-me": "today" };
 
-  /** The list row a query selects: the Needs me screen's `item`, or the Workers screen's `name`, the persona's; null where it names none. */
+  /** The query keys each screen reads, in the order a path the shell builds carries them; a key off the list is dropped. */
+  const SCREEN_KEYS = { today: ["item"], standup: [], ask: ["repo", "id"], plan: ["root", "path", "repo"], health: [], talk: ["lineage", "root", "path"], repo: [], workers: ["name"] };
+
+  /** The list row a query selects: the Today screen's `item`, or the Workers screen's `name`, the persona's; null where it names none. */
   function selectedOf(query) {
     if (typeof query.item === "string") return query.item;
     return typeof query.name === "string" ? query.name : null;
@@ -82,6 +89,7 @@
       }
     } else {
       for (const known of Object.keys(SCREEN_PATHS)) if (SCREEN_PATHS[known] === pathname) screen = known;
+      if (screen === null && Object.prototype.hasOwnProperty.call(PATH_ALIASES, pathname)) screen = PATH_ALIASES[pathname];
     }
     if (screen === null) return null;
     const search = new URLSearchParams(txt(where.search));
@@ -112,14 +120,12 @@
     return { screen, name: null, query, item: selectedOf(query) };
   }
   /**
-   * The path of a route with no list row selected, by `item` or by a worker's `name`, and no Needs me
-   * chip chosen, which tells one screen's reading from another's: a chip filters the reading the
-   * screen holds and reads nothing new, and a selected worker is a row of the reading already held.
+   * The path of a route with no list row selected, by `item` or by a worker's `name`, which tells one
+   * screen's reading from another's: a selected row is a row of the reading already held.
    */
   function placeOf(at) {
     const query = Object.assign({}, at.query);
     delete query.item;
-    delete query.chip;
     delete query.name;
     return pathOf({ screen: at.screen, name: at.name, query });
   }
@@ -301,7 +307,7 @@
   }
 
   /**
-   * A section's header on the overview, Needs me, worker, plan and ask pages: the name, then " · " and the
+   * A section's header on the overview, Today, worker, plan and ask pages: the name, then " · " and the
    * count where one is given, as one small uppercase heading in a row with a rule beneath. A node the
    * caller appends after the heading sits at the row's right. The health page keeps `label`.
    */
@@ -595,7 +601,7 @@
    * button is disabled or gone, and returns to a rollout button when the toast is dismissed. A toast
    * given an `action`, `{ words, run }`, carries that one button in Dismiss's place, whose tap runs it;
    * the caller clears that toast itself. Answers the toast's body, so a caller can tell its toast is
-   * still the one shown. A Needs me dismissal whose Undo toast this one replaces is posted at once, as
+   * still the one shown. A Today dismissal whose Undo toast this one replaces is posted at once, as
    * a second Dismiss posts it, so no item leaves later with no Undo on screen. Every toast shows its
    * own line, then its command, then each of `toastNotes` on a line of its own, oldest first; null
    * words draw the notes alone.
@@ -970,58 +976,6 @@
     return card;
   }
 
-  /**
-   * The Needs-me page's Roll out group, one row and one button per client branch and per publish repository with something
-   * waiting, or nothing where the slot is null.
-   */
-  function rolloutGroup(view) {
-    if (!Array.isArray(view.rollout)) return null;
-    const now = nowOf(view);
-    const rows = objects(view.rollout);
-    const publishing = objects(view.publish);
-    const held = rolloutHeld(view);
-    if (!held && rows.length === 0 && publishing.length === 0) return null;
-    const section = h("section", "section", null, "group:rollout");
-    section.setAttribute("aria-label", "Roll out");
-    const count = publishing.length === 0 ? plural(rows.length, "client", "clients") : rows.length + publishing.length + " waiting";
-    section.append(cardHead("Roll out", held ? "tags unread" : count, "h2"));
-    const card = h("div", "card panel");
-    card.dataset.key = "rollout";
-    if (held) card.append(h("div", "nm-none", "tags unread"));
-    else {
-      for (const row of rows) {
-        const line = h("div", "ro-need", null, "client:" + rolloutKey(row));
-        const text = h("div");
-        text.append(h("b", null, rolloutClient(row)), " · " + (num(row.toRollOut) ?? 0) + " merged ");
-        const parts = [];
-        const oldest = dayOf(row.oldestAt, now);
-        if (oldest !== null) parts.push("oldest " + oldest);
-        parts.push(tagDay(row.lastTagDate) === "" ? "no rollout tag yet" : "last deploy " + tagDay(row.lastTagDate));
-        if (txt(row.repo) !== "") parts.push(txt(row.repo));
-        text.append(h("span", "muted", "· " + parts.join(" · ")));
-        line.append(text);
-        if (rolloutRowOf(row)) line.append(rolloutButton(row, "ro-button-need"));
-        card.append(line);
-      }
-      for (const row of publishing) {
-        const line = h("div", "ro-need", null, "publish:" + txt(row.repo));
-        const text = h("div");
-        text.append(h("b", null, txt(row.repo)), " · " + publishSince(row, now) + " ");
-        const oldest = dayOf(row.oldestAt, now);
-        if (oldest !== null) text.append(h("span", "muted", "· oldest " + oldest));
-        // The head the tap ships, by its title, and what the tag starts; no title where the row carries no commits.
-        const newest = objects(row.commits)[0];
-        if (newest !== undefined && txt(newest.title) !== "") text.append(h("div", "muted", "newest: " + txt(newest.title)));
-        text.append(h("div", "muted", "the tag starts the publish workflow"));
-        line.append(text);
-        if (publishRowOf(row)) line.append(publishButton(row, "ro-button-need"));
-        card.append(line);
-      }
-    }
-    section.append(card);
-    return section;
-  }
-
   // ---------------------------------------------------------------------------------------------
   // Sandbox page
   // ---------------------------------------------------------------------------------------------
@@ -1048,7 +1002,7 @@
     return x < y ? -1 : x > y ? 1 : 0;
   }
 
-  /** An ask's id on the Needs me page: its repo, a colon and its ask id, unencoded, or null for any other item. */
+  /** An ask's id on the Today detail: its repo, a colon and its ask id, unencoded, or null for any other item. */
   function askKey(item) {
     return item.kind === "ask" && txt(item.askId) !== "" ? txt(item.repo) + ":" + txt(item.askId) : null;
   }
@@ -1068,22 +1022,6 @@
       : null;
   }
 
-  function needRow(item, now) {
-    const href = askHrefOf(item);
-    const key = itemRowKey(item);
-    const row = href !== null ? link("need-row", href, null, key) : item.repo ? link("need-row", repoHref(item.repo), null, key) : h("div", "need-row", null, key);
-    row.append(h("span", "who", item.repo ? item.repo : "Hands"));
-    const middle = h("div");
-    if (item.kind === "blocked") middle.append(h("span", "tag", "blocked"));
-    else if (item.kind === "ask" && item.blocking) middle.append(h("span", "tag", "blocking"));
-    middle.append(txt(item.text));
-    if (item.recommend) middle.append(recRow(item.recommend));
-    row.append(middle);
-    const opened = parse(item.openedAt);
-    row.append(clockText("span", "age", opened === null ? "" : span(now - opened)));
-    return row;
-  }
-
   /** Appends "worker <state>" to `line`, and ", last turn <age> ago" where the worker has had one, the age as `clockText`. */
   function workerWords(line, worker, now) {
     const state = worker && worker.surfaceState ? worker.surfaceState : "no session";
@@ -1096,7 +1034,7 @@
     return worker && worker.leaseOpen ? "lease open" : "lease closed";
   }
 
-  // The band draws a need whole, so the repo card's need line is a pointer cut at this many code points.
+  // The Today screen draws a need whole, so the repo card's need line is a pointer cut at this many code points.
   const NEED_POINTER_POINTS = 80;
 
   /** `text` cut to its first `points` code points, an ellipsis marking a cut. */
@@ -1158,9 +1096,10 @@
   }
 
   /**
-   * The standup as the list pane: the needs band, the direction heading with its Steer composer, the
-   * rollout card, the workers' counts, the repos sorted by state, the health band and the read times,
-   * as one column. `selectedName` is the repo the detail pane shows, whose card, row or chip is marked.
+   * The standup as the list pane: the direction heading with its Steer composer, the rollout card, the
+   * workers' counts, the repos sorted by state, the health band and the read times, as one column. The
+   * needs are Today's list, so each needy repo's card keeps its own need line and no band repeats them.
+   * `selectedName` is the repo the detail pane shows, whose card, row or chip is marked.
    */
   function renderStandup(view, selectedName) {
     const out = document.createDocumentFragment();
@@ -1175,7 +1114,7 @@
     top.append(row, h("p", "sub", "Unseen changes, per repo"));
     out.append(top);
 
-    // The needs and the direction lead and the workers follow; neither column draws a box of its own, so
+    // The direction leads and the workers follow; neither column draws a box of its own, so
     // the sections stack as one column in the list pane at every width.
     const cols = h("div", "standup-cols", null, "cols");
     const main = h("div", "standup-main");
@@ -1183,21 +1122,6 @@
     cols.append(main, side);
     out.append(cols);
 
-    const band = h("section", "card attn panel");
-    band.dataset.key = "needs";
-    band.id = "needs";
-    band.setAttribute("aria-labelledby", "needs-heading");
-    const head = cardHead("Needs you", needs.length + (needs.length === 1 ? " item" : " items"), "h2", "needs-heading");
-    head.classList.add("band-head");
-    head.prepend(dot("amber"));
-    band.append(head);
-    if (needs.length === 0) band.append(h("div", "empty", "Nothing needs you right now."));
-    else {
-      const rows = h("div", "need-list");
-      for (const item of needs) rows.append(needRow(item, now));
-      band.append(rows);
-    }
-    main.append(band);
     const headingBand = headingCard(view, false);
     if (headingBand !== null) main.append(headingBand);
     const rolloutBand = rolloutCard(view);
@@ -1222,7 +1146,7 @@
 
     const stack = h("section", "repos", null, "repos");
     stack.setAttribute("aria-label", "Repos");
-    // A repo with an ask or a blocked item in the band needs the operator and draws as a card; every other
+    // A repo with an ask or a blocked item among the needs needs the operator and draws as a card; every other
     // repo draws as a row, or as a chip in the dormant box.
     const needy = new Set(needs.filter((item) => item.kind === "ask" || item.kind === "blocked").map((item) => item.repo));
     // The cards and rows share one wrapper, a bounded panel on a wide screen and no box of its own on a phone.
@@ -1447,7 +1371,7 @@
     const out = document.createDocumentFragment();
     const now = nowOf(view);
     const top = h("div", "top");
-    top.append(back("/", "Standup"));
+    top.append(back(SCREEN_PATHS.standup, "Standup"));
     const row = h("div", "top-row");
     row.append(h("h1", null, txt(view.name)), stamp(view));
     top.append(row);
@@ -1524,9 +1448,14 @@
     return root && path ? { root: root, path: path } : null;
   }
 
+  /** The plan reading's address for a configured root and a plan path, route text plus the encoded values. */
+  function planUrlOf(root, path) {
+    return "/web/plan?root=" + encodeURIComponent(root) + "&path=" + encodeURIComponent(path);
+  }
+
   function planUrl() {
     const params = planParams();
-    return params === null ? null : "/web/plan?root=" + encodeURIComponent(params.root) + "&path=" + encodeURIComponent(params.path);
+    return params === null ? null : planUrlOf(params.root, params.path);
   }
 
   /**
@@ -1568,7 +1497,7 @@
   function planList(name) {
     const out = document.createDocumentFragment();
     const top = h("div", "top", null, "top");
-    top.append(name === null ? back("/", "Standup") : back(repoHref(name), name));
+    top.append(name === null ? back(SCREEN_PATHS.standup, "Standup") : back(repoHref(name), name));
     const row = h("div", "top-row");
     row.append(h("h1", null, "Plans"));
     top.append(row);
@@ -1584,12 +1513,12 @@
 
   /**
    * The plan screen: its repo's plans in the list pane and the plan in the detail pane, the sheet on a
-   * phone, which closes to the repo screen, or to the standup where no repo is named for the plan.
+   * phone, which closes back to the screen it was opened from, or to Today, as `closesBack` says.
    */
   function renderPlanScreen(view) {
     const name = planRepoOf(view);
     const out = document.createDocumentFragment();
-    out.append(pane("list", planList(name)), detailPane(name === null ? SCREEN_PATHS.standup : repoHref(name), renderPlan(view)));
+    out.append(pane("list", planList(name)), detailPane(SCREEN_PATHS.today, renderPlan(view)));
     return out;
   }
 
@@ -1634,7 +1563,7 @@
     const finished = txt(view.status).toLowerCase() === "complete";
 
     const top = h("div", "top");
-    top.append(back("/", "Standup"));
+    top.append(back(SCREEN_PATHS.standup, "Standup"));
     const row = h("div", "top-row");
     row.append(h("h1", "plan-title", txt(view.title)), stamp(view));
     top.append(row);
@@ -1991,10 +1920,11 @@
 
   /**
    * The path a sibling pill opens on the sibling, by the screen drawn: the screens that name no
-   * object of this sandbox open the same screen there, and the others open the sibling's standup.
+   * object of this sandbox open the same screen on a sibling running this build, and the others open
+   * the sibling's root path.
    * The href is the sibling's origin, from this broker's own configuration, plus one of these fixed paths.
    */
-  const RAIL_PATHS = { standup: "/", "needs-me": "/needs-me", health: "/health" };
+  const RAIL_PATHS = { today: "/", standup: "/repos", health: "/health" };
 
   /**
    * The one shape an origin may take to be drawn as a link: plain HTTP to a tailnet address and port.
@@ -2394,7 +2324,7 @@
     }
   }
 
-  /** The key the Needs-me page keeps the touched asks under. */
+  /** The key the Today and ask pages keep the touched asks under. */
   const TOUCHED_KEY = "channels.needs-me.touched";
 
   /** Reads the plan's title and section count once, for the heading card; a failed read leaves the card out. */
@@ -2448,12 +2378,12 @@
   /**
    * Points the page at another lineage: the drawn lines go, and the whole ring is fetched. The
    * address and the place the shell holds move together, so a later link to either lineage is told
-   * apart from the screen drawn.
+   * apart from the screen drawn. The entry keeps its state, so Close still steps back where `closesBack` says so.
    */
   async function retarget(lineage) {
     if (lineage === talk.lineage) return;
     resetTalk(lineage);
-    history.replaceState(null, "", talkPath(lineage));
+    history.replaceState(history.state, "", talkPath(lineage));
     const at = routeOf(window.location);
     if (at !== null) lastPlace = placeOf(at);
     try {
@@ -2920,7 +2850,7 @@
     const params = planParams();
 
     const top = h("div", "top");
-    top.append(params === null ? back("/", "Standup") : back(planHref(params.root, params.path, lineage), talk.plan ? talk.plan.title || "Plan" : "Plan"));
+    top.append(params === null ? back(SCREEN_PATHS.standup, "Standup") : back(planHref(params.root, params.path, lineage), talk.plan ? talk.plan.title || "Plan" : "Plan"));
     const row = h("div", "top-row");
     row.append(h("h1", null, lineage));
     top.append(row);
@@ -3115,7 +3045,8 @@
   /**
    * The talk screen: the sessions to talk with in the list pane, and the composer with the lines, the
    * waiting prompts and the session pills in the detail pane, the sheet on a phone. Talk has no list
-   * of its own without a lineage, so the sheet closes to the health screen, whose list holds the sessions.
+   * of its own without a lineage, so the sheet's Close steps back to the screen it was opened from, as
+   * `closesBack` says, and on a load closes to the health screen, whose list holds the sessions.
    */
   function renderTalkScreen(view) {
     const out = document.createDocumentFragment();
@@ -3124,15 +3055,8 @@
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Needs-me page
+  // Today page
   // ---------------------------------------------------------------------------------------------
-
-  /** The three orders the items can be read in; the groups stay in their places and the items move within them. */
-  const SORTS = [
-    { id: "kind", words: "By kind" },
-    { id: "age", words: "By age" },
-    { id: "blocking", words: "Blocking first" },
-  ];
 
   /**
    * What the broker's answer to an act means, in the operator's words: the router's word for the line,
@@ -3173,22 +3097,6 @@
   /** The phone layout, under the stylesheet's first breakpoint, where a card takes the swipe. */
   const PHONE_QUERY = "(max-width: 699px)";
 
-  /**
-   * The chips over the Needs me list: the address's `chip` value, the words, and the groups each lists
-   * in the order drawn. All lists every group, Decisions the asks, Blocked the blocked runs and the
-   * hands items, and Reviews the pull requests ready for review. An address with no chip, or one off
-   * this list, reads as All.
-   */
-  const CHIPS = [
-    { id: "all", words: "All", groups: ["blocked", "ask", "review", "hands"] },
-    { id: "decisions", words: "Decisions", groups: ["ask"] },
-    { id: "blocked", words: "Blocked", groups: ["blocked", "hands"] },
-    { id: "reviews", words: "Reviews", groups: ["review"] },
-  ];
-
-  /** Every group a Needs me reading carries, so a selected item is found whichever chip lists it. */
-  const ALL_GROUPS = ["blocked", "ask", "hands", "review"];
-
   /** The one origin a review's Open PR link may point at; the broker admits the URL under a github.com pull request pattern too. */
   const GITHUB_PREFIX = "https://github.com/";
 
@@ -3196,7 +3104,7 @@
   const BLOCK_CHANGED_WORDS = "the block's reason changed since you read it, read it again";
 
   /**
-   * A Needs me headline is cut at this many code points, an ellipsis marking the cut, and the whole
+   * A Today headline is cut at this many code points, an ellipsis marking the cut, and the whole
    * text is in the item's Context. Two upstream readers cut a text with no mark before it reaches the
    * page. The broker's ledger reader keeps 1,000 code points of an ask's stored question, which is
    * `<question>? Recommend: <recommend>`: a cut in the Recommend tail goes with the segment the views
@@ -3213,19 +3121,20 @@
   /** The most items one batch carries where the view names no cap; the view's `maxBatch` is the broker's own bound. */
   const DEFAULT_MAX_BATCH = 64;
 
-  /** The batch cap the needs-me view carries, or the default where it is absent. */
+  /** The batch cap the Today view carries, or the default where it is absent. */
   function batchCap(view) {
     const cap = num(view.maxBatch);
     return cap !== null && cap >= 1 ? Math.floor(cap) : DEFAULT_MAX_BATCH;
   }
 
   /**
-   * What the Needs-me and ask pages hold between polls: the order chosen; the asks the operator acted
+   * What the Today and ask pages hold between polls: the asks the operator acted
    * on in this tab, kept in its session storage, which the batch leaves alone; the words beside each
    * item from its last act; whether an act is out, and the items it is out for; each item whose line
    * was delivered, with the reading it was drawn from, which a newer reading replaces; the Answer box
    * open, by its item's key, with its draft; each open Context, by its item's key; and the Context the
-   * Needs me detail pane read for the item it shows, the brief, plan title and conversation it draws,
+   * Today detail pane read for the item it shows, the brief, plan title and conversation it draws or
+   * an approve item's plan,
    * with the reading it was read under, dropped once the detail shows another item so a return reads
    * it afresh, or once a newer reading is drawn where the read failed. `processing`
    * holds each item whose Agree was tapped, until a reading no longer carries it or the post fails.
@@ -3236,7 +3145,6 @@
    * the tap that ends it does not select the row.
    */
   const needsMe = {
-    sort: "kind",
     touched: loadTouched(),
     statuses: new Map(),
     acting: false,
@@ -3315,59 +3223,11 @@
     return one.kind === "review" && txt(one.entryId) !== "" && reviewNumber(one) !== null;
   }
 
-  /** The chip the address names on the Needs me screen, All on any other screen or where it names none the list knows. */
-  function chipOf() {
-    const at = screen === "needs-me" ? routeOf(window.location) : null;
-    const id = at === null ? null : at.query.chip;
-    return CHIPS.find((one) => one.id === id) ?? CHIPS[0];
-  }
-
-  /** The Needs me query for a chip and a selected row key, the chip left out where it is All. */
-  function needsQuery(chip, rowKey) {
-    const query = {};
-    if (rowKey !== null) query.item = rowKey;
-    if (chip.id !== "all") query.chip = chip.id;
-    return query;
-  }
-
-  /** The items a chip lists, in the order drawn, less any delivered from this reading and any being dismissed. */
-  function listedItems(view, chip) {
-    return chip.groups.flatMap((name) => sortedItems(groupItems(view, name))).filter((one) => !deliveredIn(view, one) && !dismissing(one));
-  }
-
   /** The words beside an item once its act is answered; a status the table lacks is named as the broker said it. */
   function actWords(status, act, item) {
     if (status === "delivered") return DELIVERED_WORDS[act] + ", sent to " + txt(item.repo);
     if (status === "changed" && item.kind === "blocked") return BLOCK_CHANGED_WORDS;
     return Object.prototype.hasOwnProperty.call(ACT_WORDS, status) ? ACT_WORDS[status] : "the broker answered " + status + ", left open";
-  }
-
-  /** The items of one group, each an object. */
-  function groupItems(view, name) {
-    const groups = view.groups !== null && typeof view.groups === "object" ? view.groups : {};
-    return list(groups[name]).filter((item) => item !== null && typeof item === "object");
-  }
-
-  /**
-   * The group's items in the chosen order. By kind and by age are both oldest first with undated items
-   * last, so an ask that arrives on a poll lands after those drawn and none moves down under a tap;
-   * blocking first keeps age within each half.
-   */
-  function sortedItems(items) {
-    const indexed = items.map((item, index) => ({ item, index }));
-    const byAge = (a, b) => {
-      const x = openedOf(a.item);
-      const y = openedOf(b.item);
-      if (x !== y) {
-        if (x === null) return 1;
-        if (y === null) return -1;
-        return x - y;
-      }
-      return a.index - b.index;
-    };
-    if (needsMe.sort === "age" || needsMe.sort === "kind") indexed.sort(byAge);
-    else if (needsMe.sort === "blocking") indexed.sort((a, b) => (b.item.blocking === true) - (a.item.blocking === true) || byAge(a, b));
-    return indexed.map((one) => one.item);
   }
 
   /** An ask the broker can agree to: it names its lineage and id, and carries a recommendation. */
@@ -3571,7 +3431,7 @@
   }
 
   /**
-   * Dismisses an item from the Needs me list with Undo: the item leaves the list and the counts at once,
+   * Dismisses an item from the Today list with Undo, or marks an approve item Done: the item leaves the list and the counts at once,
    * and a toast names it with Undo for `UNDO_MS`. Its Dismiss is posted when the toast expires, never
    * before; Undo restores it and posts nothing. A second Dismiss while a toast is up posts the first at
    * once and starts its own toast. Nothing posts from an unload, so an item whose page closes during its
@@ -3586,9 +3446,11 @@
     const pending = { key: itemKey(one), item: one, timer: null, toast: null };
     needsMe.pending = pending;
     pending.timer = setTimeout(() => postDismiss(pending), UNDO_MS);
-    if (screen === "needs-me" && item === itemRowKey(one)) go(routeTo("needs-me", needsQuery(chipOf(), null)), true);
+    if (screen === "today" && item === itemRowKey(one)) go(routeTo("today", {}), true);
     else redrawNeeds();
-    pending.toast = showToast("Dismissed " + dismissHeadline(one) + ". It stays open if this page closes now.", null, { words: "Undo", run: () => undoDismiss(pending) });
+    // An approve item's Dismiss is its Done, so the toast names the act the operator tapped.
+    const done = one.kind === "review" ? "Done " : "Dismissed ";
+    pending.toast = showToast(done + dismissHeadline(one) + ". It stays open if this page closes now.", null, { words: "Undo", run: () => undoDismiss(pending) });
   }
 
   /**
@@ -3628,9 +3490,10 @@
     }
     // The broker's word is the one sendAct set and captured before its own redraw, which drops the words of an item the reading no longer holds.
     const words = took ? null : said.words ?? unconfirmed(null, "dismiss");
-    if (!took && screen === "needs-me" && item === null) go(routeTo("needs-me", needsQuery(chipOf(), itemRowKey(pending.item))), true);
+    if (!took && screen === "today" && item === null) go(routeTo("today", todayQuery(itemRowKey(pending.item))), true);
     else redrawNeeds();
-    if (words !== null) showDismissFailure("Dismiss of " + dismissHeadline(pending.item) + " not done: " + words + ".");
+    const failure = pending.item.kind === "review" ? "Done on " + dismissHeadline(pending.item) + " did not take: " : "Dismiss of " + dismissHeadline(pending.item) + " not done: ";
+    if (words !== null) showDismissFailure(failure + words + ".");
   }
 
   /** How many code points of a worker's text a Discuss draft quotes, the broker's own bound on every text a line quotes. */
@@ -3785,7 +3648,7 @@
    * read starts, so a draw made meanwhile shows it reading, and the draw after the reads is made only
    * while the shell is still on the screen visit that started them. An answer that lands after the
    * entry was dropped or read again is dropped. A Context disclosure holds its reads in
-   * `needsMe.context`, and the Needs me detail pane its own in `needsMe.detail`. A read again after a
+   * `needsMe.context`, and the Today detail pane its own in `needsMe.detail`. A read again after a
    * failure passes the failed entry as `prior`, whose ask and lines the new entry keeps while it reads
    * and wherever its own read of either fails, so what was read stays drawn rather than reading again.
    */
@@ -3931,13 +3794,6 @@
     const tags = [h("span", "tag tag-blue", "decision")];
     if (one.blocking === true) tags.push(h("span", "tag tag-bad", "blocking"));
     return tags;
-  }
-
-  /** What a list row says of an item: a review's pull request number and plan title, any other item's text. */
-  function rowText(one) {
-    if (one.kind !== "review") return txt(one.text);
-    const number = reviewNumber(one);
-    return (number === null ? "" : "PR " + number + ": ") + txt(one.title);
   }
 
   /** Whether the item reads a Context: an ask or a blocked run naming its session and its id, the items whose session holds the conversation. */
@@ -4111,45 +3967,11 @@
     return number === null ? null : h("span", "nm-pr", "PR " + number, "pr|" + key);
   }
 
-  /**
-   * A review in the detail pane: the session with its kind and ready age, the plan title as the heading,
-   * the meta line, then Open PR and Dismiss. Open PR is `pullRequestPart`'s: a link to the entry's pull
-   * request URL, "PR <number>" as text with a number and no link, and nothing with neither. Dismiss
-   * writes the review's handled mark, keyed by the pull request number, so it is drawn only where the
-   * number is one the mark can take. Nothing here merges: the pull request is the operator's to merge
-   * by hand.
-   */
-  function reviewItem(one, now) {
-    const box = h("div", "nm-item nm-detail", null, itemRowKey(one));
-    const key = itemKey(one);
-    if (needsMe.out.has(key)) box.classList.add("nm-acting");
-    const head = h("div", "nm-head");
-    const who = h("span", "nm-who", txt(one.repo));
-    for (const tag of kindTags(one)) who.append(" ", tag);
-    const ready = openedOf(one);
-    head.append(who, clockText("span", "nm-age", ready === null ? "" : span(now - ready)));
-    box.append(head, h("h2", "nm-heading", txt(one.title), "heading"), metaLine(one, undefined, now));
-    const controls = h("div", "nm-controls nm-acts", null, "controls");
-    const pr = pullRequestPart(one, key);
-    if (pr !== null) controls.append(pr);
-    if (dismissable(one)) controls.append(keyHint(actButton("nm-dismiss", "Dismiss", "dismiss|" + key, () => dismissLater(one)), "X"));
-    controls.append(h("span", "nm-hint", "J / K to move between items", "hint"));
-    box.append(controls);
-    const words = needsMe.statuses.get(key);
-    if (words !== undefined) box.append(statusLine(words));
-    return box;
-  }
-
   /** What stands where a delivered item was until the next reading: the act's word and the session it went to. */
   function deliveredLine(item) {
     const line = h("div", "nm-item nm-sent", needsMe.statuses.get(itemKey(item)) ?? "", itemRowKey(item));
     line.setAttribute("role", "status");
     return line;
-  }
-
-  /** The path that selects an item in the Needs me list, its row key as the `item` query value beside the chip shown, built through the route table. */
-  function itemPath(one) {
-    return pathOf(routeTo("needs-me", needsQuery(chipOf(), itemRowKey(one))));
   }
 
   /**
@@ -4200,153 +4022,120 @@
   }
 
   /**
-   * One row of the Needs me list: who and the kind tags, the age, and the headline, as a link that
-   * selects the item in the detail pane, marked `sel` where it is the one the detail pane shows. A row
-   * whose Agree is processing carries the word, and a row that takes Dismiss takes the phone's swipe.
+   * Each Do first kind's tag on a card and in the detail: the kind word in capitals and its tone. A kind
+   * off this table draws its own word in capitals in the plain tone.
    */
-  function needsRow(one, now, selectedKey) {
+  const TODAY_KINDS = {
+    unblock: ["UNBLOCK", "tag tag-bad"],
+    approve: ["APPROVE", "tag tag-ok"],
+    decide: ["DECIDE", "tag tag-blue"],
+    answer: ["ANSWER", "tag"],
+  };
+
+  /** The line under an approve item's brief, naming the order the ready pull requests land in. */
+  const READY_ORDER_WORDS = "Approve items top to bottom; each sits on one above it or on main.";
+
+  /** A Do first item's kind tag, set as text. */
+  function todayTag(entry) {
+    const kind = txt(entry.kind);
+    const [words, cls] = Object.prototype.hasOwnProperty.call(TODAY_KINDS, kind) ? TODAY_KINDS[kind] : [kind.toUpperCase(), "tag"];
+    return h("span", cls, words);
+  }
+
+  /** The Today reading's Do first items, in the view's order, each carrying the queue item its acts post. */
+  function todayItems(view) {
+    return objects(view.first).filter((entry) => isObject(entry.item));
+  }
+
+  /** The Do first items the list draws as cards: every one less any delivered from this reading and any being dismissed. */
+  function openToday(view) {
+    return todayItems(view).filter((entry) => !deliveredIn(view, entry.item) && !dismissing(entry.item));
+  }
+
+  /** The Do first item the detail shows: the one the address selects, or the first card where it selects none. */
+  function chosenToday(view, selectedKey) {
+    if (selectedKey === null) return openToday(view)[0];
+    return todayItems(view).find((entry) => itemRowKey(entry.item) === selectedKey && !dismissing(entry.item));
+  }
+
+  /** The Today query for a selected row key, empty where none is selected. */
+  function todayQuery(rowKey) {
+    return rowKey === null ? {} : { item: rowKey };
+  }
+
+  /** The path that selects an item in the Today list, its row key as the `item` query value, built through the route table. */
+  function itemPath(one) {
+    return pathOf(routeTo("today", todayQuery(itemRowKey(one))));
+  }
+
+  /**
+   * One Do first card: the kind tag, the who line and the number, then the title and the effect
+   * sentence, as a link that selects the item in the detail pane, marked `sel` where it is the one the
+   * detail pane shows and `first` where it is number 1. A card whose Agree is processing carries the
+   * word, and a card that takes Dismiss, or Done for an approve item, takes the phone's swipe.
+   */
+  function todayCard(entry, selectedKey) {
+    const one = entry.item;
     const key = itemRowKey(one);
-    const row = link(key === selectedKey ? "nm-row sel" : "nm-row", itemPath(one), null, key);
+    const number = num(entry.number);
+    const row = link("nm-row td-card" + (number === 1 ? " first" : "") + (key === selectedKey ? " sel" : ""), itemPath(one), null, key);
     if (key === selectedKey) row.setAttribute("aria-current", "true");
     const processing = needsMe.processing.has(itemKey(one));
     if (needsMe.out.has(itemKey(one)) || processing) row.classList.add("nm-acting");
-    const head = h("div", "nm-head");
-    const who = h("span", "nm-who", one.repo ? txt(one.repo) : "Hands");
-    const opened = openedOf(one);
-    for (const tag of kindTags(one)) who.append(" ", tag);
-    if (processing) who.append(" ", h("span", "tag tag-blue", "processing"));
-    head.append(who, clockText("span", "nm-age", opened === null ? "" : span(now - opened)));
-    row.append(head, h("div", "nm-text", cutPoints(rowText(one), HEADLINE_POINTS)));
+    const head = h("div", "td-head");
+    head.append(todayTag(entry));
+    if (processing) head.append(h("span", "tag tag-blue", "processing"));
+    head.append(h("span", "td-who", txt(entry.who)), h("span", "td-num", number === null ? "" : String(number)));
+    row.append(head, h("div", "td-title", cutPoints(txt(entry.title), HEADLINE_POINTS)), h("div", "td-effect", txt(entry.effect)));
     if (dismissable(one)) swipeable(row, one);
     return row;
   }
 
-  /**
-   * One group of the list: its label with a count and an optional note, then its rows in the chosen
-   * order, or a line saying there are none. An item whose line was delivered from this reading is
-   * out of the count, and its words stand in its place; an item being dismissed is drawn nowhere.
-   */
-  function needsGroup(view, name, words, note, now, attn, selectedKey) {
-    const items = sortedItems(groupItems(view, name)).filter((one) => !dismissing(one));
-    const open = items.filter((one) => !deliveredIn(view, one));
-    const section = h("section", "section", null, "group:" + name);
-    section.setAttribute("aria-label", words);
-    const head = cardHead(words, open.length, "h2");
-    if (note) head.append(h("div", "meta", note));
-    section.append(head);
-    const card = h("div", attn && open.length > 0 ? "card attn" : "card");
-    card.dataset.key = name;
-    if (items.length === 0) card.append(h("div", "nm-none", "Nothing here."));
-    for (const one of items) card.append(deliveredIn(view, one) ? deliveredLine(one) : needsRow(one, now, selectedKey));
-    section.append(card);
-    return section;
-  }
-
-  /** The open items the chip shown lists, in the order the list draws them. */
-  function openItems(view) {
-    return listedItems(view, chipOf());
-  }
-
-  /** The item the detail shows: the one the address selects, found in any group, or the chip's first open item where it selects none. */
-  function chosenItem(view, selectedKey) {
-    if (selectedKey === null) return openItems(view)[0];
-    return ALL_GROUPS.flatMap((name) => groupItems(view, name)).find((one) => itemRowKey(one) === selectedKey && !dismissing(one));
-  }
+  /** The dot a Running row carries for its worker's state: working green, asking amber, paused hollow. */
+  const RUNNING_DOTS = { working: "green", asking: "amber", paused: "hollow" };
 
   /**
-   * The detail pane's item: the one the address selects, or the chip's first row where it selects
-   * none, drawn as `needsItem` draws an ask, a blocked run and a hands item and `reviewItem` a review.
-   * A selected item the reading no longer holds draws a line saying so, and a reading with no open
-   * item draws the list's own empty line.
+   * One Running row: the worker's state dot, its name and its plan title, then the section it is on and
+   * how long since its last turn, as a link to the Workers screen with the worker selected.
    */
-  function needsDetail(view, now, selectedKey) {
-    const chosen = chosenItem(view, selectedKey);
-    if (chosen === undefined) return h("div", "nm-none", selectedKey === null ? "Nothing here." : "This item is no longer in the reading.");
-    if (deliveredIn(view, chosen)) return deliveredLine(chosen);
-    return chosen.kind === "review" ? reviewItem(chosen, now) : needsItem(chosen, now);
+  function runningRow(one, now) {
+    const name = txt(one.name);
+    const row = link("td-row", workerPath(name), null, "running:" + name);
+    const left = h("div", "td-l");
+    const state = txt(one.state);
+    left.append(dot(Object.prototype.hasOwnProperty.call(RUNNING_DOTS, state) ? RUNNING_DOTS[state] : "hollow"), h("b", null, name));
+    const title = txt(one.title);
+    left.append(" · " + (title !== "" ? title : state));
+    if (title !== "" && (state === "asking" || state === "paused")) left.append(" · " + state);
+    const right = h("div", "td-r");
+    const step = isObject(one.step) && num(one.step.section) !== null && num(one.step.sectionCount) !== null ? one.step : null;
+    if (step !== null) right.append(step.section + " of " + step.sectionCount);
+    const turn = parse(one.lastTurnAt);
+    if (turn !== null) right.append(step !== null ? " · " : "", clockText("span", null, span(now - turn)));
+    row.append(left, right);
+    return row;
   }
 
-  /** Each group's label, its note, and whether a group with items is edged for attention. */
-  const GROUP_WORDS = {
-    blocked: ["Blocked on you", null, true],
-    ask: ["Asks", "each proceeds on its recommendation", false],
-    review: ["Reviews", "pull requests ready for you; nothing here merges", false],
-    hands: ["Your hands", null, false],
-  };
-
-  /** Shows a chip's items: the address takes the chip with no row selected, so the detail shows the chip's first item and a reload keeps the chip. */
-  function chooseChip(chip) {
-    go(routeTo("needs-me", needsQuery(chip, null)), screen === "needs-me");
+  /** One Finished row: the plan's title, or its file where it has none, and the worker, then the time it finished. */
+  function finishedRow(one, now) {
+    const row = h("div", "td-row", null, "finished:" + txt(one.name) + ":" + txt(one.plan));
+    const left = h("div", "td-l");
+    const title = txt(one.title);
+    left.append(title !== "" ? title : txt(one.plan), " · ", h("b", null, txt(one.name)));
+    const at = parse(one.at);
+    row.append(left, h("div", "td-r", at === null ? "" : dayClock(at, now)));
+    return row;
   }
 
   /**
-   * The Needs me list pane: the title with the open count and the oldest age, the chips with the count
-   * each lists, the sort buttons, the groups the chip shows, the source line and, where the chip lists
-   * the asks, the batch bar. The ask screen draws the same list beside its ask, from the Needs me
-   * reading it takes each pass, under All.
+   * The batch Agree row: one button agreeing with every untouched recommendation among the asks, in the
+   * list's order, up to the view's cap, naming how many it sends and how many of them block and are
+   * refused.
    */
-  function needsList(view, now, selectedKey) {
-    const out = h("div", "nm", null, "nm");
-    const chip = chipOf();
-    const all = listedItems(view, CHIPS[0]);
-    const dated = all.map(openedOf).filter((at) => at !== null);
-
-    const top = h("div", "top", null, "top");
-    const row = h("div", "top-row");
-    const title = h("h1", null, "Needs me");
-    title.append(h("span", "nm-count", " · " + all.length));
-    row.append(title, stamp(view));
-    top.append(row);
-    const sub = h("p", "sub", null, "sub");
-    if (dated.length > 0) sub.append("oldest ", clockText("span", null, span(now - Math.min.apply(null, dated))));
-    sub.append(h("span", "nm-swipe-hint", (dated.length > 0 ? " · " : "") + "swipe a card left to dismiss it"));
-    top.append(sub);
-    out.append(top);
-
-    const chips = h("div", "chips nm-chips", null, "chips");
-    chips.setAttribute("role", "group");
-    chips.setAttribute("aria-label", "Show");
-    for (const one of CHIPS) {
-      const on = one.id === chip.id;
-      const button = h("button", on ? "chip on" : "chip", one.words + " ");
-      button.append(h("span", "nm-chip-n", String(listedItems(view, one).length)));
-      button.type = "button";
-      button.setAttribute("aria-pressed", on ? "true" : "false");
-      button.dataset.key = "chip|" + one.id;
-      listen(button, "click", () => chooseChip(one));
-      chips.append(button);
-    }
-    out.append(chips);
-
-    const sorts = h("div", "nm-sort");
-    sorts.setAttribute("role", "group");
-    sorts.setAttribute("aria-label", "Order");
-    for (const sort of SORTS) {
-      const button = h("button", sort.id === needsMe.sort ? "nm-sort-button on" : "nm-sort-button", sort.words);
-      button.type = "button";
-      button.setAttribute("aria-pressed", sort.id === needsMe.sort ? "true" : "false");
-      button.dataset.key = "sort|" + sort.id;
-      listen(button, "click", () => {
-        needsMe.sort = sort.id;
-        redrawNeeds();
-      });
-      sorts.append(button);
-    }
-    out.append(sorts);
-
-    // The rollout rows stand under All alone, before the hands group, as no chip names them.
-    const rolloutNeeds = chip.id === "all" ? rolloutGroup(view) : null;
-    const groups = h("div", "nm-groups", null, "groups");
-    for (const name of chip.groups) {
-      if (name === "hands" && rolloutNeeds !== null) groups.append(rolloutNeeds);
-      const [words, note, attn] = GROUP_WORDS[name];
-      groups.append(needsGroup(view, name, words, note, now, attn, selectedKey));
-    }
-    out.append(groups, sources(view, ["roster", "queues", "ledger", "events", "registry", "usage", "rollout"]));
-    if (chip.groups.indexOf("ask") < 0) return out;
-
-    // The batch is over the asks in the order drawn that the operator has not touched.
-    const untouched = sortedItems(groupItems(view, "ask")).filter((item) => agreeable(item) && !needsMe.touched.has(needsKey(item)) && !dismissing(item));
+  function batchBar(view) {
+    const untouched = todayItems(view)
+      .map((entry) => entry.item)
+      .filter((item) => agreeable(item) && !needsMe.touched.has(needsKey(item)) && !dismissing(item));
     const bar = h("div", "nm-batch", null, "batch-bar");
     const batch = h("button", "nm-batch-button");
     batch.type = "button";
@@ -4364,76 +4153,237 @@
           (blocking > 0 ? " (" + blocking + " blocking, which " + (blocking === 1 ? "is" : "are") + " refused)" : "");
     listen(batch, "click", () => sendBatch(untouched, cap));
     bar.append(batch, h("div", "meta nm-batch-note", "Each lands as your word with the time. A blocking ask is refused and stays open for you."));
-    out.append(bar);
+    return bar;
+  }
+
+  /**
+   * The Today list pane: the heading with its as-of time, the lede, the numbered Do first cards, the
+   * batch Agree row, Running, Finished, the health line linking to the health screen, and the read
+   * times. An item whose line was delivered from this reading draws its words in its place, and an item
+   * being dismissed is drawn nowhere. The ask screen draws the same list beside its ask.
+   */
+  function todayList(view, now, selectedKey) {
+    const out = h("div", "nm td", null, "today");
+
+    const top = h("div", "top", null, "top");
+    const row = h("div", "top-row");
+    row.append(h("h1", null, "Today"), stamp(view));
+    top.append(row);
+    const lede = h("p", "sub td-lede", txt(view.lede), "lede");
+    lede.append(h("span", "nm-swipe-hint", " Swipe a card left to dismiss it, or to mark an approve item done."));
+    top.append(lede);
+    out.append(top);
+
+    const first = h("section", "section", null, "first");
+    first.setAttribute("aria-label", "Do first");
+    const firstHead = cardHead("Do first", null, "h2");
+    firstHead.append(h("div", "meta", "top one unblocks the most"));
+    first.append(firstHead);
+    const cards = h("div", "td-cards", null, "cards");
+    const drawn = todayItems(view).filter((entry) => !dismissing(entry.item));
+    if (drawn.length === 0) cards.append(h("div", "nm-none", "Nothing here."));
+    for (const entry of drawn) cards.append(deliveredIn(view, entry.item) ? deliveredLine(entry.item) : todayCard(entry, selectedKey));
+    first.append(cards);
+    out.append(first, batchBar(view));
+
+    const running = objects(view.running);
+    const runningBox = h("section", "section", null, "running");
+    runningBox.setAttribute("aria-label", "Running");
+    runningBox.append(cardHead("Running", running.length, "h2"));
+    const runningRows = h("div", "td-rows", null, "running-rows");
+    if (running.length === 0) runningRows.append(h("div", "nm-none", "No worker is running."));
+    for (const one of running) runningRows.append(runningRow(one, now));
+    runningBox.append(runningRows);
+    out.append(runningBox);
+
+    const finished = objects(view.finished);
+    const finishedBox = h("section", "section", null, "finished");
+    finishedBox.setAttribute("aria-label", "Finished");
+    const finishedHead = cardHead("Finished", finished.length, "h2");
+    finishedHead.append(h("div", "meta", "last 48 hours"));
+    finishedBox.append(finishedHead);
+    const finishedRows = h("div", "td-rows", null, "finished-rows");
+    if (finished.length === 0) finishedRows.append(h("div", "nm-none", "Nothing finished in the last 48 hours."));
+    for (const one of finished) finishedRows.append(finishedRow(one, now));
+    finishedBox.append(finishedRows);
+    out.append(finishedBox);
+
+    const word = txt(view.health);
+    const health = link("td-health", SCREEN_PATHS.health, null, "health");
+    health.append("Health: ", word === "" ? "no reading yet" : h("span", "badge " + verdictTone(word), word), chevron());
+    out.append(health, sources(view, ["roster", "queues", "ledger", "events", "registry", "usage"]));
     return out;
   }
 
   /**
-   * The Needs me screen: the list pane, and the detail pane holding the item the address selects
-   * with its acts, as the sheet on a phone. The detail reads the shown item's Context the first time
-   * it draws the item, and again on a newer reading where that read failed, and drops what it read for
-   * any other item.
+   * Reads the plan an approve item names, through the plan screen's own reading, into `into` under the
+   * item's key as `{ loading, plan, failure }`, and draws again once it lands on the visit it was read
+   * on. The plan reading takes the configured root, the item's `root`, the repository's folder. A read
+   * again after a failure passes the failed entry as `prior`, whose failure the new entry keeps while
+   * it reads, so the failure line stays drawn rather than reading again. A read that lands clears the
+   * failure, and one that fails again replaces it with its own. An item naming no plan or no folder
+   * settles with no plan and no failure and reads nothing, so a newer reading, which reads again only
+   * after a failure, leaves it settled, and the detail leaves its What it does section out on purpose,
+   * since there is no brief to read and no read to fail.
    */
-  function renderNeedsMe(view) {
+  async function readPlanBrief(entry, into, prior = null) {
+    const one = entry.item;
+    const key = itemKey(one);
+    const here = visit;
+    const held = { loading: true, plan: null, failure: prior === null ? null : prior.failure };
+    into.set(key, held);
+    const root = txt(entry.root);
+    if (root === "" || txt(one.planPath) === "") {
+      held.loading = false;
+      return;
+    }
+    try {
+      const plan = await fetchView(planUrlOf(root, txt(one.planPath)));
+      if (into.get(key) !== held) return;
+      held.failure = null;
+      if (isObject(plan)) held.plan = plan;
+    } catch (error) {
+      if (into.get(key) !== held) return;
+      held.failure = error instanceof Unreadable ? error.message : "the reading could not be fetched";
+    }
+    held.loading = false;
+    if (here === visit) redrawNeeds();
+  }
+
+  /**
+   * An approve item, a review, in the detail pane: the kind tag and who line with the ready age, the
+   * plan title as the heading and the effect under it, the plan's brief under "What it does" where the
+   * plan reading carries one, or a line naming why the read failed, which stays drawn while a read
+   * again is in flight, else "reading" while the first read is, the ready line naming the order
+   * the items land in, then Open PR and Done, Done under X. Open PR is `pullRequestPart`'s checked
+   * link. Done writes the review's handled mark through the review Dismiss's post, after the same Undo
+   * toast, so it is drawn only where the pull request number is one the mark can take. Nothing here
+   * merges: the pull request is the operator's to approve on GitHub.
+   */
+  function approveItem(entry, held, now) {
+    const one = entry.item;
+    const key = itemKey(one);
+    const acts = list(entry.acts);
+    const box = h("div", "nm-item nm-detail", null, itemRowKey(one));
+    if (needsMe.out.has(key)) box.classList.add("nm-acting");
+    const head = h("div", "nm-head");
+    const who = h("span", "nm-who");
+    who.append(todayTag(entry), " ", txt(entry.who));
+    const ready = openedOf(one);
+    head.append(who, clockText("span", "nm-age", ready === null ? "" : span(now - ready)));
+    box.append(head, h("h2", "nm-heading", txt(one.title), "heading"), h("p", "td-effect", txt(entry.effect), "effect"));
+    const brief = held !== undefined && isObject(held.plan) ? briefCard(held.plan.brief) : null;
+    const failed = held !== undefined && held.failure !== null;
+    if (brief !== null || failed || held === undefined || held.loading) {
+      const what = detailSection("What it does", "what");
+      if (failed) what.append(h("p", "meta nm-context-failed", "The plan's brief could not be read: " + held.failure + "."));
+      else what.append(brief ?? h("p", "meta", "reading"));
+      box.append(what);
+    }
+    const line = h("p", "meta td-ready", null, "ready");
+    if (ready !== null) line.append("Ready ", clockText("span", null, span(now - ready)), " ago. ");
+    line.append(READY_ORDER_WORDS);
+    box.append(line);
+    const controls = h("div", "nm-controls nm-acts", null, "controls");
+    const pr = acts.includes("open-pr") ? pullRequestPart(one, key) : null;
+    if (pr !== null) controls.append(pr);
+    if (acts.includes("done") && dismissable(one)) controls.append(keyHint(actButton("nm-done", "Done", "done|" + key, () => dismissLater(one)), "X"));
+    controls.append(h("span", "nm-hint", "J / K to move between items", "hint"));
+    box.append(controls);
+    const words = needsMe.statuses.get(key);
+    if (words !== undefined) box.append(statusLine(words));
+    return box;
+  }
+
+  /**
+   * The detail pane's item: the one the address selects, or the first card where it selects none, an
+   * approve item drawn by `approveItem` and every other kind as `needsItem` draws it. A selected item
+   * the reading no longer holds draws a line saying so, and a reading with no open item draws the
+   * list's own empty line.
+   */
+  function todayDetail(view, now, selectedKey) {
+    const chosen = chosenToday(view, selectedKey);
+    if (chosen === undefined) return h("div", "nm-none", selectedKey === null ? "Nothing here." : "This item is no longer in the reading.");
+    const one = chosen.item;
+    if (deliveredIn(view, one)) return deliveredLine(one);
+    if (chosen.kind === "approve" && one.kind === "review") return approveItem(chosen, needsMe.detail.get(itemKey(one)), now);
+    return needsItem(one, now);
+  }
+
+  /**
+   * The Today screen: the list pane, and the detail pane holding the item the address selects with its
+   * acts, as the sheet on a phone. The detail reads the shown item's Context, or an approve item's plan,
+   * the first time it draws the item, and again on a newer reading where that read failed, and drops
+   * what it read for any other item.
+   */
+  function renderToday(view) {
     const now = nowOf(view);
     // A delivered item's hide holds for the reading it was drawn from alone, so a newer reading decides again.
     for (const [key, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(key);
     // An item's words and Context go with the item, so a key no item in this reading holds is dropped.
-    const held = new Set(ALL_GROUPS.flatMap((name) => groupItems(view, name)).map(itemKey));
+    const held = new Set(todayItems(view).map((entry) => itemKey(entry.item)));
     for (const key of needsMe.statuses.keys()) if (!held.has(key)) needsMe.statuses.delete(key);
     for (const key of needsMe.context.keys()) if (!held.has(key)) needsMe.context.delete(key);
     // An Agree is processing until a reading no longer carries its item.
     for (const key of needsMe.processing) if (!held.has(key)) needsMe.processing.delete(key);
-    const chosen = chosenItem(view, item);
-    const shownKey = chosen === undefined ? null : itemKey(chosen);
+    const chosen = chosenToday(view, item);
+    const one = chosen === undefined ? undefined : chosen.item;
+    const shownKey = one === undefined ? null : itemKey(one);
     for (const key of needsMe.detail.keys()) if (key !== shownKey) needsMe.detail.delete(key);
-    // A read that failed is read again on a newer reading, once per reading, so a broker that recovers fills the detail; what it had read stays drawn meanwhile.
+    // A read that failed is read again on a newer reading, once per reading and never while one is loading, so a broker that recovers fills the detail.
+    // The failed entry passes to the new read as its prior, so what it had read and the failure line stay drawn while the read is in flight.
     const shownHeld = shownKey === null ? undefined : needsMe.detail.get(shownKey);
     const failed = shownHeld !== undefined && !shownHeld.loading && shownHeld.failure !== null && shownHeld.reading !== view;
     if (failed) needsMe.detail.delete(shownKey);
-    if (chosen !== undefined && contextual(chosen) && !needsMe.detail.has(shownKey)) {
-      readContext(chosen, true, needsMe.detail, failed ? shownHeld : null);
+    if (one !== undefined && contextual(one) && !needsMe.detail.has(shownKey)) {
+      readContext(one, true, needsMe.detail, failed ? shownHeld : null);
+      needsMe.detail.get(shownKey).reading = view;
+    } else if (one !== undefined && chosen.kind === "approve" && one.kind === "review" && !needsMe.detail.has(shownKey)) {
+      readPlanBrief(chosen, needsMe.detail, failed ? shownHeld : null);
       needsMe.detail.get(shownKey).reading = view;
     }
-    // The row the detail shows is the one marked in the list: the selected item, else the chip's first open row.
-    const first = openItems(view)[0];
-    const shown = item !== null ? item : first === undefined ? null : itemRowKey(first);
+    // The card the detail shows is the one marked in the list: the selected item, else the first open card.
+    const first = openToday(view)[0];
+    const shown = item !== null ? item : first === undefined ? null : itemRowKey(first.item);
     const out = document.createDocumentFragment();
-    const listPath = pathOf(routeTo("needs-me", needsQuery(chipOf(), null)));
-    out.append(pane("list", needsList(view, now, shown)), detailPane(listPath, needsDetail(view, now, item)));
+    out.append(pane("list", todayList(view, now, shown)), detailPane(SCREEN_PATHS.today, todayDetail(view, now, item)));
     return out;
   }
 
   /**
-   * The inbox's keys on the Needs me screen: A agrees, R opens the Answer box, D discusses and X
-   * dismisses the item the detail shows, each only where its button is drawn live for that item, and
-   * J and K move the selection down and up the list the chip shows, moving the address as a row tap
-   * does. A key pressed in a field, the Answer box among them, held with Alt, Ctrl, Meta or Shift, or
-   * repeating while held stays the browser's, so typing and its shortcuts never fire an act.
+   * The inbox's keys on the Today screen: A agrees, R opens the Answer box, D discusses and X dismisses
+   * the item the detail shows, each only where its button is drawn live for that item, and on an
+   * approve item X takes Done and D does nothing. J and K move the selection down and up the list, moving the
+   * address as a card tap does. A key pressed in a field, the Answer box among them, held with Alt,
+   * Ctrl, Meta or Shift, or repeating while held stays the browser's, so typing and its shortcuts never
+   * fire an act.
    */
   function inboxKey(event) {
-    if (screen !== "needs-me" || lastView === null) return;
+    if (screen !== "today" || lastView === null) return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat) return;
     if (typedInto(event.target) || typedInto(document.activeElement)) return;
     const letter = typeof event.key === "string" ? event.key.toLowerCase() : "";
     if (letter === "j" || letter === "k") {
-      const rows = openItems(lastView);
+      const rows = openToday(lastView);
       if (rows.length === 0) return;
-      const at = rows.findIndex((one) => itemRowKey(one) === (item ?? itemRowKey(rows[0])));
+      const at = rows.findIndex((entry) => itemRowKey(entry.item) === (item ?? itemRowKey(rows[0].item)));
       const next = at < 0 ? 0 : letter === "j" ? Math.min(rows.length - 1, at + 1) : Math.max(0, at - 1);
       event.preventDefault();
-      go(routeTo("needs-me", needsQuery(chipOf(), itemRowKey(rows[next]))));
+      go(routeTo("today", todayQuery(itemRowKey(rows[next].item))));
       return;
     }
-    const one = chosenItem(lastView, item);
-    if (one === undefined || deliveredIn(lastView, one)) return;
+    const chosen = chosenToday(lastView, item);
+    if (chosen === undefined || deliveredIn(lastView, chosen.item)) return;
+    const one = chosen.item;
     // The buttons' own rule: every act waits while one is out, and a processing item takes none.
     if (needsMe.acting || needsMe.processing.has(itemKey(one))) return;
+    const done = chosen.kind === "approve" && one.kind === "review" && list(chosen.acts).includes("done");
     let act = null;
     if (letter === "a" && agreeable(one)) act = () => sendAgree(one);
     else if (letter === "r" && one.kind === "ask" && contextual(one)) act = () => openCorrect(one);
+    else if (letter === "x" && done && dismissable(one)) act = () => dismissLater(one);
     else if (letter === "d" && contextual(one)) act = () => discuss(one);
-    else if (letter === "x" && dismissable(one)) act = () => dismissLater(one);
+    else if (letter === "x" && dismissable(one) && one.kind !== "review") act = () => dismissLater(one);
     if (act === null) return;
     event.preventDefault();
     act();
@@ -4755,14 +4705,14 @@
     return params === null ? null : "/web/ask?repo=" + encodeURIComponent(params.repo) + "&id=" + encodeURIComponent(params.id);
   }
 
-  /** The Needs me reading the ask page steps through, taken once per pass beside the ask's own; null until one arrives. */
-  let askNeeds = null;
+  /** The Today reading the ask page steps through, taken once per pass beside the ask's own; null until one arrives. */
+  let askToday = null;
 
-  /** The step row's ends and count from the last Needs me reading that held the ask on this page, by the ask's key. */
+  /** The step row's ends and count from the last Today reading that held the ask on this page, by the ask's key. */
   let askStepHeld = null;
 
   /**
-   * The row that steps to the previous and next ask: the Needs me page's Asks in its default order,
+   * The row that steps to the previous and next ask: the asks in the Today list's order,
    * the current ask found by its repo and id, and "n of N" between the two links. An end with nowhere
    * to go is a disabled mark, never a link. Once a reading has held the ask, a later one that does not,
    * as after Agree or Dismiss here, draws the row that reading gave with its count, and an end whose
@@ -4772,8 +4722,10 @@
    * reading has arrived, or where neither the list nor the remembered row has an ask.
    */
   function askStep(item) {
-    if (askNeeds === null) return null;
-    const asks = sortedItems(groupItems(askNeeds, "ask")).filter((one) => askHrefOf(one) !== null);
+    if (askToday === null) return null;
+    const asks = todayItems(askToday)
+      .map((entry) => entry.item)
+      .filter((one) => askHrefOf(one) !== null);
     const key = itemKey(item);
     const at = asks.findIndex((one) => itemKey(one) === key);
     let place;
@@ -4824,31 +4776,31 @@
     go(at);
   }
 
-  /** The ask screen's list pane: the Needs me list from the reading taken each pass, with this ask's row selected, or a line until one arrives. */
+  /** The ask screen's list pane: the Today list from the reading taken each pass, with this ask's row selected, or a line until one arrives. */
   function askList(selectedKey) {
-    return askNeeds === null ? h("p", "muted", "Reading Needs me") : needsList(askNeeds, nowOf(askNeeds), selectedKey);
+    return askToday === null ? h("p", "muted", "Reading Today") : todayList(askToday, nowOf(askToday), selectedKey);
   }
 
   /**
    * One ask: who asked and how long ago, the question, the recommendation, the brief, the plan, the
    * thread, the step to the previous and next ask, then Agree, Answer and Dismiss with a Context of
-   * the session's lines. They are the Needs me page's acts, with the same bodies, words, touched mark
+   * the session's lines. They are the Today page's acts, with the same bodies, words, touched mark
    * and inline Answer box, so the batch there skips an ask answered here. A handled ask, one whose
    * line a page delivered, draws the act and its time in place of the buttons, since every other page
-   * hides it until its session closes or raises it. The ask is the detail pane, with the Needs me
+   * hides it until its session closes or raises it. The ask is the detail pane, with the Today
    * list beside it and this ask's row selected there.
    */
   function renderAsk(view) {
     const out = document.createDocumentFragment();
     const now = nowOf(view);
-    // The ask in the Needs me item's shape, raise time included, so the shared acts and the touched mark key it the same way and send the version this page drew.
+    // The ask in a Today item's shape, raise time included, so the shared acts and the touched mark key it the same way and send the version this page drew.
     const item = { kind: "ask", repo: txt(view.repo), askId: txt(view.askId), text: txt(view.question), recommend: view.recommend, openedAt: view.openedAt, reraisedAt: view.reraisedAt };
     const key = itemKey(item);
-    // A delivered ask's hide holds for the reading it was drawn from alone, as on the Needs me page.
+    // A delivered ask's hide holds for the reading it was drawn from alone, as on the Today page.
     for (const [held, drawn] of needsMe.delivered) if (drawn !== view) needsMe.delivered.delete(held);
 
     const top = h("div", "top");
-    top.append(back("/", "Standup"));
+    top.append(back(SCREEN_PATHS.standup, "Standup"));
     const row = h("div", "top-row");
     const who = h("h1", null, item.repo);
     if (view.blocking === true) who.append(" ", h("span", "tag", "blocking"));
@@ -4898,7 +4850,7 @@
     } else {
       const acts = h("div", "ask-acts", null, "acts");
       const controls = h("div", "nm-controls ask-controls", null, "controls");
-      // An ask's page state is keyed on its id, so a view with none takes no act and no Context, as on Needs me.
+      // An ask's page state is keyed on its id, so a view with none takes no act and no Context, as on Today.
       if (item.askId !== "") {
         if (agreeable(item)) controls.append(actButton("nm-agree", "Agree", "agree|" + key, () => sendAgree(item)));
         controls.append(actButton("nm-correct", "Answer", "answer|" + key, () => openCorrect(item)));
@@ -4917,8 +4869,8 @@
 
     out.append(sources(view, ["roster", "ledger", "registry"]));
     const frame = document.createDocumentFragment();
-    // The ask's list pane is the Needs me list, so its sheet closes to that list.
-    frame.append(pane("list", askList(itemRowKey(item))), detailPane(SCREEN_PATHS["needs-me"], out));
+    // The ask's list pane is the Today list, so its sheet closes to that list.
+    frame.append(pane("list", askList(itemRowKey(item))), detailPane(SCREEN_PATHS.today, out));
     return frame;
   }
 
@@ -4926,7 +4878,7 @@
   function askGone() {
     const out = document.createDocumentFragment();
     const top = h("div", "top");
-    top.append(back("/", "Standup"));
+    top.append(back(SCREEN_PATHS.standup, "Standup"));
     const row = h("div", "top-row");
     row.append(h("h1", null, "Ask"));
     top.append(row);
@@ -4936,7 +4888,7 @@
     card.append(h("p", null, "This ask is not open. The broker's last reading lists no open ask at this address."));
     out.append(card);
     const frame = document.createDocumentFragment();
-    frame.append(pane("list", askList(null)), detailPane(SCREEN_PATHS["needs-me"], out));
+    frame.append(pane("list", askList(null)), detailPane(SCREEN_PATHS.today, out));
     return frame;
   }
 
@@ -5263,19 +5215,19 @@
    * and plan screens the standup leads to.
    */
   const RAIL = [
-    { screen: "needs-me", glyph: "◉", words: "Needs me", marks: ["needs-me"] },
+    { screen: "today", glyph: "◉", words: "Today", marks: ["today"] },
     { screen: "workers", glyph: "▤", words: "Workers", marks: ["workers"] },
     { screen: "standup", glyph: "⌂", words: "Repos", marks: ["standup", "repo", "plan"] },
     { screen: "health", glyph: "♥", words: "Health", marks: ["health"] },
   ];
 
   /**
-   * The count beside a rail entry, or null for none: Needs me takes the summary's `needsYou`,
+   * The count beside a rail entry, or null for none: Today takes the summary's `needsYou`,
    * Workers the Workers reading's `tiles.working` where the shell holds one, else the number of
    * standup repos working from the standup reading it holds, and Health the capacity verdict word.
    */
   function railCount(entry) {
-    if (entry.screen === "needs-me") {
+    if (entry.screen === "today") {
       const count = isObject(summaryView) ? num(summaryView.needsYou) : null;
       return count === null ? null : String(count);
     }
@@ -5296,14 +5248,14 @@
   }
 
   /**
-   * The rail: the brand, a link to the standup, the four entries with their counts, the entry of the screen drawn marked,
+   * The rail: the brand, a link to the root path and so to Today, the four entries with their counts, the entry of the screen drawn marked,
    * and at the foot the sibling pills above the sandbox's name. On a phone the stylesheet lays it
    * as the bottom tab bar.
    */
   function shellRail() {
     const rail = h("nav", "rail", null, "rail");
     rail.setAttribute("aria-label", "Screens");
-    rail.append(link("brand", SCREEN_PATHS.standup, "Channels", "brand"));
+    rail.append(link("brand", "/", "Channels", "brand"));
     for (const entry of RAIL) {
       const on = entry.marks.includes(screen);
       const nav = link(on ? "nav on" : "nav", SCREEN_PATHS[entry.screen], null, "nav:" + entry.screen);
@@ -5312,7 +5264,7 @@
       const count = railCount(entry);
       // Health's count is the verdict word, marked `n-word`. The folded rail, too narrow for a word, shows the dot beside it
       // instead, in the verdict's tone, and the entry's title carries the word.
-      const kind = entry.screen === "needs-me" && count !== "0" ? "n" : entry.screen === "health" ? "n dim n-word" : "n dim";
+      const kind = entry.screen === "today" && count !== "0" ? "n" : entry.screen === "health" ? "n dim n-word" : "n dim";
       if (count !== null) nav.append(h("span", kind, count));
       if (count !== null && entry.screen === "health") {
         nav.append(h("span", ("dot n-dot " + verdictTone(count)).trim()));
@@ -5358,8 +5310,10 @@
 
   /**
    * The detail pane of a screen with a selected row. On a phone it is the sheet over the list, and
-   * its head, a grab bar and a Close link to `listPath`, the path of the list the sheet is drawn over
-   * with no row selected, is drawn there; the wide layouts hide it. `listPath` is a route-table path.
+   * its head, a grab bar and a Close link to `listPath`, is drawn there; the wide layouts hide it.
+   * `listPath` is a route-table path: the list the sheet is drawn over with no row selected, or Today
+   * for an ask or a plan and Health for talk, whose Close steps back to the screen it was opened from
+   * instead where `closesBack` says so.
    */
   function detailPane(listPath, ...parts) {
     const head = h("div", "sheet-head", null, "sheet-head");
@@ -5370,12 +5324,12 @@
   /**
    * The classes on the shell's root the stylesheet lays the phone out by: `sheet` where a row is
    * selected and the detail slides up over the list, which an ask, a repo, a plan and a talk
-   * address each name, as a Needs me or Workers address naming a row does, and `stacked` where the screen has no selection and the two panes flow as
+   * address each name, as a Today or Workers address naming a row does, and `stacked` where the screen has no selection and the two panes flow as
    * one column. The standup screen has neither, so a phone shows its list alone.
    */
   function frameClasses() {
     const named = screen === "ask" || screen === "repo" || screen === "plan" || screen === "talk";
-    app.classList.toggle("sheet", named || ((screen === "needs-me" || screen === "workers") && item !== null));
+    app.classList.toggle("sheet", named || ((screen === "today" || screen === "workers") && item !== null));
     app.classList.toggle("stacked", screen === "health");
   }
 
@@ -5558,13 +5512,13 @@
   }
 
   /**
-   * The ask page's Needs me reading beside its own, once per pass, which its step row orders by. A
+   * The ask page's Today reading beside its own, once per pass, which its step row orders by. A
    * failure here is not the page's: the last reading stays, and the ask's own fetch decides the notice.
    */
-  async function fetchNeeds() {
+  async function fetchToday() {
     if (screen !== "ask") return;
     try {
-      askNeeds = await fetchView("/web/needs-me");
+      askToday = await fetchView("/web/today");
     } catch (error) {
       // Kept as it was: a step row that cannot refresh keeps the last order rather than vanishing.
     }
@@ -5598,12 +5552,12 @@
   }
 
   /**
-   * The readings a screen draws beside its own view that are fetched with it, the ask's Needs me
+   * The readings a screen draws beside its own view that are fetched with it, the ask's Today
    * list and the repo screen's standup, so the poll and an act's refresh read the same set. The
    * repos beside the standup and the plan are read after their view, by the screen's `accept`.
    */
   function fetchBeside() {
-    return Promise.all([fetchNeeds(), fetchStandup()]);
+    return Promise.all([fetchToday(), fetchStandup()]);
   }
 
   /**
@@ -5669,22 +5623,23 @@
   }
 
   /** What the main area says on a screen whose address names no object to read. */
-  const EMPTY_WORDS = { plan: "Open a plan from a repo page.", talk: "No session named in the address.", ask: "Open an ask from the standup or Needs me page." };
+  const EMPTY_WORDS = { plan: "Open a plan from a repo page.", talk: "No session named in the address.", ask: "Open an ask from the Today or Repos page." };
 
   /**
    * Opens the screen a route names. Where only the selected row differs from the screen drawn, the
    * last reading is drawn again with the new row, its detail at the top. Otherwise the poll loop of
    * the screen left is stopped, what it held is forgotten, and the new screen's loop starts now; the
-   * screen left stays on the page, scrolled where it was, until the new screen draws at its top. A
-   * move between the standup and a repo, whose list pane is the same standup list, keeps that list
-   * where the reader scrolled it, and only the detail starts at its top.
+   * screen left stays on the page, scrolled where it was and with no sheet, until the new screen draws
+   * at its top. A move between the standup and a repo, whose list pane is the same standup list, keeps
+   * that list where the reader scrolled it, and only the detail starts at its top.
    */
   function enter(at) {
     const place = placeOf(at);
     const moved = at.item !== item;
     item = at.item;
     if (place === lastPlace) {
-      frameClasses();
+      // draw and drawGone set the frame classes. Before the first reading the page still shows the
+      // screen left, so the classes are left alone and the sheet stays down until that draw.
       if (lastView !== null) draw(lastView);
       else if (goneDrawn) drawGone();
       // Another row's detail starts at its top, not where the last row's was scrolled to.
@@ -5705,16 +5660,18 @@
     goneDrawn = false;
     seenSent = false;
     // The readings a screen takes beside its own are held for the visit that took them: the ask's
-    // Needs me list, the standup the standup and repo screens draw and the rail's Workers count reads,
+    // Today list, the standup the standup and repo screens draw and the rail's Workers count reads,
     // the repo whose detail the standup screen draws and whose plans the plan screen lists, and the
     // Workers reading the rail's count reads. The standup is kept where the list it draws stays on the
     // page, so the list is drawn from it at once.
-    askNeeds = null;
+    askToday = null;
     if (!listKept) standupView = null;
     workersView = null;
     if (!planToPlan) repoBeside = null;
     notice.hidden = true;
-    frameClasses();
+    // The screen left stays drawn until the new screen's first reading is, with its detail hidden
+    // meanwhile: that draw sets the new screen's classes, so no detail but its own rises as the sheet.
+    app.classList.remove("sheet");
     // The talk screen's held lines are one lineage's: a different lineage in the address starts afresh.
     if (screen === "talk" && talkLineage() !== talk.lineage) resetTalk(talkLineage());
     const url = page.url();
@@ -5729,31 +5686,58 @@
   /**
    * Moves the address to a route and draws its screen: the one place `pushState` is called, over a path `pathOf` builds.
    * A tap on the address already shown replaces the entry rather than adding one, so Back never stalls on a repeat tap, and a
-   * caller passing `replace` as true replaces it too: a chip changed on its own screen, or a dismissed item leaving the address.
+   * caller passing `replace` as true replaces it too: a dismissed item leaving the address, or one whose Dismiss failed coming back to it.
+   * Every entry added carries the state `{ shell: true }`, so the entry behind it is one of the shell's screens, and a replaced entry keeps its state.
    */
   function go(at, replace) {
     const path = pathOf(at);
     const here = routeOf(window.location);
-    if (replace === true || (here !== null && pathOf(here) === path)) history.replaceState(null, "", path);
-    else history.pushState(null, "", path);
+    if (replace === true || (here !== null && pathOf(here) === path)) history.replaceState(history.state, "", path);
+    else history.pushState({ shell: true }, "", path);
     enter(at);
+  }
+
+  /**
+   * Whether the sheet's Close steps back one history entry instead of following its link: on an ask,
+   * a plan or a talk sheet, which other screens link to, where `go` added the entry shown, so the entry
+   * behind it is the shell's screen the sheet was opened from, which may be another ask, plan or talk.
+   * An entry a load opened carries no such state, and Close follows its own link: Today for an ask or a
+   * plan, Health for talk.
+   */
+  function closesBack() {
+    return (screen === "ask" || screen === "plan" || screen === "talk") && isObject(history.state) && history.state.shell === true;
   }
 
   /**
    * A tap on a link to one of the shell's own screens draws that screen here, with no page load. A
    * link to another origin, to a file, or to any path the route table has no screen for is left to
    * the browser, as is a tap with a modifier key or a button other than the main one, so a middle
-   * click, a long press and a sibling pill keep their meaning.
+   * click, a long press and a sibling pill keep their meaning. The sheet's Close link steps back
+   * where `closesBack` says so. On the phone layout a tap on the dim layer under the sheet, which is
+   * the root's own `::before` and so targets the root itself, taps Close; a tap anywhere in the sheet
+   * targets a node inside it and closes nothing. The press must start on the dim layer too, since a
+   * press inside the sheet released over the list, as a text selection drags, also clicks the root.
    */
   function followLink(event) {
     if (event.defaultPrevented || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const pressed = pressedOn;
+    pressedOn = null;
+    if (event.target === app && pressed === app && app.classList.contains("sheet") && window.matchMedia(PHONE_QUERY).matches) {
+      const close = app.querySelector(".pane.detail .sheet-head .close");
+      if (close !== null) close.click();
+      return;
+    }
     const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (anchor === null || anchor.target !== "" || anchor.origin !== window.location.origin) return;
     const at = routeOf(anchor);
     if (at === null) return;
     event.preventDefault();
-    go(at);
+    if (anchor.classList.contains("close") && closesBack()) history.back();
+    else go(at);
   }
+
+  /** The node the press inside the shell's root started on, which a tap on the dim layer must be; each click reads it once and clears it. */
+  let pressedOn = null;
 
   /** The screen the address names now, after the back or forward button moved it. */
   function returned() {
@@ -5772,6 +5756,9 @@
     // The toast's live region joins the page empty, before any message, so a screen reader announces the first one.
     document.body.append(toastBox);
     document.addEventListener("click", followLink);
+    app.addEventListener("pointerdown", (event) => {
+      pressedOn = event.target;
+    });
     document.addEventListener("keydown", stepKey);
     document.addEventListener("keydown", inboxKey);
     window.addEventListener("popstate", returned);

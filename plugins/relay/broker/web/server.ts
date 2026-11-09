@@ -64,7 +64,7 @@ import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
 import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { askView, blockKey, blockedReasons, drawnAsk, healthView, needsMeView, planView, repoView, rootName, standupView, workersView } from "./views.ts";
+import { askView, blockKey, blockedReasons, drawnAsk, healthView, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
 import type { Readings } from "./views.ts";
 import type { HandledHow, HandledMark, WatermarkStore } from "./watermarks.ts";
 
@@ -99,8 +99,8 @@ const ROUTE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
  * which screen to draw from the path and the query, so a bookmark of any path opens on its screen.
  */
 const SHELL_PAGE = "shell.html";
-/** The fixed page paths, each served the shell. */
-const PAGE_ROUTES: ReadonlySet<string> = new Set(["/", "/plan", "/health", "/talk", "/needs-me", "/ask", "/workers"]);
+/** The fixed page paths, each served the shell. `/needs-me` stays so an old link opens on Today. */
+const PAGE_ROUTES: ReadonlySet<string> = new Set(["/", "/today", "/repos", "/plan", "/health", "/talk", "/needs-me", "/ask", "/workers"]);
 const REPO_PREFIX = "/repo/";
 const ROUTE_PREFIX = "/web/";
 /** The one path the summary peer list admits a node to, the summary `registerViewHandlers` serves. */
@@ -657,7 +657,7 @@ function sendJson(response: ServerResponse, body: unknown, status = 200): void {
 }
 
 /**
- * Registers `/web/standup`, `/web/needs-me`, `/web/workers`, `/web/ask`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`.
+ * Registers `/web/standup`, `/web/today`, `/web/needs-me`, `/web/workers`, `/web/ask`, `/web/repo`, `/web/plan`, `/web/health` and `/web/summary`.
  * Each answers a GET from the readings `source` hands back, the pass's latest, and reads no file of its own. A
  * request string reaches no response and no log: it is compared with names the broker holds and dropped.
  *
@@ -688,7 +688,8 @@ export function registerViewHandlers(
   get("standup", (_request, response) => sendJson(response, standupView(source())));
   get("health", (_request, response) => sendJson(response, healthView(source())));
   get("summary", (_request, response) => sendJson(response, summaryView(source())));
-  // The view carries the batch cap the Agree route enforces, so the page never holds its own copy.
+  // Each view carries the batch cap the Agree route enforces, so the page never holds its own copy.
+  get("today", (_request, response) => sendJson(response, { ...todayView(source()), maxBatch: MAX_AGREE_BATCH }));
   get("needs-me", (_request, response) => sendJson(response, { ...needsMeView(source()), maxBatch: MAX_AGREE_BATCH }));
   get("workers", (_request, response) => sendJson(response, workersView(source())));
 

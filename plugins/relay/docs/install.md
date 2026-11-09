@@ -914,7 +914,7 @@ curl.exe -s http://127.0.0.1:8787/sessions
 ## Claude Duet
 
 Claude Duet, your assistant in Anthropic's cloud, can read this fleet through a connector that
-can change nothing. It sees what the pages show: the standup, the needs-me list, the workers,
+can change nothing. It sees what the pages show: the standup, the needs-me list the Today screen orders, the workers,
 each ask, each repository's plans and briefs, the health view, the sibling sandboxes' counts and
 up to 50 recent lines of a persona's talk. It cannot post, answer an ask, approve a prompt, steer
 a session or open a file. The server runs on one host, beside that host's broker, and needs the
