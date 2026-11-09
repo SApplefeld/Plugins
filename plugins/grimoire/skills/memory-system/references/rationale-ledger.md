@@ -857,15 +857,16 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: `memq delete-operator <name> --confirm-shared` | The same for the operator tier.
 
 ### c1.C084
-- key: Run `memq decay-scan` to report decay candidates with evidence dates, the pinned class, superseded records and a usage-evidence line.
+- key: Run `memq decay-scan` to report decay candidates, ten per class and tier unless `--candidates <n|all>` lifts the bound, with evidence and kept dates, the pinned class, superseded records and a usage-evidence line.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:34
-- provenance: 8e22ff4 2026-07-31, which installed the decay lifecycle.
+- provenance: 8e22ff4 2026-07-31, which installed the decay lifecycle; rewritten by claude-kit_decay-share-bounded_spec_v1.md section 2 2026-11-05.
 - verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: What the scan reports and that it writes nothing are what a session needs before choosing it; the evidence-line section at line 288 owns how the lines are read. Flipped from keep to rewrite at section 22's close: c1.C122's retire cut the sidecar passage the sentence was joined to by a semicolon, so the sentence was respelled to stand as landed. Landed as the proposal below.
+- landed: d81b98a9 finishing
+- reason: What the scan reports and that it writes nothing are what a session needs before choosing it; the evidence-line section at line 288 owns how the lines are read. Flipped from keep to rewrite at section 22's close: c1.C122's retire cut the sidecar passage the sentence was joined to by a semicolon, so the sentence was respelled to stand as landed. Landed as the proposal below. Rewritten 2026-11-05: an unbounded list repeated at every close-out, so the row names the bound and the kept date.
 - proposed: Writes no record, index line, journal entry or stamp.
-- passage: Report decay candidates with their evidence dates, the pinned class, a superseded record whatever its idle clock, and a standing usage-evidence line.
+- passage: Report decay candidates with their evidence dates, `kept` among them, the pinned class, a superseded record whatever its idle clock, and a standing usage-evidence line.
+- passage: It lists ten candidates per class and tier, oldest first, and ten pairs per tier, counting the rest on stderr. `--candidates <n\|all>` and `--pairs <n\|all>` list that many, or all, on your own ask.
 - passage: Writes no record, index line, journal entry or stamp.
 
 ### c1.C085
@@ -5670,13 +5671,13 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Read the usage-evidence line on stderr alongside the candidates rather than expecting it in captured stdout.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:288
-- provenance: f270e9c 2026-07-31, installed with the evidence line.
+- provenance: f270e9c 2026-07-31, installed with the evidence line; requoted by claude-kit_decay-share-bounded_spec_v1.md.
 - verdict: rewrite
-- landed: 227ba108 section 5
+- landed: 76ca0e41 section 2
 - reason: The rule holds, since a session that captures stdout alone never sees the line and nothing warns it. Only the paragraph splits, so the two reading rules lead and the torn-line exit follows. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was rewrite.
 - proposed: Split 288 into the evidence line and its reading (C048 to C050) and the torn-line exit with its two caller-facing bounds (C052 to C054).
 - baseline-test: yes
-- passage: Every `decay-scan` prints a usage-evidence line on stderr naming the memory database's last-read, last-applied and distinct-day aggregates, the evidence the candidates on stdout rest on.
+- passage: Every `decay-scan` prints a usage-evidence line on stderr naming the memory database's last-read, last-applied, last-kept and distinct-day aggregates, the evidence the candidates on stdout rest on.
 
 ### c5.C050
 - key: Investigate rather than archive when `usage evidence: none (no usage.jsonl)` appears on a store you know has been used.
@@ -5731,11 +5732,11 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Treat `created: YYYY-MM-DD` as an author-asserted sign of life that can defer decay but never age a memory faster than its mtime.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:294
-- provenance: 8e22ff4 2026-07-31, the memory-extension plan's Chapter 3: the implementer defined `created:` as a scan input, and the plan required it be documented or it ships as dead code.
+- provenance: 8e22ff4 2026-07-31, the memory-extension plan's Chapter 3: the implementer defined `created:` as a scan input, and the plan required it be documented or it ships as dead code; rewritten by claude-kit_decay-share-bounded_spec_v1.md section 2 2026-11-05.
 - verdict: rewrite
-- landed: f92e99ec section 5
-- reason: The clock takes the field (memq.js:4967), but this is the field's only definition, and an author deciding whether to write `created:` needs both what it does and what it cannot do. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep.
-- passage: A record's created date is a sign of life too. The clock takes the freshest evidence, so it never ages a memory faster than its update time.
+- landed: 76ca0e41 section 2
+- reason: The clock takes the field (memq.js:4967), but this is the field's only definition, and an author deciding whether to write `created:` needs both what it does and what it cannot do. Rewritten on 2026-10-04 by section 5 of `docs/archive/claude-kit_memory-in-sql_spec_v1.md`, which made the memory database the record; the passage now quotes the text that carries the rule; the verdict before it was keep. Rewritten 2026-11-05: a keep is a sign of life, and the update-time clause went, since the freshest evidence already says it.
+- passage: A record's created date and its last keep are signs of life too. The clock takes the freshest evidence.
 - flag: stale
 
 ### c5.C061
@@ -6125,12 +6126,12 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Run the archive pass in order: `decay-scan` reports, your judgment picks, `decay-prune` with archive flags archives, `decay-done` stamps.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:296
-- provenance: 8e22ff4 2026-07-31, the plan's Approach: decay is deterministically scanned, human-judged and close-out-triggered; re-extracted at 55c5abc 2026-09-09. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which made this the archive pass's run beside the hygiene step; the passage is unchanged.
+- provenance: 8e22ff4 2026-07-31, the plan's Approach: decay is deterministically scanned, human-judged and close-out-triggered; re-extracted at 55c5abc 2026-09-09. Amended on 2026-10-12 by section 3 of docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md, which made this the archive pass's run beside the hygiene step; the passage is unchanged. Rewritten by claude-kit_decay-share-bounded_spec_v1.md section 2 2026-11-05.
 - verdict: rewrite
-- landed: d2c43f1 section 22
-- reason: The verbs report, mutate and stamp separately and no driver runs them in order; the judgment step between scan and prune is the session's. Flipped from keep to rewrite at section 22's close: S008's rewrite lifted the summarize rule out of the parenthetical, so the sentence was respelled to stand as landed. Landed as the proposal below.
+- landed: d81b98a9 finishing
+- reason: The verbs report, mutate and stamp separately and no driver runs them in order; the judgment step between scan and prune is the session's. Flipped from keep to rewrite at section 22's close: S008's rewrite lifted the summarize rule out of the parenthetical, so the sentence was respelled to stand as landed. Landed as the proposal below. Rewritten 2026-11-05: `memq keep` is the third verdict, for a candidate that still holds.
 - proposed: The run: `decay-scan` reports, your judgment picks, `decay-prune` with the archive flags mutates, `decay-done` stamps.
-- passage: The run: `decay-scan` reports, your judgment picks, `decay-prune` with the archive flags archives, `decay-done` stamps.
+- passage: The run: `decay-scan` reports, your judgment picks, `decay-prune` with the archive flags archives, `memq keep` marks one that still holds, `decay-done` stamps.
 
 ### S008
 - key: Make the summarize edit the pass's only hand edit, and hand-edit the project tier alone.
@@ -6448,12 +6449,12 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - key: Disposition every pair the neighbour-pairs block shows by the Shared-Tier Repair and Removal routing rule, recording a pair that is two facts with `memq two-facts <a> <b>` and the pair's tier flag, reading both records of every listed pair with `memq get <name> --operator|--type=<type> --no-stamp`, bare for a project record, before the first verdict and again before the write, and never archiving a pinned record.
 - class: rule
 - source: plugins/grimoire/skills/memory-system/SKILL.md:228
-- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; rewritten by docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md section 2 2026-10-12, which added `memq two-facts`.
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; rewritten by docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md section 2 2026-10-12, which added `memq two-facts`; reworded by claude-kit_decay-share-bounded_spec_v1.md section 2 2026-11-05.
 - verdict: rewrite
-- landed: 05d1edf6 section 3
-- reason: The block nominates and picks no remedy, so the routing is the session's judgment over the two bodies, and the routing paragraph (c3.C027, c3.C028) owns it rather than a second list here. Every session reading the same tier reads the same strongest pairs, the type tier by its declared type and the project tier by its project key, so a pair another session already worked is skipped rather than worked twice. A pin binds `decay-prune` and not the delete verbs (Pinning), so a pinned record is never archived and a pinned member judged redundant is the operator's. A pair left as two facts with nothing recorded stayed in the default listing at every scan, so the step re-read it each close-out and never drained; a recorded verdict takes it out of the listing, and its lapse on either record's change returns a pair whose facts may have converged. The verdict was keep before this rewrite. Reworded on 2026-10-14 by section 4 of `docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md`, which cut words from the paragraph to pay for N010's sentence under the corpus cap: the sentence that every session reading the same tier sees the same top pairs went, since the reason above states it and no step turns on it, and the other cuts kept every rule and flag. Reworded on 2026-10-14 by docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md's finishing pass: every listed pair's records are read before the first verdict, so a `[PAIR DRAFTS]` block that the persona plugin delivers on a later tool result lands while the pairs are still open, rather than after the session has judged them by hand.
+- landed: 76ca0e41 section 2
+- reason: The block nominates and picks no remedy, so the routing is the session's judgment over the two bodies, and the routing paragraph (c3.C027, c3.C028) owns it rather than a second list here. Every session reading the same tier reads the same strongest pairs, the type tier by its declared type and the project tier by its project key, so a pair another session already worked is skipped rather than worked twice. A pin binds `decay-prune` and not the delete verbs (Pinning), so a pinned record is never archived and a pinned member judged redundant is the operator's. A pair left as two facts with nothing recorded stayed in the default listing at every scan, so the step re-read it each close-out and never drained; a recorded verdict takes it out of the listing, and its lapse on either record's change returns a pair whose facts may have converged. The verdict was keep before this rewrite. Reworded on 2026-10-14 by section 4 of `docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md`, which cut words from the paragraph to pay for N010's sentence under the corpus cap: the sentence that every session reading the same tier sees the same top pairs went, since the reason above states it and no step turns on it, and the other cuts kept every rule and flag. Reworded on 2026-10-14 by docs/plans/claude-kit_fork-drafted-pair-dispositions_spec_v1.md's finishing pass: every listed pair's records are read before the first verdict, so a `[PAIR DRAFTS]` block that the persona plugin delivers on a later tool result lands while the pairs are still open, rather than after the session has judged them by hand. Reworded on 2026-11-05 by section 2 of claude-kit_decay-share-bounded_spec_v1.md, which cut the sentence that a recorded pair leaves the listing until a record changes, since the `two-facts` row states the lapse, to pay for the candidate verdicts under the corpus cap.
 - passage: In the hygiene step `decay-scan` reports. Disposition each listed pair by the routing rule above.
-- passage: Read both records of every listed pair before the first verdict, with `memq get <name> --operator|--type=<type> --no-stamp`, bare for a project record. Record a two-facts pair with `memq two-facts <a> <b> --operator|--type=<type>`, bare for a project pair. It leaves the listing until a record changes. Read both again before any write, skipping a pair that changed. A pinned record is never archived and, judged redundant, goes to the operator.
+- passage: Read both records of every listed pair before the first verdict, with `memq get <name> --operator|--type=<type> --no-stamp`, bare for a project record. Record a two-facts pair with `memq two-facts <a> <b> --operator|--type=<type>`, bare for a project pair. Read both again before any write, skipping a pair that changed. A pinned record is never archived and, judged redundant, goes to the operator.
 
 ### N004
 - key: In a shared-tier pair, repair a member whose fact is right and whose wording is poor, archive the redundant member under the `--confirm-shared` rules, and hand a never-true record and a credential-carrying record to the operator; take a project-tier pair through `forget`, `put --replace` or `decay-prune --archive`.
@@ -6476,14 +6477,14 @@ Extracted at `6bc07fb`: lines 1-39 (`skills.memory-system.c1.md`); lines 40-146 
 - passage: Re-read every record the drift block names against its file. Then re-anchor it from the main checkout with `memq anchor <name> [<path>...] --prune-missing`, adding `--operator` for an operator record, or route it through the remedies.
 
 ### N006
-- key: Ask for `decay-scan --pairs all` when draining a backlog.
+- key: Judge every candidate `decay-scan` lists summarize, archive or keep, and ask for `--pairs all` or `--candidates all` when draining a backlog.
 - class: mechanic
 - source: plugins/grimoire/skills/memory-system/SKILL.md:228
-- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; section 1 of the same plan added `--pairs <n|all>`; rewritten by docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md section 2 2026-10-12, which added `memq two-facts`.
+- provenance: docs/plans/claude-kit_memory-dedupe-routine_spec_v1.md section 3 2026-10-12; section 1 of the same plan added `--pairs <n|all>`; rewritten by docs/plans/claude-kit_two-facts-pair-verdicts_spec_v1.md section 2 2026-10-12, which added `memq two-facts`; rewritten by claude-kit_decay-share-bounded_spec_v1.md section 2 2026-11-05.
 - verdict: rewrite
-- landed: 05d1edf6 section 3
-- reason: A backlog drains only when every found pair is listed. The widening by `--pairs <10+k>` went with this rewrite: a two-facts pair is now recorded and leaves the listing (N003), so the default ten no longer repeats the pairs a session judged. The verdict was keep before this rewrite.
-- passage: A backlog takes `--pairs all`, redirected to a `.kit/` file.
+- landed: d81b98a9 finishing
+- reason: A backlog drains only when every found pair is listed. The widening by `--pairs <10+k>` went with this rewrite: a two-facts pair is now recorded and leaves the listing (N003), so the default ten no longer repeats the pairs a session judged. The verdict was keep before this rewrite. Rewritten 2026-11-05: a keep takes a held candidate off the list until its threshold passes again, so the bounded share drains the store over close-outs.
+- passage: Judge every listed candidate summarize, archive or `memq keep`. The listing is the close-out's whole share, and the stderr count is information. A backlog takes `--pairs all` or `--candidates all`, redirected to a `.kit/` file.
 
 ### N007
 - key: Report the hygiene step as partial, never clean, where the pairs block says its pairs are not listed or not checked, or a tier heading counts records not checked.

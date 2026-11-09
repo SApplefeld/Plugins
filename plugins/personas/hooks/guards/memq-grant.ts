@@ -84,7 +84,7 @@ export const PRELOAD_ENV = ["NODE_OPTIONS", "NODE_PATH", "NODE_REPL_EXTERNAL_MOD
 // decision on granting it. An allowlist, so a verb the CLI gains later is
 // withheld until listed here.
 const GRANTED_VERBS: ReadonlySet<string> = new Set([
-  "log", "get", "applied", "recall", "recall-candidates", "judged", "recent", "unstamped", "touch",
+  "log", "get", "applied", "recall", "recall-candidates", "judged", "recent", "unstamped", "touch", "keep",
   "add-type", "add-operator", "put", "decay-scan", "decay-prune", "decay-done",
 ]);
 

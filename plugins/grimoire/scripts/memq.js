@@ -36,7 +36,8 @@
 //   memq forget <name> --confirm
 //   memq delete-type <type> <name> --confirm-shared
 //   memq delete-operator <name> --confirm-shared
-//   memq decay-scan [--pairs <n|all>]
+//   memq decay-scan [--pairs <n|all>] [--candidates <n|all>]
+//   memq keep <name> [--type|--type=<type>|--operator]
 //   memq decay-prune [--archive <name>]... [--archive-type <name>]...
 //                    [--archive-operator <name>]... [--confirm-shared]
 //   memq decay-done
@@ -365,6 +366,7 @@ const OPERATOR_LABEL = 'operator';
 const DECAY_STAMP_FILE = 'decay-stamp';
 const DECLARERS_SHOWN = 10;   // declaring-project names listed before the remainder is counted
 const PINNED_SHOWN = 10;      // pinned memories listed by decay-scan before the remainder is counted
+const CANDIDATES_SHOWN = 10;  // decay candidates listed per class and tier by decay-scan before the remainder is counted
 const DRIFT_SHOWN = 10;       // drifted memories listed by decay-scan before the remainder is counted
 // Pairs listed per tier by decay-scan before the remainder is counted, when the
 // call does not ask for more. At the block enumerations' value because it
@@ -5238,9 +5240,11 @@ function usage(problem) {
         + '       memq forget <name> --confirm\n'
         + '       memq delete-type <type> <name> --confirm-shared\n'
         + '       memq delete-operator <name> --confirm-shared\n'
-        + '       memq decay-scan [--pairs <n|all>]\n'
+        + '       memq decay-scan [--pairs <n|all>] [--candidates <n|all>]\n'
         + '       memq two-facts <a> <b> [--type|--type=<type>|--operator]\n'
         + '                (records the pair as two facts; decay-scan withholds it while both stand unchanged)\n'
+        + '       memq keep <name> [--type|--type=<type>|--operator]\n'
+        + '                (stamps the record kept; decay-scan lists it again once its summarize threshold passes since the keep)\n'
         + '       memq decay-prune [--archive <name>]... [--archive-type <name>]...\n'
         + '                        [--archive-operator <name>]... [--confirm-shared]\n'
         + '       memq decay-done\n'
@@ -8099,12 +8103,16 @@ function rowMs(value) {
     return Number.isFinite(ms) ? ms : null;
 }
 
-// A row's last sign of life: the newest of its update time, its created date
-// and its last applied stamp, lastAliveMs over the index's columns.
+// A row's last sign of life: the newest of its update time, its created date,
+// its last applied stamp and its last kept stamp, lastAliveMs over the index's
+// columns. A keep is life as an edit is, so it folds in beside the update time
+// and adds no applied day.
 function rowAliveMs(row) {
     const updated = rowMs(row.updated);
+    const kept = rowMs(row.lastKept);
+    const touched = kept !== null && (updated === null || kept > updated) ? kept : updated;
     const applied = rowMs(row.lastApplied);
-    return lastAliveMs(updated === null ? -Infinity : updated, rowMs(row.created),
+    return lastAliveMs(touched === null ? -Infinity : touched, rowMs(row.created),
         applied === null ? undefined : { lastMs: applied, distinctDays: Number(row.appliedDays) || 0 });
 }
 
@@ -9627,6 +9635,149 @@ function cmdTouch(argv, options) {
     process.stdout.write('touched ' + sanitize(name, NAME_CAP) + ' applied' + stampWhere + '\n');
 }
 
+// memq keep: the decay pass's third verdict, beside summarize and archive. A
+// record judged still true takes one stamp of mem.usp_AppendUsage's `kept`
+// kind, which the host keeps as the usage row's newest kept time. The idle
+// clock reads it as a sign of life (rowAliveMs), so the record leaves the
+// scan's list until its summarize threshold, SUMMARIZE_AFTER_DAYS extended by its
+// applied days, has passed again since the keep. A keep is not use:
+// it moves no applied time, no distinct applied day and no calibration, which
+// is why it is a kind of its own rather than `touch --applied`.
+//
+// The tier flags, the network-share stand-down and the no-declared-type line
+// are touch's. The index is the host's mem.usp_ListIndex read the scan makes,
+// keyed by the project for the project tier and by no key for a shared one,
+// so --operator and --type=<type> resolve nothing from the working directory.
+// A name the tier lists no live row of, a pinned row and a superseded row are
+// each one stderr line and exit 1. Then the version the same read reported
+// must reach KEPT_SCHEMA_VERSION, and only then is the stamp sent.
+//
+// A keep never queues. A host below version 15 refuses the kind, so a queued
+// keep would come off the queue as a refused unit after the caller was told
+// it waits. The send passes `queue: false`, under which writeThrough answers
+// `unreachable` wherever it would have queued, and `probed` with the version
+// read here, so no second probe runs. A host that did not answer is one line
+// and exit 1, and the record lists again at the next scan.
+function cmdKeep(argv, options) {
+    const opts = options || {};
+    let name = null;
+    let toType = false;
+    let namedType = null;
+    let toOperator = false;
+    for (const a of argv) {
+        if (a === '--type' || a.startsWith('--type=')) {
+            if (toType) return usage('--type is given once, as --type or --type=<type>');
+            toType = true;
+            if (a !== '--type') namedType = a.slice('--type='.length);
+        } else if (a === '--operator') toOperator = true;
+        else if (a.startsWith('--')) return usage('unknown option ' + sanitize(a, 40));
+        else if (name !== null) return usage('keep takes one <name>');
+        else name = a;
+    }
+    if (name === null) return usage('keep needs a <name>');
+    if (toType && toOperator) return usage('keep stamps one tier: give --type or --operator, not both');
+    if (!isMemoryFilename(name + '.md')) {
+        return usage('name must be characters from [A-Za-z0-9_.-], at most '
+            + (MEMORY_FILE_CAP - 3) + ', and not the memory index');
+    }
+    // touch's two gates on a named type, in touch's order and words.
+    if (namedType !== null && !isTypeName(namedType)) {
+        return usage(TYPE_NAME_RULE);
+    }
+    if (namedType !== null && storeSignalsPresent()) {
+        return usage(namedTypeRefusedBySignals('a keep there is the sign of life the decay'
+            + ' pass reads, written into a tier no project on this vector opted into'));
+    }
+    // touch's guard, on touch's exclusions: the operator tier and a named type
+    // resolve no store from the working directory.
+    if (!toOperator && namedType === null && pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
+        process.stderr.write('memq: this call\'s working directory names a network share, so its '
+            + 'project memory directory was not resolved (a synchronous walk under it risks '
+            + 'hanging for the SMB timeout on an unreachable host); nothing was stamped\n');
+        process.exitCode = 1;
+        return;
+    }
+    let tier;
+    let segment = null;
+    let key = null;
+    let label;
+    if (toOperator) {
+        tier = 'operator';
+        label = OPERATOR_LABEL;
+    } else if (toType) {
+        segment = namedType !== null ? namedType : projectType(process.cwd());
+        if (segment === null) {
+            process.stderr.write(noDeclaredTypeText('--type'));
+            process.exitCode = 1;
+            return;
+        }
+        tier = 'type';
+        label = 'type:' + sanitize(segment, TYPE_CAP);
+    } else {
+        tier = 'project';
+        label = 'project';
+        segment = projectSegment(process.cwd());
+        key = projectKey(process.cwd());
+    }
+    const shown = sanitize(name, NAME_CAP);
+    const refuse = (why) => {
+        process.stderr.write('memq: keep not recorded: ' + shown + ' ' + why + '\n');
+        process.exitCode = 1;
+    };
+    const notAnswered = () => {
+        process.stderr.write('memq: keep not recorded: the memory database did not answer, so nothing was stamped\n');
+        process.exitCode = 1;
+    };
+    const below = (version) => {
+        process.stderr.write('memq: keep needs memory database schema version ' + memoryDatabase.KEPT_SCHEMA_VERSION
+            + ' and the host reports ' + (Number.isFinite(version) ? version : 'none')
+            + '; nothing was stamped; re-run plugins/grimoire/db/Install-MemoryDatabase.ps1 against the host\n');
+        process.exitCode = 1;
+    };
+    const read = memoryDatabase.listIndex(key, { config: opts.config, deps: opts.deps });
+    if (!read.ok) {
+        if (read.cause === 'schema') return below(Number(read.schemaVersion));
+        if (read.cause === 'standDown' || read.cause === 'refused') {
+            reportHostUnread(read);
+            process.exitCode = 1;
+            return;
+        }
+        return notAnswered();
+    }
+    const listed = (Array.isArray(read.rows) ? read.rows : []).filter((r) => r.tier === tier
+        && typeof r.name === 'string' && r.name !== '' && (tier !== 'type' || r.typeName === segment));
+    const fileKey = memoryFileKey(name + '.md');
+    const row = listed.find((r) => memoryFileKey(r.name + '.md') === fileKey);
+    if (row === undefined) return refuse('is not a live record in the ' + label + ' tier');
+    if (row.pinned === true) return refuse('is pinned, so it is already exempt from decay');
+    const successors = supersededBy(supersededSuccessors(listed.map((r) => ({
+        name: r.name, supersedes: typeof r.supersedes === 'string' && r.supersedes !== '' ? r.supersedes : null
+    }))), name, false);
+    if (successors !== null) {
+        return refuse('is superseded by ' + supersededNaming(successors, (n) => sanitize(n, NAME_CAP))
+            + ', so the pointer is the evidence; archive it or replace it');
+    }
+    const version = Number(read.schemaVersion);
+    if (!(Number.isFinite(version) && version >= memoryDatabase.KEPT_SCHEMA_VERSION)) return below(version);
+    const answered = memoryDatabase.writeThrough(
+        memoryDatabase.usageEntry(tier, segment, name, fileKey, 'kept', key),
+        { config: opts.config, deps: opts.deps, queue: false, probed: version });
+    if (answered.state === 'unreachable') {
+        reportDrainRefusals(answered.drain);
+        return notAnswered();
+    }
+    if (reportUndelivered(answered, 'the kept stamp for \'' + shown + '\' in the ' + label + ' tier')) return;
+    // touch's reading: the one stamp sent, so a rejected count is this record.
+    if ((Number(answered.answer.rejected) || 0) > 0) {
+        process.stderr.write('memq: the memory database holds no record named \'' + shown + '\' in the '
+            + label + ' tier, so nothing was stamped\n');
+        process.exitCode = 1;
+        return;
+    }
+    process.stdout.write('kept ' + shown + (tier === 'type' ? ' in the ' + sanitize(segment, TYPE_CAP) + ' type tier'
+        : tier === 'operator' ? ' in the operator tier' : '') + '\n');
+}
+
 // One path argument judged and hashed, as `{sha}` or `{refusal}`.
 //
 // `isAnchorPath` is the whole of the admission rule and `anchorEntryState` is
@@ -10803,7 +10954,7 @@ function keptListsNote(name, lists, triggersFlag) {
 // line each, moving no memory and rewriting no sidecar; its neighbour-pairs
 // block is served by the memory database. Line shapes:
 //
-//   summarize  <name>  idle <n>d  applied <date (<n>d distinct)|never>  [created <date>]  edited <date>  read <date|never>
+//   summarize  <name>  idle <n>d  applied <date (<n>d distinct)|never>  [kept <date>]  [created <date>]  [updated <date>]  read <date|never>
 //   archive    <name>  idle <n>d  (same evidence fields)
 //
 // and on stderr, where the scan's facts about itself go, the pinned block:
@@ -11558,37 +11709,62 @@ async function printNeighbourPairsBlock(tiers, options, shown) {
     }
 }
 
-// A --pairs value as the count of pairs a tier lists: a positive whole number
-// with no leading zero, so one count has one spelling, or `all`, which is
-// Infinity. Null for anything else.
+// A --pairs or --candidates value as the count a tier lists: a positive whole
+// number with no leading zero, so one count has one spelling, or `all`, which
+// is Infinity. Null for anything else.
 function parsePairsShown(value) {
     if (value === 'all') return Infinity;
     return /^[1-9][0-9]*$/.test(value) ? Number(value) : null;
 }
 
-// decay-scan takes one option, --pairs <n|all> or --pairs=<n|all>, given once,
-// and no word. Every fault is refused here, before the working directory is
-// resolved or the index read.
+// One tier's candidates of one class as the scan prints them: the idlest
+// first, the name breaking a tie, cut to `shown`, with the stderr line counting
+// what the cut left, or null where it left nothing. `shown` is
+// CANDIDATES_SHOWN unless the call asked for another count, or for Infinity,
+// which keeps them all, and the count line names the bound applied. The count
+// line is the close-out's information and not its share: the lines listed are
+// the share.
+function boundedCandidates(found, tierLabel, kind, shown) {
+    const sorted = found.slice().sort((x, y) => (x.idle === y.idle ? 0 : x.idle > y.idle ? -1 : 1)
+        || (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
+    const listed = sorted.slice(0, shown);
+    return {
+        lines: listed.map((c) => c.line),
+        count: sorted.length > listed.length
+            ? 'memq: ' + tierLabel + ' ' + kind + ': ' + listed.length + ' of ' + sorted.length
+                + ' listed, oldest first; --candidates <n|all> lists more'
+            : null
+    };
+}
+
+// decay-scan takes two options, --pairs <n|all> and --candidates <n|all>, each
+// in either spelling, --pairs=<n|all> or --candidates=<n|all>, each given at
+// most once, and no word. Every fault is refused here, before the working
+// directory is resolved or the index read.
 async function cmdDecayScan(argv, options) {
     const opts = options || {};
     let shown = PAIRS_SHOWN;
-    let pairsGiven = false;
+    let candidatesShown = CANDIDATES_SHOWN;
+    const given = new Set();
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
-        if (a !== '--pairs' && !a.startsWith('--pairs=')) {
-            return usage('decay-scan takes no arguments but --pairs <n|all>');
+        const flag = ['--pairs', '--candidates'].find((f) => a === f || a.startsWith(f + '='));
+        if (flag === undefined) {
+            return usage('decay-scan takes no arguments but --pairs <n|all> and --candidates <n|all>');
         }
-        if (pairsGiven) return usage('--pairs is given once');
-        pairsGiven = true;
+        if (given.has(flag)) return usage(flag + ' is given once');
+        given.add(flag);
         let value;
-        if (a === '--pairs') {
+        if (a === flag) {
             value = argv[++i];
-            if (value === undefined) return usage('--pairs needs a value: --pairs <n|all>');
+            if (value === undefined) return usage(flag + ' needs a value: ' + flag + ' <n|all>');
         } else {
-            value = a.slice('--pairs='.length);
+            value = a.slice(flag.length + 1);
         }
-        shown = parsePairsShown(value);
-        if (shown === null) return usage('--pairs takes a positive whole number or all: --pairs <n|all>');
+        const count = parsePairsShown(value);
+        if (count === null) return usage(flag + ' takes a positive whole number or all: ' + flag + ' <n|all>');
+        if (flag === '--pairs') shown = count;
+        else candidatesShown = count;
     }
     if (pinnedProjectSegment() === null && namesNetworkShare(process.cwd())) {
         process.stderr.write('memq: this call\'s working directory names a network share, so its '
@@ -11610,25 +11786,37 @@ async function cmdDecayScan(argv, options) {
     const now = Date.now();
 
     // Each tier's candidates from the index's own columns: the idle clock is
-    // the newest of the row's update time, its created date and its last
-    // applied stamp, and the applied evidence is the host's distinct-day
-    // count over every sandbox's stamps, so the evidence line names that
-    // source rather than a sidecar's reading.
+    // the newest of the row's update time, its created date, its last
+    // applied stamp and its last kept stamp, and the applied evidence is the
+    // host's distinct-day count over every sandbox's stamps, so the evidence
+    // line names that source rather than a sidecar's reading. Each tier's
+    // summarize and archive lists are bounded apart, so one tier's backlog
+    // never hides another's oldest records.
     const summarize = [];
     const archive = [];
     const pinned = [];
+    const counts = [];
+    const candidatesOf = (memories, label, tierLabel) => {
+        const found = { summarize: [], archive: [] };
+        indexDecayCandidates(memories, label, now, found.summarize, found.archive, pinned);
+        for (const kind of ['summarize', 'archive']) {
+            const bounded = boundedCandidates(found[kind], tierLabel, kind, candidatesShown);
+            (kind === 'summarize' ? summarize : archive).push(...bounded.lines);
+            if (bounded.count !== null) counts.push(bounded.count);
+        }
+    };
     const evidence = (tag) => process.stderr.write('memq: usage evidence' + tag
-        + ': the memory database\'s last-read, last-applied and distinct-day aggregates\n');
+        + ': the memory database\'s last-read, last-applied, last-kept and distinct-day aggregates\n');
     evidence('');
-    indexDecayCandidates(tiers.project, '', now, summarize, archive, pinned);
+    candidatesOf(tiers.project, '', 'project');
     const pairTiers = [{ label: 'project', tier: 'project', memories: tiers.project }];
     if (tiers.type !== null) {
         evidence('  (type:' + sanitize(tiers.declaredType, TYPE_CAP) + ')');
-        indexDecayCandidates(tiers.type, tiers.declaredType, now, summarize, archive, pinned);
+        candidatesOf(tiers.type, tiers.declaredType, 'type:' + sanitize(tiers.declaredType, TYPE_CAP));
         pairTiers.push({ label: 'type:' + sanitize(tiers.declaredType, TYPE_CAP), tier: 'type', memories: tiers.type });
     }
     evidence('  (operator)');
-    indexDecayCandidates(tiers.operator, OPERATOR_LABEL, now, summarize, archive, pinned);
+    candidatesOf(tiers.operator, OPERATOR_LABEL, 'operator');
     pairTiers.push({ label: 'operator', tier: 'operator', memories: tiers.operator });
 
     // The pinned population, counted and then listed, on every scan that
@@ -11675,6 +11863,9 @@ async function cmdDecayScan(argv, options) {
         process.stderr.write('memq: no decay candidates\n');
         return;
     }
+    // The classes the bound cut, counted on stderr so stdout stays the
+    // candidate lines alone.
+    if (counts.length > 0) process.stderr.write(counts.join('\n') + '\n');
     process.stdout.write(lines.join('\n') + '\n');
 }
 
@@ -11684,7 +11875,10 @@ async function cmdDecayScan(argv, options) {
 // pointer being the evidence; otherwise the idle days since the row's last
 // sign of life, extended by its distinct applied days, place it against the
 // summarize and archive thresholds. The line carries the same evidence
-// columns for every class, with `updated` where a file's edit time stood.
+// columns for every class, with `updated` where a file's edit time stood and
+// `kept` where the row carries a kept time. A summarize or archive candidate
+// is pushed as {idle, name, line}, so the caller can bound each class by its
+// idle days; a pinned row is pushed as its line.
 function indexDecayCandidates(memories, label, now, summarize, archive, pinned) {
     const supersedes = supersededSuccessors(memories);
     for (const mem of memories) {
@@ -11701,11 +11895,13 @@ function indexDecayCandidates(memories, label, now, summarize, archive, pinned) 
         const summarizeAfter = SUMMARIZE_AFTER_DAYS + extension;
         const archiveAfter = ARCHIVE_AFTER_DAYS + extension;
         const applied = rowMs(row.lastApplied);
+        const kept = rowMs(row.lastKept);
         const created = rowMs(row.created);
         const updated = rowMs(row.updated);
         const line = shown
             + '  idle ' + (Number.isFinite(idleDays) ? idleDays + 'd' : 'unknown')
             + '  applied ' + (applied === null ? 'never' : dateColumn(applied) + ' (' + distinctDays + 'd distinct)')
+            + (kept === null ? '' : '  kept ' + dateColumn(kept))
             + (created === null ? '' : '  created ' + dateColumn(created))
             + (updated === null ? '' : '  updated ' + dateColumn(updated))
             + '  read ' + (typeof row.lastRead === 'string' && rowMs(row.lastRead) !== null ? isoDate(row.lastRead) : 'never');
@@ -11715,13 +11911,13 @@ function indexDecayCandidates(memories, label, now, summarize, archive, pinned) 
             continue;
         }
         if (supersededHere !== '') {
-            archive.push('archive  ' + line + supersededHere);
+            archive.push({ idle: idleDays, name: mem.name, line: 'archive  ' + line + supersededHere });
             continue;
         }
         if (!Number.isFinite(idleDays)) continue;
         if (idleDays < summarizeAfter) continue;
-        if (idleDays >= archiveAfter) archive.push('archive  ' + line);
-        else summarize.push('summarize  ' + line);
+        if (idleDays >= archiveAfter) archive.push({ idle: idleDays, name: mem.name, line: 'archive  ' + line });
+        else summarize.push({ idle: idleDays, name: mem.name, line: 'summarize  ' + line });
     }
 }
 
@@ -14655,6 +14851,7 @@ function main() {
         });
     }
     else if (cmd === 'two-facts') cmdTwoFacts(rest);
+    else if (cmd === 'keep') cmdKeep(rest);
     else if (cmd === 'decay-prune') cmdDecayPrune(rest);
     else if (cmd === 'decay-done') cmdDecayDone(rest);
     else if (cmd === 'declare-type') cmdDeclareType(rest);
@@ -14813,6 +15010,7 @@ module.exports = {
     cmdTwoFacts,
     cmdLog,
     cmdTouch,
+    cmdKeep,
     cmdAnchor,
     cmdTriggers,
     cmdAddType,

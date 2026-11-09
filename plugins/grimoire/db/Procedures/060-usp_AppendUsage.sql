@@ -23,9 +23,18 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_AppendUsage
 		AUTHOR:		Scott Applefeld
 		DATE:		September 17th, 2026
-		VERSION:	v1.5
+		VERSION:	v1.6
 	*********************************************************************************************
-		NOTES:		v1.5 - 10/05/2026
+		NOTES:		v1.6 - 11/05/2026
+							A stamp's kind may also be kept, a judgment that the record
+							still holds. [LastKeptDt] takes the later of the row's value
+							and the batch's newest kept stamp, and a record with no row
+							takes the batch's. A kept stamp moves no applied value:
+							[LastAppliedDt], [AppliedDays] and [AppliedDates] read the
+							applied stamps alone. A stamp of any other kind still refuses
+							the batch.
+
+					v1.5 - 10/05/2026
 							The batch table carries an index over its record, kind and
 							stamp time, which the three per-record reads of the fold seek
 							on, and the @True and @False locals, which nothing read, are
@@ -140,6 +149,7 @@ BEGIN	-- PROCEDURE
 		 [RecordId]			BIGINT			NOT NULL	PRIMARY KEY
 		,[LastReadDt]		DATETIMEOFFSET	NULL
 		,[LastAppliedDt]	DATETIMEOFFSET	NULL
+		,[LastKeptDt]		DATETIMEOFFSET	NULL
 		,[AppliedDates]		NVARCHAR(MAX)	NULL
 	)
 
@@ -195,9 +205,9 @@ BEGIN	-- PROCEDURE
 		;IF EXISTS (	SELECT	NULL
 						FROM	@Incoming I
 						WHERE	I.[Kind] IS NULL
-								OR I.[Kind] NOT IN ('read', 'applied')
+								OR I.[Kind] NOT IN ('read', 'applied', 'kept')
 								OR I.[StampedDt] IS NULL	)
-			THROW 50000, 'mem.usp_AppendUsage: every stamp needs a kind of read or applied and an at timestamp.', 1
+			THROW 50000, 'mem.usp_AppendUsage: every stamp needs a kind of read, applied or kept and an at timestamp.', 1
 
 		/* Resolve Each Stamp to a Record the Caller May See, by Id First and by Identity Otherwise. */
 		/* A Project Key Match Ranks First; With None, the Segment Locator Finds the Caller's Older Store Row. */
@@ -235,12 +245,13 @@ BEGIN	-- PROCEDURE
 		FROM	@Incoming I
 		WHERE	I.[RecordId] IS NOT NULL
 
-		/* Fold the Resolved Stamps to One Row per Record: the Newest Read, the Newest Applied and the Distinct Applied Dates. */
+		/* Fold the Resolved Stamps to One Row per Record: the Newest Read, the Newest Applied, the Newest Kept and the Distinct Applied Dates. */
 		/* Each Maximum Reads Only Its Own Kind's Rows, so No NULL is Aggregated and No Warning Reaches the Caller. */
 		;INSERT INTO @Folded (
 			 [RecordId]
 			,[LastReadDt]
 			,[LastAppliedDt]
+			,[LastKeptDt]
 			,[AppliedDates]	)
 		SELECT	 [RecordId]			= R.[RecordId]
 				,[LastReadDt]		= (	SELECT	MAX(A.[StampedDt])
@@ -251,6 +262,10 @@ BEGIN	-- PROCEDURE
 										FROM	@Incoming A
 										WHERE	A.[RecordId] = R.[RecordId]
 												AND A.[Kind] = 'applied'	)
+				,[LastKeptDt]		= (	SELECT	MAX(A.[StampedDt])
+										FROM	@Incoming A
+										WHERE	A.[RecordId] = R.[RecordId]
+												AND A.[Kind] = 'kept'	)
 				,[AppliedDates]		= (	SELECT	N'[' + STRING_AGG(CAST(N'"' + CONVERT(NCHAR(10), D.[AppliedOn], 23) + N'"' AS NVARCHAR(MAX)), N',') + N']'
 										FROM	(	SELECT	DISTINCT [AppliedOn] = CAST(A.[StampedDt] AS DATE)
 													FROM	@Incoming A
@@ -268,6 +283,7 @@ BEGIN	-- PROCEDURE
 		;UPDATE RU
 		SET		 [LastReadDt]		= GREATEST(RU.[LastReadDt], F.[LastReadDt])
 				,[LastAppliedDt]	= GREATEST(RU.[LastAppliedDt], F.[LastAppliedDt])
+				,[LastKeptDt]		= GREATEST(RU.[LastKeptDt], F.[LastKeptDt])
 				,[AppliedDays]		= RU.[AppliedDays] + M.[NewDays]
 				,[AppliedDates]		= M.[AppliedDates]
 				,[UpdatedDt]		= SYSDATETIMEOFFSET()
@@ -281,11 +297,13 @@ BEGIN	-- PROCEDURE
 			 [RecordId]
 			,[LastReadDt]
 			,[LastAppliedDt]
+			,[LastKeptDt]
 			,[AppliedDays]
 			,[AppliedDates]	)
 		SELECT	 [RecordId]			= F.[RecordId]
 				,[LastReadDt]		= F.[LastReadDt]
 				,[LastAppliedDt]	= F.[LastAppliedDt]
+				,[LastKeptDt]		= F.[LastKeptDt]
 				,[AppliedDays]		= M.[NewDays]
 				,[AppliedDates]		= M.[AppliedDates]
 		FROM	@Folded F

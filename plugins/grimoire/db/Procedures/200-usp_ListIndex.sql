@@ -23,9 +23,15 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_ListIndex
 		AUTHOR:		Scott Applefeld
 		DATE:		October 3rd, 2026
-		VERSION:	v1.3
+		VERSION:	v1.4
 	*********************************************************************************************
-		NOTES:		v1.3 - 10/04/2026
+		NOTES:		v1.4 - 11/05/2026
+							Each row carries lastKept after lastApplied, the record's
+							[LastKeptDt] in mem.RecordUsage, the newest stamp judging it
+							still holds, and NULL for a record never kept or with no row
+							there.
+
+					v1.3 - 10/04/2026
 							lastRead, lastApplied and appliedDays are the record's
 							[LastReadDt], [LastAppliedDt] and [AppliedDays] in
 							mem.RecordUsage, and NULL, NULL and 0 for a record with no row
@@ -62,7 +68,7 @@ BEGIN	-- PROCEDURE
 							{recordId, tier, projectKey, typeName, name, description, tags,
 							triggers, anchors, pinned, space, machine, supersedes, created,
 							createdAt, author, origin, updated, lastRead, lastApplied,
-							appliedDays}, ordered by tier, type name and name.
+							lastKept, appliedDays}, ordered by tier, type name and name.
 	*********************************************************************************************
 	********************************************************************************************/
 
@@ -163,6 +169,7 @@ BEGIN	-- PROCEDURE
 			SELECT	 [RecordId]		= RU.[RecordId]
 					,[LastRead]		= RU.[LastReadDt]
 					,[LastApplied]	= RU.[LastAppliedDt]
+					,[LastKept]		= RU.[LastKeptDt]
 					,[AppliedDays]	= RU.[AppliedDays]
 			FROM	mem.RecordUsage RU
 					INNER JOIN #Listed L
@@ -188,6 +195,7 @@ BEGIN	-- PROCEDURE
 									,[updated]		= L.[Updated]
 									,[lastRead]		= U.[LastRead]
 									,[lastApplied]	= U.[LastApplied]
+									,[lastKept]		= U.[LastKept]
 									,[appliedDays]	= COALESCE(U.[AppliedDays], 0)
 							FOR JSON PATH, WITHOUT_ARRAY_WRAPPER, INCLUDE_NULL_VALUES	)
 		FROM	#Listed L

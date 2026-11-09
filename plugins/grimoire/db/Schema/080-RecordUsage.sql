@@ -1,13 +1,16 @@
 /*********************************************************************************
 	TABLE: mem.RecordUsage
 
-	One row per memory that has been shown to a session or marked applied, and no
-	row for one that has not, so the table grows with the number of memories and
-	not with the number of reads. A reader takes NULL, NULL and 0 for a memory
-	with no row.
+	One row per memory that has been shown to a session, marked applied or kept,
+	and no row for one that has not, so the table grows with the number of
+	memories and not with the number of reads. A reader takes NULL for each time
+	and 0 for the day count of a memory with no row.
 
 		[LastReadDt]		The newest read stamp the memory has taken.
 		[LastAppliedDt]		The newest applied stamp the memory has taken.
+		[LastKeptDt]		The newest kept stamp the memory has taken, a
+							judgment that it still holds. A kept stamp moves
+							no applied value below.
 		[AppliedDays]		The number of distinct calendar dates it was marked
 							applied on, the date of a stamp being
 							CAST([StampedDt] AS DATE).
@@ -54,6 +57,7 @@ BEGIN
 		/* Usage Fields */
 		,[LastReadDt]			DATETIMEOFFSET	NULL
 		,[LastAppliedDt]		DATETIMEOFFSET	NULL
+		,[LastKeptDt]			DATETIMEOFFSET	NULL
 		,[AppliedDays]			INT				NOT NULL	DEFAULT(0)
 		,[AppliedDates]			NVARCHAR(400)	NULL
 
@@ -70,6 +74,16 @@ BEGIN
 		,CONSTRAINT		PK_RecordUsage
 						PRIMARY KEY	CLUSTERED	( [RecordId] )
 	)
+END
+GO
+
+-- Check for and Add the Kept Time to a Table That Predates It. Each Row Already There Takes NULL.
+;IF NOT EXISTS(	SELECT	NULL
+				FROM	sys.columns C
+				WHERE	C.[object_id] = OBJECT_ID('mem.RecordUsage')
+						AND C.[name] = 'LastKeptDt' )
+BEGIN
+	;ALTER TABLE mem.RecordUsage ADD [LastKeptDt] DATETIMEOFFSET NULL
 END
 GO
 

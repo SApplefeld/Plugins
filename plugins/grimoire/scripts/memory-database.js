@@ -478,7 +478,7 @@ function refusedRecordPath(stampId) {
 // Every row is a mem.usp_ListIndex row as the procedure returns it: recordId,
 // tier, projectKey, typeName, name, description, tags, triggers, anchors,
 // pinned, space, machine, supersedes, author, created, origin, updated,
-// lastRead, lastApplied and appliedDays. A section is replaced whole by the refresh that took it
+// lastRead, lastApplied, lastKept and appliedDays. A section is replaced whole by the refresh that took it
 // and keeps its own takenAt, so a shared tier taken an hour ago and a project
 // taken just now each say when. The projects map holds every key a refresh
 // on this machine has taken, bounded at SNAPSHOT_PROJECT_KEYS_MAX with the
@@ -515,23 +515,23 @@ const SNAPSHOT_SECTION_ROWS_MAX = 512;
 // The characters a row carries in the fields the host's own columns bound and
 // the writer does not clamp, at their column widths: projectKey 400, typeName
 // 400 (the store segment), author 200, machine 100, space 100, origin 10, tier
-// 20, created 10, createdAt, updated, lastRead and lastApplied at 34 each,
-// recordId 20, appliedDays 11 and pinned 5, plus 21 keys at 20 characters of
-// name, quotes and separators apiece: 1,832 in all.
-const SNAPSHOT_ROW_BOUNDED_CHARS = 400 + 400 + 200 + 100 + 100 + 10 + 20 + 10 + 4 * 34 + 20 + 11 + 5 + 21 * 20;
+// 20, created 10, createdAt, updated, lastRead, lastApplied and lastKept at 34
+// each, recordId 20, appliedDays 11 and pinned 5, plus 22 keys at 20
+// characters of name, quotes and separators apiece: 1,886 in all.
+const SNAPSHOT_ROW_BOUNDED_CHARS = 400 + 400 + 200 + 100 + 100 + 10 + 20 + 10 + 5 * 34 + 20 + 11 + 5 + 22 * 20;
 
 // The largest index.json the reader parses, in bytes, as the arithmetic of the
 // largest file the writer can produce. A row's clamped fields are two names at
 // NAME_CAP, a description at SUMMARY_CAP, and MAX_TAGS tags, TRIGGER_ENTRIES_MAX
 // triggers and ANCHOR_ENTRIES_MAX anchors at their entry caps, each list entry
 // three characters of quotes and comma more, with SNAPSHOT_ROW_BOUNDED_CHARS
-// beside them: 20,536 characters at memq's caps today. JSON.stringify writes no
+// beside them: 20,590 characters at memq's caps today. JSON.stringify writes no
 // character in more than six bytes (a control character as \u00XX; any other
 // in at most three UTF-8 bytes per UTF-16 unit), so a row is at most six times
-// its characters, 123,216 bytes. A section is SNAPSHOT_SECTION_ROWS_MAX rows
+// its characters, 123,540 bytes. A section is SNAPSHOT_SECTION_ROWS_MAX rows
 // and 512 bytes of its own, and the file is SNAPSHOT_PROJECT_KEYS_MAX project
 // sections and the two shared tiers plus 1,024 bytes: (32 + 2) x (512 x
-// 123,216 + 512) + 1,024 = 2,144,962,560 bytes, about 2.1 GB. Past it the file
+// 123,540 + 512) + 1,024 = 2,150,602,752 bytes, about 2.2 GB. Past it the file
 // is not one this writer wrote, and it is refused before it is read.
 //
 // The ceiling guards against a planted file and bounds no reader's cost. A
@@ -2779,7 +2779,7 @@ function filled(value) {
 // ONE UNSENDABLE ROW ON THE QUEUE IS A QUEUE THAT NEVER EMPTIES. The drain sends
 // every consecutive row of a stamp kind in one call, and both append procedures
 // throw over the whole batch on a row missing what they require:
-// mem.usp_AppendUsage on a kind that is not read or applied and on an absent or
+// mem.usp_AppendUsage on a kind that is not read, applied or kept and on an absent or
 // unreadable timestamp, mem.usp_AppendOutcomes on a blank segment, a blank
 // action key or the same timestamp. So the batch is refused, nothing is deleted,
 // and every later drain rebuilds the same batch around the same row for as long
@@ -2885,8 +2885,8 @@ function unsendable(entry) {
         return null;
     }
     const kind = filled(entry.kind) ? entry.kind.trim().toLowerCase() : '';
-    if (kind !== 'read' && kind !== 'applied') {
-        return 'the stamp\'s kind is neither read nor applied';
+    if (kind !== 'read' && kind !== 'applied' && kind !== 'kept') {
+        return 'the stamp\'s kind is neither read, applied nor kept';
     }
     return null;
 }
@@ -4774,6 +4774,10 @@ const RECALL_SCHEMA_VERSION = 10;
 // the floor the decay scan's verdict read stands down below.
 const PAIR_VERDICT_SCHEMA_VERSION = 12;
 
+// The schema version whose mem.usp_AppendUsage takes the kept kind, and the
+// floor the keep verdict refuses to stamp below.
+const KEPT_SCHEMA_VERSION = 15;
+
 // The most rows mem.usp_Recall serves. It clamps a larger request itself, so
 // asking for more reads to a caller as a short answer rather than a clamp.
 const RECALL_LIMIT_MAX = 30;
@@ -6045,6 +6049,7 @@ module.exports = {
     METER_SCHEMA_VERSION,
     RECALL_SCHEMA_VERSION,
     PAIR_VERDICT_SCHEMA_VERSION,
+    KEPT_SCHEMA_VERSION,
     PURGE_SCHEMA_VERSION,
     ARCHIVED_SCHEMA_VERSION,
     ARCHIVED_DAYS_MAX,

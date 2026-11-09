@@ -219,7 +219,14 @@ $ErrorActionPreference = 'Stop'
 # every row of every other table. The client's
 # PURGE_SCHEMA_VERSION reads this number back through mem.usp_Health, and
 # `memq db-refresh` skips the purge step on a host below it.
-$script:SchemaVersion = 14
+#
+# Version 15 is where a record can be kept, a judgment that it still holds.
+# mem.RecordUsage gains [LastKeptDt], mem.usp_AppendUsage takes the kept kind
+# without moving any applied value, and mem.usp_ListIndex returns the time as
+# lastKept. A version 14 host takes it in place, keeping every row. The
+# client's KEPT_SCHEMA_VERSION reads this number back through mem.usp_Health,
+# and `memq keep` refuses to stamp on a host below it.
+$script:SchemaVersion = 15
 
 # The five logins the Security scripts create, each with the role it joins
 # and the sandbox it publishes for. The logins file carries these three

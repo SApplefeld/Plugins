@@ -24,9 +24,14 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_UpsertRecords
 		AUTHOR:		Scott Applefeld
 		DATE:		September 17th, 2026
-		VERSION:	v1.4
+		VERSION:	v1.5
 	*********************************************************************************************
-		NOTES:		v1.4 - 10/05/2026
+		NOTES:		v1.5 - 11/05/2026
+							The usage fold below carries [LastKeptDt] too, so the landed
+							row takes the later of the two rows' kept times, and a landed
+							row with no usage row takes the older row's as it stands.
+
+					v1.4 - 10/05/2026
 							The declared limit of the usage fold below states both ways a
 							landed row's count can read low. No behavior changes.
 
@@ -908,10 +913,11 @@ BEGIN	-- PROCEDURE
 			/* The Caller's Older Row of the File Key Carries No Live Record Once the Row is Landed; It Takes the Deleted Mark and No Field of Any Copy. */
 			;IF ( @OldRecordId IS NOT NULL AND @OldRecordId <> COALESCE(@WriteRecordId, -1) AND @OldDeletedDt IS NULL )
 			BEGIN
-				/* Its Usage Folds Into the Landed Row's and Its Write Stamps Join the Landed Row First, so Its Read History and Applied Stamps Survive It. */
+				/* Its Usage Folds Into the Landed Row's and Its Write Stamps Join the Landed Row First, so Its Read History, Applied Stamps and Kept Time Survive It. */
 				;UPDATE W
 				SET		 [LastReadDt]		= GREATEST(W.[LastReadDt], L.[LastReadDt])
 						,[LastAppliedDt]	= GREATEST(W.[LastAppliedDt], L.[LastAppliedDt])
+						,[LastKeptDt]		= GREATEST(W.[LastKeptDt], L.[LastKeptDt])
 						,[AppliedDays]		= W.[AppliedDays] + M.[NewDays]
 						,[AppliedDates]		= M.[AppliedDates]
 						,[UpdatedDt]		= @Now
@@ -926,11 +932,13 @@ BEGIN	-- PROCEDURE
 					 [RecordId]
 					,[LastReadDt]
 					,[LastAppliedDt]
+					,[LastKeptDt]
 					,[AppliedDays]
 					,[AppliedDates]	)
 				SELECT	 [RecordId]			= COALESCE(@WriteRecordId, @FleetRecordId)
 						,[LastReadDt]		= L.[LastReadDt]
 						,[LastAppliedDt]	= L.[LastAppliedDt]
+						,[LastKeptDt]		= L.[LastKeptDt]
 						,[AppliedDays]		= L.[AppliedDays]
 						,[AppliedDates]		= L.[AppliedDates]
 				FROM	mem.RecordUsage L WITH ( UPDLOCK, HOLDLOCK )

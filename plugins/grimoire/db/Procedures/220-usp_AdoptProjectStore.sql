@@ -24,9 +24,14 @@ BEGIN	-- PROCEDURE
 		SCRIPT:		mem.usp_AdoptProjectStore
 		AUTHOR:		Scott Applefeld
 		DATE:		October 3rd, 2026
-		VERSION:	v1.3
+		VERSION:	v1.4
 	*********************************************************************************************
-		NOTES:		v1.3 - 10/05/2026
+		NOTES:		v1.4 - 11/05/2026
+							The usage fold below carries [LastKeptDt] too, so the winner
+							takes the later of the two rows' kept times, and a winner with
+							no usage row takes the loser's as it stands.
+
+					v1.3 - 10/05/2026
 							The declared limit of the usage fold below states both ways a
 							winner's count can read low. No behavior changes.
 
@@ -350,10 +355,11 @@ BEGIN	-- PROCEDURE
 			************************************************************************************/
 			;IF ( @LoserRecordId IS NOT NULL )
 			BEGIN
-				/* The Loser's Usage Folds Into the Winning Row's and Its Write Stamps Join the Winning Row, so Its Read History and Applied Stamps Survive It. */
+				/* The Loser's Usage Folds Into the Winning Row's and Its Write Stamps Join the Winning Row, so Its Read History, Applied Stamps and Kept Time Survive It. */
 				;UPDATE W
 				SET		 [LastReadDt]		= GREATEST(W.[LastReadDt], L.[LastReadDt])
 						,[LastAppliedDt]	= GREATEST(W.[LastAppliedDt], L.[LastAppliedDt])
+						,[LastKeptDt]		= GREATEST(W.[LastKeptDt], L.[LastKeptDt])
 						,[AppliedDays]		= W.[AppliedDays] + M.[NewDays]
 						,[AppliedDates]		= M.[AppliedDates]
 						,[UpdatedDt]		= @Now
@@ -368,11 +374,13 @@ BEGIN	-- PROCEDURE
 					 [RecordId]
 					,[LastReadDt]
 					,[LastAppliedDt]
+					,[LastKeptDt]
 					,[AppliedDays]
 					,[AppliedDates]	)
 				SELECT	 [RecordId]			= @WinnerRecordId
 						,[LastReadDt]		= L.[LastReadDt]
 						,[LastAppliedDt]	= L.[LastAppliedDt]
+						,[LastKeptDt]		= L.[LastKeptDt]
 						,[AppliedDays]		= L.[AppliedDays]
 						,[AppliedDates]		= L.[AppliedDates]
 				FROM	mem.RecordUsage L WITH ( UPDLOCK, HOLDLOCK )
