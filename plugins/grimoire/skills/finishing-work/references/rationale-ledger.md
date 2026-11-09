@@ -1731,13 +1731,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - reason: Executing-work's security-specific rule at its line 436 agrees for the section close; this is the finishing moment. The gate is blast-radius, shipping known exposure, and stays (A048 to A051). Retired by reviewer-reranking section 2 2026-09-20 as a security-keyed rule: a security-lens Major is dispositioned fix now, defer or refuse. The fix-or-present route itself is not retired but relocated to the pass's fix path (W006), where the two step 4 pointers that already aimed at it by name now aim, since those carry correctness-tier Majors from the goal read rather than security findings.
 
 ### c2.C037
-- key: Skip both advisory dispatches only where every file in the changeset is prose and no document in it addresses an audience outside the operator and the operator's own sessions.
+- key: Skip both advisory dispatches only where every file in the changeset is prose and no document in it addresses an audience outside the operator and the operator's own sessions, and keep the security dispatch for a changeset that edits a security document whatever those predicates read.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:52
-- provenance: 12ef61f 2026-07-09, review-tension plan (the prose-only waiver as a file-type predicate); a5fce80 2026-08-18, document-review battery (the audience predicate); amended by docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20, which applies the waiver to both advisory lenses on the same two predicates.
-- verdict: keep
-- reason: The waiver is a predicate rather than a judgment so it cannot be argued; c2.C039 refines its definition of prose and c2.C040 states its failure consequence (A052 to A055).
-- passage: The waiver skips both dispatches only where two predicates hold, with the skip and the changed-file evidence recorded in the final Chapter. The first holds when every file in the changeset is prose: markdown or plain text, with no code, script, hook, config, query or schema file. The second holds when no document in it is written for an audience outside the operator and the operator's own sessions.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:88
+- provenance: 12ef61f 2026-07-09, review-tension plan (the prose-only waiver as a file-type predicate); a5fce80 2026-08-18, document-review battery (the audience predicate); amended by docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20, which applies the waiver to both advisory lenses on the same two predicates. Amended by `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 fix round 1 2026-11-08, which keeps the security dispatch for a changeset that edits a security document.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 fix round 1
+- reason: The waiver is a predicate rather than a judgment so it cannot be argued; c2.C039 refines its definition of prose and c2.C040 states its failure consequence (A052 to A055). The operator's ruling of 2026-11-08 on the architect channel freed security documents from his word, so the finishing security review now points his pull request review at an edit that changes what the model permits, and no route may skip it. A changeset editing only `docs/security-model.md` met both predicates, so the waiver skipped the one review that reads it. The definition names the kit's two security documents and a client's threat model, so a reader can check a changeset against it.
+- passage: The waiver skips both dispatches only where two predicates hold, with the skip and the changed-file evidence recorded in the final Chapter. The first holds when every file in the changeset is prose: markdown or plain text, with no code, script, hook, config, query or schema file. The second holds when no document in it is written for an audience outside the operator and the operator's own sessions. A changeset that edits a security document keeps the security dispatch whatever the two predicates read. A security document is a threat model or security-model document, `docs/security-model.md` and `docs/persona-security-model.md` among them, and a client repository's threat model.
 
 ### c2.C038
 - key: Record the skip and the changed-file evidence in the final Chapter whenever the waiver is used.
@@ -1759,13 +1760,14 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: **Markdown whose frontmatter is machine-read is not prose for this predicate.** An agent charter under `agents/` and a skill's `SKILL.md` are instances.
 
 ### c2.C040
-- key: Run both reviews, scoped to the non-prose files, whenever a single non-prose file appears, even a one-line edit.
+- key: Run both reviews, scoped to the non-prose files, whenever a single non-prose file appears, even a one-line edit, the security review's scope also taking in every security document the changeset edits.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:52
-- provenance: 12ef61f 2026-07-09, review-tension plan; amended by docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20, which reads both advisory dispatches where the waiver governed one.
-- verdict: keep
-- reason: It is the predicate's contrapositive plus the scoping instruction the predicate does not carry (A052, A055).
-- passage: A single non-prose file voids the waiver, and both reviews then run scoped to the non-prose files.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:90
+- provenance: 12ef61f 2026-07-09, review-tension plan; amended by docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 2 2026-09-20, which reads both advisory dispatches where the waiver governed one. Amended by `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 fix round 1 2026-11-08, which widens the scoped security review to the security documents the changeset edits.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 fix round 1
+- reason: It is the predicate's contrapositive plus the scoping instruction the predicate does not carry (A052, A055). Scoped to the non-prose files alone, a mixed changeset's security review never read its security document. Since the operator's ruling of 2026-11-08 freed security documents from his word, that review is what points his pull request review at an edit that changes what the model permits, so no scope may leave one out (c2.C037).
+- passage: A single non-prose file voids the waiver, and both reviews then run scoped to the non-prose files. The security review's scope also takes in every security document the changeset edits.
 
 ### c2.C041
 - key: Read the audience predicate off the spec's `Audience:` lines rather than off the documents.
@@ -3102,15 +3104,16 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 ### c3.C073
 - key: Present a consolidated walkthrough of every changed file, what changed and why, organized by section, with a diff summary, then stop and let the operator review before anything is committed.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:88
-- provenance: 656310e 2026-06-10, the walkthrough dates from the marketplace migration; 830ff28 2026-06-17 set the three commit models; rewritten 2026-10-19 by the finishing-rules-drift plan's finishing pass, so the walkthrough carries the deviation drift items and remedy receipts step 5 routes to it.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:171
+- provenance: 656310e 2026-06-10, the walkthrough dates from the marketplace migration; 830ff28 2026-06-17 set the three commit models; rewritten 2026-10-19 by the finishing-rules-drift plan's finishing pass, so the walkthrough carries the deviation drift items and remedy receipts step 5 routes to it. Rewritten by `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 close pass 2026-11-08, which adds the security findings on a permission-changing edit.
 - verdict: rewrite
 - landed: d549e65 section 5
-- reason: The stop stands as a blast-radius hold and the doctrine's ranking lets the operator's live word lift it (A113, A116); the bullet gains one sentence stating that an authorized commit or push takes the Commit-and-Push bullet's mechanics and the pass resumes at step 7, closing the gap two probes filled the same way (A114, A115). The landed sentence names the targeted lane the Commit-and-Push bullet names for the push, that bullet's pre-push whole gate having left on 2026-10-06 under section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md`, so the two bullets state one rule for one push and the push sentence names its lane as the doctrine-parity pin requires.
+- landed: `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 close pass
+- reason: The stop stands as a blast-radius hold and the doctrine's ranking lets the operator's live word lift it (A113, A116); the bullet gains one sentence stating that an authorized commit or push takes the Commit-and-Push bullet's mechanics and the pass resumes at step 7, closing the gap two probes filled the same way (A114, A115). The landed sentence names the targeted lane the Commit-and-Push bullet names for the push, that bullet's pre-push whole gate having left on 2026-10-06 under section 2 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md`, so the two bullets state one rule for one push and the push sentence names its lane as the doctrine-parity pin requires. The walkthrough names the security findings S220 puts in a pull request body, since the operator's ruling of 2026-11-08 left the finishing security review to point his pull request review at an edit that changes what the model permits, and a Review-Only plan has no body to carry it.
 - proposed: (via A114) Add to the Review-Only bullet: on the operator's word to commit or push, that act takes the Commit-and-Push bullet's mechanics including the docs predicate and the pre-push gate, and the pass resumes at step 7.
 - baseline-test: yes
 - passage: On my word to commit or push, that act takes the Commit-and-Push bullet's mechanics, its docs predicate and the targeted lane that bullet names for the push. The pass then resumes at step 7.
-- passage: present a consolidated walkthrough of every changed file, what changed and why, organized by section, with a diff summary, the deviation drift items and the remedy receipts, the staged changes being the review surface. Then stop, since I review before anything is committed.
+- passage: present a consolidated walkthrough of every changed file, what changed and why, organized by section, with a diff summary, the deviation drift items, the remedy receipts, and each security review finding naming an edit that changes what the model permits, with the entry it changes, the staged changes being the review surface. Then stop, since I review before anything is committed.
 
 ### c3.C074
 - key: With the docs commit already on the branch, update from origin and surface any sibling-session conflicts for resolution.
@@ -6184,14 +6187,15 @@ Extracted at `6bc07fb`: lines 1-41 (`skills.finishing-work.c1.md`); lines 42-65 
 - passage: Open the pull request only where none is open for the branch (`gh pr list --head <branch> --state open`), and otherwise push and refresh its body with `gh pr edit <branch> --body-file <path>`. To open one, push the branch and run `gh pr create --base <integration>` on GitHub or `az repos pr create --target-branch <integration>` on Azure DevOps Git, or, with no CLI or auth, surface the "create a pull request" URL the host prints.
 
 ### S220
-- key: Have the PR carry its title, by-section summary, test evidence, archival summary, deviation drift items and remedy receipts.
+- key: Have the PR carry its title, by-section summary, test evidence, archival summary, deviation drift items, remedy receipts, and each security review finding naming an edit that changes what the model permits, with the entry it changes, a finding that blocks nothing.
 - class: rule
-- source: plugins/grimoire/skills/finishing-work/SKILL.md:168
-- provenance: f758743 2026-06-23, documentation carried into PRs; the deviation items from the drift-routing rule at step 5; moved by 55c5abc 2026-09-09. Rewritten 2026-10-18 by the finishing-pass-rules plan's finishing pass, on the docs curator's drift item D5.
+- source: plugins/grimoire/skills/finishing-work/SKILL.md:174
+- provenance: f758743 2026-06-23, documentation carried into PRs; the deviation items from the drift-routing rule at step 5; moved by 55c5abc 2026-09-09. Rewritten 2026-10-18 by the finishing-pass-rules plan's finishing pass, on the docs curator's drift item D5. Rewritten by `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 fix round 1 2026-11-08, which adds the security findings on a permission-changing edit.
 - verdict: rewrite
 - landed: a80a5c80 finishing pass
-- reason: Step 5 disposes of a deviation and this enumerates the PR's contents, meeting at one item; the drift items are what the body-file control (S223) exists to carry safely. Step 5 records every cleared curator remedy with its receipt in the PR description, so the list names the receipts.
-- passage: The PR carries its title, by-section summary, test evidence, archival summary, deviation drift items and remedy receipts.
+- landed: `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 1 fix round 1
+- reason: Step 5 disposes of a deviation and this enumerates the PR's contents, meeting at one item; the drift items are what the body-file control (S223) exists to carry safely. Step 5 records every cleared curator remedy with its receipt in the PR description, so the list names the receipts. The operator's ruling of 2026-11-08 on the architect channel freed security documents from his word, so the finishing security review points his pull request review at an edit that changes what the model permits. A finding left on the interim board never reaches him, so the body carries it. It informs his review and blocks nothing, since the ruling released the hold.
+- passage: The PR carries its title, by-section summary, test evidence, archival summary, deviation drift items, remedy receipts, and each security review finding naming an edit that changes what the model permits, with the entry it changes. That finding informs my review and blocks nothing.
 
 ### S221
 - key: Write the PR title in the doctrine's commit-title form: an uppercase surface prefix, the change as a proper sentence with a period, a "so" clause where the effect is not obvious, informative words first.
