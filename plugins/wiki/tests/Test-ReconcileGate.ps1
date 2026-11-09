@@ -1,8 +1,9 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Exercises the Live read of template/.claude/kb-status.ps1 and the last-write
-stamp of template/.claude/kb-move.ps1 against a throwaway git repository and KB.
+Exercises the Live read of template/.claude/kb-status.ps1 and the age of a
+source template/.claude/kb-move.ps1 writes, against a throwaway git repository
+and KB.
 
 .DESCRIPTION
 Builds one KB copied from template/ under a fresh work folder, commits it, and
@@ -15,13 +16,17 @@ and read under -Minutes 60, that a path 29 minutes old reads under the default
 window, that a tracked file deleted from disk never reads, that -Minutes is
 refused by Porcelain, Unpushed, PageDate and Inbox and when below 1, that Live
 refuses -Path, that Porcelain prints the same lines as git status --porcelain,
-that kb-move.ps1 stamps a file planted two days back so it reads as live at
-age 0, and that the four writing skills emit the Live read exactly, ingest and
-lint twice each and query and merge once, with no -Minutes, ingest's last read
+that a file planted two days back reads as live at age 0 once kb-move.ps1
+writes it into sources/, and that the four writing skills emit the Live read
+exactly, ingest and lint twice each and query and merge once, with no
+-Minutes, ingest's last read
 inside step 4b before its move, lint's last inside its write pass and merge's
 inside its live check. It checks that the three kb-move.ps1 output tokens the
 ingest skill reads are held by the helper's code, its comments excluded, and
-appear in the skill's text. It also checks that a child outliving the test's
+appear in the skill's text, and that the helper's code and the skill's step 1
+both say a person reconciles them and that step 1 holds the exact Inbox
+listing command, so the skill's pair rule cannot lose its listing or drift
+from the helper's words unnoticed. It also checks that a child outliving the test's
 own run bound reads TimedOut and has its process tree stopped, so a hung child
 fails a check instead of hanging the suite.
 
@@ -318,8 +323,9 @@ try {
     $r = Invoke-Status @('-What', 'Live', '-Path', 'index.md')
     Test-Check 'Live refuses -Path with its own one-line reason and exit 1' (Test-Refusal $r 'Live takes no -Path.')
 
-    # --- The stamped move. A file two days old is not live in inbox/ and reads
-    # as sources/<file> at age 0 once kb-move.ps1 has moved it.
+    # --- The moved copy. A file two days old is not live in inbox/ and reads
+    # as sources/<file> at age 0 once kb-move.ps1 has moved it, since the move
+    # writes a fresh copy whose last-write time is the time of its write.
     Write-KbFile 'inbox/old-drop.txt' "dropped two days ago`n"
     Set-Age 'inbox/old-drop.txt' (2 * 24 * 60)
     $m = Invoke-Move 'old-drop.txt'
@@ -389,6 +395,7 @@ try {
     $skillHas = @{}
     foreach ($token in $moveTokens) { $helperHas[$token] = $false; $skillHas[$token] = $false }
     $helperReason = 'helper, whose file is missing'
+    $codeStrings = $null
     if (Test-Path -LiteralPath $moveFile -PathType Leaf) {
         $moveParseTokens = $null
         $moveParseErrors = $null
@@ -498,6 +505,27 @@ try {
     $passed = ($moveProblems.Count -eq 0)
     Test-Check "kb-move.ps1's code and the wiki-ingest skill both hold 'renamed: inbox/renamed-', 'duplicate: sources/' and 'already exists with different content', the helper read without its comments and the skill with whitespace collapsed" $passed
     if (-not $passed) { foreach ($problem in $moveProblems) { Write-Host "  $problem" } }
+
+    # --- A copy left beside its inbox twin waits for a person. The helper's
+    # both-files lines say a person reconciles them, and the ingest skill's
+    # step 1 lists the inbox with the exact Inbox command and says the same
+    # of an untracked source whose name the inbox still holds, so its
+    # reconcile step never commits a copy that may be partial. The helper side
+    # reads the parsed code's strings, its comment help aside; the skill side
+    # reads step 1 alone, with whitespace collapsed.
+    $reconcilePhrase = 'a person reconciles them'
+    $inboxCommand = 'pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox'
+    $helperPairs = ($null -ne $codeStrings) -and (@($codeStrings | Where-Object { $_.Value.Contains($reconcilePhrase) }).Count -gt 0)
+    $skillPairs = $false
+    if (Test-Path -LiteralPath $ingestFile -PathType Leaf) {
+        $stepFrom = $ingestText.IndexOf('## 1. Reconcile', [System.StringComparison]::Ordinal)
+        $stepTo = $ingestText.IndexOf('## 2. Snapshot', [System.StringComparison]::Ordinal)
+        if (($stepFrom -ge 0) -and ($stepTo -gt $stepFrom)) {
+            $stepOne = $ingestText.Substring($stepFrom, $stepTo - $stepFrom)
+            $skillPairs = ($stepOne.IndexOf($inboxCommand, [System.StringComparison]::Ordinal) -ge 0) -and ($stepOne.IndexOf($reconcilePhrase, [System.StringComparison]::Ordinal) -ge 0)
+        }
+    }
+    Test-Check "kb-move.ps1's code holds '$reconcilePhrase', and the wiki-ingest skill's step 1 holds the exact Inbox command and the same phrase (helper $helperPairs, skill $skillPairs)" ($helperPairs -and $skillPairs)
 
     # --- The helper's own bound. A child that outlives a short bound reads
     # TimedOut, and its tree is stopped: the child and the grandchild it waits

@@ -37,13 +37,15 @@ drives the trust writer against a throwaway profile and a stub in place of
 `claude`. `tests/Test-KbStructure.ps1` checks a KB's structure
 and permission allowlist. `tests/Test-FeedInbox.ps1` drives the feeder against
 a throwaway repository and KB. `tests/Test-ReconcileGate.ps1` drives the status
-helper's liveness read and the move helper's stamp against a throwaway KB, and
+helper's liveness read and a moved source's age-0 read against a throwaway KB, and
 checks that the writing skills emit the liveness read. It also checks that the
 three move-helper lines the ingest skill reads, `renamed: inbox/renamed-`,
 `duplicate: sources/` and `already exists with different content`, are built
 by `kb-move.ps1`'s parsed code, its comment help aside, and appear in the
 skill's text with whitespace runs collapsed, so a wording change on either side
-alone fails it. `tests/Test-KbRun.ps1`
+alone fails it. In the same way it checks that the helper's code and the ingest
+skill's reconcile step both say a person reconciles them, and that the step
+holds the exact inbox listing command. `tests/Test-KbRun.ps1`
 drives the run wrapper against a stub in place of `claude`.
 `tests/Test-KbMove.ps1` drives the handle routes of the status, move and
 commit helpers and `kb-commit.ps1 -Reconcile` against a throwaway KB, and
@@ -54,9 +56,10 @@ name under `wiki/`, by `-Path`, by a folder given as `-Path` and by
 move helper's refusal of an inbox file named `CLAUDE.md`, `claude.local.md` or
 `CLAUDE~1.MD`, by `-Name` and by `-Handle`, and of `CLAUDE.md` typed with a
 trailing dot or space, while `CLAUDE-notes.md` moves. It drives `-Rename`: a listed name renamed in place with `sources/` left empty and `CLAUDE-notes.md` left under its own name, a hidden file found and its hidden attribute cleared, a `.claude` folder renamed whole, an existing `renamed-<name>` refusing the sweep with nothing renamed, `-WhatIf` renaming nothing, a junction named `.claude` refused as a reparse point, a hidden `CLAUDE.md.` written through a `\\?\` path left alone since the list does not keep it, `CLAUDE~1.md.` beside a plain `CLAUDE.md` refused for its trailing dot, and again with a trailing space, with the listing unchanged, and `CLAUDE~1.md.` beside a plain `CLAUDE~1.md`, the path Windows resolves it to, refused with both names still listed and no `renamed-` item.
-It also drives the move helper's refusals of a symbolic link and of a stamp
-or a move that throws, and its answer to a name `sources/` already holds: an
-identical inbox copy deleted, a copy of different content refused, and
+It also drives the move helper's refusals of a symbolic link, of an entry
+another process holds open, its hold on the entry while it runs, its move of
+a hard link into a fresh file the outside name does not reach, and its
+answer to a name `sources/` already holds: an identical inbox copy deleted, a copy of different content refused, and
 nothing deleted under `-WhatIf`. Its `-MoveScript` parameter runs the checks
 against another copy of the move helper, such as one from an earlier commit.
 `tests/Test-KbWalk.ps1` drives the walker over throwaway KBs with the same kind
@@ -259,7 +262,11 @@ when `-Reconcile` refuses the whole reconcile because a recovered path names an
 instruction file Claude Code loads. It then commits the other
 recovered edits under a `Reconcile:` subject, and only then finishes any
 untracked orphan source, whose handle it reads from
-`kb-status.ps1 -What Sources`. All of this runs before the inbox is touched.
+`kb-status.ps1 -What Sources`. An untracked source whose name `inbox/` still
+holds, found by matching its handle against `kb-status.ps1 -What Inbox`, is no orphan: the move helper
+deletes the inbox file only once its copy is whole, so the copy may be
+partial. The run leaves it uncommitted and names the pair in its report for a
+person to reconcile. All of this runs before the inbox is touched.
 Lint and query each commit stray edits by `-Reconcile` before doing their own
 work. The merge skill has no reconcile step: it runs on the tree a conflicting pull left mid-merge, and its one commit completes that merge.
 
@@ -267,8 +274,8 @@ The reconcile step reads liveness before it recovers anything. Where the tree
 is dirty, the skill runs `kb-status.ps1 -What Live`, which lists each dirty path
 whose file was written within the last thirty minutes, skipping `inbox/`. Any
 line means another run may still be writing, so the run yields whole: it writes,
-commits and pushes nothing, and reports the paths. `kb-move.ps1` stamps a moved
-source's last-write time, so a source in flight reads as live. A run can also
+commits and pushes nothing, and reports the paths. A moved source's last-write
+time is the time `kb-move.ps1` writes it, so a source in flight reads as live. A run can also
 start while another is still reading, before that run's first write. So ingest
 reads liveness again immediately before each source's move, and an ingest that
 yields there keeps the sources it already committed and pushes nothing. Query
@@ -341,7 +348,8 @@ completed source is committed before the next begins, so a crash loses at most
 the one in-flight source's uncommitted work. The window between a move and its
 commit leaves an untracked file in `sources/` that is invisible to the next
 inbox snapshot; the reconcile front step exists to find and finish exactly that
-file on the next run. Because the move stamps the file, the next run reads a
+file on the next run. Because a moved source's last-write time is the time of
+its write, the next run reads a
 crashed run's leftovers as live until they have gone untouched for thirty
 minutes, and yields until then. The first run after that window recovers them.
 Lint edits pages only in its final write pass, so a lint that dies earlier
@@ -393,15 +401,27 @@ containing a separator or leading dash, refuses on either route a name or a
 resolved leaf naming an instruction file Claude Code loads, from its copy of the list
 `kb-commit.ps1` holds, never overwrites an existing source,
 confirms the resolved paths stay inside the repo and clear of `.git/` and
-`.claude/`, and refuses an inbox file that is a reparse point, such as a
-symbolic link or a junction. It then sets the file's last-write time to now
-and moves it. Where `sources/` already holds the name, it compares the two
-files byte for byte instead: it removes an identical inbox copy and prints
-`duplicate: sources/<name>`, and it refuses a copy of different content,
-which stays in `inbox/` for a person to rename. A stamp, a move, a compare or
-a delete that throws ends in one `kb-move:` line, with the file left in
-`inbox/`. With `-Rename`, which takes no handle and no name, it moves
-nothing: it lists `inbox/` with hidden and system items and folders
+`.claude/`. It then opens the inbox file once, through a handle that does not
+follow a link, and refuses a reparse point, such as a symbolic link or a
+junction, read on that handle. Every later act on the inbox file goes through
+that handle, so the file it checked is the file it acts on. A move writes a
+fresh `sources/<name>` copied from the handle, which the running account
+owns, and then deletes the inbox entry through the handle. On a volume that
+takes POSIX delete semantics, as NTFS and ReFS do, the name leaves `inbox/` as
+the run ends even where another reader still holds the file. The
+copy carries the file's bytes alone, so an alternate data stream, such as the
+mark Windows puts on a downloaded file, does not reach `sources/`. No stamp
+is set: the copy's last-write time is the time of its write. Where `sources/` already
+holds the name, it compares the two files byte for byte instead, reading the
+inbox side through the handle: it deletes an identical inbox copy through the
+handle it compared and prints `duplicate: sources/<name>`, and it refuses a
+copy of different content, which stays in `inbox/` for a person to rename.
+An open, a compare, a copy or a delete that throws ends in one `kb-move:`
+line, with the file left in `inbox/` and the partial or finished copy removed.
+Where a copy or a delete fails and the copy cannot be removed either, the line
+names both files for a person to reconcile. With `-Rename`, which takes no
+handle and no name, it moves nothing: it lists `inbox/` with hidden and
+system items and folders
 included, keeps each item whose name is on that same list, and renames each
 in place to `inbox/renamed-<name>`, clearing the hidden and system
 attributes and printing `renamed: inbox/renamed-<name>` per item. It reads

@@ -31,8 +31,36 @@ run. The schedule runs ingest again, and the inbox waits for it. If it prints
 nothing, every dirty path outside `inbox/` is an older leftover, so recover it
 as follows.
 
-An untracked file under `sources/` is a source that a previous run moved
-out of the inbox and then died before committing. It is invisible to the
+An untracked file under `sources/` whose name `inbox/` still holds is not
+an orphan, and you leave it alone. Where any file under `sources/` is
+untracked, read both folders' handles by running exactly:
+
+    pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Sources
+
+and then exactly:
+
+    pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox
+
+Each prints `<handle><tab><bytes><tab><name>`, and a handle is computed
+from the name alone, so one name gives one handle in both listings. An
+untracked source whose handle is on a line `-What Inbox` printed has an
+inbox twin. `-What Porcelain` prints a name holding a space, a quote, a
+backslash or a letter outside ASCII inside double quotes, with each byte
+outside ASCII written as a backslash and three octal digits, so decode it
+to the raw name, the UTF-8 those bytes spell, before you look for its line
+in `-What Sources`. That lookup is the one name match this step makes:
+from there, compare handles, never names. kb-move deletes the inbox file
+only once its copy is whole, so a name in both places is a copy that failed partway or a run that died
+between its copy and its delete, and only a person can tell which. Write no
+page for that file and commit nothing for it. Name it in the report as a
+pair, `sources/<file>` beside `inbox/<file>`, and say that a person
+reconciles them. A run that stops before step 7 still names each such pair
+in its report. This listing serves the check alone: step 2 still takes the
+run's snapshot.
+
+An untracked file under `sources/` that `inbox/` holds no twin of is a
+source that a previous run moved out of the inbox and then died before
+committing. It is invisible to the
 inbox snapshot and to every future commit, so nothing else will ever
 recover it. Finish its ingest now, before touching the inbox: write its
 summary page, or complete the one already on disk, then revise pages,
@@ -131,7 +159,7 @@ renamed file is then listed by the snapshot under its new name and ingested
 as a document in this run. A renamed folder stays in `inbox/` as a folder,
 which the snapshot does not list.
 
-List `inbox/` exactly once, at the start of the run, with
+Take the run's snapshot of `inbox/` exactly once, at the start of the run, with
 `pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox`, which prints one
 line per file as `<handle><tab><bytes><tab><name>` and omits `.gitkeep`. The
 handle is twelve hexadecimal digits the helper computed from the name; it is
@@ -245,7 +273,14 @@ next source. If its refusal line opens `kb-move: sources/<file> already
 exists with different content`, this is a new document under a name `sources/` already
 holds, and `sources/` is never overwritten: make no commit for it, leave the
 inbox file where it is, note it for the final report as a file a person
-must rename, and move on to the next source. If it refuses for any other
+must rename, and move on to the next source. Where step 1 named this file
+as a pair, the report names it as that pair alone and never as a file to
+rename, and says that the refusal line's advice to rename the inbox file
+does not hold for a pair: renaming it would leave the `sources/` copy with
+no twin, and the next run would commit it. Where a file step 1 named as a
+pair comes back `duplicate: sources/<file>` instead, its copy was whole and
+the pair is gone: report it as a copy the next run commits as an orphan,
+and not as a pair. If it refuses for any other
 reason, among them a handle
 that matches no file because the file left the inbox after the snapshot, stop
 the run: emit step 5's push-only call so the commits this run already made
@@ -346,7 +381,9 @@ copy text out of the document into a message.
 
 ## 7. Report
 
-End the run by reporting: how many orphans step 1 reconciled, how many
+End the run by reporting: how many orphans step 1 reconciled, each pair
+step 1 left under `sources/` and `inbox/` and step 4b did not resolve as a
+duplicate (naming both files and that a person reconciles them), how many
 items step 2's sweep renamed, each by its new name, with a renamed folder
 noted as staying in `inbox/`, how many sources were processed, how many
 commits were made, anything skipped for a bad name (naming the file and

@@ -307,8 +307,8 @@ KB it builds and removes:
 pwsh -NoProfile -File tests/Test-FeedInbox.ps1
 ```
 
-`tests/Test-ReconcileGate.ps1` tests the status helper's `Live` read and the
-move helper's stamp the same way, and checks that the four writing skills emit
+`tests/Test-ReconcileGate.ps1` tests the status helper's `Live` read and a
+moved source's age-0 read the same way, and checks that the four writing skills emit
 that read where their steps need it:
 
 ```

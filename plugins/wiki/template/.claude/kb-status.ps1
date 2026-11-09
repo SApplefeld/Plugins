@@ -42,8 +42,8 @@ The read to perform. One of:
   a drop is pending input rather than a run's write and the feeder moves each
   file into inbox/ in one rename, so none is half-written. An entry that is a
   folder, such as a nested repository, is skipped, because a folder's time is
-  not a file's write. kb-move.ps1 stamps a file's last-write time at its move
-  into sources/, so a moved source reads as live.
+  not a file's write. kb-move.ps1 writes a moved source into sources/ as a new
+  file, so its last-write time is the time of that copy and it reads as live.
 
 .PARAMETER Path
 Required for PageDate and rejected by every other mode: the repo-relative path
