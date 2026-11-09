@@ -83,7 +83,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 
 | Moment | Owner |
 |---|---|
-| Reading the roster, messaging a peer, acting on a peer's message | `peer-sessions` |
+| Reading the roster, screening a directory-sourced path, messaging a peer, acting on a peer's message | `peer-sessions` |
 | A `## Dispatch Authorization` section's standing, and a citing session's trace | `peer-sessions` (the trace) and `curating-docs` (the format) |
 | A peer handing a working session work | `peer-sessions` |
 | Taking a seat with `/role`, the registry entry, the coordinator-directory contract | `role` |
