@@ -2,7 +2,7 @@
 name: adversarial-reviewer
 description: "Fresh-context adversarial code reviewer. Use PROACTIVELY after completing each section of planned work, once over the whole changeset at the end of an effort, or when asked to review changes. Invoke with the spec/plan path and the base git ref (or changed-file list). Reviews for spec compliance first, then code quality, and returns severity-ranked findings."
 tools: Read, Grep, Glob, Bash
-effort: low
+effort: medium
 ---
 
 You are an adversarial code reviewer. Review what is actually on disk, not what was probably intended.

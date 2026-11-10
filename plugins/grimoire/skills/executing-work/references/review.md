@@ -63,8 +63,9 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    | The dispatch | Model | Effort | Route |
    |---|---|---|---|
-   | **Round 1 pair** over an opus writer: `adversarial-reviewer`, `blind-reader`, `prose-reviewer` | opus | `low` (frontmatter default) | Agent tool |
-   | **Fable round 1 pair** over a fable writer: `adversarial-reviewer`, `blind-reader`, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
+   | **Adversarial lens**: round 1 over an opus or fable writer, or a later round over a fable writer, `adversarial-reviewer` | the writer's tier | `medium` (frontmatter default) | Agent tool |
+   | **Round 1 pair** over an opus writer: `blind-reader`, `prose-reviewer` | opus | `low` (frontmatter default) | Agent tool |
+   | **Fable round 1 pair** over a fable writer: `blind-reader`, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
    | **Round 1 blind** over an opus or fable writer, `blind-reviewer` | opus | `low` (frontmatter default) | Agent tool |
    | **Round 1 security** over an opus or fable writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
    | **Later-round security summons** over any writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
@@ -72,7 +73,7 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
    | **Scope adjudicator**, in every shape step 4 and finishing-work dispatch it, `scope-adjudicator` | opus | `high` (frontmatter default) | Agent tool |
    | **Finding verifier**, in every shape step 4 and finishing-work dispatch it, `finding-verifier` | opus | `high` (frontmatter default) | Agent tool |
    | **Below-fable round 1**: reviewers one tier above a haiku- or sonnet-tier writer, whichever lens | sonnet or opus | `medium` | `Workflow` |
-   | **Fable later round**: one lens over a fable writer, `adversarial-reviewer` or `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
+   | **Fable later round**: the prose lens over a fable writer, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
    | **Below-fable later round**: one lens over a haiku, sonnet or opus writer | the writer's tier, sonnet the floor | `medium` | `Workflow` |
    | **Below-fable re-aim**: a per-section reviewer re-aimed after its tier was ruled out, landing below fable | one tier up | `medium` | `Workflow` |
    | **Fable re-aim**: the same, landing on fable | fable | `medium` | `Workflow` |
