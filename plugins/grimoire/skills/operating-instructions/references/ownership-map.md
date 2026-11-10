@@ -22,6 +22,7 @@ Amending: a row changes when ownership moves. It lands in the same change as the
 | A verdict on a decision framed with the operator's own preference | doctrine (Match my precision) |
 | Gaps at intake, and how each is routed | doctrine (Enumerate the gaps at intake) |
 | Filing a question that is the operator's to decide, closing it when the answer arrives, and what is never filed | doctrine (Surface decisions in batches) |
+| An item that waits on the operator: its one record, the open ask, and what never stands in for it | doctrine (Surface decisions in batches) |
 | A plan doc's name, format, `Status` lifecycle and `Commit Model` values, and the `docs/` taxonomy | `curating-docs` |
 | Archiving a plan, pruning the backlog, refreshing indexes | `curating-docs` |
 

@@ -120,7 +120,7 @@ Owed for any check only I can run: a customer window, a production deploy, a rea
 Never write one of these as a Section of Work. Finishing-work owns their completion semantics.
 
 ## Open Questions
-Unresolved items and who owns the answer.
+Unresolved items and who owns the answer. An item the operator owns is filed with `ask_open`, and the line names the ask's id.
 
 ## Chapters
 (Appended by executing-work as sections complete. Leave empty at creation.)

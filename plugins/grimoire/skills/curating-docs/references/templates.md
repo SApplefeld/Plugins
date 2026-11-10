@@ -71,6 +71,8 @@ Active cross-effort next-steps and handoffs only. Per-plan history stays in the 
 
 Every active item carries the date it was parked: `- **<item> (YYYY-MM-DD).** <body>`. Items age from the first date on their line, so a keep at the aging check writes its fresh date first and keeps the original beside it (`(2026-11-07, parked 2026-05-01)`). An undated item is past the threshold by definition, so the prune pass backfills its date and adjudicates it in the same pass.
 
+An item that waits on the operator, a check only the operator can run or a decision only the operator can make, is never parked here. Its one record is an open ask on the operator's ledger.
+
 ## Active
 
 - (Active next-steps and handoffs. Each item takes the dated shape above.)

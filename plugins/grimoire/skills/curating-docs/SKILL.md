@@ -17,7 +17,7 @@ Three zones, each with one job, plus the briefs folder, the living backlog and t
 | `docs/plans/` | Active plans only (open or in progress) | A plan leaves the moment it is Complete or abandoned |
 | `docs/briefs/` | The plan brief of each active plan that has one, named `<plan stem>.md` after its plan, in the form the `prose-register` skill's Plan Brief section states. A plan written before briefs gains one at its finishing pass | Moves to `docs/archive/briefs/` with its plan at the close path |
 | `docs/archive/` | Finished and abandoned plans (Chapters intact), their briefs under `briefs/`, and dated backlog snapshots | Immutable history; nothing here is live |
-| `docs/backlog.md` | The handoff doc for cross-effort next-steps, active items only | Pruned-live: completed items move to a dated snapshot |
+| `docs/backlog.md` | The handoff doc for cross-effort next-steps, active items only, never a wait on the operator | Pruned-live: completed items move to a dated snapshot |
 | `docs/direction.md` | The operator's direction ledger for this repository, in the operator's own words, in the line shape the role skill's coordinator-directory contract states | Operator-owned: sessions read it and never write it |
 
 ## Archiving a Completed Plan

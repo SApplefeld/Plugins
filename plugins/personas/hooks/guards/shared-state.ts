@@ -34,12 +34,12 @@
 //     --force, with ., ./ or .\ as an operand, or with two operands (a
 //     tree-ish and a path); switch with --discard-changes, -f or --force;
 //     restore, unless it carries --staged without --worktree; clean; branch
-//     with --delete or a short-flag cluster holding d or D; update-ref with -d
-//     alone or in a short-flag cluster, unless its first operand is a readable
-//     ref under refs/ and no operand opens refs/heads/ in any case, names
-//     HEAD, holds a brace or is unreadable, and no xargs sits ahead of it in
-//     its segment or anywhere in a command whose nested shell carries it;
-//     worktree remove or prune;
+//     with --delete or any prefix of it from --d, or a short-flag cluster
+//     holding d or D; update-ref with -d alone or in a short-flag cluster,
+//     unless its first operand is a readable ref under refs/ and no operand
+//     opens refs/heads/ in any case, names HEAD, holds a brace or is
+//     unreadable, and no xargs sits ahead of it in its segment or anywhere in
+//     a command whose nested shell carries it; worktree remove or prune;
 //   a recursive delete (rm with r or R in a short-flag cluster or
 //     --recursive, Remove-Item and its aliases with -Recurse or a unique
 //     prefix of it, or cmd's rd, rmdir, del or erase with /s) whose target is
@@ -272,8 +272,13 @@ function gitAct(cmd: string, masked: string, fed: boolean): string | null {
     }
     if (sub === "clean") return "a clean of the checkout (git clean)";
     if (sub === "branch") {
-      // A short-flag cluster holding d or D deletes (-d, -D, -df, -Df).
-      const del = rest.find((a) => a === "--delete" || /^-[A-Za-z]*[dD][A-Za-z]*$/.test(a));
+      // --delete deletes, and so does each shorter spelling from --d up (--d,
+      // --de, --del, --dele, --delet), since git's option parser binds any
+      // unique abbreviation of a long option and --delete is the one git
+      // branch option opening with d. Nothing longer matches: git refuses
+      // --deleted as unknown. A short-flag cluster holding d or D deletes
+      // (-d, -D, -df, -Df).
+      const del = rest.find((a) => /^--d(?:e(?:l(?:e(?:t(?:e)?)?)?)?)?$/.test(a) || /^-[A-Za-z]*[dD][A-Za-z]*$/.test(a));
       if (del !== undefined) return `a branch delete (git branch ${del})`;
     }
     if (sub === "update-ref") {
