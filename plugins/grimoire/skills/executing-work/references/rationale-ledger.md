@@ -5708,14 +5708,14 @@ Extracted at `6bc07fb`: lines 1-96 (`skills.executing-work.c1.md`); lines 97-358
 - passage: | [references/implementing.md](references/implementing.md) | before a section opens and before any implementer is dispatched | steps 1 and 2 of the section loop, with the Dispatch Brief template, the capacity reading, and the rule on awaiting a dispatched agent and stopping one before replacing it; and `## Delegating to Subagents`, with its disjoint-files rule and the rule whose bold lead is "Band the scout by question shape, and state its return contract" |
 
 ### I004
-- key: Read references/review.md before any reviewer is dispatched; it holds step 3, the dispatch table, the review briefs and the compensation route.
+- key: Read references/review.md before any reviewer or the scope adjudicator is dispatched; it holds step 3, the dispatch table, the review briefs and the compensation route.
 - class: pointer
 - source: plugins/grimoire/skills/executing-work/SKILL.md:16
-- provenance: `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md` section 2, on the operator's word of 2026-10-05 on the ARCHITECT persona's channel; the measurement is Chapter 4 of `docs/archive/claude-kit_skill-guidance-alignment_spec_v1.md`.
-- verdict: keep
+- provenance: `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md` section 2, on the operator's word of 2026-10-05 on the ARCHITECT persona's channel; the measurement is Chapter 4 of `docs/archive/claude-kit_skill-guidance-alignment_spec_v1.md`. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
 - reason: Claude Code 2.1.289 re-attaches an invoked skill after an automatic compaction cut at 20,000 characters (`docs/harness-assumptions.md`, the entry on re-attached skills), so the main file keeps what binds at every moment and names where the rest is. The row names the parts another document reaches by name, so a pointer such as "the Dispatch Brief template" resolves from the main file in one step.
-- landed: 1009405c section 2
-- passage: | [references/review.md](references/review.md) | before any reviewer is dispatched | step 3, with the dispatch table, the Document Review Brief and the Reviewer Dispatch template, and the compensation route, dispatch table row "Gate compensation" |
+- landed: 289ad1a2c finishing
+- passage: | [references/review.md](references/review.md) | before any reviewer or the scope adjudicator is dispatched | step 3, with the dispatch table, the Document Review Brief, the Reviewer Dispatch template, the Scope Adjudicator Brief, and the compensation route, dispatch table row "Gate compensation" |
 
 ### I005
 - key: Read references/findings.md when a review returns and before any fix; it holds step 4.
@@ -8082,9 +8082,9 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 ## plugins/grimoire/skills/executing-work/references/review.md
 
-This document is the reference file of the executing-work skill that carries step 3 of the section loop. It owns the review round: the correctness and advisory lenses and their triggers, the reviewer tier rule, the round's tree-state bracket, the Document Review Brief, the dispatch table, the Workflow route with its Reviewer Dispatch template, and the compensation route. Load class: `plan-run` - the main file's contents table and its skeleton line for step 3 tell a session to read it before any reviewer is dispatched.
+This document is the reference file of the executing-work skill that carries step 3 of the section loop. It owns the review round: the correctness and advisory lenses and their triggers, the reviewer tier rule, the round's tree-state bracket, the Document Review Brief, the dispatch table, the Workflow route with its Reviewer Dispatch template, the compensation route, and the Scope Adjudicator Brief. Load class: `plan-run` - the main file's contents table and its skeleton line for step 3 tell a session to read it before any reviewer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: I022, R040 and R042 rewritten to their passages as they now read, R045 retired, and BA001 to BA003 added under the plan's letter BA for the adjudicator's amendments heading, its trace target and the Scope Adjudicator Brief.
 
 ### I021
 - key: Title the reference file carrying step 3 of the section loop, with the dispatch table and the review templates `Reviewing a Section`.
@@ -8097,14 +8097,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: # Reviewing a Section
 
 ### I022
-- key: Open the reference file carrying step 3 of the section loop, with the dispatch table and the review templates by naming the skill it belongs to and what it carries.
+- key: Open the reference file carrying step 3 of the section loop, with the dispatch table and the review templates, the Scope Adjudicator Brief among them, by naming the skill it belongs to and what it carries.
 - class: pointer
 - source: plugins/grimoire/skills/executing-work/references/review.md:3
-- provenance: `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md` section 2, on the operator's word of 2026-10-05 on the ARCHITECT persona's channel; the measurement is Chapter 4 of `docs/archive/claude-kit_skill-guidance-alignment_spec_v1.md`.
-- verdict: keep
+- provenance: `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md` section 2, on the operator's word of 2026-10-05 on the ARCHITECT persona's channel; the measurement is Chapter 4 of `docs/archive/claude-kit_skill-guidance-alignment_spec_v1.md`; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which names the Scope Adjudicator Brief the file carries.
+- verdict: rewrite
+- landed: 00604b467 section 1
 - reason: A session holding this file alone, as after a compaction, learns from its first line which skill governs it and which steps it holds.
-- landed: a90a42b9 section 2
-- passage: Part of the executing-work skill: step 3 of the section loop, with the dispatch table and the Reviewer Dispatch template.
+- passage: Part of the executing-work skill: step 3 of the section loop, with the dispatch table, the Reviewer Dispatch template and the Scope Adjudicator Brief.
 
 ### c3.C019
 - key: Open the review step only after step 2's targeted run has finished, with Branch-and-PR's first-green commit already landed at step 7 and the section's own gate deferred to step 4 after this round's fixes.
@@ -8447,10 +8447,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Carry the `Amendments in effect:` line on every sighted dispatch in the round and never let it reach a blind lens.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:15
-- provenance: a5e184b 2026-08-25; unchanged by f26619c, which added the scope adjudicator as the rule's one carve-out in the other direction (R045).
-- verdict: keep
+- provenance: a5e184b 2026-08-25; unchanged by f26619c, which added the scope adjudicator as the rule's one carve-out in the other direction (R045); amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which carries the block to the scope adjudicator as a heading of its what (BA001) and retires R045. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
 - reason: The sighted-only rule whole; its contamination reason retires to this ledger under c3.C034. Same sentences as c3.C032 and c3.C033.
-- passage: **The `Amendments in effect:` line is sighted-only.** Every sighted dispatch in the round carries it, the prose-reviewer's as a Document Review Brief field, save the scope adjudicator's. It never reaches the blind-reviewer or blind-reader.
+- passage: **The `Amendments in effect:` line is sighted-only.** Every sighted dispatch in the round carries it, the prose-reviewer's as a Document Review Brief field and the scope adjudicator's as a heading of its what save its relevance brief. It never reaches the blind-reviewer or blind-reader. The `Adjudicated findings:` and `Step back:` lines ride the adversarial dispatch alone, a re-raised round's included. `Fix delta:` rides the same dispatches and the security summons, since its files met that lens's trigger.
 
 ### R041
 - key: Carry a `Trace target:` line on the adversarial lens, the security lens, the performance lens and the scope adjudicator, and on no other dispatch.
@@ -8465,19 +8466,22 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Make the `Trace target:` name the spec's Goal, its `## Intent` record where the plan carries one, and its acceptance bullets as amended, quoting them into the dispatch where an amendment moved a bullet.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:17
-- provenance: f26619c 2026-09-08, whose third review round found that a by-path read returns the unamended bullets; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which puts the Intent record on the line so an Intent clause is a valid `trace:` citation for every lens that carries it.
-- verdict: keep
+- provenance: f26619c 2026-09-08, whose third review round found that a by-path read returns the unamended bullets; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which puts the Intent record on the line so an Intent clause is a valid `trace:` citation for every lens that carries it; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which makes the adjudicator's trace target the Scope Adjudicator Brief's What line (BA002).
+- verdict: rewrite
+- landed: 00604b467 section 1
 - reason: New at HEAD with no finding; the quote-not-path bound is the review-caught defect.
-- passage: It names the spec's Goal, its `## Intent` record where one exists, and its acceptance bullets as amended by any `Standing Brief Amendments` entry. Quote into the dispatch any bullet an amendment moved, since a by-path read returns it unamended. The adjudicator's relevance brief carries only the Goal, the `## Intent` record and the acceptance bullet a performance finding quotes.
+- passage: It names the spec's Goal, its `## Intent` record where one exists, and its acceptance bullets as amended by any `Standing Brief Amendments` entry. Quote into the dispatch any bullet an amendment moved, since a by-path read returns it unamended. The adjudicator's is the What line of the Scope Adjudicator Brief below, and its relevance brief carries only the Goal, the `## Intent` record and the acceptance bullet a performance finding quotes.
 
 ### R045
 - key: Give the scope adjudicator the trace target and never the `Amendments in effect:` line.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:15
 - provenance: f26619c 2026-09-08; the charter's refused inputs are b3ed504 2026-09-08's.
-- verdict: keep
-- reason: New at HEAD with no finding; the block's contents are rulings the judge's charter refuses.
+- verdict: retire
+- landed: 00604b467 section 1
+- reason: The scope adjudicator carries the amendments block as a heading of its what, which BA001 states, so no carve-out from the sighted-only line remains.
 - passage: Every sighted dispatch in the round carries it, the prose-reviewer's as a Document Review Brief field, save the scope adjudicator's.
+- superseded-by: BA001
 
 ### R046
 - key: Before dispatching, answer whether this repo has exactly one shared resource and whether anything is holding it.
@@ -9061,11 +9065,43 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: Each kit dispatch takes its effort and route from its dispatch table row, and the table's rows covered round 1 and a later round's one lens, so the summoned lens had none. Its model is the lens's ceiling, opus (U001), and holds over a fable writer, whose tier the later-round rows would otherwise give it. Its effort is the security-reviewer's frontmatter default, as on the "Round 1 security" row (U009).
 - passage: | **Later-round security summons** over any writer, `security-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
 
+### BA001
+- key: Carry the `Standing Brief Amendments` block to the scope adjudicator as a heading of its what save its relevance brief.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:15
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 451 and 570, where an amendment and a ruling that rewrote a bullet reached the judge only through a hand refresh of the quoted bullets. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
+- reason: Findings.md writes the block bare, so it carries no argument the charter refuses, and the charter reads its entries as the what (BA004 under the charter's heading). Carried as a heading, an amendment reaches the judge with no session refreshing quoted bullets by hand.
+- passage: Every sighted dispatch in the round carries it, the prose-reviewer's as a Document Review Brief field and the scope adjudicator's as a heading of its what save its relevance brief.
+
+### BA002
+- key: Make the scope adjudicator's `Trace target:` the What line of the Scope Adjudicator Brief.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:17
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 400 and 543.
+- verdict: keep
+- landed: 00604b467 section 1
+- reason: The judge's goal path is the whole what its charter lists (BA001 under the charter's heading). A trace target naming the Goal, the Intent record and the acceptance bullets alone would withhold the section bodies, `## Related` and the amendments block.
+- passage: The adjudicator's is the What line of the Scope Adjudicator Brief below
+
+### BA003
+- key: Fill the Scope Adjudicator Brief for the held finding, the design stop and the goal read, each shape carrying the what by heading, its finding or the add-decision line's first four parts, its provenance fact, and nothing else.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:115
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 790, 836 and 447, where a dispatching passage sent the add-decision line's fifth part to the judge, or named no bound on the whole-changeset read.
+- verdict: keep
+- landed: b2b84774b section 1
+- reason: The charter states what it accepts, and a session following a dispatching passage verbatim built a brief the charter refused, which returned `NEEDS_CONTEXT` and spent the one re-dispatch. One template beside the dispatch table gives the three dispatching passages one form to name. The whole-changeset shape reads the plan document's first commit past the base, since a document that reached the trunk before the branch was cut has its add below the base.
+- passage: **The Scope Adjudicator Brief.** Step 4's held finding and design stop and finishing-work's goal read fill this template.
+- passage: - Whole changeset: the charter's two questions. Provenance: the base ref and the plan document's first commit past it, the last line git log --first-parent --format=%H <base>..HEAD -- docs/plans/<file> prints, or none where it prints none.
+- passage: - Nothing else rides: no lean, no fifth add-decision part, no ruling the What line does not carry, no fix narrative, and no Approach, Decisions or Chapters.
+
 ## plugins/grimoire/skills/executing-work/references/findings.md
 
 This document is the reference file of the executing-work skill that carries step 4 of the section loop. It owns addressing a review's findings: the Minor list and close pass, the advisory disposition, the claim-class region, provenance and the held-finding judge, the add-decision line and the design stop, the review-round backstop, the loop's end condition, the recurrence and adoption triggers, the fix-delta bar, the close gate and the out-of-scope route. Load class: `plan-run` - the main file's contents table and its skeleton line for step 4 tell a session to read it when a review returns and before any fix.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1 on 2026-11-04 (`AR` entries below, and S080 and E007 rewritten in place).
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: T135, T137, T138 and T139 rewritten to their passages as they now read, and the reasons of T059, T074, T093, T130, T135 and T137 reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the scope adjudicator to Opus: T047, T091 and T093 rewritten to their passages as they now read, and Q001 added for the ungated-judge route. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded section 1: c3.C137 rewritten to its passage as it now reads, c3.C138 and S082 retired, and A001 through A003 added under the plan's letter A for the fix writer rule. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: S080 rewritten to its passage as it now reads, and E006 to E008 added under the plan's letter E for the repost, `APPROACH:` and class-finding readings. Amended by `docs/plans/claude-kit_shared-state-authority_spec_v1.md` section 2 on 2026-10-18 (`AA` entries below). Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` section 3 on 2026-10-20: T186, S069 and S070 rewritten to their passages as they now read, and AC001 to AC005 added under the plan's letter AC for the finding verifier's paragraph. Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (`AG` entries below). Amended by `docs/plans/claude-kit_fold-admits-owed-surfaces_spec_v1.md` section 1 on 2026-11-04 (`AR` entries below, and S080 and E007 rewritten in place). Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 on 2026-11-10 (`BA` entries below, T048, T088 and c3.C125 rewritten in place, and T049, T050 and T163 retired).
 
 ### I023
 - key: Title the reference file carrying step 4 of the section loop `Addressing Review Findings`.
@@ -9099,11 +9135,12 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### c3.C125
 - key: Write any change to what a section's dispatches are built from into the `Standing Brief Amendments` block at the moment it is adopted, before the next dispatch of any kind, append an operator decision made mid-run to the plan's `## Intent` section the same turn, adding the heading where the plan carries none, and keep the block carrying judge rulings and declared bullets to every sighted dispatch.
 - class: rule
-- source: plugins/grimoire/skills/executing-work/references/findings.md:73
-- provenance: a5e184b 2026-08-25, standing amendment A1 caught the orchestrator mid-plan and the trigger was written as the block's second writer; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19, which adds the `## Intent` append and its missing-heading case, at HEAD line 580.
-- verdict: keep
+- source: plugins/grimoire/skills/executing-work/references/findings.md:79
+- provenance: a5e184b 2026-08-25, standing amendment A1 caught the orchestrator mid-plan and the trigger was written as the block's second writer; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 1 2026-09-19, which adds the `## Intent` append and its missing-heading case, at HEAD line 580; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, which adds the bullet-moving ruling to the examples and the bare-bullet form (BA003).
+- verdict: rewrite
+- landed: aa867396a section 2
 - reason: Executing-work owns the block; step 1's adopted-ruling sentence points here and adds the fold into the re-dispatch brief, so the overlap-within is owner and pointer (A050 to A052). The `## Intent` append is a second destination rather than a second writer: the block reaches the run's sighted dispatches and nothing after the run, while the record reaches the plan reviewer and every fresh reader of the plan, so a decision written to the block alone dies with the run. The missing-heading case is stated because most plans predate the section; without it the rule would bind only plans written after the format gained the heading, which at the install was none in flight. The position named is the spec template's own, which curating-docs' placement rule admits rather than fixes, since that rule states a region and a region alone would let a session put the plan's why below its sections; the drift record is the same one every deliberate edit above `## Chapters` takes (brainstorming's C162 and C180), so nothing here decides a placement or a record of its own. The block's own job is restated in the same breath because the append gives an operator decision a second destination, and a reader meeting the second one first would otherwise take the block as superseded rather than as the surface that still reaches the run's sighted dispatches.
-- passage: **The adoption trigger is the block's second writer, and it fires on an event rather than a count:** any change to what a section's dispatches are built from, such as an adopted escalation, an operator decision or a spec amendment, is written to the `Standing Brief Amendments` block when adopted, before the next dispatch. An operator decision made mid-run also lands in the plan's `## Intent` section, per brainstorming's freeze paragraph. Where the plan has no such section, add the heading between `## Goal` and `## Approach` and record it as the same drift. The block still carries judge rulings and declared bullets to every sighted dispatch.
+- passage: **The adoption trigger is the block's second writer, and it fires on an event rather than a count:** any change to what a section's dispatches are built from, such as an adopted escalation, an operator decision, a spec amendment, or a consult or drift ruling that retires or rewrites an acceptance bullet, is written to the `Standing Brief Amendments` block as a bare bullet when adopted, before the next dispatch. An operator decision made mid-run also lands in the plan's `## Intent` section, per brainstorming's freeze paragraph. Where the plan has no such section, add the heading between `## Goal` and `## Approach` and record it as the same drift. The block still carries judge rulings and declared bullets to every sighted dispatch.
 
 ### c3.C126
 - key: Keep the intake gap check's route (a) and (b) resolutions out of the amendments block, leaving a declared assumption's home the Chapter's `Assumptions:` line.
@@ -9852,30 +9889,35 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: f9389aff section 1
 
 ### T048
-- key: Read the adjudicator charter for the held-finding brief's contents and its forbidden inputs; this paragraph does not state them.
+- key: Fill the held-finding brief from the single-finding shape of step 3's Scope Adjudicator Brief; this paragraph does not state its contents.
 - class: pointer
-- source: plugins/grimoire/skills/executing-work/references/findings.md:23
-- provenance: f26619c 2026-09-08, as T047's key (shares its supersession of S043); line touched by 6983398 2026-09-10 without changing this clause.
-- verdict: keep
-- reason: A pointer at the charter, which owns the brief's contents and forbidden inputs; the paragraph states neither, which is the form the ownership rule asks for.
-- passage: Its charter states the brief
+- source: plugins/grimoire/skills/executing-work/references/findings.md:25
+- provenance: f26619c 2026-09-08, as T047's key (shares its supersession of S043); line touched by 6983398 2026-09-10 without changing this clause; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, which points the brief at the template rather than the charter, answering kit issues 790 and 836.
+- verdict: rewrite
+- landed: 1e73e145a section 2
+- reason: A pointer at the template, which states each shape's inputs against the charter's contract (BA003 under the review.md heading); the paragraph states neither, which is the form the ownership rule asks for. A session following the charter's prose alone built briefs the charter refused, and the template is the one form the dispatching passages share.
+- passage: The adjudicator's brief is the single-finding shape of step 3's Scope Adjudicator Brief.
 
 ### T049
 - key: Put no `Amendments in effect:` line in that judge's brief.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:23
-- provenance: f26619c 2026-09-08, the charter refuses adopted rulings as inputs; line touched by 0103483 2026-09-09 and by 6983398 2026-09-10 without changing this clause. Folds S044's no-amendments-line bar; the delivery half is T050, which shares this supersession.
-- verdict: keep
-- reason: The block's contents are rulings the charter refuses.
+- provenance: f26619c 2026-09-08, the charter refuses adopted rulings as inputs; line touched by 0103483 2026-09-09 and by 6983398 2026-09-10 without changing this clause. Folds S044's no-amendments-line bar; the delivery half is T050, which shares this supersession. Retired by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, answering kit issue 451.
+- verdict: retire
+- landed: aa867396a section 2
+- reason: Findings.md writes the block bare, so the charter reads its entries as the what, and the brief carries it as a heading of the what, which BA001 under the review.md heading states.
+- superseded-by: BA001 under the review.md heading
 - passage: which carries no `Amendments in effect:` line
 
 ### T050
 - key: Deliver an amendment that moved the acceptance bullets to the judge by refreshing the what its brief quotes.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:23
-- provenance: f26619c 2026-09-08, as T049's key (shares its supersession of S044); line touched by 0103483 2026-09-09; 6983398 2026-09-10 touched the line without changing this clause and gave the charter's input line its quoted-what clause.
-- verdict: keep
-- reason: Refreshing the quoted what is the one channel a moved bullet has to a judge that refuses the amendments line; the charter's input line now says the quoted text is the what it rules against.
+- provenance: f26619c 2026-09-08, as T049's key (shares its supersession of S044); line touched by 0103483 2026-09-09; 6983398 2026-09-10 touched the line without changing this clause and gave the charter's input line its quoted-what clause. Retired by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, answering kit issues 451 and 570.
+- verdict: retire
+- landed: aa867396a section 2
+- reason: A moved bullet reaches the judge through the amendments block, which rides as a heading of the what (BA001 under the review.md heading), so no hand refresh of quoted bullets is the channel.
+- superseded-by: BA001 under the review.md heading
 - passage: Its charter states the brief, which carries no `Amendments in effect:` line, so a moved acceptance bullet reaches the judge only by refreshing the Goal, `## Intent` record, acceptance bullets and `## Out of Scope` list the brief quotes.
 
 ### T051
@@ -9907,13 +9949,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: So a refuse names the Goal reading, the Intent clause or the `## Out of Scope` entry that keeps the finding out, and the check confirms that entry exists and reaches this finding.
 
 ### T054
-- key: For an accept-and-declare, confirm the named Goal sentence or Intent clause exists and that the declared work adds no mechanism the trace target does not already carry.
+- key: For an accept-and-declare, confirm the named Goal sentence, Intent clause or What-line bullet exists and that the declared work adds no mechanism the trace target does not already carry.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:25
-- provenance: f26619c 2026-09-08; line touched by 0103483 2026-09-09 and by 6983398 2026-09-10 without changing this clause; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which admits an Intent clause as a ground the charter may name, so the check has to be able to read one.
-- verdict: keep
+- provenance: f26619c 2026-09-08; line touched by 0103483 2026-09-09 and by 6983398 2026-09-10 without changing this clause; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which admits an Intent clause as a ground the charter may name, so the check has to be able to read one. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
 - reason: The no-new-mechanism half is what separates a declare from an ask.
-- passage: An accept-and-declare names the Goal sentence or Intent clause it serves and its bound, and the check confirms the clause exists and the declared work adds no mechanism the trace target lacks.
+- passage: An accept-and-declare names the Goal sentence, Intent clause or What-line bullet it serves and its bound, and the check confirms the clause exists and the declared work adds no mechanism the trace target lacks.
 
 ### T055
 - key: Wherever a bullet is quoted, confirm it exists in the trace target and covers the finding's subject.
@@ -10020,19 +10063,20 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Record a refuse in the plan doc's `Standing Brief Amendments` block as its ground rather than its verdict, written as a rule the next round judges against.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:29
-- provenance: f26619c 2026-09-08, since the block rides verbatim on every sighted amendments line; line touched by 0103483 2026-09-09 and by 6983398 2026-09-10 without changing this clause. Folds S059's record form; the moves-no-bullet clause is T067, which shares this supersession.
-- verdict: keep
+- provenance: f26619c 2026-09-08, since the block rides verbatim on every sighted amendments line; line touched by 0103483 2026-09-09 and by 6983398 2026-09-10 without changing this clause. Folds S059's record form; the moves-no-bullet clause is T067, which shares this supersession. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
 - reason: A rated finding in the block is the pre-judging step 3 bars.
-- passage: Its ground, never its verdict, goes in the `Standing Brief Amendments` block as a rule the next round judges against, and it refreshes no quoted what.
+- passage: Its ground, never its verdict, goes in the `Standing Brief Amendments` block as a rule the next round judges against.
 
 ### T067
 - key: Refresh no quoted what on a refusal, since a refusal moves no bullet.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:29
-- provenance: f26619c 2026-09-08, as T066's key (shares its supersession of S059); line touched by 6983398 2026-09-10 without changing this clause.
-- verdict: keep
-- reason: A refusal moves no bullet, so a refreshed what would hand the judge a change that never happened.
-- passage: Its ground, never its verdict, goes in the `Standing Brief Amendments` block as a rule the next round judges against, and it refreshes no quoted what.
+- provenance: f26619c 2026-09-08, as T066's key (shares its supersession of S059); line touched by 6983398 2026-09-10 without changing this clause. Retired by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10.
+- verdict: retire
+- landed: 289ad1a2c finishing
+- reason: The hand-refresh channel the clause answered is gone: the brief's What line carries the amendments block, so a refuse ground written there is part of the next judge's what rather than a refreshed quote.
 
 ### T068
 - key: Re-enter an accept-and-declare finding as spec-traceable so it takes a fix round and the close gate like any other.
@@ -10128,10 +10172,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Put the question of whether the mechanism the fix proposes to add should exist, and if it should, what its design is.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:33
-- provenance: 9f1ed1b 2026-09-09, installed with the design stop and keyed by no R entry; line touched by 6983398 2026-09-10 without changing this clause. goal-fit section 3 2026-09-19, the add-decision trigger.
-- verdict: keep
+- provenance: 9f1ed1b 2026-09-09, installed with the design stop and keyed by no R entry; line touched by 6983398 2026-09-10 without changing this clause. goal-fit section 3 2026-09-19, the add-decision trigger. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, which cut the bucket clause to pay the section's growth.
+- verdict: rewrite
+- landed: 1e73e145a section 2
 - reason: The question the bucket answers under T085 and the charter's design-stop shape rules on, and it is one sentence, so there is nothing to compress or point at.
-- passage: It asks whether the mechanism should exist and, if so, in what design, and the bucket answers both.
+- passage: It asks whether the mechanism should exist and in what design.
 
 ### T084
 - key: Convene the judge below rather than the `consultant` for this stop.
@@ -10146,10 +10191,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Read the design answer off the bucket: refuse means the spec's own form, declare means the mechanism as the bullets already carry it, ask means the operator settles the design.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/findings.md:33
-- provenance: 9f1ed1b 2026-09-09; line touched by 6983398 2026-09-10 without changing this clause, the same commit giving the charter's REFUSE bucket the design-stop reading.
-- verdict: keep
+- provenance: 9f1ed1b 2026-09-09; line touched by 6983398 2026-09-10 without changing this clause, the same commit giving the charter's REFUSE bucket the design-stop reading. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, which cut the bucket clause to pay the section's growth.
+- verdict: rewrite
+- landed: 1e73e145a section 2
 - reason: Unchanged in this skill; the charter's REFUSE bucket now carries the design-stop reading this sentence reads a refuse by, under the sixth Standing Brief Amendment, so the two surfaces agree where they disagreed before the finishing pass.
-- passage: It asks whether the mechanism should exist and, if so, in what design, and the bucket answers both.
+- passage: It asks whether the mechanism should exist and in what design.
 
 ### T087
 - key: Route the stop to the same judge as a held finding: the repo's live Expert seat where the roster shows one, and the `scope-adjudicator` otherwise.
@@ -10161,14 +10207,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: The held-finding judge rules, never the `consultant`.
 
 ### T088
-- key: Fill that brief for this shape with the add-decision line's first four parts, the finding verbatim and the latest capture, and never the line's cost clause or the account of a round; where an implementer's report raised the stop, that line stands in for the finding and the capture is named for the adjudication rather than for a round.
+- key: Fill that brief from the design-stop shape of step 3's Scope Adjudicator Brief, with the add-decision line's first four parts, the finding verbatim and the latest capture, and keep out the line's fifth part, every prior ruling the What line does not carry, and the account of a round; where an implementer's report raised the stop, that line stands in for the finding and the capture is named for the adjudication rather than for a round.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/findings.md:33
-- provenance: 9f1ed1b 2026-09-09, as T087's key (shares its supersession of R128); 6983398 2026-09-10 split the sentence to insert T089 and changed no term. goal-fit section 3 2026-09-19, the add-decision trigger.
-- verdict: keep
-- reason: The charter names the same three inputs for the design-stop shape (scope-adjudicator.md line 16); its why (T090) lives here: the account of those rounds is an input the charter refuses, so a brief handing that narrative over as the finding buys a `NEEDS_CONTEXT` and spends the one re-dispatch.
-- passage: Its brief is the charter's design-stop brief.
-- flag: stale
+- source: plugins/grimoire/skills/executing-work/references/findings.md:35
+- provenance: 9f1ed1b 2026-09-09, as T087's key (shares its supersession of R128); 6983398 2026-09-10 split the sentence to insert T089 and changed no term. goal-fit section 3 2026-09-19, the add-decision trigger. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, which points the brief at the template and names what stays out in place, answering kit issues 790 and 836.
+- verdict: rewrite
+- landed: aa867396a section 2
+- reason: The charter's design-stop input line takes the first four parts and refuses the fifth, and its forbidden item 2 refuses prior rulings outside the what. The fifth-part bar is the design-stop input bullet (scope-adjudicator.md:16, "Its fifth part, what not building it costs, must not reach you"). Naming both here stops a session that writes the five-part line from forwarding it whole, which buys a `NEEDS_CONTEXT` and spends the one re-dispatch. Its why (T090) lives here: the account of those rounds is an input the charter refuses.
+- passage: Its brief is the design-stop shape of step 3's Scope Adjudicator Brief, and the add-decision line's fifth part and every prior ruling the What line does not carry stay out of it.
 
 ### T091
 - key: Inherit the paragraph above's one re-dispatch, its double-`NEEDS_CONTEXT` exit and its `GROUNDS` check whole, the exit ending `the judge could not run` where the judge's gate ended ungated.
@@ -10371,8 +10417,9 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Take the fix and close instead of stopping where the round's only owed work is a fix that would owe no further round under the fix-delta bar.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:39
-- provenance: 9463de7 2026-09-09, the backstop's install; carried unchanged by 6983398 2026-09-10.
-- verdict: keep
+- provenance: 9463de7 2026-09-09, the backstop's install; carried unchanged by 6983398 2026-09-10. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, which cut a repeated clause to pay the section's growth. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
 - reason: Naming both the prose-only clause (W003) and the below-bar judgment is what keeps a section one below-bar fix from closing from stopping at the bound.
 - passage: Where the only owed work is a fix owing no further round under the fix-delta bar's prose-only clause or its below-bar judgment, the section takes the fix and closes, unless the written fix owes a round after all, which it then takes, counted against this bound.
 
@@ -10380,8 +10427,9 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: Where the written fix turns out to owe a round after all, let the exemption lapse at that reading, take and count the round, and meet this bound at the higher count.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/findings.md:39
-- provenance: 9463de7 2026-09-09, the backstop's install; carried unchanged by 6983398 2026-09-10.
-- verdict: keep
+- provenance: 9463de7 2026-09-09, the backstop's install; carried unchanged by 6983398 2026-09-10. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, which cut a repeated clause to pay the section's growth. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
 - reason: The exemption rests on a prediction about a fix that does not exist yet; the lapse is what stops a wrong one from carrying the section past the bound with nothing left to stop it.
 - passage: unless the written fix owes a round after all, which it then takes, counted against this bound.
 
@@ -10689,9 +10737,11 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - key: State the plan's what as its Goal, its `## Intent` record, its acceptance bullets and its `## Out of Scope` list wherever the judge's brief names it.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/findings.md:23
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, folded into that section at review; the enumeration named only the Goal and the acceptance bullets while the charter's own brief bullet had already been widened to four.
-- verdict: keep
-- reason: T050 says how an amendment reaches the judge, by refreshing the what the brief quotes, and leaves what the what is to this sentence. Once the charter admits four inputs, an orchestrator working from a two-item enumeration builds a brief the charter would return `NEEDS_CONTEXT` on for a missing required input.
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, folded into that section at review; the enumeration named only the Goal and the acceptance bullets while the charter's own brief bullet had already been widened to four. Retired by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2 2026-11-10, answering kit issues 400 and 543.
+- verdict: retire
+- landed: aa867396a section 2
+- reason: The what is listed once, on the What line of step 3's Scope Adjudicator Brief (BA003 under the review.md heading), which this paragraph points at (T048). A second enumeration here is how a list drifts from the charter's, as this one did when the charter widened.
+- superseded-by: BA003 under the review.md heading
 - passage: refreshing the Goal, `## Intent` record, acceptance bullets and `## Out of Scope` list the brief quotes.
 
 ### T164
@@ -11084,6 +11134,46 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: 8d428221 section 1
 - reason: The exits answer issue 530, a one-line comment outside the changed directories, issue 776, the lane row owed in `test/gate-lanes.json`, and issue 510, the ledger entry a skill edit makes stale, each owed by the change itself wherever its file sits.
 - passage: Three surfaces also fold wherever the file sits, on the other two conditions: a fix whose every hunk changes prose alone, a row the section's change makes owed in a registry file the repository's gates read, such as `test/gate-lanes.json`, and the entry in a skill's `references/rationale-ledger.md` quoting a passage the section changed.
+
+### BA001
+- key: Never ask the Expert seat to judge a held finding on a plan whose Intent provenance line names that seat or its session as a writer, and dispatch the `scope-adjudicator` instead.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/findings.md:25
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2, 2026-11-10, answering kit issue 377, where the seat-first route convened the plan's own author as its judge.
+- verdict: keep
+- landed: 1e73e145a section 2
+- reason: The judge's blindness to the Approach, Decisions and Chapters is the instrument (the charter's forbidden-inputs list), and a seat that wrote the plan holds the first two whatever brief it is handed. Brainstorming's provenance line names the writing session, and an Expert-written plan names the seat or that session there, so the exclusion reads a line every plan carries. A seat named beside another writer is still a writer.
+- passage: Where the Intent's provenance line names the Expert seat or its session as a writer, the adjudicator is dispatched instead. A plan's author holds the Approach the judge must not read.
+
+### BA002
+- key: Let direction from another seat on the role skill's chain, under the standing delegation, answer the review-round backstop where it directs a fix round on the plan's own branch inside the plan's scope and outside the delegation's exclusions, give it what an operator's continue buys, and name it in the close-out.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/findings.md:43
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2, 2026-11-10, answering kit issue 765, where the backstop called the stop the operator's and left a delegated seat's direction unanswered; the sender wording follows the operator's ruling of 2026-11-09 recorded in `docs/plans/claude-kit_direction-from-any-seat_spec_v1.md`. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
+- reason: The role skill's chain bullet routes an act to the operator by the act and never by the sender's seat, and a fix round on the plan's own branch sits on the doctrine's stop-for-a-yes closed list. So the sentence names no rank, and a direction to anything past a fix round inside the plan routes where the delegation's exclusions send it. The restart and the close-out record keep the bound counted and visible, as an operator's answer is (T127).
+- passage: Direction from another seat on the role skill's chain, under the standing delegation, answers this stop where it directs a fix round on the plan's own branch, inside the plan's scope and outside the delegation's exclusions. It buys what a continue below buys, and the close-out names it.
+
+### BA003
+- key: Count a consult or drift ruling that retires or rewrites an acceptance bullet among the adoption trigger's events, and write every adopted change to the `Standing Brief Amendments` block as a bare bullet.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/findings.md:79
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 2, 2026-11-10, answering kit issues 570 and 862, where a bullet a consult or an architect ruling retired or rewrote reached the judge as written.
+- verdict: keep
+- landed: aa867396a section 2
+- reason: The scope adjudicator reads the block as part of its what and refuses a ruling's narrative (BA001 under the review.md heading, and the charter's forbidden item 2). A ruling that moves a bullet reaches the judge only through the block, and only in the bare form the charter admits.
+- passage: a consult or drift ruling that retires or rewrites an acceptance bullet, is written to the `Standing Brief Amendments` block as a bare bullet when adopted
+
+### BA004
+- key: Count a keep-out bullet elsewhere in the brief's What line as the `## Out of Scope` entry a refuse may name.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/findings.md:27
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing adversarial review's Major that the grounds check named only the old what.
+- verdict: keep
+- landed: 289ad1a2c finishing
+- reason: The judge's what now holds the `## Related` section, the amendments block and every section body, and a ruling grounded on a keep-out bullet there would otherwise fail the check by its letter and fall back to an ask. The three-ground list stays as it is, pinned by `test/review-loop-provenance.test.js`.
+- passage: A keep-out bullet elsewhere in the brief's What line counts as that entry.
 
 ## plugins/grimoire/skills/executing-work/references/closing.md
 
@@ -16487,7 +16577,7 @@ Extracted at `6bc07fb`: whole document (`agents.docs-curator.md`). Re-extracted 
 
 This document is an agent charter for a fresh-context "scope adjudicator": a read-only judge that decides whether a review finding, a mechanism a fix proposes to add, or a whole changeset serves the goal the plan was approved for. It owns four moments: ruling a single review finding into one of three buckets (REFUSE, ACCEPT-AND-DECLARE, ASK); ruling a design stop on a mechanism a fix proposes to add; ruling an advisory finding's relevance to the project's threat model or stated deployment into one of three buckets of its own (CONFIRM, REFUSE, ASK); and, at a plan's finishing pass, listing over a whole changeset what was built that nothing asked for and what a Goal sentence or an Intent clause promised that nothing delivers. It also owns the refusal moment, returning NEEDS_CONTEXT when the dispatch brief carries any of six forbidden inputs or omits a required one. Load class: `plan-run` - the charter governs the dispatched agent itself and is loaded at its dispatch, which the orchestrator makes at a review finding, at a design stop, or at the finishing pass.
 
-Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20 (T056 to T065 below, C022 amended in place), and by that plan's section 9 on 2026-09-21 (T065 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `a7c964bf` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line).
+Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20 (T056 to T065 below, C022 amended in place), and by that plan's section 9 on 2026-09-21 (T065 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `a7c964bf` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: T004, T005, T055, T057 and C065 rewritten to their passages as they now read, T001 and T016 retired, and BA001 to BA008 added under the plan's letter BA for the what read by what a passage carries, the whole-changeset read bounded to the plan's own commits, and the true-correction exemption.
 
 ### C001
 - key: Answer to the agent name `scope-adjudicator` when dispatched.
@@ -16699,10 +16789,11 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - key: Read the diff reference yourself rather than accepting the brief's characterization of it.
 - class: rule
 - source: plugins/grimoire/agents/scope-adjudicator.md:19
-- provenance: b3ed504 2026-09-08; the seat exists because the producing session's account of its own work is the thing under suspicion.
-- verdict: keep
+- provenance: b3ed504 2026-09-08; the seat exists because the producing session's account of its own work is the thing under suspicion. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
 - reason: A characterization written by the session that built the thing is the framing the seat is blind by design to, so this is the rule that keeps the dispatch honest; nothing mechanical enforces it.
-- passage: Read the diff reference yourself, never the brief's characterization of it, and hold two bounds on that read.
+- passage: Read the diff reference yourself, never the brief's characterization of it, and hold three bounds on that read.
 - flag: weak-reason
 
 ### C024
@@ -17107,13 +17198,14 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - baseline-test: yes
 
 ### C065
-- key: At a plan's finishing pass, take one dispatch over the whole changeset, with the same what plus the base ref and two questions in place of a finding.
+- key: At a plan's finishing pass, take one dispatch over the whole changeset, with the same what plus the base ref, the plan document's first commit past it and two questions in place of a finding.
 - class: mechanic
-- source: plugins/grimoire/agents/scope-adjudicator.md:60
-- provenance: b3ed504 2026-09-08, added with the charter's third shape.
-- verdict: keep
+- source: plugins/grimoire/agents/scope-adjudicator.md:71
+- provenance: b3ed504 2026-09-08, added with the charter's third shape; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which adds the plan document's first commit past the base that bounds the read (BA005).
+- verdict: rewrite
+- landed: b2b84774b section 1
 - reason: The third dispatch shape, with a different payload and a different output section; a judge that misreads it as the single-finding shape returns a bucket where two lists are owed.
-- passage: At a plan's finishing pass you are dispatched once over the whole changeset. The brief carries the same what and, in place of a finding, **the base ref** and two questions:
+- passage: At a plan's finishing pass you are dispatched once over the whole changeset. The brief carries the same what and, in place of a finding, **the base ref**, `<first>` and two questions:
 - flag: weak-reason
 
 ### C066
@@ -17236,9 +17328,11 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - class: mechanic
 - source: plugins/grimoire/agents/scope-adjudicator.md:14
 - provenance: b3ed504 2026-09-08, the charter's input contract, whose review rounds closed Majors that were all defects in that contract; reworded around at 6983398 2026-09-10 by the provenance plan's finishing rounds, which spliced the quoted-text clause into the same sentence; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which admits the plan's `## Intent` record to this seat.
-- verdict: keep
-- reason: The three inputs and their two delivery forms are the contract executing-work and finishing-work dispatch on without restating it; the bullet split ruled at T006 to T008 leaves this sentence's content untouched.
+- verdict: retire
+- landed: 00604b467 section 1
+- reason: The sentence's list of the what is BA001's, which carries every section body, the `## Related` section and the amendments block beside the headings this sentence named.
 - passage: The plan's `## Goal` paragraph, its `## Intent` record where the plan carries one, every section's acceptance bullets, and its `## Out of Scope` list, quoted in the brief or given by path.
+- superseded-by: BA001
 
 ### T002
 - key: Where the brief quotes those sections, rule against the quoted text itself.
@@ -17264,22 +17358,24 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - baseline-test: yes
 
 ### T004
-- key: When the goal path arrives by path, `grep -n` for `## Goal`, `## Intent`, `## Out of Scope` and each section's `Acceptance:` line, then read only those ranges.
+- key: When the goal path arrives by path, `grep -n` for the headings BA001 lists, then read only those ranges.
 - class: mechanic
-- source: plugins/grimoire/agents/scope-adjudicator.md:14
-- provenance: b3ed504 2026-09-08, the charter's input contract, carrying both C009's range rule and C010's `grep -n` mechanic; reworded around at 6983398 2026-09-10; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which admits the plan's `## Intent` record to this seat.
-- verdict: keep
+- source: plugins/grimoire/agents/scope-adjudicator.md:15
+- provenance: b3ed504 2026-09-08, the charter's input contract, carrying both C009's range rule and C010's `grep -n` mechanic; reworded around at 6983398 2026-09-10; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which admits the plan's `## Intent` record to this seat; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which names the headings by BA001's list.
+- verdict: rewrite
+- landed: 00604b467 section 1
 - reason: One sentence holding the rule, its mechanic and its bound, unchanged by the merge; the surrounding bullet split leaves it standing on its own, which is all C009's split asked for, and no hook can bound a judge's read.
-- passage: Given by path, `grep -n` for `## Goal`, `## Intent`, `## Out of Scope` and each section's `Acceptance:` line, and read only those ranges, since the forbidden inputs below sit in the same file.
+- passage: Given by path, `grep -n` for those headings and read only their ranges, since the forbidden inputs below sit in the same file.
 
 ### T005
 - key: Read only the named ranges because the forbidden inputs sit in the same file, so a whole-file read hands you the design story you exist to be blind to.
 - class: rationale-example
-- source: plugins/grimoire/agents/scope-adjudicator.md:14
-- provenance: b3ed504 2026-09-08, the seat being dispatched with a plan path by design so the contaminating file is the one it is told to read; reworded around at 6983398 2026-09-10.
-- verdict: keep
+- source: plugins/grimoire/agents/scope-adjudicator.md:15
+- provenance: b3ed504 2026-09-08, the seat being dispatched with a plan path by design so the contaminating file is the one it is told to read; reworded around at 6983398 2026-09-10; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which names the headings by BA001's list.
+- verdict: rewrite
+- landed: 00604b467 section 1
 - reason: Kept as C011 was: it is what makes the range read a contamination bar rather than an efficiency note, and a judge who trades it off reads the Chapters it exists to be blind to.
-- passage: Given by path, `grep -n` for `## Goal`, `## Intent`, `## Out of Scope` and each section's `Acceptance:` line, and read only those ranges, since the forbidden inputs below sit in the same file.
+- passage: Given by path, `grep -n` for those headings and read only their ranges, since the forbidden inputs below sit in the same file.
 
 ### T006
 - key: From a section, take its `Acceptance:` bullets as your input and treat its implementation body as the how you do not receive.
@@ -17387,9 +17483,11 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - class: mechanic
 - source: plugins/grimoire/agents/scope-adjudicator.md:16
 - provenance: b3ed504 2026-09-08, the whole-changeset shape; reworded around at 6983398 2026-09-10.
-- verdict: keep
-- reason: Finishing-work step 4 dispatches on this shape "which that charter states in full and this step does not restate", and at finishing the work is uncommitted so the worktree is the only head.
+- verdict: retire
+- landed: 00604b467 section 1
+- reason: The whole-changeset provenance fact is BA005's, which carries the plan document's first commit past the base beside the base ref so the read is bounded to the plan's own commits.
 - passage: For the whole-changeset shape it is the base ref alone, and the head is the tree you are dispatched in.
+- superseded-by: BA005
 
 ### T017
 - key: Diff with `git diff <base> <head> -- . ':(exclude)docs/plans/**' ':(exclude)docs/archive/**' ':(exclude)kaizen/**'`.
@@ -17421,16 +17519,16 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - baseline-test: yes
 
 ### T020
-- key: Keep every other path under `docs/` in view; exclude only those three roots.
+- key: Keep every other path under `docs/` in view; exclude only those three roots, save the whole-changeset excludes.
 - class: rule
 - source: plugins/grimoire/agents/scope-adjudicator.md:21
-- provenance: b3ed504 2026-09-08, the positive bound on the exclusion; reworded around at 6983398 2026-09-10.
+- provenance: b3ed504 2026-09-08, the positive bound on the exclusion; reworded around at 6983398 2026-09-10. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
 - verdict: rewrite
-- landed: f0a3c5b section 9
+- landed: 289ad1a2c finishing
 - reason: The rule leads its paragraph, stated positively as every path under `docs/` staying in view except the plan docs and the archive, being the sentence most at risk of loss among text arguing that `docs/` is where the how lives. The sentence carrying the two command spellings follows it and opens on this entry's exclusion half, naming the two `docs/` roots and the kaizen inbox, since the kaizen inbox is no path under `docs/` and the sentence that named the three roots retires at T019; the two spellings and their tails stand verbatim as the pin parses them (T017, T018). T021's sentence closes the paragraph as its own sentence, its opening letter recased.
 - proposed: Lead the paragraph with the keep-in-view rule stated positively, then the two command spellings verbatim as the pin requires.
 - baseline-test: yes
-- passage: Every path under `docs/` stays in view except the plan docs and the archive.
+- passage: Every path under `docs/` stays in view except the plan docs, the archive and the whole-changeset excludes below.
 - flag: stale
 
 ### T021
@@ -17693,13 +17791,14 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - flag: weak-reason
 
 ### T047
-- key: In GROUNDS, quote the acceptance bullet, Goal sentence or Intent clause the thing serves or fails to serve, or state that no bullet, no Goal sentence and no Intent clause covers it, or quote the `## Out of Scope` entry, or the Intent clause of the record's negative half, that keeps it out.
+- key: In GROUNDS, quote the bullet, Goal sentence or Intent clause the thing serves or fails to serve, or state that none covers it, or quote the `## Out of Scope` entry, the Intent clause of the record's negative half or the keep-out bullet that keeps it out.
 - class: mechanic
 - source: plugins/grimoire/agents/scope-adjudicator.md:72
-- provenance: b3ed504 2026-09-08, the output contract; changed at 6983398 2026-09-10 by finishing round 5's adversarial Major, the GROUNDS line admitting no `## Out of Scope` ground where executing-work's check requires one; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which admits the plan's `## Intent` record to this seat.
-- verdict: keep
+- provenance: b3ed504 2026-09-08, the output contract; changed at 6983398 2026-09-10 by finishing round 5's adversarial Major, the GROUNDS line admitting no `## Out of Scope` ground where executing-work's check requires one; amended by docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, which admits the plan's `## Intent` record to this seat. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
 - reason: Executing-work re-checks this field on its own surface before adopting a ruling, and its check reads the Out of Scope list beside the trace target, so the field must admit that ground.
-- passage: **GROUNDS:** one of three. The acceptance bullet, Goal sentence or Intent clause the thing serves or fails to serve, quoted. The statement that no bullet, no Goal sentence and no Intent clause covers it. The `## Out of Scope` entry or negative-half Intent clause that keeps it out, quoted,
+- passage: **GROUNDS:** one of three. The bullet, Goal sentence or Intent clause the thing serves or fails to serve, quoted. The statement that none covers it. The `## Out of Scope` entry, negative-half Intent clause or keep-out bullet that keeps it out, quoted,
 
 ### T048
 - key: On an `## Out of Scope` ground, or on an Intent clause of the record's negative half, state that the fix is then not written at all.
@@ -17768,12 +17867,14 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 ### T055
 - key: Read an operator ruling recorded in the plan's `## Intent` as part of the what rather than as the prior ruling forbidden input 2 keeps out, and read it on whichever half its own words fall in.
 - class: rule
-- source: plugins/grimoire/agents/scope-adjudicator.md:14
-- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, adopted on the `scope-adjudicator`'s own ACCEPT-AND-DECLARE ruling at that section's design stop, which found the mechanism to be the form the Goal sentence and the 2026-09-18 Intent ruling already ask for.
-- verdict: keep
+- source: plugins/grimoire/agents/scope-adjudicator.md:15
+- source: plugins/grimoire/agents/scope-adjudicator.md:34
+- provenance: docs/plans/claude-kit_goal-fit_spec_v1.md section 2 2026-09-19, adopted on the `scope-adjudicator`'s own ACCEPT-AND-DECLARE ruling at that section's design stop, which found the mechanism to be the form the Goal sentence and the 2026-09-18 Intent ruling already ask for; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which reads each bullet of the wider what on its own half (BA003) and adds the amendments block beside the record (BA004).
+- verdict: rewrite
+- landed: b2b84774b section 1
 - reason: The record carries the operator's post-ship rulings by its own definition, and input 2 forbids a prior ruling on the question, so without this reading the charter both requires the judge to read a ruling and requires it to refuse the brief carrying one. The reading is the charter's own rather than a new carve-out: the frontmatter description has glossed the forbidden inputs as "no lean, no prior consult and no fix narrative" since `b3ed504`, and C042's kept why records input 2 as guarding against the framing that colored the question and the design story the session itself produced. An operator ruling made at design time is neither. The six inputs are therefore unchanged, as section 1's acceptance requires, and the statement sits on the list's lead and on the record-admission bullet rather than inside any of the six.
-- passage: An operator ruling in it reads on whichever half its words fall in, widening what is asked for or what is kept out.
-- passage: An operator ruling recorded in the `## Intent` record is part of the what, not this input, whatever question it bears on.
+- passage: An operator ruling in it binds the same way.
+- passage: An operator ruling recorded in the `## Intent` record, or an entry in the `## Standing Brief Amendments` block, is part of the what, not this input, whatever question it bears on.
 
 ### T056
 - key: Name the relevance shape in the description: an advisory finding's relevance to the project's threat model or stated deployment, ruled into one of three buckets of its own (confirm, refuse, ask).
@@ -17787,11 +17888,12 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 ### T057
 - key: On the relevance shape, expect one advisory finding verbatim with its lens and severity, and one item more by lens: for a security finding its `threat:` field where it carries one and the project's `## Threat model` section or the line `threat model: absent`; for a performance finding the requirement it names and the acceptance bullet it quotes; the Goal and Intent record as always; and no diff reference.
 - class: mechanic
-- source: plugins/grimoire/agents/scope-adjudicator.md
-- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 3 2026-09-20.
-- verdict: keep
+- source: plugins/grimoire/agents/scope-adjudicator.md:18
+- provenance: docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 3 2026-09-20; amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 2026-11-10, which widens the what, so every heading of it beyond the Goal and the Intent record is named as never `NEEDS_CONTEXT` here.
+- verdict: rewrite
+- landed: 00604b467 section 1
 - reason: Executing-work's advisory paragraph states the same brief from the dispatcher's side (its ledger's T177), and the charter states it from the judge's so a missing item is a NEEDS_CONTEXT rather than a guess. The brief is fixed because a relevance question is answerable from the threat model and the plan's what alone, and the threat model is in none of the other shapes' inputs.
-- passage: For the relevance shape only: **one advisory finding**, verbatim, with its lens and severity. A security finding brings its `threat:` field where it carries one, and the project's `## Threat model` section from `docs/security-model.md` or the line `threat model: absent`. A performance finding brings the requirement it names, quoted or stated as assumed, and the acceptance bullet it quotes, if any. The `## Goal` and `## Intent` record, beside that bullet, are the whole goal-path text here, so the missing acceptance bullets and `## Out of Scope` are never `NEEDS_CONTEXT`. No diff reference or anything else rides.
+- passage: For the relevance shape only: **one advisory finding**, verbatim, with its lens and severity. A security finding brings its `threat:` field where it carries one, and the project's `## Threat model` section from `docs/security-model.md` or the line `threat model: absent`. A performance finding brings the requirement it names, quoted or stated as assumed, and the acceptance bullet it quotes, if any. The `## Goal` and `## Intent` record, beside that bullet, are the whole goal-path text here, so the what's other headings are never `NEEDS_CONTEXT`. No diff reference or anything else rides.
 
 ### T058
 - key: On the relevance shape, rule on whether the project admits the finding: for security, whether the model or with it absent the deployment the Intent record and the Goal state admits the attacker class and the asset the finding needs; for performance, whether the Goal, the Intent record or the quoted bullet states the requirement it measures against; grounded in the quoted sentence.
@@ -17876,6 +17978,100 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - reason: A dispatch passing no model override lands at the lens's Opus ceiling (U001 under the review.md heading) rather than on the session's model; an explicit model override, on the Agent tool or on a `Workflow` `agent()` call, takes precedence over the frontmatter, so a haiku or sonnet writer's round keeps the tier the table names.
 - passage: model: opus
 - landed: f9389aff section 1
+
+### BA001
+- key: Take as your what the plan's `## Goal`, every `### N.` section body, its `## Out of Scope` list, and its `## Intent` record, `## Related` section and `## Standing Brief Amendments` block where the plan carries each, quoted in the brief or given by path.
+- class: mechanic
+- source: plugins/grimoire/agents/scope-adjudicator.md:15
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 400, 451, 543, 514, 570 and 862, where an authorization written in a section body, a `## Related` line or the amendments block was withheld from the judge, which refused or asked on it. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
+- reason: The kit writes authorizations into each of these surfaces. Findings.md writes the amendments block as bare bullets with no lens, round or ruling provenance, a section body carries the deliverable's shape with its acceptance as one bullet among others, and `## Related` records what a plan inherits or takes back. Each passage carries a bare requirement, exclusion or grant and no argument, so it is what rather than how, wherever it sits. The forbidden list keeps the Approach, Decisions and Chapters, which carry the narrative.
+- passage: The plan's `## Goal` paragraph, every `### N.` section body, its `## Out of Scope` list, and its `## Intent` record, `## Related` section and `## Standing Brief Amendments` block where the plan carries each, quoted in the brief or given by path.
+
+### BA002
+- key: Read a section body less its `Model:`, `Locus:` and `Method:` lines and its tier reason.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:15
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 543 and 514, where a section body's bullets were read as how. Reworded by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing reviews' findings.
+- verdict: rewrite
+- landed: 289ad1a2c finishing
+- reason: Those three lines choose the writer's tier, locus and method, which is how the work is built and never what it delivers. Every other line of a section body states the deliverable, so the skip is the whole of the body's how.
+- passage: A section body is read less its `Model:`, `Locus:` and `Method:` lines and its tier reason, since those reason about the writer.
+
+### BA003
+- key: In the bucket tests and the whole-changeset questions, let every bullet of a section body, the `## Related` section or the amendments block bind as asked for or kept out, on whichever half its words fall in, and a bullet whose words ask for nothing bind nothing.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:15
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 400, 543 and 570.
+- verdict: keep
+- landed: b2b84774b section 1
+- reason: The bucket sentences name acceptance bullets and are pinned byte for byte by test/review-loop-provenance.test.js subject 11, so this reading lets them reach the wider what unchanged. A refuse ground findings.md writes to the amendments block keeps something out, so it binds on the negative half, as an Intent ruling does under T055. A `## Related` line recording a parent or a pull request asks for nothing, so it is no criterion the whole-changeset read could find undelivered.
+- passage: In the tests and questions below, a bullet a section body, the `## Related` section or the amendments block states binds as asked for or kept out, on whichever half its words fall in. A bullet whose words ask for nothing binds nothing.
+- passage: An operator ruling in it binds the same way.
+
+### BA004
+- key: Read an entry in the `## Standing Brief Amendments` block as part of the what rather than as forbidden input 2, and a Chapter's record of the same ruling as that input still.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:34
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 451 and 570, where a mid-run amendment and a ruling that rewrote a bullet were withheld from the judge or refused as a prior ruling.
+- verdict: keep
+- landed: 00604b467 section 1
+- reason: Findings.md writes the block bare, one bullet with no lens, round, seat or ruling provenance, so it carries a ruling's result and no argument. A Chapter records the same ruling with its rounds and reasons, which is the narrative inputs 2 and 6 keep out.
+- passage: An operator ruling recorded in the `## Intent` record, or an entry in the `## Standing Brief Amendments` block, is part of the what, not this input, whatever question it bears on.
+- passage: A Chapter's record of the same ruling is still this input.
+
+### BA005
+- key: On the whole-changeset shape, take the base ref and the plan document's first commit past it as provenance, and read only the hunks the plan's own first-parent commits since that commit carry.
+- class: mechanic
+- source: plugins/grimoire/agents/scope-adjudicator.md:17
+- source: plugins/grimoire/agents/scope-adjudicator.md:25
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issue 447, where a branch carrying two efforts had another plan's content attributed to this one.
+- verdict: keep
+- landed: b2b84774b section 1
+- reason: The whole branch diff hands the judge every effort the branch carries. A plan's own commits are its first-parent line without merges, and every session commits under one identity, so no author filter can stand in. The line starts at the plan document's first commit past the base, not its add, since a document that reached the trunk before the branch was cut, or sits below a stack a restack orphaned, has its add below the base and would pull in other efforts' commits. A merged-in commit can write a hunk on a path an own commit also touched, so a hunk no own commit carries is out of the read. `git rev-list` and `git show --format=` print no commit message, so the read keeps the message bar.
+- passage: For the whole-changeset shape it is the base ref and the plan document's first commit past it, `<first>`, and the head is the tree you are dispatched in.
+- passage: On the whole-changeset shape, read the plan's own commits alone. `git rev-list --reverse --first-parent --no-merges <first>^..HEAD` lists them, and the union of `git show --format= --name-only <commit>` over them stands in for `.` in that form. A hunk there that no listed commit's `git show --format= <commit> -- <path>` carries is another effort's, never built here. Where the brief names no `<first>`, `.` stands.
+
+### BA006
+- key: On the whole-changeset shape, also exclude `docs/README.md`, `docs/backlog.md` and `docs/briefs/**` unless a Goal sentence or a section body names the path.
+- class: mechanic
+- source: plugins/grimoire/agents/scope-adjudicator.md:25
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 686 and 725, where the plan's own docs index row and a backlog line the out-of-scope route placed were refused on every plan.
+- verdict: keep
+- landed: b2b84774b section 1
+- reason: The kit's own routes write these paths on a plan's run, so none is built-but-unasked. Finishing-work's base check names the docs index in its bookkeeping set, and curating-docs keeps each active plan's plan brief under `docs/briefs/`. A plan whose deliverable is one of them names it, which keeps it in view. The briefs root rides this sentence and not the two `git diff` spellings, whose root set test/review-loop-provenance.test.js pins as one value with the skip list and the capture command.
+- passage: That shape also excludes `docs/README.md`, `docs/backlog.md` and `docs/briefs/**`, which the kit's own routes write, unless a Goal sentence or a section body names the path.
+
+### BA007
+- key: Bucket a documentation edit whose removal would restore a claim the base code contradicts as `ACCEPT-AND-DECLARE`, never `REFUSE`, grounded in the base code's file and line.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:59
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issue 561, where a README count fix was refused though its removal would ship a sentence the base code already made false.
+- verdict: keep
+- landed: 00604b467 section 1
+- reason: A refuse orders the removal form, which restores the base text, and where the base code contradicts that text the removal ships a false sentence. The doctrine's "Nothing untrue ships" bars that. Reading the base's code first keeps the exemption to a contradiction the judge can quote by file and line.
+- passage: A documentation edit whose removal would restore a claim the base code contradicts never takes `REFUSE`. It is `ACCEPT-AND-DECLARE` instead, under the doctrine's "Nothing untrue ships". Read the base's code for the claim first, and name its file and line as the ground.
+
+### BA008
+- key: Expect a fixed brief carrying the plan's what, each passage that states a bare requirement, exclusion or grant, and never its how.
+- class: mechanic
+- source: plugins/grimoire/agents/scope-adjudicator.md:3
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1, 2026-11-10, answering kit issues 400, 451 and 543.
+- verdict: keep
+- landed: 00604b467 section 1
+- reason: The description is the dispatcher's surface (C002), so it names the what by what a passage carries, as BA001 does in the body. The forbidden inputs are stated whole in the body's list.
+- passage: Dispatched on a fixed brief carrying the plan's what, each passage that states a bare requirement, exclusion or grant, and never its how.
+
+### BA009
+- key: Let an amendments entry that retires or rewrites a section-body bullet replace that bullet.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:15
+- provenance: `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` finishing pass 2026-11-10, on the finishing adversarial review's Major that the charter gave no precedence between the two.
+- verdict: keep
+- landed: 289ad1a2c finishing
+- reason: A by-path read returns the section body unamended, so without the rule a judge could list a retired bullet as asked but unbuilt or rule against wording the block replaced.
+- passage: An amendments entry that retires or rewrites a section-body bullet replaces it.
 
 ## plugins/grimoire/agents/blind-reader.md
 

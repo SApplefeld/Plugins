@@ -1,6 +1,6 @@
 # Reviewing a Section
 
-Part of the executing-work skill: step 3 of the section loop, with the dispatch table and the Reviewer Dispatch template.
+Part of the executing-work skill: step 3 of the section loop, with the dispatch table, the Reviewer Dispatch template and the Scope Adjudicator Brief.
 
 3. **Review.** On round 1, dispatch the `adversarial-reviewer` and `blind-reviewer` in parallel, overlapping no run of yours. Step 2's targeted run has finished, and under Branch-and-PR its first-green commit has landed at step 7. Their fixes land in step 4, which runs the section's close gate after them, so the gate that closes the section covers what the round changed (the lanes and their moments are owned by the operating doctrine's gate bullet). The adversarial-reviewer gets the spec path, the base git ref or changed-file list, the section name, and a REQUIRED `Amendments in effect:` line from the plan doc's `Standing Brief Amendments` block or explicitly `none`. A C# or T-SQL section adds the csharp-style or sql-style absolute paths, resolved by the Dispatch Brief template's style-skill ladder.
 
@@ -12,9 +12,9 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
 
    **The four code lenses run in two tiers, ranked adversarial, blind, performance, security.** The correctness tier, adversarial and blind, drives step 4's fix round, provenance read, design stop and round backstop. The advisory tier, performance and security, takes step 4's advisory disposition for its Criticals and Majors. Tier keys on the lens, never the finding. The advisory lenses ride round 1 and re-raised rounds where their triggers hold, and a decayed round only by the security summons below.
 
-   **The `Amendments in effect:` line is sighted-only.** Every sighted dispatch in the round carries it, the prose-reviewer's as a Document Review Brief field, save the scope adjudicator's. It never reaches the blind-reviewer or blind-reader. The `Adjudicated findings:` and `Step back:` lines ride the adversarial dispatch alone, a re-raised round's included. `Fix delta:` rides the same dispatches and the security summons, since its files met that lens's trigger.
+   **The `Amendments in effect:` line is sighted-only.** Every sighted dispatch in the round carries it, the prose-reviewer's as a Document Review Brief field and the scope adjudicator's as a heading of its what save its relevance brief. It never reaches the blind-reviewer or blind-reader. The `Adjudicated findings:` and `Step back:` lines ride the adversarial dispatch alone, a re-raised round's included. `Fix delta:` rides the same dispatches and the security summons, since its files met that lens's trigger.
 
-   **The adversarial, security and performance lenses and the scope adjudicator carry a `Trace target:` line, and no other dispatch does.** It names the spec's Goal, its `## Intent` record where one exists, and its acceptance bullets as amended by any `Standing Brief Amendments` entry. Quote into the dispatch any bullet an amendment moved, since a by-path read returns it unamended. The adjudicator's relevance brief carries only the Goal, the `## Intent` record and the acceptance bullet a performance finding quotes.
+   **The adversarial, security and performance lenses and the scope adjudicator carry a `Trace target:` line, and no other dispatch does.** It names the spec's Goal, its `## Intent` record where one exists, and its acceptance bullets as amended by any `Standing Brief Amendments` entry. Quote into the dispatch any bullet an amendment moved, since a by-path read returns it unamended. The adjudicator's is the What line of the Scope Adjudicator Brief below, and its relevance brief carries only the Goal, the `## Intent` record and the acceptance bullet a performance finding quotes.
 
    **The adversarial, security and performance lenses carry a `Failure by area:` line, and no other dispatch does.** It quotes the header and each row of the repository's `docs/verification.md` Failure by Area table whose Area holds a changed file, a file under a Skip path included, or reads `none written` where no such row exists. It closes with `Skip names context you need not read, never a changed file to pass over.` The blind-reviewer, blind-reader and scope adjudicator never carry it.
 
@@ -111,3 +111,26 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
    Where Workflow is unavailable, the dispatch and any re-aim take the Agent tool at the row's model override and the agent's frontmatter effort. The Chapter records the actual effort beside the row's.
 
    **Compensation belongs to gate-shaped work and never to plan-following work.** It reaches a Fable-aimed gate, the consultant among them, and never an implementer.
+
+   **The Scope Adjudicator Brief.** Step 4's held finding and design stop and finishing-work's goal read fill this template.
+
+   ```
+   Scope Adjudicator Brief (all REQUIRED for the shape dispatched):
+   - What, every shape: the plan's ## Goal, each ### N. section body less
+     its Model:, Locus: and Method: lines and tier reason, ## Out of Scope,
+     and ## Intent, ## Related and ## Standing Brief Amendments where the
+     plan carries each, quoted or given by path.
+   - Single finding: the finding verbatim with its lens and severity.
+     Provenance: the base ref with the fix commits, or the latest
+     fix-round capture path under .kit/.
+   - Design stop: the finding, or the implementer's add-decision line in
+     its place, and that line's first four parts, never its fifth.
+     Provenance: as for a single finding.
+   - Whole changeset: the charter's two questions. Provenance: the base
+     ref and the plan document's first commit past it, the last line
+     git log --first-parent --format=%H <base>..HEAD -- docs/plans/<file>
+     prints, or none where it prints none.
+   - Nothing else rides: no lean, no fifth add-decision part, no ruling
+     the What line does not carry, no fix narrative, and no Approach,
+     Decisions or Chapters.
+   ```

@@ -107,7 +107,7 @@ A wrong base raises no error, so check it before spending it. Compare step 5's c
 
 4. **Goal read.** Dispatch the `scope-adjudicator` agent once over the whole changeset, at dispatch table row "Scope adjudicator". Where the unavailability rule above confirms this dispatch cannot be run at its opus tier here, the goal read ends ungated.
 
-   The brief is the charter's whole-changeset shape, which the charter states in full, with the base ref in place of a finding. It carries no `Amendments in effect:` line, on the carve-out executing-work's step 3 states for this judge. The Expert seat holds no whole-changeset shape, so this step dispatches the adjudicator whatever the roster shows.
+   The brief fills the whole-changeset shape of the Scope Adjudicator Brief in executing-work's `references/review.md`, with the base ref and the plan document's first commit past the base in place of a finding. The Expert seat holds no whole-changeset shape, so this step dispatches the adjudicator whatever the roster shows.
 
    A `NEEDS_CONTEXT` return takes the route executing-work's provenance paragraph gives the adjudicator's: the brief is corrected and dispatched once more. A second such return sends the read to me in this pass's close-out with both returns beside it, in the ask bucket's register. Record a read the unavailability rule's ladder ends ungated on the final Chapter's `Review Findings:` field in the `review: <pair or lens> ungated (<chain>)` form executing-work's Chapter format states, with `goal read` as the lens.
 
