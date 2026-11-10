@@ -235,6 +235,7 @@ export const REFUSED_TOOLS: ReadonlySet<string> = new Set([
   "mcp__personas__goal_done",
   "mcp__personas__goal_longterm",
   "mcp__personas__task_add",
+  "mcp__personas__routine_add",
   "mcp__personas__ask_open",
   "mcp__personas__ask_close",
   "mcp__personas__agentic_resolve",

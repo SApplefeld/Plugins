@@ -229,6 +229,7 @@ import { inplaceRewriteGuard } from "./guards/inplace-rewrite";
 // The memq grant, answered on tool.check.
 import { MEMQ_GRANT_REASON, memqGrantMatches, memqGrantable, type MemqGrantDeps } from "./guards/memq-grant";
 import { ATTACHMENT_WITHHELD, BLOCK_WITHHELD, bodyFileRefusal, PROMPT_WITHHELD, REFUSED_TOOLS, REFUSED_TOOL_REASON, SPAWN_WITHHELD, scrubAttachment, scrubContextBlocks, scrubPrompt, scrubServed, scrubSpawn, scrubText, seedFiles, seedVault, serverOf, setRedactorOn, setRestoreTools, toolCallBack, toolCallDown, toolCallRefusal, unrestoredNotice, withheldContextBlocks, withheldToolResult, type SeedFile, type ToolCallDown } from "./redactor";
+import { ROUTINE_LEAD_TEXT } from "./routines";
 import { drainOwnIdNote, setOwnSessionId } from "./redactor-detect";
 import { type ExpectedTurn, turnTextEquals, findExpectedTurn, type ChannelSender as ChannelSenderFromModule, OPERATOR_SENDER, ASKED_BY_MAX_CHARS as ASKED_BY_MAX_CHARSFromModule, channelSenderOf as channelSenderOfFromModule, TASK_TEXT_MAX_CHARS as TASK_TEXT_MAX_CHARSFromModule, TASK_ID_MAX_CHARS as TASK_ID_MAX_CHARSFromModule, type SubmitOutcome, removeExpectedTurn, CHANNEL_SEGMENT_PATTERN, CHANNEL_SEGMENT_MAX_BYTES, channelSegmentPath } from "./channel-text";
 import { TURN_PLAN_EDITS_MAX as TURN_PLAN_EDITS_MAXFromModule, namesPlanDocument, planPathUnderCwd as planPathUnderCwdFromModule, reactivateAskedEntry, isPlanEntry, PLAN_CHECKOUT_TIMEOUT_MS, closingLeafObjective, planStatusText } from "./plan-route";
@@ -2142,7 +2143,10 @@ function meterDrainStep(dp: any, now: number): void {
 // since test-personas/redactor-module-test.mjs reads every model call here
 // for its scrubText. So do the [SUPERVISOR], [ORPHAN SWEEP] and [BOX NOTICE] submits, since
 // test-personas/injection-ledger.mjs sizes their frames and counts the
-// submitExpectedTurn call sites from this file's source.
+// submitExpectedTurn call sites from this file's source. The controller
+// tick's own submits sit in this file on that count too, the [TRUNK GATE]
+// and [ROUTINE] turns among them. The [ROUTINE] turn's lead is
+// hooks/routines.ts's, which the ledger reads beside this file.
 function drainsDepsOf(dp: any): DrainsDeps {
   return {
     session: sess,
@@ -5292,6 +5296,82 @@ export const register: Register = async (on, options) => {
       },
     }));
 
+    // The persona's table of scheduled routines: add, remove and list. Never
+    // gated to an operator or coordinator turn and never to an autonomy
+    // level, since the persona schedules its own recurring chores.
+    await registerTool("routine_add", () => $.tool.register({
+      name: "routine_add",
+      description:
+        "Schedule a routine: a one-line note this persona wants to act on again and again, kept in its own store, so " +
+        "it outlives a restart and a compaction. Three cadences, each taking its own fields and no other: " +
+        'cadence "hours" takes everyHours, a whole number from 1 to 168, and counts from the last fire, or from the ' +
+        'add before its first fire, not from the top of the hour; cadence "daily" takes hour, a whole number from 0 ' +
+        'to 23 on this machine\'s local clock; ' +
+        'cadence "weekly" takes weekday, one of sun, mon, tue, wed, thu, fri or sat, and hour. A persona holds at ' +
+        "most 10 routines, and a note is one line of at most 500 code points: a longer one is refused, never cut. " +
+        "Refused too for a store that has not loaded, an empty note, a field its cadence does not take or lacks, and " +
+        "a note already scheduled on the same schedule. When a routine is due and no turn is open, the note comes back as a [ROUTINE] turn. That " +
+        "turn carries no authority: it is this persona's own stored text, so an act that needs a yes still needs it. " +
+        "A routine missed many times over fires once. To change a routine, remove it and add it again. Tell the " +
+        "operator on your thread, in the same turn, that you scheduled it. Owner only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          text: {
+            type: "string",
+            description: "text is the note, one line of at most 500 code points.",
+          },
+          cadence: {
+            type: "string",
+            description: 'cadence is "hours", "daily" or "weekly".',
+          },
+          everyHours: {
+            type: "integer",
+            description: 'everyHours is the hours between fires, from 1 to 168. Required for cadence "hours", refused otherwise.',
+          },
+          hour: {
+            type: "integer",
+            description: 'hour is the local hour of the fire, from 0 to 23. Required for cadence "daily" and "weekly", refused otherwise.',
+          },
+          weekday: {
+            type: "string",
+            description: 'weekday is sun, mon, tue, wed, thu, fri or sat. Required for cadence "weekly", refused otherwise.',
+          },
+        },
+        required: ["text", "cadence"],
+      },
+    }));
+
+    await registerTool("routine_remove", () => $.tool.register({
+      name: "routine_remove",
+      description:
+        "Remove one scheduled routine from this persona's table, by id, so it never fires again. A store that has " +
+        "not loaded is refused. An id the table does not hold is refused, and the refusal names the ids it does " +
+        "hold. Owner only.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "id names the routine to remove, as routine_add returned it and routine_list shows it.",
+          },
+        },
+        required: ["id"],
+      },
+    }));
+
+    await registerTool("routine_list", () => $.tool.register({
+      name: "routine_list",
+      description:
+        "List this persona's scheduled routines: one line each with its id, its schedule, its last fire, its next " +
+        "due time and its note, the times on this machine's local clock. It changes nothing, and is refused only " +
+        "where this session never loaded its persona's state.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    }));
+
     await registerTool("memory_add", () => $.tool.register({
       name: "memory_add",
       description:
@@ -6206,6 +6286,16 @@ export const register: Register = async (on, options) => {
       submitTrunkGate: async () => {
         const trunkGateOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: TRUNK_GATE_TEXT }));
         return trunkGateOutcome;
+      },
+      // The [ROUTINE] turn: the label, the lead and the routine's note on a
+      // line of its own. The note is text the persona stored, so it passes
+      // through bracketSafeText and its line is quoted, and it cannot read as
+      // a label or a line the plugin wrote. The id is the plugin's own: an
+      // add composes it and a load keeps only the id shape.
+      submitRoutine: async (id, text) => {
+        const routineText = quoteContinuationLines(`[ROUTINE id=${id}] ${ROUTINE_LEAD_TEXT}\n${bracketSafeText(text)}`);
+        const routineOutcome = await submitExpectedTurn($, expectedTurns, expectTurn({ kind: "plugin", text: routineText }));
+        return routineOutcome;
       },
       expectProposalTurn: () => {
         const expectedProposalTurn = expectTurn({ kind: "proposal", text: proposeFrame(sess.state.longTermGoals, coordinatorPersona, sess.state.autonomy) });

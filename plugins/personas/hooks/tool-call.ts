@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -47,6 +47,7 @@ import { isPlanEntry, planLeftOpenText, planStatusText, reactivateAskedEntry } f
 import type { recognitionAsk as recognitionAskFromModule, settleRecognitionOutcomes as settleRecognitionOutcomesFromModule } from "./recall";
 import { memqGetsOf, memqTouchesOf } from "./recall-text";
 import { shellCommandOf } from "./recognition";
+import { ROUTINE_WEEKDAYS, localTimeText, newRoutineId, routineListText, routineNextDueAt, sameSchedule, scheduleWords, type Routine, type RoutineSchedule } from "./routines";
 import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validateRosterEntry, writeRoster } from "./roster";
 import type { addGoalEntry as addGoalEntryFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, promoteOpenRecord as promoteOpenRecordFromModule } from "./records";
 import { skillPickTool } from "./skill-pick";
@@ -235,6 +236,49 @@ export function queueRecordFieldsOf(text: string, planPath: string): { fields: Q
 // since the caller cannot tell from the store that the first one applied.
 export function goalWriteFailedText(failed: string, repeatDoubles: boolean): string {
   return ` The store write failed with ${failed}; the change stands in memory and lands on the next write that succeeds.${repeatDoubles ? " A repeat of this call would apply it twice." : ""}`;
+}
+
+// A whole number from `min` to `max` out of a tool argument, which can arrive
+// as a number or as its digits in a string, or undefined for anything else.
+function wholeArgIn(raw: unknown, min: number, max: number): number | undefined {
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^\d{1,3}$/.test(raw.trim()) ? Number(raw.trim()) : NaN;
+  return Number.isInteger(value) && value >= min && value <= max ? value : undefined;
+}
+
+// The schedule a routine_add call names, or the refusal naming the field at
+// fault. Each cadence takes its own fields and no other: a field it requires
+// is read first, then a field it does not take, where present means neither
+// undefined nor null, so an empty string or a zero is refused too.
+export function routineScheduleOf(input: { cadence?: unknown; everyHours?: unknown; hour?: unknown; weekday?: unknown }): { schedule: RoutineSchedule } | { problem: string } {
+  const cadence = typeof input.cadence === "string" ? input.cadence.trim() : "";
+  if (cadence !== "hours" && cadence !== "daily" && cadence !== "weekly") {
+    return { problem: 'cadence must be "hours", "daily" or "weekly".' };
+  }
+  const present = (raw: unknown): boolean => raw !== undefined && raw !== null;
+  const notTaken = (field: string): { problem: string } => ({ problem: `${field} is not a field cadence "${cadence}" takes; send the call without it.` });
+  const hourProblem = { problem: `hour must be a whole number from 0 to 23 for cadence "${cadence}".` };
+  if (cadence === "hours") {
+    const every = wholeArgIn(input.everyHours, 1, ROUTINE_HOURS_MAX);
+    if (every === undefined) return { problem: `everyHours must be a whole number from 1 to ${ROUTINE_HOURS_MAX} for cadence "hours".` };
+    if (present(input.hour)) return notTaken("hour");
+    if (present(input.weekday)) return notTaken("weekday");
+    return { schedule: { kind: "hours", every } };
+  }
+  if (cadence === "daily") {
+    const hour = wholeArgIn(input.hour, 0, 23);
+    if (hour === undefined) return hourProblem;
+    if (present(input.everyHours)) return notTaken("everyHours");
+    if (present(input.weekday)) return notTaken("weekday");
+    return { schedule: { kind: "daily", hour } };
+  }
+  const weekday = typeof input.weekday === "string"
+    ? (ROUTINE_WEEKDAYS as readonly string[]).indexOf(asciiLower(input.weekday.trim()))
+    : -1;
+  if (weekday === -1) return { problem: `weekday must be one of ${ROUTINE_WEEKDAYS.join(", ")} for cadence "weekly".` };
+  const hour = wholeArgIn(input.hour, 0, 23);
+  if (hour === undefined) return hourProblem;
+  if (present(input.everyHours)) return notTaken("everyHours");
+  return { schedule: { kind: "weekly", weekday, hour } };
 }
 
 // The served body: what the handler's try block in hooks/index.ts answered
@@ -1853,6 +1897,135 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+  }
+
+  // Serve routine_add, routine_remove and routine_list: the persona's own
+  // table of scheduled routines. None of the three checks the turn's origin
+  // or the autonomy level, since the persona schedules its own chores in a
+  // turn of any origin. What bounds a stored note is its shape: one line, at
+  // most ROUTINE_TEXT_MAX_POINTS code points, refused past that and never
+  // cut, since the note comes back as a prompt and a cut instruction can
+  // mean something else.
+  if (e.tool === "mcp__personas__routine_add") {
+    if (sess.stateNotLoaded !== null) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: stateNotLoadedText(sess.stateNotLoaded) };
+    }
+    if (!sess.isOwner) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+    }
+    // Folded and trimmed as task_add folds its own text, through the store
+    // layer's one fold, so the stored note is one line.
+    const text = oneLine(String((e as any).text || "")).trim();
+    if (!text) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: "routine_add requires non-empty 'text'." };
+    }
+    // headPoints returns a text of at most the bound unchanged, so a
+    // difference means the text runs past it in code points.
+    if (headPoints(text, ROUTINE_TEXT_MAX_POINTS) !== text) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return {
+        deny: `routine_add refused: 'text' is longer than ${ROUTINE_TEXT_MAX_POINTS} code points once folded to one line. Shorten the note; it is never cut to fit.`,
+      };
+    }
+    const named = routineScheduleOf(e as any);
+    if ("problem" in named) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `routine_add refused: ${named.problem}` };
+    }
+    const twin = sess.state.routines.find((r) => r.text === text && sameSchedule(r.schedule, named.schedule));
+    if (twin) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `routine_add refused: ${twin.id} already holds this note on this schedule.` };
+    }
+    if (sess.state.routines.length >= ROUTINES_MAX) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return {
+        deny: `routine_add refused: the table already holds ${sess.state.routines.length} routines, the cap (${ROUTINES_MAX}). Remove one with routine_remove first.`,
+      };
+    }
+    const now = Date.now();
+    const routine: Routine = { id: newRoutineId(now), text, schedule: named.schedule, addedAt: now };
+    // The rollback acts on this table, as routine_remove's does.
+    const routines = sess.state.routines;
+    routines.push(routine);
+    // The row names the id and the schedule and never the note.
+    const addDecision: AgentState["decisions"][number] = {
+      timestamp: now,
+      loop: "monitor",
+      action: "routine_added",
+      detail: `${routine.id} added, ${scheduleWords(routine.schedule)}`,
+    };
+    sess.state.decisions.push(addDecision);
+    const writeOk = await persistOrRollBack(() => {
+      const at = routines.indexOf(routine);
+      if (at !== -1) routines.splice(at, 1);
+      dropDecision(addDecision);
+    });
+    if (writeOk) {
+      return {
+        result:
+          `Routine scheduled: ${routine.id}, ${scheduleWords(routine.schedule)}, first due ${localTimeText(routineNextDueAt(routine))} local time. ` +
+          "Tell the operator on your thread, in this turn, that you scheduled this routine.",
+      };
+    }
+    setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+    return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+  }
+
+  if (e.tool === "mcp__personas__routine_remove") {
+    if (sess.stateNotLoaded !== null) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: stateNotLoadedText(sess.stateNotLoaded) };
+    }
+    if (!sess.isOwner) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+    }
+    const id = String((e as any).id || "").trim();
+    const at = sess.state.routines.findIndex((r) => r.id === id);
+    if (at === -1) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      const held = sess.state.routines.map((r) => r.id).join(", ");
+      return {
+        deny: `routine_remove refused: "${headPoints(id, 50)}" is not in the table, which holds ${held || "no routine"}.`,
+      };
+    }
+    // The rollback acts on this table, not on sess.state at rollback time:
+    // the write awaits a store read, during which an identity switch can
+    // put another persona's state on the session.
+    const routines = sess.state.routines;
+    const routine = routines[at];
+    routines.splice(at, 1);
+    const removeDecision: AgentState["decisions"][number] = {
+      timestamp: Date.now(),
+      loop: "monitor",
+      action: "routine_removed",
+      detail: `${routine.id} removed, ${scheduleWords(routine.schedule)}`,
+    };
+    sess.state.decisions.push(removeDecision);
+    // A refused write puts the routine back at the place it held.
+    const writeOk = await persistOrRollBack(() => {
+      routines.splice(at, 0, routine);
+      dropDecision(removeDecision);
+    });
+    if (writeOk) {
+      return { result: `Routine removed: ${routine.id}, ${scheduleWords(routine.schedule)}.` };
+    }
+    setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+    return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
+  }
+
+  // routine_list writes nothing, so a session that is not the owner reads
+  // the table too.
+  if (e.tool === "mcp__personas__routine_list") {
+    if (sess.stateNotLoaded !== null) {
+      setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+      return { deny: stateNotLoadedText(sess.stateNotLoaded) };
+    }
+    return { result: routineListText(sess.state.routines) };
   }
 
   // Serve supervisor_shutdown (plan item 4: distinct from a finished goal,

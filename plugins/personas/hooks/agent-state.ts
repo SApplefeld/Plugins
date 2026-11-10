@@ -2,6 +2,10 @@
 // Access via $.fs.* (read, write, exists).
 // One JSON file per project, one owner at a time (the Monitor loop).
 
+// This module imports no value, only a type the loader erases, so a script or
+// a suite reads it with no resolver for a sibling's path.
+import type { Routine, RoutineSchedule } from "./routines";
+
 /**
  * One piece of untrusted text with the delivery brackets neutralized, under
  * the same rule bracketSafeProblem refuses on and for the same reason: a '['
@@ -391,6 +395,13 @@ export interface TaskItem {
 
 // The most tasks one goal holds at once.
 export const MAX_TASKS_PER_GOAL = 20;
+
+// The routine table's limits: the most routines one persona holds, the
+// longest a routine's note runs in code points, and the longest an hours
+// routine waits between fires. The shapes are in routines.ts.
+export const ROUTINES_MAX = 10;
+export const ROUTINE_TEXT_MAX_POINTS = 500;
+export const ROUTINE_HOURS_MAX = 168;
 
 // The most task lines the injected task list shows before it names the rest
 // by count.
@@ -1205,6 +1216,7 @@ export interface AgentState {
   memory: MemoryEntry[];
   goals: GoalNode[];
   tasks: TaskItem[]; // beside the tree, each keyed to a goal; see TaskItem
+  routines: Routine[]; // the persona's scheduled routines, in the order added; see Routine in routines.ts
   turnRecords: TurnRecord[]; // beside the tree, one message each; see TurnRecord
   shownMemories: ShownMemory[]; // the store's records the read showed; see ShownMemory
   memoryOwed: MemoryOwed[]; // the turn ends whose record the memory drain still owes, oldest first; see MemoryOwed
@@ -1396,6 +1408,7 @@ export function createDefaultState(persona: string, sessionId: string): AgentSta
     memory: [],
     goals: [],
     tasks: [],
+    routines: [],
     turnRecords: [],
     shownMemories: [],
     memoryOwed: [],
@@ -1712,6 +1725,56 @@ function fillTasks(state: AgentState): void {
   });
 }
 
+// A whole number from `min` to `max`.
+function isWholeIn(value: unknown, min: number, max: number): value is number {
+  return Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
+}
+
+// Whether a stored value is one of the three schedule shapes, each field in
+// its range.
+function isRoutineSchedule(value: unknown): value is RoutineSchedule {
+  const s = value as { kind?: unknown; every?: unknown; hour?: unknown; weekday?: unknown } | null;
+  if (!s || typeof s !== "object") return false;
+  if (s.kind === "hours") return isWholeIn(s.every, 1, ROUTINE_HOURS_MAX);
+  if (s.kind === "daily") return isWholeIn(s.hour, 0, 23);
+  return s.kind === "weekly" && isWholeIn(s.weekday, 0, 6) && isWholeIn(s.hour, 0, 23);
+}
+
+// The routine table, filled at every load exit. A stored value that is not a
+// list reads as an empty one, which is how a store written before the table
+// existed loads. A stored entry is kept only where its id matches
+// ROUTINE_ID_SHAPE and repeats no id kept ahead of it, its text is one line
+// of at most ROUTINE_TEXT_MAX_POINTS code points holding more than
+// whitespace, its schedule is one of the three shapes, its addedAt is a
+// moment in the Date range, and its lastFiredAt is absent or a moment in that
+// range; anything else is dropped, and the first ROUTINES_MAX of what is kept
+// stand in their stored order. The id is printed on a label line, so it holds
+// no break, bracket or space. A stamp past the Date range makes the next due
+// moment NaN, and such a routine would never fire. Nothing is folded or cut
+// to fit: the text is replayed as a prompt, and a note repaired here could
+// say something its writer did not.
+const ROUTINE_ID_SHAPE = /^rt-[0-9a-z-]{1,40}$/;
+function fillRoutines(state: AgentState): void {
+  const stored = (state as { routines?: unknown }).routines;
+  if (!Array.isArray(stored)) {
+    state.routines = [];
+    return;
+  }
+  const isMoment = (n: unknown): boolean => Number.isFinite(n) && Math.abs(n as number) <= 8.64e15;
+  const ids = new Set<string>();
+  state.routines = headItems(stored.filter((r): r is Routine => {
+    const routine = r as Partial<Routine> | null;
+    const keep = !!routine && typeof routine === "object"
+      && typeof routine.id === "string" && ROUTINE_ID_SHAPE.test(routine.id) && !ids.has(routine.id)
+      && typeof routine.text === "string" && routine.text.trim() !== ""
+      && !LINE_TERMINATOR.test(routine.text) && headPoints(routine.text, ROUTINE_TEXT_MAX_POINTS) === routine.text
+      && isRoutineSchedule(routine.schedule) && isMoment(routine.addedAt)
+      && (routine.lastFiredAt === undefined || isMoment(routine.lastFiredAt));
+    if (keep) ids.add(routine!.id as string);
+    return keep;
+  }), ROUTINES_MAX);
+}
+
 // The turn records, filled at every load exit. A stored value that is not a
 // list reads as an empty one, which is how a store written before the records
 // existed loads. A stored entry is kept only where its id and text are strings,
@@ -1865,6 +1928,7 @@ export function parseState(json: string): AgentState {
       memory: old.memory ?? [],
       goals,
       tasks: [],
+      routines: [],
       turnRecords: [],
       shownMemories: [],
       memoryOwed: [],
@@ -1925,6 +1989,7 @@ export function parseState(json: string): AgentState {
       state.autonomy = "propose";
     }
     fillTasks(state);
+    fillRoutines(state);
     fillTurnRecords(state);
     fillPreviousSessionIds(state);
     fillProposal(state);
@@ -2027,6 +2092,7 @@ export function parseState(json: string): AgentState {
     state.autonomy = "propose";
   }
   fillTasks(state);
+  fillRoutines(state);
   fillTurnRecords(state);
   fillPreviousSessionIds(state);
   fillProposal(state);

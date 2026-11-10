@@ -45,6 +45,7 @@ import { SweepDeleteError, askKey, claimReaderRole, deliveryArchitectLine, deliv
 import { PLAN_ARCHIVE_DIRS } from "./plan-record";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
 import { CONTROLLER_DECISION, PLAN_SWITCH, PLAN_SWITCH_NO_MATCH, controllerLabelsOf, controllerLastAnswerText, controllerStateText, kaizenLine, resolverOf, type ControllerStateFact } from "./question-catalog";
+import { routineDue, scheduleWords } from "./routines";
 import { FINDING_COOLOFF_MS, FINDING_UNROUTABLE_AFTER_MS, buildSelfReviewInput, dedupeSelfReview, evictSelfReview, isClosureTimingLesson, isSelfScoringLesson, reviewOwnRecord, shouldSelfReview } from "./self-review";
 import type { SessionState } from "./session-state";
 import { readPersonaStore } from "./store-files";
@@ -155,6 +156,7 @@ export interface TickContext extends SharedHandlerState {
   noteReconcileStoreRefused: (err: unknown) => void;
   submitReconcile: () => Promise<SubmitOutcome>;
   submitTrunkGate: () => Promise<SubmitOutcome>;
+  submitRoutine: (id: string, text: string) => Promise<SubmitOutcome>;
   expectProposalTurn: () => ExpectedTurn;
   submitProposal: (expectedProposalTurn: ExpectedTurn) => Promise<SubmitOutcome>;
   submitNudge: (g: GoalNode, idleGapConverted: boolean, idleDisplay: string, controllerStampId: string | null) => Promise<{ nudgeOutcome: SubmitOutcome; unlinedAnswers: number }>;
@@ -1161,10 +1163,12 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // Section 6: the fleet wake. The steward is woken by this block rather
   // than by a cadence written into its own standing instruction. A duty
   // written "on each tick" states a trigger the runtime does not have:
-  // everything else in this tick, save the daily [TRUNK GATE] turn the
-  // coordinator never takes, submits nothing at all on a persona holding no
-  // active goal leaf and an empty inbox, which is exactly the
-  // quiet fleet on which a crashed persona most needs reporting. It runs
+  // everything else in this tick submits nothing at all on a persona holding
+  // no active goal leaf and an empty inbox, which is exactly the
+  // quiet fleet on which a crashed persona most needs reporting. The two
+  // exceptions wake nobody for the fleet: the daily [TRUNK GATE] turn, which
+  // the coordinator never takes, and a [ROUTINE] turn, which comes only on a
+  // schedule the persona stored in its own routine table. It runs
   // for the coordinator persona only, that being the seat whose standing
   // instruction carries the fleet duty, and only with a roster
   // configured, there being no fleet to read without one.
@@ -1549,7 +1553,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
 
   // The daily trunk gate: one [TRUNK GATE] turn a local date, at or past
   // trunkGateHour, for a session with that option set. It sits here, above
-  // the inbox drain and ahead of the planning gate and the idle branch,
+  // the scheduled routines' block and the inbox drain and ahead of the
+  // planning gate and the idle branch,
   // so it runs on every tick with no turn open, a day the persona has work
   // included. The coordinator persona and the default persona are skipped,
   // as the idle proposal skips them. trunkGateDecision reads the local date
@@ -1561,8 +1566,8 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // that fails has still spent the day, which the trunk_gate_failed record
   // makes visible. A persist that throws is attempted rather than depended
   // on, as the reconciliation block's is, so a store held unparseable does
-  // not skip the inbox drain and the actuator below; the stamp stands in
-  // memory.
+  // not skip the routine block, the inbox drain and the actuator below; the
+  // stamp stands in memory.
   if (trunkGateHour !== undefined && sess.persona !== coordinatorPersona && sess.persona !== "default") {
     const trunkGateNow = Date.now();
     const gate = trunkGateDecision(new Date(trunkGateNow), trunkGateHour, sess.state.trunkGateDate, turnIsOpen());
@@ -1601,6 +1606,76 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           loop: "monitor",
           action: "trunk_gate_failed",
           detail: headPoints(`submit ${trunkGateOutcome.how}, ${gate.date} already spent: ${trunkGateOutcome.reason}`, 200),
+        });
+      sess.state.updatedAt = Date.now();
+      try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
+    }
+  }
+
+  // The scheduled routines: at most one [ROUTINE] turn a tick, for the first
+  // routine in the persona's table the due rule reads as due. The block runs
+  // for any persona whose table holds a routine, the coordinator persona and
+  // the default persona included, an empty table being the off switch. It
+  // sits here, below the trunk gate and above the inbox drain, which returns
+  // once it delivers a record and so would starve a block below it under a
+  // steady inbox. The clock is read once. A routine whose anchor is later
+  // than the clock has that anchor set to now and fires nothing, and one
+  // persist attempt carries every such stamp, tolerated where it fails as the
+  // trunk gate's stamp is. The candidate is read from the table after that
+  // write, since the session can replace its state under an await. A turn
+  // open when the candidate is read leaves the routine due for a later tick.
+  // The fire follows the trunk gate's order for the trunk
+  // gate's reason: the last fire is stamped and persisted before the submit,
+  // which does not resolve until the session is next idle, so a stamp
+  // written after it would leave every tick in between queueing another
+  // copy. A submit that fails has still spent the fire, which the
+  // routine_failed record makes visible. A tick with nothing to stamp and
+  // nothing to fire writes nothing.
+  if (sess.state.routines.length > 0) {
+    const routineNow = Date.now();
+    let restamped = false;
+    for (const routine of sess.state.routines) {
+      if (routineDue(routineNow, routine) !== "restamp") continue;
+      if (routine.lastFiredAt === undefined) routine.addedAt = routineNow;
+      else routine.lastFiredAt = routineNow;
+      restamped = true;
+    }
+    if (restamped) {
+      sess.state.updatedAt = routineNow;
+      try { await ctx.persist(); } catch { /* the store refused; the stamps stand in memory */ }
+    }
+    const dueRoutine = sess.state.routines.find((routine) => routineDue(routineNow, routine) === "fire");
+    if (dueRoutine !== undefined && !turnIsOpen()) {
+      const lastFiredAt = dueRoutine.lastFiredAt;
+      dueRoutine.lastFiredAt = routineNow;
+      sess.state.updatedAt = routineNow;
+      // A persist that returned false is a session that has just given the
+      // persona up, and the commons yield writes this state on its way out.
+      // The stamp rolls back with the call, so the successor finds the
+      // routine still due and fires it, and no turn goes to a session that no
+      // longer holds the persona. A persist that threw ran the rollback too,
+      // and this branch submits, so the stamp goes forward again in memory.
+      try {
+        if (!await ctx.persistOrRollBack(() => {
+          if (lastFiredAt === undefined) delete dueRoutine.lastFiredAt;
+          else dueRoutine.lastFiredAt = lastFiredAt;
+        })) return;
+      } catch {
+        dueRoutine.lastFiredAt = routineNow;
+      }
+      const routineOutcome = await ctx.submitRoutine(dueRoutine.id, dueRoutine.text);
+      sess.state.decisions.push(routineOutcome.ok
+        ? {
+          timestamp: routineNow,
+          loop: "monitor",
+          action: "routine_fired",
+          detail: `[ROUTINE] turn submitted for ${dueRoutine.id}, ${scheduleWords(dueRoutine.schedule)}`,
+        }
+        : {
+          timestamp: routineNow,
+          loop: "monitor",
+          action: "routine_failed",
+          detail: headPoints(`submit ${routineOutcome.how} for ${dueRoutine.id}, the fire is spent: ${routineOutcome.reason}`, 200),
         });
       sess.state.updatedAt = Date.now();
       try { await ctx.persist(); } catch { /* the store refused; the line above waits for one that parses */ }
