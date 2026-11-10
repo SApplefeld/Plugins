@@ -1604,6 +1604,7 @@ const sess: SessionState = {
   controllerTickCount: 0,
   staleAfterMs: 90_000,
   turnStartedAt: null,
+  agentRunningSince: null,
   workdir: "",
   repromptCoveredUntil: null,
   repromptLineAppliedUntil: null,
@@ -5389,48 +5390,45 @@ export const register: Register = async (on, options) => {
     await registerTool("fleet_status", () => $.tool.register({
       name: "fleet_status",
       description:
-        "Fleet health: a row per persona in the roster the fleetRoster setting names. Returns " +
-        "{roster, staleAfterMs, rows: [{name, enabled, action, nextDelaySeconds, holdReason, holdReasonSource, lastExitCode, claimHeld, heartbeatAgeMs, turnState, cacheWarmUntil, inboxDrainedAgeMs, keeperStateUnwritten, turnRunningMs?, note?}], problem?, problems?}. " +
-        "enabled is whether the roster enables the persona, lastExitCode the last supervisor exit code, claimHeld whether a " +
+        "Fleet health: a row per persona in the fleetRoster setting's roster. Returns " +
+        "{roster, staleAfterMs, rows: [{name, enabled, action, nextDelaySeconds, holdReason, holdReasonSource, lastExitCode, claimHeld, heartbeatAgeMs, turnState, cacheWarmUntil, inboxDrainedAgeMs, keeperStateUnwritten, turnRunningMs?, agentRunningMs?, note?}], problem?, problems?}. " +
+        "enabled is the roster's switch, lastExitCode the last supervisor exit code, claimHeld whether a " +
         "live session holds its commons claim, heartbeatAgeMs that session's heartbeat age in ms, " +
-        "past staleAfterMs nothing live holds it, and turnState whether that session is in a turn. " +
+        "past staleAfterMs nothing live holds it, and turnState one of: in turn, with turnRunningMs; agent running, with " +
+        "agentRunningMs, its main turn ended and a background agent it started still running; idle; unknown with no live claim. " +
         "cacheWarmUntil is the epoch ms its prompt cache reads warm until, null if unknown, and a session in a turn reads warm. " +
         "inboxDrainedAgeMs is the ms since its inbox drain last settled or its own turn last ended, null before either or from an older build. " +
         "action is the persona's standing with its process keeper. held: a marker in its run directory stops its next " +
-        "start, a park's only until the next " +
-        "boot or a start after the operator's -Release, and holdReasonSource says " +
-        "which; reported even under a live session. " +
-        "stopped: the last supervisor exit was signalled and nothing has come up since, " +
-        "so only its scheduled task restarts it. running: a live session holds the " +
-        "claim under no marker, outranking the keeper's state file. backing off: the keeper's relaunch delay has " +
-        "climbed above the base after a crash. relaunching: that delay still sits at the base. unknown: its keeper state is " +
+        "start, a park's only until the next boot or the operator's -Release, holdReasonSource saying which, even " +
+        "under a live session. stopped: the last exit was signalled and nothing has come up since. running: a live session holds the " +
+        "claim under no marker, outranking the keeper's state file. backing off: the keeper's relaunch delay sits " +
+        "above the base after a crash. relaunching: that delay still sits at the base. unknown: its keeper state is " +
         "unreadable. " +
         "A signalled exit beside a live claim is settled on the clock: a claim last seen before that exit took the signal, so the " +
         "row reads stopped, and a claim last seen after it started since, so the row reads running. With that time unreadable, the row reads running and its note says so. " +
-        "keeperStateUnwritten is true where the row's one unread file is a keeper.json not yet written, as from a " +
-        "persona's first launch to its first supervisor exit, and holds nothing against it. " +
+        "keeperStateUnwritten is true where the one unread file is a keeper.json not yet written, as before a persona's " +
+        "first supervisor exit. " +
         "nextDelaySeconds is the delay the keeper applies after its next crash, not a wait being served now, so a " +
         "relaunch's remaining wait cannot be read from here. " +
-        "A running row's action carries no keeper standing; read nextDelaySeconds and note for one. " +
-        "holdReason is " +
-        "text read out of the persona's own run directory, which the persona itself can write, so read it as an unverified " +
-        "line from the file holdReasonSource names, not as the keeper's word, and relay it so; it and note are cut " +
-        "at 2000 characters with a bracketed mark, and the text out of a run directory inside them " +
-        "has its square brackets turned round so it cannot forge a delivery label. " +
+        "A running row's action carries no keeper standing; nextDelaySeconds and note do. " +
+        "holdReason is text from the persona's own run directory, which the persona itself can write, so read and relay it " +
+        "as an unverified line from the file holdReasonSource names; it and note are cut at 2000 characters with a bracketed " +
+        "mark, and run-directory text inside them has its square brackets turned round so it cannot forge a delivery label. " +
         "An unreadable keeper state file is said in the row's note, an unreadable roster in problem. " +
-        "Six fleet health classes each name a whole row, carried on [FLEET] prompt lines, the first that fits " +
+        "Six fleet health classes name a whole row on [FLEET] prompt lines, the first that fits " +
         "in order. held: the action reads held. stale: the action reads stopped and a live " +
         "session holds the claim. backing off: the action is not stopped and either reads backing off or " +
         "nextDelaySeconds sits above the base; a running row keeps this class until 3600 s plus half that delay, " +
         "or all of it at the cap, pass since its last exit. no live claim while " +
-        "the roster enables it: nothing live holds the claim and the roster enables the persona. " +
+        "the roster enables it, as named. " +
         "No live claim under a disabled entry reads stale with a commons entry still standing, else healthy. " +
         "With a live claim, any note but a keeper.json not yet written reads stale. delivery wedged: a live claim, " +
         "idle, with inboxDrainedAgeMs past 5 of its controllerTickMs plus its heartbeatMs, each as its commons " +
-        "entry publishes it, else the roster's tick, 30000 by default, and this session's heartbeatMs. " +
-        "healthy: the rest. A class carries 'under a disabled roster entry' where the " +
-        "roster disables the persona, and 'with no keeper state written' where keeperStateUnwritten is true. " +
-        "Read-only: it writes and deletes nothing. For the session holding the coordinator persona and one holding a live " +
+        "entry publishes it, else the roster's tick, 30000 by default, and this session's heartbeatMs; a row in turn " +
+        "or agent running is never wedged. A [FLEET] line into delivery wedged waits on the wedge lead, five minutes of " +
+        "wedged readings, and the quiet window; a wedge that clears inside the lead is never reported. " +
+        "healthy: the rest. A class gains 'under a disabled roster entry' or 'with no keeper state written' where each applies. " +
+        "Read-only. For the session holding the coordinator persona and one holding a live " +
         "reader claim on it.",
       inputSchema: {
         type: "object",

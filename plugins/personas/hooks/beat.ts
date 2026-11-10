@@ -54,6 +54,11 @@ export type BeatSession = {
   myEpoch: number;
   isOwner: boolean;
   turnStartedAt: number | null;
+  // The instant the heartbeat tick's reading first found a top-level agent
+  // running, or null where its latest reading found none; stampCommons
+  // writes it into the entry, and the coordinator's fleet reading reads a
+  // session carrying it as busy rather than idle.
+  agentRunningSince: number | null;
   workdir: string;
   // The launch directory session.start resolved, "" until one is known.
   memqLaunchDir: string;
@@ -178,6 +183,7 @@ async function stampCommons(store: CommonsStore, sess: BeatSession, at: number):
     ? (raw as CommonsEntry)
     : { sessionId: sess.mySessionId, lastSeen: at, claims: [], turnStartedAt: null, workdir: "" };
   existing.turnStartedAt = sess.turnStartedAt;
+  existing.agentRunningSince = sess.agentRunningSince;
   existing.workdir = launchDirOf(sess);
   existing.cacheWarmUntil = sess.cacheWarmUntil;
   existing.inboxDrainedAt = sess.inboxDrainedAt;

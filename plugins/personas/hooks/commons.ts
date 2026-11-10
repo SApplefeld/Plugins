@@ -27,6 +27,7 @@ export interface CommonsEntry {
   lastSeen: number; // ms timestamp, refreshed on every heartbeat tick
   claims: CommonsClaim[];
   turnStartedAt?: number | null; // the session's clock at turn.start, null between turns
+  agentRunningSince?: number | null; // the instant the session's heartbeat reading first found a top-level agent running, null where its latest reading found none; absent in an older build's entry
   workdir?: string; // the session's launch directory, where its store sits, "" when unknown
   cacheWarmUntil?: number | null; // the instant the session's prompt cache is read as warm until, null before a main request; absent in an older build's entry
   inboxDrainedAt?: number | null; // the instant the session's inbox drain last settled while it held the slot, or the owner's own turn last ended, null before the first of either and on a reader, which never drains; absent in an older build's entry

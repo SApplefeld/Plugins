@@ -446,6 +446,23 @@ export async function heartbeatTick(ctx: TickContext): Promise<void> {
     } catch { /* non-fatal */ }
   }
 
+  // The agent stamp the beat below publishes: whether a top-level agent
+  // the main loop started is running, read here at every tick, inside a
+  // turn and outside one, so the entry's stamp is never older than its
+  // own lastSeen. A reading that finds one keeps the instant an earlier
+  // reading set and otherwise takes this tick's; one that finds none, or
+  // fails, clears the stamp, so the entry never carries an agent the
+  // latest reading did not see and a failed read leaves the row idle
+  // rather than hiding a wedge. It sits after the ownership check so a
+  // slow list never delays this session's yield, and ahead of the beat so
+  // the stamp reaches the entry within one heartbeat of the main turn's
+  // end, inside the fleet's wedge bound on every cadence.
+  try {
+    sess.agentRunningSince = (await ctx.liveTopLevelAgentRunning()) ? (sess.agentRunningSince ?? at) : null;
+  } catch {
+    sess.agentRunningSince = null;
+  }
+
   // The beat: the sidecar, the commons entry and the meter beat from
   // the tick's one instant, the supervisor's file having taken it at
   // the top. It runs after the ownership check so a demoted owner

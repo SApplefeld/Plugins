@@ -655,18 +655,28 @@ export const FLEET_ENTRY_PROBLEMS_KEY = "the roster entries that carry a problem
  * reading between ticks.
  *
  * `class` is the class the last reading produced, which is what a further
- * reading is compared against. `reported` is the class the last line the
- * watcher submitted actually named, which is what the operator was last told,
- * and it is the empty string while no line has been submitted at all. The two
- * differ whenever a change was counted rather than reported, and every line
- * the watcher composes reads its `from` out of `reported`, so a line never
- * names a class nobody was told.
+ * reading is compared against. `reported` is what the key reads as told: the
+ * class the last line the watcher submitted actually named, which is what the
+ * operator was last told, and the empty string while no line has been
+ * submitted at all, save for a key whose move into `delivery wedged` the wedge
+ * lead holds before any line has named it, where it is the class the key was
+ * first compared against. The two differ whenever a change was counted rather
+ * than reported, and every line the watcher composes reads its `from` out of
+ * `reported`, so a line never names a class nobody was told.
  *
  * `reportedAt` is the clock at that line, 0 when there has been none, and it
  * is what the quiet window runs from: one line per key per window, whatever
  * the class does in between. `suppressed` is how many class changes have
  * happened since that line with no line of their own, and it rides the next
  * line about the key.
+ *
+ * `wedgedSince` is the clock at the first reading of the key's current
+ * unbroken run of `delivery wedged` readings, and 0 outside one. The wedge
+ * lead runs from it: a line into that class goes only once the run has lasted
+ * the lead, and a run that ends inside the lead was never news. The run is
+ * counted on the class whatever tail the value carries, and a reading of any
+ * other class ends it. A memo without the field reads as a run that starts at
+ * the reading that finds it.
  *
  * `departed` is true between the line reporting that a cleanly read roster has
  * stopped naming this persona and the reading that names it again. It is what
@@ -689,6 +699,7 @@ export interface FleetHealthMemo {
   reportedAt: number;
   suppressed: number;
   departed: boolean;
+  wedgedSince: number;
 }
 
 // One record the per-prompt read showed the worker, from the kit's memory

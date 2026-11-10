@@ -32,6 +32,13 @@ export interface SessionState {
   controllerTickCount: number; // D4: in-session tick counter for backoff and cost_summary
   staleAfterMs: number; // F9a: single-source the staleness threshold
   turnStartedAt: number | null; // plan item 8.3: this session's clock at turn.start, null between turns
+  // The instant the heartbeat tick's reading first found a top-level agent
+  // running, kept while each later reading still finds one, and null once a
+  // reading finds none or fails. hooks/controller-tick.ts's heartbeatTick is
+  // its one writer, and the beat publishes it in the commons entry so the
+  // fleet reads a session working through an agent as busy. In memory only,
+  // never persisted.
+  agentRunningSince: number | null;
   workdir: string; // the directory this session runs in, "" until session.start reads it
   // The newest transcript record timestamp a mid-turn re-prompt covered, or
   // null where none has been queued; hooks/mid-turn-reprompt.ts takes no

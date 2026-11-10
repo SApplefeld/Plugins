@@ -89,8 +89,18 @@ type FleetRow = {
   lastExitCode: number | null;
   claimHeld: boolean;
   heartbeatAgeMs: number | null;
-  turnState: "in turn" | "idle" | "unknown";
+  // "in turn" where the live session's entry carries a turn stamp, "agent
+  // running" where it carries no turn stamp and an agent stamp, the instant
+  // a heartbeat reading, inside a turn or outside one, first found the
+  // top-level agent still running, "idle" under a live claim with
+  // neither, and "unknown" where no live session holds the claim. The
+  // health class reads wedged only on "idle", so a session working through
+  // an agent is never read wedged.
+  turnState: "in turn" | "agent running" | "idle" | "unknown";
   turnRunningMs?: number;
+  // How long the agent stamp has stood, present only on an "agent running"
+  // row, as turnRunningMs is present only on an "in turn" one.
+  agentRunningMs?: number;
   // The live session's published warm-until instant, null where none. It
   // moves on every main request, so no class or change comparison reads it.
   cacheWarmUntil: number | null;
@@ -412,7 +422,7 @@ function fleetCommonsOf(
   staleAfterMs: number,
   now: number,
   lastEndMs: number | null,
-): Pick<FleetRow, "claimHeld" | "heartbeatAgeMs" | "turnState" | "turnRunningMs" | "cacheWarmUntil" | "inboxDrainedAgeMs"> & { lastSeen: number | null; cadence: FleetCadence } {
+): Pick<FleetRow, "claimHeld" | "heartbeatAgeMs" | "turnState" | "turnRunningMs" | "agentRunningMs" | "cacheWarmUntil" | "inboxDrainedAgeMs"> & { lastSeen: number | null; cadence: FleetCadence } {
   const resource = `persona:${persona}`;
   const noCadence: FleetCadence = { controllerTickMs: null, heartbeatMs: null };
   const holders = entries.filter((entry) => entry.claims.some((claim) => claim && claim.resource === resource));
@@ -451,6 +461,12 @@ function fleetCommonsOf(
   const cadence: FleetCadence = { controllerTickMs: publishedCadenceMs(entry.controllerTickMs), heartbeatMs: publishedCadenceMs(entry.heartbeatMs) };
   if (typeof entry.turnStartedAt === "number") {
     return { claimHeld: true, lastSeen: entry.lastSeen, heartbeatAgeMs, turnState: "in turn", turnRunningMs: Math.max(0, now - entry.turnStartedAt), cacheWarmUntil, inboxDrainedAgeMs, cadence };
+  }
+  // The agent stamp is read as the drain stamp is: the entry is another
+  // session's to write, so only a finite number is aged, and anything else,
+  // an older build's absent field among them, leaves the row idle.
+  if (typeof entry.agentRunningSince === "number" && Number.isFinite(entry.agentRunningSince)) {
+    return { claimHeld: true, lastSeen: entry.lastSeen, heartbeatAgeMs, turnState: "agent running", agentRunningMs: Math.max(0, now - entry.agentRunningSince), cacheWarmUntil, inboxDrainedAgeMs, cadence };
   }
   return { claimHeld: true, lastSeen: entry.lastSeen, heartbeatAgeMs, turnState: "idle", cacheWarmUntil, inboxDrainedAgeMs, cadence };
 }
@@ -694,6 +710,7 @@ export const readFleetRows = async (
       // stamp that places a signalled exit is a row nobody can place.
       keeperStateUnwritten: keeper.stateUnwritten && notes.length === 1,
       ...(commons.turnRunningMs !== undefined ? { turnRunningMs: commons.turnRunningMs } : {}),
+      ...(commons.agentRunningMs !== undefined ? { agentRunningMs: commons.agentRunningMs } : {}),
       ...(note !== undefined ? { note } : {}),
     });
   }
@@ -831,6 +848,24 @@ const FLEET_UNSEEN = "not in the previous reading";
 // it being no news. A change held back is counted, and the count rides the
 // next line about that key.
 const FLEET_QUIET_MS = 10 * 60_000;
+
+// How long a key has to read delivery wedged at every reading of this session
+// before the watcher reports the move into that class, the wedge lead. The
+// class itself is read at the bound, so fleet_status shows a wedge the moment
+// the drain stamp ages past it; only the [FLEET] line waits. At the reading
+// that first finds a row wedged, nothing but time tells a passing stall, a
+// heartbeat paused for an update or an engine that opened its turn late, from
+// a drain that has really frozen, and each line costs the steward a turn and
+// the operator a message, two of them where the stall clears on its own. So
+// the move is held, counted like one held inside the quiet window, and goes
+// out at the first reading at or past the lead where the quiet window has run
+// out too. A wedge that clears inside the lead is never reported, neither when
+// it appears nor when it goes. The lead is counted from the watcher's own
+// readings, never from the drain stamp's age: a row turns idle with an old
+// stamp in the instant a background agent finishes, so an age bound would
+// pass at that row's first wedged reading. The run is held in this session's
+// memory with the rest of the reading, so it restarts with the session.
+const FLEET_WEDGE_LEAD_MS = 5 * 60_000;
 
 // How many per-entry lines the watcher names in one prompt before it reports
 // the rest by their count alone. Two producers take it, and both write one
@@ -1002,7 +1037,12 @@ export function fleetReadingOf(
   // ten minutes: a change inside it is held rather than dropped, and the
   // latest class is what the window's end compares against that same
   // last line.
-  const compare = (key: string, value: string, well: string): { from: string; suppressed: number } | null => {
+  // `wedged` says the value's class is delivery wedged, whatever tail the
+  // value carries, and it is what the wedge lead counts: a line into that
+  // class waits until the key has read it at every reading for
+  // FLEET_WEDGE_LEAD_MS, and the run ends at a reading of any other class.
+  // The three keys about the roster file and the tick never read wedged.
+  const compare = (key: string, value: string, well: string, wedged = false): { from: string; suppressed: number } | null => {
     const memo = previousMap !== undefined && Object.hasOwn(previousMap, key) ? previousMap[key] : undefined;
     if (memo === undefined) {
       // Before this session's first clean roster reading every key
@@ -1015,15 +1055,38 @@ export function fleetReadingOf(
       if (from === value) {
         // reportedAt 0 rather than now: nothing has been reported about
         // this key, so its first real change is held back by nothing.
-        current[key] = { class: value, reported: "", reportedAt: 0, suppressed: 0, departed: false };
+        current[key] = { class: value, reported: "", reportedAt: 0, suppressed: 0, departed: false, wedgedSince: 0 };
         return null;
       }
-      current[key] = { class: value, reported: value, reportedAt: fleetNow, suppressed: 0, departed: false };
+      if (wedged && !previousFirstReadingDone) {
+        // A key found wedged at the session's first clean reading starts
+        // its lead here and is held like any other move into the class. A
+        // persona the roster gains later is not held: its arrival is news
+        // the operator gets at once, whatever class it arrives in. `reported`
+        // takes what the key was compared against, which is what it reads
+        // as told until a line names it: the fallback below reads `class`
+        // only while `reported` is empty, and a held wedge left to that
+        // fallback would read at the next tick as what the operator
+        // already believes, so the line would never go. reportedAt stays
+        // 0, since no line has gone, and the held move is counted so the
+        // line that ends the lead stands for it.
+        current[key] = { class: value, reported: from, reportedAt: 0, suppressed: 1, departed: false, wedgedSince: fleetNow };
+        return null;
+      }
+      current[key] = { class: value, reported: value, reportedAt: fleetNow, suppressed: 0, departed: false, wedgedSince: wedged ? fleetNow : 0 };
       return { from, suppressed: 0 };
     }
     // What the operator was last told, which is the last observed class
-    // only while no line has ever gone out about this key.
+    // only while no line has ever gone out about this key and no wedge
+    // has been held on it.
     const told = memo.reported === "" ? memo.class : memo.reported;
+    // The clock at the first reading of this key's current run of wedged
+    // readings, 0 outside one. A memo without the field reads as a run
+    // that starts at this reading. The
+    // run continues through a wedged reading whatever the value's tail,
+    // and any other class ends it.
+    const runStart = memo.wedgedSince ?? 0;
+    const wedgedSince = wedged ? (runStart > 0 ? runStart : fleetNow) : 0;
     // The departed mark goes wherever this key is read again, the memo
     // being the one thing a return is compared against; the line that
     // set it has already gone out.
@@ -1050,6 +1113,7 @@ export function fleetReadingOf(
         class: value,
         departed: false,
         suppressed: memo.suppressed + (memo.departed || memo.class === value ? 0 : 1),
+        wedgedSince,
       };
       return null;
     }
@@ -1058,10 +1122,30 @@ export function fleetReadingOf(
       // is not news, so nothing goes out and the count goes with it: a
       // key that settled where the operator already believes it to be
       // has nothing left to stand for.
-      current[key] = { ...memo, class: value, departed: false, suppressed: 0 };
+      current[key] = { ...memo, class: value, departed: false, suppressed: 0, wedgedSince };
       return null;
     }
-    current[key] = { class: value, reported: value, reportedAt: fleetNow, suppressed: 0, departed: false };
+    if (wedged && fleetNow - wedgedSince < FLEET_WEDGE_LEAD_MS) {
+      // Past the window, moved into delivery wedged, and inside the
+      // wedge lead: held exactly as a move inside the window is, the
+      // latest value remembered and a real move counted. `reported` takes
+      // what the key reads as told, which leaves a named key's where it
+      // stood and gives a key no line has named the class it stood in
+      // before the run, since the fallback above reads `class` while
+      // `reported` is empty and the wedge now sits there. The reading
+      // that first finds the row wedged cannot tell a passing stall from
+      // a frozen drain, and the lead's end can.
+      current[key] = {
+        ...memo,
+        class: value,
+        reported: told,
+        departed: false,
+        suppressed: memo.suppressed + (memo.departed || memo.class === value ? 0 : 1),
+        wedgedSince,
+      };
+      return null;
+    }
+    current[key] = { class: value, reported: value, reportedAt: fleetNow, suppressed: 0, departed: false, wedgedSince };
     // The count stands for the readings this line does not name, which is
     // one fewer than the moves counted whenever the last counted move is
     // the one the line is about. That is the case exactly when the key
@@ -1098,7 +1182,9 @@ export function fleetReadingOf(
     // reading is the operator's own doing and is not news. A persona the
     // keeper has written no state for yet is the same case, because a
     // fleet on its first launch has one of those per persona.
-    const moved = compare(row.name, health, fleetClassValue(FLEET_HEALTH.healthy, row.enabled, row.keeperStateUnwritten));
+    // The wedge lead is counted on the class the row reduced to, so the
+    // tails the value carries change nothing about whether a run holds.
+    const moved = compare(row.name, health, fleetClassValue(FLEET_HEALTH.healthy, row.enabled, row.keeperStateUnwritten), rowHealth === FLEET_HEALTH.deliveryWedged);
     if (moved !== null) {
       changed.push({ row, from: moved.from, to: health, suppressed: moved.suppressed });
       movedKeys += 1;
@@ -1163,8 +1249,12 @@ export function fleetReadingOf(
       const memo = previousMap[key];
       const departing = rosterRead && !FLEET_FILE_KEYS.has(key) && !memo.departed
         && fleetNow - memo.reportedAt >= FLEET_QUIET_MS;
+      // A clean reading with no row for the key is not a wedged reading, so
+      // the key's run ends here as at a reading of any other class, and a
+      // key read wedged again starts its lead at that reading. A roster that
+      // could not be read says nothing about the key, so its run stands.
       if (!departing) {
-        current[key] = memo;
+        current[key] = rosterRead && memo.wedgedSince ? { ...memo, wedgedSince: 0 } : memo;
         continue;
       }
       // `reported` is left where it stands, holding the last health
@@ -1176,7 +1266,7 @@ export function fleetReadingOf(
       // the cap below, so each departure is accounted once. A key left
       // unmarked would be found departing again at the next tick and
       // fill the next prompt with the same list.
-      current[key] = { ...memo, reportedAt: fleetNow, departed: true };
+      current[key] = { ...memo, reportedAt: fleetNow, departed: true, wedgedSince: 0 };
       departed.push(key);
     }
     // Sorted and capped in the shape the entry-problems branch below
