@@ -668,12 +668,19 @@ export const FLEET_ENTRY_PROBLEMS_KEY = "the roster entries that carry a problem
  * `class` is the class the last reading produced, which is what a further
  * reading is compared against. `reported` is what the key reads as told: the
  * class the last line the watcher submitted actually named, which is what the
- * operator was last told, and the empty string while no line has been
- * submitted at all, save for a key whose move into `delivery wedged` the wedge
- * lead holds before any line has named it, where it is the class the key was
- * first compared against. The two differ whenever a change was counted rather
- * than reported, and every line the watcher composes reads its `from` out of
- * `reported`, so a line never names a class nobody was told.
+ * operator was last told, and the empty string while no line has named a
+ * health class for the key, save in two cases. One is a key whose move into
+ * `delivery wedged` the wedge lead holds before any line has named it. The
+ * other is a key that left the roster before any line had named it and comes
+ * back inside its departure line's quiet window, where the return is held. In
+ * both it is the class the key read as told until then: the class it was
+ * compared against before the wedge, and the class it read as told when it
+ * left, which its departure line gives as last known where it names the key.
+ * Every write that changes `class` without a line sets it so, since a reading
+ * that finds it empty takes `class` as told. `class` and `reported` differ
+ * whenever a change was counted rather than reported, and every line the
+ * watcher composes reads its `from` out of `reported`, so a line never names
+ * a class nobody was told.
  *
  * `reportedAt` is the clock at that line, 0 when there has been none, and it
  * is what the quiet window runs from: one line per key per window, whatever

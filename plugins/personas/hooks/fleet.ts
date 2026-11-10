@@ -1078,8 +1078,13 @@ export function fleetReadingOf(
       return { from, suppressed: 0 };
     }
     // What the operator was last told, which is the last observed class
-    // only while no line has ever gone out about this key and no wedge
-    // has been held on it.
+    // only while no line has ever gone out about this key, no wedge has
+    // been held on it and no return of it has been held inside a
+    // departure's window. The fallback is sound only while `class` has
+    // not moved without a line, so every write below that changes `class`
+    // and sends no line sets `reported` to this value. A write that left
+    // it empty would have the next reading take the new class as told,
+    // and the change would never be reported.
     const told = memo.reported === "" ? memo.class : memo.reported;
     // The clock at the first reading of this key's current run of wedged
     // readings, 0 outside one. A memo without the field reads as a run
@@ -1109,9 +1114,17 @@ export function fleetReadingOf(
       // in has moved nowhere the operator was not told about, and
       // counting `class` against it there would make the key's next line
       // claim one more unnamed change than happened.
+      // `reported` takes what the key reads as told, as every write that
+      // changes `class` without a line does. That leaves a named key's
+      // where it stood. A key no line has named is inside a window only
+      // after its departure line, and it takes the class it read as told
+      // when it left, which its departure line gives as last known where
+      // that line names it, so the window's end compares its return
+      // against that class.
       current[key] = {
         ...memo,
         class: value,
+        reported: told,
         departed: false,
         suppressed: memo.suppressed + (memo.departed || memo.class === value ? 0 : 1),
         wedgedSince,
