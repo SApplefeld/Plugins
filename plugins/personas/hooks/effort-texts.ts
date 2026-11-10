@@ -3,9 +3,11 @@
 // for hooks/index.ts, which imports these by name. Pure text.
 
 // The one refusal the four acts that start a new effort give outside a turn
-// the operator, the coordinator persona or the architect persona's [QUEUE] record started.
+// the operator, the coordinator persona or the architect persona's [QUEUE]
+// record started, or, for the architect persona's own goal_create and
+// goal_add of a plan, a worker's record.
 export const EFFORT_REFUSED_TEXT =
-  "Refused: a new effort starts only in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, and this turn is none of them. " +
+  "Refused: a new effort starts only in a turn the operator, the coordinator persona or the architect persona's [QUEUE] record or, for the architect persona, a worker's record started, and this turn is none of them for this act. " +
   "An act the operator, the coordinator persona or the architect persona's [QUEUE] record directed is retried in a turn one of them opens, not proposed. " +
   "An operator-class message from the persona's thread that arrived during this turn is re-prompted by the plugin as a turn of its own, at the first turn end that can take it, so finish this step and take the act up there. " +
   "Send any other idea to the coordinator persona with agentic_say, opening the text with [PROPOSAL].";

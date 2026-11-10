@@ -1448,6 +1448,16 @@ function opensWithQueueLead(text: string): boolean {
   return text.startsWith("[QUEUE]");
 }
 
+// Whether an inbox record's own text opens with [STARTED], the one seat lead
+// the gate's own-session reading for the architect persona refuses: a
+// worker's report of work started unprompted is information, where its
+// [FINDING] or [PROPOSAL] may be a design ask the architect answers with a
+// plan. It takes opensWithSeatLead's reading of the lead as the text's first
+// characters, with no trim, for the same reasons.
+function opensWithStartedLead(text: string): boolean {
+  return text.startsWith("[STARTED]");
+}
+
 // The prompt origin kinds the harness stamps on the operator's own turns:
 // the terminal, the Remote Control bridge, a relayed channel message, and
 // the SDK host, which is how the supervisor's launch prompt arrives.
@@ -4111,13 +4121,53 @@ export const register: Register = async (on, options) => {
   // in the operator's own turn, in a coordinator delivery turn and in an
   // architect delivery turn whose record opens with [QUEUE], delivered to
   // the persona the session still holds at the act.
+  // goal_add of a plan is also allowed in the architect persona's own
+  // session in a turn a worker's record started, and goal_create there only
+  // where the store holds no goal at all and no ask is open: the entry the
+  // architect adds for a plan is bookkeeping of the plan it writes and
+  // starts no effort, and a worker's design ask is the seat's own work item
+  // as the coordinator persona's is. A goal_create over any tree, finished
+  // or not, would replace the seat's entries, and one with an ask open, tree
+  // or none, would close that ask, which no worker's record, and no
+  // liaison's brief under the same WORKER: ground, may direct. The create
+  // alone is not bookkeeping: a root left with no child when the turn ends
+  // is the controller's planner's at its next idle tick. The architect skill
+  // has the seat add its plan entry in the same turn, which keeps the root
+  // the seat's, and that is the seat's conduct, not a check here. A worker's
+  // answer to an ask the architect opened is a worker's record too, and is
+  // admitted on the same reading. That reading admits a turn that matched
+  // a delivery entry under a WORKER: ground, delivered to the persona the
+  // session holds at the act, where that persona is the architect the plugin
+  // names, the turn is not the priming turn and the record's lead is not
+  // [STARTED], which reports work started and asks nothing. A [FINDING] or
+  // [PROPOSAL] lead is admitted, since the architect weighs those and a plan
+  // is one of its answers. Unlike the readings in
+  // turnIsOperatorsOrCoordinators, which prove the writer's seat from the
+  // label the drain gave the record, this one proves the reader's seat from
+  // the persona the session holds, which agentic_identity sets under the
+  // claim the store granted; and as there, the entry's deliveredTo must
+  // equal that persona, so a switch inside the turn admits nothing, and the
+  // lead is read from the entry, fixed at the drain, never from the text.
   // goal_add of a plan is also allowed in every
   // other turn once the autonomy level is plan-and-ask or plan-and-start,
   // and the goal_add handler decides what such an add becomes. Every other
   // act is refused in every other turn.
   const turnMayStartEffort = (act: EffortAct, autonomy: string = sess.state.autonomy): boolean => {
     if (turnIsOperatorsOrCoordinators()) return true;
+    if (act === "goal_add_plan" && turnIsWorkersRecordToArchitect()) return true;
+    if (act === "goal_create" && turnIsWorkersRecordToArchitect() && sess.state.goals.length === 0 && openAskEntries(sess.state).length === 0) return true;
     return act === "goal_add_plan" && (autonomy === "plan-and-ask" || autonomy === "plan-and-start");
+  };
+  // Whether the turn now running is a worker's record delivered to the
+  // architect persona this session holds at the act: the plugin names an
+  // architect, the session's persona is that name, the turn matched a
+  // delivery entry whose ground opens with WORKER: and whose deliveredTo is
+  // that persona, the turn is not the priming turn, and the record did not
+  // open with [STARTED].
+  const turnIsWorkersRecordToArchitect = (): boolean => {
+    if (architectPersona === "" || sess.persona !== architectPersona) return false;
+    if (currentTurnIsPriming || currentTurnEntry === null || currentTurnEntry.kind !== "delivery" || currentTurnEntry.startedLead) return false;
+    return currentTurnEntry.ground.startsWith("WORKER:") && currentTurnEntry.deliveredTo === sess.persona;
   };
   // Whether the turn now running is the operator's own, a coordinator
   // delivery turn or an architect delivery turn. A coordinator delivery turn
@@ -4134,8 +4184,9 @@ export const register: Register = async (on, options) => {
   // open with no lead and are refused by that shape, in whatever session
   // they land. That shape is the architect's conduct under its charter, not
   // a check here: a record under the architect's label that opens with
-  // [QUEUE] is admitted whatever it is. The gate reads nothing about the
-  // session's persona. The
+  // [QUEUE] is admitted whatever it is. These readings take nothing about
+  // the session's persona but deliveredTo's binding;
+  // turnIsWorkersRecordToArchitect is the one that reads it. The
   // label is the proof of the writer's seat: deliveryGroundIn in
   // hooks/operator.ts gives it only to a writer that owned the architect
   // persona under the claims it read, at the drain that delivered the
@@ -4932,8 +4983,8 @@ export const register: Register = async (on, options) => {
       description:
         "Create a new goal tree for this persona. The root carries the objective; the planner " +
         "creates the plans under it at the next controller tick. A tree whose root is unfinished " +
-        "is replaced only with replace: true. A call in a turn none of the operator, the coordinator persona or the architect persona's [QUEUE] record started is refused. " +
-        "A delivered [FINDING], [PROPOSAL] or [STARTED] record never counts as such a turn.",
+        "is replaced only with replace: true. A call in a turn none of the operator, the coordinator persona, the architect persona's [QUEUE] record or, for the architect persona, a worker's record started is refused. " +
+        "A delivered [FINDING], [PROPOSAL] or [STARTED] record never counts as such a turn, except in the architect persona's own session, where a worker's [FINDING] or [PROPOSAL] record counts and a [STARTED] record does not, and there only while the store holds no goal at all and no ask is open; over a tree, add the plan with goal_add of kind plan instead.",
       inputSchema: {
         type: "object",
         properties: {
@@ -4963,8 +5014,9 @@ export const register: Register = async (on, options) => {
       description:
         "Add a node to the goal tree under parentId. With parentId omitted the parent is the " +
         "active leaf where that leaf is a plan, and the active task's parent otherwise. " +
-        'In a turn the operator, the coordinator persona or the architect persona\'s [QUEUE] record started, kind "plan" is added as any node is, and a [FINDING], [PROPOSAL] or [STARTED] record never starts such a turn. ' +
-        'Outside one, the autonomy level decides kind "plan": at propose it is refused; at plan-and-ask it is added paused, awaiting the operator\'s yes, and a [PROPOSAL] record naming it goes to the coordinator persona; ' +
+        "In a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, and at propose in a turn that, for the architect persona, a worker's record started, kind \"plan\" is added as any node is. " +
+        "A [FINDING], [PROPOSAL] or [STARTED] record never starts such a turn, except in the architect persona's own session, where a worker's [FINDING] or [PROPOSAL] record does and a [STARTED] record does not. " +
+        'Outside one, the autonomy level decides kind "plan": at propose the add is refused, the architect persona\'s worker-record turn being admitted above rather than by the level; at plan-and-ask it is added paused, awaiting the operator\'s yes, and a [PROPOSAL] record naming it goes to the coordinator persona; ' +
         "at plan-and-start it is added to start, and a [STARTED] record naming it goes to the coordinator persona. Where that record cannot be written, the add is refused.",
       inputSchema: {
         type: "object",
@@ -6246,7 +6298,7 @@ export const register: Register = async (on, options) => {
       submitAnswerDelivery: async (answer, askEntry, answerLabel, answerBlocks) => {
         const answerText = deliveryText(answerLabel, answer.id, answer.text, { answerTo: askEntry.question });
         const framedAnswerText = deliveryWithContext(answerBlocks, answerText);
-        const expectedAnswerTurn = expectTurn({ kind: "delivery", recordId: answer.id, ground: answerLabel, seatLead: opensWithSeatLead(answer.text), queueLead: opensWithQueueLead(answer.text), deliveredTo: sess.persona, answersAsk: true, text: framedAnswerText });
+        const expectedAnswerTurn = expectTurn({ kind: "delivery", recordId: answer.id, ground: answerLabel, seatLead: opensWithSeatLead(answer.text), startedLead: opensWithStartedLead(answer.text), queueLead: opensWithQueueLead(answer.text), deliveredTo: sess.persona, answersAsk: true, text: framedAnswerText });
         const answerOutcome = await submitExpectedTurn($, expectedTurns, expectedAnswerTurn);
         return answerOutcome;
       },
@@ -6257,7 +6309,7 @@ export const register: Register = async (on, options) => {
       submitDelivery: async (oldest, ground, deliveryBlocks) => {
         const submittedText = deliveryText(ground, oldest.id, oldest.text);
         const framedSubmittedText = deliveryWithContext(deliveryBlocks, submittedText);
-        const expectedDeliveryTurn = expectTurn({ kind: "delivery", recordId: oldest.id, ground, seatLead: opensWithSeatLead(oldest.text), queueLead: opensWithQueueLead(oldest.text), deliveredTo: sess.persona, text: framedSubmittedText });
+        const expectedDeliveryTurn = expectTurn({ kind: "delivery", recordId: oldest.id, ground, seatLead: opensWithSeatLead(oldest.text), startedLead: opensWithStartedLead(oldest.text), queueLead: opensWithQueueLead(oldest.text), deliveredTo: sess.persona, text: framedSubmittedText });
         const deliveryOutcome = await submitExpectedTurn($, expectedTurns, expectedDeliveryTurn);
         return deliveryOutcome;
       },
@@ -7360,6 +7412,7 @@ export const register: Register = async (on, options) => {
         noteTurnToolCall,
         turnMayStartEffort,
         turnIsOperatorsOrCoordinators,
+        turnIsWorkersRecordToArchitect,
         turnIsOperators,
         noteStandingRefusal,
         hookBudget,

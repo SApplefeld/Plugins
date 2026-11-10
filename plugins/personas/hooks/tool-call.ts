@@ -119,6 +119,10 @@ export interface ToolCallContext extends SharedHandlerState {
   noteTurnToolCall: (tool: string, args: { file_path?: unknown; path?: unknown; notebook_path?: unknown; command?: unknown }) => void;
   turnMayStartEffort: (act: EffortAct, autonomy?: string) => boolean;
   turnIsOperatorsOrCoordinators: () => boolean;
+  // Whether the turn is a worker's record delivered to the architect persona
+  // the session holds at the act, the one other turn in which goal_add of a
+  // plan is a directed add rather than an unprompted one.
+  turnIsWorkersRecordToArchitect: () => boolean;
   turnIsOperators: () => boolean;
   // The note a tool makes where it refuses an act, or lands it waiting,
   // because the operator had not opened the turn: the re-prompt window owes
@@ -285,7 +289,7 @@ export function routineScheduleOf(input: { cadence?: unknown; everyHours?: unkno
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -905,8 +909,13 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // one of the promotion routes calls too, so neither route holds a second
     // copy of the dial's shape. What stays here is what only a tool call can
     // read: whether this turn's origin makes the add unprompted, and the text
-    // the model is answered with.
-    const unprompted = kind === "plan" && !turnIsOperatorsOrCoordinators();
+    // the model is answered with. At propose, the architect persona's add in
+    // a turn a worker's record started is directed too: the gate admits it
+    // there on that reading alone, the level admitting no add, so no
+    // [STARTED] record claiming a level goes out for it. At plan-and-ask and
+    // plan-and-start the level admits the add whatever the turn, and the add
+    // takes the level's hold and record as it does for any persona.
+    const unprompted = kind === "plan" && !turnIsOperatorsOrCoordinators() && !(autonomy === "propose" && turnIsWorkersRecordToArchitect());
     const awaitingYes = unprompted && autonomy === "plan-and-ask";
     // A plan added in a [QUEUE] delivery turn takes the record's branch and
     // pull request from its labels, read from the record in the store. The
