@@ -1058,11 +1058,11 @@ export function fleetReadingOf(
         current[key] = { class: value, reported: "", reportedAt: 0, suppressed: 0, departed: false, wedgedSince: 0 };
         return null;
       }
-      if (wedged && !previousFirstReadingDone) {
-        // A key found wedged at the session's first clean reading starts
-        // its lead here and is held like any other move into the class. A
-        // persona the roster gains later is not held: its arrival is news
-        // the operator gets at once, whatever class it arrives in. `reported`
+      if (wedged) {
+        // A key with no memo found wedged starts its lead here and is held
+        // like any other move into the class, whether this is the session's
+        // first clean reading or the key is a persona the roster gained
+        // later, whose arrival line waits with the wedge. `reported`
         // takes what the key was compared against, which is what it reads
         // as told until a line names it: the fallback below reads `class`
         // only while `reported` is empty, and a held wedge left to that
@@ -1073,7 +1073,8 @@ export function fleetReadingOf(
         current[key] = { class: value, reported: from, reportedAt: 0, suppressed: 1, departed: false, wedgedSince: fleetNow };
         return null;
       }
-      current[key] = { class: value, reported: value, reportedAt: fleetNow, suppressed: 0, departed: false, wedgedSince: wedged ? fleetNow : 0 };
+      // No wedged key reaches this write, so no run starts here.
+      current[key] = { class: value, reported: value, reportedAt: fleetNow, suppressed: 0, departed: false, wedgedSince: 0 };
       return { from, suppressed: 0 };
     }
     // What the operator was last told, which is the last observed class
