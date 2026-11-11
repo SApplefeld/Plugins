@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the kit's rulebook for authoring and amending behavior-shaping prose. It owns the moments where a session decides whether a new skill earns a file at all, how a SKILL.md is shaped (frontmatter, body, one owner per rule, size-budget caps), how a description states its trigger, which rule form fixes which observed failure, what facts a rule may rest on, the three sentence-shape bars for any prose the kit ships in its own voice, the paragraph-as-edit-unit rule for correcting a claim in curated prose and how carriers of that claim on other surfaces are routed, and the RED/GREEN/REFACTOR probe discipline (including the probe-corpus before-and-after pair, doctrine-probe staging, and the contaminated-RED case) that must run before a wording change is trusted. Its load class is `named-trigger`: the frontmatter says to use it when creating or editing a skill, when judging whether a wording change will change behavior, or when amending curated prose the kit ships, with triggers such as adding a new SKILL.md, reworking a skill's rules, correcting a claim a curated document states, or a kaizen change to the kit's own skills.
 
-Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by `docs/plans/claude-kit_skill-guidance-alignment_spec_v1.md` section 1 on 2026-10-05 (H001 below, with C032 retired to it and C007 and S026 retired, as that section cut those sentences to pay for the description rule). Amended by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1 on 2026-10-17 (A001 below, with C073 retired to it and C070 retired to C069; C031, C047, C050, C052, C065 and C069 re-quoted after a narrow cut; C008 and C009 stand at line 14 word for word, closing the rewritten bullet). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 1 on 2026-10-19 (AB001 below, with A001 re-quoted after its raise-ask clause moved into AB001's rule). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `36998390` with its fix round at `6f26f01a`, so every live entry's `passage:` line the skill guidance alignment plan did not re-quote quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags.
+Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-extracted at `4b2e64c` over the hunks the Section 8 merge changed (`S` entries below). Amended by `docs/plans/claude-kit_skill-guidance-alignment_spec_v1.md` section 1 on 2026-10-05 (H001 below, with C032 retired to it and C007 and S026 retired, as that section cut those sentences to pay for the description rule). Amended by `docs/plans/claude-kit_cut-before-add_spec_v1.md` section 1 on 2026-10-17 (A001 below, with C073 retired to it and C070 retired to C069; C031, C047, C050, C052, C065 and C069 re-quoted after a narrow cut; C008 and C009 stand at line 14 word for word, closing the rewritten bullet). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 1 on 2026-10-19 (AB001 below, with A001 re-quoted after its raise-ask clause moved into AB001's rule). Redrafted on 2026-09-26 by section 8 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `36998390` with its fix round at `6f26f01a`, so every live entry's `passage:` line the skill guidance alignment plan did not re-quote quotes the text at `6f26f01a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 on 2026-11-11, whose fix and finishing rounds reworded the reasons of C056, C059, C064 and C125 to say the doctrine text they cite went in that section.
 
 ### C001
 - key: Name the specific failure a skill change is meant to fix before writing the change.
@@ -565,7 +565,7 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - source: plugins/grimoire/skills/writing-skills/SKILL.md:63
 - provenance: 8cdb3f5 2026-09-04 installed the bar at forty words; 8b03bfb 2026-09-08 tightened it to twenty on the operator's relay request after reading a dense and a plain version of one plan sketch.
 - verdict: keep
-- reason: The doctrine points here for curated prose; scott-writing-style's 30-to-50-word sentences govern a document in the operator's voice, a different owner and audience. The shared figure is pinned on the doctrine's three copies (test/doctrine-parity.test.js) and not against this file, a drift risk to watch when either number moves.
+- reason: The doctrine points here for curated prose; scott-writing-style's 30-to-50-word sentences govern a document in the operator's voice, a different owner and audience. The doctrine's three copies carried the same figure until `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 retired it there with operating-instructions c1.C016, so this file now holds the kit's only sentence count.
 - passage: A sentence is one idea, about twenty words.
 
 ### C057
@@ -593,7 +593,7 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - source: plugins/grimoire/skills/writing-skills/SKILL.md:63
 - provenance: 8b03bfb 2026-09-08, installed in the doctrine's core and here together.
 - verdict: keep
-- reason: The doctrine's copy is the pinned register core for operator communication; this one sits beside the count it qualifies for curated prose. The doctrine side is the operating-instructions unit's to rule.
+- reason: This sentence sits beside the count it qualifies for curated prose. Its doctrine copy went with the twenty-word check in `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3, operating-instructions c1.C016, and the doctrine keeps "Vary sentence length." as c1.C022.
 - passage: A count past twenty is the diagnostic that finds a second idea, read per sentence and never as a target.
 
 ### C060
@@ -639,7 +639,7 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - source: plugins/grimoire/skills/writing-skills/SKILL.md:64
 - provenance: 8b03bfb 2026-09-08, the plain-prose bullet added to the doctrine's core.
 - verdict: retire
-- reason: row 1258 merge. The doctrine's "Plain prose, never mannered prose" bullet names the packed sentence and the nested qualification itself ("Never carry a second rule inside a rule's clause. Never nest a qualification..."). Its "The answer comes first" bullet carries the order.
+- reason: row 1258 merge. The doctrine's "Plain prose, never mannered prose" bullet names the packed sentence and the nested qualification itself ("Never carry a second rule inside a rule's clause. Never nest a qualification..."). Its "The answer comes first" bullet carries the order. On 2026-11-11 `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 retired both quoted doctrine sentences on the operator's ruling, so neither shape is named in the doctrine now, and this entry stays retired as that plan left it.
 - passage: The packed sentence, the nested qualification and the reasoning-first order are the same defect in other shapes, and the doctrine's plain-prose bullet names each.
 
 ### C065
@@ -1225,7 +1225,7 @@ Extracted at `6bc07fb`: whole document (`skills.writing-skills.SKILL.md`). Re-ex
 - provenance: 12ef61f 2026-07-09.
 - verdict: rewrite
 - landed: 22eafd6 section 31
-- reason: The rule holds; it shares a semicolon sentence with C124, which the doctrine's plain-prose bullet forbids, so it becomes its own sentence with nothing removed. Lands at line 91 as its own sentence, 'A rule with neither a reproduced RED nor that rationale is the guidance-from-imagination antipattern, so leave it out.', nothing removed. Its landing respelled C124's keep sentence; C124 records the flip.
+- reason: The rule holds; it shares a semicolon sentence with C124, which the doctrine's plain-prose bullet then forbade, so it becomes its own sentence with nothing removed. That bar's one-idea sentence, operating-instructions c1.C016, went in `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3, and BI009 there keeps one idea per sentence. Lands at line 91 as its own sentence, 'A rule with neither a reproduced RED nor that rationale is the guidance-from-imagination antipattern, so leave it out.', nothing removed. Its landing respelled C124's keep sentence; C124 records the flip.
 - passage: A rule with neither a reproduced RED nor that rationale is left out.
 
 ### C126

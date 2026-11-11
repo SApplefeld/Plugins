@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the operator's core operating doctrine: the house ruleset for how a session thinks, decides, builds, verifies, communicates, and stays in scope. It owns the moments of directness and register in replies, prose and commit-message style, language and data-access defaults, resolving which surface governs when two disagree, deciding what to ask versus decide at intake, capturing kit friction, driving an effort through a plan doc from analysis to close-out, and marking and verifying every load-bearing claim before it ships. Its frontmatter says to use it when the session's context holds no document headed Operating Instructions and a non-trivial task begins, or when such a session is unsure how the operator wants work approached, and calls it the always-apply house ruleset. In Claude Code the same text loads at session start through `~/.claude/CLAUDE.md`, and the skill is the fallback where it is absent, so its load class is `session-start`.
 
-Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lines 110-205 (`skills.operating-instructions.c2.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`S` entries below, their source lines read at that pass's fix round 1). The mirror `home/grimoire-doctrine.md` is byte-identical to this document under `test/doctrine-parity.test.js`, so its claims are recorded once, here. Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-22 by section 1 of `docs/plans/claude-kit_prose-register_spec_v1.md`, which added the structure layer of the prose register after the plain-prose bullet (`P` entries below), and by that plan's section 4 on 2026-09-22 (P008 below). Redrafted on 2026-09-26 by section 2 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `63045e8d` with its fix round at `68cce656`, so every live entry's `passage:` line quotes the text at `68cce656`, the `flag:` and `ruled:` lines record that pass's flags and the operator's rulings, and P009 below is the heading rule that section added. Amended on 2026-09-26 by section 12 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, which moved the claims true only of the operator's setup or of one harness version to memory on the operator's ruling of that date (`A` entries below, and the `ruled:` lines on the `flag: environment` entries). Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: each live entry's `passage:` line quotes the text that section landed, and an entry whose rule a row dropped or merged into its owner reads `verdict: retire` with a reason naming the row. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with c2.C147 retired to B001). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c1.C044, c1.C100, c1.C103 and c2.C086 rewritten to their passages as they now read, and c1.C058's and c2.C086's reasons reworded. Amended by section 1 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` on 2026-10-06, which states one whole gate per plan and the operator's merge ruling of 2026-10-01: c1.C132 and c1.C145 rewritten to their passages as they now read. Amended by section 1 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` on 2026-10-06, which reads a suite-wide no-regressions claim against the integration branch's head and carries the operator's ruling of that date that a trunk red is fixed before the handoff: c1.C140 rewritten to its passage as it now reads, and c2.C135's provenance corrected to name it. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c1.C132's note-push exemption passage retired with the push it exempted. Amended by section 1 of `docs/plans/claude-kit_board-and-ready-mark_spec_v1.md` on 2026-10-07, which reads a board line's status live from its source and hands the operator a pull request marked ready with auto-merge armed: c2.C086 rewritten to its passages as they now read, with its key widened to name both. Amended by section 1 of `docs/plans/claude-kit_plan-lifecycle_spec_v1.md` on 2026-10-07, which added the plan-lifecycle bullet (L001 below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: c2.C057 rewritten to its passage as it now reads, with its reason and provenance reworded. Amended by section 3 of `docs/plans/claude-kit_ask-open-tool_spec_v1.md` on 2026-10-12, which added the filing rule to the batches bullet (D001 below). Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12, which added the plan-posting sentences to the plan-travel bullet (L001 rewritten in place). Amended by section 1 of `docs/plans/claude-kit_queue-stacking_spec_v1.md` on 2026-10-19, which made every plan stack on the open pull request at the stack's tip (L001 rewritten in place). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19, which added the interview sentence to the Analyze bullet (AB001 below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 3 on 2026-10-19, which added the measured-figure sentences to the grounding bullet (AB002 and AB003 below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which gave the intake bullet's route (c) the test for a gap that is the operator's: c1.C068 rewritten to its passage as it now reads, and AB004 added for the test sentence. Its fix round 1 on the same day rewrote c2.C072 to the judgment bullet's fork sentence as it now reads. Amended by section 4 of `docs/plans/claude-kit_doctrine-to-hooks_spec_v1.md` on 2026-10-21, which moved four bullets' mechanical halves to the `em-dash` and `git-commit-gate` guards: c1.C024, c1.C032, c1.C034, c2.C028, c2.C029, c2.C031 and c2.C033 rewritten to their passages as they now read, and c1.C025 retired. Amended by `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 on 2026-10-21, which added the rendered-visual sentences to the craft bullet (AD001 and AD002 below, written at that plan's finishing pass). Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30, which added the writer-tier bullet (AI001 below). Amended by section 1 of `docs/plans/claude-kit_read-first-handover_spec_v1.md` on 2026-10-30, which arms a handed-over pull request only where its base is the trunk: c2.C086 rewritten to its passages as they now read. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30, which added the hang-limit pointer to the tree-mutating probe sub-bullet (AK001 below). Amended by section 2 of `docs/plans/claude-kit_ask-close-on-answer_spec_v1.md` on 2026-10-30, which added the close rule to the batches bullet: D001 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 (AO001 below). Amended by `docs/plans/claude-kit_one-record-for-a-wait_spec_v1.md` section 1 on 2026-11-09, which added the one-record rule to the batches bullet (AZ001 below), D001's passage re-quoted as the two runs the insertion leaves. Its fix round 1 on the same day added the refusal fallback and the unrequested-check qualifier: AZ001 re-quoted, and D001 rewritten to its passages as they now read. Amended by `docs/archive/claude-kit_ready-chain_spec_v1.md` section 1 on 2026-11-09, which cuts every plan from the trunk and restacks it onto the ready chain's tip before the ready, on the operator's words of 2026-11-08: L001 rewritten to its passage as it now reads, with its key, provenance and reason reworded. Amended by `docs/plans/claude-kit_dispatch-wording-cost-first_spec_v1.md` section 2 on 2026-11-10, which added the cost sentences to the standing-dispatch bullet on the rule its section 1 wrote before the first try (BB001 to BB003 below). Amended by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 1 on 2026-11-11, which replaced the standing-dispatch bullet's Workflow grant with the ask for a skill-named effort: c2.C090 and c2.C091 rewritten to their passages as they now read, and c2.C087's and c2.C148's reasons reworded.
+Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lines 110-205 (`skills.operating-instructions.c2.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Amended by the finishing pass of `docs/plans/claude-kit_corpus-rewrite-follow-up_spec_v1.md` on 2026-09-14 (`S` entries below, their source lines read at that pass's fix round 1). The mirror `home/grimoire-doctrine.md` is byte-identical to this document under `test/doctrine-parity.test.js`, so its claims are recorded once, here. Amended on 2026-09-20 by the peer-standing amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-22 by section 1 of `docs/plans/claude-kit_prose-register_spec_v1.md`, which added the structure layer of the prose register after the plain-prose bullet (`P` entries below), and by that plan's section 4 on 2026-09-22 (P008 below). Redrafted on 2026-09-26 by section 2 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `63045e8d` with its fix round at `68cce656`, so every live entry's `passage:` line quotes the text at `68cce656`, the `flag:` and `ruled:` lines record that pass's flags and the operator's rulings, and P009 below is the heading rule that section added. Amended on 2026-09-26 by section 12 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, which moved the claims true only of the operator's setup or of one harness version to memory on the operator's ruling of that date (`A` entries below, and the `ruled:` lines on the `flag: environment` entries). Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: each live entry's `passage:` line quotes the text that section landed, and an entry whose rule a row dropped or merged into its owner reads `verdict: retire` with a reason naming the row. Amended by `docs/plans/claude-kit_coordinator-follow-through_spec_v1.md` section 3 on 2026-10-02 and 2026-10-03 (`B` entries below, with c2.C147 retired to B001). Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c1.C044, c1.C100, c1.C103 and c2.C086 rewritten to their passages as they now read, and c1.C058's and c2.C086's reasons reworded. Amended by section 1 of `docs/archive/claude-kit_fewer-full-runs_spec_v1.md` on 2026-10-06, which states one whole gate per plan and the operator's merge ruling of 2026-10-01: c1.C132 and c1.C145 rewritten to their passages as they now read. Amended by section 1 of `docs/archive/claude-kit_base-head-baseline_spec_v1.md` on 2026-10-06, which reads a suite-wide no-regressions claim against the integration branch's head and carries the operator's ruling of that date that a trunk red is fixed before the handoff: c1.C140 rewritten to its passage as it now reads, and c2.C135's provenance corrected to name it. Amended by section 3 of `docs/plans/claude-kit_kaizen-capture-under-protection_spec_v1.md` on 2026-10-06, which moved kaizen capture to GitHub issues: c1.C132's note-push exemption passage retired with the push it exempted. Amended by section 1 of `docs/plans/claude-kit_board-and-ready-mark_spec_v1.md` on 2026-10-07, which reads a board line's status live from its source and hands the operator a pull request marked ready with auto-merge armed: c2.C086 rewritten to its passages as they now read, with its key widened to name both. Amended by section 1 of `docs/plans/claude-kit_plan-lifecycle_spec_v1.md` on 2026-10-07, which added the plan-lifecycle bullet (L001 below). Amended by `docs/archive/claude-kit_retire-file-store_spec_v1.md` section 4 on 2026-10-11, which retired the file memory store and its git channel: c2.C057 rewritten to its passage as it now reads, with its reason and provenance reworded. Amended by section 3 of `docs/plans/claude-kit_ask-open-tool_spec_v1.md` on 2026-10-12, which added the filing rule to the batches bullet (D001 below). Amended by section 1 of `docs/plans/claude-kit_plan-documents-reach-the-thread_spec_v1.md` on 2026-10-12, which added the plan-posting sentences to the plan-travel bullet (L001 rewritten in place). Amended by section 1 of `docs/plans/claude-kit_queue-stacking_spec_v1.md` on 2026-10-19, which made every plan stack on the open pull request at the stack's tip (L001 rewritten in place). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19, which added the interview sentence to the Analyze bullet (AB001 below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 3 on 2026-10-19, which added the measured-figure sentences to the grounding bullet (AB002 and AB003 below). Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 4 on 2026-10-19, which gave the intake bullet's route (c) the test for a gap that is the operator's: c1.C068 rewritten to its passage as it now reads, and AB004 added for the test sentence. Its fix round 1 on the same day rewrote c2.C072 to the judgment bullet's fork sentence as it now reads. Amended by section 4 of `docs/plans/claude-kit_doctrine-to-hooks_spec_v1.md` on 2026-10-21, which moved four bullets' mechanical halves to the `em-dash` and `git-commit-gate` guards: c1.C024, c1.C032, c1.C034, c2.C028, c2.C029, c2.C031 and c2.C033 rewritten to their passages as they now read, and c1.C025 retired. Amended by `docs/archive/claude-kit_rendered-visuals_spec_v1.md` section 2 on 2026-10-21, which added the rendered-visual sentences to the craft bullet (AD001 and AD002 below, written at that plan's finishing pass). Amended by `docs/plans/claude-kit_writer-tier-doctrine_spec_v1.md` section 1 on 2026-10-30, which added the writer-tier bullet (AI001 below). Amended by section 1 of `docs/plans/claude-kit_read-first-handover_spec_v1.md` on 2026-10-30, which arms a handed-over pull request only where its base is the trunk: c2.C086 rewritten to its passages as they now read. Amended by `docs/plans/claude-kit_test-hang-limit_spec_v1.md` section 1 on 2026-10-30, which added the hang-limit pointer to the tree-mutating probe sub-bullet (AK001 below). Amended by section 2 of `docs/plans/claude-kit_ask-close-on-answer_spec_v1.md` on 2026-10-30, which added the close rule to the batches bullet: D001 rewritten to its passage as it now reads. Amended by `docs/plans/claude-kit_author-named-exception_spec_v1.md` section 1 (AO001 below). Amended by `docs/plans/claude-kit_one-record-for-a-wait_spec_v1.md` section 1 on 2026-11-09, which added the one-record rule to the batches bullet (AZ001 below), D001's passage re-quoted as the two runs the insertion leaves. Its fix round 1 on the same day added the refusal fallback and the unrequested-check qualifier: AZ001 re-quoted, and D001 rewritten to its passages as they now read. Amended by `docs/archive/claude-kit_ready-chain_spec_v1.md` section 1 on 2026-11-09, which cuts every plan from the trunk and restacks it onto the ready chain's tip before the ready, on the operator's words of 2026-11-08: L001 rewritten to its passage as it now reads, with its key, provenance and reason reworded. Amended by `docs/plans/claude-kit_dispatch-wording-cost-first_spec_v1.md` section 2 on 2026-11-10, which added the cost sentences to the standing-dispatch bullet on the rule its section 1 wrote before the first try (BB001 to BB003 below). Amended by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 1 on 2026-11-11, which replaced the standing-dispatch bullet's Workflow grant with the ask for a skill-named effort: c2.C090 and c2.C091 rewritten to their passages as they now read, and c2.C087's and c2.C148's reasons reworded. Amended by `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 on 2026-11-11, which replaced the plain-prose bullet's four shape sentences with the text of Anthropic's guide on the operator's ruling of that date (BI001 to BI012 below): c1.C016, c1.C018, c1.C019 and c1.C021 retired to BI009, and c1.C022's passage re-quoted as the sentence it now holds alone. Its finishing pass on 2026-11-11 reworded the reasons of c1.C084 and c2.C079 to say the plain-prose bar they cite went in that section, and moved c1.C022's account of the change from its reason to its provenance.
 ### c1.C001
 - key: Apply this doctrine to any non-trivial task you take on.
 - class: rule
@@ -163,8 +163,9 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - class: mechanic
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
 - provenance: 8b03bfb 2026-09-08, which tightened the bar from forty words to twenty in this bullet and in writing-skills together.
-- verdict: keep
-- reason: A designed two-site placement: this copy governs every message the operator reads, writing-skills:63 governs curated prose, and the doctrine-parity test pins the pointer between them. Nothing measures sentence shape in a message.
+- verdict: retire
+- superseded-by: BI009
+- reason: A designed two-site placement: this copy governs every message the operator reads, writing-skills:63 governs curated prose, and the doctrine-parity test pins the pointer between them. Nothing measures sentence shape in a message. Superseded on 2026-11-11 by BI009, when `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 replaced the plain-prose bullet's four shape sentences with the text of Anthropic's guide on the operator's ruling of that date; the verdict before it was keep.
 - passage: One idea per sentence, about twenty words, as a check and never a target.
 
 ### c1.C017
@@ -183,8 +184,9 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
 - provenance: 8b03bfb 2026-09-08: the class-level one-idea bar had allowed a rule and its bound in one forty-word sentence, which is the shape the operator could not follow.
-- verdict: keep
-- reason: A named shape of the incident, kept because the class statement alone had failed to prevent it.
+- verdict: retire
+- superseded-by: BI009
+- reason: A named shape of the incident, kept because the class statement alone had failed to prevent it. Superseded on 2026-11-11 by BI009, when `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 replaced the plain-prose bullet's four shape sentences with the text of Anthropic's guide on the operator's ruling of that date; the verdict before it was keep.
 - passage: Never carry a second rule inside a rule's clause.
 
 ### c1.C019
@@ -192,8 +194,9 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
 - provenance: 8b03bfb 2026-09-08, the plain-prose bullet.
-- verdict: keep
-- reason: A named incident shape; line 24's parentheses remain a lawful em-dash replacement for an aside, and a qualification takes its own sentence, so both are satisfiable. Parenthetical caveats in the operator's own voice are scott-writing-style's moment.
+- verdict: retire
+- superseded-by: BI009
+- reason: A named incident shape; line 24's parentheses remain a lawful em-dash replacement for an aside, and a qualification takes its own sentence, so both are satisfiable. Parenthetical caveats in the operator's own voice are scott-writing-style's moment. Superseded on 2026-11-11 by BI009, when `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 replaced the plain-prose bullet's four shape sentences with the text of Anthropic's guide on the operator's ruling of that date; the verdict before it was keep.
 - passage: Never nest a qualification in parentheses or after a semicolon.
 - flag: stale
 - ruled: keep 2026-09-26
@@ -212,18 +215,20 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
 - provenance: 8b03bfb 2026-09-08, the plain-prose bullet, paired with writing-skills' rule-and-bound-in-two-sentences form.
-- verdict: keep
-- reason: The remedy for the packed sentence the operator could not follow; writing-skills:63 is the curated-prose end of the same pair.
+- verdict: retire
+- superseded-by: BI009
+- reason: The remedy for the packed sentence the operator could not follow; writing-skills:63 is the curated-prose end of the same pair. Superseded on 2026-11-11 by BI009, when `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 replaced the plain-prose bullet's four shape sentences with the text of Anthropic's guide on the operator's ruling of that date; the verdict before it was keep.
 - passage: Gain precision by adding a sentence, never by packing one.
 
 ### c1.C022
 - key: Vary sentence length rather than writing uniformly long or short sentences.
 - class: rule
 - source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
-- provenance: 8b03bfb 2026-09-08, the plain-prose bullet, moved with its writing-skills twin.
-- verdict: keep
-- reason: The bound that keeps the twenty-word check from becoming a target; the writing-skills copy is the designed pair and the voice skills add bands for the operator's own voice.
-- passage: One idea per sentence, about twenty words, as a check and never a target. Vary sentence length.
+- provenance: 8b03bfb 2026-09-08, the plain-prose bullet, moved with its writing-skills twin, C059 in that ledger. `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 on 2026-11-11 retired the twenty-word check beside it with c1.C016, so the sentence now stands alone beside the guide text of BI009.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: The bound that keeps the bullet's short-sentence advice from flattening into one length. The voice skills add bands for the operator's own voice.
+- passage: Vary sentence length.
 - flag: stale
 - ruled: keep 2026-09-26
 
@@ -844,7 +849,7 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - provenance: b9c7f85 2026-06-14 installed the execution-loop bullet, no incident narrated; c800e05 2026-06-26 moved it into this skill file.
 - verdict: rewrite
 - landed: a2ca9e5 section 1
-- reason: The rules all keep, including the library-docs instruction no other surface carries; what changes is that four rules stop riding one dash-joined sentence, which the doctrine's own plain-prose bar forbids (A090, A091). The delegating case is covered: executing-work assigns the read to the implementer, so who reads differs and not whether (A088).
+- reason: The rules all keep, including the library-docs instruction no other surface carries; what changes is that four rules stop riding one dash-joined sentence, which the doctrine's own plain-prose bar then forbade (A090, A091). That bar's one-idea sentence, c1.C016, went in `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3, and BI009 keeps one idea per sentence. The delegating case is covered: executing-work assigns the read to the implementer, so who reads differs and not whether (A088).
 - proposed: Line 72 as one rule per sentence (read first; consult library docs; call out concerns; propose a concise plan before implementing), without "Ask first if anything material is ambiguous".
 - baseline-test: yes
 - passage: For a feature or non-trivial fix, read the involved files and docs first. Check current library docs rather than guessing an unfamiliar signature.
@@ -2329,7 +2334,7 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - provenance: b9c7f85 2026-06-14, the home CLAUDE.md consolidation; the message narrates no incident, so the why is no provenance found.
 - verdict: rewrite
 - landed: a2ca9e5 section 1
-- reason: The rule shares one comma-joined sentence with c2.C080, which the doctrine's plain-prose rule (8b03bfb) bars; split the sentence and change no words. Systematic-debugging's failed-first-fix trigger is a different next act and points rather than duplicates.
+- reason: The rule shares one comma-joined sentence with c2.C080, which the doctrine's plain-prose rule (8b03bfb) then barred; split the sentence and change no words. That rule's one-idea sentence, c1.C016, went in `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3, and BI009 keeps one idea per sentence. Systematic-debugging's failed-first-fix trigger is a different next act and points rather than duplicates.
 - passage: Re-diagnose a new symptom rather than retrying the last fix.
 
 ### c2.C080
@@ -3372,6 +3377,126 @@ Extracted at `6bc07fb`: lines 1-109 (`skills.operating-instructions.c1.md`); lin
 - landed: `docs/plans/claude-kit_dispatch-wording-cost-first_spec_v1.md` section 2
 - reason: The list opens with "such as", so it names instances and closes nothing: the found-work bullet's "spun to a subagent" keeps its reason though no skill names it, and a closed list would be the narrowed request BB002 refuses. The one bound the sentence sets is the handful of calls. In that plan's staged probe, a dispatched agent asked to find one config value, with the debugging skill's Explore line beside the task, started an Explore agent in 5 of 10 tries on claude-fable-5-2 at high and 0 of 10 on claude-opus-5-5 at medium under the current text. With these sentences carried in the task brief as an amendment, it started none in 10 tries on each arm. A brief sets the sentences closer to the task than the doctrine does, so that gain is an upper bound on what the landed text does. With no skill line, both arms held 10 of 10 under the current text. All 40 tries in the skill-line context found the right value. A task that asked for a fresh-context review, with the sentences carried the same way, started one in 10 of 10 tries on each arm. The debugging skill's line names the Explore subagent for unfamiliar territory with no size, and the sentence is what reads that start against the task's size.
 - passage: The reason comes from the work, such as a plan's section, a review, a consult or a skill's step that names the start, and work a handful of calls would finish stays in the session.
+
+### BI001
+- key: Write for an intelligent reader who holds little of the session's context.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: The operator read twelve close-outs blind, three wordings of this bullet on two plans and two models, and picked the block arm's report in 2 of 4 sets, the current rule's in 1 and the added arm's in 1, with no passage marked as read twice. That fell short of the plan's bar of 3, and he ruled the block wording in on 2026-11-11: "the difference on the two I liked was DRAMATICALLY better. I think that block wording achieves what we want more than the existing unchanged doctrine." The guide reports that this text made final reports less dense, with fewer semicolons, and warns that a hard limit such as one instruction per sentence in 20 words or fewer can make Fable 5.2's prose choppy, so the bullet's four shape sentences went with it.
+- passage: Write for an intelligent but low-context reader.
+
+### BI002
+- key: Assume the reader has not seen the tool calls, the reasoning or the files opened, and may be switching in from other work.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: The person reading has not seen your tool calls, your reasoning or the files you opened, and may be switching in from other work.
+
+### BI003
+- key: Make each message self-contained, so the reader understands it without digging for other context.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Messages should generally be self-contained: the reader should understand what you mean without having to dig for other context.
+
+### BI004
+- key: Put the key points in the first few sentences.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Put the key points in the first few sentences.
+
+### BI005
+- key: Order sentences by progressive disclosure, with no reference in an early line that only a later line explains.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Practice progressive disclosure in your sentence order, and do not use undefined references and ideas in line 1 that won't make sense until the reader reaches line 12.
+
+### BI006
+- key: Use plain words in clear, full sentences.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Use plain words, and write in clear, understandable full sentences.
+
+### BI007
+- key: Never use a term or abbreviation made up during the work.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Do not use a term or abbreviation that you made up during the work.
+
+### BI008
+- key: Say what a thing is in words any reader understands.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Say what the thing is in a way any reader would understand.
+
+### BI009
+- key: Write mostly in the style of ASD-STE100 Simplified Technical English: short sentences, one idea each, active voice, one word for one thing.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records. This sentence carries the part of the four retired sentences the guide keeps, one idea per sentence and short sentences, so c1.C016, c1.C018, c1.C019 and c1.C021 name it as their successor. It does not carry c1.C019's bar on a qualification nested in parentheses or after a semicolon, or the packing bars of c1.C018 and c1.C021. Those have no successor in the doctrine, which the operator's ruling accepted with the guide's text.
+- passage: Write mostly in the style of ASD-STE100 Simplified Technical English: short sentences, one idea per sentence, active voice, and consistently using the same word for the same thing.
+
+### BI010
+- key: Use flowing prose where ideas connect, and bullets only for lists of separate items.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Use a paragraph of flowing prose where ideas connect, and keep bullets for lists of separate items.
+
+### BI011
+- key: Leave out details the reader did not ask for, while keeping the key context.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records. The output style's Reader section asks to err toward overexplaining, and this sentence asks for concision; that plan leaves the pair for the FABLE-5-2 persona to weigh.
+- passage: Leave out unnecessary details unless the reader asks and practice concision, but do ensure that your messages have the key context.
+
+### BI012
+- key: Make user-facing text as readable and clear as possible.
+- class: rule
+- source: plugins/grimoire/skills/operating-instructions/SKILL.md:20
+- provenance: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 2026-11-11, the block arm of that plan's blind read, landed on the operator's ruling of 2026-11-11 on the DEV-GRIMOIRE-2 persona's thread; the text is word for word from Anthropic's guide Prompting Claude Fable 5.2, fetched 2026-11-10; the operator approves the landed text at the plan's pull request.
+- verdict: keep
+- landed: `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3
+- reason: One sentence of the guide text that landed whole as one block, whose reading and ruling BI001 records.
+- passage: Aim to make your user-facing text as human-readable and clear as possible.
 
 ## home/grimoire-doctrine.md
 
@@ -4501,7 +4626,7 @@ Extracted at `6bc07fb`: whole document (`skills.operating-instructions.reference
 
 This document is the kit's output style: it sets the register and shape of everything the session writes to Scott, its named reader. It owns the moments of addressing that reader (pitching explanation depth for a mixed expert-and-outsider audience who often reads on a phone after the fact), teaching while working, emitting the three formatted blocks (insight before and after significant work, decision when a call is made inside the session's remit, memory when the memory store changes by a deliberate act), and, through the pinned communication core it carries, the general communication rules. It is a style with `force-for-plugin: true` and `keep-coding-instructions: true` in its frontmatter, so it is in force for every turn of every session rather than invoked for a task: load class `session-start`.
 
-Extracted at `6bc07fb`: whole document (`output-styles.kit.md`). Skipped region: KIT-REGISTER-CORE lines 44-81 (pinned copy of the doctrine core, extracted with the doctrine). Amended on 2026-09-22 by section 1 of `docs/plans/claude-kit_prose-register_spec_v1.md`, which reworded the two Teaching sentences that named a concrete example, under the register's case-lands bullet (`P` entries below). Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: each live entry's `passage:` line quotes the text that section landed, and an entry whose rule a row dropped or merged into its owner reads `verdict: retire` with a reason naming the row; the core region follows the doctrine through the parity sync.
+Extracted at `6bc07fb`: whole document (`output-styles.kit.md`). Skipped region: KIT-REGISTER-CORE lines 44-81 (pinned copy of the doctrine core, extracted with the doctrine). Amended on 2026-09-22 by section 1 of `docs/plans/claude-kit_prose-register_spec_v1.md`, which reworded the two Teaching sentences that named a concrete example, under the register's case-lands bullet (`P` entries below). Amended on 2026-10-01 by section 2 of `docs/plans/claude-kit_mechanism-cut_spec_v1.md`, which applied the cut file `tools/corpus-compression/mechanism-cut-2026-09-30.json`: each live entry's `passage:` line quotes the text that section landed, and an entry whose rule a row dropped or merged into its owner reads `verdict: retire` with a reason naming the row; the core region follows the doctrine through the parity sync. Amended by `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3 on 2026-11-11, whose finishing pass reworded the reasons of C007 and C008 to say the plain-prose bar they cite went in that section.
 
 ### C001
 - key: Write to Scott as an intelligent outsider by default, even after he shows deep expertise in the domain at hand.
@@ -4584,7 +4709,7 @@ Extracted at `6bc07fb`: whole document (`output-styles.kit.md`). Skipped region:
 - provenance: e815c7d 2026-08-01, the Kit output style plan's teaching posture, subsuming the built-in Explanatory style the operator pinned; the doctrine's autonomous-execution clause beside it dates from 2bd7674 2026-06-28 and was scoped so teaching does not fight execution.
 - verdict: rewrite
 - landed: f842186 section 2
-- reason: The rule stands against the doctrine's "execute autonomously" clause because the two are different semantics: the doctrine bars per-step narration, the style places teaching at the bounded block moments with the line 30 skip. The rewrite is shape only, merging its two sentences into one under the plain-prose bar installed at 8b03bfb after the style was written. Landed as the three sentences the proposal names, the second and third keeping C008's and C009's original wording rather than the paraphrase, since those two entries are the split's own instruction. Landed as the last proposal below.
+- reason: The rule stands against the doctrine's "execute autonomously" clause because the two are different semantics: the doctrine bars per-step narration, the style places teaching at the bounded block moments with the line 30 skip. The rewrite is shape only, merging its two sentences into one under the plain-prose bar installed at 8b03bfb after the style was written. That bar's one-idea sentence, c1.C016, went in `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3, and BI009 keeps one idea per sentence. Landed as the three sentences the proposal names, the second and third keeping C008's and C009's original wording rather than the paraphrase, since those two entries are the split's own instruction. Landed as the last proposal below.
 - proposed: Rewrite line 16 as three sentences: teach while you work so Scott ends each effort understanding the system better; keep explanations to this codebase, this decision, this failure; prefer a concrete example from the work at hand over an abstract principle. The conciseness licence moves to line 12 under A010.
 - proposed: Teach while you work, so Scott ends each effort understanding the system better, not just holding a result. Explanations are about this codebase, this decision, this failure, never generic programming lessons. Prefer a concrete example from the work at hand over an abstract statement of the principle.
 - baseline-test: yes
@@ -4597,7 +4722,7 @@ Extracted at `6bc07fb`: whole document (`output-styles.kit.md`). Skipped region:
 - provenance: e815c7d 2026-08-01, the Kit output style plan's verbatim shell.
 - verdict: rewrite
 - landed: f842186 section 2
-- reason: The rule stands unchanged in substance; it shares a sentence with C009 across a semicolon, which the doctrine's plain-prose bullet (8b03bfb 2026-09-08) bars, so the two split into a sentence each.
+- reason: The rule stands unchanged in substance; it shares a sentence with C009 across a semicolon, which the doctrine's plain-prose bullet (8b03bfb 2026-09-08) then barred, so the two split into a sentence each. That bar's one-idea sentence, c1.C016, went in `docs/plans/claude-kit_sentence-shape-rule-tested_spec_v1.md` section 3, and BI009 keeps one idea per sentence.
 - passage: Explanations are about this codebase, this decision, this failure, never generic programming lessons.
 
 ### C009
