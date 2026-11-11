@@ -128,9 +128,11 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
      its place, and that line's first four parts, never its fifth.
      Provenance: as for a single finding.
    - Whole changeset: the charter's two questions. Provenance: the base
-     ref and the plan document's first commit past it, the last line
-     git log --first-parent --format=%H <base>..HEAD -- docs/plans/<file>
-     prints, or none where it prints none.
+     ref and the plan's first own commit, <first>, the last line
+     git rev-list --first-parent --no-merges <base>..HEAD
+     prints, or none where it prints none. Where <first> is not none and
+     git show --format= --name-only <first> -- docs/plans/<file>
+     prints nothing, the provenance adds the words start unconfirmed.
    - Nothing else rides: no lean, no fifth add-decision part, no ruling
      the What line does not carry, no fix narrative, and no Approach,
      Decisions or Chapters.
