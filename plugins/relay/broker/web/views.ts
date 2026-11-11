@@ -359,7 +359,7 @@ export type AskView = {
 
 export type RepoView = {
   name: string;
-  /** The newest item of the repository's own `docs/direction.md`; null where the folder is no configured root or has none. */
+  /** The newest item of the repository's own `docs/direction.md`; null where the folder is no `CHANNEL_BOARD_PROJECTS` root or has none. */
   heading: Heading | null;
   /** The row of the client branch the persona's checkout is on; null off a client branch. */
   rollout: RolloutRow | null;
@@ -462,8 +462,8 @@ export type TodayItem = {
   item: Item | ReviewItem;
   /**
    * On an approve item alone: the configured root the plan reading takes for the plan, the
-   * repository's folder. The roster keeps only a persona whose workdir names a folder, so every
-   * review's persona has one. The page reads no plan for an empty root.
+   * repository's folder's last name where that folder is one of the plan sweep's roots, else empty.
+   * The page reads no plan for an empty root.
    */
   root?: string;
 };
@@ -858,7 +858,7 @@ function indexOf(readings: Readings): PlanIndex {
   return readings.plans.value === null ? NO_PLANS : planIndex(readings.plans.value);
 }
 
-/** Whether some configured root is this folder: the join of a plan to a repo, and its absence. */
+/** Whether some root the plan sweep reads is this folder: the join of a plan to a repo, and its absence. */
 function rootMatches(readings: Readings, workdir: string): boolean {
   let keys = rootsMemo.get(readings.roots);
   if (keys === undefined) {
@@ -881,7 +881,10 @@ function machineHeading(readings: Readings): Heading | null {
   return headingOf(readings.direction.value?.machine ?? null);
 }
 
-/** The heading of the ledger under a folder that is a configured root, null where it has none. */
+/**
+ * The heading of the ledger under a folder that is a `CHANNEL_BOARD_PROJECTS` root, null where it has
+ * none, since the direction read takes the setting's roots alone.
+ */
 function repoHeading(readings: Readings, workdir: string): Heading | null {
   const reading = readings.direction.value;
   if (reading === null || !rootMatches(readings, workdir)) return null;
@@ -1852,7 +1855,8 @@ export function todayItems(readings: Readings): TodayItem[] {
           "done",
         ],
         item: review,
-        root: folders.get(review.repo) ?? "",
+        // Only a sweep root: the plan route answers 400 for any other, which the page would draw as a failure.
+        root: rootMatches(readings, repo.persona.workdir) ? rootName(repo.persona.workdir) : "",
       });
     }
   }

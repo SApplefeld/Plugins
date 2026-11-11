@@ -148,8 +148,8 @@ reason a worker wrote on a blocked entry. With
 the last path segment of each root as the project name. So a root at or just under your home
 directory would put your account name there too. The card's folder view sweeps that setting alone,
 and leaving it empty turns the folder view off. The web pages, with `CHANNEL_WEB_BIND` set, sweep
-the setting where it is set and otherwise each roster persona's working directory, so a host that
-never set it still sees its plans there. With the roster set and the setting empty, each plan's
+the setting's roots and each roster persona's working directory, so a host that never set it, or set
+it before a persona was added, still sees every persona's plans there. With the roster set, each plan's
 title, status, progress and next step under those working directories reaches whoever can open the
 pages: an admitted login on an admitted device, and any account's process on this host while the
 host's own tailnet login is admitted and `CHANNEL_WEB_DEVICES` is unset or names it (T5 in

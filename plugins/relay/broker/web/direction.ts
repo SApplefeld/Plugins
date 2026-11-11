@@ -1,5 +1,5 @@
 // The direction ledgers the web surface's heading cards draw: the machine's own, at the path
-// `CHANNEL_DIRECTION_LEDGER` names, and one per configured project root, at `docs/direction.md`.
+// `CHANNEL_DIRECTION_LEDGER` names, and one per `CHANNEL_BOARD_PROJECTS` root, at `docs/direction.md`.
 //
 // A ledger opens with the line `# Direction` and holds items one per line as
 // `- D<n> <YYYY-MM-DD>: <the operator's words>`. The operator hand-edits the file, so the heading is
@@ -59,7 +59,7 @@ export type DirectionLedger = { items: readonly DirectionItem[] };
 
 /**
  * What the direction source reads: `machine` the ledger at the configured path (null where no path
- * is set or the file is absent), and `repos` the ledger under each configured root that has one.
+ * is set or the file is absent), and `repos` the ledger under each `CHANNEL_BOARD_PROJECTS` root that has one.
  */
 export type DirectionReading = {
   machine: DirectionLedger | null;

@@ -616,7 +616,7 @@ export function screenPlanShape(decoded: string): PlanPathScreen {
   return { ok: true, path: decoded };
 }
 
-/** Whether `root` names a configured root, compared by last folder name without regard to case. */
+/** Whether `root` names a root the plan sweep reads, compared by last folder name without regard to case. */
 function rootConfigured(readings: Readings, root: string): boolean {
   return readings.roots.some((configured) => foldRootName(rootName(configured)) === foldRootName(root));
 }

@@ -4248,7 +4248,7 @@
   /**
    * Reads the plan an approve item names, through the plan screen's own reading, into `into` under the
    * item's key as `{ loading, plan, failure }`, and draws again once it lands on the visit it was read
-   * on. The plan reading takes the configured root, the item's `root`, the repository's folder. A read
+   * on. The plan reading takes the sweep root, the item's `root`, the repository's folder. A read
    * again after a failure passes the failed entry as `prior`, whose failure the new entry keeps while
    * it reads, so the failure line stays drawn rather than reading again. A read that lands clears the
    * failure, and one that fails again replaces it with its own. An item naming no plan or no folder
@@ -4265,6 +4265,7 @@
     const root = txt(entry.root);
     if (root === "" || txt(one.planPath) === "") {
       held.loading = false;
+      held.failure = null;
       return;
     }
     try {

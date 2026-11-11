@@ -258,25 +258,32 @@ export function webPassSources(config: WebPassConfig, log: (message: string) => 
 }
 
 /**
- * The roots the plan sweep reads each pass: the setting, as given, where it is set, else each roster
- * persona's working directory in roster order, a directory whose resolved path an earlier one has
- * dropped and a later root whose folded last folder name matches an earlier one's skipped, logged once
- * per pair. A page addresses a root by its last folder name, so two roots sharing one would answer for
- * each other; `broker/web/config.ts` refuses that pair in the setting, and a roster can still hold one.
- * The skip line names the two personas and neither folder, since a working directory typically carries
- * the account name. Each root keeps the spelling it was given. With the setting empty and no roster
- * read, it is empty.
+ * The roots the plan sweep reads each pass: the setting's roots, as given, then each roster persona's
+ * working directory in roster order, so a persona added after the setting was written is still read. A
+ * directory whose resolved path an earlier root has is dropped, and one whose folded last folder name
+ * matches an earlier root's is skipped, logged once per pair. A page addresses a root by its last folder
+ * name, so two roots sharing one would answer for each other; `broker/web/config.ts` refuses that pair
+ * in the setting, and a roster can still hold one. The skip line names the persona and the earlier
+ * persona or the setting, and neither folder, since a working directory typically carries the account
+ * name. Each root keeps the spelling it was given. With no roster read, it is the setting alone.
  */
 export function createSweepRoots(
   log: (message: string) => void,
 ): (boardProjects: readonly string[], personas: readonly RosterPersona[] | null) => readonly string[] {
   const skippedPairs = new Set<string>();
   return (boardProjects, personas) => {
-    if (boardProjects.length > 0) return boardProjects;
+    if (personas === null || personas.length === 0) return boardProjects;
     const seen = new Set<string>();
-    const named = new Map<string, { key: string; persona: string }>();
+    // A setting root is named by the setting, since no persona owns it.
+    const named = new Map<string, { key: string; persona: string | null }>();
     const roots: string[] = [];
-    for (const persona of personas ?? []) {
+    for (const root of boardProjects) {
+      const rootKey = comparablePath(path.resolve(root));
+      seen.add(rootKey);
+      named.set(foldRootName(path.basename(root)), { key: rootKey, persona: null });
+      roots.push(root);
+    }
+    for (const persona of personas) {
       const root = persona.workdir;
       const rootKey = comparablePath(path.resolve(root));
       if (seen.has(rootKey)) continue;
@@ -286,7 +293,8 @@ export function createSweepRoots(
       if (earlier !== undefined) {
         const pair = JSON.stringify([earlier.key, rootKey]);
         if (!skippedPairs.has(pair)) {
-          log(`web pass: ${persona.name}'s folder skipped from the plan sweep (its last folder name matches ${earlier.persona}'s)`);
+          const owner = earlier.persona === null ? "a CHANNEL_BOARD_PROJECTS root" : earlier.persona;
+          log(`web pass: ${persona.name}'s folder skipped from the plan sweep (its last folder name matches ${owner}'s)`);
         }
         skippedPairs.add(pair);
         continue;
@@ -454,7 +462,7 @@ export function createWebPass(options: WebPassOptions): WebPass {
     if (rolloutState !== null && rolloutState.held && rollout.value !== null && !sameRoots(rolloutState.outside, rollout.value.outside)) {
       rollout.value = { ...rollout.value, outside: rolloutState.outside };
     }
-    // The setting where it is set, else the folders of the roster's last good reading. The page joins
+    // The setting's roots, then the folders of the roster's last good reading. The page joins
     // plans to a repo through these roots, so they move only with a sweep that read well, and an
     // unchanged list keeps its array.
     const roots = sweepRoots(config.boardProjects, personas);
