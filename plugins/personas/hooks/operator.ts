@@ -83,7 +83,7 @@ const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 import type { CommonsStore, CommonsMeta, UnionedClaim } from "./commons";
 import { claimResource, releaseResource, readAllClaims, readAllEntries, commonsWinner } from "./commons";
-import { LINE_TERMINATOR } from "./agent-state";
+import { BRACKET_CLOSE, BRACKET_OPEN, LINE_TERMINATOR } from "./agent-state";
 import type { AskEntryStatus } from "./agent-state";
 
 // --- Key helpers ---
@@ -117,13 +117,20 @@ function seqKey(persona: string, writerSessionId: string): string {
 }
 
 // The one rule for a string that is spliced inside a delivery bracket (a
-// persona name or a record id): no "[" or "]", which could close the
-// bracket early and open a forged one; no ",", which is the bracket's own
+// persona name or a record id): no member of the bracket class that
+// agent-state.ts states and bracketSafeText rewrites, "[" and "]" among
+// them, which could close the bracket early and open a forged one, or read
+// to a model as doing so; no ",", which is the bracket's own
 // separator before "urgent"; and no whitespace, control or format
 // character, which could split or hide a field. Returns the reason, or
-// null when the string is safe.
+// null when the string is safe. A member other than the two ASCII square
+// brackets is named by its code point, so the reason carries no bracket.
 function bracketSafeProblem(s: string): string | null {
   if (s.includes("[") || s.includes("]")) return "cannot contain '[' or ']'";
+  const opens = s.search(BRACKET_OPEN);
+  const closes = s.search(BRACKET_CLOSE);
+  const at = opens < 0 ? closes : closes < 0 ? opens : Math.min(opens, closes);
+  if (at >= 0) return `cannot contain the bracket character U+${s.codePointAt(at)!.toString(16).toUpperCase().padStart(4, "0")}`;
   if (s.includes(",")) return "cannot contain ','";
   if (/[\s\p{Cc}\p{Cf}]/u.test(s)) return "cannot contain whitespace, a control character or a format character";
   return null;

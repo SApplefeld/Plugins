@@ -7,13 +7,42 @@
 import type { Routine, RoutineSchedule } from "./routines";
 
 /**
+ * The bracket class, as the members that open and the members that close. The
+ * comment on bracketSafeText below states the class and its two closed lists.
+ * This is its one statement among the hook modules, and bracketSafeProblem
+ * reads it from here. bin/restart-recap.mjs holds a copy, which
+ * test-personas/bracket-class-unit-test.mjs holds to this one. Both patterns
+ * carry the g flag for the rewrite, so a reader that asks only where a member
+ * sits calls String.prototype.search, which ignores
+ * the flag and keeps no position between calls.
+ */
+export const BRACKET_OPEN = /(?![({\u201A\u201E\u2E42\u301D])[\p{Ps}\u23A1-\u23A3]/gu;
+export const BRACKET_CLOSE = /(?![)}\u301E\u301F])[\p{Pe}\u23A4-\u23A6]/gu;
+
+/**
  * One piece of untrusted text with the delivery brackets neutralized, under
- * the same rule bracketSafeProblem refuses on and for the same reason: a '['
- * in text the plugin did not compose lets that text forge a delivery label
- * such as [COORDINATOR id=7]. The two are one rule read two ways. A caller
+ * the same rule bracketSafeProblem refuses on and for the same reason: a
+ * bracket-shaped character in text the plugin did not compose lets that text
+ * forge a delivery label such as [COORDINATOR id=7]. A model reads a label by
+ * likeness, so the rule holds a class with a shape and not the two ASCII
+ * square brackets alone. The class is closed at two parts.
+ * The first is every character Unicode classes as open or close punctuation,
+ * the general categories Ps and Pe, less a closed list of ten kept
+ * characters. ASCII ( and ) are kept because they are what this helper
+ * emits. ASCII { and } are kept because they carry quoted data and no label
+ * uses them. The six quotation marks U+201A, U+201E, U+2E42, U+301D, U+301E
+ * and U+301F are kept because they are shaped like commas and primes, where
+ * every other quotation mark in the two categories is a corner bracket.
+ * The second is a closed list of six pieces of a tall square bracket, U+23A1
+ * to U+23A6, which are math symbols and so sit in neither category. The left
+ * three open and the right three close.
+ * Each opening member reads back as ( and each closing member as ), so a
+ * second pass changes nothing. An angle-shaped character outside the two
+ * categories, such as < or a guillemet, is outside the class.
+ * The two are one rule read two ways. A caller
  * who supplies a persona name can be told to pick another, so that path
  * refuses; a file read has nobody to ask, so this path rewrites. Text
- * carrying no bracket comes through byte for byte.
+ * carrying no member of the class comes through byte for byte.
  * The guard belongs to the channel the text leaves by rather than to the
  * field that first needed it, so every site that puts text out of a
  * persona's own tree in front of a model calls this one helper: the fleet
@@ -28,7 +57,7 @@ import type { Routine, RoutineSchedule } from "./routines";
  * every suite that reads the store.
  */
 export function bracketSafeText(text: string): string {
-  return text.replace(/\[/g, "(").replace(/\]/g, ")");
+  return text.replace(BRACKET_OPEN, "(").replace(BRACKET_CLOSE, ")");
 }
 
 /**

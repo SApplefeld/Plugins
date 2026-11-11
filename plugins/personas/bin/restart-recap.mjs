@@ -70,11 +70,16 @@
 //
 // Why the text is folded. The digest is placed in front of a model as context,
 // so each piece of transcript text is folded to one line, its control and
-// format characters closed up, and its square brackets turned to parentheses:
-// a line the script did not compose must not read as one it did, and a '['
-// would let stored text forge a delivery label such as [COORDINATOR id=7].
+// format characters closed up, and its bracket characters turned to
+// parentheses: a line the script did not compose must not read as one it did,
+// and a bracket-shaped character would let stored text forge a delivery label
+// such as [COORDINATOR id=7]. The characters are the bracket class
+// hooks/agent-state.ts owns and states on bracketSafeText: open and close
+// punctuation less ten kept characters, plus six bracket pieces.
 // This is the same guard hooks/agent-state.ts applies as oneLine and
-// bracketSafeText, which a .mjs script cannot import from TypeScript.
+// bracketSafeText, which a .mjs script cannot import from TypeScript, so
+// digestText holds a copy of the class and
+// test-personas/bracket-class-unit-test.mjs holds the copy to the owner.
 //
 // Bounds. Each transcript is read from its last RECAP_TAIL_BYTES only, and a
 // first line the cut landed inside is dropped, as is a last line with no
@@ -122,7 +127,8 @@ const LINE_TERMINATOR = /\r\n|[\n\r\v\f\u{85}\u{2028}\u{2029}]/u;
 /**
  * One piece of transcript text as one digest-safe line: folded on every line
  * terminator, its runs of whitespace, control and format characters closed up
- * to one space, its square brackets turned to parentheses, and cut to the cap.
+ * to one space, its bracket characters turned to parentheses, and cut to the
+ * cap.
  * @param {unknown} text
  * @param {number} cap
  * @returns {string}
@@ -132,8 +138,8 @@ export function digestText(text, cap = RECAP_MESSAGE_CHARS) {
     .split(LINE_TERMINATOR).join(' ')
     .replace(/[\s\p{Cc}\p{Cf}]+/gu, ' ')
     .trim()
-    .replace(/\[/g, '(')
-    .replace(/\]/g, ')')
+    .replace(/(?![({\u201A\u201E\u2E42\u301D])[\p{Ps}\u23A1-\u23A3]/gu, '(')
+    .replace(/(?![)}\u301E\u301F])[\p{Pe}\u23A4-\u23A6]/gu, ')')
     .slice(0, cap);
 }
 
