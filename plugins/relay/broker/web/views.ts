@@ -151,6 +151,8 @@ export type RolloutReading = {
   readAt: string | null;
   /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
   branches: readonly OpenBranches[];
+  /** The roots that hold no repository, whose personas' reviews no page lists. */
+  outside: readonly string[];
 };
 
 /** The standup page's rollout card: every row, with the counts the card's heading draws. */
@@ -1187,7 +1189,8 @@ function timelineOf(readings: Readings, lineage: string): TimelineEvent[] {
 }
 
 /**
- * The reviews waiting in one repo: each queue entry with a `pr-ready` line among `lines` on its plan,
+ * The reviews waiting in one repo, none where the rollout reading lists the persona's working folder
+ * as holding no repository: each queue entry with a `pr-ready` line among `lines` on its plan,
  * the entry's `planSegment` and the line's plan compared by `eventPlanName`, and whose pull request
  * number no review mark hides. An entry that names a branch also leaves once a fetch newer than the
  * newest such line shows that branch's tip contained in the default branch or the branch absent from
@@ -1202,6 +1205,9 @@ function timelineOf(readings: Readings, lineage: string): TimelineEvent[] {
 function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent[]): ReviewItem[] {
   const queue = repo.queue;
   if (queue === null || lines.length === 0) return [];
+  // A persona whose folder holds no repository has no mirror to retire a review by, so none is listed.
+  const outside = readings.rollout.value?.outside ?? [];
+  if (outside.some((root) => sameFolder(root, repo.persona.workdir))) return [];
   const handled = (readings.marks ?? EMPTY_MARKS).handled;
   const items: ReviewItem[] = [];
   for (const entry of queue.entries) {

@@ -13,7 +13,9 @@
 // first sight with `init --bare` and an `origin` set to the URL read from the group's first root in
 // list order. Every fetch, read, tag and push for the group runs there. A worker's checkout is read
 // by exactly two commands, `remote get-url origin` to group it and `symbolic-ref HEAD` to learn its
-// branch, and nothing is ever written into one. Per group, no more often than `ROLLOUT_FETCH_MS`,
+// branch, and nothing is ever written into one. A root whose origin read git itself refuses is
+// checked for a `.git` entry in it or any folder above it, and one with none is published as
+// `outside`, a folder holding no repository. Per group, no more often than `ROLLOUT_FETCH_MS`,
 // the reader asks the remote which branch its HEAD names with `ls-remote --symref`, then fetches
 // the client branches, the plan branches, that default branch, the rollout tags and the publish
 // tags, then, in a second fetch, every branch head into `refs/open/`, and nothing else; it reads
@@ -49,7 +51,7 @@
 // pass's tick: `read` starts a cycle where none is running and hands back what the last one computed.
 // Each group has one lock, which the timed cycle and a tap's re-fetch both take, so two fetches never
 // run into one bare repository at once.
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { comparablePath } from "../board/events.ts";
 import { MAX_PLAN_FILE_BYTES } from "../board/plans.ts";
@@ -107,6 +109,8 @@ export type RolloutState = {
   readAt: string | null;
   /** Every repository's open branches, one record each, from the repositories with a default branch and a successful fetch. */
   branches: readonly OpenBranches[];
+  /** The latest cycle's roots that hold no repository: git's own origin read failed, and no `.git` stands in the folder or any parent. */
+  outside: readonly string[];
   /** Whether a read cycle has completed at all; the pass leaves the source unread until one has. */
   attempted: boolean;
   /** Whether any repository's latest fetch or read failed, or none has ever read. */
@@ -479,6 +483,24 @@ function lines(output: string): string[] {
   return output.split(/\r?\n/).filter((line) => line !== "");
 }
 
+/** Whether `root` or any folder above it holds a `.git` entry, a directory or a worktree's file. The walk starts
+ * at the real path the git runner hands git, resolved the same way. A root whose real path the broker cannot
+ * resolve counts as inside, keeping its reviews. */
+function insideRepository(root: string): boolean {
+  let dir: string;
+  try {
+    dir = realpathSync(root);
+  } catch {
+    return true;
+  }
+  for (;;) {
+    if (existsSync(path.join(dir, ".git"))) return true;
+    const parent = path.dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+}
+
 function kindOf(error: unknown): string {
   return error instanceof Error ? error.message : "unknown";
 }
@@ -500,7 +522,9 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
   const unprepared = new Set<string>();
   const unfetchedOpen = new Set<string>();
   const refusedClients = new Set<string>();
-  let state: RolloutState = { rows: [], checkouts: [], shared: [], publish: [], readAt: null, branches: [], attempted: false, held: true, reachedGit: false };
+  let state: RolloutState = { rows: [], checkouts: [], shared: [], publish: [], readAt: null, branches: [], outside: [], attempted: false, held: true, reachedGit: false };
+  /** The latest cycle's roots that hold no repository, published beside its checkouts. */
+  let outsideRoots: readonly string[] = [];
   let inFlight: Promise<void> | null = null;
   /**
    * Whether the last cycle could ask git about its roots: true where it had none, or git answered
@@ -1090,6 +1114,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
       publish: listed.flatMap((group) => group.publish),
       readAt,
       branches: listed.flatMap((group) => (group.branches === null ? [] : [group.branches])),
+      outside: outsideRoots,
       attempted: true,
       // Roots that hold no repository are a good read with no rows; a machine where git never
       // answered, a root whose origin read failed for any reason but git's own `exit <n>`, or a
@@ -1104,6 +1129,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     const byKey = new Map<string, Group>();
     const named = new Map<string, string>();
     const checkouts: RolloutCheckout[] = [];
+    const outside: string[] = [];
     let asked = false;
     let answered = false;
     let failedRead = false;
@@ -1121,7 +1147,15 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
         // a signal kill, `spawn EACCES` or an `exit <n>`, is git answering, so a host whose git
         // hangs reads as held.
         if (kindOf(error) !== "spawn ENOENT") answered = true;
-        if (!kindOf(error).startsWith("exit ")) failedRead = true;
+        if (!kindOf(error).startsWith("exit ")) {
+          failedRead = true;
+          // A read that failed any other way tells nothing new of the folder: it keeps the last cycle's
+          // standing while no `.git` stands in reach, matched as the cycle matches roots.
+          if (outsideRoots.some((one) => comparablePath(path.resolve(one)) === rootKey) && !insideRepository(root)) outside.push(root);
+        }
+        // Git's own refusal with no `.git` in reach is a folder holding no repository. A checkout
+        // with no origin, or one git refuses for its owner, keeps its `.git` and is never listed.
+        else if (!insideRepository(root)) outside.push(root);
         if (!skippedRoots.has(rootKey)) log(`web rollout: ${root} skipped (${kindOf(error)})`);
         skippedRoots.add(rootKey);
         continue;
@@ -1183,6 +1217,7 @@ export function createRolloutReader(options: RolloutReaderOptions): RolloutReade
     for (const group of groups.values()) {
       await underRepoLock(group.folded, () => readGroup(group, at, false));
     }
+    outsideRoots = outside;
     publish(checkouts);
   }
 

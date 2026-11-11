@@ -8,7 +8,9 @@
 //
 // Each source keeps its own last good reading with the time it was read. A source whose read throws,
 // or returns a reading it marks unusable, is recorded as held: the pass keeps the value it had and
-// the views say so. One source failing never touches another, and never fails the pass or a request.
+// the views say so. Once the rollout source has read well, its `outside` list alone still follows each
+// held cycle the reader completes. One source failing never touches another, and never fails the pass
+// or a request.
 // A source that has never read well has a null value and is held until it does, which is every source
 // before the first pass.
 //
@@ -444,8 +446,13 @@ export function createWebPass(options: WebPassOptions): WebPass {
       attempt("rollout", rollout, at, () =>
         state === null || state.held
           ? UNREADABLE
-          : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, publish: state.publish, readAt: state.readAt, branches: state.branches },
+          : { rows: state.rows, checkouts: state.checkouts, shared: state.shared, publish: state.publish, readAt: state.readAt, branches: state.branches, outside: state.outside },
       );
+    }
+    // A held reading keeps its last good rows, but `outside` is the reader's own evidence from the folders,
+    // taken on every cycle with no fetch, so the reading takes the latest list.
+    if (rolloutState !== null && rolloutState.held && rollout.value !== null && !sameRoots(rolloutState.outside, rollout.value.outside)) {
+      rollout.value = { ...rollout.value, outside: rolloutState.outside };
     }
     // The setting where it is set, else the folders of the roster's last good reading. The page joins
     // plans to a repo through these roots, so they move only with a sweep that read well, and an
