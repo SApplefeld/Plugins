@@ -417,9 +417,9 @@ $script:afterMarker = Join-Path $stubDir 'after-sleep.txt'
 $resolvedFile = Join-Path $stubDir 'resolved.md'
 $emptyConfig = Join-Path $work 'empty.gitconfig'
 
-$ingestArgs = '-p "Use the wiki-ingest skill." --model sonnet --permission-mode default'
-$lintArgs = '-p "Use the wiki-lint skill." --model sonnet --permission-mode default'
-$mergeArgs = '-p "Use the wiki-merge skill." --model sonnet --permission-mode default'
+$ingestArgs = '-p "Use the wiki-ingest skill." --model sonnet --permission-mode default --strict-mcp-config'
+$lintArgs = '-p "Use the wiki-lint skill." --model sonnet --permission-mode default --strict-mcp-config'
+$mergeArgs = '-p "Use the wiki-merge skill." --model sonnet --permission-mode default --strict-mcp-config'
 
 # The wikis made so far, by name, with their paths; and the trusted ones.
 $script:wikis = [ordered]@{}

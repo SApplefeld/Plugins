@@ -51,10 +51,13 @@ Every model run goes through the KB's own wrapper, `.claude/kb-run.ps1`,
 which runs one command in the KB folder:
 
 ```
-claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default
+claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default --strict-mcp-config
 ```
 
 with `wiki-lint` or `wiki-merge` in place of `wiki-ingest` for the other two.
+The last flag, with no `--mcp-config`, starts the run with no MCP server, so a
+channel's reply tool never reaches a scheduled run. An MCP server is a program
+or service that hands Claude extra tools.
 The ingest moves each original from `inbox/` into `sources/`, writes a summary
 page, revises the wiki pages the source bears on, updates `index.md` and
 `log.md`, and commits. Lint finds orphan pages, broken links, missing
@@ -602,8 +605,9 @@ the KB's ingest.
 between entities.
 
 `Read` and `Glob` are allowed unscoped, and a headless run will read an
-absolute path outside its own repository. Credential files are denied, but an
-ordinary file is not. So putting two entities' KBs under one account puts one
+absolute path outside its own repository. Only three credential stores are
+denied there, `.credentials.json`, the .NET user-secrets store and
+`appsettings*.json`. Every other file, credential or ordinary, is not. So putting two entities' KBs under one account puts one
 entity's sources within reach of the other entity's agent. A prompt-injected
 document dropped into one KB's inbox could instruct the run to read the other
 KB's sources and write them into a wiki page that is then pushed. The

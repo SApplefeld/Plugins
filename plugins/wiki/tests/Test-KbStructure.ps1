@@ -13,7 +13,8 @@ Also checks the permission allowlist, which is load-bearing: a headless run
 cannot answer a permission prompt, so a missing allow rule stalls an
 unattended ingest and a missing deny rule lets it damage sources/ or read a
 secret. The checks confirm settings.json parses, denies writes under
-sources/, inbox/, .git/ and .claude/, denies Write and Edit on an instruction
+sources/, inbox/, .git/ and .claude/, denies reads under inbox/, so a source
+is readable only once it has moved, denies Write and Edit on an instruction
 file (CLAUDE.md, CLAUDE.local.md, a .claude/ folder, .mcp.json) at any depth
 under wiki/, denies every raw git verb and the raw
 shell verbs that would bypass the helpers, denies the Grep tool, denies reads
@@ -167,6 +168,7 @@ $settingsChecks = @(
     'settings.json has permissions.deny array'
     'deny array blocks writes under sources/'
     'deny array blocks writes under inbox/'
+    'deny array blocks reads under inbox/'
     'deny array blocks writes under .git/'
     'deny array blocks writes under .claude/'
     'deny array blocks instruction files under wiki/'
@@ -174,7 +176,7 @@ $settingsChecks = @(
     'deny array blocks every raw git verb'
     'deny array blocks the Grep tool'
     'deny array blocks reads of credential files'
-    'allow array covers wiki page writes'
+    'allow array covers wiki page edits'
     'allow array covers the commit helper'
     'allow array covers moving a file out of inbox/'
     'allow array covers the status helper'
@@ -206,25 +208,28 @@ if (-not $parsed) {
     Test-Check -Description 'settings.json has permissions.allow array' -Passed ($allowRules.Count -gt 0)
     Test-Check -Description 'settings.json has permissions.deny array'  -Passed ($denyRules.Count -gt 0)
 
-    Test-Check -Description 'deny array blocks writes under sources/' -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(.*sources')
-    Test-Check -Description 'deny array blocks writes under inbox/'   -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(.*inbox')
-    Test-Check -Description 'deny array blocks writes under .git/'    -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(.*\.git')
-    # The root .claude/ check is anchored at ./.claude/, so the nested
-    # ./wiki/**/.claude/** rules below cannot stand in for the root pair.
-    Test-Check -Description 'deny array blocks writes under .claude/' -Passed (Test-RuleMatch $denyRules '^(Write|Edit)\(\./\.claude/')
+    # Each write deny is pinned as its exact string, in the Edit form, compared
+    # with regard to case, so a narrowed or respelled rule fails the check.
+    Test-Check -Description 'deny array blocks writes under sources/' -Passed ($denyRules -ccontains 'Edit(./sources/**)')
+    Test-Check -Description 'deny array blocks writes under inbox/'   -Passed ($denyRules -ccontains 'Edit(./inbox/**)')
+    # Pinned as its exact string, compared with regard to case, so a narrowed
+    # or misplaced rule that leaves an inbox source readable fails the check.
+    Test-Check -Description 'deny array blocks reads under inbox/'    -Passed ($denyRules -ccontains 'Read(./inbox/**)')
+    Test-Check -Description 'deny array blocks writes under .git/'    -Passed ($denyRules -ccontains 'Edit(./.git/**)')
+    Test-Check -Description 'deny array blocks writes under .claude/' -Passed ($denyRules -ccontains 'Edit(./.claude/**)')
 
     # The allow rule on wiki/ covers every path under it, and Claude Code loads
     # a CLAUDE.md, a CLAUDE.local.md or a .claude/ folder from any folder it
     # works in, and .mcp.json at the project root, so these deny rules keep a
     # page the agent writes from becoming an instruction file the next run
-    # follows. Each of the eight is pinned as its exact string, Write and Edit
-    # for each of the four names, compared with regard to case, so a missing
-    # Edit rule or a respelled pattern fails the check.
+    # follows. Each of the four is pinned as its exact string, in the Edit form,
+    # compared with regard to case, so a missing rule or a respelled pattern
+    # fails the check.
     $instructionRules = @(
-        'Write(./wiki/**/CLAUDE.md)', 'Edit(./wiki/**/CLAUDE.md)',
-        'Write(./wiki/**/CLAUDE.local.md)', 'Edit(./wiki/**/CLAUDE.local.md)',
-        'Write(./wiki/**/.claude/**)', 'Edit(./wiki/**/.claude/**)',
-        'Write(./wiki/**/.mcp.json)', 'Edit(./wiki/**/.mcp.json)'
+        'Edit(./wiki/**/CLAUDE.md)',
+        'Edit(./wiki/**/CLAUDE.local.md)',
+        'Edit(./wiki/**/.claude/**)',
+        'Edit(./wiki/**/.mcp.json)'
     )
     $missingInstructionRules = @($instructionRules | Where-Object { -not ($denyRules -ccontains $_) })
     Test-Check -Description 'deny array blocks instruction files under wiki/' -Passed ($missingInstructionRules.Count -eq 0)
@@ -251,24 +256,39 @@ if (-not $parsed) {
 
     # Read is allowed unscoped, so only these deny rules keep an injected instruction
     # from reading a credential file and writing it into a page that gets pushed.
+    # A `**/` rule binds only inside the KB. The three `//**/` rules bind on every drive.
     Test-Check -Description 'deny array blocks reads of credential files' -Passed (
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.credentials\.json\)') -and
+        ($denyRules -ccontains 'Read(//**/.credentials.json)') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/\.claude\.json\)') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/\.git-credentials\)') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/\.ssh/') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/\.aws/') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/\*\.pem\)') -and
+        ($denyRules -ccontains 'Read(**/*.pfx)') -and
+        ($denyRules -ccontains 'Read(**/*.key)') -and
+        ($denyRules -ccontains 'Read(**/id_rsa)') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/id_ed25519\)') -and
+        ($denyRules -ccontains 'Read(**/.npmrc)') -and
+        ($denyRules -ccontains 'Read(**/.pypirc)') -and
+        ($denyRules -ccontains 'Read(**/.docker/config.json)') -and
+        ($denyRules -ccontains 'Read(**/.kube/config)') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/\.config/gh/') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/GitHub CLI/') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/\.netrc\)') -and
         (Test-RuleMatch $denyRules '^Read\(\*\*/_netrc\)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.claude/\*\.json\)')
+        (Test-RuleMatch $denyRules '^Read\(\*\*/\.claude/\*\.json\)') -and
+        ($denyRules -ccontains 'Read(//**/UserSecrets/**)') -and
+        ($denyRules -ccontains 'Read(//**/appsettings*.json)')
     )
 
     # A structurally valid allowlist that omits a verb the ingest flow needs leaves an
     # unattended run stalled on a prompt nobody can answer. These assert the minimum set.
-    Test-Check -Description 'allow array covers wiki page writes' -Passed (Test-RuleMatch $allowRules '^Write(\(|$)')
+    # Each page rule is pinned as its exact string, compared with regard to case:
+    # an ingest whose page, index or log write is refused stalls on a prompt.
+    $pageRules = @('Edit(./wiki/**)', 'Edit(./index.md)', 'Edit(./log.md)')
+    $missingPageRules = @($pageRules | Where-Object { -not ($allowRules -ccontains $_) })
+    Test-Check -Description 'allow array covers wiki page edits' -Passed ($missingPageRules.Count -eq 0)
+    if ($missingPageRules.Count -gt 0) { Write-Host "  missing: $($missingPageRules -join ', ')" }
     Test-Check -Description 'allow array covers the commit helper' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-commit\.ps1')
     Test-Check -Description 'allow array covers moving a file out of inbox/' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-move\.ps1')
     Test-Check -Description 'allow array covers the status helper' -Passed (Test-RuleMatch $allowRules '^Bash\(pwsh .*kb-status\.ps1')

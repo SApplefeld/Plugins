@@ -213,8 +213,8 @@ one discipline.
 
 **Ingest** (`wiki-ingest`) is the core operation, written for unattended
 headless execution. It snapshots `inbox/` once at run start (files arriving
-mid-run wait for the next run), and for each source in order it reads the file,
-moves the original to `sources/`, writes a per-source summary page, revises the
+mid-run wait for the next run), and for each source in order it moves
+the original to `sources/`, reads it there, writes a per-source summary page, revises the
 handful of wiki pages the source genuinely touches, updates `index.md`, appends
 a `log.md` entry, and makes exactly one commit. It pushes once at run end, and
 a KB with no remote named `origin` pushes nothing. An
@@ -278,7 +278,10 @@ commits and pushes nothing, and reports the paths. A moved source's last-write
 time is the time `kb-move.ps1` writes it, so a source in flight reads as live. A run can also
 start while another is still reading, before that run's first write. So ingest
 reads liveness again immediately before each source's move, and an ingest that
-yields there keeps the sources it already committed and pushes nothing. Query
+yields there keeps the sources it already committed and pushes nothing. Ingest
+reads a source only after that move, and the deny rule `Read(./inbox/**)` makes
+a source still in `inbox/` unreadable, so no page a run builds from a source
+can come before that source's move and the liveness read just ahead of it. Query
 reads liveness once, when it files. Lint's checks only read and record
 their fixes, and a final write pass reads liveness again, then applies every fix,
 appends its report and commits in one short stretch, so lint never leaves a
@@ -492,23 +495,33 @@ recorded as an attributed claim (both values, both citations) rather than
 overwriting a sourced claim. A new source overwrites in place only when it
 clearly postdates or explicitly corrects the claim it replaces.
 
-**Reads of known credential and token files are denied; other out-of-repo reads
-are allowed.** `Read` and `Glob` are allowed unscoped, so an ingest run can read
-files. The `Grep` tool is denied outright, because its path-scoped deny rules do
+**Known credential files are unreadable inside the KB, and three stores on every
+drive.** Other reads are allowed: `Read` and `Glob` are allowed unscoped, so an
+ingest run can read files. The `Grep` tool is denied outright, because its path-scoped deny rules do
 not bind. `settings.json` denies `Read` of these paths, and those denies hold
 whether or not the workspace is trusted:
 
-- Claude Code's own: `**/.credentials.json` (also denied to `Glob`),
-  `**/.claude.json`, and `**/.claude/*.json`.
+- Claude Code's own: `//**/.credentials.json`, `**/.claude.json`, and
+  `**/.claude/*.json`.
 - git and GitHub: `**/.git-credentials`, `**/.config/gh/**`, and
   `**/GitHub CLI/**`.
 - SSH and keys: `**/.ssh/**`, `**/*.pem`, `**/*.pfx`, `**/*.key`, `**/id_rsa`,
   and `**/id_ed25519`.
 - Cloud and package tokens: `**/.aws/**`, `**/.npmrc`, `**/.pypirc`,
   `**/.docker/config.json`, `**/.kube/config`, `**/.netrc`, and `**/_netrc`.
+- .NET configuration: `//**/UserSecrets/**` and `//**/appsettings*.json`.
 
-A credential file at any other path, and every ordinary file elsewhere on the
-machine, remains readable. The boundary for that data rests on the Windows
+On Claude Code 2.1.322, a `Read` rule matches only files under its anchor, and
+a later build can move that reach. A `**/` pattern is anchored
+at the folder the run starts in, the KB root for every scheduled run, so it
+binds only inside the KB. The three `//**/` patterns are
+anchored at the filesystem root, so they bind on every drive. Of the three,
+only the user-secrets rule has been observed refusing a file on a drive other
+than the run's own. So a file a `**/`
+pattern names but that sits outside the KB, such as a key in the account's own
+`.ssh` folder, remains readable. So does a credential file at any other path,
+and every ordinary file elsewhere on the
+machine. The boundary for that data rests on the Windows
 account, so the one-account-per-entity invariant is a hard requirement.
 
 **Any invalid settings file is ignored wholesale.** Claude Code silently ignores
@@ -637,13 +650,16 @@ and defers the step where any file is live, so a model run never starts only
 to yield. A model is called only by a conflicting pull, an ingest with work or
 a due lint, so an idle KB costs nothing. Each model run goes through the
 wrapper, whose action is
-`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default`,
+`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default --strict-mcp-config`,
 with `wiki-lint` or `wiki-merge` in place of `wiki-ingest`. The prompt names
 the skill in prose, the stable form for a headless run. The model pin is
 load-bearing and fails silently when wrong: a too-small or unpinned model does
 nothing while emitting success-shaped text. The permission mode pin holds the
 run to the workspace allow list on an account whose own default is to bypass
-permissions.
+permissions. An MCP server is a program or service that hands Claude
+extra tools, a channel's reply tool among them. The MCP pin,
+`--strict-mcp-config` with no `--mcp-config`, starts the run with no MCP
+server, so no such tool reaches a scheduled run.
 
 The pass holds a budget of 6900 seconds, under the task's 2-hour limit. A KB
 not started before it runs out is recorded `skipped: budget`, and the next pass

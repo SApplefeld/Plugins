@@ -313,7 +313,8 @@ permission allowlist has the right shape (it denies writes under `sources/`,
 `inbox/`, `.git/`, and `.claude/`, denies writes to the instruction files
 Claude Code loads, `CLAUDE.md`, `CLAUDE.local.md`, a `.claude/` folder and
 `.mcp.json`, at any depth under `wiki/`, denies all of raw git and the raw shell verbs
-that would bypass the helpers, denies credential reads, allows the three vetted
+that would bypass the helpers, denies reads under `inbox/` and of the credential
+paths the template names, allows the three vetted
 helpers, and pins the default permission mode).
 
 A green run does not prove a headless run will complete. That also needs

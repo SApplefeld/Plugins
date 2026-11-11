@@ -212,22 +212,14 @@ unpushed check.
 
 For each source, in the order the snapshot listed them:
 
-**a. Check its size, then read it.** The snapshot gives the size. Above
-25 MB, do not attempt to read it at all: a read that large can exhaust the
-run. Move it (step b) and write a stub summary page recording the file
-name, its size, that it was too large to read, and that it needs manual
-attention, then continue the remaining steps for it. Otherwise read it;
-PDFs and images read natively. If the file cannot be read (an archive, an
-unsupported binary, a corrupt file), do not skip it and do not leave it in
-the inbox: move it anyway and write the same kind of stub summary page,
-recording that its content could not be read, then continue the remaining
-steps for it (index entry, log entry, its own commit). A source is never
-silently dropped and never left in the inbox to be retried forever, save the
-two kinds step b leaves there: a name its first check skips and a new
-document under a name `sources/` already holds. Where step b removes a
-duplicate or leaves a file under a taken name, that source ends there, with
-no stub page. A file step b refuses for any other reason stops the run
-instead, and stays in the inbox until a person acts on the refusal.
+**a. Check its size.** The snapshot gives the size, and this step reads
+nothing: the source still sits in `inbox/`, where the permission rules
+refuse a read, and step c reads it only after step b has moved it. Above
+25 MB, do not attempt to read it at all, at this step or after the move: a
+read that large can exhaust the run. Flag it as too large to read and
+send it on to step b unread. This step writes nothing for it: step c
+writes its stub page, and only once step b has moved it. Every other
+source goes on to step b unread too.
 
 **b. Move it.** First look at the name itself. kb-move refuses a name
 containing `/`, `\` or `:`, equal to `.` or `..`, or starting with a dash,
@@ -286,8 +278,30 @@ that matches no file because the file left the inbox after the snapshot, stop
 the run: emit step 5's push-only call so the commits this run already made
 reach origin, then report the refusal. Never work around a refusal.
 
-**c. Write its summary page**, `wiki/<source-slug>-summary.md`, deriving
-the slug and the page's content per the schema. The page's first lines
+**c. Read it, and write its summary page.** Read the source now, with the
+Read tool, at the path kb-move printed in step b, `sources/<file>`. Write
+no page for a source before this step, and for a source step a did not
+flag, not before attempting this read. The path is the Read tool's
+parameter and goes on no command line, as step b says. No step reads a
+source while it is in `inbox/`. PDFs and images read natively. A source
+step a flagged as above 25 MB is not read. Where step b moved it, write a
+stub summary page recording the file name, its size, that it was too
+large to read, and that it needs manual attention, then continue the
+remaining steps for it. If the file cannot be read (an archive, an
+unsupported binary, a corrupt file, or a read the permission rules refuse),
+do not skip it:
+it is already in `sources/`, so write the same kind of stub summary page,
+recording that its content could not be read, then continue the remaining
+steps for it (index entry, log entry, its own commit). A source is never
+silently dropped and never left in the inbox to be retried forever, save the
+two kinds step b leaves there: a name its first check skips and a new
+document under a name `sources/` already holds. Where step b removes a
+duplicate or leaves a file under a taken name, that source ends there, with
+no stub page. A file step b refuses for any other reason stops the run
+instead, and stays in the inbox until a person acts on the refusal.
+
+The summary page is `wiki/<source-slug>-summary.md`. Derive the slug and
+the page's content per the schema. The page's first lines
 must name the exact source file it summarizes; that is what keeps
 provenance unambiguous when two file names share a slug. Before writing,
 check whether the target page already exists. If it exists and its first

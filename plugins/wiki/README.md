@@ -35,10 +35,11 @@ Every knowledge base built from this engine has three layers:
 Ingest adds a document to the wiki, query answers a question from it, and
 lint checks its health and fixes what it can.
 
-**Ingest.** A file arrives in `inbox/`. The ingest run reads it, moves the
-original to `sources/` (never deleted, never edited again), writes a summary
-page for it, and revises the existing wiki pages that source actually touches,
-in one pass. It updates `index.md` and appends a `log.md` entry, then commits,
+**Ingest.** A file arrives in `inbox/`. The ingest run moves the
+original to `sources/` (never deleted, never edited again), reads it there,
+writes a summary page for it, and revises the existing wiki pages that source
+actually touches, in one pass. The wiki's permissions refuse any read under
+`inbox/`, so a source is read only after its move. It updates `index.md` and appends a `log.md` entry, then commits,
 and pushes where the KB has a remote named `origin`.
 
 Designed for unattended, headless execution. Every completed source is
@@ -209,8 +210,10 @@ pushes its engine update.
 An idle KB costs no model call, so the hourly pass costs nothing on a quiet
 account. Each model run goes through the KB's wrapper, `.claude/kb-run.ps1`,
 which runs headless Claude Code
-(`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default`)
-with the KB folder as its working directory. Every pass writes
+(`claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default --strict-mcp-config`)
+with the KB folder as its working directory. The last flag starts the run with
+no MCP server, so a channel's reply tool never reaches it. An MCP server is a
+program or service that hands Claude extra tools. Every pass writes
 `%LOCALAPPDATA%\llm-wiki\walk-status.json`, which names each KB, each step's
 outcome, every failure and every deferred KB with its reason. A stuck wiki also
 gets a line in `%LOCALAPPDATA%\llm-wiki\walk-notices.jsonl`, which a persona

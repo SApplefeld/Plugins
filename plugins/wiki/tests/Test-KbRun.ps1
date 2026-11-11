@@ -313,9 +313,9 @@ $noClaudeDir = Join-Path $work 'no-claude'
 $emptyConfig = Join-Path $work 'empty.gitconfig'
 $scrubbedPath = "$noClaudeDir;$(Join-Path $env:SystemRoot 'System32')"
 
-$ingestArgs = '-p "Use the wiki-ingest skill." --model sonnet --permission-mode default'
-$lintArgs = '-p "Use the wiki-lint skill." --model sonnet --permission-mode default'
-$mergeArgs = '-p "Use the wiki-merge skill." --model sonnet --permission-mode default'
+$ingestArgs = '-p "Use the wiki-ingest skill." --model sonnet --permission-mode default --strict-mcp-config'
+$lintArgs = '-p "Use the wiki-lint skill." --model sonnet --permission-mode default --strict-mcp-config'
+$mergeArgs = '-p "Use the wiki-merge skill." --model sonnet --permission-mode default --strict-mcp-config'
 $stubStderr = 'kbrun-stub: a line on stderr'
 
 $priorGlobal = $env:GIT_CONFIG_GLOBAL

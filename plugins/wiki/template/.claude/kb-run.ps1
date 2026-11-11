@@ -20,7 +20,7 @@ KB and the operation and exits 0, so Task Scheduler records a clean no-op. The
 lock handle is not inheritable, so the child never holds it.
 
 With the lock held, the wrapper runs
-    claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default
+    claude -p "Use the wiki-ingest skill." --model sonnet --permission-mode default --strict-mcp-config
 for Ingest, or the same line naming wiki-lint for Lint or wiki-merge for Merge,
 with the KB root as the working directory. The argument line is fixed text; no value a caller supplies
 is placed in it, so a claude.cmd that forwards its arguments cannot be handed a
@@ -264,7 +264,7 @@ function New-KillOnCloseJob {
 # The KB root is the parent of the .claude/ directory this script lives in.
 $kbRoot = Split-Path -Parent $PSScriptRoot
 $skill = "wiki-$($Operation.ToLowerInvariant())"
-$arguments = "-p `"Use the $skill skill.`" --model sonnet --permission-mode default"
+$arguments = "-p `"Use the $skill skill.`" --model sonnet --permission-mode default --strict-mcp-config"
 $whatIf = [bool]$WhatIfPreference
 
 $lock = $null
