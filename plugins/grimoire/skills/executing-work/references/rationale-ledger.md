@@ -7350,7 +7350,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: the spec, or a diff captured with `git diff > .kit/scratch/<name>.diff`. Keep the project's `.gitignore` covering `.kit/`.
 
 ### c4.C080
-- key: Give the blind-reviewer the base ref or changed-file list per step 3's contract, never a captured diff.
+- key: Give the blind-reviewer the base ref and the changed-file list per step 3's contract, never a captured diff.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/implementing.md:174
 - provenance: af64267 2026-07-27, a kaizen note after an orchestrator handed a section-named diff and the blind reviewer flagged the contamination live; the carve-out was placed at the point of action with step 3 kept as the contract's owner.
@@ -7359,7 +7359,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - reason: The exception stays as a pointer at step 3; the reason moves here: a captured diff leaks intent twice, through its filename (usually the section name) and through the docs/ hunks inside it.
 - proposed: (via A022) "The blind-reviewer is the standing exception: it takes the base ref or changed-file list per step 3's contract, never a captured diff." Drop the "because the capture's filename ... side door" clause.
 - baseline-test: yes
-- passage: The blind-reviewer is the standing exception: it takes the base ref or changed-file list per step 3's contract, never a captured diff.
+- passage: The blind-reviewer is the standing exception: it takes the base ref and the changed-file list per step 3's contract, never a captured diff.
 
 ### c4.C081
 - key: Have each subagent return its report inline in its final message rather than as a committed file.
@@ -8104,7 +8104,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 This document is the reference file of the executing-work skill that carries step 3 of the section loop. It owns the review round: the correctness and advisory lenses and their triggers, the reviewer tier rule, the round's tree-state bracket, the Document Review Brief, the dispatch table, the Reviewer Dispatch template that carries a row's effort on the Agent tool call, the compensation route, and the Scope Adjudicator Brief. Load class: `plan-run` - the main file's contents table and its skeleton line for step 3 tell a session to read it before any reviewer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: I022, R040 and R042 rewritten to their passages as they now read, R045 retired, and BA001 to BA003 added under the plan's letter BA for the adjudicator's amendments heading, its trace target and the Scope Adjudicator Brief. Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10, which set the adversarial-reviewer's effort to `medium` from its sweep: U008, U011 and AM001 rewritten to their rows as they now read, each keeping the lenses still at `low`, and BC002 added under the plan's letter BC for the adversarial-reviewer's row split out of them. Its rewritten and added entries' `source:` lines name the lines their rows sit on in that section's tree. Amended by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2 on 2026-11-11, which sends every dispatch-table row through the Agent tool, its effort passed on the call: U010, U012, c3.C063, c3.C065 and Q002 rewritten to their rows as they now read, c3.C064 and A001 re-quoted with their route cells, G001 and G002 re-quoted, c3.C073, c3.C076, c3.C084, c3.C085, c3.C089, c3.C092, c3.C093, R073, R074 and W018 rewritten to their passages as they now read, c3.C074 and c3.C090 retired, and the keys or reasons of c3.C075, c3.C078, R050 and R052 reworded. Amended by `docs/plans/claude-kit_judge-own-commits-signals-agree_spec_v1.md` section 1 on 2026-11-11: BA003 rewritten to its passage as it now reads, the whole-changeset line naming the plan's first own commit and the words `start unconfirmed`.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: I022, R040 and R042 rewritten to their passages as they now read, R045 retired, and BA001 to BA003 added under the plan's letter BA for the adjudicator's amendments heading, its trace target and the Scope Adjudicator Brief. Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10, which set the adversarial-reviewer's effort to `medium` from its sweep: U008, U011 and AM001 rewritten to their rows as they now read, each keeping the lenses still at `low`, and BC002 added under the plan's letter BC for the adversarial-reviewer's row split out of them. Its rewritten and added entries' `source:` lines name the lines their rows sit on in that section's tree. Amended by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2 on 2026-11-11, which sends every dispatch-table row through the Agent tool, its effort passed on the call: U010, U012, c3.C063, c3.C065 and Q002 rewritten to their rows as they now read, c3.C064 and A001 re-quoted with their route cells, G001 and G002 re-quoted, c3.C073, c3.C076, c3.C084, c3.C085, c3.C089, c3.C092, c3.C093, R073, R074 and W018 rewritten to their passages as they now read, c3.C074 and c3.C090 retired, and the keys or reasons of c3.C075, c3.C078, R050 and R052 reworded. Amended by `docs/plans/claude-kit_judge-own-commits-signals-agree_spec_v1.md` section 1 on 2026-11-11: BA003 rewritten to its passage as it now reads, the whole-changeset line naming the plan's first own commit and the words `start unconfirmed`. Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH008 added under the plan's letter BH for the reviewer reading contract, the reading rule and the files block. Amended by that plan's section 2 on 2026-11-11: R030 and R032 rewritten to their passages as they now read, each lens given the changed-file list beside the base ref, and BH009 to BH013 added under the plan's letter BH for the orchestrator's check of each code lens's return against the list it sent. Its new paragraph moved every later line of the source down by 2, and the entries whose `source:` line named their passage's line were re-pointed to it.
 
 ### I021
 - key: Title the reference file carrying step 3 of the section loop, with the dispatch table and the review templates `Reviewing a Section`.
@@ -8388,13 +8388,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - flag: stale
 
 ### R030
-- key: Give the adversarial-reviewer the spec path, the base ref or changed-file list, the section name, a REQUIRED `Amendments in effect:` line, and style-skill absolute paths.
+- key: Give the adversarial-reviewer the spec path, the base ref and the changed-file list, the section name, a REQUIRED `Amendments in effect:` line, and style-skill absolute paths.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:5
-- provenance: 12ef61f 2026-07-09, a5e184b 2026-08-25, 9b54008 2026-08-01; unchanged by f26619c.
-- verdict: keep
-- reason: The complete field list for one dispatch; the sighted-only rule and finishing-work's restatement answer other questions. Same sentence as c3.C020.
-- passage: The adversarial-reviewer gets the spec path, the base git ref or changed-file list, the section name, and a REQUIRED `Amendments in effect:` line from the plan doc's `Standing Brief Amendments` block or explicitly `none`. A C# or T-SQL section adds the csharp-style or sql-style absolute paths, resolved by the Dispatch Brief template's style-skill ladder.
+- provenance: 12ef61f 2026-07-09, a5e184b 2026-08-25, 9b54008 2026-08-01; unchanged by f26619c; `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2 2026-11-11 gave the lens the changed-file list beside the base ref, which BH009's check reads a return against.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2
+- reason: The complete field list for one dispatch; the sighted-only rule and finishing-work's restatement answer other questions. Same sentence as c3.C020. The list rides beside the ref, since the orchestrator checks the return's files block against the list it sent (BH009).
+- proposed: The adversarial-reviewer gets the spec path, the base git ref and the changed-file list, the section name, and a REQUIRED `Amendments in effect:` line from the plan doc's `Standing Brief Amendments` block or explicitly `none`.
+- passage: The adversarial-reviewer gets the spec path, the base git ref and the changed-file list, the section name, and a REQUIRED `Amendments in effect:` line from the plan doc's `Standing Brief Amendments` block or explicitly `none`. A C# or T-SQL section adds the csharp-style or sql-style absolute paths, resolved by the Dispatch Brief template's style-skill ladder.
 
 ### R031
 - key: Ensure every sentence of the blind-reviewer's brief would read identically for every diff in this repository.
@@ -8406,13 +8408,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: Every sentence of the blind-reviewer's brief passes one test: would it read identically for every diff in this repository?
 
 ### R032
-- key: Give the blind-reviewer the base ref or changed-file list only, never a captured diff, the spec path, the plan, the section name, a focus line, or docs/ paths.
+- key: Give the blind-reviewer the base ref and the changed-file list only, never a captured diff, the spec path, the plan, the section name, a focus line, or docs/ paths.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:7
-- provenance: 12ef61f 2026-07-09, af64267 2026-07-27; unchanged by f26619c.
-- verdict: keep
-- reason: Step 3 is the contract's owner by the installing commit's own words; the delegation-section carve-out cites it. Same sentence as c3.C021.
-- passage: So it gets the base git ref or changed-file list, never a captured diff. It never gets the spec path, the plan, the section name, or a line on what the change adds or where to focus. Omit docs/ paths from the list, since their hunks carry the intent story.
+- provenance: 12ef61f 2026-07-09, af64267 2026-07-27; unchanged by f26619c; `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2 2026-11-11 gave the lens the changed-file list beside the base ref, which BH009's check reads a return against.
+- verdict: rewrite
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2
+- reason: Step 3 is the contract's owner by the installing commit's own words; the delegation-section carve-out cites it. Same sentence as c3.C021. The list rides beside the ref, since the orchestrator checks the return's files block against the list it sent (BH009). The list was a blind input before it became a required one, so the property test (R031) admits it as it did.
+- proposed: So it gets the base git ref and the changed-file list, never a captured diff.
+- passage: So it gets the base git ref and the changed-file list, never a captured diff. It never gets the spec path, the plan, the section name, or a line on what the change adds or where to focus. Omit docs/ paths from the list, since their hunks carry the intent story.
 
 ### R033
 - key: Treat a section carrying an `Audience:` line as a deliverable document and add the document pair to whatever its content already earns.
@@ -8783,7 +8787,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### U008
 - key: Dispatch round 1's blind-reader and prose-reviewer over a section whose writer tier is opus at model opus, effort `low` (frontmatter default), via the Agent tool.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/review.md:67
+- source: plugins/grimoire/skills/executing-work/references/review.md:69
 - provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 dropped the blind-reviewer from the row; docs/plans/claude-kit_opus-reviews-opus_spec_v1.md section 1 2026-11-01, on the operator's ruling of 2026-10-30 on the architect's channel, narrowed the row to the opus writer at opus and moved the fable writer to its own row (AM001); docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md section 3 2026-11-10, on the sweep its section 2 tabled, where the adversarial-reviewer on Fable 5.2 averaged 1.00 confirmed findings per run at low against 1.75 at medium, split the adversarial-reviewer onto its own row (BC002).
 - verdict: rewrite
 - reason: The row names round 1 explicitly, since a later round dispatches one sighted lens, the one the fix delta earns. Over an opus writer these lenses run at opus, on the operator's balance of Opus and Fable use and his judgment of Opus as a sufficient reviewer (U001); the blind-reviewer has its own Opus row (Q001), and the adversarial-reviewer has its own row (BC002) because its frontmatter default is `medium` and a row's effort cell states one level for every agent it names.
@@ -8815,7 +8819,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### U011
 - key: Dispatch a later round's prose lens over a fable writer at model fable, effort `low` (frontmatter default), via the Agent tool.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/review.md:76
+- source: plugins/grimoire/skills/executing-work/references/review.md:78
 - provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md section 3 2026-11-10, on the sweep its section 2 tabled, where the adversarial-reviewer on Fable 5.2 averaged 1.00 confirmed findings per run at low against 1.75 at medium, split the adversarial lens onto its own row (BC002).
 - verdict: rewrite
 - reason: A later round over a Fable-tier writer stays cheap, since the writer's own tier is already the ceiling and the round is one lens rather than the round 1 roster. The adversarial lens has its own row (BC002) because its frontmatter default is `medium`.
@@ -9062,7 +9066,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### AM001
 - key: Dispatch round 1's blind-reader and prose-reviewer over a section whose writer tier is fable at model fable, effort `low` (frontmatter default), via the Agent tool.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/review.md:68
+- source: plugins/grimoire/skills/executing-work/references/review.md:70
 - provenance: docs/plans/claude-kit_opus-reviews-opus_spec_v1.md section 1 2026-11-01, on the operator's ruling of 2026-10-30 on the architect's channel, splitting the fable writer out of U008's row; docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md section 3 2026-11-10, on the sweep its section 2 tabled, where the adversarial-reviewer on Fable 5.2 averaged 1.00 confirmed findings per run at low against 1.75 at medium, split the adversarial-reviewer onto its own row (BC002).
 - verdict: rewrite
 - reason: A fable writer's section still earns a Fable check at round 1, since these lenses' ceiling is Fable (U001) and the operator's ruling moved only the opus writer's round. The row takes its own short name so the opus row keeps the name other text already used for round 1's pair. The adversarial-reviewer has its own row (BC002) because its frontmatter default is `medium`.
@@ -9134,12 +9138,142 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 ### BC002
 - key: Dispatch the adversarial-reviewer at round 1 over a section whose writer tier is opus or fable, and at a later round over a fable writer, at the writer's tier, effort `medium` (frontmatter default), via the Agent tool.
 - class: mechanic
-- source: plugins/grimoire/skills/executing-work/references/review.md:66
+- source: plugins/grimoire/skills/executing-work/references/review.md:68
 - provenance: docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md section 3 2026-11-10, on the sweep its section 2 tabled, where the adversarial-reviewer on Fable 5.2 averaged 1.00 confirmed findings per run at low against 1.75 at medium, split out of the rows of U008, AM001 and U011.
 - verdict: keep
 - reason: The adversarial-reviewer's frontmatter default is `medium` (BC001), which test/dispatch-table.test.js's effort map holds, so it sits on a row of its own apart from the lenses on the U008, AM001 and U011 rows, whose default is `low`. One row serves its three shapes because each runs at the writer's tier.
 - passage: | **Adversarial lens**: round 1 over an opus or fable writer, or a later round over a fable writer, `adversarial-reviewer` | the writer's tier | `medium` (frontmatter default) | Agent tool |
 - landed: e38811c2b section 3
+
+### BH001
+- key: Read the reading rule and the files block as the reviewers' own text, owned in review.md and copied whole into their charters, and never as an instruction to the orchestrator.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:118
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: A dispatched reviewer does not load this file, so a copy in its charter is the only form that reaches it. One owner with pinned copies keeps the text the orchestrator checks a return against equal to the text the reviewer followed, under test/claim-class-parity.test.js. Read as the orchestrator's own instruction, the passages would order it to read diffs, which is not its duty at this step.
+- passage: The two passages below are the reviewers' own text, owned here and copied whole into their charters: the reading rule into the four code lenses, the finding verifier and the scope adjudicator, and the files block into the four code lenses alone. The orchestrator reads them as the contract it checks, never as an instruction to itself.
+
+### BH002
+- key: Read a changeset one file at a time: take the changed-file list from the brief or list the changed paths with a name-only command, read each file's diff with a command naming that one path, and read the file itself where that command prints nothing.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:121
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: The harness caps what one tool result carries and hands back a saved-output notice with a preview past the cap, so a whole-range diff can hide a file the reviewer then never reads. One file's diff per command stays under the cap unless that file alone passes it. A command that prints nothing for a listed file means the file is untracked or unchanged against the base, and the file itself is then the only read there is.
+- passage: Read a changeset one file at a time. Take the changed-file list from your brief. Where the brief carries none, list the changed paths first with a name-only command. Then read each file's diff in a tool call of its own, with a command that names that one path, such as `git diff <base> -- <path>`. A listed path your charter excludes is not yours to read, by its diff or whole. Where the command prints nothing for any other listed file, the file is untracked, unchanged against the base, or gone from both, and your read is the file itself where one stands.
+
+### BH003
+- key: Treat a tool result that arrives as a saved-or-cut notice with a preview as unread, and read it again with a narrower command or through the saved file in parts.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:123
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: A preview holds the first part of the output alone, so a reviewer that takes it as read returns a verdict over changes it never saw. A narrower command and the saved file are the two routes that reach the rest.
+- passage: A tool result that arrives as a notice that the output was saved or cut, with a preview in its place, is unread, however much the preview shows. Read it again with a narrower command, or, where the notice names a saved file in a tool-results folder, open that file and read it through in parts.
+
+### BH004
+- key: Never count a name list or a stat summary as a read of a file's changes.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:125
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: A name and two counts carry none of the changed lines, and after the notice the sweep's reviewers fell back on a stat summary and returned a verdict over the range.
+- passage: A name list or a stat summary is no read of a file's changes.
+
+### BH005
+- key: Where a file's changes could not be read whole, say so in the return and name the file.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:127
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: A return that names the file it could not read lets the orchestrator send that file again, rather than take the verdict as covering it.
+- passage: Where a file's changes could not be read whole, say so in your return and name the file.
+
+### BH006
+- key: Close the return with the files block directly above the verdict line, one line per file of the changed-file list in the list's order.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:131
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: The orchestrator holds the list it sent and compares the block with it, so the block answers every listed file by path in the list's order. Directly above the verdict line is where the orchestrator already reads the return.
+- passage: Close your return with this block, directly above your verdict line. After its header it holds one line per file of the changed-file list, the brief's or the one you listed, in the list's order:
+
+### BH007
+- key: Write the files block in three line shapes: `FILES: <n> listed, <r> read, <u> not read`, `read: <path>` and `not read: <path> - <why>`.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:134
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: The orchestrator reads these three line shapes, so they are a contract and change only with the check that reads them.
+- passage: FILES: <n> listed, <r> read, <u> not read read: <path> not read: <path> - <why>
+
+### BH008
+- key: Mark a file `read` only where the whole output of its own diff command reached the lens, or where a file whose diff printed nothing was read through, mark every other file `not read`, and let the verdict cover the `read` files alone.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:139
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: A `read` mark a preview or a stat summary could earn would carry the blind spot the rule exists to close, so the mark rests on the whole output reaching the lens. A verdict over the `read` files alone keeps a missed file from passing under an approval.
+- passage: A file is `read` where the whole output of its own diff command reached you, in one tool result or in parts by the routes above for a result that arrives saved or cut, whatever that output holds: hunks, a binary-file line, a mode change or a deletion. A listed file whose diff command printed nothing is `read` where you read the file itself through, or where no file stands at its path. Every other file is `not read`. Your verdict covers the files marked `read` alone.
+
+### BH009
+- key: Send every code lens the changed-file list beside the base ref, taken on a section round and a `Step back:` round by `git diff --name-only --no-renames <base ref>` unioned with `git ls-files --others --exclude-standard` and on any other later round from the `Fix delta:` files, with `docs/` paths omitted from the blind lens's list.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:33
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where reviewers returned verdicts over a range holding a file they never read, and three of the five returns said nothing of the skip.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2
+- reason: The check below compares two lists the orchestrator holds, so the list it sends is the one it checks against. The name-only form with renames off lists each changed path once by its own name, and a later round's reviewed files are the fix delta's. The blind list keeps R032's exclusion, since `docs/` hunks carry the intent story.
+- passage: **A code lens's return answers the changed-file list it was sent, or the lens is sent once more.** Every dispatch of a code lens carries the changed-file list beside the base ref. On a section round and on a `Step back:` round, take it with `git diff --name-only --no-renames <base ref>` unioned with `git ls-files --others --exclude-standard`, and on any other later round it is the `Fix delta:` files. The blind lens's list omits `docs/` paths, as its brief above states. On a section the Audience rule also gives the document pair, the code lenses' list holds its non-document files alone.
+
+### BH010
+- key: Before adjudicating any finding of a code lens, compare its files block with the list sent, and treat as an incomplete return exactly a return with no block, a listed file no line names, or a `not read` line, reading the per-file lines alone.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:33
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where reviewers returned verdicts over a range holding a file they never read, and three of the five returns said nothing of the skip.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2
+- reason: A reviewer that skipped a file can still return a verdict, and the sweep showed a low-effort reviewer does not always follow its charter, so the guarantee sits on a comparison the orchestrator makes. The three cases are the only ways a block can leave a listed file unanswered. The header's counts are the reviewer's own arithmetic and a stray path answers nothing, so only the per-file lines decide.
+- passage: Before adjudicating any finding of a lens, compare the return's files block with the list it was sent. An incomplete return is one of three things, and the set is closed: a return with no files block, a listed file no line of the block names, or a line reading `not read`. Read the block's per-file lines alone. Its header's counts decide nothing, and a line naming a path the list does not hold is ignored.
+
+### BH011
+- key: Treat an incomplete return as an environment fault, neither a pass nor a failed round, adjudicating its findings and reading its verdict as covering the `read` files alone.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:33
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where the unread file's diff passed the harness's tool-result cap, a limit of the environment and not of the change.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2
+- reason: The miss comes from the harness's cap on one tool result, so it says nothing of the change's quality and spends no escalation. The findings the lens did return rest on files it read, so discarding them would lose real defects. The verdict matches the files block's own contract (BH008).
+- passage: An incomplete return is an environment fault, neither a pass nor a failed round. Its findings stand and are adjudicated, and its verdict covers the files marked `read` alone.
+
+### BH012
+- key: Dispatch a lens with an incomplete return once more per round over its unaccounted files at the same row, inside its own round, carrying the more severe of its two verdicts, adjudicating both returns' findings together and naming the re-dispatch on the Chapter.
+- class: rule
+- source: plugins/grimoire/skills/executing-work/references/review.md:33
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where the file a reviewer missed held a defect the sweep's verifiers confirmed.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2
+- reason: A file no lens read carries no review, and a second dispatch over that file alone is small enough to reach it. One dispatch bounds the cost, and counting it inside the lens's round keeps step 1's escalation count, as findings.md counts a lens re-dispatched after the wedge hallmark. The more severe verdict keeps a defect in either return from passing under the other's approval.
+- passage: Dispatch that lens once more over the unaccounted files, at the same dispatch table row, with those files as its changed-file list. Once is once per lens per round. That dispatch completes the lens's own round, as `findings.md` says of a lens re-dispatched after the wedge hallmark finishing-work's unavailability rule defines. The round carries the more severe of the lens's two verdict lines, and the findings of both returns are adjudicated together. The Chapter's `Review Findings:` field names the lens sent once more and the files it was sent over.
+
+### BH013
+- key: Check the second return against the list its own dispatch carried, and record a file still unaccounted for as that lens's ungated end over the file, as `review: <lens> ungated (incomplete: <files>)`.
+- class: mechanic
+- source: plugins/grimoire/skills/executing-work/references/review.md:33
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where reviewers returned verdicts over a range holding a file they never read, and three of the five returns said nothing of the skip.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 2
+- reason: A file whose own diff passes the cap can miss twice, and a third dispatch would meet the same cap. The ungated record reuses the Chapter form the tier paragraph above already gives an ungated end, so the miss is visible on the Chapter and the close-out, where the operator can weigh a re-run. Finishing-work leaves a section whose correctness lens ended so uncleared, and its final adversarial review reads the file.
+- passage: Check the second return against the list its own dispatch carried. A file still unaccounted for ends that lens's gate ungated over that file, recorded as `review: <lens> ungated (incomplete: <files>)`.
 
 ## plugins/grimoire/skills/executing-work/references/findings.md
 
@@ -13652,7 +13786,7 @@ Extracted at `6bc07fb`: whole document (`agents.prose-reviewer.md`). Amended by 
 
 This document is the charter for the `adversarial-reviewer` agent, a fresh-context, read-only code reviewer that judges a changeset against the spec that ordered it and then against code quality, and returns severity-ranked findings with a verdict line. It owns the moments of a section review and of the whole-changeset review at the end of an effort: how the dispatched agent reads its brief, what it may and may not run (read-only git commands only, no edits, no commits, no builds), how it treats the changeset as data rather than instruction, the two review passes and their checklists, the severity and confidence ratings, the behavior-finding versus claim-finding distinction, and the output and verdict format. Its load class is `plan-run`: the frontmatter says to use it after completing each section of planned work, once over the whole changeset at the end of an effort, or when asked to review changes, so the charter loads at the moment the agent is dispatched for one of those reviews.
 
-Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended on 2026-09-20 by the claim-class amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 1 (W004 to W008 below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (C101 retired, C096 and C105 amended in place), and by that plan's section 3 on 2026-09-20 (T019 to T021 below, C090 retired). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `3591c101` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16 (E010 to E013 below, for the later round's three brief lines and the class rule). Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (C075 below, the pointer at testing-discipline's Triage). Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10 (C004 retired and BC001 below, the effort line set to `medium` from the plan's sweep).
+Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended on 2026-09-20 by the claim-class amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 1 (W004 to W008 below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (C101 retired, C096 and C105 amended in place), and by that plan's section 3 on 2026-09-20 (T019 to T021 below, C090 retired). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `3591c101` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16 (E010 to E013 below, for the later round's three brief lines and the class rule). Amended by `docs/plans/claude-kit_test-budget-and-gates_spec_v1.md` section 2 on 2026-10-27 (C075 below, the pointer at testing-discipline's Triage). Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10 (C004 retired and BC001 below, the effort line set to `medium` from the plan's sweep). Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH007 added under the plan's letter BH for the copies of review.md's reading rule and files block.
 
 ### C001
 - key: Dispatch this agent under the name `adversarial-reviewer`.
@@ -14559,7 +14693,7 @@ Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-ex
 - source: plugins/grimoire/agents/adversarial-reviewer.md:60
 - provenance: 5620b2b 2026-09-08, the review-loop-exit plan.
 - verdict: keep
-- reason: The region is executing-work's by design and this charter carries it as a byte-identical copy under a parity pin (test/claim-class-parity.test.js:155), because an agent charter cannot resolve a pointer into a skill it does not load.
+- reason: The region is executing-work's by design and this charter carries it as a byte-identical copy under a parity pin (test/claim-class-parity.test.js:184), because an agent charter cannot resolve a pointer into a skill it does not load.
 - passage: A behavior finding states a failure scenario: an input or a state where the code does the wrong thing on a reachable path, or a test exercises the wrong thing.
 
 ### C100
@@ -15212,6 +15346,76 @@ Extracted at `6bc07fb`: whole document (`agents.adversarial-reviewer.md`). Re-ex
 - reason: The frontmatter value is the default the Agent tool dispatches at, and executing-work's table records it as exactly that. On Fable 5.2 this charter confirms more findings per run at medium than at low, by more than the margin the sweep's decision rule allows.
 - passage: effort: medium
 - landed: e38811c2b section 3
+
+### BH001
+- key: Read a changeset one file at a time: take the changed-file list from the brief or list the changed paths with a name-only command, read each file's diff with a command naming that one path, and read the file itself where that command prints nothing.
+- class: rule
+- source: plugins/grimoire/agents/adversarial-reviewer.md:23
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH002 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Read a changeset one file at a time. Take the changed-file list from your brief. Where the brief carries none, list the changed paths first with a name-only command. Then read each file's diff in a tool call of its own, with a command that names that one path, such as `git diff <base> -- <path>`. A listed path your charter excludes is not yours to read, by its diff or whole. Where the command prints nothing for any other listed file, the file is untracked, unchanged against the base, or gone from both, and your read is the file itself where one stands.
+
+### BH002
+- key: Treat a tool result that arrives as a saved-or-cut notice with a preview as unread, and read it again with a narrower command or through the saved file in parts.
+- class: rule
+- source: plugins/grimoire/agents/adversarial-reviewer.md:25
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH003 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A tool result that arrives as a notice that the output was saved or cut, with a preview in its place, is unread, however much the preview shows. Read it again with a narrower command, or, where the notice names a saved file in a tool-results folder, open that file and read it through in parts.
+
+### BH003
+- key: Never count a name list or a stat summary as a read of a file's changes.
+- class: rule
+- source: plugins/grimoire/agents/adversarial-reviewer.md:27
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH004 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A name list or a stat summary is no read of a file's changes.
+
+### BH004
+- key: Where a file's changes could not be read whole, say so in the return and name the file.
+- class: rule
+- source: plugins/grimoire/agents/adversarial-reviewer.md:29
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH005 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Where a file's changes could not be read whole, say so in your return and name the file.
+
+### BH005
+- key: Close the return with the files block directly above the verdict line, one line per file of the changed-file list in the list's order.
+- class: mechanic
+- source: plugins/grimoire/agents/adversarial-reviewer.md:86
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH006 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Close your return with this block, directly above your verdict line. After its header it holds one line per file of the changed-file list, the brief's or the one you listed, in the list's order:
+
+### BH006
+- key: Write the files block in three line shapes: `FILES: <n> listed, <r> read, <u> not read`, `read: <path>` and `not read: <path> - <why>`.
+- class: mechanic
+- source: plugins/grimoire/agents/adversarial-reviewer.md:89
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH007 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: FILES: <n> listed, <r> read, <u> not read read: <path> not read: <path> - <why>
+
+### BH007
+- key: Mark a file `read` only where the whole output of its own diff command reached the lens, or where a file whose diff printed nothing was read through, mark every other file `not read`, and let the verdict cover the `read` files alone.
+- class: rule
+- source: plugins/grimoire/agents/adversarial-reviewer.md:94
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH008 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A file is `read` where the whole output of its own diff command reached you, in one tool result or in parts by the routes above for a result that arrives saved or cut, whatever that output holds: hunks, a binary-file line, a mode change or a deletion. A listed file whose diff command printed nothing is `read` where you read the file itself through, or where no file stands at its path. Every other file is `not read`. Your verdict covers the files marked `read` alone.
 
 ## plugins/grimoire/agents/docs-curator.md
 
@@ -16631,7 +16835,7 @@ Extracted at `6bc07fb`: whole document (`agents.docs-curator.md`). Re-extracted 
 
 This document is an agent charter for a fresh-context "scope adjudicator": a read-only judge that decides whether a review finding, a mechanism a fix proposes to add, or a whole changeset serves the goal the plan was approved for. It owns four moments: ruling a single review finding into one of three buckets (REFUSE, ACCEPT-AND-DECLARE, ASK); ruling a design stop on a mechanism a fix proposes to add; ruling an advisory finding's relevance to the project's threat model or stated deployment into one of three buckets of its own (CONFIRM, REFUSE, ASK); and, at a plan's finishing pass, listing over a whole changeset what was built that nothing asked for and what a Goal sentence or an Intent clause promised that nothing delivers. It also owns the refusal moment, returning NEEDS_CONTEXT when the dispatch brief carries any of six forbidden inputs or omits a required one. Load class: `plan-run` - the charter governs the dispatched agent itself and is loaded at its dispatch, which the orchestrator makes at a review finding, at a design stop, or at the finishing pass.
 
-Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20 (T056 to T065 below, C022 amended in place), and by that plan's section 9 on 2026-09-21 (T065 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `a7c964bf` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: T004, T005, T055, T057 and C065 rewritten to their passages as they now read, T001 and T016 retired, and BA001 to BA008 added under the plan's letter BA for the what read by what a passage carries, the whole-changeset read bounded to the plan's own commits, and the true-correction exemption. Amended by `docs/plans/claude-kit_judge-own-commits-signals-agree_spec_v1.md` section 1 on 2026-11-11: BA005 and C065 rewritten to the plan's first own commit as the whole-changeset read's start, BA005 to its passage as it now reads, and BG001 and BG002 added under the plan's letter BG for the read on an unconfirmed start and the commits named per item. Amended by that plan's finishing pass on 2026-11-11: BG001 re-quoted, naming the own-commits list its read keeps, and T016's provenance naming section 1's rewording of its reason.
+Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20 (T056 to T065 below, C022 amended in place), and by that plan's section 9 on 2026-09-21 (T065 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `a7c964bf` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: T004, T005, T055, T057 and C065 rewritten to their passages as they now read, T001 and T016 retired, and BA001 to BA008 added under the plan's letter BA for the what read by what a passage carries, the whole-changeset read bounded to the plan's own commits, and the true-correction exemption. Amended by `docs/plans/claude-kit_judge-own-commits-signals-agree_spec_v1.md` section 1 on 2026-11-11: BA005 and C065 rewritten to the plan's first own commit as the whole-changeset read's start, BA005 to its passage as it now reads, and BG001 and BG002 added under the plan's letter BG for the read on an unconfirmed start and the commits named per item. Amended by that plan's finishing pass on 2026-11-11: BG001 re-quoted, naming the own-commits list its read keeps, and T016's provenance naming section 1's rewording of its reason. Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH004 added under the plan's letter BH for the copy of review.md's reading rule, and BH005 for the unread file named beside the status.
 
 ### C001
 - key: Answer to the agent name `scope-adjudicator` when dispatched.
@@ -18147,6 +18351,56 @@ Extracted at `6bc07fb`: whole document (`agents.scope-adjudicator.md`). Re-extra
 - reason: The words tell the finishing pass to place the commits before it buckets an item, and that pass sets aside an item that only another effort's commits carry. It can place a commit only once it knows which commits carry the item. The judge already reads each listed commit's hunks with `git show --format= <commit> -- <path>`, so it names them without reading a message.
 - passage: On a brief carrying `start unconfirmed`, the list opens with those words, and each item also names the listed commits that carry it, by hash.
 
+### BH001
+- key: Read a changeset one file at a time: take the changed-file list from the brief or list the changed paths with a name-only command, read each file's diff with a command naming that one path, and read the file itself where that command prints nothing.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:41
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH002 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Read a changeset one file at a time. Take the changed-file list from your brief. Where the brief carries none, list the changed paths first with a name-only command. Then read each file's diff in a tool call of its own, with a command that names that one path, such as `git diff <base> -- <path>`. A listed path your charter excludes is not yours to read, by its diff or whole. Where the command prints nothing for any other listed file, the file is untracked, unchanged against the base, or gone from both, and your read is the file itself where one stands.
+
+### BH002
+- key: Treat a tool result that arrives as a saved-or-cut notice with a preview as unread, and read it again with a narrower command or through the saved file in parts.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:43
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH003 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A tool result that arrives as a notice that the output was saved or cut, with a preview in its place, is unread, however much the preview shows. Read it again with a narrower command, or, where the notice names a saved file in a tool-results folder, open that file and read it through in parts.
+
+### BH003
+- key: Never count a name list or a stat summary as a read of a file's changes.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:45
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH004 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A name list or a stat summary is no read of a file's changes.
+
+### BH004
+- key: Where a file's changes could not be read whole, say so in the return and name the file.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:47
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH005 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Where a file's changes could not be read whole, say so in your return and name the file.
+
+### BH005
+- key: Where a file's changes could not be read whole, name the file beside the status, and on the whole-changeset shape say the two lists cover the files read alone.
+- class: rule
+- source: plugins/grimoire/agents/scope-adjudicator.md:107
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: A ruling over a changeset the judge did not read whole would read as covering it. Naming the file beside the status keeps `NEEDS_CONTEXT` to its meaning of a forbidden or missing input (C076), so the orchestrator spends no re-dispatch on it, and finishing-work's goal read records the named file on the final Chapter.
+- passage: Where a file's changes could not be read whole, the return names the file beside its status, and on the whole-changeset shape it says the two lists cover the files read alone.
+
 ## plugins/grimoire/agents/blind-reader.md
 
 This document is the charter for a dispatched agent that reads a deliverable document as a named outside-reader persona, with no account of what the author intended, and reports the experience of reading it. It owns the moments of that dispatch end to end: deciding which parts of the incoming brief are legitimate standing repository facts and which are contamination to disregard and flag, deciding what the named persona may open beyond the handed documents, running a procedural dry-run without executing the steps, deriving near-miss boundary pairs for each gating definition in the document, and shaping the five-part output with its severity and confidence markings and its bans on proposing prose or issuing a verdict. Load class: plan-run. The agent that this document governs loads it at its own dispatch, when an orchestrator sends a document out for a blind outside-reader review.
@@ -18859,7 +19113,7 @@ Extracted at `6bc07fb`: whole document (`agents.blind-reader.md`). Redrafted on 
 
 This document is the charter for a read-only security review agent that inspects a changeset for vulnerabilities and audit exposure in production codebases, with deep specialization in C#/.NET and SQL Server and equal coverage of JS/Node, shell, CLI and infrastructure surfaces. It owns the moments of security review: reading a project's documented security model, verifying the procedure-only data-access invariants where a project uses that model, sweeping documents against a disclosure list, running a general OWASP-mapped checklist over authentication, secrets, logging, input boundaries, cryptography, dependencies and shell permission grants, and emitting severity-ranked findings with confidence, OWASP and SOC 2 tags and a closing verdict. Its load class is `plan-run`: the dispatched agent loads the charter at its own dispatch, which the description says happens when a work section touches a surface executing-work's review step names as this reviewer's trigger, and always over the full changeset during finishing-work except the all-prose waiver finishing-work defines.
 
-Extracted at `6bc07fb`: whole document (`agents.security-reviewer.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20 (T010 to T020 below, C025, R013 and C081 retired, R014 and T009 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `073bec24` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 2 on 2026-11-08 (AT001 below, the advisory Minor for a security document edit that changes what the model permits).
+Extracted at `6bc07fb`: whole document (`agents.security-reviewer.md`). Re-extracted at `d9540ad` over the hunks the Section 5 merge changed (`R` entries below). Re-extracted at `aff63fa` over the hunks the finishing merge changed (`T` entries below). Amended by `docs/plans/claude-kit_goal-fit_spec_v1.md` on 2026-09-19 (the entries below carrying its provenance). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20 (T010 to T020 below, C025, R013 and C081 retired, R014 and T009 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `073bec24` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 2 on 2026-11-08 (AT001 below, the advisory Minor for a security document edit that changes what the model permits). Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH007 added under the plan's letter BH for the copies of review.md's reading rule and files block.
 
 ### C001
 - key: Answer to the agent name `security-reviewer` when dispatched.
@@ -19990,11 +20244,81 @@ Extracted at `6bc07fb`: whole document (`agents.security-reviewer.md`). Re-extra
 - passage: **An edit that changes what the model permits.** An edit in the changeset that changes what the model permits is a Minor naming the entry it changes and what the model permits after the edit. The class has four members: a security document edit that adds or widens an accepted risk or weakens one of its preconditions, one that removes or narrows a threat or an attacker class in consideration, one that loosens a boundary the document states a component holds, and a plan edit that drops an item from the plan's `Disclosure:` list. Read that last member from the plan document's hunk in the changeset diff, since the brief's `Disclosure:` list is copied from the plan as it reads now. A false claim inside such an edit still takes the Major above. The finding is advisory and blocks nothing. Its purpose is the operator's eye on the pull request. Such an edit runs on the plan's grant, so this finding is what points the operator's review of the pull request at it.
 - landed: `docs/plans/claude-kit_documentation-edits-need-no-word_spec_v1.md` section 2
 
+### BH001
+- key: Read a changeset one file at a time: take the changed-file list from the brief or list the changed paths with a name-only command, read each file's diff with a command naming that one path, and read the file itself where that command prints nothing.
+- class: rule
+- source: plugins/grimoire/agents/security-reviewer.md:12
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH002 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Read a changeset one file at a time. Take the changed-file list from your brief. Where the brief carries none, list the changed paths first with a name-only command. Then read each file's diff in a tool call of its own, with a command that names that one path, such as `git diff <base> -- <path>`. A listed path your charter excludes is not yours to read, by its diff or whole. Where the command prints nothing for any other listed file, the file is untracked, unchanged against the base, or gone from both, and your read is the file itself where one stands.
+
+### BH002
+- key: Treat a tool result that arrives as a saved-or-cut notice with a preview as unread, and read it again with a narrower command or through the saved file in parts.
+- class: rule
+- source: plugins/grimoire/agents/security-reviewer.md:14
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH003 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A tool result that arrives as a notice that the output was saved or cut, with a preview in its place, is unread, however much the preview shows. Read it again with a narrower command, or, where the notice names a saved file in a tool-results folder, open that file and read it through in parts.
+
+### BH003
+- key: Never count a name list or a stat summary as a read of a file's changes.
+- class: rule
+- source: plugins/grimoire/agents/security-reviewer.md:16
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH004 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A name list or a stat summary is no read of a file's changes.
+
+### BH004
+- key: Where a file's changes could not be read whole, say so in the return and name the file.
+- class: rule
+- source: plugins/grimoire/agents/security-reviewer.md:18
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH005 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Where a file's changes could not be read whole, say so in your return and name the file.
+
+### BH005
+- key: Close the return with the files block directly above the verdict line, one line per file of the changed-file list in the list's order.
+- class: mechanic
+- source: plugins/grimoire/agents/security-reviewer.md:91
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH006 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Close your return with this block, directly above your verdict line. After its header it holds one line per file of the changed-file list, the brief's or the one you listed, in the list's order:
+
+### BH006
+- key: Write the files block in three line shapes: `FILES: <n> listed, <r> read, <u> not read`, `read: <path>` and `not read: <path> - <why>`.
+- class: mechanic
+- source: plugins/grimoire/agents/security-reviewer.md:94
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH007 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: FILES: <n> listed, <r> read, <u> not read read: <path> not read: <path> - <why>
+
+### BH007
+- key: Mark a file `read` only where the whole output of its own diff command reached the lens, or where a file whose diff printed nothing was read through, mark every other file `not read`, and let the verdict cover the `read` files alone.
+- class: rule
+- source: plugins/grimoire/agents/security-reviewer.md:99
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH008 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A file is `read` where the whole output of its own diff command reached you, in one tool result or in parts by the routes above for a result that arrives saved or cut, whatever that output holds: hunks, a binary-file line, a mode change or a deletion. A listed file whose diff command printed nothing is `read` where you read the file itself through, or where no file stands at its path. Every other file is `not read`. Your verdict covers the files marked `read` alone.
+
 ## plugins/grimoire/agents/performance-reviewer.md
 
 This document is the charter for a read-only, advisory performance review agent that reads a changeset for what it costs on the path it touches: throughput and latency, process spawn count and cost, per-call work on a hot path, locks and deadlocks, cross-process waits and their bounds, loop shape and termination, timing assumptions against an API or a clock, resource lifetime, and scaling to the requirements the plan states as future. It owns the moments of performance review: reading the brief's trace target and amendments, following the touched path past the section, binding every Critical and Major to a requirement quoted from the plan or stated as assumed and to a measurement, count or complexity as evidence, and emitting severity-ranked findings with a requirement line, an evidence line, confidence and a closing verdict that never blocks a close on its own. Its load class is `plan-run`: the dispatched agent loads the charter at its own dispatch, which the description places on executing-work's performance trigger list for a section and on every finishing pass except the all-prose waiver finishing-work defines.
 
-Written by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20: whole document (the `C` entries below, whose passages are read at that section's tree). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `7505b797` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line).
+Written by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 2026-09-20: whole document (the `C` entries below, whose passages are read at that section's tree). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `7505b797` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH007 added under the plan's letter BH for the copies of review.md's reading rule and files block.
 
 ### C001
 - key: Answer to the agent name `performance-reviewer` when dispatched.
@@ -20424,11 +20748,81 @@ Written by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 3 on 20
 - passage: model: opus
 - landed: f9389aff section 1
 
+### BH001
+- key: Read a changeset one file at a time: take the changed-file list from the brief or list the changed paths with a name-only command, read each file's diff with a command naming that one path, and read the file itself where that command prints nothing.
+- class: rule
+- source: plugins/grimoire/agents/performance-reviewer.md:20
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH002 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Read a changeset one file at a time. Take the changed-file list from your brief. Where the brief carries none, list the changed paths first with a name-only command. Then read each file's diff in a tool call of its own, with a command that names that one path, such as `git diff <base> -- <path>`. A listed path your charter excludes is not yours to read, by its diff or whole. Where the command prints nothing for any other listed file, the file is untracked, unchanged against the base, or gone from both, and your read is the file itself where one stands.
+
+### BH002
+- key: Treat a tool result that arrives as a saved-or-cut notice with a preview as unread, and read it again with a narrower command or through the saved file in parts.
+- class: rule
+- source: plugins/grimoire/agents/performance-reviewer.md:22
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH003 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A tool result that arrives as a notice that the output was saved or cut, with a preview in its place, is unread, however much the preview shows. Read it again with a narrower command, or, where the notice names a saved file in a tool-results folder, open that file and read it through in parts.
+
+### BH003
+- key: Never count a name list or a stat summary as a read of a file's changes.
+- class: rule
+- source: plugins/grimoire/agents/performance-reviewer.md:24
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH004 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A name list or a stat summary is no read of a file's changes.
+
+### BH004
+- key: Where a file's changes could not be read whole, say so in the return and name the file.
+- class: rule
+- source: plugins/grimoire/agents/performance-reviewer.md:26
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH005 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Where a file's changes could not be read whole, say so in your return and name the file.
+
+### BH005
+- key: Close the return with the files block directly above the verdict line, one line per file of the changed-file list in the list's order.
+- class: mechanic
+- source: plugins/grimoire/agents/performance-reviewer.md:61
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH006 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Close your return with this block, directly above your verdict line. After its header it holds one line per file of the changed-file list, the brief's or the one you listed, in the list's order:
+
+### BH006
+- key: Write the files block in three line shapes: `FILES: <n> listed, <r> read, <u> not read`, `read: <path>` and `not read: <path> - <why>`.
+- class: mechanic
+- source: plugins/grimoire/agents/performance-reviewer.md:64
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH007 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: FILES: <n> listed, <r> read, <u> not read read: <path> not read: <path> - <why>
+
+### BH007
+- key: Mark a file `read` only where the whole output of its own diff command reached the lens, or where a file whose diff printed nothing was read through, mark every other file `not read`, and let the verdict cover the `read` files alone.
+- class: rule
+- source: plugins/grimoire/agents/performance-reviewer.md:69
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH008 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A file is `read` where the whole output of its own diff command reached you, in one tool result or in parts by the routes above for a result that arrives saved or cut, whatever that output holds: hunks, a binary-file line, a mode change or a deletion. A listed file whose diff command printed nothing is `read` where you read the file itself through, or where no file stands at its path. Every other file is `not read`. Your verdict covers the files marked `read` alone.
+
 ## plugins/grimoire/agents/blind-reviewer.md
 
 This document is the charter for a dispatched review agent named blind-reviewer, whose job is to inspect a code or prose diff for correctness defects while deliberately knowing nothing about what the change was meant to do. It owns the moments in which that agent decides what input it may accept (running the contamination test on each sentence of its dispatch, refusing spec and plan paths, keeping docs/, commit messages and the `.kit/` scratch path out of what it reads), what it may run (read-only commands only, no edits, no commits, no builds), what it hunts (resource lifetime, async and ordering, numbers and boundaries, evaluation semantics, error paths, edge inputs, and the prose equivalents), what it refuses to review (style, spec compliance), and how it must shape its output (severity-ranked findings in a fixed line format, the optional `[claim]` token and its one exception, confidence independent of severity, and a closing VERDICT line). The load class is `plan-run`: the charter is loaded by the agent itself at the moment it is dispatched, which the description states happens in parallel with the adversarial-reviewer on each section of planned work.
 
-Extracted at `6bc07fb`: whole document (`agents.blind-reviewer.md`). Amended on 2026-09-20 by the claim-class amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (W004 below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (C054 retired, C049 and C058 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1115f0b4` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16 (E014 below, for the class rule).
+Extracted at `6bc07fb`: whole document (`agents.blind-reviewer.md`). Amended on 2026-09-20 by the claim-class amendment landing the operator's ruling of that date (`W` entries below). Amended on 2026-09-20 by `docs/plans/claude-kit_test-requirement-axis_spec_v1.md` section 2 (W004 below). Amended by `docs/plans/claude-kit_reviewer-reranking_spec_v1.md` section 1 on 2026-09-20 (C054 retired, C049 and C058 amended in place). Redrafted on 2026-09-26 by section 10 of `docs/plans/claude-kit_corpus-compression_spec_v1.md`, landed at `1115f0b4` with its fix round at `cdbd2d2a`, so every live entry's `passage:` line quotes the text at `cdbd2d2a` and the `flag:` lines record that pass's flags. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13 (Q001 below, recording section 1's `model: opus` line). Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16 (E014 below, for the class rule). Amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11: BH001 to BH007 added under the plan's letter BH for the copies of review.md's reading rule and files block, and C017, C018, C021 and C022 rewritten to their passages as they now read.
 
 ### C001
 - key: Register this agent under the name blind-reviewer.
@@ -20598,25 +20992,25 @@ Extracted at `6bc07fb`: whole document (`agents.blind-reviewer.md`). Amended on 
 - passage: Never open docs/ or any spec on your own initiative.
 
 ### C017
-- key: Scope every diff command away from docs, for example `git diff <base> -- . ':(exclude)docs/**'`.
+- key: Scope every diff command away from docs, as the name-only listing `git diff --name-only <base> -- . ':(exclude)docs/**'` does.
 - class: mechanic
-- source: plugins/grimoire/agents/blind-reviewer.md:18
-- provenance: 12ef61f 2026-07-09.
+- source: plugins/grimoire/agents/blind-reviewer.md:19
+- provenance: 12ef61f 2026-07-09; amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, which points the diff read at the reading rule.
 - verdict: rewrite
-- landed: 263e529 section 12
-- reason: No finding challenged it, and it is the only mechanical form of the docs ban: without the pathspec the agent has a prohibition and no way to obey it on a mixed diff. Rewrite rather than keep: C016's split makes this clause open its own sentence, so its initial letter is a capital and every word stays; the proposal below is the landed sentence.
-- proposed: Scope every diff command away from them (`git diff <base> -- . ':(exclude)docs/**'`).
-- passage: Scope every diff command away from them (`git diff <base> -- . ':(exclude)docs/**'`).
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: It is the only mechanical form of the docs ban: without the pathspec the agent has a prohibition and no way to obey it on a mixed diff. Its example is the name-only listing, since the reading rule (BH001) reads each file by its own path and the listing is the one command that spans the range.
+- proposed: Scope every diff command away from them, as `git diff --name-only <base> -- . ':(exclude)docs/**'` does for the listing.
+- passage: Scope every diff command away from them, as `git diff --name-only <base> -- . ':(exclude)docs/**'` does for the listing.
 
 ### C018
-- key: Skip any docs/ path that arrives in a changed-file list and note that you skipped it.
+- key: Skip any docs/ path that arrives in a changed-file list, and give it a `not read` line naming this exclusion.
 - class: rule
-- source: plugins/grimoire/agents/blind-reviewer.md:18
-- provenance: 12ef61f 2026-07-09.
+- source: plugins/grimoire/agents/blind-reviewer.md:19
+- provenance: 12ef61f 2026-07-09; amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, which points the diff read at the reading rule.
 - verdict: rewrite
-- landed: 263e529 section 12
-- reason: Wording only. It is deliberately redundant with executing-work's omission rule, because it is the defence for the case where the sender's own rule failed. Lands as "Skip and note any docs/ path that arrives in a changed-file list."
-- passage: Skip and note any docs/ path in a changed-file list.
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: It is deliberately redundant with executing-work's omission rule, because it is the defence for the case where the sender's own rule failed. The note is a `not read` line, so the files block (BH005 to BH007) answers every listed file and the orchestrator reads the skip where it reads every other.
+- passage: Skip any docs/ path in a changed-file list, and give it a `not read` line naming this exclusion.
 
 ### C019
 - key: Do not read commit messages.
@@ -20640,25 +21034,25 @@ Extracted at `6bc07fb`: whole document (`agents.blind-reviewer.md`). Amended on 
 - baseline-test: yes
 
 ### C021
-- key: Read the diff with git diff or git show, and read the touched files in full.
+- key: Read each file's diff as the reading rule states, then read the touched files in full.
 - class: mechanic
-- source: plugins/grimoire/agents/blind-reviewer.md:18
-- provenance: 12ef61f 2026-07-09.
+- source: plugins/grimoire/agents/blind-reviewer.md:19
+- provenance: 12ef61f 2026-07-09; amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, which points the diff read at the reading rule.
 - verdict: rewrite
-- landed: 263e529 section 12
-- reason: No finding. Reading the touched files whole is what separates this lens from a hunk reader, and nothing else states it for this agent. Rewrite rather than keep: C016's split ends this sentence at "in full", so its trailing comma is a period and every word stays; the proposal below is the landed sentence.
-- proposed: Read the diff (git diff, git show) and the touched files in full.
-- passage: Read the diff (git diff, git show), the touched files in full, and their callers and surrounding code.
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Reading the touched files whole is what separates this lens from a hunk reader, and nothing else states it for this agent. The diff duty points at the reading rule (BH001), which owns how a diff is read.
+- proposed: Read each file's diff as the reading rule below states, then the touched files in full, and their callers and surrounding code.
+- passage: Read each file's diff as the reading rule below states, then the touched files in full, and their callers and surrounding code.
 
 ### C022
 - key: Read surrounding code and callers as needed to judge real behavior.
 - class: rule
-- source: plugins/grimoire/agents/blind-reviewer.md:18
-- provenance: 12ef61f 2026-07-09.
+- source: plugins/grimoire/agents/blind-reviewer.md:19
+- provenance: 12ef61f 2026-07-09; amended by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, which points the diff read at the reading rule.
 - verdict: rewrite
-- landed: 263e529 section 12
-- reason: Wording only; it is the permission that keeps the docs ban from being read as a ban on reading outside the diff at all. Lands as "Read surrounding code and callers as needed to judge real behavior.", beside the read-the-diff sentence.
-- passage: Read the diff (git diff, git show), the touched files in full, and their callers and surrounding code.
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: It is the permission that keeps the docs ban from being read as a ban on reading outside the diff at all, and it rides the sentence that points the diff read at the reading rule.
+- passage: Read each file's diff as the reading rule below states, then the touched files in full, and their callers and surrounding code.
 
 ### C023
 - key: Use only read-only commands; never edit files and never commit.
@@ -21096,6 +21490,76 @@ Extracted at `6bc07fb`: whole document (`agents.blind-reviewer.md`). Amended on 
 - verdict: keep
 - reason: One fix then sweeps every site, and step 4 counts the finding once (E008 under the findings.md heading). The blind lens gets the class rule alone, since it never sees the later-round lines and rides a later round only when the round is re-raised.
 - passage: A defect found at several sites is one finding naming the class and every site, so one fix sweeps them.
+
+### BH001
+- key: Read a changeset one file at a time: take the changed-file list from the brief or list the changed paths with a name-only command, read each file's diff with a command naming that one path, and read the file itself where that command prints nothing.
+- class: rule
+- source: plugins/grimoire/agents/blind-reviewer.md:24
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH002 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Read a changeset one file at a time. Take the changed-file list from your brief. Where the brief carries none, list the changed paths first with a name-only command. Then read each file's diff in a tool call of its own, with a command that names that one path, such as `git diff <base> -- <path>`. A listed path your charter excludes is not yours to read, by its diff or whole. Where the command prints nothing for any other listed file, the file is untracked, unchanged against the base, or gone from both, and your read is the file itself where one stands.
+
+### BH002
+- key: Treat a tool result that arrives as a saved-or-cut notice with a preview as unread, and read it again with a narrower command or through the saved file in parts.
+- class: rule
+- source: plugins/grimoire/agents/blind-reviewer.md:26
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH003 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A tool result that arrives as a notice that the output was saved or cut, with a preview in its place, is unread, however much the preview shows. Read it again with a narrower command, or, where the notice names a saved file in a tool-results folder, open that file and read it through in parts.
+
+### BH003
+- key: Never count a name list or a stat summary as a read of a file's changes.
+- class: rule
+- source: plugins/grimoire/agents/blind-reviewer.md:28
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH004 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A name list or a stat summary is no read of a file's changes.
+
+### BH004
+- key: Where a file's changes could not be read whole, say so in the return and name the file.
+- class: rule
+- source: plugins/grimoire/agents/blind-reviewer.md:30
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH005 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Where a file's changes could not be read whole, say so in your return and name the file.
+
+### BH005
+- key: Close the return with the files block directly above the verdict line, one line per file of the changed-file list in the list's order.
+- class: mechanic
+- source: plugins/grimoire/agents/blind-reviewer.md:73
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH006 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Close your return with this block, directly above your verdict line. After its header it holds one line per file of the changed-file list, the brief's or the one you listed, in the list's order:
+
+### BH006
+- key: Write the files block in three line shapes: `FILES: <n> listed, <r> read, <u> not read`, `read: <path>` and `not read: <path> - <why>`.
+- class: mechanic
+- source: plugins/grimoire/agents/blind-reviewer.md:76
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH007 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: FILES: <n> listed, <r> read, <u> not read read: <path> not read: <path> - <why>
+
+### BH007
+- key: Mark a file `read` only where the whole output of its own diff command reached the lens, or where a file whose diff printed nothing was read through, mark every other file `not read`, and let the verdict cover the `read` files alone.
+- class: rule
+- source: plugins/grimoire/agents/blind-reviewer.md:81
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH008 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A file is `read` where the whole output of its own diff command reached you, in one tool result or in parts by the routes above for a result that arrives saved or cut, whatever that output holds: hunks, a binary-file line, a mode change or a deletion. A listed file whose diff command printed nothing is `read` where you read the file itself through, or where no file stands at its path. Every other file is `not read`. Your verdict covers the files marked `read` alone.
 
 ## plugins/grimoire/agents/plan-reviewer.md
 
@@ -26292,3 +26756,59 @@ Written by `docs/plans/claude-kit_drafter-ledger-heading_spec_v1.md` section 1 o
 - verdict: keep
 - reason: Acceptance bullet 1 of both `docs/archive/claude-kit_corpus-compression_spec_v1.md` and `docs/archive/claude-kit_mechanism-cut_spec_v1.md` reads each document's landing against its target, and a landing above target carries the miss ask decision 1 of `docs/plans/claude-kit_lean-kit_program_v1.md` provides.
 - passage: End with your word count against the target.
+
+## plugins/grimoire/agents/finding-verifier.md
+
+This document is the charter for a dispatched agent named finding-verifier, a fresh-context judge of whether each correctness Critical and Major a review returned is true of the code. It owns the moments in which that agent reads its brief (the numbered findings, the diff reference and the goal path), refuses the five inputs that must not reach it, reads the diff read-only and file by file, and returns one `CONFIRMED`, `REFUTED` or `UNVERIFIED` line per finding with its ground and a closing verdict line. The load class is `plan-run`: the agent loads the charter itself when step 4 or finishing-work dispatches it.
+
+Written by `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 on 2026-11-11, which opened this heading: BH001 to BH004 under the plan's letter BH for the copy of review.md's reading rule, and BH005 for the unread file an `UNVERIFIED` names. The charter's other claims carry no entry under this heading.
+
+### BH001
+- key: Read a changeset one file at a time: take the changed-file list from the brief or list the changed paths with a name-only command, read each file's diff with a command naming that one path, and read the file itself where that command prints nothing.
+- class: rule
+- source: plugins/grimoire/agents/finding-verifier.md:26
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH002 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Read a changeset one file at a time. Take the changed-file list from your brief. Where the brief carries none, list the changed paths first with a name-only command. Then read each file's diff in a tool call of its own, with a command that names that one path, such as `git diff <base> -- <path>`. A listed path your charter excludes is not yours to read, by its diff or whole. Where the command prints nothing for any other listed file, the file is untracked, unchanged against the base, or gone from both, and your read is the file itself where one stands.
+
+### BH002
+- key: Treat a tool result that arrives as a saved-or-cut notice with a preview as unread, and read it again with a narrower command or through the saved file in parts.
+- class: rule
+- source: plugins/grimoire/agents/finding-verifier.md:28
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH003 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A tool result that arrives as a notice that the output was saved or cut, with a preview in its place, is unread, however much the preview shows. Read it again with a narrower command, or, where the notice names a saved file in a tool-results folder, open that file and read it through in parts.
+
+### BH003
+- key: Never count a name list or a stat summary as a read of a file's changes.
+- class: rule
+- source: plugins/grimoire/agents/finding-verifier.md:30
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH004 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: A name list or a stat summary is no read of a file's changes.
+
+### BH004
+- key: Where a file's changes could not be read whole, say so in the return and name the file.
+- class: rule
+- source: plugins/grimoire/agents/finding-verifier.md:32
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: Pinned copy of the review.md passage, BH005 under that heading. A dispatched reviewer does not load review.md, so this copy is the only form of the rule that reaches it, and test/claim-class-parity.test.js holds it byte-identical with the owner.
+- passage: Where a file's changes could not be read whole, say so in your return and name the file.
+
+### BH005
+- key: Where an `UNVERIFIED` rests on a file whose changes could not be read whole, name that file as what would settle it.
+- class: rule
+- source: plugins/grimoire/agents/finding-verifier.md:46
+- provenance: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1 2026-11-11, from Chapter 2 of `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md`, where a reviewer's whole-range diff of 49,177 bytes arrived as a saved-output notice with a 2 KB preview and the file whose changes began at byte 21,818 went unread.
+- verdict: keep
+- landed: `docs/plans/claude-kit_reviewers-read-every-changed-file_spec_v1.md` section 1
+- reason: A finding the verifier could not ground already reads `UNVERIFIED` and proceeds as before under findings.md, so naming the unread file gives the orchestrator what would settle it with no new return token or route.
+- passage: A reading you cannot ground in a line you read is `UNVERIFIED`, and where it rests on a file whose changes could not be read whole, it names that file as what would settle it.

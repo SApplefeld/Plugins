@@ -188,7 +188,7 @@ A subagent loads the skill catalog and, where the machine's CLAUDE.md imports it
 
 **Write the dispatch prompt from the actual current code,** assuming a skilled engineer with zero context for this codebase. The Dispatch Brief template in step 1 names the fields.
 
-**Hand bulky inputs over as files:** the spec, or a diff captured with `git diff > .kit/scratch/<name>.diff`. Keep the project's `.gitignore` covering `.kit/`. The blind-reviewer is the standing exception: it takes the base ref or changed-file list per step 3's contract, never a captured diff.
+**Hand bulky inputs over as files:** the spec, or a diff captured with `git diff > .kit/scratch/<name>.diff`. Keep the project's `.gitignore` covering `.kit/`. The blind-reviewer is the standing exception: it takes the base ref and the changed-file list per step 3's contract, never a captured diff.
 
 **A subagent's report comes back in its final message, not as a committed file.** Distill its durable outcome into the Chapter. A large review may return the verdict, the Critical/Major/Minor counts and the top finding inline, with the full findings in a `.kit/` file read only when adjudicating. The same discipline applies to read-only scouts, whose return contract is below.
 
