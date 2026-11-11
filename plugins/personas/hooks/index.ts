@@ -3018,7 +3018,7 @@ function movedSince(startPersona: string, startEpoch: number, startState: AgentS
 
 // The one decision a guarded write logs when it starts over because its own
 // session moved the persona, the epoch or the state under it, for both of
-// persist's restart points.
+// the guarded write's restart points.
 function pushPersistRestarted(startPersona: string, startEpoch: number): void {
   sess.state.decisions.push({
     timestamp: Date.now(),
@@ -3074,7 +3074,9 @@ async function waitOutOwnSwitch(dp: any): Promise<"settled" | "lost" | "refused"
 }
 
 // M7: single guarded-write path shared by every store write site.
-// Closes over sess so all write sites share one yield + write path.
+// Closes over sess so all write sites share one yield + write path. Every
+// write site calls it through persist below, which answers for the state the
+// write was asked on.
 // `rollBackOnYield` is for a caller that advanced a value for the write it is
 // asking for here, whether that value is a field of sess.state or one the
 // session holds only in memory. Every false return below is a refused write:
@@ -3085,7 +3087,7 @@ async function waitOutOwnSwitch(dp: any): Promise<"settled" | "lost" | "refused"
 // later call a no-op, so a rollback assigned after the call rests in memory
 // while the advanced value rests on disk. The callback runs on each false path before anything is
 // written, so what lands in the store is the rolled-back value.
-export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<boolean> => {
+const guardedWrite = async (dp: any, rollBackOnYield?: () => void): Promise<boolean> => {
   if (!sess.isOwner) { rollBackOnYield?.(); return false; }
   // A write that starts while the session's own switch is under way waits
   // for it to settle before it captures anything below, and refuses where
@@ -3194,7 +3196,7 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   if (waitedAtStoreRead && (await waitOutOwnSwitch(dp)) !== "settled") { rollBackOnYield?.(); return false; }
   if (waitedAtStoreRead || movedSince(startPersona, startEpoch, startState)) {
     pushPersistRestarted(startPersona, startEpoch);
-    return persist(dp, rollBackOnYield);
+    return guardedWrite(dp, rollBackOnYield);
   }
   const onDisk = store[startPersona] as AgentState | undefined;
   // F9 invariant: three sites raise the epoch: agentic_identity (commons winner),
@@ -3324,7 +3326,7 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   if (waitedAtClaimsRead && (await waitOutOwnSwitch(dp)) !== "settled") { rollBackOnYield?.(); return false; }
   if (waitedAtClaimsRead || movedSince(startPersona, startEpoch, startState)) {
     pushPersistRestarted(startPersona, startEpoch);
-    return persist(dp, rollBackOnYield);
+    return guardedWrite(dp, rollBackOnYield);
   }
   store[startPersona] = startState;
   await dp.fs.write(sess.storePath, JSON.stringify(store, null, 2));
@@ -3349,6 +3351,54 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
   return true;
 };
 
+// The store write every write site asks for: the guarded write above,
+// answering for the state it was asked on. A write handed no rollback returns
+// what the guarded write returns, on every exit.
+// A caller that hands a rollback says it advanced a value on the session's
+// state for this write. So the state object is taken here, at entry, as the
+// one the caller advanced. The session replaces that object in an identity
+// call, in a reader's promotion and at a session start, and any of them can
+// land under an await of the write. A write can enter an identity call in
+// either of two stretches. In the first, the call has set the persona and
+// not yet assigned the new state, so the write's opening wait for that
+// switch ends with the object replaced. In the second, the call has assigned
+// the new state and not yet read the claims or raised the epoch. A write
+// entering there is mid-switch on the object already replaced, so the object
+// taken at entry is the new one, and the write answers for it.
+// Where the session's state is no longer that object, the write returns false
+// and the rollback does not run. That holds at every exit of the guarded
+// write: an owner flag found down, a wait for the session's own switch that
+// settles, is lost or runs out its bound, a restart, a write that lands, and
+// a store read or write that throws.
+// That false is not a refused write. After a restart or a settled wait, the
+// live state was written, or its write was attempted, by the write going on.
+// After an owner flag found down, a lost wait or a bound run out, nothing was
+// written. A throw from an attempted write ends here, and the store's fault surfaces
+// at the next write. The rollback is withheld because it would change a live
+// state the caller never advanced. Where the replacement lands before the
+// write is issued, the advance sits on the replaced object, which nothing
+// writes again. Where it lands after the write is issued, during that write
+// or the goal-diff emit after it, and the write succeeds, the advance is on
+// disk under the persona the write was asked on. On either exit the caller
+// stops as it stops on a refused write, having acted on a state the session
+// no longer holds. On the second, its change is spent, which for a tick
+// block is a fire or a day with no turn and no row.
+// The test is the object's identity, never the persona or the epoch. An epoch
+// raised on the state the session keeps starts the write over with its
+// rollback, and that write returns true where it lands.
+export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<boolean> => {
+  if (rollBackOnYield === undefined) return guardedWrite(dp);
+  const askedOn = sess.state;
+  let wrote: boolean;
+  try {
+    wrote = await guardedWrite(dp, () => { if (sess.state === askedOn) rollBackOnYield(); });
+  } catch (err) {
+    if (sess.state === askedOn) throw err;
+    return false;
+  }
+  return wrote && sess.state === askedOn;
+};
+
 // persist with the same rollback run on a throw as well as on a false return.
 // persist reads the store and writes it with no try of its own, so a parse
 // that refuses or a write that fails leaves the exception to the caller. A
@@ -3358,7 +3408,10 @@ export const persist = async (dp: any, rollBackOnYield?: () => void): Promise<bo
 // assigned with nothing submitted behind it, and the rest of the session
 // compares against a reading whose changed keys are already stamped as
 // reported. The rollback runs and the exception carries on, so the tick fails
-// the way it would without this.
+// the way it would without this. persist throws only where the state it was
+// asked on is still the session's, and returns false on a replaced state, so
+// at the rethrow the state is the one the caller advanced. The rollback below
+// runs one microtask later with no check of its own.
 // That throw path is for a caller that does not submit. A caller that submits
 // catches the exception and advances the value again, because the store is a
 // file a watched persona can hold unparseable for as long as it likes and a

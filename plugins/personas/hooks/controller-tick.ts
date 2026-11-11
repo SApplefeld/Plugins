@@ -1276,7 +1276,12 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         // persona up, on a raised epoch or a lost commons claim, and
         // submitting then would put a fleet reading in front of a session
         // that no longer holds the seat, the reading it was composed
-        // against being nowhere. The rollback goes with the call rather
+        // against being nowhere. A false return is also a session that
+        // replaced its state under the write: the rollback did not run,
+        // and nothing is submitted for a state the reading's line was not
+        // pushed on. The fleet reading, held in session memory, then stays
+        // advanced, so no report goes out for that change until the keys
+        // move again. The rollback goes with the call rather
         // than after it, because the lost-claim path writes the state as it
         // gives the persona up and the owner check refuses every write
         // after that, so a rollback assigned below the call would rest in
@@ -1461,7 +1466,10 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         // As at the fleet submit above, and read apart the same way.
         // A persist that returned false is a session that has just given
         // the persona up, and the seat is no longer this session's to
-        // reconcile. The stamp rolls back with the call for the reason
+        // reconcile, or one that replaced its state under the write, where
+        // the rollback did not run and no pass is asked for on a state
+        // this stamp was not set on. The stamp rolls back with the call
+        // on a yield for the reason
         // the reading above does: the lost-claim path writes this state,
         // so a stamp left advanced would rest on disk with no [RECONCILE]
         // submitted, and the successor would find the cadence freshly
@@ -1577,7 +1585,11 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // stamp written after it would leave every tick in between queueing
   // another copy, and a relaunch while it waits would ask again. A submit
   // that fails has still spent the day, which the trunk_gate_failed record
-  // makes visible. A persist that throws is attempted rather than depended
+  // makes visible. A day whose session moved to another state before the
+  // submit resolved leaves its stamp, where its write landed, and no row: the
+  // block holds the state
+  // object it stamped and writes nothing after the submit on any other. A
+  // persist that throws is attempted rather than depended
   // on, as the reconciliation block's is, so a store held unparseable does
   // not skip the routine block, the inbox drain and the actuator below; the
   // stamp stands in memory.
@@ -1590,6 +1602,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       try { await ctx.persist(); } catch { /* the store refused; the stamp stands in memory */ }
     }
     if (gate.act === "fire") {
+      const gateState = sess.state;
       const trunkGateDate = sess.state.trunkGateDate;
       sess.state.trunkGateDate = gate.date;
       sess.state.updatedAt = trunkGateNow;
@@ -1597,8 +1610,12 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       // persona up, and the commons yield writes this state on its way out.
       // The stamp rolls back with the call, so the successor finds the day
       // unspent and gates it, and no turn goes to a session that no longer
-      // holds the persona. A persist that threw ran the rollback too, and
-      // this branch submits, so the stamp goes forward again in memory.
+      // holds the persona. A false return is also a session that replaced
+      // its state under the write: the rollback did not run, and nothing is
+      // submitted. A switch while a submitted turn waits in the engine's
+      // queue still delivers it under the new persona. A persist that threw ran
+      // the rollback too, and this branch submits, so the stamp goes forward
+      // again in memory.
       try {
         if (!await ctx.persistOrRollBack(() => {
           sess.state.trunkGateDate = trunkGateDate;
@@ -1607,6 +1624,11 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         sess.state.trunkGateDate = gate.date;
       }
       const trunkGateOutcome = await ctx.submitTrunkGate();
+      // The engine's contract lets the submit resolve once its turn starts or
+      // is queued, and a turn before that can replace the session's state. The day is spent, and
+      // its stamp is on disk where the write above landed. Its row is not
+      // written on a state this block did not stamp.
+      if (sess.state !== gateState) return;
       sess.state.decisions.push(trunkGateOutcome.ok
         ? {
           timestamp: trunkGateNow,
@@ -1635,15 +1657,20 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   // than the clock has that anchor set to now and fires nothing, and one
   // persist attempt carries every such stamp, tolerated where it fails as the
   // trunk gate's stamp is. The candidate is read from the table after that
-  // write, since the session can replace its state under an await. A turn
+  // write, since the session can replace its state under an await. The
+  // stamp's write and the submit are two more such awaits, and the block
+  // answers for both: the write returns false on a replaced state, and the
+  // block holds the state object it stamped across the submit. A turn
   // open when the candidate is read leaves the routine due for a later tick.
   // The fire follows the trunk gate's order for the trunk
   // gate's reason: the last fire is stamped and persisted before the submit,
   // which does not resolve until the session is next idle, so a stamp
   // written after it would leave every tick in between queueing another
   // copy. A submit that fails has still spent the fire, which the
-  // routine_failed record makes visible. A tick with nothing to stamp and
-  // nothing to fire writes nothing.
+  // routine_failed record makes visible. A fire whose session moved to
+  // another state before the submit resolved leaves its stamp, where its
+  // write landed, and no row. A
+  // tick with nothing to stamp and nothing to fire writes nothing.
   if (sess.state.routines.length > 0) {
     const routineNow = Date.now();
     let restamped = false;
@@ -1659,6 +1686,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
     }
     const dueRoutine = sess.state.routines.find((routine) => routineDue(routineNow, routine) === "fire");
     if (dueRoutine !== undefined && !turnIsOpen()) {
+      const routineState = sess.state;
       const lastFiredAt = dueRoutine.lastFiredAt;
       dueRoutine.lastFiredAt = routineNow;
       sess.state.updatedAt = routineNow;
@@ -1666,8 +1694,12 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       // persona up, and the commons yield writes this state on its way out.
       // The stamp rolls back with the call, so the successor finds the
       // routine still due and fires it, and no turn goes to a session that no
-      // longer holds the persona. A persist that threw ran the rollback too,
-      // and this branch submits, so the stamp goes forward again in memory.
+      // longer holds the persona. A false return is also a session that
+      // replaced its state under the write: the rollback did not run, and
+      // nothing is submitted. A switch while a submitted note waits in the
+      // engine's queue still delivers it under the new persona. A
+      // persist that threw ran the rollback too, and this branch submits, so
+      // the stamp goes forward again in memory.
       try {
         if (!await ctx.persistOrRollBack(() => {
           if (lastFiredAt === undefined) delete dueRoutine.lastFiredAt;
@@ -1677,6 +1709,10 @@ export async function idleTick(ctx: TickContext): Promise<void> {
         dueRoutine.lastFiredAt = routineNow;
       }
       const routineOutcome = await ctx.submitRoutine(dueRoutine.id, dueRoutine.text);
+      // As at the trunk gate's submit above: the fire is spent, and its stamp
+      // is on disk where the write above landed. Its row is not written on a
+      // state this block did not stamp.
+      if (sess.state !== routineState) return;
       sess.state.decisions.push(routineOutcome.ok
         ? {
           timestamp: routineNow,

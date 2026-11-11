@@ -96,11 +96,15 @@ export function buildSelfReviewInput(
   // surface, the same way nudge_failed is. operator_delivery_failed for the
   // same reason: a refused submit is the moment an automated path into the
   // session went dead.
+  // routine_fired is here beside the nudge's rows: a scheduled routine's
+  // fire is the plugin reporting its own clockwork. routine_failed stays in
+  // the window for the reason nudge_failed does: a refused submit is the
+  // moment an automated path into the session went dead.
   const NOISE_ACTIONS = new Set([
     "controller_tick", "env_inject", "heartbeat", "self-review",
     "turn_start", "turn_complete", "planning_fired",
     "planning_created", "nudge_sent", "nudge_skipped_turn_in_flight",
-    "nudge_skipped_floor", "nudge", "allow",
+    "nudge_skipped_floor", "nudge", "allow", "routine_fired",
   ]);
 
   const workerDecisions = state.decisions.filter(
