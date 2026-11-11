@@ -936,7 +936,7 @@ try {
     }
 
     # 7. What inbox/ and sources/ already hold. The inbox count is the listing
-    # kb-status.ps1 -What Inbox reports. Names compare without regard to case,
+    # kb-status.ps1 -What Pending reports. Names compare without regard to case,
     # as NTFS does. Each name that has a fed name's shape also records the path
     # it was fed from, its name up to the blob hash.
     $inboxFiles = @(Get-ChildItem -LiteralPath $inboxDir -File)

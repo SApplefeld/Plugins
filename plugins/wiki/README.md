@@ -110,10 +110,25 @@ Separation rests on two boundaries, and they are not the same strength:
 - **Writes and pushes are bounded by the permission model.** The agent running
   in a KB has no shell verb that can write outside the repo, and no way to push
   to any remote other than that KB's own `origin`.
-- **Reads are bounded by the Windows account.** The one-account invariant is
-  stated in full in
-  [docs/runbook_automation.md](docs/runbook_automation.md), "The hard
-  invariant, restated".
+- **Reads are bounded twice.** Inside the account, the KB's settings turn on
+  Claude Code's read block, `permissions.blockReadsOutsideWorkingDirectories`.
+  It refuses the agent's file tools, the tools through which it opens, searches
+  and lists files, a path outside the KB, save the reaches below. Runs on Claude
+  Code 2.1.322 were refused files on two drives and under the account's profile,
+  and Claude Code's settings reference,
+  https://code.claude.com/docs/en/settings, says the block needs 2.1.257 or
+  later. By that reference, it binds a person's own Claude Code session opened
+  inside a KB too, whose file tools reach an outside folder, save the other
+  reaches below, only once it is added for that session. Five reaches stay past
+  the block: a tool other than the file tools, such as a shell command or a
+  process it starts, the files Claude Code keeps readable under `~/.claude/`, a
+  folder added to the session, a build below 2.1.257, and a KB not yet updated
+  to an engine carrying the block. Residual 1 of the source repository's
+  `docs/threat-model.md`, which the published plugin does not include, lists
+  them in full. So between entities, reads are bounded by the Windows account.
+  The one-account invariant is stated in full in
+  [docs/runbook_automation.md](docs/runbook_automation.md), "The hard invariant,
+  restated".
 
 See [docs/architecture.md](docs/architecture.md) for the full model.
 
@@ -301,7 +316,10 @@ Add `-RequireSchema` for an instantiated KB. It requires `CLAUDE.md` and the
 version mark `.claude/engine.json`, so the bare template, which has no version
 mark, is checked without it. A KB created before the version mark existed fails
 `-RequireSchema` on `.claude/engine.json` until the engine writes that file into
-it. Add `-RequireSkills` to also require the four vendored skill files.
+it. A KB whose engine predates the read block fails the check that its
+`.claude/settings.json` holds `"blockReadsOutsideWorkingDirectories": true`
+until the walker's engine update copies that line in. Add `-RequireSkills` to
+also require the four vendored skill files.
 
 `tests/Test-FeedInbox.ps1` tests the feeder against a throwaway repository and
 KB it builds and removes:

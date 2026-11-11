@@ -46,14 +46,19 @@ between entities (see the hard invariant at the end). On the owning account:
   own installer, `irm https://claude.ai/install.ps1 | iex`. It needs no
   administrator rights and installs for that account alone, under
   `%USERPROFILE%\.local\bin`. Open a new PowerShell window and run
-  `claude --version`, which prints a version number. Where PowerShell says
-  `claude` is not recognized, add `%USERPROFILE%\.local\bin` to the
-  account's own PATH, since the walker's registrar looks for `claude` on PATH.
-  Then run `claude` once and follow the browser prompts to log in. The login
-  needs a paid Claude plan, and Claude Code's setup page,
+  `claude --version`, which prints a version number. It must be 2.1.257 or
+  later. The engine's read block keeps the agent's file tools from opening files
+  outside its knowledge base, save the reaches the README's read-block bullet
+  lists, and Claude Code's settings reference says it needs that build. What an
+  older build does with the block's setting is unobserved, so where it prints an
+  older version, run `claude update` and check again. Where PowerShell says
+  `claude` is not recognized, add `%USERPROFILE%\.local\bin` to the account's
+  own PATH, since the walker's registrar looks for `claude` on PATH. Then run
+  `claude` once and follow the browser prompts to log in. The login needs a paid
+  Claude plan, and Claude Code's setup page,
   https://code.claude.com/docs/en/setup, lists the plans it accepts. A second
-  account takes its own install and its own login, since neither carries
-  across Windows accounts.
+  account takes its own install and its own login, since neither carries across
+  Windows accounts.
 - **For the usual path, the `wiki@applefeld` plugin installed**, from the
   marketplace the engine [README](../README.md) names. The plugin installs
   under `~/.claude/plugins/`, so each owning account installs it for itself.
@@ -305,7 +310,10 @@ pwsh -NoProfile -File tests/Test-KbStructure.ps1 -Path <kb> -RequireSchema -Requ
 ```
 
 A KB created before the version mark existed fails this check on
-`.claude/engine.json` until the engine writes that file into it.
+`.claude/engine.json` until the engine writes that file into it. A KB whose
+engine predates the read block fails the check that its
+`.claude/settings.json` holds `"blockReadsOutsideWorkingDirectories": true`
+until the walker's engine update copies that line in.
 
 A green run confirms the KB's structure: the required directories and files are
 present, `CLAUDE.md` and the four skills exist, `settings.json` parses, and the
@@ -315,7 +323,8 @@ Claude Code loads, `CLAUDE.md`, `CLAUDE.local.md`, a `.claude/` folder and
 `.mcp.json`, at any depth under `wiki/`, denies all of raw git and the raw shell verbs
 that would bypass the helpers, denies reads under `inbox/` and of the credential
 paths the template names, anchors every read deny but the `inbox/` one at the root above the drive letters, allows the three vetted
-helpers, and pins the default permission mode).
+helpers, pins the default permission mode, and pins the read block on as the
+JSON boolean `true`).
 
 A green run does not prove a headless run will complete. That also needs
 workspace trust (step 2), which is per account and per path and lives in
@@ -323,6 +332,6 @@ workspace trust (step 2), which is per account and per path and lives in
 
 ## A hard invariant: one Windows account per entity
 
-One Windows account holds one entity's KB, never two, as
+One Windows account holds one entity's KBs, never a second entity's, as
 [runbook_automation.md](runbook_automation.md), "The hard invariant, restated",
 states in full.

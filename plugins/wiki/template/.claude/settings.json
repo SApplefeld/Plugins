@@ -1,6 +1,7 @@
 {
   "permissions": {
     "defaultMode": "default",
+    "blockReadsOutsideWorkingDirectories": true,
     "allow": [
       "Read", "Glob", "Skill", "TodoWrite",
       "Edit(./wiki/**)",

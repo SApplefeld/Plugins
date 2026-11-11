@@ -18,13 +18,13 @@ The read to perform. One of:
 - Unpushed: the commits on the current branch not yet on its upstream. A branch
   with no configured upstream reports nothing.
 - PageDate: the last-change date (YYYY-MM-DD) of one repo page.
-- Inbox: the files waiting in inbox/, one per line as
+- Pending: the files waiting in inbox/, one per line as
   `<handle><tab><bytes><tab><name>`, skipping .gitkeep. The handle is the
   first 12 lowercase hexadecimal digits of the SHA-256 of the name's UTF-8
   bytes. kb-move.ps1 -Handle and kb-commit.ps1 -SourceHandle recompute it from
   the live directory, so a skill moves and commits a file by its handle and
   no byte of the file's name sits on the command line.
-- Sources: the files under sources/, in the Inbox form, one per line as
+- Sources: the files under sources/, in the Pending form, one per line as
   `<handle><tab><bytes><tab><name>`, skipping .gitkeep and any folder. It lists
   committed sources beside an orphan, a file a crashed ingest moved and never
   committed, so the ingest skill takes the orphan's handle from this listing
@@ -64,7 +64,7 @@ pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Unpushed
 pwsh -NoProfile -File ./.claude/kb-status.ps1 -What PageDate -Path 'wiki/acme-corp.md'
 
 .EXAMPLE
-pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox
+pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Pending
 
 .EXAMPLE
 pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Sources
@@ -78,7 +78,7 @@ pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Live -Minutes 60
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Porcelain', 'Unpushed', 'PageDate', 'Inbox', 'Sources', 'Live')]
+    [ValidateSet('Porcelain', 'Unpushed', 'PageDate', 'Pending', 'Sources', 'Live')]
     [string]$What,
 
     [string]$Path,
@@ -199,12 +199,12 @@ switch ($What) {
             Write-Output $date
         }
     }
-    'Inbox' {
+    'Pending' {
         if ($pathSupplied) {
-            Stop-WithReason 'Inbox takes no -Path.'
+            Stop-WithReason 'Pending takes no -Path.'
         }
         if ($minutesSupplied) {
-            Stop-WithReason 'Inbox takes no -Minutes.'
+            Stop-WithReason 'Pending takes no -Minutes.'
         }
         $inboxDir = Join-Path $repoRoot 'inbox'
         if (-not (Test-Path -LiteralPath $inboxDir -PathType Container)) {
@@ -229,7 +229,7 @@ switch ($What) {
         if (-not (Test-Path -LiteralPath $sourcesDir -PathType Container)) {
             Stop-WithReason 'sources/ does not exist.'
         }
-        # The Inbox columns over sources/, read from the same file list
+        # The Pending columns over sources/, read from the same file list
         # kb-commit.ps1 -SourceHandle resolves a handle against, so a handle
         # printed here names the file that call commits.
         $items = @(Get-ChildItem -LiteralPath $sourcesDir -File | Where-Object { $_.Name -ne '.gitkeep' })

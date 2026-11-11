@@ -263,7 +263,8 @@ instruction file Claude Code loads. It then commits the other
 recovered edits under a `Reconcile:` subject, and only then finishes any
 untracked orphan source, whose handle it reads from
 `kb-status.ps1 -What Sources`. An untracked source whose name `inbox/` still
-holds, found by matching its handle against `kb-status.ps1 -What Inbox`, is no orphan: the move helper
+holds, found by matching its handle against `kb-status.ps1 -What Pending`,
+is no orphan: the move helper
 deletes the inbox file only once its copy is whole, so the copy may be
 partial. The run leaves it uncommitted and names the pair in its report for a
 person to reconcile. All of this runs before the inbox is touched.
@@ -396,7 +397,7 @@ and its headless page, https://code.claude.com/docs/en/headless, state these
 rules.
 
 **Three vetted helpers are the agent's only git and move operations.** `kb-move.ps1` is the
-only path into `sources/`: it takes the handle `kb-status.ps1 -What Inbox`
+only path into `sources/`: it takes the handle `kb-status.ps1 -What Pending`
 prints beside an inbox file, which it resolves against the inbox at the call,
 or a bare inbox file name from a person at the keyboard. It refuses a handle
 matching no file or more than one, refuses a name
@@ -495,12 +496,92 @@ recorded as an attributed claim (both values, both citations) rather than
 overwriting a sourced claim. A new source overwrites in place only when it
 clearly postdates or explicitly corrects the claim it replaces.
 
+**Reads outside the KB are refused to Claude Code's file tools.** The file
+tools are the tools through which the agent opens, searches and lists files:
+Read, Grep, Glob and LSP, the last being the tool that asks a language server
+about code. The template's `.claude/settings.json` holds
+`"blockReadsOutsideWorkingDirectories": true` inside its `permissions` block,
+the read block. With it, Claude Code refuses the file tools a path outside the
+session's working directories. A scheduled run's working directory is the KB's
+root, where the wrapper starts it. The refusal tells the agent to ask a person
+to add the folder with `/add-dir` or to remove the setting, which a headless
+run cannot do. Anthropic's Claude Code settings reference,
+https://code.claude.com/docs/en/settings, in its entry for this setting, says
+the block holds in every permission mode, lets no allow rule through, and
+needs Claude Code 2.1.257 or later.
+
+On Claude Code 2.1.322, in a KB on `D:` whose settings hold the line, runs in
+the default permission mode and in `bypassPermissions`, the mode that skips
+permission prompts, were refused a file elsewhere on `D:`, one nested a folder
+deeper, one on `C:`, one under `%LOCALAPPDATA%`, one in the profile's root,
+and one in a folder whose path opens with the KB's own path text. Each was
+read with the line withheld. The `D:` file was refused too under a
+parent-relative path, in upper case and with forward slashes. As a
+`\\localhost\D$` share path or a `\\?\` extended path it was refused in the
+block's words with the line, and without the line by Claude Code's own check
+on such paths, so no run showed either spelling readable. A junction inside
+the KB to an outside folder was refused with the line, and a Glob listing of
+an outside folder was refused. A run in a folder not yet trusted was refused
+the outside file too. A run started in the KB's `wiki\` subfolder was refused
+the KB's own `index.md` by Claude Code's permission prompt, so the block's
+part there is unobserved. Whether a run can read a large tool result that
+Claude Code saves to a file is unobserved too. Inside the KB, files were read
+and an ingest completed with the line, as without it. Reach on a build from
+2.1.257 to 2.1.321 rests on the vendor's statement.
+
+Five reaches stay past the block, as residual 1 of the source repository's
+[threat-model.md](threat-model.md), which the published plugin does not
+include, lists them in full. The first is a tool other than the file tools.
+The settings reference says a shell command is not refused the same way, and a
+process it starts opens files with the account's rights, which is inferred. An
+MCP server's tool in an interactive session, a tool an add-on server gives the
+session, is taken as outside the block too, since the page names only the file
+tools. That is inferred as well. The second is Claude Code's own files under
+`~/.claude/`, certain of which it keeps readable: a run with the line read a
+file in the installed plugin's folder and was refused a file in a folder made
+there. The third is a directory added to the session, which counts as a
+working directory by the vendor's page. That is one listed under
+`additionalDirectories`, the setting that adds folders to every session, in
+`~/.claude/settings.json` or in managed settings, the policy settings an
+administrator deploys to a machine, or one a person adds with `/add-dir` or
+`--add-dir`. The page says a directory added only in repository settings does
+not count. Whether the KB's local settings file,
+`.claude/settings.local.json`, counts as repository settings is unobserved.
+The fourth is a build below 2.1.257, the block's minimum by the vendor's page.
+What Claude Code does with the line there is unobserved: it may judge the
+whole settings file invalid and ignore it, deny rules included. The fifth is a
+KB whose `.claude/` does not yet hold the line, which reads as before. To see
+whether a KB holds the line, look for `"blockReadsOutsideWorkingDirectories":
+true` in its `.claude/settings.json`.
+
+With the block on, Claude Code also refused a helper call whose argument was
+the name of the read-denied `inbox/` folder, before the helper started. On
+2.1.322 it refused the listing call `kb-status.ps1` when its value was the
+word `Inbox`, which names the read-denied `inbox/` folder on a drive that
+ignores letter case. It ran the same call with the line withheld or with the
+`inbox/` read deny removed. Arguments such as `wiki/site.pem`,
+`inbox/report.txt` and a message naming the inbox reached the helper. Whether
+a quoted argument naming an existing file under a read-denied folder is
+refused is unobserved. The mechanism is inferred from those runs, not read
+from Claude Code's source. So the listing's value is `Pending`, and no helper
+value is named for a read-denied folder. No lint, merge or query run was made
+under the block. Their helper calls take values and argument shapes the ingest
+and the status calls ran, so that they pass is inferred.
+
+The structure test pins the line as the JSON boolean `true`. The row Outside
+read probe of the source repository's `docs/verification.md`, which the
+published plugin does not include, holds its reach and is re-run after each
+Claude Code update.
+
 **Known credential files are refused to the Read tool on every drive letter.**
-Other reads are
-allowed: `Read` and `Glob` are allowed unscoped, so an ingest run can read
-files. The `Grep` tool is denied outright, because its path-scoped deny rules do
-not bind. `settings.json` denies `Read` of these paths, and those denies hold
-whether or not the workspace is trusted:
+`Read` and `Glob` are allowed unscoped, so an ingest run reads the KB's own
+files without a prompt. Outside the KB, the read block refuses a file these
+rules do not name. These rules are what refuses a listed name inside the KB,
+and what still refuses one outside it where the block does not hold. Which of
+the two refuses an outside file a rule names is unobserved. The `Grep` tool is
+denied outright, because its path-scoped deny rules do not bind.
+`settings.json` denies `Read` of these paths, and those denies hold whether or
+not the workspace is trusted:
 
 - Claude Code's own: `//**/.credentials.json`, `//**/.claude.json`, and
   `//**/.claude/*.json`.
@@ -536,7 +617,8 @@ are observed refusing files inside the KB and elsewhere on `D:`, and the
 user-secrets rule on `C:` too. The other two are held on `C:` by their anchor,
 not by a run. No decoy sat under the account's profile, so a key in the
 account's own `.ssh` folder is refused by inference from the anchor and the
-`C:` result.
+`C:` result. These runs were made in a KB whose settings held no read block,
+so each outside refusal is the rule's own.
 
 A KB gets these rules when an installed engine that carries them creates it,
 or when the walker's engine update copies them into its `.claude/` once the
@@ -549,10 +631,11 @@ vendor's page says it also binds the file commands Claude Code recognizes in a
 shell, which no run here has observed, and calls its reach to Glob best effort.
 One Glob listing of one folder outside the KB, with the rules in place, named
 only the file no rule matches. A deny does not bind a subprocess that opens
-files itself. A credential file at a path no pattern names stays readable, and
-so does every ordinary file elsewhere on the machine. The boundary for that
-data rests on the Windows account, so the one-account-per-entity invariant is a
-hard requirement.
+files itself. Inside the KB, a credential file at a path no pattern names stays
+readable. Outside it, the read block refuses the file tools, within the reaches
+above, and where it does not hold, any ordinary file the account can read stays
+readable. The boundary between entities rests on the Windows account, so the
+one-account-per-entity invariant is a hard requirement.
 
 **Any invalid settings file is ignored wholesale.** Claude Code silently ignores
 a `settings.json` that fails validation in headless mode, which would void the
@@ -745,8 +828,14 @@ is its own repository with its own history and, where it has one, its own
 permission model gives the agent no way to write outside the repo or push
 anywhere but that KB's own remote. The **Windows account boundary** separates
 entities, under the one-account invariant that
-[runbook_automation.md](runbook_automation.md), "The hard invariant, restated",
-states in full.
+[runbook_automation.md](runbook_automation.md), "The hard invariant,
+restated", states in full. Inside the account, the read block,
+`permissions.blockReadsOutsideWorkingDirectories`, refuses a KB's agent the
+files of other folders through Claude Code's file tools. It is a second
+boundary inside the first. Five reaches stay past it, as residual 1 of the
+source repository's [threat-model.md](threat-model.md), which the published
+plugin does not include, lists them, among them a subprocess and a build below
+Claude Code 2.1.257, so two entities still never share an account.
 
 A Claude Code session in any other folder on the account sits outside every
 KB's wall. Beyond creating a KB through `wiki-new`, it reaches existing KBs

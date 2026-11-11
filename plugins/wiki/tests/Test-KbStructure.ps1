@@ -22,7 +22,8 @@ of credential files, anchors every Read deny at the filesystem root save the
 one under inbox/, allows the three vetted helpers a KB session calls to
 move a file, to commit, and to read status, grants no other script or
 command under Bash, and pins permissions.defaultMode to default so a
-bypass-default account still runs under the allow-list.
+bypass-default account still runs under the allow-list, and pins
+permissions.blockReadsOutsideWorkingDirectories to the JSON boolean true.
 
 Passing this check does not prove a headless run will complete. Claude Code
 ignores permissions.allow entirely in a workspace that has not been trusted,
@@ -88,11 +89,13 @@ function Test-Check {
 # access on a missing member throws, so every read of parsed JSON goes through here.
 # The property collection is enumerated one at a time rather than projected with
 # .Name, because projecting a member off an empty collection throws the same way.
+# The name is matched with regard to case, so a settings key spelled in other
+# letters reads as absent, as a key Claude Code does not recognize would be.
 function Get-JsonProperty {
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $null }
     foreach ($property in $Object.PSObject.Properties) {
-        if ($property.Name -eq $Name) { return $property.Value }
+        if ($property.Name -ceq $Name) { return $property.Value }
     }
     return $null
 }
@@ -185,6 +188,7 @@ $settingsChecks = @(
     'allow array grants no raw git write verb'
     'allow array grants only the three helpers under Bash'
     'permissions.defaultMode is pinned to default'
+    'permissions.blockReadsOutsideWorkingDirectories is pinned to true'
 )
 
 $settingsPath = Join-Path $root '.claude/settings.json'
@@ -256,7 +260,12 @@ if (-not $parsed) {
     # skill needs it.
     Test-Check -Description 'deny array blocks the Grep tool' -Passed ($denyRules -contains 'Grep')
 
-    # Read is allowed unscoped, so only these deny rules keep an injected instruction
+    # The blockReadsOutsideWorkingDirectories line has Claude Code's file tools
+    # refuse a path outside the session's working directories, save the files
+    # Claude Code states it keeps readable for itself under ~/.claude/. It does
+    # not bind a process the agent's shell starts. These deny rules also
+    # refuse the credential names inside the wiki, and on a Claude Code build
+    # where the block does not hold. They keep an injected instruction
     # from reading a credential file and writing it into a page that gets pushed.
     # All 21 are anchored at the filesystem root, so they reach every drive letter. Each
     # is pinned as its exact string, compared with regard to case, so a dropped or
@@ -331,6 +340,15 @@ if (-not $parsed) {
     # write .claude/feed.json through a shell verb or run the feeder. Pinning the
     # mode here holds every session to the allow-list, which grants neither.
     Test-Check -Description 'permissions.defaultMode is pinned to default' -Passed ((Get-JsonProperty $permissions 'defaultMode') -ceq 'default')
+
+    # Read and Glob are allowed unscoped, so this line is what has Claude Code's
+    # file tools refuse a path outside the session's working directories. The key
+    # and its parent are matched with regard to case, so a respelled key fails
+    # like a dropped one. It passes only as the JSON boolean true. The type is
+    # tested because PowerShell compares the string "true" as equal to $true.
+    # The pin holds the line, not reach. A live probe holds reach.
+    $blockOutsideReads = Get-JsonProperty $permissions 'blockReadsOutsideWorkingDirectories'
+    Test-Check -Description 'permissions.blockReadsOutsideWorkingDirectories is pinned to true' -Passed (($blockOutsideReads -is [bool]) -and $blockOutsideReads)
 }
 
 if ($failures -eq 0) {

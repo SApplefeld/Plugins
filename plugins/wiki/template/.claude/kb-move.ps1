@@ -7,7 +7,7 @@ instructions.
 
 .DESCRIPTION
 The single sanctioned path by which a file reaches sources/. It takes the file
-by its bare name or by the handle `kb-status.ps1 -What Inbox` prints for it,
+by its bare name or by the handle `kb-status.ps1 -What Pending` prints for it,
 resolves a handle against the live inbox, validates that the name cannot escape
 inbox/ or overwrite an existing source, confirms both the origin and
 destination resolve to locations inside the repo and outside .git/ and
@@ -73,7 +73,7 @@ already exists as a file or a folder is refused naming it; and each origin
 and destination must resolve inside the repo and clear of .git/ and
 .claude/. The rename reads no byte of any item. It clears
 the hidden and system attributes, so a renamed file reaches
-`kb-status.ps1 -What Inbox`, sets no time, and writes
+`kb-status.ps1 -What Pending`, sets no time, and writes
 `renamed: inbox/renamed-<name>` to stdout, one line per item. Where no item
 is on the list it writes nothing and exits 0. A clear or rename that throws
 is refused with its one-line reason. That refusal comes after the checks, so
@@ -93,7 +93,7 @@ Exactly one of -Name and -Handle is given.
 .PARAMETER Handle
 The handle of the item in inbox/ to move: the first 12 lowercase hexadecimal
 digits of the SHA-256 of the file name's UTF-8 bytes, as the first column of
-`kb-status.ps1 -What Inbox` prints it. The skills move by handle, so no byte
+`kb-status.ps1 -What Pending` prints it. The skills move by handle, so no byte
 of a hand-dropped name sits on their command line for the shell to re-read.
 The shape is checked first, then the inbox is listed as the status helper
 lists it and each file's handle recomputed. A handle matching no file, or more
@@ -119,7 +119,7 @@ inbox/renamed-CLAUDE.md, clears its hidden attribute, leaves notes.md as it
 is, and prints `renamed: inbox/renamed-CLAUDE.md`.
 
 .EXAMPLE
-pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox
+pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Pending
 Prints `3f2a9c1d8e07<tab>1204<tab>report.pdf`. Then:
 pwsh -NoProfile -File ./.claude/kb-move.ps1 -Handle '3f2a9c1d8e07'
 Moves inbox/report.pdf to sources/report.pdf and prints `sources/report.pdf`.
@@ -529,14 +529,14 @@ if ($PSCmdlet.ParameterSetName -eq 'Rename') {
 }
 
 # A handle resolves to a name against the live inbox, listed as kb-status.ps1
-# -What Inbox lists it: the inbox's own files, .gitkeep left out. The shape is
+# -What Pending lists it: the inbox's own files, .gitkeep left out. The shape is
 # checked before the inbox is read, so a value that is not a handle is refused
 # as such whatever the tree holds. The resolved name then runs every check a
 # name given on the line runs but the apostrophe refusal, which guards only
 # the shell line a handle never puts the name on.
 if ($PSCmdlet.ParameterSetName -eq 'Handle') {
     if ($Handle -cnotmatch '^[0-9a-f]{12}$') {
-        Stop-WithReason 'Handle must be twelve lowercase hexadecimal digits, as kb-status.ps1 -What Inbox prints it.'
+        Stop-WithReason 'Handle must be twelve lowercase hexadecimal digits, as kb-status.ps1 -What Pending prints it.'
     }
     $inboxDir = Join-Path $repoRoot 'inbox'
     if (-not (Test-Path -LiteralPath $inboxDir -PathType Container)) {

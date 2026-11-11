@@ -601,24 +601,60 @@ the KB's ingest.
 
 ## The hard invariant, restated
 
-**One Windows account per knowledge base. Never two.** It is the boundary
+**One Windows account per entity, and every knowledge base on that account
+belongs to that entity. Never two entities on one account.** It is the boundary
 between entities.
 
-`Read` and `Glob` are allowed unscoped, and a headless run will read an
-absolute path outside its own repository. The deny list refuses the credential
-files it names on every drive letter, among them SSH keys under the names it
-lists, git and cloud tokens and Claude Code's own files, as
-`docs/architecture.md` lists them and bounds their reach. The agent can
-read every other file the account can read, credential or ordinary, outside the
-KB's `inbox/`. So putting two entities' KBs under one account puts one
-entity's sources within reach of the other entity's agent. A prompt-injected
-document dropped into one KB's inbox could instruct the run to read the other
-KB's sources and write them into a wiki page that is then pushed. The
-repository boundary separates content, and the Windows account boundary
-separates entities. For two entities whose separation is a legal requirement,
-that boundary must never be crossed. Each entity gets its own Windows account,
-its own Claude login, its own git credentials and its own `wiki-walk` task,
-and each account's walker reads only that account's wiki list.
+`Read` and `Glob`, the tools that open and list files, are allowed without a
+path bound. The KB's settings turn on Claude Code's read block with one line,
+`"blockReadsOutsideWorkingDirectories": true` under `permissions`. With it,
+the agent's file tools, the tools through which it opens, searches and lists
+files, refuse a path outside the KB's folder, save the reaches the next
+paragraph names. Runs on Claude Code 2.1.322 were refused files on two drives
+and under the account's profile, in the default permission mode and in
+`bypassPermissions`, the mode that skips permission prompts. Anthropic's
+settings reference, https://code.claude.com/docs/en/settings, says it holds in
+every permission mode and needs Claude Code 2.1.257 or later. The deny list
+also refuses the credential files it names on every drive letter, among them
+SSH keys under the names it lists, git and cloud tokens and Claude Code's own
+files, as `docs/architecture.md` lists them and bounds their reach.
+
+The invariant still stands, because the block is a second boundary inside the
+account. Five reaches stay past it, as residual 1 of the source repository's
+`docs/threat-model.md`, which the published plugin does not include, lists
+them. The first is a tool other than the file tools. A shell command, or a
+process it starts, opens files with the account's rights once it runs. Claude
+Code refused one helper call by its argument before it started, as residual 6
+of the same document records. An MCP server's tool in an interactive session,
+a tool an add-on server gives the session, is taken as outside the block too,
+which is inferred. The second is Claude Code's own files under `~/.claude/`,
+certain of which it keeps readable to the agent, such as installed plugins and
+skills. The third is a folder added to the session, which counts as a working
+directory for the block, by the settings reference. That is a folder listed
+under `additionalDirectories`, the setting that adds folders to every session,
+in the account's own Claude settings or in managed settings, the policy
+settings an administrator deploys to a machine, or one a person adds with
+`/add-dir` or `--add-dir`. The fourth is a build below 2.1.257. What such a
+build does with the line is unobserved, and it may ignore the whole settings
+file. The fifth is a KB not yet carrying the line, which a KB gets only when
+an installed engine that carries it creates the KB or the walker's engine
+update copies it in. In each of these cases the agent reads past the block
+what that case opens, and on an older build possibly every file the account
+can read. So putting two entities' KBs under one account puts one entity's
+sources within reach of the other entity's agent. A prompt-injected document
+dropped into one KB's inbox could instruct the run to read the other KB's
+sources and write them into a wiki page that is then pushed. The repository
+boundary separates content, and the Windows account boundary separates
+entities. For two entities whose separation is a legal requirement, that
+boundary must never be crossed. Each entity gets its own Windows account, its
+own Claude login, its own git credentials and its own `wiki-walk` task, and
+each account's walker reads only that account's wiki list.
+
+By the vendor's page, the block binds a person's own Claude Code session
+opened inside a KB too, in every mode. Save the other reaches the paragraph
+above lists, such a session's file tools reach a folder outside the KB only
+once that folder is added for it. Its shell commands and other tools are not
+bound the same way, as the first reach above says.
 
 ## Troubleshooting
 

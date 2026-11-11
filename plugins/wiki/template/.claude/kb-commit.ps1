@@ -47,7 +47,7 @@ to case, since the handle names the source; refused beside -Reconcile.
 .PARAMETER SourceHandle
 The handle of the source under sources/ to stage: the first 12 lowercase
 hexadecimal digits of the SHA-256 of the file name's UTF-8 bytes, the value
-`kb-status.ps1 -What Inbox` printed for the file before kb-move.ps1 moved it,
+`kb-status.ps1 -What Pending` printed for the file before kb-move.ps1 moved it,
 or the value `kb-status.ps1 -What Sources` prints for a file already there.
 The shape is checked first, then the files under sources/ are listed and each
 one's handle recomputed. A handle matching no file, or more than one, is
@@ -493,13 +493,13 @@ if ($paths.Count -eq 0 -and -not $sourceHandleSet -and -not $reconcileSet) {
 }
 
 # A source handle resolves to a name against the files under sources/, as
-# kb-status.ps1 -What Inbox listed the file before kb-move.ps1 moved it. The
+# kb-status.ps1 -What Pending listed the file before kb-move.ps1 moved it. The
 # shape is checked before the directory is read, so a value that is not a
 # handle is refused as such whatever the tree holds.
 $resolvedSource = $null
 if ($sourceHandleSet) {
     if ($SourceHandle -cnotmatch '^[0-9a-f]{12}$') {
-        Stop-WithReason 'SourceHandle must be twelve lowercase hexadecimal digits, as kb-status.ps1 -What Inbox or -What Sources prints it.'
+        Stop-WithReason 'SourceHandle must be twelve lowercase hexadecimal digits, as kb-status.ps1 -What Pending or -What Sources prints it.'
     }
     $sourcesDir = Join-Path $repoRoot 'sources'
     if (-not (Test-Path -LiteralPath $sourcesDir -PathType Container)) {

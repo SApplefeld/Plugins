@@ -39,11 +39,11 @@ untracked, read both folders' handles by running exactly:
 
 and then exactly:
 
-    pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox
+    pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Pending
 
 Each prints `<handle><tab><bytes><tab><name>`, and a handle is computed
 from the name alone, so one name gives one handle in both listings. An
-untracked source whose handle is on a line `-What Inbox` printed has an
+untracked source whose handle is on a line `-What Pending` printed has an
 inbox twin. `-What Porcelain` prints a name holding a space, a quote, a
 backslash or a letter outside ASCII inside double quotes, with each byte
 outside ASCII written as a backslash and three octal digits, so decode it
@@ -160,7 +160,7 @@ as a document in this run. A renamed folder stays in `inbox/` as a folder,
 which the snapshot does not list.
 
 Take the run's snapshot of `inbox/` exactly once, at the start of the run, with
-`pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox`, which prints one
+`pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Pending`, which prints one
 line per file as `<handle><tab><bytes><tab><name>` and omits `.gitkeep`. The
 handle is twelve hexadecimal digits the helper computed from the name; it is
 how step 4 moves and commits the file, so keep each line's handle with its

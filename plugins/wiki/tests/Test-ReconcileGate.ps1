@@ -14,7 +14,7 @@ file in a new folder reads by its own path, that a renamed file reads by its new
 path, that the same paths aged 31 minutes read nothing under the default window
 and read under -Minutes 60, that a path 29 minutes old reads under the default
 window, that a tracked file deleted from disk never reads, that -Minutes is
-refused by Porcelain, Unpushed, PageDate and Inbox and when below 1, that Live
+refused by Porcelain, Unpushed, PageDate and Pending and when below 1, that Live
 refuses -Path, that Porcelain prints the same lines as git status --porcelain,
 that a file planted two days back reads as live at age 0 once kb-move.ps1
 writes it into sources/, and that the four writing skills emit the Live read
@@ -24,7 +24,7 @@ inside step 4b before its move, lint's last inside its write pass and merge's
 inside its live check. It checks that the three kb-move.ps1 output tokens the
 ingest skill reads are held by the helper's code, its comments excluded, and
 appear in the skill's text, and that the helper's code and the skill's step 1
-both say a person reconciles them and that step 1 holds the exact Inbox
+both say a person reconciles them and that step 1 holds the exact Pending
 listing command, so the skill's pair rule cannot lose its listing or drift
 from the helper's words unnoticed. It also checks that a child outliving the test's
 own run bound reads TimedOut and has its process tree stopped, so a hung child
@@ -310,7 +310,7 @@ try {
     Remove-Item -LiteralPath (Join-Path $script:kb 'inbox\fresh-drop.txt')
 
     # --- Refusals. Each reads the text of the rule that must refuse.
-    foreach ($mode in @('Porcelain', 'Unpushed', 'Inbox')) {
+    foreach ($mode in @('Porcelain', 'Unpushed', 'Pending')) {
         $r = Invoke-Status @('-What', $mode, '-Minutes', '10')
         Test-Check "$mode refuses -Minutes with its own one-line reason and exit 1" (Test-Refusal $r "$mode takes no -Minutes.")
     }
@@ -508,13 +508,13 @@ try {
 
     # --- A copy left beside its inbox twin waits for a person. The helper's
     # both-files lines say a person reconciles them, and the ingest skill's
-    # step 1 lists the inbox with the exact Inbox command and says the same
+    # step 1 lists the inbox with the exact Pending command and says the same
     # of an untracked source whose name the inbox still holds, so its
     # reconcile step never commits a copy that may be partial. The helper side
     # reads the parsed code's strings, its comment help aside; the skill side
     # reads step 1 alone, with whitespace collapsed.
     $reconcilePhrase = 'a person reconciles them'
-    $inboxCommand = 'pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Inbox'
+    $inboxCommand = 'pwsh -NoProfile -File ./.claude/kb-status.ps1 -What Pending'
     $helperPairs = ($null -ne $codeStrings) -and (@($codeStrings | Where-Object { $_.Value.Contains($reconcilePhrase) }).Count -gt 0)
     $skillPairs = $false
     if (Test-Path -LiteralPath $ingestFile -PathType Leaf) {
@@ -525,7 +525,7 @@ try {
             $skillPairs = ($stepOne.IndexOf($inboxCommand, [System.StringComparison]::Ordinal) -ge 0) -and ($stepOne.IndexOf($reconcilePhrase, [System.StringComparison]::Ordinal) -ge 0)
         }
     }
-    Test-Check "kb-move.ps1's code holds '$reconcilePhrase', and the wiki-ingest skill's step 1 holds the exact Inbox command and the same phrase (helper $helperPairs, skill $skillPairs)" ($helperPairs -and $skillPairs)
+    Test-Check "kb-move.ps1's code holds '$reconcilePhrase', and the wiki-ingest skill's step 1 holds the exact Pending command and the same phrase (helper $helperPairs, skill $skillPairs)" ($helperPairs -and $skillPairs)
 
     # --- The helper's own bound. A child that outlives a short bound reads
     # TimedOut, and its tree is stopped: the child and the grandchild it waits
