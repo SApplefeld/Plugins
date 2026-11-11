@@ -64,6 +64,20 @@ export type ReplyOutcome = {
 };
 
 /**
+ * What one noted close came to. `noted` is the only success: the broker marked the messages the
+ * turn read and posted nothing. `no-session` and `no-thread` are the broker's own words for a close
+ * with nowhere to mark, and `failed` is every way the request did not reach a decision, a broker
+ * that predates the field among them, since its route refuses a body with no text.
+ */
+export type NotedStatus = "noted" | "no-session" | "no-thread" | "failed";
+
+/**
+ * What one noted close comes back as. `error` is why a request failed, present only where one was
+ * written.
+ */
+export type NotedOutcome = { status: NotedStatus; error?: string };
+
+/**
  * What one restart request came to. The first two are the broker's own answers, read out of the
  * response body with the reason the broker gave; `failed` is every way the request did not reach a
  * decision, with the relay's or the broker's words for it.
@@ -138,6 +152,11 @@ export type BrokerClient = {
    * is the broker's sentence for a refusal, present only where the broker wrote one.
    */
   reply: (text: string, file?: string, mentions?: readonly string[]) => Promise<ReplyOutcome>;
+  /**
+   * Closes the turn with nothing to say: the broker marks the messages the turn read as noted and
+   * posts nothing. It rides the reply's route, token and key, so it needs no route of its own.
+   */
+  noted: () => Promise<NotedOutcome>;
   /**
    * Hands the broker one permission prompt to put in front of the operator. It resolves when the
    * broker has taken the prompt, not when the operator answers: the answer arrives whenever they
@@ -536,6 +555,20 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
         ...(answer.unresolved === undefined ? {} : { unresolved: answer.unresolved }),
         ...(answer.quieted === undefined ? {} : { quieted: answer.quieted }),
       };
+    },
+
+    async noted() {
+      // `noted` and no other key, since the broker refuses a true noted beside any words key. The
+      // broker answers at once and posts nothing, so the reply's idle window bounds the wait and
+      // no ceiling is set.
+      const answer = await post("/relay/reply", { noted: true }, replyIdleMs);
+      // A status outside the four a noted close can come to reads as `failed`, so the type holds
+      // only what the broker's answer can be.
+      const status: NotedStatus =
+        answer.status === "noted" || answer.status === "no-session" || answer.status === "no-thread"
+          ? answer.status
+          : "failed";
+      return { status, error: answer.error };
     },
 
     async permissionRequest(request) {

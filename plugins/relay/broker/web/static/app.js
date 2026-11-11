@@ -2073,7 +2073,7 @@
   const KIND_WORDS = { mirror: "mirrored", prompt: "prompt", peer: "peer", question: "question", notice: "notice" };
 
   /** The receipt stages as the page words them; a line with none shows no word. */
-  const RECEIPT_WORDS = { delivered: "delivered", "picked-up": "read", answered: "answered", warned: "warned" };
+  const RECEIPT_WORDS = { delivered: "delivered", "picked-up": "read", answered: "answered", noted: "noted", warned: "warned" };
   /** What the broker's answer to a sent line means, in the operator's words. */
   const SEND_WORDS = {
     "no-session": "No live session; nothing was sent.",

@@ -99,6 +99,9 @@ export function isMentionList(value: unknown): value is string[] {
  * event and will pass it back, and a tool that rejected an argument it was always going to be given
  * would fail the first reply of every conversation. It is not sent to the broker: routing is by
  * session, and the way to keep that true is to give the wire no field to route by.
+ *
+ * No property is required. A reply carries a message and a noted close carries none, so which one
+ * a call is, and whether its arguments fit it, is judged by the relay before the broker is asked.
  */
 export const REPLY_TOOL = {
   name: REPLY_TOOL_NAME,
@@ -112,11 +115,18 @@ export const REPLY_TOOL = {
     "can be pinged. A message that reports on someone without addressing them names nobody. A name " +
     "that matches nobody on the allowlist pings nobody and is reported in the tool result, and the " +
     "message still posts. A thread's pings are bounded per minute, and a ping quieted for volume is " +
-    "reported the same way.",
+    "reported the same way. Where the messages this turn read ask nothing of this session, call it " +
+    "with noted set to true and no message: the broker marks those messages noted and posts " +
+    "nothing. A question put to this session, a request of it or an instruction to it gets a reply " +
+    "in words, whoever wrote it, and so does anything this session is unsure about. A line that " +
+    "asks nothing may be noted whoever wrote it, an operator's thanks among them. Never spend a " +
+    "reply on saying nothing was needed, or on this session's own idle state. A noted close " +
+    "stops no mirror: where the broker mirrors this session's text, the turn's own text still " +
+    "reaches the thread.",
   inputSchema: {
     type: "object",
     properties: {
-      message: { type: "string", description: "The text to send." },
+      message: { type: "string", description: "The text to send. Leave it out when noted is true." },
       file: {
         type: "string",
         description:
@@ -136,12 +146,18 @@ export const REPLY_TOOL = {
           "allowlist and reports any it could not match; the message posts either way. Leave " +
           "mentions out when the message addresses nobody by name.",
       },
+      noted: {
+        type: "boolean",
+        description:
+          "Set true to close a turn whose messages ask nothing of this session. The broker marks the " +
+          "messages the turn read as noted and posts nothing. A noted close carries no message, file " +
+          "or mentions.",
+      },
       chat_id: {
         type: "string",
         description: "Accepted for compatibility and ignored; replies are routed by session.",
       },
     },
-    required: ["message"],
     additionalProperties: false,
   },
 } as const;
@@ -269,7 +285,10 @@ export const INSTRUCTIONS =
   "worth the operator's attention: a milestone, a decision you need, or a failure you cannot " +
   "work around. A reply goes to the thread, which may hold several readers, and reaches the " +
   "operator's phone. So it is worth spending on those and not on routine progress, which the " +
-  "thread's status card already shows. A reply that hands the operator a decision, a question, " +
+  "thread's status card already shows. A turn whose messages ask nothing of you closes with the " +
+  "reply tool's noted argument set to true and no message, which marks those messages noted and " +
+  "posts nothing. A question, a request, an instruction or anything you are unsure of still gets " +
+  "a reply in words. A reply that hands the operator a decision, a question, " +
   "or an act only they can perform opens with a line whose " +
   "first characters are ASK: followed by the ask in one sentence, written plainly rather than " +
   "bulleted, quoted or wrapped in any other markup, so the ask stands out where the operator reads " +

@@ -1529,6 +1529,7 @@ export async function startBroker(
     receipts: {
       pickedUp: (threadId, at) => receipts?.pickedUp(threadId, at),
       answered: (threadId, at) => receipts?.answered(threadId, at),
+      noted: (threadId, at) => receipts?.noted(threadId, at),
     },
   });
   // The steering writer's notices and permission alerts land in threads without passing the

@@ -204,20 +204,22 @@ export type OutboundRouterOptions = {
    */
   sleep?: (ms: number) => Promise<void>;
   /**
-   * The receipt tracker's picked-up and answered stages. `pickedUp` is told from the transcript
+   * The receipt tracker's picked-up, answered and noted stages. `pickedUp` is told from the transcript
    * tailer's prompt seam alone (`interimPrompt` below), the mirror-on half of pickup that reaches
    * a mid-turn queued message and a lost `UserPromptSubmit` hook's recovered turn-opener alike.
    * `answered` is told once a reply is on the thread, from the reply tool and from a `reply`-kind
    * mirror, whether that mirror posted or was deduplicated against a copy already there, and is
    * told the instant the reply arrived at the broker rather than the instant its post landed:
    * the Stop hook is answered before delivery, so a reply's post can land after the next turn
-   * has opened, and the tracker attributes an answer to its own turn by that arrival. Optional
+   * has opened, and the tracker attributes an answer to its own turn by that arrival. `noted` is
+   * told from the reply tool's noted close alone, with the instant that close arrived. Optional
    * for the reason every other seam here is: with nothing wired, no stage reaction is ever
    * painted.
    */
   receipts?: {
     pickedUp: (threadId: string, at: number) => void;
     answered: (threadId: string, at: number) => void;
+    noted: (threadId: string, at: number) => void;
   };
   /**
    * How a file a reply names is read: the file system, the platform whose path rules apply, the
@@ -535,6 +537,12 @@ export type ReplyResult =
   | { status: "file-refused"; reason: string; cause: ReplyFileCause };
 
 /**
+ * What a noted close came to, in the terms the relay reports back to Claude: the messages the turn
+ * read were marked, or the session could not be placed, on the terms a reply's cannot.
+ */
+export type NotedResult = { status: "noted" } | { status: "no-session" } | { status: "no-thread" };
+
+/**
  * What a mirror post carries: the operator's console prompt, or the turn's final assistant reply.
  * The kind rides the whole path from the intake so the rendering layer can attribute a prompt to
  * the console rather than presenting it as Claude's own text. Defined by that renderer, and passed
@@ -552,6 +560,12 @@ export type OutboundRouter = {
    * window; a sent result names what did not resolve and whether the pings were quieted.
    */
   reply: (processToken: string, text: string, file?: string, mentions?: readonly string[]) => Promise<ReplyResult>;
+  /**
+   * Closes a turn for the session currently held by this process token with nothing to say: every
+   * message picked up and not yet answered or noted is marked noted, and nothing is posted. It answers at once, since
+   * it waits on no post.
+   */
+  noted: (processToken: string) => NotedResult;
   /**
    * Posts one mirrored prompt or reply from the session currently held by this process token.
    *
@@ -853,9 +867,11 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
    *
    * One loop for every posting path on purpose: the landed count and the error wording are part
    * of what the callers log and report, and two copies would let those drift. Not chained here,
-   * because the interim path runs it inside a chain task of its own, where taking a second place
-   * on the same chain would deadlock; `deliver` below, and `deliverReply` for the reply tool, are
-   * the chained doorways everything else uses.
+   * because the interim path and the Stop mirror each run it inside a chain task of their own,
+   * the mirror through `postInTask` for its first run and its retry. A task already on a thread's
+   * chain must never call `deliver` or `inOrder` for that thread, since it would wait on its own
+   * tail. `deliver` below, and `deliverReply` for the reply tool, are the chained doorways for
+   * everything else.
    * The thread's ordering chain is held for the whole of a paced run, which is the order a thread
    * reads correctly in: what a session posts after a report belongs below it.
    *
@@ -928,15 +944,35 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
    * is about to post below, which is exactly the stale state the clear exists to prevent. The
    * branches that post nothing, the mirror's echo drop above all, never come through here and
    * never clear.
+   *
+   * The task's body is `postInTask`, which a caller already running a task on the thread's chain
+   * calls directly, since a second `inOrder` from inside a task would wait on its own tail.
    */
   async function deliver(
     threadId: string,
     messages: string[],
+    landedWhole?: () => void,
   ): Promise<{ landed: number; error: string | null; lastMessageId: string | null }> {
-    return inOrder(threadId, () => {
-      narration.delete(threadId);
-      return postRun(threadId, messages);
-    });
+    return inOrder(threadId, () => postInTask(threadId, messages, landedWhole));
+  }
+
+  /**
+   * The body of `deliver`'s chained task: ends the thread's narration block, posts the run, and
+   * calls `landedWhole`, where given, only for a run that landed whole. Called only from a task
+   * already on the thread's chain, never on its own.
+   *
+   * `landedWhole` runs before the task settles, as `deliverReply`'s does and for the same reason: a
+   * noted close queued behind a mirrored reply finds that reply's answered mark already made.
+   */
+  async function postInTask(
+    threadId: string,
+    messages: string[],
+    landedWhole?: () => void,
+  ): Promise<{ landed: number; error: string | null; lastMessageId: string | null }> {
+    narration.delete(threadId);
+    const run = await postRun(threadId, messages);
+    if (run.error === null) landedWhole?.();
+    return run;
   }
 
   /**
@@ -971,6 +1007,11 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
    * The run ends the thread's narration block inside the task, as one through `deliver` does and
    * for the same reason. `total` is the count of messages the run was rendered into, which the pills can change.
    * `plain` is the reply already rendered without pills, posted as it is unless the reply rings.
+   *
+   * `landedWhole` runs inside the task, and only for a run that landed whole, before the task
+   * settles. That is what orders the reply's answered mark ahead of a noted close queued behind it
+   * on the chain: the close's task starts only once this one has settled, so it never paints noted
+   * over messages this run posted words for.
    */
   async function deliverReply(
     threadId: string,
@@ -978,6 +1019,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
     plain: string[],
     file: ReplyFile | undefined,
     resolved: readonly string[],
+    landedWhole: () => void,
   ): Promise<{
     landed: number;
     error: string | null;
@@ -996,6 +1038,7 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       const messages = pinged ? renderAnswer(text, mentionUserIds) : plain;
       const run = await postRun(threadId, messages, file, mentionUserIds);
       if (pinged && run.landed === 0) replyPings.refund(threadId);
+      if (run.error === null) landedWhole();
       return { ...run, total: messages.length, pinged, quieted };
     });
   }
@@ -1136,6 +1179,11 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
    * Both outcomes are logged in their own words. This is a loss the ordinary partial-run line
    * cannot express, since that line reads identically for a run whose text another path is about
    * to carry, and the operator's only other signal is silence in the thread.
+   *
+   * `post` is how the retry goes out, `deliver` by default, which queues it as its own task on the
+   * thread's chain. The mirror runs its first run and this retry inside one chain task and passes
+   * `postInTask`, so the retry posts before that task settles. `landedWhole` is handed to `post`,
+   * so it runs inside whichever chain task carries the retry.
    */
   async function retryDeferredRun(
     threadId: string,
@@ -1146,12 +1194,18 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
     reclaim: () => void,
     subject: string,
     firstError: string,
+    landedWhole?: () => void,
+    post: (
+      threadId: string,
+      messages: string[],
+      landedWhole?: () => void,
+    ) => Promise<{ landed: number; error: string | null; lastMessageId: string | null }> = deliver,
   ): Promise<{ landed: number; error: string | null; lastMessageId: string | null }> {
     // Re-claimed with no await between the release that reported the deferral and this line: the
     // other path consults the memory on its own schedule, and a gap here is that path posting its
     // own copy beside the retry below.
     reclaim();
-    const retry = await deliver(threadId, messages);
+    const retry = await post(threadId, messages, landedWhole);
     if (retry.landed > 0) {
       log(
         `routing: the ${subject} from session ${sessionId} landed nothing (${firstError}) with the ` +
@@ -1468,7 +1522,11 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       // on. Alert paths hold their own writer and never come through this router.
       // The reply's arrival, read before the run so a prompt typed while it lands is later than it.
       const arrivedAt = now();
-      const run = await deliverReply(located.threadId, text, plain, attachment, names.resolved);
+      // The answered mark is made inside the run's own chain task, as the run lands whole, so a
+      // noted close queued behind this reply on the thread's chain finds the mark already made.
+      const run = await deliverReply(located.threadId, text, plain, attachment, names.resolved, () =>
+        options.receipts?.answered(located.threadId, arrivedAt),
+      );
       // A run whose first message never landed handed its slot back and pinged nobody.
       noteNames(
         run.pinged && run.landed > 0 ? "pinged" : run.quieted ? "quieted for volume" : "pinged nobody",
@@ -1488,12 +1546,11 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
         options.echo?.noteAnswer(located.sessionId, text);
         tapReply(located.sessionId, text, arrivedAt, run.lastMessageId);
         // The page's copy of the file is reserved here so the line carries its link, and written
-        // only after the taps and the receipt below, never awaited.
+        // only after the taps below and the receipt the run already marked, never awaited.
         const copy = attachment === undefined ? null : reserveForPage(located.sessionId, attachment);
         tapTalk(located.sessionId, { kind: "reply", author: null, senderClass: null, text, files: copy === null ? [] : [copy.link] });
         tapVoice(located.sessionId, text);
         tapGate(located.sessionId, text);
-        options.receipts?.answered(located.threadId, arrivedAt);
         if (copy !== null) writeForPage(located.sessionId, copy.write);
         return { status: "sent", ...report };
       }
@@ -1515,6 +1572,30 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
             ? run.error
             : `stopped after ${run.landed} of ${run.total} messages: ${run.error}`,
       };
+    },
+
+    noted(processToken) {
+      const located = locate(processToken);
+      // Rebuilt rather than passed along, for the reason `reply` rebuilds it.
+      if ("status" in located) return { status: located.status };
+      // The receipt mark is the whole of a noted close. Nothing posts, so nothing is recorded for
+      // the mirror's dedup and no tap is fed: each tap carries words that reached the thread, and
+      // here there are none.
+      //
+      // The instant is read as the close arrives, and the mark waits its turn on the thread's chain,
+      // so every reply already posting there makes its answered mark first and its messages read
+      // answered, since words were posted for them. The close answers now and waits on nothing. A
+      // reply that failed still settles its link, so it never holds the mark back, and a mark that
+      // throws is logged here, since the caller has already been answered. Each line names the
+      // session alone.
+      const at = now();
+      void inOrder(located.threadId, async () => {
+        options.receipts?.noted(located.threadId, at);
+      }).then(undefined, () =>
+        log(`routing: the noted mark for session ${located.sessionId} could not be made`),
+      );
+      log(`routing: session ${located.sessionId} closed a turn noted, and nothing was posted`);
+      return { status: "noted" };
     },
 
     async mirror(processToken, kind, text, sessionId) {
@@ -1798,27 +1879,29 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
       claimed?.claim();
       // The reply's arrival, read before the run so a prompt typed while it lands is later than it.
       const arrivedAt = now();
-      const run = await deliver(located.threadId, messages);
-      if (run.error === null) {
-        if (kind === "reply") {
-          tapReply(located.sessionId, text, arrivedAt, run.lastMessageId);
-          tapTalk(located.sessionId, { kind: "mirror", author: null, senderClass: null, text });
-          tapVoice(located.sessionId, text);
-          tapGate(located.sessionId, text);
-          options.receipts?.answered(located.threadId, arrivedAt);
-        } else if (kind === "prompt") {
-          tapTalk(located.sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
-        }
-        return { status: "sent" };
-      }
-      if (claimed !== null && run.landed === 0) {
-        // The release reports whether the tailer had already skipped its own copy of this text over
-        // this claim. If it had, its transcript bytes are behind its offset and this run is the last
-        // thing carrying the text, so it goes again once. The release itself matters even when
-        // nothing deferred: a claim left standing over text that never landed is what would make
-        // the tailer skip the only copy still recoverable.
-        if (options.echo?.release(located.sessionId, text, claimed.slot) === true) {
-          const retry = await retryDeferredRun(
+      // A reply's answered mark is made inside the run's own chain task, as the run lands whole. A
+      // prompt answers nothing and hands no mark.
+      const answeredMark =
+        kind === "reply" ? () => options.receipts?.answered(located.threadId, arrivedAt) : undefined;
+      // The first run, the release below and the one retry it can earn share one task on the
+      // thread's chain, so a retry posts, and makes its answered mark, before that task settles. A
+      // noted close that arrived while the first run was posting queued its mark behind this task,
+      // so it finds the mark already made whichever run landed the words.
+      //
+      // The release reports whether the tailer had already skipped its own copy of this text over
+      // this claim. If it had, its transcript bytes are behind its offset and this run is the last
+      // thing carrying the text, so it goes again once. The release itself matters even when
+      // nothing deferred: a claim left standing over text that never landed is what would make the
+      // tailer skip the only copy still recoverable.
+      const { run, retry } = await inOrder(located.threadId, async () => {
+        const first = await postInTask(located.threadId, messages, answeredMark);
+        if (
+          first.error !== null &&
+          claimed !== null &&
+          first.landed === 0 &&
+          options.echo?.release(located.sessionId, text, claimed.slot) === true
+        ) {
+          const again = await retryDeferredRun(
             located.threadId,
             located.sessionId,
             text,
@@ -1826,22 +1909,38 @@ export function createOutboundRouter(options: OutboundRouterOptions): OutboundRo
             claimed.slot,
             () => claimed.claim(),
             `mirrored ${kind}`,
-            run.error,
+            first.error,
+            answeredMark,
+            postInTask,
           );
-          if (retry.error === null) {
-            if (kind === "reply") {
-              tapReply(located.sessionId, text, arrivedAt, retry.lastMessageId);
-              tapTalk(located.sessionId, { kind: "mirror", author: null, senderClass: null, text });
-              tapVoice(located.sessionId, text);
-              tapGate(located.sessionId, text);
-              options.receipts?.answered(located.threadId, arrivedAt);
-            } else if (kind === "prompt") {
-              tapTalk(located.sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
-            }
-            return { status: "sent" };
-          }
-          return { status: "failed", error: retry.error };
+          return { run: first, retry: again };
         }
+        return { run: first, retry: null };
+      });
+      if (run.error === null) {
+        if (kind === "reply") {
+          tapReply(located.sessionId, text, arrivedAt, run.lastMessageId);
+          tapTalk(located.sessionId, { kind: "mirror", author: null, senderClass: null, text });
+          tapVoice(located.sessionId, text);
+          tapGate(located.sessionId, text);
+        } else if (kind === "prompt") {
+          tapTalk(located.sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
+        }
+        return { status: "sent" };
+      }
+      if (retry !== null) {
+        if (retry.error === null) {
+          if (kind === "reply") {
+            tapReply(located.sessionId, text, arrivedAt, retry.lastMessageId);
+            tapTalk(located.sessionId, { kind: "mirror", author: null, senderClass: null, text });
+            tapVoice(located.sessionId, text);
+            tapGate(located.sessionId, text);
+          } else if (kind === "prompt") {
+            tapTalk(located.sessionId, { kind: "prompt", author: null, senderClass: "operator", text });
+          }
+          return { status: "sent" };
+        }
+        return { status: "failed", error: retry.error };
       }
 
       // The kind, the counts, and the transport's error class only. The text is the operator's

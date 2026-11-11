@@ -1,5 +1,5 @@
 // One reaction on each person's own message, in a session's thread, tracking where that message
-// stands: handed to the session, picked up by a turn, or answered.
+// stands: handed to the session, picked up by a turn, and then answered or noted.
 //
 // A stage change adds the new emoji and, only once that lands, removes every emoji believed
 // painted on the message other than the new one, so a stage change never leaves a message with
@@ -23,13 +23,16 @@ import type { RepeatLogSurface } from "../repeat-log.ts";
 import { createRepeatLog } from "../repeat-log.ts";
 
 /**
- * The three stage emoji, and the warning a harness error episode swaps in over a still-unanswered
- * message, in one place so the operator can swap any of them.
+ * The four stage emoji, and the warning a harness error episode swaps in over a still-unanswered
+ * message, in one place so the operator can swap any of them. `noted` marks a message the session
+ * read and closed without words, so it is a mark of its own and never ✅, which says words were
+ * posted.
  */
 export const STAGE_EMOJI = {
   delivered: "📨",
   pickedUp: "👀",
   answered: "✅",
+  noted: "☑️",
   warning: "⚠️",
 } as const;
 
@@ -142,8 +145,15 @@ export type ReceiptTracker = {
    */
   answered: (threadId: string, at: number) => void;
   /**
-   * The thread's session hit a harness error: every message still tracked, which is every one not
-   * yet answered, swaps its stage reaction to ⚠️. A message already warned is left as it stands,
+   * The session closed a turn at `at` saying the messages it read asked nothing of it, and posted
+   * nothing: every message picked up at or before `at` moves to ☑️ and leaves tracking, the
+   * messages a reply arriving at that instant would have answered.
+   */
+  noted: (threadId: string, at: number) => void;
+  /**
+   * The thread's session hit a harness error: every message still tracked, which is every one
+   * neither answered nor noted yet, whether or not a turn has picked it up, swaps its stage
+   * reaction to ⚠️. A message already warned is left as it stands,
    * and a message delivered before `restore` is painted ⚠️ from the start.
    */
   warn: (threadId: string) => void;
@@ -163,8 +173,8 @@ export type ReceiptTracker = {
   stageOf: (threadId: string, messageId: string) => ReceiptStage | null;
 };
 
-/** A message's stage as the talk page reads it; `picked-up` is the 👀 stage. */
-export type ReceiptStage = "delivered" | "picked-up" | "answered" | "warned";
+/** A message's stage as the talk page reads it; `picked-up` is the 👀 stage and `noted` the ☑️ one. */
+export type ReceiptStage = "delivered" | "picked-up" | "answered" | "noted" | "warned";
 
 export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTracker {
   const describeError =
@@ -194,6 +204,10 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
   // injected after the reply arrived, and read by the tailer only after the post landed late,
   // still reads as the next turn's.
   const lastAnsweredAt = new Map<string, number>();
+  // The instant of each thread's latest noted close, kept until `forget`, for the same stale
+  // pickup: a turn closed noted can be credited its mid-turn message only afterwards, and nothing
+  // will call `noted` for that turn again.
+  const lastNotedAt = new Map<string, number>();
   // One serial queue per thread, holding only the chain of writes still pending. Dropped once
   // nothing is chained behind the last task that ran, so a thread with no live traffic does not
   // hold a queue entry forever; the budget above outlives this unless the thread was forgotten.
@@ -371,6 +385,7 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
       const list = threads.get(threadId);
       if (list === undefined) return;
       const answeredAt = lastAnsweredAt.get(threadId);
+      const notedAt = lastNotedAt.get(threadId);
       const remaining: Tracked[] = [];
       for (const entry of list) {
         if (entry.pickedUpAt !== null || entry.deliveredAt > at) {
@@ -385,6 +400,14 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
           // the message keeps whatever stage it already showed.
           reached(threadId, entry.messageId, "answered");
           enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.answered));
+          continue;
+        }
+        if (notedAt !== undefined && at <= notedAt) {
+          // The same stale pickup, for a turn that closed noted. Judged after the reply above, so
+          // a pickup both a reply and a noted close cover reads answered: words were posted for
+          // it, and ☑️ would say none were.
+          reached(threadId, entry.messageId, "noted");
+          enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.noted));
           continue;
         }
         entry.pickedUpAt = at;
@@ -423,6 +446,29 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
       threads.set(threadId, remaining);
     },
 
+    noted(threadId, at) {
+      // The instant is kept on the terms the latest answer's is: never moved backwards, and
+      // recorded only for a thread with tracking, so a close landing after `forget` leaves no
+      // entry behind that no later `forget` would ever clear.
+      const list = threads.get(threadId);
+      if (list === undefined) return;
+      const previous = lastNotedAt.get(threadId);
+      if (previous === undefined || at > previous) lastNotedAt.set(threadId, at);
+      const remaining: Tracked[] = [];
+      for (const entry of list) {
+        // Every message picked up by the close's instant and still tracked, one an earlier turn
+        // left unanswered among them, as an answer takes it: a message still queued, or picked up
+        // after the close, belongs to a later turn. A warned message moves like any other.
+        if (entry.pickedUpAt === null || entry.pickedUpAt > at) {
+          remaining.push(entry);
+          continue;
+        }
+        reached(threadId, entry.messageId, "noted");
+        enqueue(threadId, transition(threadId, entry, STAGE_EMOJI.noted));
+      }
+      threads.set(threadId, remaining);
+    },
+
     warn(threadId) {
       episodes.add(threadId);
       const list = threads.get(threadId);
@@ -455,6 +501,7 @@ export function createReceiptTracker(options: ReceiptTrackerOptions): ReceiptTra
     forget(threadId) {
       threads.delete(threadId);
       lastAnsweredAt.delete(threadId);
+      lastNotedAt.delete(threadId);
       episodes.delete(threadId);
       stages.delete(threadId);
       // The queue is left alone: a chain still running for this thread (a write already in flight

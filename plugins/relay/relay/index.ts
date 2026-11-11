@@ -14,7 +14,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { DEFAULT_PORT } from "../broker/config.ts";
 import { runDirectly } from "../broker/entrypoint.ts";
 import { createBrokerClient, holdsControlCharacter } from "./broker.ts";
-import type { BrokerClient, ReplyOutcome, ReplyStatus, RestartOutcome } from "./broker.ts";
+import type { BrokerClient, NotedStatus, ReplyOutcome, ReplyStatus, RestartOutcome } from "./broker.ts";
 import {
   PermissionRequestNotificationSchema,
   channelCapabilities,
@@ -111,18 +111,88 @@ export function replyToolResult(
   return { content: [{ type: "text", text }], isError: true };
 }
 
+/** What the model is told when its noted argument is not a boolean. */
+export const NOTED_SHAPE_SENTENCE = "noted must be true or false.";
+
+/**
+ * What the model is told when a noted close carries words. Refused rather than sent without them,
+ * so no words are dropped without the model knowing.
+ */
+export const NOTED_WORDS_SENTENCE =
+  "A noted close carries no message, file or mentions. Send the words with a plain reply, or call with noted alone.";
+
+/**
+ * What the model is told when a noted close was not marked. Each opens the same way, so the model
+ * knows the mark did not land and can still answer in words.
+ */
+export const NOTED_FAILURES: Record<string, string> = {
+  "no-session": "Not marked: the broker holds no live session for this process, so there is no thread.",
+  "no-thread": "Not marked: this session's Discord thread has not been opened yet.",
+  failed: "Not marked: the broker could not mark the messages.",
+};
+
+/**
+ * What the model is told about one noted close, from what it came to.
+ *
+ * Only `noted` is no error. Every other outcome left the messages unmarked, and an error is what
+ * invites the model to answer them in words instead. Nothing was posted on any of them.
+ */
+function notedToolResult(status: NotedStatus): CallToolResult {
+  if (status === "noted") {
+    return { content: [{ type: "text", text: "Nothing was posted. The messages this turn read are marked noted." }] };
+  }
+  // Own properties only, for the reason the reply's lookup gives: the status is a string off the
+  // wire, and `constructor` must read as a failure rather than resolve through the prototype chain.
+  const text = Object.hasOwn(NOTED_FAILURES, status) ? NOTED_FAILURES[status] : NOTED_FAILURES.failed;
+  return { content: [{ type: "text", text }], isError: true };
+}
+
 /**
  * One call of the reply tool, from its arguments to what the model is told.
  *
  * Held apart from the server wiring, as the result mapping is, so the checks that answer the model
  * without asking the broker can be driven on their own. `watched` is whether this process holds a
- * process token from the launch wrapper.
+ * process token from the launch wrapper. A call with `noted: true` is a noted close and goes to
+ * `noted`; any other call is a reply and goes to `reply`.
  */
 export async function replyToolCall(
   args: Record<string, unknown> | undefined,
   watched: boolean,
   reply: BrokerClient["reply"],
+  noted: BrokerClient["noted"],
 ): Promise<CallToolResult> {
+  // The noted argument is judged first, ahead of the message, since a noted close carries none. A
+  // false one is the same as none. A true one beside any words is refused rather than sent without
+  // them: a message that is not blank, whatever its type, a file key whatever it holds, or any
+  // mentions but an empty list. A blank message and an empty list count as absent, since a model
+  // passes them by habit. All of it is judged before the launch wrapper, as the reply's arguments are.
+  const closeNoted = args?.noted;
+  if (closeNoted !== undefined && typeof closeNoted !== "boolean") {
+    return { content: [{ type: "text", text: NOTED_SHAPE_SENTENCE }], isError: true };
+  }
+  if (closeNoted === true) {
+    const words = args?.message;
+    const names = args?.mentions;
+    if (
+      (words !== undefined && !(typeof words === "string" && words.trim() === "")) ||
+      args?.file !== undefined ||
+      (names !== undefined && !(Array.isArray(names) && names.length === 0))
+    ) {
+      return { content: [{ type: "text", text: NOTED_WORDS_SENTENCE }], isError: true };
+    }
+    if (!watched) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Not marked: this session was not started through the launch wrapper, so it has no Discord thread.",
+          },
+        ],
+        isError: true,
+      };
+    }
+    return notedToolResult((await noted()).status);
+  }
   const message = args?.message;
   if (typeof message !== "string" || message.trim() === "") {
     return { content: [{ type: "text", text: "reply needs a non-empty message." }], isError: true };
@@ -328,7 +398,7 @@ export async function startRelay(env: NodeJS.ProcessEnv = process.env): Promise<
     if (request.params.name !== REPLY_TOOL_NAME) {
       return { content: [{ type: "text", text: `Unknown tool ${request.params.name}.` }], isError: true };
     }
-    return replyToolCall(request.params.arguments, Boolean(processToken), broker.reply);
+    return replyToolCall(request.params.arguments, Boolean(processToken), broker.reply, broker.noted);
   });
 
   // The stream is opened only once the connection is initialized. Claude Code probes a stdio

@@ -13,6 +13,10 @@
 //     body: {"text": "...", "file": "<absolute path>", "mentions": ["<display name>", ...]}, the
 //        file and the mentions each optional and left off when none; a mention is a display name
 //        the router resolves against this host's allowlist
+//     body: {"noted": true} and no other key, a turn closed with nothing to say: the router marks
+//        every message picked up and not yet answered or noted, and posts nothing
+//     -> 200 {"status": "noted" | "no-session" | "no-thread"} for a noted body, as one finished
+//        response with no early head and no heartbeat, since it waits on no post
 //     -> 200 {"status": "sent" | "no-session" | "no-thread" | "failed" | "file-refused"}, with the
 //        head written before the run starts and a newline heartbeat every REPLY_HEARTBEAT_MS until
 //        it resolves. A file-refused body carries the "reason" sentence the relay shows the model
@@ -27,7 +31,8 @@
 //     -> 403 when the key does not match the pipe currently held for that token
 //     -> 400 or 413 on a body that is unreadable, past the cap, carries a file that is not a
 //        string, or carries mentions that are not a list of non-blank names inside the reply
-//        tool's count and length bounds, each decided before the head
+//        tool's count and length bounds, each decided before the head. So is a noted that is not
+//        a boolean, and a true noted beside a text, file or mentions key, whatever the key holds
 //
 //   POST /relay/permission
 //     the same two headers
@@ -77,6 +82,12 @@ import type { RelayConnection, RelayEvent, RelayHub } from "./relays.ts";
  * return value. One event is a few hundred bytes, so this is a long way past any real backlog.
  */
 const MAX_QUEUED_BYTES = 1 << 20;
+
+/** The 400 for a `noted` that is not a boolean, told apart from the words refusal below. */
+export const NOTED_SHAPE_ERROR = "noted is not a boolean";
+
+/** The 400 for a true `noted` beside a text, file or mentions key. */
+export const NOTED_WORDS_ERROR = "a noted body carries no text, file or mentions";
 
 export type RelayRoutesOptions = {
   relays: RelayHub;
@@ -314,6 +325,28 @@ export function createRelayRoutes(
         // Reported honestly rather than always as taken. A relay told a prompt was received will
         // wait for a verdict that is never coming, and say nothing about it anywhere.
         send(response, 200, { status: accepted ? "received" : "dropped" });
+        return;
+      }
+
+      // Read before the text is asked for, since a noted close carries none. The relay sends
+      // {"noted": true} and no other key, so a body of any other shape came from a caller that
+      // went around it. This route forgives nothing there: a words key beside a true `noted`,
+      // whatever it holds, is a malformed body, and so is a `noted` that is not a boolean, so no
+      // words are posted or dropped on a guess at what the caller meant. A false `noted` is the
+      // same as none and the body runs as a reply.
+      const noted = fields.noted;
+      if (noted !== undefined && typeof noted !== "boolean") {
+        send(response, 400, { error: NOTED_SHAPE_ERROR });
+        return;
+      }
+      if (noted === true) {
+        if (["text", "file", "mentions"].some((key) => Object.hasOwn(fields, key))) {
+          send(response, 400, { error: NOTED_WORDS_ERROR });
+          return;
+        }
+        // Sent whole, with no early head and no heartbeat: the close waits on no post, so its
+        // outcome is known before anything is written.
+        send(response, 200, options.outbound.noted(processToken));
         return;
       }
 
