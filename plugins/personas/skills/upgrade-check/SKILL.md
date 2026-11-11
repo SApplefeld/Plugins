@@ -15,7 +15,7 @@ Resolve each value below before running anything.
 
 - **The script.** Read the installed copy's folder from `~/.claude/plugins/installed_plugins.json`: the `installPath` of the entry under `personas@applefeld` with the newest `lastUpdated`. For example, `node -e "const r=require(require('os').homedir()+'/.claude/plugins/installed_plugins.json').plugins['personas@applefeld'];console.log(r.slice().sort((a,b)=>Date.parse(b.lastUpdated)-Date.parse(a.lastUpdated))[0].installPath)"`. The script is `bin/upgrade-check.mjs` under that folder.
 - **The launch directory.** The script reads the running session's version from the transcript folder of the directory it runs in. That must be the directory this session was launched in, which stays the same however far the shell moves. For a persona the supervisor starts, it is the directory of the file `$HEARTBEAT_PATH` names. So run both `pre` and `post` with the shell in the launch directory, and move the shell there first where a tool call has moved it. Run from anywhere else, it reads the version as `unknown`, and `post` then fails its version check on a healthy build.
-- **`--repo`.** The checkout the fleet's scheduled tasks start personas from, `<checkout>/plugins/personas`, the repository checkout's `plugins/personas` folder. Its `node_modules/typescript` must exist, from `npm install` run there once. Without it the compile step reads `fail` and the verdict is triage.
+- **`--repo`.** The plugin folder the check reads the hooks, the saved type files and the compiler from. On a machine whose scheduled tasks start personas from a repository checkout, it is `<checkout>/plugins/personas`, that checkout's `plugins/personas` folder. On a machine registered from the installed plugin, with no checkout, it is the installed copy's folder, the one the script input above resolves. Its `node_modules/typescript` must exist in either shape, and `npm install` run once in that folder lays it where it is missing. Without it the compile step reads `fail` and the verdict is triage.
 - **`--results`.** The directory that holds the fleet roster, `D:/personas` on the fleet machine. The rows land in `upgrade-checks.jsonl` there, and `upgrade-checks.md` beside it is regenerated from them. Never point it at a scratch folder for a real run, or the next canary cannot find the record.
 - **`--canary`.** This persona's name, so the table says which persona ran it.
 - **The run directory.** The folder holding this persona's `heartbeat.json`, `settings.json` and `supervisor.log`. It is the directory of the file `$SUPERVISOR_HEARTBEAT_PATH` names.
@@ -43,7 +43,7 @@ The script makes its own scratch folder, `cc-validate-<version>` under the syste
 1. Run `pre` with the Bash tool's background option, since it can run 18 minutes when six steps each reach their three-minute timeout. The command writes its own exit code, so read the result from that file rather than from the task finishing:
 
    ```
-   node <script> pre --repo <checkout>/plugins/personas --results D:/personas --canary <persona> > <log folder>/upgrade-pre.log 2>&1; echo $? > <log folder>/upgrade-pre.exit
+   node <script> pre --repo <plugin folder> --results D:/personas --canary <persona> > <log folder>/upgrade-pre.log 2>&1; echo $? > <log folder>/upgrade-pre.exit
    ```
 
 2. Read the exit code from `upgrade-pre.exit`, and the last line of `upgrade-pre.log` for the verdict. The lines above it are one per step, as `<step>: <result> - <evidence>`.
