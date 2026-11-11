@@ -757,7 +757,7 @@ export function toolCallBack(tool: string, r: ToolCallResult, handed: Set<string
   const budget = scanBudget(remainingMs);
   const rehideHanded = (text: string): string => {
     let out = text;
-    for (const v of [...handed].sort((a, b) => b.length - a.length)) if (v.length >= 4 && out.includes(v)) out = out.split(v).join(mint("SECRET", v));
+    for (const v of [...handed].sort((a, b) => b.length - a.length)) if (v.length >= 4 && out.includes(v)) out = out.split(v).join(mint("SECRET", v, "known"));
     return out;
   };
   if (r.deny !== undefined) {

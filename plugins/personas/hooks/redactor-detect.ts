@@ -168,10 +168,24 @@ function keyedHash(text: string): string {
 // Two different values never share a placeholder: on a clash the hash is
 // taken again with a counter until the tag is free. A secret equal to the
 // session's own id comes back as it is: no placeholder, no echo, not counted.
-export function mint(kind: Kind, raw: string): string {
+// `evidence` says what a SECRET hide rests on, and the value is marked with
+// it at a first sight and at every later one. The default is `named`, so a
+// caller that says nothing marks its value as one never spared. The mark
+// lands only where a named site mints, so a value first hidden by its shape
+// alone and met only in a later scan in a run that holds a key's name, as
+// NAMED reads one, or a URL's credential part on either side of it,
+// as scanEvidence reads the run, stays spareable:
+// the first re-hide pass has swapped it for its placeholder by then, and
+// a named site that meets a placeholder and mints it again marks nothing.
+// A value that only an earlier hide's placeholder carried to this mint is
+// marked nothing either, so it is never spared, since no hide judged it
+// whole on its own evidence.
+export function mint(kind: Kind, raw: string, evidence: Evidence = 'named'): string {
   if (kind === 'SECRET' && refuseOwnId(raw)) return raw
   hidden++
-  const value = kind === 'LITERAL' ? raw : restore(unpark(raw, false))
+  const unparked = kind === 'LITERAL' ? raw : unpark(raw, false)
+  const value = kind === 'LITERAL' ? raw : restore(unparked)
+  if (kind === 'SECRET' && evidence !== 'known' && value === unparked) (evidence === 'shape' ? shapeOnly : namedHide).add(value)
   const seen = byValue.get(value)
   if (seen) {
     if (kind === 'SECRET') remember(value)
@@ -212,9 +226,11 @@ export function restore(text: string): string {
 // Hides a value the caller knows is secret wherever it turns up for the rest
 // of the session, even one too short or too plain for the echo rule (a word
 // password from .env). Values under PREFIX characters can't be indexed. The
-// session's own id comes back as it is and joins nothing.
+// value is recorded as seeded, so it stays hidden where it opens a token that
+// is a record id. The session's own id comes back as it is and joins nothing.
 export function keepSecret(value: string): string {
   if (refuseOwnId(value)) return value
+  seeded.add(value)
   const tag = mint('SECRET', value)
   if (value.length >= PREFIX && !echo.has(value)) {
     echo.add(value)
@@ -261,6 +277,29 @@ export function escapeLiteralTags(text: string): string {
 // would fire on it: a tool that echoes a restored key must not print it.
 const echo = new Set<string>()
 let echoIndex: EchoIndex | null = null
+// The values keepSecret was handed, each a real secret on the caller's word.
+// The passes that hide a known value again read this set before they spare
+// one: a seeded value is hidden whatever it opens, and a value both seeded
+// and detected counts as seeded. Like `echo`, it is never cleared.
+const seeded = new Set<string>()
+// What a SECRET hide rests on, as mint is told it. `shape` records a hide
+// the generic scan made on the token's shape alone: scanEvidence found no
+// key's name, as NAMED reads one, and no URL credential part in the
+// unbroken run the token stands in, read on both sides of it, and the run
+// is shorter than 512 characters, measured on the text the scan reads,
+// after earlier hides and parking. `named` records a hide on any other
+// evidence, a key's name, a
+// pair, a URL part and a vendor shape among such evidence, and is what a
+// caller that passes nothing records. `known` records nothing: its caller
+// hides again a value the vault already holds, as the re-hide passes here
+// and rehideHanded in redactor.ts do.
+type Evidence = 'named' | 'shape' | 'known'
+// The values hidden by their shape alone, and the values hidden on any other
+// evidence. A value may be in both, and no mark is ever removed. The passes
+// that hide a known value again spare one only where it is in the first set
+// and not in the second, so a value with no mark at all is never spared.
+const shapeOnly = new Set<string>()
+const namedHide = new Set<string>()
 // The values minted during the current scan, to hide at their other spots.
 let local: Set<string> | null = null
 
@@ -361,14 +400,41 @@ function rehideKnown(text: string): string {
 }
 
 // The values minted in one scan, hidden at their other spots in it. A few
-// values are found faster one by one than by the rolling hash.
+// values are found faster one by one than by the rolling hash. Each spot
+// is judged on the text as the longer values' hides left it, so a value
+// glued after a placeholder's closing bracket opens a token of its own.
 function rehideLocal(text: string, values: Set<string>): string {
   if (values.size > 64) return rehideWith(clocked(text), buildEchoIndex(values))
   let out = text
-  for (const v of [...values].sort((a, b) => b.length - a.length)) if (out.includes(v)) out = clocked(out).split(v).join(mint('SECRET', v))
+  for (const v of [...values].sort((a, b) => b.length - a.length)) if (out.includes(v)) out = rehideOne(clocked(out), v)
   return out
 }
 
+// Hides one value at each of its spots in the text that opensRecordId does
+// not spare, under one placeholder minted once, and only where a spot is
+// hidden. After a spared spot the search goes on from the next character.
+function rehideOne(text: string, value: string): string {
+  const parts: string[] = []
+  let last = 0
+  for (let at = text.indexOf(value); at !== -1; ) {
+    if (opensRecordId(text, at, value)) {
+      at = text.indexOf(value, at + 1)
+      continue
+    }
+    parts.push(text.slice(last, at))
+    last = at + value.length
+    at = text.indexOf(value, last)
+  }
+  if (last === 0) return text
+  parts.push(text.slice(last))
+  return parts.join(mint('SECRET', value, 'known'))
+}
+
+// Hides every indexed value found in the text. Where several match at one
+// position the longest that opensRecordId does not spare is hidden, so a
+// seeded value that shares its opening with a longer spared one is still
+// hidden. Where every match is spared the walk goes on from the next
+// character, so a known value further into the same token is still found.
 function rehideWith(text: string, ix: EchoIndex): string {
   if (text.length < PREFIX) return text
   const parts: string[] = []
@@ -381,14 +447,14 @@ function rehideWith(text: string, ix: EchoIndex): string {
       if (entry) {
         for (const n of entry.lengths) {
           const v = text.slice(i, i + n)
-          if (v.length === n && entry.values.has(v)) {
+          if (v.length === n && entry.values.has(v) && !opensRecordId(text, i, v)) {
             found = v
             break
           }
         }
       }
       if (found) {
-        parts.push(text.slice(last, i), mint('SECRET', found))
+        parts.push(text.slice(last, i), mint('SECRET', found, 'known'))
         i += found.length
         last = i
         if (i + PREFIX <= text.length) h = prefixHash(text, i)
@@ -669,6 +735,31 @@ const URL_PASSWORD =
 // A token used alone as the userinfo: `https://<token>@dev.azure.com/...`,
 // the documented clone form for Azure DevOps, GitHub and Bitbucket tokens.
 const URL_USERINFO = /\b([a-z][a-z0-9+.-]{1,20}:\/\/)([A-Za-z0-9_-]{20,200})@(?=[A-Za-z0-9.-]{1,253}(?::\d{1,5})?[/:])/g
+// A URL's credential positions are its user part and its password, the
+// text between `://` and the `@` before the host. A token stands in one
+// where it is the whole user part or the whole password, so both halves
+// hold. The text before it ends in a scheme and `://`,
+// or in those, a user part and `:`. The text after it reaches `@` at once,
+// or through `:` and a password. Either neighbour may already be a
+// placeholder. The generic scan reads this to record what a hide rests on
+// where the two patterns above do not take the token: a host with no path
+// after it, a host before `)` or `,`, and a user part before a password
+// among such cases. It hides nothing itself. Each read is bounded: the
+// longest text the first half takes, and one character more so its word
+// boundary is read from the text, and the longest the second half takes.
+// The second half is read first, since it fails at its first character
+// on most tokens. It is one of the tests scanEvidence runs, and the only
+// one that reads past a quote inside the credential itself, which a user
+// part or a password may hold. A token that follows such a quote inside the
+// user part or password is neither the whole of one, so this test does not
+// mark it.
+const URL_CRED_BEFORE = /\b[a-z][a-z0-9+.-]{1,20}:\/\/(?:[^\s/@:]{0,80}:)?$/i
+const URL_CRED_AFTER = /^(?::[^\s/@]{0,200})?@/
+const URL_CRED_BEFORE_MAX = 106
+const URL_CRED_AFTER_MAX = 202
+function inUrlCredential(whole: string, offset: number, end: number): boolean {
+  return URL_CRED_AFTER.test(whole.slice(end, end + URL_CRED_AFTER_MAX)) && URL_CRED_BEFORE.test(whole.slice(Math.max(0, offset - URL_CRED_BEFORE_MAX), offset))
+}
 
 // A credential in a URL query: ?api_key=, &sig=, ?accessToken=. The value may
 // be percent-encoded, so it is decoded before it is judged.
@@ -925,7 +1016,9 @@ const BOUNDARY = /Content-Type:[ \t]*multipart\/[^\n]*?(?:\r?\n[ \t][^\n]*?)?\bb
 // tokens. `/` and `.` are left out of a candidate on purpose: with them in,
 // every long file path becomes one. A token never starts inside a `%XX`
 // escape, and `=` only counts as padding when nothing follows it.
-const CAND_BODY = String.raw`[A-Za-z0-9+_-]{12,200}(?:={1,2}(?![A-Za-z0-9=]))?`
+const CAND_CHAR = '[A-Za-z0-9+_-]'
+const CAND_MAX = 200
+const CAND_BODY = String.raw`${CAND_CHAR}{12,${CAND_MAX}}(?:={1,2}(?![A-Za-z0-9=]))?`
 const CANDIDATE_SRC = String.raw`(?<=%[0-9A-Fa-f]{2})(?<!%25)${CAND_BODY}|(?<=%25[0-9A-Fa-f]{2})${CAND_BODY}|(?<!%[0-9A-Fa-f]?|%25[0-9A-Fa-f]?)${CAND_BODY}`
 const SLASHED_SRC = String.raw`(?<![A-Za-z0-9+/_.%~-])[A-Za-z0-9+/]{20,300}={0,2}(?![A-Za-z0-9+/=_.%~-])`
 const CANDIDATE = new RegExp(CANDIDATE_SRC, 'g')
@@ -951,6 +1044,85 @@ const NAMED = new RegExp(
     ')$',
   'i',
 )
+
+// What a hide by the generic scan rests on. The scan cuts a token at `.`,
+// `%XX`, `:` and `/`, so a token may be one fragment of a credential, and
+// what stands right beside a fragment says nothing of its place. So the
+// evidence is read over the unbroken run the token stands in, on both sides
+// of it. A run ends at whitespace, a quote character, a backtick, `<` or
+// `>`, the characters URL_PASSWORD refuses inside a password. The run is
+// the back run, the token and the forward run, and each side is read no
+// further than RUN_MAX characters. The hide is `named` where any of these
+// holds, and `shape` otherwise:
+//   1. A key's name stands right before the token, as NAMED reads it in
+//      the 64 characters before the token.
+//   2. The whole run is RUN_MAX characters long or longer, measured on the
+//      text the scan reads, after earlier hides and after parkOpaque and
+//      parkMedia park their spans as short markers, a side read to its
+//      bound without a break among such runs, so what stands past it is
+//      unread.
+//   3. A key's name, as NAMED reads one, stands right before the
+//      run or inside it on either side of the token. NAMED_IN_RUN is NAMED
+//      with the rest of the back run let through after the name, read from
+//      64 characters before the back run. NAMED_AHEAD is NAMED's body
+//      starting inside the forward run, read up to 64 characters past the
+//      run so a name's own quote and separator are taken. A name in the
+//      text before the back run that the back run does not follow at once
+//      is not read: `token=abc see <token>` stays `shape`.
+//   4. The run holds `://` with an `@` after it, on either side of the
+//      token or one on each side.
+//   5. The token fills a URL's credential position, as inUrlCredential
+//      reads one.
+// The rule errs toward `named`, so a token that shares one unbroken run
+// with a key's name, or with `://` and an `@` after it, is marked though it
+// is no credential: `https://host/p/<token>@v2`, `?token=abc&ref=<token>`
+// and `key: https://host/a/<token>` are such texts. Eight forms stay `shape`
+// though a key's name or a URL credential stands near the token:
+//   a. A token after whitespace inside a quoted value under a key's name,
+//      which stands in a run of its own.
+//   b. A token in a URL's user part or password where that part holds a
+//      run-ending character and that character is whitespace, or the
+//      token is not the whole part, or the user part before it is over 80
+//      characters, or the password after it is over 200 characters or
+//      holds a slash, or the URL's scheme is one inUrlCredential does not
+//      read.
+//   c. A token in an XML element named for a key, or in an attribute whose
+//      sibling attribute names one, as `<entry name="token" value="...">`.
+//   d. A token inside a URL written without a scheme, starting at `//`.
+//   e. A token beside a key's name in a form NAMED does not read, where
+//      passphrase, pass, passcode and pw mid-line, a camelCase URL
+//      parameter, a percent-encoded name, and a name that starts inside
+//      the token are among them.
+//   f. A token beside a key's name that padding puts out of reach: the
+//      name starts more than 64 characters before the run, or what NAMED
+//      reads after a name that follows the token ends more than 64
+//      characters past the run's end.
+//   g. A token in a run whose `://` an earlier hide took, as the hide of
+//      a whole Slack or Discord webhook URL takes it.
+//   h. A token in a run that holds parked text, where the parked text held
+//      the key's name or carried the run to RUN_MAX characters.
+// This changes only what a hide records, never what is hidden.
+const RUN_MAX = 512
+const RUN_BREAK = /[\s"'`<>]/
+const NAMED_IN_RUN = new RegExp(`${NAMED.source.slice(0, -1)}[^${RUN_BREAK.source.slice(1)}{0,${RUN_MAX}}$`, 'i')
+const NAMED_AHEAD = new RegExp(`^[^${RUN_BREAK.source.slice(1)}{0,${RUN_MAX}}?(?=[^${RUN_BREAK.source.slice(1)})${NAMED.source.slice(0, -1)}`, 'i')
+function scanEvidence(whole: string, offset: number, end: number): Evidence {
+  if (NAMED.test(whole.slice(Math.max(0, offset - 64), offset))) return 'named'
+  let start = offset
+  const floor = Math.max(0, offset - RUN_MAX)
+  while (start > floor && !RUN_BREAK.test(whole[start - 1]!)) start--
+  const ahead = whole.slice(end, end + RUN_MAX)
+  const stop = ahead.search(RUN_BREAK)
+  const runEnd = end + (stop === -1 ? ahead.length : stop)
+  if (runEnd - start >= RUN_MAX) return 'named'
+  const run = whole.slice(start, runEnd)
+  const scheme = run.indexOf('://')
+  if (scheme !== -1 && run.includes('@', scheme + 3)) return 'named'
+  if (inUrlCredential(whole, offset, end)) return 'named'
+  if (NAMED_IN_RUN.test(whole.slice(Math.max(0, start - 64), offset))) return 'named'
+  if (NAMED_AHEAD.test(whole.slice(end, runEnd + 64))) return 'named'
+  return 'shape'
+}
 
 // A sibling field name that makes its value a key: the value is then
 // judged as if the name stood right before it.
@@ -1110,13 +1282,95 @@ const SESSION_ID_NAME = new RegExp(String.raw`(?:sess(?:ion)?[_-]?id|(?<![A-Za-z
 // otherwise read as a mixed-case key. A record id right after a key's name is
 // judged as before. So is a persona name outside those forms, such as one that
 // opens with a digit or holds a dot or a non-ASCII letter, and a UUID with no
-// numeric tail.
+// numeric tail. The passes that hide a known value again leave one as written
+// where it was hidden by its shape alone and only opens a longer token that
+// is a whole record id, as opensRecordId states. A known value hidden on any
+// other evidence, a key's name beside it among such evidence, is hidden
+// whatever it opens. That evidence is recorded only where a named site
+// mints, so a value first hidden by its shape alone and met only in a later
+// scan in a run that holds a key's name, as NAMED reads one, or a
+// URL's credential part on either side of it is still left as written
+// there.
 const RECORD_ID = new RegExp(`^([A-Za-z][A-Za-z0-9_-]*)-${UUID}-[0-9]+$`)
 const CAPS_OR_LETTER_PART = /^[A-Za-z]$|^[A-Z]{2,}[0-9]{0,3}$/
 
 function isRecordId(token: string): boolean {
   const m = RECORD_ID.exec(token)
   return m !== null && m[1].split(/[_-]/).every((part) => isSlugPart(part) || isWordish(part) || CAPS_OR_LETTER_PART.test(part))
+}
+
+const CAND_CHAR_ONLY = new RegExp(`^${CAND_CHAR}$`)
+const CAND_RUN = new RegExp(`^${CAND_CHAR}*`)
+const LOWER_NAME_UUID = new RegExp(`^[a-z0-9_-]+-${UUID}$`)
+
+// True where the known value found at `at` in `text` only opens a token that
+// is a whole record id. The two passes that hide a known value again,
+// rehideKnown and rehideLocal, ask before they hide a match and leave a
+// spared one as written. A title or a detail line cut to a fixed width
+// through a record id leaves an uppercase name and part of a UUID, which is
+// hidden as a key and remembered. Without this that piece would rewrite the
+// opening of every id that starts the same way, and a store surface would
+// refuse the id as a secret. A match is spared where all five hold:
+//   1. No candidate character stands right before it, so it opens a token. A
+//      known value found further in is hidden: a UUID the vault holds as a
+//      key is still a key inside an id.
+//   2. The token, which is the match and the run of candidate characters
+//      after it, is longer than the value and is a record id. A value that
+//      is the whole token was hidden on evidence of its own, such as a key's
+//      name beside it, and that evidence stands. The run is read no further
+//      than CAND_MAX characters past the match's start, the longest
+//      candidate the scan takes, and a token that passes it is not spared.
+//   3. The value was not seeded. A seeded value is a real secret on the
+//      caller's word, and is hidden whatever it opens.
+//   4. The value is not a lowercase name, a dash and a whole UUID. That is
+//      the shape of a vendor key, whose prefix is lowercase, and a real key
+//      followed by a dash and digits must stay hidden.
+//   5. The value was hidden by its shape alone: the generic scan passed it,
+//      scanEvidence found no key's name, as NAMED reads one, and no URL
+//      credential part in the unbroken run it stood in, read on both sides
+//      of it, the value was neither the whole user part nor the whole
+//      password of a URL, the run was shorter than 512 characters, measured
+//      on the text the scan read, after earlier hides and parking, and no
+//      other hide ever took it. Eight forms can each pass that test though a
+//      key's name or a URL credential stands near, as scanEvidence lists
+//      them: a value after whitespace inside a quoted value under a key's
+//      name; a value in a URL's user part or password where that part holds
+//      a run-ending character and that character is whitespace, or the
+//      value is not the whole part, or the user part before it is over 80
+//      characters, or the password after it is over 200 characters or holds
+//      a slash, or the URL's scheme is one inUrlCredential does not read; a
+//      value in an XML element named for a key or in an attribute whose
+//      sibling attribute names one; a value inside a URL written without a
+//      scheme, starting at `//`; a value beside a key's name in a form NAMED
+//      does not read, where passphrase, pass, passcode and pw mid-line, a
+//      camelCase URL parameter, a percent-encoded name, and a name that
+//      starts inside the value are among them; a value beside a key's name
+//      that padding puts out of reach, where the name starts more than 64
+//      characters before the run or what NAMED reads after a name that
+//      follows the value ends more than 64 characters past the run's end; a
+//      value in a run whose `://` an earlier hide took; and a value in a run
+//      that holds parked text, where the parked text held the key's name or
+//      carried the run to 512 characters. A value hidden on any other
+//      evidence is a secret on that evidence, whatever it opens. The mark
+//      lands only where a named site mints, so a value first hidden by its
+//      shape alone and met in such a run only in a later scan stays
+//      spareable. A value that carries no mark is read as one hidden on
+//      other evidence, so a hide that
+//      marks nothing fails closed. The passes that hide a known value again
+//      mark nothing, or a cut hidden again where it stands cut would stop
+//      being spared.
+// A spared token reaches the later passes and is judged there as it would be
+// on a vault that never held the value.
+function opensRecordId(text: string, at: number, value: string): boolean {
+  if (at > 0 && CAND_CHAR_ONLY.test(text[at - 1]!)) return false
+  if (seeded.has(value) || !shapeOnly.has(value) || namedHide.has(value)) return false
+  const end = at + value.length
+  // Read one character past the longest candidate, so a run that passes it
+  // is told from one that ends on it.
+  const tail = CAND_RUN.exec(text.slice(end, at + CAND_MAX + 1))![0].length
+  if (tail === 0 || value.length + tail > CAND_MAX) return false
+  if (LOWER_NAME_UUID.test(value)) return false
+  return isRecordId(text.slice(at, end + tail))
 }
 
 // A wiki fed name has the shape the wiki feeder writes into an inbox:
@@ -1686,7 +1940,8 @@ function scrubTokens(text: string, cfg: Config): string {
     if (span === 'soft' || (boundaries.size > 0 && isBoundary(token))) {
       if (!NAMED.test(beforeAt(whole, offset))) return token
     }
-    return looksSecret(token, beforeAt(whole, offset), cfg) ? mint('SECRET', token) : token
+    const before = beforeAt(whole, offset)
+    return looksSecret(token, before, cfg) ? mint('SECRET', token, scanEvidence(whole, offset, offset + token.length)) : token
   }
   return clocked(text).replace(SCAN, (m: string, slashed: string | undefined, offset: number, whole: string) => {
     if (slashed === undefined) return judge(m, offset, whole)
