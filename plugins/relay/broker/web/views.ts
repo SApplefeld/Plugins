@@ -39,7 +39,7 @@ import { headingOf } from "./direction.ts";
 import type { DirectionReading, Heading } from "./direction.ts";
 import type { InstalledRelease } from "./plugins.ts";
 import { SHARED_ROW_CAP, planBranchFault } from "./rollout.ts";
-import { EMPTY_MARKS, blockedHandledKey, blockedHides, handledHides, handledKey, planMarkKey, reviewHandledKey } from "./watermarks.ts";
+import { EMPTY_MARKS, blockedHandledKey, blockedHides, handledHides, handledKey, planMarkKey, reviewEntryHandledKey, reviewHandledKey } from "./watermarks.ts";
 import type { BlockedReasons, HandledHow, Marks } from "./watermarks.ts";
 
 /** The sources a view draws from, in the order `asOf` and `held` list them. */
@@ -295,7 +295,7 @@ export type StandupView = {
 
 /**
  * A review waiting on the operator: a queue entry with a `pr-ready` timeline line on its plan, whatever
- * lines follow it, and whose pull request no review mark hides. `pullRequest`, `pullRequestUrl` and
+ * lines follow it, and that no review mark on its pull request number or entry id hides. `pullRequest`, `pullRequestUrl` and
  * `branch` are the entry's, null where the store wrote none the reader admits; `readyAt` is the
  * newest `pr-ready` line's stamp.
  */
@@ -1192,14 +1192,11 @@ function timelineOf(readings: Readings, lineage: string): TimelineEvent[] {
  * The reviews waiting in one repo, none where the rollout reading lists the persona's working folder
  * as holding no repository: each queue entry with a `pr-ready` line among `lines` on its plan,
  * the entry's `planSegment` and the line's plan compared by `eventPlanName`, and whose pull request
- * number no review mark hides. An entry that names a branch also leaves once a fetch newer than the
- * newest such line shows that branch's tip contained in the default branch or the branch absent from
+ * number no review mark hides, and whose id no entry mark drawn from its newest `pr-ready` line or a later one hides. An entry that names a branch also leaves once a fetch newer than the newest such line shows that branch's tip contained in the default branch or the branch absent from
  * the mirror, as `branchGone` reads it. A squash or rebase merge leaves the tip outside the default
  * branch, so such an entry stands until its branch is deleted on the remote and pruned.
  * The newest line keys the review whatever lines follow it, since the kit writes `goal-complete`
- * minutes after `pr-ready` in the same finishing pass: a later line never retires a review. An entry
- * with no number cannot be marked, so it stands while its `pr-ready` line is in the fold and the
- * mirror does not show its branch gone. A done entry still counts: a merged pull request's plan is
+ * minutes after `pr-ready` in the same finishing pass: a later line never retires a review. A done entry still counts: a merged pull request's plan is
  * complete.
  */
 function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent[]): ReviewItem[] {
@@ -1221,6 +1218,9 @@ function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent
     if (newest === null) continue;
     const pullRequest = entry.pullRequest ?? null;
     if (pullRequest !== null && handled.get(reviewHandledKey(repo.persona.name, pullRequest))?.kind === "review") continue;
+    // An entry mark hides the review the page drew, number or none, and no pr-ready line newer than the one drawn.
+    const entryMark = handled.get(reviewEntryHandledKey(repo.persona.name, entry.id));
+    if (entryMark?.kind === "review-entry" && newest.tsMs <= entryMark.readyAt) continue;
     const branch = entry.branch ?? null;
     if (branch !== null && branch !== "" && branchGone(readings, repo.persona.workdir, branch, newest.tsMs)) continue;
     const reading = queue.readings.get(entry.id);
@@ -1237,6 +1237,17 @@ function reviewsOf(readings: Readings, repo: Repo, lines: readonly TimelineEvent
     });
   }
   return items;
+}
+
+/**
+ * The review `reviewsOf` lists for the queue entry `entryId` under the roster persona `persona`, or
+ * undefined where it lists none: no such persona or entry, no `pr-ready` line on its plan, or a mark,
+ * merge or outside folder that retires it. A Dismiss by entry id reads its ready stamp here.
+ */
+export function listedReview(readings: Readings, persona: string, entryId: string): ReviewItem | undefined {
+  const repo = fleet(readings).find((one) => one.persona.name === persona);
+  if (repo === undefined) return undefined;
+  return reviewsOf(readings, repo, timelineOf(readings, persona)).find((one) => one.entryId === entryId);
 }
 
 /**
@@ -1838,7 +1849,7 @@ export function todayItems(readings: Readings): TodayItem[] {
         effect: APPROVE_EFFECT,
         acts: [
           ...(review.pullRequestUrl !== null ? (["open-pr"] as const) : []),
-          ...(review.pullRequest !== null ? (["done"] as const) : []),
+          "done",
         ],
         item: review,
         root: folders.get(review.repo) ?? "",

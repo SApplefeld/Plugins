@@ -3127,6 +3127,9 @@
   /** A blocked run's `changed`: the reason the page drew is no longer the block's. */
   const BLOCK_CHANGED_WORDS = "the block's reason changed since you read it, read it again";
 
+  /** A review's `changed`: the pull request's ready line or its number is no longer the one the page drew. */
+  const REVIEW_CHANGED_WORDS = "the pull request changed since you read it, read it again";
+
   /**
    * A Today headline is cut at this many code points, an ellipsis marking the cut, and the whole
    * text is in the item's Context. Two upstream readers cut a text with no mark before it reaches the
@@ -3230,7 +3233,7 @@
     return (needsMe.pending !== null && needsMe.pending.key === key) || needsMe.posting.has(key);
   }
 
-  /** A review's or a Workers row's pull request number where it is a positive integer, the one a review Dismiss can name; null otherwise. */
+  /** A review's or a Workers row's pull request number where it is a positive integer, the key a review Dismiss names where there is one; null otherwise. */
   function reviewNumber(one) {
     const number = num(one.pullRequest);
     return number !== null && Number.isInteger(number) && number > 0 ? number : null;
@@ -3238,19 +3241,20 @@
 
   /**
    * Whether the item takes Dismiss: an ask naming its id, a blocked run naming its queue entry, and a
-   * review naming a pull request number, the one key its handled mark can take. A hands item never does.
+   * review naming its queue entry, keyed by its pull request number where it has one. A hands item never does.
    */
   function dismissable(one) {
     if (txt(one.repo) === "") return false;
     if (one.kind === "ask") return txt(one.askId) !== "";
     if (one.kind === "blocked") return txt(one.entryId) !== "";
-    return one.kind === "review" && txt(one.entryId) !== "" && reviewNumber(one) !== null;
+    return one.kind === "review" && txt(one.entryId) !== "";
   }
 
   /** The words beside an item once its act is answered; a status the table lacks is named as the broker said it. */
   function actWords(status, act, item) {
     if (status === "delivered") return DELIVERED_WORDS[act] + ", sent to " + txt(item.repo);
     if (status === "changed" && item.kind === "blocked") return BLOCK_CHANGED_WORDS;
+    if (status === "changed" && item.kind === "review") return REVIEW_CHANGED_WORDS;
     return Object.prototype.hasOwnProperty.call(ACT_WORDS, status) ? ACT_WORDS[status] : "the broker answered " + status + ", left open";
   }
 
@@ -3398,14 +3402,16 @@
    * Dismisses one item: an ask by its id with the question, the two times and the recommendation this
    * page drew, the recommendation as the view gave it, null kept as null, a blocked
    * run by its queue entry and the text the view gave it, each of which the broker matches byte for
-   * byte, and a review by its lineage and pull request number. The body is built from `item` as held
+   * byte, and a review by its lineage and pull request number, or its queue entry's id where it has no number. The body is built from `item` as held
    * at the call, so a Dismiss posted after its Undo notice sends what the operator tapped, never a
    * later reading. `said` is passed to `sendAct` for the words set beside the item.
    */
   function sendDismiss(item, said = null) {
     let body;
-    if (item.kind === "review") body = { kind: "review", repo: item.repo, pullRequest: reviewNumber(item) };
-    else
+    if (item.kind === "review") {
+      const number = reviewNumber(item);
+      body = number === null ? { kind: "review", repo: item.repo, entryId: item.entryId, readyAt: item.readyAt } : { kind: "review", repo: item.repo, pullRequest: number };
+    } else
       body =
         item.kind === "blocked"
           ? { kind: "blocked", repo: item.repo, entryId: item.entryId, reason: txt(item.text) }
@@ -4281,7 +4287,7 @@
    * again is in flight, else "reading" while the first read is, the ready line naming the order
    * the items land in, then Open PR and Done, Done under X. Open PR is `pullRequestPart`'s checked
    * link. Done writes the review's handled mark through the review Dismiss's post, after the same Undo
-   * toast, so it is drawn only where the pull request number is one the mark can take. Nothing here
+   * toast, keyed by the pull request number or, with none, by the queue entry's id. Nothing here
    * merges: the pull request is the operator's to approve on GitHub.
    */
   function approveItem(entry, held, now) {

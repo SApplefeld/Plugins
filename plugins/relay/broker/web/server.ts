@@ -67,7 +67,7 @@ import type { QuestionDesk, QuestionEntryView } from "../question-desk.ts";
 import { jumpLink } from "../discord/links.ts";
 import { answerableFromThread } from "../discord/question-message.ts";
 import type { Verdict } from "../security/permission.ts";
-import { askView, blockKey, blockedReasons, branchPlanView, checkoutRepoOf, drawnAsk, healthView, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
+import { askView, blockKey, blockedReasons, branchPlanView, checkoutRepoOf, drawnAsk, healthView, listedReview, needsMeView, planView, repoView, rootName, standupView, todayView, workersView } from "./views.ts";
 import type { Readings } from "./views.ts";
 import type { HandledHow, HandledMark, WatermarkStore } from "./watermarks.ts";
 
@@ -1392,14 +1392,17 @@ function agreeItem(value: unknown): AgreeItem | null {
 type DismissItem =
   | { kind: "ask"; askId: string; repo: string; drawn: DrawnAsk | null; recommend: DrawnRecommend | null }
   | { kind: "blocked"; repo: string; entryId: string; reason: string | null }
-  | { kind: "review"; repo: string; pullRequest: number };
+  | { kind: "review"; repo: string; pullRequest: number }
+  | { kind: "review-entry"; repo: string; entryId: string; readyAt: number };
 
 /**
  * A Dismiss body: an ask by id and lineage with the question and times the page drew through
  * `drawnOf` and the recommendation through `drawnRecommendOf`, a blocked queue entry by lineage, entry
  * id and the reason the page drew, null where the body carries none or not a string, which `dismiss`
  * answers as `changed`, as an Agree with no recommendation is, or a review by lineage and pull request
- * number, which must be a positive integer.
+ * number, which must be a positive integer. A review body with no `pullRequest` names its queue entry's
+ * id instead, the one key a review whose entry carries no number has, and `readyAt`, the drawn review's
+ * ready stamp as ISO, which the route compares with the listed review's own.
  */
 function dismissItem(body: Record<string, unknown>): DismissItem | null {
   if (body.kind === "ask") {
@@ -1409,7 +1412,11 @@ function dismissItem(body: Record<string, unknown>): DismissItem | null {
   const { repo } = body;
   if (typeof repo !== "string" || repo === "") return null;
   if (body.kind === "review") {
-    const { pullRequest } = body;
+    const { pullRequest, entryId, readyAt } = body;
+    if (pullRequest === undefined) {
+      const readyMs = typeof readyAt === "string" ? Date.parse(readyAt) : Number.NaN;
+      return typeof entryId === "string" && entryId !== "" && Number.isFinite(readyMs) ? { kind: "review-entry", repo, entryId, readyAt: readyMs } : null;
+    }
     if (typeof pullRequest !== "number" || !Number.isInteger(pullRequest) || pullRequest <= 0) return null;
     return { kind: "review", repo, pullRequest };
   }
@@ -1423,10 +1430,13 @@ function dismissItem(body: Record<string, unknown>): DismissItem | null {
  * Registers `POST /web/agree` with `{askId, repo, recommend, question, openedAt, reraisedAt}`,
  * `POST /web/agree-batch` with `{items: [...]}` of the same, `POST /web/correct` with `{askId, repo,
  * words, question, openedAt, reraisedAt, recommend}`, and `POST /web/dismiss` with `{kind: "ask", askId,
- * repo, question, openedAt, reraisedAt, recommend}`, `{kind: "blocked", repo, entryId, reason}` or
- * `{kind: "review", repo, pullRequest}`. A review's Dismiss is the one act that sends no line: it
- * writes the review's handled mark where a queue entry under the lineage carries the number, answers
- * `handled`, and answers `closed` where none does. A mark that cannot be written is the handler's
+ * repo, question, openedAt, reraisedAt, recommend}`, `{kind: "blocked", repo, entryId, reason}`,
+ * `{kind: "review", repo, pullRequest}` or `{kind: "review", repo, entryId, readyAt}`. A review's Dismiss is the
+ * one act that sends no line: it writes the review's handled mark where a queue entry under the
+ * lineage carries the number, or where the views list a review for the entry id drawn from the same
+ * ready stamp whose entry carries no number, and answers `handled`. It answers `closed` where there is
+ * no such entry or listed review, and `changed` where the listed review's ready stamp is not the one
+ * posted or its entry now carries a number. A mark that cannot be written is the handler's
  * failure, a 500, since nothing was delivered that the answer could stand for.
  * Each carries the operator's word, so the gate has already refused the broker host's own node and
  * required the same-origin JSON headers, and the login an act acts for is the peer's. Each act is one
@@ -1591,6 +1601,18 @@ export function registerAgreeHandlers(register: WebHandler["register"], options:
       if (!carried) return "closed";
       const settle = settler(`web dismiss: pull request ${String(pullRequest)} for ${JSON.stringify(repo)}`);
       options.marks.markHandled({ kind: "review", repo, pullRequest, markedAt: now(), how: "dismissed" });
+      return settle("handled");
+    }
+    if (item.kind === "review-entry") {
+      const { repo, entryId, readyAt } = item;
+      // The review the views list now: none is closed, and one drawn from another ready line is changed,
+      // so the mark is bounded by a ready line the operator saw and the broker holds. One whose entry now
+      // carries a number is changed too, since a numbered review is never given a new entry mark.
+      const review = listedReview(options.source(), repo, entryId);
+      if (review === undefined) return "closed";
+      const settle = settler(`web dismiss: review entry ${JSON.stringify(entryId)} for ${JSON.stringify(repo)}`);
+      if (review.pullRequest !== null || Date.parse(review.readyAt) !== readyAt) return settle("changed");
+      options.marks.markHandled({ kind: "review-entry", repo, entryId, readyAt, markedAt: now(), how: "dismissed" });
       return settle("handled");
     }
     const { repo, entryId } = item;

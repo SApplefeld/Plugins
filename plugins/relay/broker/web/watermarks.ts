@@ -3,9 +3,10 @@
 // routes write when an Agree, Correct or Dismiss line from the pages was delivered to the item's
 // session, or when a review was dismissed from the page, which delivers nothing. A handled mark
 // hides an open ask until the persona closes it or raises it again, a blocked queue entry while
-// it still reads blocked for the same reason, and a review while a queue entry under the repo
-// carries its pull request number. They live in one file, `web-watermarks.json`, in the
-// directory of the broker's state file, written whole through `writeSnapshot`, the same
+// it still reads blocked for the same reason, a review while a queue entry under the repo
+// carries its pull request number, and an entry's review ready no later than the line the mark was
+// drawn from while an entry under the repo has its id. They live in one file, `web-watermarks.json`, in the directory of the broker's state file,
+// written whole through `writeSnapshot`, the same
 // temp-and-rename the registry snapshot uses, so a crash mid-write leaves the previous file intact.
 //
 // The store holds the marks in memory and the file is read once, when the store opens. A write is made
@@ -70,9 +71,18 @@ export type BlockedHandledMark = { kind: "blocked"; repo: string; entryId: strin
  */
 export type ReviewHandledMark = { kind: "review"; repo: string; pullRequest: number; markedAt: number; how: HandledHow };
 
-export type HandledMark = AskHandledMark | BlockedHandledMark | ReviewHandledMark;
+/**
+ * A review the operator dismissed from the page by its queue entry, the one key a review whose entry
+ * carries no pull request number has: its persona's roster name, the entry's id, `readyAt`, the
+ * stamp of the newest `pr-ready` line the page drew the review from, when it was dismissed, and
+ * `dismissed`. It hides the entry's review while the entry's newest `pr-ready` line is no later than
+ * `readyAt`, so a ready line the operator never saw draws the review again.
+ */
+export type ReviewEntryHandledMark = { kind: "review-entry"; repo: string; entryId: string; readyAt: number; markedAt: number; how: HandledHow };
 
-/** The marks a view reads: caught-up times by roster name, seen snapshots by `planMarkKey`, and handled marks by `handledKey`, `blockedHandledKey` or `reviewHandledKey`. */
+export type HandledMark = AskHandledMark | BlockedHandledMark | ReviewHandledMark | ReviewEntryHandledMark;
+
+/** The marks a view reads: caught-up times by roster name, seen snapshots by `planMarkKey`, and handled marks by `handledKey`, `blockedHandledKey`, `reviewHandledKey` or `reviewEntryHandledKey`. */
 export type Marks = {
   repos: ReadonlyMap<string, number>;
   plans: ReadonlyMap<string, PlanMark>;
@@ -96,10 +106,16 @@ export function reviewHandledKey(repo: string, pullRequest: number): string {
   return JSON.stringify([repo, "review", pullRequest]);
 }
 
+/** The key an entry's review mark is held under: its own third part, so it never collides with a blocked entry's mark on the same id. */
+export function reviewEntryHandledKey(repo: string, entryId: string): string {
+  return JSON.stringify([repo, "review-entry", entryId]);
+}
+
 /** The key a handled mark is held under, by its kind. */
 function keyOf(mark: HandledMark): string {
   if (mark.kind === "ask") return handledKey(mark.repo, mark.askId);
   if (mark.kind === "blocked") return blockedHandledKey(mark.repo, mark.entryId);
+  if (mark.kind === "review-entry") return reviewEntryHandledKey(mark.repo, mark.entryId);
   return reviewHandledKey(mark.repo, mark.pullRequest);
 }
 
@@ -133,8 +149,11 @@ export type BlockedReasons = ReadonlyMap<string, ReadonlyMap<string, string>> | 
  */
 export type ReviewNumbers = ReadonlyMap<string, ReadonlySet<number>> | null;
 
-/** The slice of a queues reading `withMarks` reads the pull request numbers from. */
-type QueuesWithNumbers = { value: readonly { queue: { name: string; entries: readonly { pullRequest?: number }[] } }[] | null };
+/** The ids of the queue entries of a reading, by persona name, absent and null as `ReviewNumbers` are. */
+export type ReviewEntries = ReadonlyMap<string, ReadonlySet<string>> | null;
+
+/** The slice of a queues reading `withMarks` reads the pull request numbers and entry ids from. */
+type QueuesWithNumbers = { value: readonly { queue: { name: string; entries: readonly { id: string; pullRequest?: number }[] } }[] | null };
 
 const reviewMemo = new WeakMap<NonNullable<QueuesWithNumbers["value"]>, ReviewNumbers>();
 
@@ -149,6 +168,20 @@ function reviewNumbersOf(queues: QueuesWithNumbers): ReviewNumbers {
     byRepo.set(queue.name, new Set(queue.entries.flatMap((entry) => (entry.pullRequest === undefined ? [] : [entry.pullRequest]))));
   }
   reviewMemo.set(value, byRepo);
+  return byRepo;
+}
+
+const entryMemo = new WeakMap<NonNullable<QueuesWithNumbers["value"]>, ReviewEntries>();
+
+/** The entry ids one queues reading carries, built once per reading as `reviewNumbersOf` builds the numbers. */
+function reviewEntriesOf(queues: QueuesWithNumbers): ReviewEntries {
+  const value = queues.value;
+  if (value === null) return null;
+  const held = entryMemo.get(value);
+  if (held !== undefined) return held;
+  const byRepo = new Map<string, ReadonlySet<string>>();
+  for (const { queue } of value) byRepo.set(queue.name, new Set(queue.entries.map((entry) => entry.id)));
+  entryMemo.set(value, byRepo);
   return byRepo;
 }
 
@@ -169,13 +202,14 @@ export type WatermarkStore = {
   /**
    * Drops each ask's handled mark whose ask the ledger reading shows closed, each blocked entry's
    * whose entry the queues reading shows no longer blocked, or blocked for another reason, and each
-   * review's whose pull request number no queue entry under its persona carries in `reviews`. A
+   * review's whose pull request number no queue entry under its persona carries in `reviews`, and
+   * each entry review mark whose entry id no queue entry under its persona has in `entries`. A
    * persona the reading does not cover, one off the roster among them, or whose ledger reading cannot
    * answer, keeps its marks: one with no ledger, no good file read, or an open list at the reader's
    * cap, since an ask missing there may still be open. Never throws: a write that fails is logged
    * once, is not retried on the same readings, and the marks stand.
    */
-  pruneHandled: (ledger: readonly LedgerReading[] | null, blocked: BlockedReasons, reviews?: ReviewNumbers) => void;
+  pruneHandled: (ledger: readonly LedgerReading[] | null, blocked: BlockedReasons, reviews?: ReviewNumbers, entries?: ReviewEntries) => void;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -234,7 +268,7 @@ function askMarkOf(item: unknown, how: HandledHow): AskHandledMark | null {
   return { kind: "ask", repo: item.repo, askId: item.askId, openedAt, seenRaise, markedAt, how };
 }
 
-/** A current file's handled mark of either kind, or null where the entry does not validate. */
+/** A current file's handled mark of any kind, or null where the entry does not validate. */
 function handledMarkOf(item: unknown): HandledMark | null {
   if (!isRecord(item) || typeof item.how !== "string" || !HOWS.has(item.how)) return null;
   const how = item.how as HandledHow;
@@ -245,6 +279,12 @@ function handledMarkOf(item: unknown): HandledMark | null {
     const { pullRequest } = item;
     if (typeof pullRequest !== "number" || !Number.isInteger(pullRequest) || pullRequest <= 0) return null;
     return { kind: "review", repo: item.repo, pullRequest, markedAt, how };
+  }
+  if (item.kind === "review-entry") {
+    const { entryId } = item;
+    const readyAt = timeOf(item.readyAt);
+    if (typeof entryId !== "string" || entryId === "" || readyAt === null) return null;
+    return { kind: "review-entry", repo: item.repo, entryId, readyAt, markedAt, how };
   }
   if (item.kind !== "blocked") return null;
   const { entryId, reason } = item;
@@ -260,6 +300,9 @@ function savedMark(mark: HandledMark): Record<string, unknown> {
   }
   if (mark.kind === "review") {
     return { kind: mark.kind, repo: mark.repo, pullRequest: mark.pullRequest, markedAt, how: mark.how };
+  }
+  if (mark.kind === "review-entry") {
+    return { kind: mark.kind, repo: mark.repo, entryId: mark.entryId, readyAt: new Date(mark.readyAt).toISOString(), markedAt, how: mark.how };
   }
   return {
     kind: mark.kind,
@@ -303,38 +346,44 @@ function answers(reading: LedgerReading): boolean {
 /**
  * The readings a view is drawn from, with the operator's marks merged in: the merge first drops the
  * handled marks of asks the ledger no longer lists open, of entries `blocked` no longer reads as
- * blocked for the mark's reason, and of reviews whose pull request number no queue entry under the
- * persona carries, then carries the marks as they stand. `blocked` is `blockedReasons` from
- * `./views.ts`, handed in so this module needs no import of the views; the review numbers are read
- * here from the queues reading. The one merge the broker and the tests share.
+ * blocked for the mark's reason, of reviews whose pull request number no queue entry under the
+ * persona carries, and of entry review marks whose id no entry under the persona has, then carries
+ * the marks as they stand. `blocked` is `blockedReasons` from `./views.ts`, handed in so this module
+ * needs no import of the views; the review numbers and entry ids are read here from the queues reading. The one merge the broker and the tests share.
  */
 export function withMarks<T extends { ledger: { value: readonly LedgerReading[] | null }; queues: QueuesWithNumbers }>(
   base: T,
   store: WatermarkStore,
   blocked: (base: T) => BlockedReasons,
 ): T & { marks: Marks } {
-  store.pruneHandled(base.ledger.value, blocked(base), reviewNumbersOf(base.queues));
+  store.pruneHandled(base.ledger.value, blocked(base), reviewNumbersOf(base.queues), reviewEntriesOf(base.queues));
   return { ...base, marks: store.marks() };
 }
 
 /**
  * Whether a handled mark still stands against the readings: an ask's while the ledger cannot say the
  * ask closed, a blocked entry's while the queues reading cannot say the block ended or changed, and a
- * review's while the queues reading cannot say no entry under the persona carries the number.
+ * review's while the queues reading cannot say no entry under the persona carries the number, and an
+ * entry review mark while it cannot say no entry under the persona has the id.
  */
 function stands(
   mark: HandledMark,
   covered: ReadonlyMap<string, LedgerReading> | null,
   blocked: BlockedReasons,
   reviews: ReviewNumbers,
+  entries: ReviewEntries,
 ): boolean {
   if (mark.kind === "blocked") {
-    const entries = blocked?.get(mark.repo);
-    return entries === undefined || entries.get(mark.entryId) === mark.reason;
+    const reasons = blocked?.get(mark.repo);
+    return reasons === undefined || reasons.get(mark.entryId) === mark.reason;
   }
   if (mark.kind === "review") {
     const numbers = reviews?.get(mark.repo);
     return numbers === undefined || numbers.has(mark.pullRequest);
+  }
+  if (mark.kind === "review-entry") {
+    const ids = entries?.get(mark.repo);
+    return ids === undefined || ids.has(mark.entryId);
   }
   const reading = covered?.get(mark.repo);
   return reading === undefined || !answers(reading) || reading.open.some((ask) => ask.id === mark.askId);
@@ -368,7 +417,7 @@ export function openWatermarks(file: string, log: (message: string) => void = ()
   }
 
   /** The readings whose prune last failed to write, so the same readings are not written again. */
-  let failedOn: { ledger: readonly LedgerReading[] | null; blocked: BlockedReasons; reviews: ReviewNumbers } | null = null;
+  let failedOn: { ledger: readonly LedgerReading[] | null; blocked: BlockedReasons; reviews: ReviewNumbers; entries: ReviewEntries } | null = null;
 
   return {
     marks: () => current,
@@ -382,14 +431,14 @@ export function openWatermarks(file: string, log: (message: string) => void = ()
     markHandled(mark) {
       commit({ ...current, handled: new Map(current.handled).set(keyOf(mark), mark) });
     },
-    pruneHandled(ledger, blocked, reviews = null) {
+    pruneHandled(ledger, blocked, reviews = null, entries = null) {
       if (current.handled.size === 0) return;
       // Readings that failed to write are not retried until the next pass brings new ones.
-      if (failedOn !== null && failedOn.ledger === ledger && failedOn.blocked === blocked && failedOn.reviews === reviews) return;
+      if (failedOn !== null && failedOn.ledger === ledger && failedOn.blocked === blocked && failedOn.reviews === reviews && failedOn.entries === entries) return;
       const covered = ledger === null ? null : new Map(ledger.map((reading) => [reading.name, reading]));
       const kept = new Map<string, HandledMark>();
       for (const [key, mark] of current.handled) {
-        if (stands(mark, covered, blocked, reviews)) kept.set(key, mark);
+        if (stands(mark, covered, blocked, reviews, entries)) kept.set(key, mark);
       }
       if (kept.size === current.handled.size) return;
       try {
@@ -397,7 +446,7 @@ export function openWatermarks(file: string, log: (message: string) => void = ()
         failedOn = null;
       } catch {
         if (failedOn === null) log("web watermarks: a closed item's handled mark could not be dropped, so the file keeps it");
-        failedOn = { ledger, blocked, reviews };
+        failedOn = { ledger, blocked, reviews, entries };
       }
     },
   };
