@@ -18,7 +18,8 @@ is readable only once it has moved, denies Write and Edit on an instruction
 file (CLAUDE.md, CLAUDE.local.md, a .claude/ folder, .mcp.json) at any depth
 under wiki/, denies every raw git verb and the raw
 shell verbs that would bypass the helpers, denies the Grep tool, denies reads
-of credential files, allows the three vetted helpers a KB session calls to
+of credential files, anchors every Read deny at the filesystem root save the
+one under inbox/, allows the three vetted helpers a KB session calls to
 move a file, to commit, and to read status, grants no other script or
 command under Bash, and pins permissions.defaultMode to default so a
 bypass-default account still runs under the allow-list.
@@ -176,6 +177,7 @@ $settingsChecks = @(
     'deny array blocks every raw git verb'
     'deny array blocks the Grep tool'
     'deny array blocks reads of credential files'
+    'deny array anchors every credential read rule at the filesystem root'
     'allow array covers wiki page edits'
     'allow array covers the commit helper'
     'allow array covers moving a file out of inbox/'
@@ -256,30 +258,47 @@ if (-not $parsed) {
 
     # Read is allowed unscoped, so only these deny rules keep an injected instruction
     # from reading a credential file and writing it into a page that gets pushed.
-    # A `**/` rule binds only inside the KB. The three `//**/` rules bind on every drive.
-    Test-Check -Description 'deny array blocks reads of credential files' -Passed (
-        ($denyRules -ccontains 'Read(//**/.credentials.json)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.claude\.json\)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.git-credentials\)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.ssh/') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.aws/') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\*\.pem\)') -and
-        ($denyRules -ccontains 'Read(**/*.pfx)') -and
-        ($denyRules -ccontains 'Read(**/*.key)') -and
-        ($denyRules -ccontains 'Read(**/id_rsa)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/id_ed25519\)') -and
-        ($denyRules -ccontains 'Read(**/.npmrc)') -and
-        ($denyRules -ccontains 'Read(**/.pypirc)') -and
-        ($denyRules -ccontains 'Read(**/.docker/config.json)') -and
-        ($denyRules -ccontains 'Read(**/.kube/config)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.config/gh/') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/GitHub CLI/') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.netrc\)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/_netrc\)') -and
-        (Test-RuleMatch $denyRules '^Read\(\*\*/\.claude/\*\.json\)') -and
-        ($denyRules -ccontains 'Read(//**/UserSecrets/**)') -and
-        ($denyRules -ccontains 'Read(//**/appsettings*.json)')
+    # All 21 are anchored at the filesystem root, so they reach every drive letter. Each
+    # is pinned as its exact string, compared with regard to case, so a dropped or
+    # respelled rule fails the check. The pins hold spelling, not reach. A live
+    # probe holds reach.
+    $credentialRules = @(
+        'Read(//**/.credentials.json)',
+        'Read(//**/.claude.json)',
+        'Read(//**/.git-credentials)',
+        'Read(//**/.ssh/**)',
+        'Read(//**/.aws/**)',
+        'Read(//**/*.pem)',
+        'Read(//**/*.pfx)',
+        'Read(//**/*.key)',
+        'Read(//**/id_rsa)',
+        'Read(//**/id_ed25519)',
+        'Read(//**/.npmrc)',
+        'Read(//**/.pypirc)',
+        'Read(//**/.docker/config.json)',
+        'Read(//**/.kube/config)',
+        'Read(//**/.config/gh/**)',
+        'Read(//**/GitHub CLI/**)',
+        'Read(//**/.netrc)',
+        'Read(//**/_netrc)',
+        'Read(//**/.claude/*.json)',
+        'Read(//**/UserSecrets/**)',
+        'Read(//**/appsettings*.json)'
     )
+    $missingCredentialRules = @($credentialRules | Where-Object { $denyRules -cnotcontains $_ })
+    Test-Check -Description 'deny array blocks reads of credential files' -Passed ($missingCredentialRules.Count -eq 0)
+    if ($missingCredentialRules.Count -gt 0) { Write-Host "  missing: $($missingCredentialRules -join ', ')" }
+
+    # Every Read deny is anchored at the filesystem root, save the named inbox rule,
+    # which is anchored at the KB on purpose. A read rule in any folder-relative or
+    # home-relative form binds under that folder alone, so a credential rule added
+    # later in such a form fails this check without being named. The exemption is
+    # compared as its exact string, with regard to case.
+    $readRootExemptions = @('Read(./inbox/**)')
+    $unrootedReadRules = @($denyRules | Where-Object {
+        ($_ -match '^Read\(') -and ($_ -notmatch '^Read\(//') -and ($readRootExemptions -cnotcontains $_)
+    })
+    Test-Check -Description 'deny array anchors every credential read rule at the filesystem root' -Passed ($unrootedReadRules.Count -eq 0)
 
     # A structurally valid allowlist that omits a verb the ingest flow needs leaves an
     # unattended run stalled on a prompt nobody can answer. These assert the minimum set.

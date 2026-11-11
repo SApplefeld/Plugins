@@ -31,9 +31,9 @@ keeps every other property as it is, the empty-named property included, which
 ConvertFrom-Json cannot hold. Only projects[<key>].hasTrustDialogAccepted is
 set; the projects object and the key's object are created only where absent,
 and no other property is touched. The file is first copied to
-~/.claude/kb-trust-backup.json. The template's Read(**/.claude/*.json) deny
-binds only inside a knowledge base, so a knowledge base's agent can read this
-copy, as it can read the file it copies. Then the new document is written to a
+~/.claude/kb-trust-backup.json. The template's Read(//**/.claude/*.json) deny
+reaches every drive letter by its anchor, so a knowledge base's agent is refused this copy,
+as it is refused the file it copies. Then the new document is written to a
 temporary file beside it and moved over it, so a crash leaves the old file whole. The
 read through the move runs under Claude Code's own lock on the file, the
 directory ~/.claude.json.lock, so a live session's save neither erases the key
@@ -280,9 +280,9 @@ if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
     Stop-WithReason 'USERPROFILE is not set, so the location of ~/.claude.json is unknown'
 }
 $claudeConfig = Join-Path $env:USERPROFILE '.claude.json'
-# Under ~/.claude/, outside every knowledge base, so the template's
-# Read(**/.claude/*.json) deny does not reach it, as Read(**/.claude.json)
-# does not reach the file it copies.
+# Under ~/.claude/, where the template's Read(//**/.claude/*.json) deny refuses
+# it to a knowledge base's agent, as Read(//**/.claude.json) refuses the file
+# it copies.
 $backupPath = Join-Path $env:USERPROFILE '.claude\kb-trust-backup.json'
 
 $found = @(Get-Command -Name 'claude' -CommandType Application -ErrorAction SilentlyContinue)

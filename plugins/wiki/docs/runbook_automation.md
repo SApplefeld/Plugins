@@ -605,9 +605,12 @@ the KB's ingest.
 between entities.
 
 `Read` and `Glob` are allowed unscoped, and a headless run will read an
-absolute path outside its own repository. Only three credential stores are
-denied there, `.credentials.json`, the .NET user-secrets store and
-`appsettings*.json`. Every other file, credential or ordinary, is not. So putting two entities' KBs under one account puts one
+absolute path outside its own repository. The deny list refuses the credential
+files it names on every drive letter, among them SSH keys under the names it
+lists, git and cloud tokens and Claude Code's own files, as
+`docs/architecture.md` lists them and bounds their reach. The agent can
+read every other file the account can read, credential or ordinary, outside the
+KB's `inbox/`. So putting two entities' KBs under one account puts one
 entity's sources within reach of the other entity's agent. A prompt-injected
 document dropped into one KB's inbox could instruct the run to read the other
 KB's sources and write them into a wiki page that is then pushed. The

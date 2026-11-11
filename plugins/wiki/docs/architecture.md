@@ -495,34 +495,64 @@ recorded as an attributed claim (both values, both citations) rather than
 overwriting a sourced claim. A new source overwrites in place only when it
 clearly postdates or explicitly corrects the claim it replaces.
 
-**Known credential files are unreadable inside the KB, and three stores on every
-drive.** Other reads are allowed: `Read` and `Glob` are allowed unscoped, so an
-ingest run can read files. The `Grep` tool is denied outright, because its path-scoped deny rules do
+**Known credential files are refused to the Read tool on every drive letter.**
+Other reads are
+allowed: `Read` and `Glob` are allowed unscoped, so an ingest run can read
+files. The `Grep` tool is denied outright, because its path-scoped deny rules do
 not bind. `settings.json` denies `Read` of these paths, and those denies hold
 whether or not the workspace is trusted:
 
-- Claude Code's own: `//**/.credentials.json`, `**/.claude.json`, and
-  `**/.claude/*.json`.
-- git and GitHub: `**/.git-credentials`, `**/.config/gh/**`, and
-  `**/GitHub CLI/**`.
-- SSH and keys: `**/.ssh/**`, `**/*.pem`, `**/*.pfx`, `**/*.key`, `**/id_rsa`,
-  and `**/id_ed25519`.
-- Cloud and package tokens: `**/.aws/**`, `**/.npmrc`, `**/.pypirc`,
-  `**/.docker/config.json`, `**/.kube/config`, `**/.netrc`, and `**/_netrc`.
+- Claude Code's own: `//**/.credentials.json`, `//**/.claude.json`, and
+  `//**/.claude/*.json`.
+- git and GitHub: `//**/.git-credentials`, `//**/.config/gh/**`, and
+  `//**/GitHub CLI/**`.
+- SSH and keys: `//**/.ssh/**`, `//**/*.pem`, `//**/*.pfx`, `//**/*.key`,
+  `//**/id_rsa`, and `//**/id_ed25519`.
+- Cloud and package tokens: `//**/.aws/**`, `//**/.npmrc`, `//**/.pypirc`,
+  `//**/.docker/config.json`, `//**/.kube/config`, `//**/.netrc`, and
+  `//**/_netrc`.
 - .NET configuration: `//**/UserSecrets/**` and `//**/appsettings*.json`.
 
-On Claude Code 2.1.322, a `Read` rule matches only files under its anchor, and
-a later build can move that reach. A `**/` pattern is anchored
-at the folder the run starts in, the KB root for every scheduled run, so it
-binds only inside the KB. The three `//**/` patterns are
-anchored at the filesystem root, so they bind on every drive. Of the three,
-only the user-secrets rule has been observed refusing a file on a drive other
-than the run's own. So a file a `**/`
-pattern names but that sits outside the KB, such as a key in the account's own
-`.ssh` folder, remains readable. So does a credential file at any other path,
-and every ordinary file elsewhere on the
-machine. The boundary for that data rests on the Windows
-account, so the one-account-per-entity invariant is a hard requirement.
+Claude Code turns a Windows path into a slash form before it matches a rule,
+so `C:\Users\alice` is matched as `/c/Users/alice`, as the vendor's page
+states. A pattern opening `//` is anchored at the root of that form, above the
+drive letters. In a pattern, `**` stands for any run of folders, and after `//`
+it stands for the drive letter too. So `//**/.ssh/**` matches every file under
+any `.ssh` folder on any drive letter, while `//c/**/.ssh/**` would match on
+`C:` alone, as the vendor's page states. A single `*` stands for part of one
+name, such as `site` in `site.pem`. A pattern opening `./`, such as
+`./inbox/**`, is anchored at the folder the run starts in, the KB root for
+every scheduled run.
+
+On Claude Code 2.1.322 a `Read` rule matches only files under its anchor, so
+each pattern above reaches every drive letter by its anchor, inside the KB and
+outside it. A later build can move that reach. Runs have observed it on two
+lettered local drives, `C:` and `D:`, and on no network share or `subst`
+drive. In a KB on `D:`, one decoy for each of
+the 18 rules outside the .NET and `.credentials.json` rules is refused inside
+the KB, elsewhere on `D:` and on `C:`, and is read once those 18 rules are
+withheld. The `.credentials.json`, user-secrets and `appsettings*.json` rules
+are observed refusing files inside the KB and elsewhere on `D:`, and the
+user-secrets rule on `C:` too. The other two are held on `C:` by their anchor,
+not by a run. No decoy sat under the account's profile, so a key in the
+account's own `.ssh` folder is refused by inference from the anchor and the
+`C:` result.
+
+A KB gets these rules when an installed engine that carries them creates it,
+or when the walker's engine update copies them into its `.claude/` once the
+published plugin is installed. That update waits while the KB has a live
+uncommitted file or a merge in progress. Until then a KB keeps the rules it
+has.
+
+A `Read` deny does not stop every read of a file. It binds the Read tool. The
+vendor's page says it also binds the file commands Claude Code recognizes in a
+shell, which no run here has observed, and calls its reach to Glob best effort.
+One Glob listing of one folder outside the KB, with the rules in place, named
+only the file no rule matches. A deny does not bind a subprocess that opens
+files itself. A credential file at a path no pattern names stays readable, and
+so does every ordinary file elsewhere on the machine. The boundary for that
+data rests on the Windows account, so the one-account-per-entity invariant is a
+hard requirement.
 
 **Any invalid settings file is ignored wholesale.** Claude Code silently ignores
 a `settings.json` that fails validation in headless mode, which would void the
