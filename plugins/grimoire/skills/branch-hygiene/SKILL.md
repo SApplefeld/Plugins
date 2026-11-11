@@ -5,7 +5,7 @@ description: "Reaps the local branches and worktrees that Branch-and-PR efforts 
 
 # Branch Hygiene
 
-This skill sweeps local branches and worktrees whose work has landed, under Safe Set and Hard Rules, and leaves everything else alone.
+This skill sweeps local branches and worktrees whose work has landed, under Safe Set and Hard Rules, and leaves everything else alone. A finished plan's worktree is cleared by step 10 of `finishing-work`. This skill reaps a tree that step left, and each merged branch, only where Safe Set admits it.
 
 The SessionStart nudge flags **reapable** branches, merged and safe to sweep, and **stranded** ones, whose remote is gone because the PR merged while the branch holds commits that never reached the trunk. Stranded branches take priority: recover them before sweeping anything.
 
