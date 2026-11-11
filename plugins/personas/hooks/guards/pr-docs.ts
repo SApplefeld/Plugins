@@ -23,7 +23,7 @@
 // LexHost hooks/index.ts builds.
 
 import type { BeforeGuard, GuardCall, GuardContext, GuardHost } from "./runner";
-import type { LexHost } from "./readonly-agent";
+import { resolveTarget, type LexHost } from "./readonly-agent";
 
 // How long one git query may run, the hook's own bound.
 export const PR_DOCS_GIT_TIMEOUT_MS = 5000;
@@ -63,15 +63,18 @@ function lastPathSwitchBefore(cmd: unknown, end: number): string | null {
 }
 
 // The directory the PR create runs in: the last path switch ahead of it,
-// resolved against the cwd, else the cwd. Null where a switch names no
-// existing directory.
-async function effectiveDir(cmd: unknown, prAt: number, cwd: string, lex: LexHost): Promise<string | null> {
+// resolved against the cwd through resolveTarget, so a Git Bash /<drive>/
+// spelling on a Windows host names its drive path; else the cwd. Null where
+// a switch names no existing directory or a target resolveTarget cannot
+// place before the shell runs.
+export async function effectiveDir(cmd: unknown, prAt: number, cwd: string, lex: LexHost): Promise<string | null> {
   const target = lastPathSwitchBefore(cmd, prAt);
   if (target === null) return cwd;
   const bare = target.replace(/^["']|["']$/g, "");
   if (!bare || bare.startsWith("-")) return null;
   try {
-    const resolved = lex.path.resolve(cwd, bare);
+    const resolved = resolveTarget(bare, cwd, lex);
+    if (resolved === null) return null;
     return (await lex.isDirectory(resolved)) ? resolved : null;
   } catch {
     return null;

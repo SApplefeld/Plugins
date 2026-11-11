@@ -30,9 +30,10 @@
 //     pgrep or pidof, through a pipe into xargs, a command substitution, or a
 //     PowerShell subexpression;
 //   a git operation reaching past the agent's own files: stash with any or no
-//     subcommand but list; reset --hard or --merge; checkout with --, -f or
-//     --force, with ., ./ or .\ as an operand, or with two operands (a
-//     tree-ish and a path); switch with --discard-changes, -f or --force;
+//     subcommand but list; reset --hard or --merge; checkout with --, -f
+//     alone or in a short-flag cluster or --force, with ., ./ or .\ as an
+//     operand, or with two operands (a tree-ish and a path); switch with
+//     --discard-changes, -f alone or in a short-flag cluster or --force;
 //     restore, unless it carries --staged without --worktree; clean; branch
 //     with --delete or any prefix of it from --d, or a short-flag cluster
 //     holding d or D; update-ref with -d alone or in a short-flag cluster,
@@ -247,9 +248,14 @@ function gitAct(cmd: string, masked: string, fed: boolean): string | null {
       const mode = rest.find((a) => a === "--hard" || a === "--merge");
       if (mode !== undefined) return `a reset that discards (git reset ${mode})`;
     }
+    // A short-flag cluster that forces: one dash, then letters or digits, with
+    // a lowercase f ahead of the first letter that takes a value. Git reads
+    // the rest of a cluster past such a letter as its value, the new branch's
+    // name, so -qf and -fb force and -bf names a branch f.
+    const forces = (a: string, valued: RegExp) => /^-[A-Za-z0-9]+$/.test(a) && a.split(valued)[0].includes("f");
     if (sub === "checkout") {
       if (rest.includes("--")) return "a checkout that discards (git checkout --)";
-      const force = rest.find((a) => a === "-f" || a === "--force");
+      const force = rest.find((a) => forces(a, /[bB]/) || a === "--force");
       if (force !== undefined) return `a checkout that discards (git checkout ${force})`;
       // The operands past the flags, with the branch name -b, -B or --orphan
       // takes stepped over: ., ./ or .\ restores the tree, and two operands are a
@@ -261,7 +267,7 @@ function gitAct(cmd: string, masked: string, fed: boolean): string | null {
       if (operands.length >= 2) return `a checkout that discards (git checkout ${operands[0]} ${operands[1]})`;
     }
     if (sub === "switch") {
-      const discard = rest.find((a) => a === "--discard-changes" || a === "-f" || a === "--force");
+      const discard = rest.find((a) => a === "--discard-changes" || forces(a, /[cC]/) || a === "--force");
       if (discard !== undefined) return `a switch that discards (git switch ${discard})`;
     }
     if (sub === "restore") {

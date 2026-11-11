@@ -957,7 +957,7 @@ else {
             $personasGaps += "$personasKeysText is installed but no settings tier enables it (read: $personasTiersText)."
         }
     }
-    Report "FAIL" "Persona plugin" (@("The personas plugin is not installed and enabled, so no per-call guard runs: the docs-write, dispatch-docs, pr-docs, merged-pr-push, readonly-agent, shared-state, git-commit-gate, em-dash, test-hang-gate and inplace-rewrite deny guards and the memq grant live in its module.") + $personasGaps + @("Fix: claude plugin install personas@applefeld --scope user, then restart Claude Code."))
+    Report "FAIL" "Persona plugin" (@("The personas plugin is not installed and enabled, so no per-call guard runs: the docs-write, dispatch-docs, pr-docs, draft-body, merged-pr-push, readonly-agent, shared-state, git-commit-gate, em-dash, test-hang-gate and inplace-rewrite deny guards and the memq grant live in its module.") + $personasGaps + @("Fix: claude plugin install personas@applefeld --scope user, then restart Claude Code."))
 }
 
 # --- Installed copy. On a clone, the memq shim check below

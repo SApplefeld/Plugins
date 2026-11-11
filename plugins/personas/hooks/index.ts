@@ -25,7 +25,7 @@
 // never that it exited. A claim is non-destructive: the epoch bump makes
 // the old holder yield on its next write.
 
-import type { AgentSpawnInput, AgentSpawnResult, CommandRunArgs, HttpInit, Next, ProcessRunInit, ProcessRunResult, PromptAttachmentInput, PromptSubmitInput, PromptSubmitResult, Register, SessionUsageArgs, StateValue, ToolCallInput, ToolCallResult } from "claude-code";
+import type { AgentSpawnInput, AgentSpawnResult, CommandRunArgs, HttpInit, Next, ProcessRunInit, ProcessRunResult, PromptAttachmentInput, PromptSubmitInput, PromptSubmitResult, Register, SessionUsageArgs, StateValue, ToolCallInput, ToolCallResult, TurnStepResult } from "claude-code";
 import type { PluginHost } from "./host";
 import {
   createDefaultState,
@@ -192,7 +192,7 @@ import { RECOGNITION_OPS_MAX, nudgeClaim, nudgeCollectHits, nudgeDedupKey, nudge
 import { assembleContext, deliveryWithContext, type ContextSources } from "./context-assembly";
 import { cacheModelSwitch, type CacheClockState } from "./cache-clock";
 import { FORK_IDLE } from "./fork-watch";
-import { compactionPassEvent, compactionPassOptionOf, compactionPassReading, compactionPassShadow, compactionPassStep, compactionPlanDetail, compactionReadingDetail, compactionRerunAtCompaction, compactionSummaryUsageDetail, newCompactionPassState, type CompactionPassDeps, type CompactionPassOption, type CompactionPassReading } from "./compaction-pass";
+import { compactionAfterDetail, compactionAfterRoute, compactionPassEvent, compactionPassOptionOf, compactionPassReading, compactionPassShadow, compactionPassStep, compactionPlanDetail, compactionReadingDetail, compactionRerunAtCompaction, compactionSummaryUsageDetail, compactionSurveyDetail, newCompactionPassState, type CompactionAfterArm, type CompactionPassDeps, type CompactionPassOption, type CompactionPassReading } from "./compaction-pass";
 import { endStretchAtCompaction, markStretchApplied, stretchInstructions, WRITER_TAG_STRETCH, type StretchDeps } from "./stretch-distillation";
 import { boundaryBankCompactionBoundary, boundaryKitInstallPathOf, boundaryKitMemq, boundaryKitNodeRun, firstFailureToday, MEMQ_UNAVAILABLE_LINES, type KitBoundaryDeps, type KitMemqOptions, type KitMemqResult } from "./memq-boundary";
 import { emitGoalDiff, emitGoalDiffFrom, emitKitEvent, followKitEventsOwner, newKitEventsState, type KitEventDeps } from "./kit-events";
@@ -212,14 +212,15 @@ import { GuardError, commandVerdictOf, matchingBeforeGuards, runAfter, runBefore
 import { formatterHook, prReadyHook, recognitionHook, resolveExecutable } from "./guards/after-hooks";
 import { childEnvOf, gitHooksPathOf } from "./spawn";
 import { newSpawnTypes, recordSpawnType, spawnLogLine, spawnTypeOf, type SpawnTypes } from "./spawn-types";
-// The ten deny guards: the four the kit's command hooks held, ported, the
+// The eleven deny guards: the four the kit's command hooks held, ported, the
 // shared-state guard, the git commit gate, the em-dash guard, the test-hang
-// gate, the inplace-rewrite guard and the dispatch-docs guard beside them,
-// and the path host their tree reads go through.
+// gate, the inplace-rewrite guard, the dispatch-docs guard and the draft-body
+// guard beside them, and the path host their tree reads go through.
 import { pathOpsOf, readonlyAgentGuard, type LexHost } from "./guards/readonly-agent";
 import { docsWriteGuard } from "./guards/docs-write";
 import { dispatchDocsGuard } from "./guards/dispatch-docs";
 import { prDocsGuard } from "./guards/pr-docs";
+import { draftBodyGuard } from "./guards/draft-body";
 import { GIT_ENV_REDIRECTS, mergedPrPushGuard } from "./guards/merged-pr-push";
 import { sharedStateGuard } from "./guards/shared-state";
 import { gitCommitGateGuard } from "./guards/git-commit-gate";
@@ -848,15 +849,17 @@ async function guardWindowsOf(dp: any): Promise<boolean> {
   }
 }
 
-// The module's own before guards for one call, the ten deny guards, built
-// over the hook-bound `$` for hostOf's reason. They run beside the guards
-// runner.ts holds registered, in the same runBefore pass, after those.
+// The module's own before guards for one call, the eleven deny guards, the
+// draft-body guard among them, built over the hook-bound `$` for hostOf's
+// reason. They run beside the guards runner.ts holds registered, in the same
+// runBefore pass, after those.
 function moduleBeforeGuards(dp: any): BeforeGuard[] {
   const lexHost = () => guardLexHostOf(dp);
   return [
     docsWriteGuard({ lexHost, quote: (text: string) => bracketSafeText(oneLine(text)) }),
     dispatchDocsGuard({}),
     prDocsGuard({ lexHost }),
+    draftBodyGuard({ lexHost }),
     mergedPrPushGuard({
       windows: () => guardWindowsOf(dp),
       plantedGitVariable: () => plantedGitVariableOf(dp),
@@ -6910,7 +6913,7 @@ export const register: Register = async (on, options) => {
         await compactionPassEvent(compactionPassDepsOf($), {
           trigger: e.trigger,
           option: compactionPassOption,
-          ...(reading === null ? { ...compactionPlanDetail(null) } : compactionReadingDetail(reading)),
+          ...(reading === null ? { ...compactionPlanDetail(null), ...compactionSurveyDetail(e.messages) } : compactionReadingDetail(reading)),
           plan: "none",
           why,
           protected: protectedIds.length,
@@ -6961,6 +6964,15 @@ export const register: Register = async (on, options) => {
       compactionHeld = null;
       compactionReminderAt = 0;
     }
+    // The compaction_after arm, set by the same compaction whatever the pass
+    // option reads: the next main-conversation model request takes it in the
+    // turn.step hook and journals what that request returned. It holds the
+    // route, the trigger and the time. A second compaction before any request
+    // replaces it. An off session registers no turn.step hook, so nothing
+    // there could take an arm and none is set.
+    if (ran && e.trigger !== "precompute" && arming !== "off") {
+      compactionPass.after = { route: compactionAfterRoute(handUp !== null, cut !== null), trigger: e.trigger, at: Date.now() };
+    }
     if (ran && consume !== null) await consume();
 
     // The shadow pass, on an allowed compaction of the main conversation on
@@ -6993,7 +7005,7 @@ export const register: Register = async (on, options) => {
         await compactionPassEvent(compactionPassDepsOf($), {
           trigger: e.trigger,
           option: compactionPassOption,
-          ...(reading === null ? { plan: "none", why: null, ...compactionPlanDetail(null) } : compactionReadingDetail(reading)),
+          ...(reading === null ? { plan: "none", why: null, ...compactionPlanDetail(null), ...compactionSurveyDetail(e.messages) } : compactionReadingDetail(reading)),
           ...liveRefusal,
           protected: protectedIds.length,
           marked,
@@ -8125,6 +8137,12 @@ export const register: Register = async (on, options) => {
   // stepEffortRewrite. Otherwise the event handed to next is the event
   // received. A subagent's step, a reader session's and a step of a turn this
   // session saw no start for pass through with no reading and no rewrite.
+  // The one exception is the first main-conversation step after a compaction
+  // that ran: whoever owns the session and whatever turn it belongs to, it
+  // takes the compaction_after arm before the call beneath and writes one
+  // compaction_after line from that call's exit path, whether the call
+  // returned, threw or was closed early. The write is never awaited and its
+  // failure is caught, and a throw from the call beneath passes up unchanged.
   // Every reading sits inside a catch, so nothing here throws into the step.
   on("turn.step", async function* ($, e, next) {
     // The budget a shadow call fired here takes its share of, live until
@@ -8185,7 +8203,42 @@ export const register: Register = async (on, options) => {
         // A count or a rewrite is lost, and the step goes on as it came.
         down = e;
       }
-      const result = yield* next(down);
+      // The compaction_after arm, taken by a step that carries no agentId
+      // and cleared before the call beneath, so no other step takes it too.
+      let after: CompactionAfterArm | null = null;
+      if (!(typeof e.agentId === "string" && e.agentId.length > 0)) {
+        after = compactionPass.after;
+        compactionPass.after = null;
+      }
+      const outcome: { returned: boolean; threw: boolean; result: unknown } = { returned: false, threw: false, result: undefined };
+      let result: TurnStepResult;
+      try {
+        result = yield* next(down);
+        outcome.returned = true;
+        outcome.result = result;
+      } catch (err) {
+        outcome.threw = true;
+        throw err;
+      } finally {
+        // The exit path of the call beneath: it returned, it threw, or the
+        // engine closed the step before either, which leaves both flags
+        // false. The line is written from here and never awaited, since this
+        // handler wraps the model call, and the catch covers a throw while
+        // the line is built as well as a write that rejects.
+        if (after !== null) {
+          const arm = after;
+          void Promise.resolve()
+            .then(async () => {
+              noteJournalWrite(await writeEvent(hostOf($), {
+                persona: sess.persona,
+                session: sess.mySessionId,
+                event: "compaction_after",
+                detail: compactionAfterDetail(arm, e.model, outcome, Date.now()),
+              }), "compaction_after");
+            })
+            .catch(() => { /* the line is lost; the step stands as it ended */ });
+        }
+      }
       try {
         const watch = sess.stepWatch;
         const subagentStep = typeof e.agentId === "string" && e.agentId.length > 0;

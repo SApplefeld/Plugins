@@ -24,6 +24,7 @@ import {
   cutWorthStarting,
   isToolVerdict,
   keysPrefix,
+  pairingSurvey,
   passFillPercentOf,
   planRefusal,
   rerunEntriesOf,
@@ -142,11 +143,66 @@ export type CompactionPassState = {
   rerun: RerunEntry[] | null;
   // The rerun list's store writes, chained so they run one after another.
   rerunWrites: Promise<void>;
+  // The arm of the compaction_after line: set by a compaction of the main
+  // conversation that ran, a precompute aside, and taken by the next
+  // main-conversation model request, or null where none stands. A second
+  // compaction before any request replaces it.
+  after: CompactionAfterArm | null;
 };
+
+// The route a compaction took, in the live compaction_pass line's own words:
+// `whole` where the summarizer read the untouched messages, `cut` where it
+// read the cut list, `hand-up` where the plugin's own list answered and no
+// summary ran, which that line reads as summarized `none`.
+export type CompactionAfterRoute = "whole" | "cut" | "hand-up";
+
+// What the arm holds: the route, the compaction's trigger and the time it
+// ran, in Date.now() milliseconds.
+export type CompactionAfterArm = { route: CompactionAfterRoute; trigger: string; at: number };
+
+// The route from the two facts the session.compact hook holds: whether the
+// hand-up answered and whether the cut list went down to the summarizer.
+export function compactionAfterRoute(handedUp: boolean, cutSent: boolean): CompactionAfterRoute {
+  return handedUp ? "hand-up" : cutSent ? "cut" : "whole";
+}
+
+// The compaction_after line's detail, a closed list of nine flat keys, for
+// the model request that took the arm. `model` is the model the request was
+// sent to. `returned` is whether the call beneath handed back a result, and
+// `threw` whether it threw; a step closed before either reads both false.
+// `stopReason` is that result's stop reason where it is a string and null
+// otherwise, `arrived` is whether `stopReason` is not null, so the two never
+// disagree, and `outputTokens` is the result's usage.output_tokens where that
+// is a finite number. `sinceMs` is the milliseconds from the compaction to
+// `now`.
+export function compactionAfterDetail(
+  arm: CompactionAfterArm,
+  model: unknown,
+  outcome: { returned: boolean; threw: boolean; result: unknown },
+  now: number,
+): Record<string, string | number | boolean | null> {
+  const result: Record<string, unknown> | null = outcome.returned && typeof outcome.result === "object" && outcome.result !== null
+    ? (outcome.result as Record<string, unknown>)
+    : null;
+  const stopReason = result !== null && typeof result.stopReason === "string" ? result.stopReason : null;
+  const usage = result !== null && typeof result.usage === "object" && result.usage !== null ? (result.usage as Record<string, unknown>) : null;
+  const outputTokens = usage !== null && typeof usage.output_tokens === "number" && Number.isFinite(usage.output_tokens) ? usage.output_tokens : null;
+  return {
+    route: arm.route,
+    trigger: arm.trigger,
+    model: typeof model === "string" ? model : null,
+    returned: outcome.returned,
+    arrived: stopReason !== null,
+    stopReason,
+    outputTokens,
+    threw: outcome.threw,
+    sinceMs: now - arm.at,
+  };
+}
 
 // A fresh state, as a session starts with it.
 export function newCompactionPassState(): CompactionPassState {
-  return { plan: null, cache: null, cacheVersion: 0, planCacheVersion: -1, busy: false, disabledJournaled: false, lastMainTurnEndedAt: 0, coldCacheJournaled: false, seamNoKey: false, rerun: null, rerunWrites: Promise.resolve() };
+  return { plan: null, cache: null, cacheVersion: 0, planCacheVersion: -1, busy: false, disabledJournaled: false, lastMainTurnEndedAt: 0, coldCacheJournaled: false, seamNoKey: false, rerun: null, rerunWrites: Promise.resolve(), after: null };
 }
 
 // The verdict cache, read from the engine's state once and held. A read
@@ -210,6 +266,17 @@ export function compactionPlanDetail(plan: CompactionPlan | null): Record<string
     skillSuperseded: plan.skillSuperseded,
     planRows: plan.rowCount,
   };
+}
+
+// The pairing survey of the rows a compaction_pass line read, as they stood
+// before any plan was applied: pairCalls, the tool calls whose result the
+// rows also hold, pairApart, those whose result is not in the message
+// directly after the call's, and pairApartBatch, the apart ones that sit
+// inside a batch of parallel calls. A list `pairingSurvey` cannot read
+// reads as an empty one, by that function's rule.
+export function compactionSurveyDetail(messages: unknown): { pairCalls: number; pairApart: number; pairApartBatch: number } {
+  const survey = pairingSurvey(messages);
+  return { pairCalls: survey.calls, pairApart: survey.apart, pairApartBatch: survey.apartBatch };
 }
 
 // The pass's tick, run from the heartbeat in an armed session, owner or
@@ -287,6 +354,7 @@ export async function compactionPassStep(deps: CompactionPassDeps, option: Compa
           plan: "covering",
           why: option === "live" && !startCut ? "under-minimum" : null,
           ...compactionPlanDetail(standing),
+          ...compactionSurveyDetail(current),
           tokensAfter: null,
           idleS: Math.floor((now - deps.pass.lastMainTurnEndedAt) / 1000),
           messages: current.length,
@@ -412,13 +480,18 @@ export function compactionSummaryUsageDetail(usage: unknown): { summaryInputToke
   };
 }
 
-// The compaction_pass line's plan fields for one reading.
+// The compaction_pass line's plan fields for one reading, with the pairing
+// survey of the messages it read. Where the plan was applied to them, the
+// line also carries the pairing read's verdict and its two counts:
+// pairFailing, the calls that fail the read, and pairBroken, the failing
+// ones whose call and result were adjacent before the plan.
 export function compactionReadingDetail(reading: CompactionPassReading): Record<string, string | number | boolean | null> {
   const applied = reading.applied;
   return {
     plan: reading.why === null ? "applied" : "none",
     why: reading.why,
     ...compactionPlanDetail(reading.plan),
+    ...compactionSurveyDetail(reading.messages),
     ...(applied === null ? {} : {
       keptCount: applied.keptCount,
       keptTokens: tokensOf(applied.keptChars),
@@ -426,6 +499,8 @@ export function compactionReadingDetail(reading: CompactionPassReading): Record<
       skillKept: applied.skillKept,
       skillSuperseded: applied.skillSuperseded,
       paired: applied.paired,
+      pairFailing: applied.failing,
+      pairBroken: applied.broken,
     }),
   };
 }

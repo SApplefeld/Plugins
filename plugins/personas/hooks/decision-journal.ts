@@ -899,12 +899,17 @@ export async function writeRendering(host: JournalHost, record: RenderingRecord)
 // duplicate and failed, of memory verdicts applied, confirmed, misled,
 // unused and off the shown set, of items dropped and follow-ups queued,
 // whether the summarizer was briefed, the fork's three usage counts and its
-// milliseconds, each count a flat key since the detail map nests nothing.
+// milliseconds, each count a flat key since the detail map nests nothing. A
+// `compaction_after` is what the first main-conversation request after a
+// compaction that ran returned: the route the compaction took, its trigger,
+// the request's model, whether a result came back, whether a response
+// arrived, its stop reason and output tokens, whether the call threw, and the
+// milliseconds since the compaction.
 //
 // The union and the array carry the same members in the same order: a member
 // in the union alone compiles and is refused by writeEvent at runtime.
-export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge" | "recognition_withheld" | "stretch_distillation";
-export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge", "recognition_withheld", "stretch_distillation"];
+export type EventName = "compaction_gate" | "compaction_pass" | "compaction_pass_disabled" | "guard_verdict" | "guard_shadow" | "guard_error" | "recognition_nudge" | "recognition_withheld" | "stretch_distillation" | "compaction_after";
+export const EVENT_NAMES: readonly EventName[] = ["compaction_gate", "compaction_pass", "compaction_pass_disabled", "guard_verdict", "guard_shadow", "guard_error", "recognition_nudge", "recognition_withheld", "stretch_distillation", "compaction_after"];
 
 // A value an event's detail may carry: a string, a number, a boolean or null.
 export type EventDetailValue = string | number | boolean | null;

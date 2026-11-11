@@ -7,8 +7,9 @@
 // writes one row, and the last line printed names the verdict the exit code
 // carries.
 //
-// Two verbs, because half the checks need a session that has already
-// restarted onto the new build:
+// Three verbs. The canary's check is two of them, because half its checks
+// need a session that has already restarted onto the new build. The third
+// reads the fleet once it has restarted:
 //
 //   pre   node bin/upgrade-check.mjs pre --repo <checkout> --results <dir>
 //                                        [--scratch <dir>] [--canary <persona>]
@@ -25,7 +26,42 @@
 //         runs it is the restarted one, and --tools carries the three tool
 //         readings only a model can take.
 //
-// The steps, and what each catches:
+//   landing  node bin/upgrade-check.mjs landing --results <dir> [--roster <file>]
+//                                        [--expect <name>=<id>[,<name>=<id>...]]
+//                                        [--by <persona>] [--persona <name>]
+//         Which model each rostered persona's current session answers on,
+//         beside the id stated for that persona's roster name. One row per
+//         roster entry, in roster order, and it changes nothing: no restart,
+//         no roster edit, no update. --roster defaults to fleet.json under
+//         --results, --persona narrows the run to one entry, and --expect
+//         states an id for a roster name on this run, which needs --by to
+//         name who states it. Prints
+//         "landing: every judged persona matches its stated id (run <id>)"
+//         where every row reads pass or skipped and one or more reads pass,
+//         else "landing: triage <persona> (<class>), ..." or
+//         "landing: no persona was judged".
+//
+// What landing reads, all of it from outside any session: the entry's model
+// as the roster name, opus where it has none; sessionId and lastSeen in
+// <rundir>/heartbeat.json; the newest LANDING_SCAN_BYTES of that session's
+// transcript; and `claude --version` once. A reply is one assistant record
+// off the main thread that names a model, records sharing a message id
+// counting once. The expected id for a roster name is, in order, the one
+// --expect states, the roster name itself where it is a full id, and the
+// newest earlier row in the record that carries one, with the date and the
+// stater it was recorded under. A reply matches the expected id, or that id
+// followed by a hyphen and eight digits, with one trailing bracketed suffix
+// such as [1m] taken off the expected id first. The script holds no model id
+// of its own.
+//
+// What leaves a transcript. The transcripts landing opens belong to other
+// sessions, so only three things read from one reach standard output, a row
+// or the table: a reply count, a version token as versionToken admits one of
+// at most LANDING_BUILD_CHARS characters, and a model id of the shape
+// isModelId admits. Any other model value prints
+// as "(other)", and no evidence line carries any other transcript text.
+//
+// The steps of pre, and what each catches:
 //   1 versions   the build on disk, and the build this session is running.
 //   2 types      the declarations the new build writes beside a plugin it loads
 //                from a folder under its plugin-dir watch, read off a probe
@@ -54,7 +90,13 @@
 // Exits. 0 clear, 1 triage, 2 could not run, 3 failed. A missing --repo or --results, a
 // --repo with no hooks/ directory, and a results directory that cannot be
 // written all exit 2 before any step runs, with the reason printed: a run
-// that cannot record its rows is not a run. A scratch folder that exists,
+// that cannot record its rows is not a run. For landing, so do a roster that
+// cannot be read as a JSON array, a --persona the roster does not hold, an
+// --expect with no --by, a command line holding any word other than its own
+// flags each given once with one value, an --expect value that is not a model
+// id, an --expect name no roster entry carries, and under --persona an
+// --expect name no entry it leaves carries. A
+// scratch folder that exists,
 // holds files and carries no .upgrade-check-scratch marker also exits 2 and
 // is left as it stands, since the scratch folder is emptied at the start of a
 // run and only a folder this script made is its to empty. Every child process
@@ -79,6 +121,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { transcriptFolders } from './restart-recap.mjs';
 import { TRANSCRIPT_SCAN_BYTES, transcriptPathsFor } from './supervise-liveness.mjs';
 
 export const STEP_TIMEOUT_MS = 180000;
@@ -138,16 +181,21 @@ export const SUPERVISOR_HEARTBEAT_NOTE = /\bHEARTBEAT_ABSENT child-\d+: .* has n
 const LINE_TERMINATOR = /\r\n|[\n\r\v\f\u{85}\u{2028}\u{2029}]/u;
 const EVIDENCE_CAP = 600;
 
-// One piece of command output as one line of evidence: folded on every line
-// terminator, its runs of whitespace closed up, and cut to the cap. What
-// makes it safe in the table is applied again at the table (cell), since the
-// guard belongs to the channel the text leaves by.
-export function evidenceLine(text) {
+// Text folded on every line terminator, with its runs of whitespace and
+// control characters closed up to one space, and not yet cut to the cap.
+function foldedLine(text) {
   return String(text === undefined || text === null ? '' : text)
     .split(LINE_TERMINATOR).join(' ')
     .replace(/[\s\p{Cc}\p{Cf}]+/gu, ' ')
-    .trim()
-    .slice(0, EVIDENCE_CAP);
+    .trim();
+}
+
+// One piece of command output as one line of evidence: folded as foldedLine
+// folds it, and cut to the cap. What makes it safe in the table is applied
+// again at the table (cell), since the guard belongs to the channel the text
+// leaves by.
+export function evidenceLine(text) {
+  return foldedLine(text).slice(0, EVIDENCE_CAP);
 }
 
 // One value in a markdown table cell. The cell's own separator is escaped
@@ -514,10 +562,37 @@ function readTailText(file, scanBytes) {
   return text;
 }
 
+// A session id a file name can safely carry, or '' for any other value.
+// transcriptPathsFor owns that check, so an id read from a file passes the
+// same guard the liveness verdict's does before it reaches a path. The root
+// and the working directory handed in are placeholders: only the verdict on
+// the id is taken.
+function safeSessionId(value) {
+  if (typeof value !== 'string') return '';
+  return transcriptPathsFor('placeholder-root', 'placeholder-workdir', value).transcriptPath ? value : '';
+}
+
+// Where a session's transcript is: <sessionId>.jsonl in the first folder
+// under <profile>/.claude/projects whose name equals the working directory's
+// project key without regard to case, since the engine has written one
+// directory under two letter cases. '' where the profile, the working
+// directory or a safe session id is missing, or no such folder holds the
+// file.
+function findTranscript(profileRoot, workdir, sessionId) {
+  const id = safeSessionId(sessionId);
+  if (!profileRoot || !workdir || !id) return '';
+  const folders = transcriptFolders(path.join(profileRoot, '.claude', 'projects'), workdir) || [];
+  for (const folder of folders) {
+    const file = path.join(folder.path, id + '.jsonl');
+    try { if (fs.statSync(file).isFile()) return file; } catch (e) { continue; }
+  }
+  return '';
+}
+
 // The running session's own version, off the newest record in the tail of
 // the transcript CLAUDE_CODE_SESSION_ID names. Only the tail is read, the same
 // TRANSCRIPT_SCAN_BYTES the liveness verdict reads, since a transcript grows
-// for the life of a session and every record carries the version. 'unknown'
+// for the life of a session and its conversation records carry the version. 'unknown'
 // where the shell carries no id, the profile cannot be named, or no record in
 // the tail carries a version: the check records what it could read and never
 // guesses.
@@ -526,7 +601,7 @@ export function runningSessionVersion(env = process.env) {
   const profileRoot = String(env.USERPROFILE || env.HOME || '');
   const workdir = process.cwd();
   if (!sessionId || !profileRoot) return 'unknown';
-  const { transcriptPath } = transcriptPathsFor(profileRoot, workdir, sessionId);
+  const transcriptPath = findTranscript(profileRoot, workdir, sessionId);
   if (!transcriptPath) return 'unknown';
   const text = readTailText(transcriptPath, TRANSCRIPT_SCAN_BYTES);
   if (text === null) return 'unknown';
@@ -1128,6 +1203,383 @@ export function post(flags) {
   return { rows, line, code: failing.length > 0 ? 1 : 0, runId, resultsDir };
 }
 
+// The newest part of a transcript the landing tally reads: enough replies to
+// say what the session answers on now, without reading a transcript that has
+// grown for the life of a session.
+export const LANDING_SCAN_BYTES = 8 * 1024 * 1024;
+// How many heartbeat intervals without a stamp read as a persona that is not
+// running.
+export const LANDING_STALE_INTERVALS = 10;
+// The roster name an entry with no model launches under, the default
+// bin/supervise.sh applies.
+export const DEFAULT_ROSTER_MODEL = 'opus';
+// What a model value outside the model-id shape prints as.
+export const OTHER_MODEL = '(other)';
+// The most ids a printed tally names before it counts the rest.
+const TALLY_PRINT_IDS = 5;
+// The longest session build a transcript may report. A longer token reads as
+// unknown, so the one free-text value a transcript passes out stays short.
+export const LANDING_BUILD_CHARS = 32;
+
+// The model-id shape: 1 to 80 characters, each a lowercase letter, a digit, a
+// dot, a hyphen or a square bracket, the first a letter or a digit. A model
+// value read from a transcript reaches standard output, a row and the table
+// only where it has this shape, so no space, uppercase letter, slash, quote or
+// line terminator a transcript holds can ride out under a model's name.
+const MODEL_ID_SHAPE = /^[a-z0-9][a-z0-9.[\]-]{0,79}$/;
+export function isModelId(value) {
+  return typeof value === 'string' && MODEL_ID_SHAPE.test(value);
+}
+
+// Whether a reply's id is the expected id, or the expected id followed by a
+// hyphen and eight digits, which is the dated form of the same model. A roster
+// name may carry a bracketed suffix such as [1m] that the engine reads and
+// the transcript does not record, so one trailing suffix is taken off the
+// expected id before the comparison.
+function matchesExpected(id, expected) {
+  if (id === expected) return true;
+  const bare = expected.replace(/\[[^[\]]*\]$/, '');
+  if (id === bare) return true;
+  return id.length === bare.length + 9 && id.startsWith(bare + '-') && /^[0-9]{8}$/.test(id.slice(-8));
+}
+
+/**
+ * The reply tally and the build in one transcript's text. A reply is one
+ * record whose type is assistant, which is not a sidechain record and whose
+ * message names a model other than the engine's own '<synthetic>'. Records
+ * sharing one message id are one reply, since the engine writes one record
+ * per content block, and a record with no message id is a reply of its own.
+ * The build is the newest version value in the text.
+ *
+ * Nothing else is taken from a record, and the two values that are taken are
+ * narrowed here, at the read: a model outside the model-id shape is counted
+ * under OTHER_MODEL, and the version passes versionToken and reads unknown
+ * past LANDING_BUILD_CHARS, a bound the pre and post readings do not take
+ * since their version is this session's own. A record is one
+ * LF-ended line, so the text is split on LF alone: a JSON string may hold a
+ * raw LINE SEPARATOR, and a wider splitter would drop the reply holding one.
+ * A line that is not JSON is passed over, the last line of a transcript
+ * still being written among them.
+ * @param {string|null} text
+ * @returns {{tally: [string, number][], replies: number, build: string}} the tally largest first
+ */
+function landingTally(text) {
+  const counts = new Map();
+  const seen = new Set();
+  let version = '';
+  let replies = 0;
+  for (const line of String(text || '').split('\n')) {
+    if (!line.trim()) continue;
+    let o;
+    try { o = JSON.parse(line); } catch (e) { continue; }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+    if (typeof o.version === 'string' && o.version) version = o.version;
+    if (o.type !== 'assistant' || o.isSidechain === true) continue;
+    const message = o.message;
+    if (!message || typeof message !== 'object') continue;
+    if (typeof message.model !== 'string' || !message.model || message.model === '<synthetic>') continue;
+    if (typeof message.id === 'string' && message.id) {
+      if (seen.has(message.id)) continue;
+      seen.add(message.id);
+    }
+    const id = isModelId(message.model) ? message.model : OTHER_MODEL;
+    counts.set(id, (counts.get(id) || 0) + 1);
+    replies += 1;
+  }
+  const tally = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const build = version ? versionToken(version) : 'unknown';
+  return { tally, replies, build: build.length > LANDING_BUILD_CHARS ? 'unknown' : build };
+}
+
+// A tally as text: "<id> x<count>", largest first, `shown` ids at most and
+// then how many more there were.
+function tallyText(tally, shown = TALLY_PRINT_IDS) {
+  const named = tally.slice(0, shown).map(([id, n]) => id + ' x' + n).join(', ');
+  return tally.length > shown ? named + ' (+' + (tally.length - shown) + ' more)' : named;
+}
+
+// A landing row's evidence, "<head><by><tallyLead><tally>; <reading>", kept
+// within the EVIDENCE_CAP cut row() makes, so the reading always ends the row
+// whole. Where the whole runs past the cap the tally names fewer ids first,
+// down to one, then the --by value is cut, and last whatever precedes the
+// tally. The cut on `by` is exact because by is already one evidence line.
+function fitEvidence(head, by, tallyLead, tally, reading) {
+  const tail = '; ' + reading;
+  const over = (text) => foldedLine(text).length - EVIDENCE_CAP;
+  let text = '';
+  for (let shown = TALLY_PRINT_IDS; shown >= 1; shown -= 1) {
+    text = head + by + tallyLead + tallyText(tally, shown) + tail;
+    if (over(text) <= 0) return text;
+  }
+  const rest = tallyLead + tallyText(tally, 1) + tail;
+  const cutBy = by.slice(0, Math.max(0, by.length - over(text)));
+  text = head + cutBy + rest;
+  if (over(text) <= 0) return text;
+  const restLine = foldedLine(rest);
+  return foldedLine(head + cutBy).slice(0, Math.max(0, EVIDENCE_CAP - restLine.length)) + restLine;
+}
+
+// A heartbeat file's session and lastSeen, or null where the file holds no
+// numeric lastSeen that reads as a time. The plugin rewrites the file in
+// place, so a read that fails or does not parse is retried. An absent file
+// returns at once.
+function readHeartbeat(file) {
+  for (let attempt = 1; attempt <= HEARTBEAT_READ_ATTEMPTS; attempt += 1) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+      if (e && e.code === 'ENOENT') return null;
+      if (attempt < HEARTBEAT_READ_ATTEMPTS) sleepSync(HEARTBEAT_READ_PAUSE_MS);
+      continue;
+    }
+    let hb;
+    try { hb = JSON.parse(text); } catch (e) {
+      if (attempt < HEARTBEAT_READ_ATTEMPTS) sleepSync(HEARTBEAT_READ_PAUSE_MS);
+      continue;
+    }
+    const lastSeen = hb && typeof hb === 'object' && typeof hb.lastSeen === 'number' ? hb.lastSeen : NaN;
+    // The bound is the widest a Date holds, so the time always prints.
+    return Number.isFinite(lastSeen) && Math.abs(lastSeen) <= 8.64e15 ? { sessionId: hb.sessionId, lastSeen } : null;
+  }
+  return null;
+}
+
+// The --expect value as roster name to id. A pair that is not <name>=<id>,
+// and an id outside the model-id shape, exit 2 before any row is written,
+// since an expectation is carried into later runs. A name no roster entry
+// carries is refused by landing once the roster is read.
+function parseExpect(value) {
+  const stated = new Map();
+  for (const pair of String(value).split(',')) {
+    const cut = pair.indexOf('=');
+    const name = cut > 0 ? pair.slice(0, cut).trim() : '';
+    const id = cut > 0 ? pair.slice(cut + 1).trim() : '';
+    if (!name) cannotRun('--expect takes <name>=<id> pairs separated by commas, and "' + evidenceLine(pair) + '" is not one');
+    if (!isModelId(id)) cannotRun('--expect states "' + evidenceLine(id) + '" for ' + evidenceLine(name) + ', which is not a model id: 1 to 80 characters, each a lowercase letter, a digit, a dot, a hyphen or a square bracket, the first a letter or a digit');
+    if (stated.has(name)) cannotRun('--expect names ' + evidenceLine(name) + ' more than once, and a run reads one id for a name');
+    stated.set(name, id);
+  }
+  return stated;
+}
+
+// The roster's entries that carry a name, in roster order. The roster is a
+// JSON array of persona entries, read past a byte-order mark as the plugin
+// reads it. An entry that is not an object or carries no name is passed over,
+// since a row is keyed by its persona. The reasons name no text of the file:
+// a JSON parse failure's message is built from the bytes it stopped on.
+function readRoster(file) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    cannotRun('the roster ' + file + ' cannot be read' + (e && e.code ? ': ' + e.code : ''));
+  }
+  let roster = null;
+  try { roster = JSON.parse(text.replace(/^\uFEFF/, '')); } catch (e) {
+    cannotRun('the roster ' + file + ' does not parse as JSON');
+  }
+  if (!Array.isArray(roster)) cannotRun('the roster ' + file + ' does not hold a JSON array of persona entries');
+  return roster.filter((e) => e && typeof e === 'object' && !Array.isArray(e) && typeof e.name === 'string' && e.name);
+}
+
+// The roster name an entry launches under: opus where the model is absent or
+// blank, which is the supervisor's default where supervisorModel is unset,
+// and the model as a string otherwise. The keeper reads a blank model the
+// same way, and a string or number model to the same text.
+function rosterNameOf(entry) {
+  const model = entry.model;
+  if (model === undefined || model === null || String(model).trim() === '') return DEFAULT_ROSTER_MODEL;
+  return String(model);
+}
+
+// The flags landing reads.
+const LANDING_FLAGS = Object.freeze(['results', 'roster', 'expect', 'by', 'persona']);
+
+// What is wrong with landing's command line, or '' where it reads whole. It
+// reads whole where each word after the verb is one of landing's flags, given
+// once, followed by one value that is not empty and is not itself a flag.
+// parseArgs drops any other word silently, and a lost --expect or --by lets a
+// run judge against an older carried id and exit 0, while a lost --persona or
+// --roster widens or moves the read, so landing reads the command line whole.
+function landingArgsFault(argv) {
+  const list = argv.map(String);
+  const words = list[0] === 'landing' ? list.slice(1) : list;
+  const seen = new Set();
+  for (let i = 0; i < words.length; i += 2) {
+    const word = words[i];
+    if (!word.startsWith('--')) return '"' + evidenceLine(word) + '" is not a flag, and each flag takes one value as the word after it';
+    const eq = word.indexOf('=');
+    const name = (eq > 0 ? word.slice(0, eq) : word).slice(2);
+    if (!LANDING_FLAGS.includes(name)) return '--' + evidenceLine(name) + ' is not a landing flag: landing takes --' + LANDING_FLAGS.slice(0, -1).join(', --') + ' and --' + LANDING_FLAGS[LANDING_FLAGS.length - 1];
+    if (eq > 0) return '--' + name + ' takes its value as the next word, not after "="';
+    if (seen.has(name)) return '--' + name + ' was given more than once, and a run reads only one';
+    seen.add(name);
+    const value = words[i + 1];
+    if (value === undefined || value === '' || value.startsWith('--')) return '--' + name + ' was given with no value';
+  }
+  return '';
+}
+
+// What a landing verdict calls each result that needs triage.
+const LANDING_CLASS = Object.freeze({ fail: 'another id', warn: 'mixed', gap: 'unjudged' });
+
+/**
+ * Which model each rostered persona's current session answers on, beside the
+ * id stated for its roster name: one row per roster entry, in roster order.
+ * Reads only, and what it lets out of a transcript is bounded as the module
+ * header states.
+ * @param {Record<string,string>} flags
+ * @param {string[]} argv the command line flags was parsed from, read whole as landingArgsFault reads it
+ * @returns {{rows: object[], line: string, code: number, runId: string, resultsDir: string}}
+ */
+export function landing(flags, argv) {
+  // Required, so a caller cannot skip the whole-line check by leaving it out.
+  if (!Array.isArray(argv)) throw new Error('landing takes the command line its flags were parsed from');
+  const argsFault = landingArgsFault(argv);
+  if (argsFault) cannotRun(argsFault);
+  const resultsDir = flags.results ? path.resolve(flags.results) : '';
+  const by = evidenceLine(flags.by);
+  if (!resultsDir) cannotRun('--results names the directory the rows are written to, and it was not given');
+  if (flags.expect !== undefined && !by) cannotRun('--by names who states the expected id, and --expect was given without it');
+  const stated = flags.expect === undefined ? new Map() : parseExpect(flags.expect);
+  const rosterPath = flags.roster ? path.resolve(flags.roster) : path.join(resultsDir, 'fleet.json');
+  let entries = readRoster(rosterPath);
+  // Each stated name is checked against the whole roster, before --persona
+  // narrows it, so a misspelled name stops the run rather than leaving every
+  // entry on that name judged against an older carried id.
+  const carriedNames = [...new Set(entries.map(rosterNameOf))];
+  for (const name of stated.keys()) {
+    if (!carriedNames.includes(name)) {
+      cannotRun('--expect names ' + evidenceLine(name) + ', and no entry in the roster ' + rosterPath + ' carries that roster name: its entries carry ' + (carriedNames.length ? evidenceLine(carriedNames.join(', ')) : 'none'));
+    }
+  }
+  if (flags.persona !== undefined) {
+    entries = entries.filter((e) => e.name === String(flags.persona));
+    if (entries.length === 0) cannotRun('--persona names ' + evidenceLine(flags.persona) + ', and the roster ' + rosterPath + ' holds no entry of that name');
+    // Then against the narrowed read, since a stated name no remaining entry
+    // carries writes no row, and a later run would carry an older id for it.
+    const narrowedNames = new Set(entries.map(rosterNameOf));
+    for (const name of stated.keys()) {
+      if (!narrowedNames.has(name)) {
+        cannotRun('--expect names ' + evidenceLine(name) + ', and no entry --persona leaves carries it, so no row would record it: drop that pair from --expect');
+      }
+    }
+  }
+  try {
+    fs.mkdirSync(resultsDir, { recursive: true });
+    fs.accessSync(resultsDir, fs.constants.W_OK);
+  } catch (e) {
+    cannotRun(resultsDir + ' cannot be written: ' + (e && e.message));
+  }
+
+  const claude = resolveCommand('claude');
+  const versionRun = claude
+    ? runChild(claude.file, [...claude.args, '--version'])
+    : { status: null, stdout: '', stderr: '', timedOut: false, error: 'claude could not be resolved on PATH' };
+  const disk = versionRun.status === 0 ? versionToken(versionRun.stdout) : 'unknown';
+  const runId = newRunId();
+  const runAt = new Date().toISOString();
+  const profileRoot = String(process.env.USERPROFILE || process.env.HOME || '');
+  // The record as it stood before this run, which is where an expectation an
+  // earlier run stated is carried from: the newest row for the roster name
+  // that holds an id, with the date and the stater it was recorded under.
+  const earlier = readRows(resultsDir);
+  const carried = (rosterName) => {
+    for (let i = earlier.length - 1; i >= 0; i -= 1) {
+      const r = earlier[i];
+      if (r.rosterName === rosterName && isModelId(r.expected)) {
+        return { expected: r.expected, expectedAt: evidenceLine(r.expectedAt), expectedBy: evidenceLine(r.expectedBy), stated: '' };
+      }
+    }
+    return null;
+  };
+
+  const rows = [];
+  const triage = [];
+  for (const entry of entries) {
+    const persona = evidenceLine(entry.name);
+    const rosterName = rosterNameOf(entry);
+    // The expected id for the roster name, the name whole: this run's
+    // --expect, then the roster name itself where it is a full id, then the
+    // newest earlier row that carries one.
+    let expectation = { expected: '', expectedAt: '', expectedBy: '', stated: '' };
+    if (stated.has(rosterName)) {
+      expectation = { expected: stated.get(rosterName), expectedAt: runAt, expectedBy: by, stated: '' };
+    } else if (isModelId(rosterName) && rosterName.startsWith('claude-')) {
+      expectation = { expected: rosterName, expectedAt: '', expectedBy: 'the roster', stated: 'the id the roster entry names' };
+    } else {
+      expectation = carried(rosterName) || expectation;
+    }
+    const { expected, expectedAt, expectedBy } = expectation;
+    // The stater's name is the one part of a claim fitEvidence may cut.
+    const statedHead = expectation.stated || 'the id stated ' + expectedAt + ' by ';
+    const statedBy = expectation.stated ? '' : expectedBy;
+    const lead = 'roster name ' + rosterName + '; ';
+    const record = (result, evidence, sessionBuild = 'unknown', landed = {}) => {
+      const built = row(runId, disk, '', '', 'landing: ' + persona, result, evidence);
+      rows.push({ ...built, rosterName, expected, expectedAt, expectedBy, sessionBuild, landed });
+      if (LANDING_CLASS[built.result]) triage.push(persona + ' (' + LANDING_CLASS[built.result] + ')');
+    };
+
+    if (entry.enabled !== true) {
+      record('skipped', lead + 'not enabled in the roster');
+      continue;
+    }
+    const workdir = typeof entry.workdir === 'string' ? entry.workdir : '';
+    const rundir = typeof entry.rundir === 'string' && entry.rundir ? entry.rundir : (workdir ? workdir + '/run' : '');
+    // The session id is read from a file the persona's own session writes, so
+    // it passes the path guard before it names a transcript or prints.
+    const heartbeat = rundir ? readHeartbeat(path.join(rundir, 'heartbeat.json')) : null;
+    const sessionId = heartbeat ? safeSessionId(heartbeat.sessionId) : '';
+    if (!sessionId) {
+      record('gap', lead + 'no session is named in ' + rundir + '/heartbeat.json');
+      continue;
+    }
+    if (Date.now() - heartbeat.lastSeen > LANDING_STALE_INTERVALS * readHeartbeatMs(rundir)) {
+      record('gap', lead + 'not running: last seen ' + new Date(heartbeat.lastSeen).toISOString());
+      continue;
+    }
+    const transcript = findTranscript(profileRoot, workdir, sessionId);
+    const read = landingTally(transcript ? readTailText(transcript, LANDING_SCAN_BYTES) : null);
+    const landed = Object.fromEntries(read.tally);
+    if (read.replies === 0) {
+      record('gap', lead + 'no reply to read in session ' + sessionId, read.build);
+      continue;
+    }
+    const session = 'session ' + sessionId + ' on build ' + read.build + ', build on disk ' + disk + '; ';
+    if (!expected) {
+      record('gap', fitEvidence(lead + session + 'no expected id is stated for ' + rosterName, '', ': landed ', read.tally, 'state one with --expect'), read.build, landed);
+      continue;
+    }
+    const matched = read.tally.reduce((sum, [id, n]) => sum + (matchesExpected(id, expected) ? n : 0), 0);
+    const claim = lead + session + matched + ' of ' + read.replies + ' replies match ' + expected + ', ' + statedHead;
+    if (matched === read.replies) {
+      record('pass', claim + statedBy, read.build, landed);
+    } else if (matched > 0) {
+      record('warn', fitEvidence(claim, statedBy, ': ', read.tally, 'replies ran on more than one model, which neither a restart nor an update changes'), read.build, landed);
+    } else {
+      // Which reading fits a session no reply of which matched. Where either
+      // build could not be read, the two cannot be compared, so neither a
+      // restart nor an update is ruled out.
+      const landedId = read.tally[0][0];
+      let reading = 'this session runs build ' + read.build + ' and the build on disk is ' + disk + ', so a restart is the first candidate';
+      if (read.build === 'unknown') {
+        reading = 'this session\'s build could not be read, so a restart and an update are both candidates';
+      } else if (disk === 'unknown') {
+        reading = 'the build on disk could not be read, so a restart and an update are both candidates';
+      } else if (read.build === disk) {
+        reading = 'this session runs the build on disk, so that build reaches ' + landedId + ' for this name: update Claude Code, or restate the expectation with --expect where ' + landedId + ' is the newer model';
+      }
+      record('fail', fitEvidence(claim, statedBy, ': ', read.tally, reading), read.build, landed);
+    }
+  }
+
+  // Only pass and skipped are allowed, and a run in which no row reads pass
+  // is not clear either: a check that judged nobody has earned no silence.
+  const judged = rows.some((r) => r.result === 'pass');
+  let line = 'landing: every judged persona matches its stated id (run ' + runId + ')';
+  if (triage.length > 0) line = 'landing: triage ' + triage.join(', ') + ' (run ' + runId + ')';
+  else if (!judged) line = 'landing: no persona was judged (run ' + runId + ')';
+  return { rows, line, code: triage.length === 0 && judged ? 0 : 1, runId, resultsDir };
+}
+
 // Whether node was asked to run this file, rather than one that imported it.
 // The check errs toward running: it stands down only where the entry point is
 // another readable file, which is what an import looks like. A launch spelled
@@ -1144,16 +1596,18 @@ function launchedDirectly() {
   try { return !fs.statSync(entry).isFile(); } catch (e) { return true; }
 }
 
-// The verbs are a closed pair, and anything else exits 2 with the usage rather
-// than running a half-named check.
+// The verbs are a closed list of three, and anything else exits 2 with the
+// usage rather than running a half-named check.
 // The exit code is set rather than exited on, so output still queued for a
 // pipe is written before the process ends.
 function main() {
   const parsed = parseArgs(process.argv.slice(2));
-  if (parsed.verb !== 'pre' && parsed.verb !== 'post') {
-    cannotRun('the verb is "pre" or "post"; usage: upgrade-check.mjs pre --repo <checkout> --results <dir> [--scratch <dir>] [--canary <persona>] | upgrade-check.mjs post --run <id> --results <dir> --rundir <dir> --tools <ok | fail: reason>');
+  if (parsed.verb !== 'pre' && parsed.verb !== 'post' && parsed.verb !== 'landing') {
+    cannotRun('the verb is "pre", "post" or "landing"; usage: upgrade-check.mjs pre --repo <checkout> --results <dir> [--scratch <dir>] [--canary <persona>] | upgrade-check.mjs post --run <id> --results <dir> --rundir <dir> --tools <ok | fail: reason> | upgrade-check.mjs landing --results <dir> [--roster <file>] [--expect <name>=<id>[,<name>=<id>...]] [--by <persona>] [--persona <name>]');
   }
-  const outcome = parsed.verb === 'pre' ? pre(parsed.flags) : post(parsed.flags);
+  const outcome = parsed.verb === 'pre' ? pre(parsed.flags)
+    : parsed.verb === 'post' ? post(parsed.flags)
+      : landing(parsed.flags, process.argv.slice(2));
   // The step lines print first, so a failed append still leaves each step's
   // reading in the log. The rows are recorded before the verdict prints, so a
   // reader of the table and a reader of the verdict never disagree.

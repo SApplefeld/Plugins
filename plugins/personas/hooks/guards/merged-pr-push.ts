@@ -60,7 +60,7 @@ export const QUERY_ENV: Readonly<Record<string, string>> = { GIT_TERMINAL_PROMPT
 // The branch names a host query may carry: letters, digits, dot, underscore,
 // slash and hyphen, never a leading hyphen. A branch outside it cannot be
 // told from an injection attempt, so it reads UNKNOWN and allows.
-const BRANCH_ALLOWLIST = /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/;
+export const BRANCH_ALLOWLIST = /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/;
 
 // The integration branches, never guarded.
 const INTEGRATION_BRANCH = /^(develop|main|master)$/i;

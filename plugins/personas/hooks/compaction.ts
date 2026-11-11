@@ -592,6 +592,9 @@ export type CompactionPlan = {
 // whose result was dropped or cut, with its tool and input. `paired` is
 // whether every call that had its result in the list still has it there,
 // directly after the assistant message carrying the call, or has lost both.
+// `failing` counts the calls for which that does not hold, so `paired` is
+// `failing === 0`, and `broken` counts the failing ones whose result sat
+// directly after the call in the list handed in.
 export type ApplyResult = {
   messages: PassMessage[];
   counts: { keep: number; cut: number; drop: number };
@@ -602,6 +605,8 @@ export type ApplyResult = {
   skillSuperseded: number;
   changed: Array<{ id: string; tool: string; input: unknown }>;
   paired: boolean;
+  failing: number;
+  broken: number;
 };
 
 // --- The pass: reading a transcript ---
@@ -1063,7 +1068,9 @@ export function isCutLine(text: string): boolean {
 // which the live pass fills from protectedResultIdsOf and the shadow
 // estimate leaves empty. `paired` reads the output against the list handed
 // in: each call whose result the list held keeps both, its result in the
-// message directly after its call's, or loses both. Pure.
+// message directly after its call's, or loses both. `failing` and `broken`
+// are pairingFailures' counts of the calls for which that does not hold.
+// Pure.
 export function applyPlan(
   messages: readonly PassMessage[],
   plan: { verdicts: Readonly<Record<string, ToolVerdict>>; skillKept: readonly string[]; skillBodyChars?: Readonly<Record<string, number>> },
@@ -1178,22 +1185,90 @@ export function applyPlan(
   }
   // The pairing read: every call the list held with its result keeps both,
   // the result directly after the call, or loses both.
-  const calledIn = new Set<string>();
-  for (const m of messages) for (const u of m.toolUses ?? []) calledIn.add(u.tool_use_id);
-  const useOut = new Map<string, number>();
-  const resultOut = new Map<string, number>();
-  for (let i = 0; i < result.length; i += 1) {
-    for (const u of result[i].toolUses ?? []) useOut.set(u.tool_use_id, i);
-    for (const r of result[i].toolResults ?? []) resultOut.set(r.tool_use_id, i);
+  const { failing, broken } = pairingFailures(messages, result);
+  return { messages: result, counts, keptCount: result.length, keptChars, droppedChars, skillKept, skillSuperseded, changed, paired: failing === 0, failing, broken };
+}
+
+// Where each tool call and each tool result sits in a message list, by id:
+// the index of the message holding it, the last one where an id repeats.
+function pairPositions(messages: readonly PassMessage[]): { useAt: Map<string, number>; resultAt: Map<string, number> } {
+  const useAt = new Map<string, number>();
+  const resultAt = new Map<string, number>();
+  for (let i = 0; i < messages.length; i += 1) {
+    for (const u of messages[i].toolUses ?? []) useAt.set(u.tool_use_id, i);
+    for (const r of messages[i].toolResults ?? []) resultAt.set(r.tool_use_id, i);
   }
-  let paired = true;
-  for (const id of resultAt.keys()) {
-    if (!calledIn.has(id)) continue;
-    const u = useOut.get(id);
-    const r = resultOut.get(id);
-    if ((u === undefined) !== (r === undefined) || (u !== undefined && r !== u + 1)) paired = false;
+  return { useAt, resultAt };
+}
+
+// The pairing read's counts over the list a plan was applied to and the list
+// it produced. A call the first list held with its result fails where the
+// second holds one of the two without the other, or holds both with the
+// result anywhere but the message directly after the call's. `failing`
+// counts those calls, and `broken` counts the failing ones whose result sat
+// directly after the call in the first list, so the two were adjacent before
+// the plan. Pure.
+export function pairingFailures(before: readonly PassMessage[], after: readonly PassMessage[]): { failing: number; broken: number } {
+  const was = pairPositions(before);
+  const now = pairPositions(after);
+  let failing = 0;
+  let broken = 0;
+  for (const [id, resultWas] of was.resultAt) {
+    const useWas = was.useAt.get(id);
+    if (useWas === undefined) continue;
+    const u = now.useAt.get(id);
+    const r = now.resultAt.get(id);
+    if ((u === undefined) !== (r === undefined) || (u !== undefined && r !== u + 1)) {
+      failing += 1;
+      if (resultWas === useWas + 1) broken += 1;
+    }
   }
-  return { messages: result, counts, keptCount: result.length, keptChars, droppedChars, skillKept, skillSuperseded, changed, paired };
+  return { failing, broken };
+}
+
+// The pairing survey of one message list as it stands, before any plan is
+// applied. `calls` counts the tool calls whose result the list also holds.
+// `apart` counts those whose result is not in the message directly after the
+// call's message. `apartBatch` counts the apart ones whose result comes
+// later with every message between the two holding a tool call or a tool
+// result, the shape a batch of parallel calls takes where the engine hands
+// its calls or its results as rows of their own. A result that comes before
+// its call is apart and is no batch. A value that is not a list, or a list
+// holding a row that is not an object or whose toolUses or toolResults is
+// present and not an array of objects, reads as an empty one, all three
+// counts zero, so a line written where the plan could not be read still
+// carries them.
+// Pure.
+export function pairingSurvey(messages: unknown): { calls: number; apart: number; apartBatch: number } {
+  const none = { calls: 0, apart: 0, apartBatch: 0 };
+  if (!Array.isArray(messages)) return none;
+  for (const row of messages as unknown[]) {
+    if (typeof row !== "object" || row === null) return none;
+    const { toolUses, toolResults } = row as { toolUses?: unknown; toolResults?: unknown };
+    for (const blocks of [toolUses, toolResults]) {
+      if (blocks === undefined) continue;
+      if (!Array.isArray(blocks) || blocks.some((b) => typeof b !== "object" || b === null)) return none;
+    }
+  }
+  const rows = messages as readonly PassMessage[];
+  const { useAt, resultAt } = pairPositions(rows);
+  let calls = 0;
+  let apart = 0;
+  let apartBatch = 0;
+  for (const [id, r] of resultAt) {
+    const u = useAt.get(id);
+    if (u === undefined) continue;
+    calls += 1;
+    if (r === u + 1) continue;
+    apart += 1;
+    if (r <= u) continue;
+    let batch = true;
+    for (let i = u + 1; i < r; i += 1) {
+      if ((rows[i].toolUses ?? []).length === 0 && (rows[i].toolResults ?? []).length === 0) { batch = false; break; }
+    }
+    if (batch) apartBatch += 1;
+  }
+  return { calls, apart, apartBatch };
 }
 
 // The one line the engine prints for a marked compaction the plan could not

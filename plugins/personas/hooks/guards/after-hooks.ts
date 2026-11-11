@@ -140,19 +140,36 @@ const PR_READY_TOOLS = /^(bash|powershell)$/i;
  * and then `gh pr ready`, as in `echo "done; gh pr ready 12"`, is a mark
  * too, and an echoed or quoted `gh pr ready` with no separator before it
  * inside the quotes is no mark. The first such
- * command whose words hold no `--undo` is the one read. Returns the pull
- * request number it names, the first word after `ready` that is one to nine
- * digits, null where it names none; and null where no such command stands.
+ * command whose words hold no `--undo` is the one read. Returns its words
+ * after `ready` and the index of its `gh` in the shell line, or null where
+ * no such command stands. The ready mark and the draft-body guard both read
+ * a shell line through this, so the two see the same commands.
+ */
+export function prReadySegmentOf(command: string): { words: string[]; index: number } | null {
+  const separator = /&&|\|\|?|;|\r?\n/g;
+  let start = 0;
+  for (;;) {
+    const cut = separator.exec(command);
+    const segment = command.slice(start, cut === null ? command.length : cut.index);
+    const words = segment.trim().split(/\s+/);
+    if (words[0] === "gh" && words[1] === "pr" && words[2] === "ready" && !words.includes("--undo")) {
+      return { words: words.slice(3), index: start + segment.length - segment.trimStart().length };
+    }
+    if (cut === null) return null;
+    start = cut.index + cut[0].length;
+  }
+}
+
+/**
+ * The pull request number the `gh pr ready` command prReadySegmentOf reads
+ * names, the first word after `ready` that is one to nine digits, null where
+ * it names none; and null where no such command stands.
  */
 export function prReadyCommandOf(command: string): { number: number | null } | null {
-  for (const segment of command.split(/&&|\|\|?|;|\r?\n/)) {
-    const words = segment.trim().split(/\s+/);
-    if (words[0] !== "gh" || words[1] !== "pr" || words[2] !== "ready") continue;
-    if (words.includes("--undo")) continue;
-    const number = words.slice(3).find((word) => /^[0-9]{1,9}$/.test(word));
-    return { number: number === undefined ? null : Number(number) };
-  }
-  return null;
+  const ready = prReadySegmentOf(command);
+  if (ready === null) return null;
+  const number = ready.words.find((word) => /^[0-9]{1,9}$/.test(word));
+  return { number: number === undefined ? null : Number(number) };
 }
 
 // What the ready mark reaches through hooks/index.ts: `command` reads the
