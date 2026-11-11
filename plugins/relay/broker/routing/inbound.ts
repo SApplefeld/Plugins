@@ -204,10 +204,11 @@ export type ReactedAsk = {
 };
 
 /**
- * The line a reaction becomes, in the bracketed forms the relay's instructions state: on an ask's
- * card or one of its brief parts, the ask by id and question, with the recommendation its card
- * drew where it drew one; on a message that was read, its author, time and an excerpt; otherwise
- * the unreadable form. Every untrusted string in it is bounded as typed text is and made one line,
+ * The line a reaction becomes, in one of three bracketed forms: on an ask's card or one of its
+ * brief parts, the ask by id and question, with the recommendation its card drew where it drew
+ * one; on a message that was read, its author, time and an excerpt; otherwise the unreadable form.
+ * The relay's instructions name the line's opening, `[reaction`, and say the line is text a writer
+ * could have typed. Every untrusted string in it is bounded as typed text is and made one line,
  * so none can leave its quote marks or start a line. Each is then cut by `quotedText` except the
  * recommendation, which the decisions-thread message already held to
  * `MAX_MESSAGE_RECOMMEND_LENGTH` and which a second cut would misquote. The names are the
