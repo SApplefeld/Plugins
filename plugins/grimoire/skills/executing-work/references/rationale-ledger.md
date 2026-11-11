@@ -8102,9 +8102,9 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 
 ## plugins/grimoire/skills/executing-work/references/review.md
 
-This document is the reference file of the executing-work skill that carries step 3 of the section loop. It owns the review round: the correctness and advisory lenses and their triggers, the reviewer tier rule, the round's tree-state bracket, the Document Review Brief, the dispatch table, the Workflow route with its Reviewer Dispatch template, the compensation route, and the Scope Adjudicator Brief. Load class: `plan-run` - the main file's contents table and its skeleton line for step 3 tell a session to read it before any reviewer is dispatched.
+This document is the reference file of the executing-work skill that carries step 3 of the section loop. It owns the review round: the correctness and advisory lenses and their triggers, the reviewer tier rule, the round's tree-state bracket, the Document Review Brief, the dispatch table, the Reviewer Dispatch template that carries a row's effort on the Agent tool call, the compensation route, and the Scope Adjudicator Brief. Load class: `plan-run` - the main file's contents table and its skeleton line for step 3 tell a session to read it before any reviewer is dispatched.
 
-Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: I022, R040 and R042 rewritten to their passages as they now read, R045 retired, and BA001 to BA003 added under the plan's letter BA for the adjudicator's amendments heading, its trace target and the Scope Adjudicator Brief. Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10, which set the adversarial-reviewer's effort to `medium` from its sweep: U008, U011 and AM001 rewritten to their rows as they now read, each keeping the lenses still at `low`, and BC002 added under the plan's letter BC for the adversarial-reviewer's row split out of them. Its rewritten and added entries' `source:` lines name the lines their rows sit on in that section's tree.
+Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fit_spec_v1.md`, after its section 2 moved this text unchanged out of `SKILL.md`: each live entry below keeps the id it carried under the `SKILL.md` heading, and its `source:` line is read at `1009405c` rather than at the commit its id layer names. The `I` entries below record this file's title and opening line, which section 2 added. Amended by `docs/plans/claude-kit_goal-leash-removal_spec_v1.md` section 4 on 2026-10-06, which removed the goal leash: c3.C084's reason reworded. Amended by `docs/plans/claude-kit_reviewers-on-opus_spec_v1.md` section 2 on 2026-10-13, which recorded section 1's move of the blind-reviewer, security-reviewer, performance-reviewer and scope-adjudicator dispatches to Opus: c3.C064, R050, R052, R053, R062, U001, U008, U009 and T174 rewritten to their passages as they now read, Q001 through Q003 added for the two new table rows and the ungated Opus gate, R075 rewritten where compensation reaches a Fable-aimed gate alone, and c3.C063's key keyed on the lens's ceiling. Amended by `docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md` section 4 on 2026-10-13, which recorded sections 1 and 2: U002, U003 and R050 rewritten to their passages as they now read, R054 rewritten to the sentence it keeps, c3.C064 rewritten for the narrowed row, A001 and A002 added under the plan's letter A, for the "Finishing adversarial, cleared" row and the fix writer's tier. Amended by `docs/plans/claude-kit_review-convergence_spec_v1.md` section 1 on 2026-10-16: U002, U003 and R056 rewritten to their passages as they now read, and E001 to E005 added under the plan's letter E for the later round's three brief lines, their sighted-only reach and the pre-judging exemption. Amended by `docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md` section 2 on 2026-10-19: c3.C076 rewritten to its passage as it now reads, naming the altitude interviewer. Amended by `docs/plans/claude-kit_finding-verifier-vote_spec_v1.md` sections 2 and 3 on 2026-10-20: U001 and E002 rewritten to their passages as they now read, and AC001 to AC003 added under the plan's letter AC for the finding verifier's dispatch row, its Opus ceiling and the `refuted` disposition. Amended by `docs/plans/claude-kit_escaped-defect-fixtures_spec_v1.md` section 3 on 2026-10-21: AE001 added under the plan's letter AE for the `Failure by area:` line, and R073 and R074 rewritten to their passages as they now read. Amended by `docs/plans/claude-kit_opus-reviews-opus_spec_v1.md` section 1 on 2026-11-01: U001 and U008 rewritten to their passages as they now read, c3.C079 and c3.C081 retired with their sentences cut, and AM001 added under the plan's letter AM for the fable writer's round 1 pair row. Amended by `docs/plans/claude-kit_briefs-carry-their-checks_spec_v1.md` section 2 on 2026-11-04: c3.C077 retired with the Reviewer Dispatch template's sentence on an omitted `agentType`, cut to pay for the added text, T173 rewritten to its passage as it now reads, U009's reason reworded, and AW007 and AW008 added under the plan's letter AW for the reviewer's absence-check clause and the later round's security summons. Its round 1 fix on the same day added AW009 for the summons's dispatch table row, amended AW008 in place to summon the lens at its ceiling, rewrote E004 to its passage as it now reads, carrying `Fix delta:` to the summons, and dropped c3.C077's `passage:` line, whose sentence the section cut. Its finishing pass on 2026-11-09 rewrote AW007 to its passage as it now reads, scoping the carried clause to a reviewer, moving no line. Section 2's edits and its round 1 fix's moved later lines of the source, and every other `source:` line keeps the line it was read at. Amended by `docs/plans/claude-kit_judge-brief-carries-what_spec_v1.md` section 1 on 2026-11-10: I022, R040 and R042 rewritten to their passages as they now read, R045 retired, and BA001 to BA003 added under the plan's letter BA for the adjudicator's amendments heading, its trace target and the Scope Adjudicator Brief. Amended by `docs/archive/claude-kit_fable-5-2-reviewer-effort-sweep_spec_v1.md` section 3 on 2026-11-10, which set the adversarial-reviewer's effort to `medium` from its sweep: U008, U011 and AM001 rewritten to their rows as they now read, each keeping the lenses still at `low`, and BC002 added under the plan's letter BC for the adversarial-reviewer's row split out of them. Its rewritten and added entries' `source:` lines name the lines their rows sit on in that section's tree. Amended by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2 on 2026-11-11, which sends every dispatch-table row through the Agent tool, its effort passed on the call: U010, U012, c3.C063, c3.C065 and Q002 rewritten to their rows as they now read, c3.C064 and A001 re-quoted with their route cells, G001 and G002 re-quoted, c3.C073, c3.C076, c3.C084, c3.C085, c3.C089, c3.C092, c3.C093, R073, R074 and W018 rewritten to their passages as they now read, c3.C074 and c3.C090 retired, and the keys or reasons of c3.C075, c3.C078, R050 and R052 reworded.
 
 ### I021
 - key: Title the reference file carrying step 3 of the section loop, with the dispatch table and the review templates `Reviewing a Section`.
@@ -8187,72 +8187,76 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: **The dispatch table.** The model rule above sets each reviewer's model. Each kit dispatch takes its effort and route from its row.
 
 ### c3.C063
-- key: Dispatch a per-section reviewer re-aimed after its tier was ruled out one tier up, its lens's ceiling the ceiling, at effort `medium`, via `Workflow` on the dispatch template.
+- key: Dispatch a per-section reviewer re-aimed after its tier was ruled out one tier up, its lens's ceiling the ceiling, at effort `medium`, via the Agent tool on the dispatch template, the effort passed on the call.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:70
-- provenance: 0faeb51 2026-09-06, the re-aim row; effort cell amended in place on 2026-10-05 by G001; key keyed on the lens's ceiling by docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 2 2026-10-13.
-- verdict: keep
+- provenance: 0faeb51 2026-09-06, the re-aim row; effort cell amended in place on 2026-10-05 by G001; key keyed on the lens's ceiling by docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 2 2026-10-13. Route cell rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the row to the Agent tool once the tool took an `effort` argument; the verdict before it was keep.
+- verdict: rewrite
 - landed: 1a866911 section 3
 - reason: The row; R052's sentence adds the one-at-a-time and one-retry bounds.
-- passage: | **Below-fable re-aim**: a per-section reviewer re-aimed after its tier was ruled out, landing below fable | one tier up | `medium` | `Workflow` |
+- passage: | **Below-fable re-aim**: a per-section reviewer re-aimed after its tier was ruled out, landing below fable | one tier up | `medium` | Agent tool |
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C064
-- key: Dispatch the document lenses, and the final adversarial review where any section is uncleared, at model fable, effort `medium`, via `Workflow` per finishing-work.
+- key: Dispatch the document lenses, and the final adversarial review where any section is uncleared, at model fable, effort `medium`, via the Agent tool per finishing-work.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:72
-- provenance: 5ecd99a 2026-08-11 for the row, e00d1e3 2026-09-05 for the wording; effort cell amended in place on 2026-10-05 by G001; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 narrowed the row to the lenses that stay on Fable; landed earlier at 1a866911 section 3; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13, which gave the final adversarial review of a fully cleared changeset the "Finishing adversarial, cleared" row and left this row the uncleared case.
+- provenance: 5ecd99a 2026-08-11 for the row, e00d1e3 2026-09-05 for the wording; effort cell amended in place on 2026-10-05 by G001; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 narrowed the row to the lenses that stay on Fable; landed earlier at 1a866911 section 3; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13, which gave the final adversarial review of a fully cleared changeset the "Finishing adversarial, cleared" row and left this row the uncleared case. Route cell rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the row to the Agent tool once the tool took an `effort` argument.
 - verdict: rewrite
 - reason: The row names the dispatches that keep Fable: the document lenses always, and the final adversarial review where any section is uncleared, because a cleared section's adversarial lens already ran at Fable and the cleared row (A001) sends a fully cleared changeset's final review to Opus. The security and performance lenses have their own Opus row (Q002), so every line keeps one Fable correctness read, in its section round or here (U001). Reads "per finishing-work" and the paragraph below says the row is finishing-work's to specify; already the pointer.
-- proposed: | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | `Workflow`, per finishing-work |
-- passage: | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | `Workflow`, per finishing-work |
+- proposed: | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | Agent tool, per finishing-work |
+- passage: | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | Agent tool, per finishing-work |
 - landed: 22dcfd78 section 2
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C065
-- key: Dispatch compensation, where a first-aim gate could not be run at its fable tier, at model opus, effort `high`, via `Workflow` per finishing-work.
+- key: Dispatch compensation, where a first-aim gate could not be run at its fable tier, at model opus, effort `high`, via the Agent tool per finishing-work.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:72
-- provenance: 5ecd99a 2026-08-11 built the row for a Fable gate that could not run (it fired on its own first live use); 0faeb51 2026-09-06 returned it to that ground alone; effort cell amended in place on 2026-10-05 by G001.
-- verdict: keep
+- provenance: 5ecd99a 2026-08-11 built the row for a Fable gate that could not run (it fired on its own first live use); 0faeb51 2026-09-06 returned it to that ground alone; effort cell amended in place on 2026-10-05 by G001. Route cell rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the row to the Agent tool once the tool took an `effort` argument; the verdict before it was keep.
+- verdict: rewrite
 - landed: 1a866911 section 3
 - reason: As c3.C064; finishing-work is named as the owner in the row.
-- passage: | **Gate compensation** for a Fable gate ruled out | opus | `high` | `Workflow`, per finishing-work |
+- passage: | **Gate compensation** for a Fable gate ruled out | opus | `high` | Agent tool, per finishing-work |
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C073
-- key: Send any dispatch whose row names an effort other than the frontmatter default through `Workflow`'s `agent()` rather than the Agent tool.
+- key: Pass a row's effort, where its cell is not marked `(frontmatter default)`, on the Agent tool's `effort` argument beside the row's model.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:86
-- provenance: 5ecd99a 2026-08-11, the reviewer-effort compensation plan.
-- verdict: keep
-- reason: no finding.
-- passage: So a dispatch routed to `Workflow` goes through `Workflow`'s `agent()`.
-- flag: weak-reason
+- provenance: 5ecd99a 2026-08-11, the reviewer-effort compensation plan. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which sends every row through the Agent tool; the verdict before it was keep.
+- verdict: rewrite
+- reason: The Agent tool takes an `effort` argument, so a row's effort rides on the same call as its model and no second dispatch tool is needed; the Reviewer Dispatch template (c3.C075) makes the call name both. A row marked `(frontmatter default)` passes none, since the charter's frontmatter already runs it there.
+- passage: A row whose effort cell is not marked `(frontmatter default)` passes that effort on the Agent tool's `effort` argument, beside the row's model.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C074
 - key: Route above-default efforts through Workflow because on v2.1.205 the Agent tool takes a model override but has no effort parameter.
 - class: rationale-example
 - source: plugins/grimoire/skills/executing-work/references/review.md:86
 - provenance: 5ecd99a 2026-08-11, the reviewer-effort compensation plan.
-- verdict: keep
-- reason: The version-pinned fact is the route's expiry condition; the doctrine says the Workflow grant lapses when the Agent tool gains an effort parameter, and this is how a reader knows.
-- passage: On v2.1.205 the Agent tool takes a model override but has no effort parameter.
+- verdict: retire
+- reason: The sentence stated as present fact that the Agent tool has no effort parameter. On v2.1.322 the tool takes an `effort` argument, which docs/harness-assumptions.md records, so the expiry this entry marked has come and every row whose effort cell is not a frontmatter default passes that effort on the Agent tool call. Retired on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2; the verdict before it was keep.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C075
-- key: Fill the Reviewer Dispatch template on every Workflow call, all three fields required.
+- key: Fill the Reviewer Dispatch template on every Agent tool call passing a row's effort, all three fields required.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:86
-- provenance: 5ecd99a 2026-08-11; a5e184b 2026-08-25 held it at three fields.
+- provenance: 5ecd99a 2026-08-11; a5e184b 2026-08-25 held it at three fields. Key reworded on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, the calls being Agent tool calls; the passage is unchanged.
 - verdict: keep
 - reason: The owner; finishing-work cites it as executing-work's.
 - passage: Every such call fills this template:
 
 ### c3.C076
-- key: Name `agentType` as the agent's scoped name, `grimoire:<seat>` for a seat the classifier's `STRICT_SEAT` pattern names.
+- key: Name `subagent_type` as the agent's scoped name, `grimoire:<seat>` for a seat the classifier's `STRICT_SEAT` pattern names.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:93
-- provenance: 5ecd99a 2026-08-11 for the field; d6cd30d 2026-08-15 widened the covered class shape-first and named the consultant; later charters added their names; amended by docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 1 2026-09-20, which adds performance-reviewer; amended by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, which adds altitude-interviewer; amended by docs/plans/claude-kit_one-seat-roster_spec_v1.md section 2 2026-10-19, which points at `STRICT_SEAT` instead of listing the seats.
-- verdict: keep
-- reason: readonly-agent-guard.js classifies by the name it is handed and supplies none, so nothing mechanical enforces the naming.
-- passage: - agentType: `grimoire:<seat>` for a seat `STRICT_SEAT` in the kit source's `plugins/personas/hooks/guards/agent-class.ts` names.
+- provenance: 5ecd99a 2026-08-11 for the field; d6cd30d 2026-08-15 widened the covered class shape-first and named the consultant; later charters added their names; amended by docs/plans/claude-kit_reviewer-reranking_spec_v1.md section 1 2026-09-20, which adds performance-reviewer; amended by docs/plans/claude-kit_altitude-and-autonomy_spec_v1.md section 2 2026-10-19, which adds altitude-interviewer; amended by docs/plans/claude-kit_one-seat-roster_spec_v1.md section 2 2026-10-19, which points at `STRICT_SEAT` instead of listing the seats. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which renamed the field from `agentType` to the Agent tool's `subagent_type`; the verdict before it was keep.
+- verdict: rewrite
+- reason: readonly-agent-guard.js classifies by the name it is handed and supplies none, so the guard enforces nothing here. The field takes the Agent tool's own name, `subagent_type`, since every row dispatches through that tool, and `test/dispatch-table.test.js` pins that the template requires it, written `grimoire:<seat>`.
+- passage: - subagent_type: `grimoire:<seat>` for a seat `STRICT_SEAT` in the kit source's `plugins/personas/hooks/guards/agent-class.ts` names.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C077
 - key: Never omit agentType, since omitting it yields a workflow-subagent, a type readonly-agent-guard does not govern, handing the tree under review to an agent free to rewrite it.
@@ -8270,7 +8274,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - source: plugins/grimoire/skills/executing-work/references/review.md:96
 - provenance: 5ecd99a 2026-08-11.
 - verdict: keep
-- reason: The Workflow template's field; c3.C039's every-dispatch rule is a different scope.
+- reason: The template's field; c3.C039's every-dispatch rule is a different scope.
 - passage: - model: named explicitly, never left to inherit.
 
 ### c3.C079
@@ -8303,63 +8307,65 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - flag: weak-reason
 
 ### c3.C084
-- key: Take the Workflow route without a per-session authorization ask, since the doctrine's standing-dispatch bullet carries the operator's request for it.
+- key: Pass a row's effort on the Agent tool call without a per-session authorization ask, since the doctrine's standing-dispatch bullet is the explicit ask the tool's description requires.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:105
-- provenance: 5ecd99a 2026-08-11, the Workflow route shipped because the Agent tool has no effort parameter and the fable limit fired on the plan's own reviewers that day; the doctrine's dispatch bullet (0c0eaed) is the request it cites.
-- verdict: keep
-- reason: The doctrine owns the standing request per the ownership map and this sentence is already the pointer, stating mechanics and disclaiming authorization (A002, A003, A005). The narrow grant reaches every session through the doctrine, which this sentence already points at.
-- passage: The doctrine's standing-dispatch bullet carries the operator's request for this route, so it needs no per-session ask.
-- flag: stale
+- provenance: 5ecd99a 2026-08-11, the Workflow route shipped because the Agent tool has no effort parameter and the fable limit fired on the plan's own reviewers that day; the doctrine's dispatch bullet (0c0eaed) is the request it cites. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the ask from the Workflow route to the Agent tool's `effort` argument; the verdict before it was keep.
+- verdict: rewrite
+- reason: The doctrine owns the standing request per the ownership map, and the Agent tool's description allows the `effort` argument only where the operator or an instruction explicitly asks for that effort. This sentence names the doctrine's bullet as that ask rather than restating it (A002, A003, A005).
+- passage: The doctrine's standing-dispatch bullet is the explicit ask the tool's description requires, so no per-session ask is needed.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C085
-- key: Keep the round one round: send mixed Agent-tool and Workflow dispatches out together under the single tree-state capture.
+- key: Keep the round one round: send its dispatches out together under the single tree-state capture.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:105
-- provenance: 5ecd99a 2026-08-11, installed with the route so a mixed-route round stays inside step 3's tree-state bracket (03a0500).
-- verdict: keep
+- provenance: 5ecd99a 2026-08-11, installed with the route so a mixed-route round stays inside step 3's tree-state bracket (03a0500). Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, every dispatch of the round now taking the Agent tool; the verdict before it was keep.
+- verdict: rewrite
 - reason: Executing-work owns the review round; finishing-work:32 applies this rule to its compensating round and cites it (A006, A007).
-- passage: The round stays one round: mixed Agent-tool and Workflow dispatches go out together under the single tree-state capture
-- flag: stale
+- passage: The round stays one round: its dispatches go out together under the single tree-state capture
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C089
-- key: Honor every input contract above on the Workflow route as on the Agent tool.
+- key: Honor every input contract above on every dispatch of the round, the calls passing a row's effort included.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:105
-- provenance: 5ecd99a 2026-08-11, reworded fb5d4fe 2026-09-07; the route changes the caller, not the agent.
+- provenance: 5ecd99a 2026-08-11, reworded fb5d4fe 2026-09-07; the route changes the caller, not the agent. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which dropped "on this route".
 - verdict: rewrite
 - landed: 3a09c25 section 4
-- reason: No hook reads prompt contents, so the blind-brief property test and the sighted-only rule reach the Workflow route only through this sentence (A004). Flipped from keep to rewrite at section 4's close: c3.C088's retire removed the clause this sentence hung on, so it was respelled to stand alone. Landed as the proposal below.
-- proposed: Every input contract above still binds on this route.
-- passage: Every input contract above still binds on this route.
+- reason: No hook reads prompt contents, so the blind-brief property test and the sighted-only rule reach a call passing a row's effort only through this sentence (A004). Rewritten on 2026-11-11 when its route clause went with the Workflow route.
+- proposed: Every input contract above still binds.
+- passage: Every input contract above still binds.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C090
 - key: Build each blind prompt in an assembling script as its own literal, composed of the blind boilerplate plus its contract inputs and nothing else, sharing no brief-building constant, helper, or template variable with any sighted dispatch.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:105
 - provenance: 502d9f1 2026-08-20, kaizen/archive/2026-08-20-blind-brief-construction-rule.md: an ai-os multi-reviewer Workflow script shared a section-context const with the blind dispatch and the reviewer caught its own contamination; baseline-tested RED and GREEN there.
-- verdict: keep
-- reason: The incident recurs whenever a script assembles several dispatches and no machinery inspects assembled prompts; the rule names the banned construction mechanically (A004).
-- passage: A script assembling several dispatches authors each blind prompt as its own literal, the blind boilerplate plus its contract inputs and nothing else, sharing no brief-building constant, helper, or template variable with any sighted dispatch.
+- verdict: retire
+- reason: No script builds the round's calls once every row takes the Agent tool, so the script-specific construction rule has no subject. Its guard against a shared brief-building constant reaching a blind prompt survives in c3.C092's sentence, each blind prompt its own literal. Retired on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2; the verdict before it was keep.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C092
-- key: Judge the property test on the assembled string each agent will actually receive, never on the ingredient list.
+- key: Write each blind prompt as its own literal, the blind boilerplate plus its contract inputs and nothing else, and judge the property test on the string each agent receives.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:105
-- provenance: 502d9f1 2026-08-20, the same record; the ingredient list is where the toy probe looked clean.
-- verdict: keep
-- reason: This is the test's judging surface and the only sentence that says where to apply it in a script; nothing mechanical reads assembled prompts (A004).
-- passage: The property test judges the assembled string each agent receives, never the ingredient list.
+- provenance: 502d9f1 2026-08-20, the same record; the ingredient list is where the toy probe looked clean. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which folded c3.C090's own-literal rule into it; the verdict before it was keep.
+- verdict: rewrite
+- reason: Nothing mechanical reads assembled prompts, so this is the test's judging surface (A004). It carries the own-literal rule c3.C090 held for scripts, since a prompt built from a shared constant leaks the same way in a message of Agent tool calls.
+- passage: Each blind prompt is its own literal, the blind boilerplate plus its contract inputs and nothing else. The property test judges the string each agent receives.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C093
-- key: Where the Workflow route is unavailable, take the Agent tool at the row's own model override and the agent's frontmatter effort, and record in the Chapter the effort the review ran at beside its row's effort.
+- key: Where the session's Agent tool carries no `effort` argument, take the row's model override and the agent's frontmatter effort, and record in the Chapter the effort the review ran at beside its row's effort.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:107
-- provenance: 5ecd99a 2026-08-11 for the fallback; 0faeb51 2026-09-06 extended it to a re-aim and listed the per-row models.
-- verdict: keep
-- reason: Executing-work states the fallback for the rows it owns and finishing-work:12 restates it for its own row, which the table at 396 assigns to finishing-work; neither is a bare copy (A015, A016).
-- passage: Where Workflow is unavailable, the dispatch and any re-aim take the Agent tool at the row's model override and the agent's frontmatter effort. The Chapter records the actual effort beside the row's.
-- flag: stale
+- provenance: 5ecd99a 2026-08-11 for the fallback; 0faeb51 2026-09-06 extended it to a re-aim and listed the per-row models. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which keyed the fallback on the Agent tool lacking an `effort` argument, Workflow no longer being a route; the verdict before it was keep.
+- verdict: rewrite
+- reason: Executing-work states the fallback once for every row, finishing-work's and brainstorming's included, which point here (A015, A016). A session on an older harness reads its own Agent tool's parameter list to know it is in this case.
+- passage: Where the session's Agent tool carries no `effort` argument, which its own parameter list shows, the dispatch and any re-aim take the row's model override and the agent's frontmatter effort. The Chapter records the actual effort beside the row's.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### c3.C160
 - key: Go to the operating doctrine's gate bullet for what the lanes are and when a gate's moment is measured.
@@ -8538,7 +8544,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - source: plugins/grimoire/skills/executing-work/references/review.md:25
 - provenance: 0faeb51 2026-09-06; unchanged by f26619c; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 limited the capacity reading to a fable override, landed at f9389aff section 1; its finishing pass 2026-10-13 folded the inheriting case into the same sentence on the architect's cut ruling to fit the corpus cap after the #603 merge, a dispatch with no override taking no reading by the sentence's own last clause; docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 1 2026-10-13, which cut the capacity-reading clause, implementing.md's capacity-reading sentence (Z001) owning it.
 - verdict: rewrite
-- reason: Binds every dispatch, Agent tool included; the Workflow template's `model` field is a different scope. The capacity reading guards the Fable allotment and fires on a `fable` override, which Z001 states where the dispatch is built, so a dispatch aimed at Opus spends none (U001) without this sentence restating the trigger.
+- reason: Binds every dispatch, Agent tool included; the Reviewer Dispatch template's `model` field is a different scope. The capacity reading guards the Fable allotment and fires on a `fable` override, which Z001 states where the dispatch is built, so a dispatch aimed at Opus spends none (U001) without this sentence restating the trigger.
 - proposed: The reviewer's tier rides as an explicit model override on every dispatch, save a Fable reviewer on a Fable-led session.
 - passage: The reviewer's tier rides as an explicit model override on every dispatch, save a Fable reviewer on a Fable-led session.
 - landed: 083b9dcb section 1
@@ -8553,7 +8559,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - passage: A first-aim gate that could not be run at its fable tier is confirmed per finishing-work's unavailability rule or measured by step 1's capacity reading, compensated per dispatch table row "Gate compensation", and recorded.
 
 ### R052
-- key: Re-aim a reviewer below its lens's ceiling whose tier could not run one tier up at its row's effort through Workflow, one dispatch at a time, each with the ladder's one retry.
+- key: Re-aim a reviewer below its lens's ceiling whose tier could not run one tier up at its row's effort, one dispatch at a time, each with the ladder's one retry.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:25
 - provenance: 0faeb51 2026-09-06; unchanged by f26619c; docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13 keyed the re-aim on each lens's ceiling, landed at f9389aff section 1; its finishing pass 2026-10-13 dropped the restated cap to fit the corpus cap after the #603 merge, since one tier up from below a lens's ceiling cannot pass it and review.md:21 caps every round-1 dispatch there.
@@ -8683,24 +8689,25 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: 194f099b finishing
 
 ### R073
-- key: On the Workflow route, carry the `Amendments in effect:` line on a sighted dispatch, the `Trace target:` line on a dispatch carrying the plan's what, and the `Failure by area:` line on the three lenses that carry it.
+- key: Carry the `Amendments in effect:` line on a sighted dispatch, the `Trace target:` line on a dispatch carrying the plan's what, and the `Failure by area:` line on the three lenses that carry it, beside the Reviewer Dispatch template.
 - class: rule
 - source: plugins/grimoire/skills/executing-work/references/review.md:103
-- provenance: a5e184b 2026-08-25 for the amendments line beside the template; f26619c 2026-09-08 added the trace-target line so the sighted lenses can cite the bullets the provenance read needs. Reached this branch through the merge at d9540ad.
-- verdict: keep
+- provenance: a5e184b 2026-08-25 for the amendments line beside the template; f26619c 2026-09-08 added the trace-target line so the sighted lenses can cite the bullets the provenance read needs. Reached this branch through the merge at d9540ad. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which dropped "on this route"; the verdict before it was keep.
+- verdict: rewrite
 - reason: Restates c3.C082 with the trace-target line added; c3.C082 retires as its duplicate and this is the surviving text.
-- passage: A dispatch on this route carries the `Amendments in effect:`, `Trace target:` and `Failure by area:` lines the rules above give it, beside the template, not in it.
+- passage: A dispatch carries the `Amendments in effect:`, `Trace target:` and `Failure by area:` lines the rules above give it, beside the template, not in it.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### R074
 - key: Keep the amendments and trace-target lines beside the Reviewer Dispatch template rather than inside it.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:103
-- provenance: a5e184b 2026-08-25, a fourth template field falsified two neighbouring skills stating three; f26619c 2026-09-08 added the second line.
+- provenance: a5e184b 2026-08-25, a fourth template field falsified two neighbouring skills stating three; f26619c 2026-09-08 added the second line. Re-quoted on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which dropped "on this route".
 - verdict: rewrite
 - landed: 3a09c25 section 4
 - reason: c3.C083's duplicate at HEAD; the placement keeps and the "one class, each an anti-downgrade rule" ground moves to this ledger under c3.C083 (A001), since finishing-work:32 pins the three-field count mechanically.
-- passage: A dispatch on this route carries the `Amendments in effect:`, `Trace target:` and `Failure by area:` lines the rules above give it, beside the template, not in it.
-- flag: stale
+- passage: A dispatch carries the `Amendments in effect:`, `Trace target:` and `Failure by area:` lines the rules above give it, beside the template, not in it.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### R075
 - key: Give compensation to gate-shaped work and never to plan-following work.
@@ -8795,14 +8802,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: f9389aff section 1
 
 ### U010
-- key: Dispatch round 1's reviewers one tier above a haiku- or sonnet-tier writer, whichever lens, at sonnet or opus, effort `medium`, via `Workflow` on the dispatch template.
+- key: Dispatch round 1's reviewers one tier above a haiku- or sonnet-tier writer, whichever lens, at sonnet or opus, effort `medium`, via the Agent tool on the dispatch template, the effort passed on the call.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:66
-- provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; effort cell amended in place on 2026-10-05 by G001.
-- verdict: keep
+- provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; effort cell amended in place on 2026-10-05 by G001. Route cell rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the row to the Agent tool once the tool took an `effort` argument; the verdict before it was keep.
+- verdict: rewrite
 - landed: 1a866911 section 3
 - reason: The row now names round 1 explicitly, since a later round over that writer runs a different row (U012) at the writer's own tier.
-- passage: | **Below-fable round 1**: reviewers one tier above a haiku- or sonnet-tier writer, whichever lens | sonnet or opus | `medium` | `Workflow` |
+- passage: | **Below-fable round 1**: reviewers one tier above a haiku- or sonnet-tier writer, whichever lens | sonnet or opus | `medium` | Agent tool |
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### U011
 - key: Dispatch a later round's prose lens over a fable writer at model fable, effort `low` (frontmatter default), via the Agent tool.
@@ -8815,14 +8823,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: e38811c2b section 3
 
 ### U012
-- key: Dispatch a later round's one lens over a haiku, sonnet or opus writer at the writer's tier, sonnet the floor, effort `medium`, via `Workflow` on the dispatch template.
+- key: Dispatch a later round's one lens over a haiku, sonnet or opus writer at the writer's tier, sonnet the floor, effort `medium`, via the Agent tool on the dispatch template, the effort passed on the call.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:68
-- provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; effort cell amended in place on 2026-10-05 by G001.
-- verdict: keep
+- provenance: docs/archive/claude-kit_review-tier-decay_spec_v1.md 2026-09-10, stage 2 of the lean-kit program carrying its decision 6; effort cell amended in place on 2026-10-05 by G001. Route cell rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the row to the Agent tool once the tool took an `effort` argument; the verdict before it was keep.
+- verdict: rewrite
 - landed: 1a866911 section 3
 - reason: A later round no longer buys the round-1 escalation over a below-Fable writer; it runs at the writer's own tier, sonnet the floor, since no reviewer charter exists below sonnet.
-- passage: | **Below-fable later round**: one lens over a haiku, sonnet or opus writer | the writer's tier, sonnet the floor | `medium` | `Workflow` |
+- passage: | **Below-fable later round**: one lens over a haiku, sonnet or opus writer | the writer's tier, sonnet the floor | `medium` | Agent tool |
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### T170
 - key: Also dispatch the performance-reviewer where the section's delta spawns a process, runs on a per-tool-call path, walks the tree, holds a lock, waits on another process, or queries a store.
@@ -8873,13 +8882,14 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: f9389aff section 1
 
 ### W018
-- key: Await a Workflow round by the `WAITING:` turn end exactly as an Agent-tool dispatch is awaited, its completion being a wake.
+- key: Await a review round's dispatches by the `WAITING:` turn end exactly as any Agent-tool dispatch is awaited, their completion being a wake.
 - class: pointer
 - source: plugins/grimoire/skills/executing-work/references/review.md:105
-- provenance: docs/plans/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md section 2.
-- verdict: keep
-- reason: A review round through Workflow is the commonest dispatch a run makes. One rule for both dispatch tools leaves the executor a single wait shape, and the completion contract's dispatch row states it.
-- passage: mixed Agent-tool and Workflow dispatches go out together under the single tree-state capture and are awaited by the `WAITING:` turn end like any dispatch.
+- provenance: docs/plans/claude-kit_end-the-turn-on-a-dispatch_spec_v1.md section 2. Rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, every dispatch of the round now taking the Agent tool; the verdict before it was keep.
+- verdict: rewrite
+- reason: A review round is the commonest dispatch a run makes. One rule for every dispatch leaves the executor a single wait shape, and the completion contract's dispatch row states it.
+- passage: its dispatches go out together under the single tree-state capture and are awaited by the `WAITING:` turn end like any dispatch.
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### P001
 - key: Give the single prose-reviewer dispatch the spec path and document paths in scope, the Amendments in effect entries or "none", each Audience persona and knowledge level, the Voice with the voice reference it names or none, the fact-base paths, the prose-register skill's absolute path plus its references/ai-tells.md, and the voice reference's absolute path where the Voice names one.
@@ -8899,9 +8909,9 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: 1a866911 section 3
 - reason: The operator's ruling of 2026-10-03: `medium` serves Opus and Sonnet 5.5 on most tasks at far lower cost, and the three Fable dispatches that run on every plan drop to it. It replaces the 2026-08-11 ground that a weaker model needs more effort to stand in for a stronger one. The operator's ruling of 2026-10-05, reported through DEV-PLUGIN's relay thread, sets the Fable re-aim row to `medium` too, and G002 carries that row.
 - passage: | **Fable implementer**, `implementer-fable` | fable | `medium` (frontmatter default) | Agent tool |
-- passage: | **Consultant stand-in** where fable cannot run | opus | `high` | `Workflow` |
-- passage: | **Plan review**, `plan-reviewer` | fable | `medium` | `Workflow` |
-- passage: | **Other below-fable dispatch** without a frontmatter effort | opus or sonnet | `medium` | `Workflow` where used |
+- passage: | **Consultant stand-in** where fable cannot run | opus | `high` | Agent tool |
+- passage: | **Plan review**, `plan-reviewer` | fable | `medium` | Agent tool |
+- passage: | **Other below-fable dispatch** without a frontmatter effort | opus or sonnet | `medium` | Agent tool |
 
 ### G002
 - key: Dispatch the Fable re-aim at effort `medium`.
@@ -8910,7 +8920,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - provenance: the operator's ruling of 2026-10-05, reported through DEV-PLUGIN's relay thread.
 - verdict: keep
 - reason: The operator ruled that the Fable re-aim runs at `medium`, the level they judge the best blend for most models now. It settles the row G001 left to the operator.
-- passage: | **Fable re-aim**: the same, landing on fable | fable | `medium` | `Workflow` |
+- passage: | **Fable re-aim**: the same, landing on fable | fable | `medium` | Agent tool |
 
 ### Q001
 - key: Dispatch round 1's blind-reviewer over a section whose writer tier is opus or fable at model opus, effort `low` (frontmatter default), via the Agent tool.
@@ -8923,14 +8933,15 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: f9389aff section 1
 
 ### Q002
-- key: Dispatch the security and performance lenses over the whole changeset at model opus, effort `medium`, via `Workflow` per finishing-work.
+- key: Dispatch the security and performance lenses over the whole changeset at model opus, effort `medium`, via the Agent tool per finishing-work.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:73
-- provenance: docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13, the row split out of "Finishing reviews" when the advisory lenses' ceiling became Opus.
-- verdict: keep
+- provenance: docs/plans/claude-kit_reviewers-on-opus_spec_v1.md section 1 2026-10-13, the row split out of "Finishing reviews" when the advisory lenses' ceiling became Opus. Route cell rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the row to the Agent tool once the tool took an `effort` argument; the verdict before it was keep.
+- verdict: rewrite
 - reason: The finishing pass takes the same two ceilings the section round takes: the advisory lenses run on Opus (U001) and the final adversarial review and document lenses stay on Fable in the row above (c3.C064), so the changeset keeps one Fable correctness check. The effort and route match the Fable row because finishing-work specifies both. finishing-work's step 2 points at this row by name, in its sentence "Dispatch the advisory reviews (step 2) at dispatch table row "Finishing advisory"".
-- passage: | **Finishing advisory**: the security and performance lenses over the whole changeset | opus | `medium` | `Workflow`, per finishing-work |
+- passage: | **Finishing advisory**: the security and performance lenses over the whole changeset | opus | `medium` | Agent tool, per finishing-work |
 - landed: f9389aff section 1
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### Q003
 - key: End a gate aimed at its Opus ceiling that could not run there ungated, recorded as finishing-work records an ungated end, since no lower compensation exists.
@@ -8943,15 +8954,16 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - landed: 194f099b finishing
 
 ### A001
-- key: Dispatch the final adversarial review where every section is cleared at model opus, effort `medium`, via `Workflow` per finishing-work.
+- key: Dispatch the final adversarial review where every section is cleared at model opus, effort `medium`, via the Agent tool per finishing-work.
 - class: mechanic
 - source: plugins/grimoire/skills/executing-work/references/review.md:73
-- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13, the row added when a changeset whose every section the adversarial lens cleared at Fable stopped needing a second Fable read.
+- provenance: docs/plans/claude-kit_fable-savings-beyond-reviewers_spec_v1.md section 2 2026-10-13, the row added when a changeset whose every section the adversarial lens cleared at Fable stopped needing a second Fable read. Route cell rewritten in place on 2026-11-11 by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2, which moved the row to the Agent tool once the tool took an `effort` argument.
 - verdict: rewrite
 - reason: Every line a lens reads gets one Fable read, in its section round or in the finishing pass and never two, so the whole-changeset review of a fully cleared changeset carries only the cohesion and debris read, which Opus holds at the table's effort. A dispatch stopped at Opus ends ungated because no tier above it is in the chain for this row, per finishing-work's unavailability rule. The second audit's 67 finishing Workflow dispatches at 28.56M units are reported, not measured, and the plan names no saving.
-- proposed: | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | `Workflow`, per finishing-work |
-- passage: | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | `Workflow`, per finishing-work |
+- proposed: | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | Agent tool, per finishing-work |
+- passage: | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | Agent tool, per finishing-work |
 - landed: 22dcfd78 section 2
+- landed: `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 2
 
 ### A002
 - key: Take a dispatched fix writer's tier as the writer tier for the round that reviews its delta, as an escalated tier is after a tier escalation.
@@ -9016,7 +9028,7 @@ Written on 2026-10-05 by section 3 of `docs/plans/claude-kit_skill-compaction-fi
 - source: plugins/grimoire/skills/executing-work/references/review.md:67
 - provenance: docs/plans/claude-kit_finding-verifier-vote_spec_v1.md section 2 2026-10-20, stage 5 of the review-verification program (docs/review-verification-program.md), carrying its frame: "A fresh read-only verifier reads every Critical and Major with the diff before a fix round, and a finding it refutes is recorded and not fixed."
 - verdict: keep
-- reason: The verifier is a judge, as the scope adjudicator is, so it takes that row's shape: Opus, the charter's `high` frontmatter effort, and the Agent tool, whose missing effort parameter the frontmatter fills. The spec's Assumptions record this as the author's default. test/dispatch-table.test.js holds the effort in its map.
+- reason: The verifier is a judge, as the scope adjudicator is, so it takes that row's shape: Opus, the charter's `high` frontmatter effort, and the Agent tool, passing no effort because the charter's frontmatter already carries it. The spec's Assumptions record this as the author's default. test/dispatch-table.test.js holds the effort in its map.
 - passage: | **Finding verifier**, in every shape step 4 and finishing-work dispatch it, `finding-verifier` | opus | `high` (frontmatter default) | Agent tool |
 
 ### AC002
@@ -12469,7 +12481,7 @@ Extracted at `6bc07fb`: whole document (`agents.prose-reviewer.md`). Amended by 
 - source: plugins/grimoire/agents/prose-reviewer.md:5
 - provenance: e00d1e3 2026-09-06, the reviewer-uncap change retired the Opus cap and moved per-lens effort into the reviewer agents' frontmatter.
 - verdict: keep
-- reason: The apparent clash with the finishing reviews' row is two routes, not two values: the frontmatter default governs a per-section Agent dispatch and the Workflow route sets effort per call for the finishing reviews. `test/dispatch-table.test.js`'s effort map pins this line.
+- reason: The apparent clash with the finishing reviews' row is two routes, not two values: the frontmatter default governs a per-section dispatch whose row is marked `(frontmatter default)`, and the finishing reviews' row passes its own effort on the Agent tool call. `test/dispatch-table.test.js`'s effort map pins this line.
 - passage: effort: low
 
 ### C005
@@ -18902,7 +18914,7 @@ Extracted at `6bc07fb`: whole document (`agents.security-reviewer.md`). Re-extra
 - source: plugins/grimoire/agents/security-reviewer.md:5
 - provenance: e00d1e3 2026-09-05 (reviewer-fable-uncap plan) set the value by lens, the security lens chasing boundaries beyond the diff; 4caabee 2026-08-11 had first pinned an effort here because the gate drifted with the session's setting.
 - verdict: keep
-- reason: The frontmatter value is the default a Fable Agent-tool dispatch inherits; any other effort is its dispatch table row's per-call Workflow override, and test/dispatch-table.test.js's effort map pins this value (A013, A014, A015).
+- reason: The frontmatter value is the default a Fable Agent-tool dispatch inherits; any other effort is its dispatch table row's per-call override, passed on the Agent tool's `effort` argument, and test/dispatch-table.test.js's effort map pins this value (A013, A014, A015).
 - passage: effort: medium
 
 ### C009
@@ -21105,7 +21117,7 @@ Extracted at `6bc07fb`: whole document (`agents.plan-reviewer.md`). Amended by `
 - source: plugins/grimoire/agents/plan-reviewer.md:5
 - provenance: ead49db 2026-09-08, the charter's install; brainstorming's dispatch sentence in the same commit lifts the run to high through Workflow and names this frontmatter value as the fallback.
 - verdict: keep
-- reason: The plan review's dispatch table row sets its own effort on the Workflow route, and the Agent-tool fallback runs at this value, which test/dispatch-table.test.js's effort map pins; change one and the other must change with it.
+- reason: The plan review's dispatch table row passes its own effort on the Agent tool call, and the fallback for a session whose Agent tool carries no `effort` argument runs at this value, which test/dispatch-table.test.js's effort map pins; change one and the other must change with it.
 - passage: effort: low
 
 ### C005
@@ -25059,7 +25071,7 @@ Extracted at `6bc07fb`: whole document (`agents.consultant.md`). Amended by `doc
 - source: plugins/grimoire/agents/consultant.md:2
 - provenance: 94e4ae5 2026-08-15, the section that created the consultant agent and its guard coverage; the name is what the readonly-agent-guard's strict class and the dispatching skills key on.
 - verdict: keep
-- reason: The name is a live identifier, not prose: hooks/readonly-agent-guard.js lists `consultant` in the strict class and the consult skill dispatches that agentType, so renaming it silently drops the seat's read-only guard.
+- reason: The name is a live identifier, not prose: hooks/readonly-agent-guard.js lists `consultant` in the strict class and the consult skill dispatches that agent type, so renaming it silently drops the seat's read-only guard.
 - passage: name: consultant
 
 ### C002

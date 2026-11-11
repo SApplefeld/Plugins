@@ -72,44 +72,44 @@ Part of the executing-work skill: step 3 of the section loop, with the dispatch 
    | **Round 1 performance** over an opus or fable writer, `performance-reviewer` | opus | `medium` (frontmatter default) | Agent tool |
    | **Scope adjudicator**, in every shape step 4 and finishing-work dispatch it, `scope-adjudicator` | opus | `high` (frontmatter default) | Agent tool |
    | **Finding verifier**, in every shape step 4 and finishing-work dispatch it, `finding-verifier` | opus | `high` (frontmatter default) | Agent tool |
-   | **Below-fable round 1**: reviewers one tier above a haiku- or sonnet-tier writer, whichever lens | sonnet or opus | `medium` | `Workflow` |
+   | **Below-fable round 1**: reviewers one tier above a haiku- or sonnet-tier writer, whichever lens | sonnet or opus | `medium` | Agent tool |
    | **Fable later round**: the prose lens over a fable writer, `prose-reviewer` | fable | `low` (frontmatter default) | Agent tool |
-   | **Below-fable later round**: one lens over a haiku, sonnet or opus writer | the writer's tier, sonnet the floor | `medium` | `Workflow` |
-   | **Below-fable re-aim**: a per-section reviewer re-aimed after its tier was ruled out, landing below fable | one tier up | `medium` | `Workflow` |
-   | **Fable re-aim**: the same, landing on fable | fable | `medium` | `Workflow` |
-   | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | `Workflow`, per finishing-work |
-   | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | `Workflow`, per finishing-work |
-   | **Finishing advisory**: the security and performance lenses over the whole changeset | opus | `medium` | `Workflow`, per finishing-work |
-   | **Gate compensation** for a Fable gate ruled out | opus | `high` | `Workflow`, per finishing-work |
+   | **Below-fable later round**: one lens over a haiku, sonnet or opus writer | the writer's tier, sonnet the floor | `medium` | Agent tool |
+   | **Below-fable re-aim**: a per-section reviewer re-aimed after its tier was ruled out, landing below fable | one tier up | `medium` | Agent tool |
+   | **Fable re-aim**: the same, landing on fable | fable | `medium` | Agent tool |
+   | **Finishing reviews**: the document lenses, and the final adversarial review where any section is uncleared | fable | `medium` | Agent tool, per finishing-work |
+   | **Finishing adversarial, cleared**: the final adversarial review where every section is cleared, per finishing-work | opus | `medium` | Agent tool, per finishing-work |
+   | **Finishing advisory**: the security and performance lenses over the whole changeset | opus | `medium` | Agent tool, per finishing-work |
+   | **Gate compensation** for a Fable gate ruled out | opus | `high` | Agent tool, per finishing-work |
    | **Haiku implementer**, `implementer-haiku` | haiku | `medium` (frontmatter default) | Agent tool |
    | **Sonnet implementer**, `implementer-sonnet` | sonnet | `medium` (frontmatter default) | Agent tool |
    | **Opus implementer**, `implementer-opus` | opus | `medium` (frontmatter default) | Agent tool |
    | **Fable implementer**, `implementer-fable` | fable | `medium` (frontmatter default) | Agent tool |
    | **Fable consultant**, `consultant` | fable | `high` (frontmatter default) | Agent tool |
-   | **Consultant stand-in** where fable cannot run | opus | `high` | `Workflow` |
-   | **Plan review**, `plan-reviewer` | fable | `medium` | `Workflow` |
+   | **Consultant stand-in** where fable cannot run | opus | `high` | Agent tool |
+   | **Plan review**, `plan-reviewer` | fable | `medium` | Agent tool |
    | **Spec blind read**, `blind-reader` | the session's | `low` (frontmatter default) | Agent tool |
    | **Altitude interview**, `altitude-interviewer` | fable | `low` (frontmatter default) | Agent tool |
-   | **Other below-fable dispatch** without a frontmatter effort | opus or sonnet | `medium` | `Workflow` where used |
-   | **Other fable dispatch**, the same at fable | fable | `medium` | `Workflow` where used |
+   | **Other below-fable dispatch** without a frontmatter effort | opus or sonnet | `medium` | Agent tool |
+   | **Other fable dispatch**, the same at fable | fable | `medium` | Agent tool |
 
    An agent no row names runs at its frontmatter effort, if any, on its skill's route.
 
-   **Dispatching on the Workflow route.** On v2.1.205 the Agent tool takes a model override but has no effort parameter. So a dispatch routed to `Workflow` goes through `Workflow`'s `agent()`. Every such call fills this template:
+   **Passing a row's effort.** A row whose effort cell is not marked `(frontmatter default)` passes that effort on the Agent tool's `effort` argument, beside the row's model. The doctrine's standing-dispatch bullet is the explicit ask the tool's description requires, so no per-session ask is needed. Every such call fills this template:
 
    ```
    Reviewer Dispatch (all REQUIRED):
-   - agentType: `grimoire:<seat>` for a seat `STRICT_SEAT` in the kit source's
+   - subagent_type: `grimoire:<seat>` for a seat `STRICT_SEAT` in the kit source's
      `plugins/personas/hooks/guards/agent-class.ts` names.
    - model: named explicitly, never left to inherit.
    - effort: named explicitly, never left to inherit.
    ```
 
-   A dispatch on this route carries the `Amendments in effect:`, `Trace target:` and `Failure by area:` lines the rules above give it, beside the template, not in it.
+   A dispatch carries the `Amendments in effect:`, `Trace target:` and `Failure by area:` lines the rules above give it, beside the template, not in it.
 
-   The doctrine's standing-dispatch bullet carries the operator's request for this route, so it needs no per-session ask. The round stays one round: mixed Agent-tool and Workflow dispatches go out together under the single tree-state capture and are awaited by the `WAITING:` turn end like any dispatch. Every input contract above still binds on this route. A script assembling several dispatches authors each blind prompt as its own literal, the blind boilerplate plus its contract inputs and nothing else, sharing no brief-building constant, helper, or template variable with any sighted dispatch. The property test judges the assembled string each agent receives, never the ingredient list.
+   The round stays one round: its dispatches go out together under the single tree-state capture and are awaited by the `WAITING:` turn end like any dispatch. Every input contract above still binds. Each blind prompt is its own literal, the blind boilerplate plus its contract inputs and nothing else. The property test judges the string each agent receives.
 
-   Where Workflow is unavailable, the dispatch and any re-aim take the Agent tool at the row's model override and the agent's frontmatter effort. The Chapter records the actual effort beside the row's.
+   Where the session's Agent tool carries no `effort` argument, which its own parameter list shows, the dispatch and any re-aim take the row's model override and the agent's frontmatter effort. The Chapter records the actual effort beside the row's.
 
    **Compensation belongs to gate-shaped work and never to plan-following work.** It reaches a Fable-aimed gate, the consultant among them, and never an implementer.
 

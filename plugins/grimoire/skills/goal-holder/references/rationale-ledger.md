@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the conduct of a goal persona, the worker-kind persona that holds one goal the operator gave it as its goal tree's root and sees it done through plans the architect persona writes and workers run. It owns the seat's conduct while it holds the goal, in seven passages: reading the root and its done statements, the design asks to the architect, the plan reports to the coordinator and the watch on their outcomes, what it writes to memory, the turn budget, completing the root, and the acts it refuses. Its load class is `named-trigger`: the persona plugin's goal-holder priming names it at launch, and its description also pulls it in on a seeded root with done statements, a design ask, a returned plan, an outcome, a spent turn budget and a root whose statements all hold.
 
-Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-10-26: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach, its second paragraph, states the conduct the skill owns, and its third and fourth paragraphs state the turn budget and the retire record the skill's Turn Budget and Completing the Goal passages read.
+Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-10-26: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach, its second paragraph, states the conduct the skill owns, and its third and fourth paragraphs state the turn budget and the retire record the skill's Turn Budget and Completing the Goal passages read. C024 was written by `docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md` section 3 on 2026-11-11, and its passage is read at that section's tree.
 
 ### C001
 - key: Load this skill on the goal-holder priming, a root seeded from a roster entry, a design ask, a returned plan, an outcome, a spent turn budget or a root whose done statements all hold.
@@ -220,3 +220,12 @@ Written by `docs/archive/claude-kit_goal-persona_spec_v1.md` section 3 on 2026-1
 - verdict: keep
 - reason: The priming steer sentence a goal persona keeps tells a worker to add and start a queued plan, so the seat needs the specific case stated: a worker runs every plan, and the coordinator reroutes a plan queued to the wrong seat from the report.
 - passage: A record that queues a plan to the seat, from the coordinator or the architect, is declined through `agentic_resolve` and reported to the coordinator, since a worker runs every plan.
+
+### C024
+- key: Send an ask for an act another seat performs to that seat, adding, retiring or restarting a persona to the coordinator, as the role skill's Authority Over Machine-Shared State section states the ask.
+- class: rule
+- source: plugins/grimoire/skills/goal-holder/SKILL.md:8
+- provenance: docs/plans/claude-kit_agent-effort-reference-corrected_spec_v1.md section 3 2026-11-11; kaizen issue 1124 on the kit's repository.
+- verdict: keep
+- reason: A goal persona asked the operator on its own channel for a roster change and a worker's restart, and the coordinator, which performs the restart and takes the operator's word for it only where its own session hears it, asked him again on its thread, so one approval cost two answers. The roster field change in that incident stays the operator's own edit, as the coordinator skill's paragraph on `fleet_add` and `fleet_retire` states, so the passage names only the acts the coordinator performs. The seat that acts is the seat that asks, and the role skill's section owns what the ask names, so this passage points there and states no shape of its own. C003's route to the operator stands for every other question.
+- passage: An ask for an act another seat performs is the exception. Adding, retiring or restarting a persona is the coordinator's act, so the seat asks the coordinator, as the role skill's Authority Over Machine-Shared State section states the ask, and the coordinator asks the operator on its own channel. The coordinator takes the operator's word for such an act only where its own session hears it, so a yes given on this seat's thread has to be given a second time. Where no coordinator is seated, that section sends the ask to the operator.

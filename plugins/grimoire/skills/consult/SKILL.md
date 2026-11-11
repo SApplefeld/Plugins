@@ -30,7 +30,7 @@ Whether a spec gap is the operator's is the test in the doctrine's intake bullet
 
 ## Model Rule
 
-The consultant runs at dispatch table row "Fable consultant", a plain Agent-tool dispatch with the fable model override, after executing-work's capacity reading. Where this consult could not be run at the fable tier in this environment, per finishing-work's unavailability rule, or where that reading returned `-> downgrade`, the stand-in is dispatch table row "Consultant stand-in", filling executing-work's Reviewer Dispatch template with `agentType` `grimoire:consultant`.
+The consultant runs at dispatch table row "Fable consultant", a plain Agent-tool dispatch with the fable model override, after executing-work's capacity reading. Where this consult could not be run at the fable tier in this environment, per finishing-work's unavailability rule, or where that reading returned `-> downgrade`, the stand-in is dispatch table row "Consultant stand-in", filling executing-work's Reviewer Dispatch template with `subagent_type` `grimoire:consultant`.
 
 The model choice is static, never set by how hard the question looks.
 
