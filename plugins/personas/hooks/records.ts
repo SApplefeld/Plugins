@@ -669,7 +669,7 @@ export async function addGoalEntry(
     title: headPoints(a.title, 80),
     objective: headPoints(a.objective, 500),
     status: awaitingYes ? "paused" : "pending",
-    ...(awaitingYes ? { blockedReason: AWAITING_YES_REASON, awaitingYes: true } : {}),
+    ...(awaitingYes ? { blockedReason: AWAITING_YES_REASON, awaitingYes: true, pausedAt: now, releasedBy: "operator" } : {}),
     source: "worker",
     planningRounds: 0,
     consecutiveBlockedPlannings: 0,
@@ -754,7 +754,7 @@ export async function addGoalEntry(
   // The hold check beside it is one thing: an open blocking ask on the
   // ledger is the operator's own open question the work is stopped on,
   // whatever opened it, and the controller keeps no other hold. A paused
-  // node, dropped by an operator pause or left over from a plan switch, is
+  // node, such as one an operator pause left, is
   // not a hold and must not disable this branch for the rest of the session.
   if (
     !deps.session.state.goals.some((g) => g.status === "active") &&

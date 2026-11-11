@@ -26,7 +26,7 @@
 // harness evaluates it once per process while it loads a fresh
 // hooks/index.ts per case.
 
-import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isAutonomyLevel, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, resumeGoalNode, rootBudgetBlocked, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
+import { ASKS_OPEN_MAX, AUTONOMY_LEVELS, AWAITING_YES_REASON, LINE_TERMINATOR, LONG_TERM_GOAL_CAP, MAX_TASKS_PER_GOAL, PLAN_PATH_PATTERN, PLAN_PATH_REQUIRED_FORM, QUEUE_BRANCH_FORM, QUEUE_PULL_REQUEST_LINK_FORM, ROUTINES_MAX, ROUTINE_HOURS_MAX, ROUTINE_TEXT_MAX_POINTS, activateNext, awaitingEntryAtOrAbove, bracketSafeText, headPoints, closeAsk, createDefaultState, isActivationEligible, isAutonomyLevel, isPlanningDue, liftAsk, newTaskId, oneLine, openAskEntries, openBlockingAsks, openGoals, openTurnRecord, parseState, pauseGoalNode, planHolderOf, previousSessionsText, recordPreviousSession, releaserOf, resumeGoalNode, rootBudgetBlocked, stallPartsText, type AgentState, type GoalNode, type LongTermGoal, type TaskItem } from "./agent-state";
 import type { openWorkerAsk as openWorkerAskFromModule } from "./ask-layer";
 import { ASKED_BY_MAX_CHARS, TASK_ID_MAX_CHARS, TASK_TEXT_MAX_CHARS, targetPersonaOf, type ExpectedTurn } from "./channel-text";
 import { claimResource, commonsWinner, readAllClaims, readAllEntries, readHolderMeta, releaseResource, type CommonsStore } from "./commons";
@@ -34,8 +34,8 @@ import { COMPACT_REMINDER_INTERVAL_MS, COMPACT_VALVE_PERCENT, checkpointCommandC
 import { compactionRerunAtCall, type CompactionPassDeps } from "./compaction-pass";
 import type { SharedHandlerState } from "./controller-tick";
 import type { drainPairDraftOwed as drainPairDraftOwedFromModule, noteMemoryWrite as noteMemoryWriteFromModule, notePairDraftsDropped as notePairDraftsDroppedFromModule, writeMemoryRecord as writeMemoryRecordFromModule } from "./drains";
-import { AUTONOMY_REFUSED_TEXT, AWAITING_YES_DONE_REFUSED_TEXT, AWAITING_YES_DROP_REFUSED_TEXT, AWAITING_YES_RESUME_REFUSED_TEXT, CLOSING_LEAF_DROP_REFUSED_TEXT, EFFORT_REFUSED_TEXT } from "./effort-texts";
-import { FLEET_RESTART_MIN_INTERVAL_MS, FLEET_RESTART_REASON_MAX, fleetLineText, liveClaimsOf, readFleetRows, readRosterFile, rosterRunDir, type RosterEntry } from "./fleet";
+import { AUTONOMY_REFUSED_TEXT, AWAITING_YES_DONE_REFUSED_TEXT, AWAITING_YES_DROP_REFUSED_TEXT, AWAITING_YES_REPEND_REFUSED_TEXT, AWAITING_YES_RESUME_REFUSED_TEXT, CLOSING_LEAF_DROP_REFUSED_TEXT, EFFORT_REFUSED_TEXT, PAUSE_RELEASER_REFUSED_TEXT, PLAN_DROP_REFUSED_TEXT, REPEND_NOT_PAUSED_REFUSED_TEXT, REPEND_TURN_BUDGET_REFUSED_TEXT } from "./effort-texts";
+import { FLEET_RESTART_MIN_INTERVAL_MS, FLEET_RESTART_REASON_MAX, fleetLineText, liveClaimsOf, readFleetRows, readFleetStalls, readRosterFile, rosterRunDir, type FleetStoreReads, type RosterEntry } from "./fleet";
 import type { PluginHost } from "./host";
 import type { HookBudget } from "./jev-live";
 import type { boundaryBankCompactionBoundary, boundaryKitInstallPathOf } from "./memq-boundary";
@@ -287,6 +287,36 @@ export function routineScheduleOf(input: { cadence?: unknown; everyHours?: unkno
   if (hour === undefined) return hourProblem;
   if (present(input.everyHours)) return notTaken("everyHours");
   return { schedule: { kind: "weekly", weekday, hour } };
+}
+
+// The nearest entry above `node` that `holds` accepts, or undefined where
+// none does. The root is never a candidate: the controller's walk admits a
+// node only while every entry between it and the root is pending, and the
+// root itself is exempt from that rule. The node count bounds the climb, so
+// a parent cycle ends it.
+function nearestEntryAbove(state: Pick<AgentState, "goals">, node: GoalNode, holds: (above: GoalNode) => boolean): GoalNode | undefined {
+  let above = state.goals.find((g) => g.id === node.parentId);
+  for (let steps = state.goals.length; above && above.parentId !== null && steps > 0; steps--) {
+    if (holds(above)) return above;
+    const parentId = above.parentId;
+    above = state.goals.find((g) => g.id === parentId);
+  }
+  return undefined;
+}
+
+// The clause a goal_resume or goal_edit repend decision ends with where an
+// entry awaiting the operator's yes sits at or above the node: a delivery
+// turn names the seat whose record admitted the act, read from the entry's
+// ground against the grounds the effort gate admits, and any other turn
+// names the re-prompt or its origin. With no awaiting entry it is empty.
+function awaitingAdmittedByText(awaitingAbove: GoalNode | undefined, entry: ExpectedTurn | null, originKind: string, architectPersona: string): string {
+  if (!awaitingAbove) return "";
+  const deliverySeat = (ground: string): string => ground === COORDINATOR_GROUND ? "coordinator record"
+    : architectPersona !== "" && ground === `WORKER:${architectPersona}` ? "architect record"
+    : `${ground} record`;
+  return entry !== null && entry.kind === "delivery" ? `; admitted by ${deliverySeat(entry.ground)} ${entry.recordId}`
+    : entry?.kind === "reprompt" ? "; admitted by the operator's mid-turn re-prompt"
+    : `; admitted by origin ${originKind}`;
 }
 
 // The served body: what the handler's try block in hooks/index.ts answered
@@ -1026,9 +1056,9 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     const nodeId = String((e as any).nodeId || "").trim();
     const action = String((e as any).action || "").trim();
     const reason = String((e as any).reason || "").trim();
-    if (!nodeId || !["drop", "pause", "reprioritize"].includes(action)) {
+    if (!nodeId || !["drop", "pause", "repend", "reprioritize"].includes(action)) {
       setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
-      return { deny: 'goal_edit requires a valid nodeId and action ("drop" | "pause" | "reprioritize").' };
+      return { deny: 'goal_edit requires a valid nodeId and action ("drop" | "pause" | "repend" | "reprioritize").' };
     }
     const node = sess.state.goals.find((g) => g.id === nodeId);
     if (!node) {
@@ -1068,6 +1098,15 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         noteStandingRefusal();
         return { deny: AWAITING_YES_DROP_REFUSED_TEXT };
       }
+      // A plan entry is dropped only in a turn that could add a plan, the
+      // turns goal_add's own gate admits at the level the store holds, so no
+      // turn drops an entry it could not put back. The refusal turns on the
+      // turn's standing, so it is counted as the awaiting-yes one above is.
+      if (node.kind === "plan" && !turnMayStartEffort("goal_add_plan", sess.state.autonomy)) {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        noteStandingRefusal();
+        return { deny: PLAN_DROP_REFUSED_TEXT };
+      }
       // A dropped plan's open closing leaf is abandoned with it, and the
       // active slot leaves it where it named it, so no open leaf stays
       // under a dropped plan. No other child is touched.
@@ -1094,13 +1133,78 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
         return { deny: `Cannot pause ${nodeId}: status is "${node.status}" (only an active or pending node can be paused).` };
       }
-      pauseGoalNode(sess.state, node, reason || "paused by operator", now);
+      // A pause waits on a party outside the session, so it names that
+      // party or is refused with the tree as it stood.
+      const given = (e as any).releasedBy;
+      const releaser = typeof given === "string" ? releaserOf(given.trim()) : null;
+      if (releaser === null) {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        return { deny: PAUSE_RELEASER_REFUSED_TEXT };
+      }
+      pauseGoalNode(sess.state, node, reason || "paused by operator", now, releaser);
       sess.state.decisions.push({
         timestamp: now,
         loop: "goal",
         action: "paused_by_operator",
         detail: `${nodeId}: ${node.blockedReason}`,
       });
+    } else if (action === "repend") {
+      // repend returns a paused entry to pending where it stands: it keeps
+      // its sortKey, plan document, branch and pull request, starts nothing
+      // and changes no other node, so the controller's walk starts it in
+      // queue order. A blocked entry is not paused, so a round budget's
+      // block is never released here.
+      if (node.status !== "paused") {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        return { deny: REPEND_NOT_PAUSED_REFUSED_TEXT };
+      }
+      // Past that, two refusals lift no hold a resume of the same entry in
+      // this turn could not lift, on the predicates goal_resume reads: the
+      // turn budget's block on the root, and an entry awaiting the
+      // operator's yes at or above the node in a turn that may not resume
+      // it. A blocked entry goal_resume releases, one at its round budget,
+      // is refused above as not paused.
+      const budgetBlockedRoot = rootBudgetBlocked(sess.state) ? sess.state.goals.find((g) => g.parentId === null) : undefined;
+      if (budgetBlockedRoot) {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        return { deny: `${REPEND_TURN_BUDGET_REFUSED_TEXT} Its id is ${budgetBlockedRoot.id}.` };
+      }
+      const awaitingAbove = awaitingEntryAtOrAbove(sess.state, node);
+      if (awaitingAbove && !turnMayStartEffort("goal_resume_awaiting")) {
+        setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+        noteStandingRefusal();
+        return { deny: AWAITING_YES_REPEND_REFUSED_TEXT };
+      }
+      // The reason, the operator line's flag and the node's own awaiting
+      // flag go. pausedAt and releasedBy stay, read only from a paused node.
+      // An awaiting entry above the node keeps its flag and stays paused, so
+      // the node below it is pending and still out of the walk's reach.
+      // A blocked lead goes, as goal_resume lifts it, since once the walk
+      // starts the entry the lead would hold the idle branch with no nudge.
+      // A waiting lead keeps its own hold window and stays.
+      const pausedReason = node.blockedReason || "unknown";
+      const admittedBy = awaitingAdmittedByText(awaitingAbove, currentTurnEntry(), currentTurnOriginKind(), architectPersona);
+      const liftedLead = node.lead && node.lead.state === "blocked" ? node.lead : null;
+      node.status = "pending";
+      node.blockedReason = undefined;
+      node.awaitingYes = undefined;
+      delete node.pausedByOperatorLine;
+      if (liftedLead) node.lead = null;
+      node.updatedAt = now;
+      sess.state.decisions.push({
+        timestamp: now,
+        loop: "goal",
+        action: "repend",
+        detail: `${nodeId}: returned to pending (paused: ${pausedReason}${liftedLead ? "; blocked lead cleared" : ""}${admittedBy})`,
+      });
+      if (liftedLead) {
+        sess.state.decisions.push({
+          timestamp: now,
+          loop: "goal",
+          action: "lead_cleared",
+          detail: `${nodeId}: blocked lead cleared by goal_edit repend`,
+        });
+      }
     } else {
       // reprioritize: move nodeId to activate before its pending siblings.
       if (node.status !== "pending") {
@@ -1121,9 +1225,17 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       });
     }
 
+    // A repended node under a paused entry is out of the walk's reach, which
+    // admits a node only while every entry between it and the root is
+    // pending, so the result names the nearest paused one. The root is
+    // exempt from that rule, so it is never named.
+    const pausedAbove = action === "repend" ? nearestEntryAbove(sess.state, node, (above) => above.status === "paused") : undefined;
+    const heldNote = pausedAbove
+      ? ` ${nodeId} is pending, under paused ${pausedAbove.id}, which holds it out of the walk until that entry is resumed or repended.`
+      : "";
     const written = await persistAnswering(ctx, "goal_edit", nodeId);
     if (written !== false) {
-      return { result: `${action} applied to ${nodeId}. Now: [${node.status}] "${node.title}".${written === true ? "" : goalWriteFailedText(written.failed, false)}` };
+      return { result: `${action} applied to ${nodeId}. Now: [${node.status}] "${node.title}".${heldNote}${written === true ? "" : goalWriteFailedText(written.failed, false)}` };
     }
     setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
     return { deny: `persona '${sess.persona}' is held by a live session; this write was not saved.` };
@@ -1559,16 +1671,35 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
       }
       if (leftOpenText !== "") return { result: `Complete: "${completedTitle}".${leftOpenText}${healthText}${writeFailed}` };
       // Nothing started, so the result says why by the tree's shape. With
-      // no pending entry, the planner runs. With one or more, the walk could
+      // no pending entry and no paused or blocked one, the no-pending
+      // sentence stands alone. With no pending entry and one or more paused
+      // or blocked, the root among them, the result counts each status and
+      // points at goal_status, which prints each with its reason. Where
+      // isPlanningDue, the controller's own planning gate, still reads true,
+      // the count follows the no-pending sentence: the gate takes a blocked
+      // entry under an open planner's root as no work, so the planner runs.
+      // Where it reads false, a paused entry, a blocked root or a seat's root
+      // holds the planner, and the count stands in the sentence's place.
+      // With one or more pending, the walk could
       // not reach them: under a budget-blocked root activateNext returns null
       // whatever the tree holds, so the budget is named as the cause; else a
       // pending entry sits under a paused, blocked, abandoned or complete
       // ancestor, or over a child the round budget blocked, and the sentence
       // names no one cause but points at the [GOAL QUEUE] block, which lists
-      // them. The count carries no node title, so it needs no bracket guard.
+      // them. A count carries no node title, so it needs no bracket guard.
       const pendingCount = openGoals(sess.state).filter((g) => g.status === "pending").length;
       if (pendingCount === 0) {
-        return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${healthText}${writeFailed}` };
+        const heldCounts = (["paused", "blocked"] as const)
+          .map((status) => ({ status, count: sess.state.goals.filter((g) => g.status === status).length }))
+          .filter((held) => held.count > 0);
+        const heldTotal = heldCounts.reduce((sum, held) => sum + held.count, 0);
+        const heldText = heldCounts.length === 0
+          ? ""
+          : `${heldCounts.map((held) => `${held.count} ${held.status}`).join(" and ")} ${heldTotal === 1 ? "entry remains" : "entries remain"}; goal_status lists each with its reason.`;
+        if (heldText === "" || isPlanningDue(sess.state)) {
+          return { result: `Complete: "${completedTitle}". No pending goals; planning runs at the next tick.${heldText === "" ? "" : ` ${heldText}`}${healthText}${writeFailed}` };
+        }
+        return { result: `Complete: "${completedTitle}". Nothing started by itself: ${heldText}${healthText}${writeFailed}` };
       }
       const one = pendingCount === 1;
       if (rootBudgetBlocked(sess.state)) {
@@ -2151,12 +2282,18 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     }
     const lines: string[] = [...recordLines];
     // A folded plan's children left the tree for the history file, so its
-    // one line names how many.
+    // one line names how many. A paused or blocked node's line ends with
+    // its reason, folded to one line and cut, and with its releaser and its
+    // age where the node holds them, the parts the [GOAL QUEUE] line
+    // carries; every other node's line carries none of the three.
+    const statusNow = Date.now();
     const statusOf = (id: string) => {
       const n = sess.state.goals.find((g) => g.id === id)!;
       const folded = n.foldedChildren ?? 0;
       const foldedText = folded > 0 ? ` (${folded} child${folded === 1 ? "" : "ren"} folded)` : "";
-      return `[${n.status}] ${n.id} (${n.kind}) "${n.title}"${foldedText}`;
+      const stalled = n.status === "paused" || n.status === "blocked";
+      const stallText = stalled ? `${n.blockedReason ? ` | ${headPoints(oneLine(n.blockedReason), 60)}` : ""}${stallPartsText(n, statusNow)}` : "";
+      return `[${n.status}] ${n.id} (${n.kind}) "${n.title}"${foldedText}${stallText}`;
     };
     lines.push(statusOf(root.id));
     const children = (pid: string) =>
@@ -2274,19 +2411,48 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         noteStandingRefusal();
         return { result: `No paused node to resume here: ${passedOver.id} "${passedOver.title}" waits for the operator's word, and so does anything under it.` };
       }
+      // A call naming an entry that exists and is out of the resume's reach
+      // says where that entry stands, so a pending entry is never paused to
+      // be resumed. A pending entry below the root takes one more sentence,
+      // from the first of four arms that fits. Over an active entry it is in
+      // progress, so that entry is named. Under an entry that is not pending,
+      // whatever that entry's status, the walk cannot reach it, so the
+      // nearest such entry is named. Where the walk's own eligibility rule
+      // accepts it or an entry under it, it is queued, the one shape
+      // reprioritize can start sooner: asking isActivationEligible keeps
+      // "queued" from being said of an entry the walk would start nothing
+      // under. Otherwise every leaf under it is held, so one paused or
+      // blocked entry reached from it through pending entries is named.
+      // Like the answer below, the call writes nothing and counts as no tool
+      // error. The text carries ids and statuses alone, so it needs no
+      // bracket guard.
+      const named = nodeId ? sess.state.goals.find((g) => g.id === nodeId) : undefined;
+      if (named) {
+        let standing = "";
+        if (named.status === "pending" && named.parentId !== null) {
+          const isUnderNamed = (g: GoalNode): boolean => nearestEntryAbove(sess.state, g, (above) => above.id === named.id) !== undefined;
+          const activeBelow = sess.state.goals.find((g) => g.status === "active" && isUnderNamed(g));
+          const holder = nearestEntryAbove(sess.state, named, (above) => above.status !== "pending");
+          if (activeBelow) {
+            standing = ` The active entry under it is ${activeBelow.id}.`;
+          } else if (holder) {
+            standing = ` It is under ${holder.status} ${holder.id}, which holds it out of the walk.`;
+          } else if (sess.state.goals.some((g) => (g.id === named.id || isUnderNamed(g)) && isActivationEligible(sess.state, g))) {
+            standing = " It is queued, and goal_edit with the action reprioritize moves it ahead of its siblings.";
+          } else {
+            const heldBelow = sess.state.goals.find((g) => (g.status === "paused" || g.status === "blocked")
+              && nearestEntryAbove(sess.state, g, (above) => above.id === named.id || above.status !== "pending")?.id === named.id);
+            if (heldBelow) {
+              standing = ` The walk starts nothing under it: ${heldBelow.id} under it is ${heldBelow.status}, and goal_status lists any other held entry.`;
+            }
+          }
+        }
+        return { result: `${named.id} is ${named.status}, so goal_resume changed nothing.${standing}` };
+      }
       return { result: "No paused nodes to resume." };
     }
-    // A delivery turn names the seat whose record admitted the resume, read
-    // from the entry's ground against the grounds the effort gate admits.
-    const awaitingAbove = awaitingEntryAtOrAbove(sess.state, target);
-    const resumeEntry = currentTurnEntry();
-    const deliverySeat = (ground: string): string => ground === COORDINATOR_GROUND ? "coordinator record"
-      : architectPersona !== "" && ground === `WORKER:${architectPersona}` ? "architect record"
-      : `${ground} record`;
-    const admittedBy = !awaitingAbove ? ""
-      : resumeEntry !== null && resumeEntry.kind === "delivery" ? `; admitted by ${deliverySeat(resumeEntry.ground)} ${resumeEntry.recordId}`
-      : resumeEntry?.kind === "reprompt" ? "; admitted by the operator's mid-turn re-prompt"
-      : `; admitted by origin ${currentTurnOriginKind()}`;
+    // A delivery turn names the seat whose record admitted the resume.
+    const admittedBy = awaitingAdmittedByText(awaitingEntryAtOrAbove(sess.state, target), currentTurnEntry(), currentTurnOriginKind(), architectPersona);
     // The resume body lives in agent-state.ts, shared with the operator's
     // [RESUME] line; the nudge counters are the session's, so they reset here.
     const { budgetRelease } = resumeGoalNode(sess.state, target, { now: Date.now(), admittedBy, fromLine: false });
@@ -2295,7 +2461,13 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     setCountResetSinceNudgeOpened(true);
     sess.lastNudgeAt = 0;
     const written = await persistAnswering(ctx, "goal_resume", target.id);
-    const resumed = `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.${budgetRelease ? " Round budget restarted." : ""}`;
+    // The result names the active entry whenever it is not the target. After
+    // resumeGoalNode that happens on one path alone: the target sits above
+    // the active entry, which stays active while the target goes pending
+    // over it.
+    const activeId = sess.state.activeGoalId;
+    const activeElsewhere = activeId && activeId !== target.id ? ` The active entry is ${activeId}.` : "";
+    const resumed = `Resumed ${target.id} (${target.kind}) "${target.title}". Nudge budget reset.${budgetRelease ? " Round budget restarted." : ""}${activeElsewhere}`;
     return { result: typeof written === "boolean" ? resumed : resumed + goalWriteFailedText(written.failed, false) };
   }
 
@@ -2593,8 +2765,8 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
 
   // Section 3: serve fleet_status (one row per roster persona: what the
   // process keeper last decided for it and what its commons entry says).
-  // Read-only: the roster, each persona's keeper state and the commons
-  // entries are read, and nothing is written, created or deleted. The
+  // Read-only: the roster, each persona's keeper state and goal store and
+  // the commons entries are read, and nothing is written, created or deleted. The
   // commons entries are read once, before the reach check, and serve both:
   // the claims readAllClaims would return are derived from them, which
   // keeps the read-only promise, since readAllClaims collects stale entries
@@ -2627,10 +2799,21 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // what a row says. This handler adds the staleness bound the ages in
     // it were read against.
     const report = await readFleetRows(host(), fleetRoster, entries, sess.staleAfterMs, now);
+    // Each row's stalled goal entries, read here and never in readFleetRows:
+    // this is one read of each store file the roster's personas work in,
+    // shared by the personas of one directory through `storeReads`, which
+    // lives for this call alone. The tick's watcher never opens those files,
+    // and text out of them reaches a tool result alone, never a prompt the
+    // plugin submits.
+    const storeReads: FleetStoreReads = new Map();
+    const rows = [];
+    for (const row of report.rows) {
+      rows.push({ ...row, ...(await readFleetStalls(host(), report.workdir.get(row.name) ?? null, row.name, now, storeReads)) });
+    }
     return { result: JSON.stringify({
       roster: report.roster,
       staleAfterMs: sess.staleAfterMs,
-      rows: report.rows,
+      rows,
       ...(report.problem !== undefined ? { problem: fleetLineText(report.problem) } : {}),
       ...(report.problems !== undefined ? { problems: report.problems.map(fleetLineText) } : {}),
     }, null, 2) };

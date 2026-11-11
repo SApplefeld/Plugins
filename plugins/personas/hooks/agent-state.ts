@@ -290,6 +290,20 @@ export interface GoalNode {
                       // [RESUME] line finds what it resumes by this flag,
                       // never by activeGoalId, and the resume clears it.
                       // Load drops a value that is not true.
+  pausedAt?: number; // The clock of the write that put the node in paused.
+                      // Read only from a paused node, so no writer clears it
+                      // and a value left on a node that has since resumed is
+                      // never read. Load drops a value that is not a finite
+                      // number.
+  blockedAt?: number; // The clock of the write that put the node in blocked,
+                      // read only from a blocked node and held to the same
+                      // rules as pausedAt.
+  releasedBy?: string; // The party whose act lets a paused node move again,
+                      // in the form releaserOf stores. Read only from a
+                      // paused node, as pausedAt is. Every pause written
+                      // now names one, and a paused node loaded from a
+                      // store an older build wrote may lack it. Load drops
+                      // a value releaserOf refuses.
   runLines?: RunLines; // Plan holder only: the run lines of the plan's run,
                       // the messages hooks/run-lines.ts decides and the
                       // turn-end handler sends to the session's own thread.
@@ -1392,6 +1406,49 @@ export const PLAN_PATH_REQUIRED_FORM =
 export const QUEUE_BRANCH_FORM = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 export const QUEUE_PULL_REQUEST_LINK_FORM = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/([0-9]{1,9})$/;
 
+// The persona name: bin/Register-PersonaTasks.ps1 Read-PersonaRoster, the
+// strictest reader, matches `\A[A-Za-z0-9_][A-Za-z0-9_-]*\z`. A JavaScript
+// `$` with no `m` flag matches only at the end of the input, never before a
+// final line feed, so this regex refuses a name ending in a newline as the
+// PowerShell `\z` does. It is stated here, in the module that imports
+// nothing, because the store load reads it for a releaser; hooks/roster.ts
+// exports it again for the roster's own readers.
+export const PERSONA_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;
+
+// The releaser a pause names, in the form the store holds, or null where the
+// value names none. The set is closed at three kinds: the words operator and
+// coordinator, matched in any letter case and stored in lower case, and a
+// persona name, a value on PERSONA_NAME_RE holding at least one letter, kept
+// as written. A persona named operator or coordinator reads as the word. An
+// empty value, a phrase, a bare number and a condition are each refused. The
+// name's shape is checked and never the roster, since a worker session may
+// hold none. goal_edit's pause and the store load both read this one rule.
+export function releaserOf(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const word = value.toLowerCase();
+  if (word === "operator" || word === "coordinator") return word;
+  return PERSONA_NAME_RE.test(value) && /[A-Za-z]/.test(value) ? value : null;
+}
+
+// The two parts a stalled node's line carries after its reason, for the
+// [GOAL QUEUE] block and goal_status alike: " | released by <releasedBy>" on
+// a paused node that holds one, and " | <age>" where the node holds the
+// stamp its status reads, pausedAt on a paused node and blockedAt on a
+// blocked one. The age is one whole number and one unit: minutes under an
+// hour, hours under two days and days after. Any other node, and a stalled
+// one holding neither field, gives the empty text. releasedBy is spliced as
+// stored, since every writer and the load hold it to releaserOf, whose
+// values carry no bracket and no line break.
+export function stallPartsText(node: GoalNode, now: number): string {
+  if (node.status !== "paused" && node.status !== "blocked") return "";
+  const releaser = node.status === "paused" && node.releasedBy !== undefined ? ` | released by ${node.releasedBy}` : "";
+  const stamp = node.status === "paused" ? node.pausedAt : node.blockedAt;
+  if (stamp === undefined) return releaser;
+  const minutes = Math.max(0, Math.floor((now - stamp) / 60_000));
+  const age = minutes < 60 ? `${minutes}m` : minutes < 2 * 24 * 60 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / (24 * 60))}d`;
+  return `${releaser} | ${age}`;
+}
+
 // How long a waiting lead holds the controller's idle branch, measured from
 // the clock the lead was read at. Past it the branch runs as usual with the
 // lead left on the entry.
@@ -2354,6 +2411,21 @@ function enforceInvariants(state: AgentState): void {
     if (raw.pausedByOperatorLine !== undefined && raw.pausedByOperatorLine !== true) delete g.pausedByOperatorLine;
   }
 
+  // The two stall stamps and the releaser, each kept only in its shape, the
+  // same rule: a stamp that is not a finite number gives no age, and a
+  // releaser releaserOf refuses names no party. A releaser stored in another
+  // letter case loads in the stored form.
+  for (const g of state.goals) {
+    const raw = g as { pausedAt?: unknown; blockedAt?: unknown; releasedBy?: unknown };
+    if (raw.pausedAt !== undefined && !(typeof raw.pausedAt === "number" && Number.isFinite(raw.pausedAt))) delete g.pausedAt;
+    if (raw.blockedAt !== undefined && !(typeof raw.blockedAt === "number" && Number.isFinite(raw.blockedAt))) delete g.blockedAt;
+    if (raw.releasedBy !== undefined) {
+      const releaser = releaserOf(raw.releasedBy);
+      if (releaser === null) delete g.releasedBy;
+      else g.releasedBy = releaser;
+    }
+  }
+
   // The seeded root's three fields, each kept only in the shape the seed
   // writes: doneWhen an array of strings, turnBudget a positive integer,
   // turnsSpent a whole number. A value of another shape is dropped rather
@@ -2502,6 +2574,7 @@ export function completeLeaf(state: AgentState, id: string, note: string, openPl
         c.status === "blocked"
     );
     if (hasBlocked && parent.status !== "complete") {
+      if (parent.status !== "blocked") parent.blockedAt = Date.now();
       parent.status = "blocked";
       parent.blockedReason = "Child task blocked";
       parent.updatedAt = Date.now();
@@ -2798,16 +2871,19 @@ export function activateNext(state: AgentState, completedId?: string): string | 
 }
 
 // The one pause body: the node goes paused under the reason, and the active
-// slot empties where it named the node. goal_edit's pause, goal_resume's
-// pause of the entry it displaces and the operator's [PAUSE] line run
-// through here; the controller's plan switch and the turn budget's block
-// write their paused entries themselves. Each caller records its own
+// slot empties where it named the node. goal_edit's pause and the operator's
+// [PAUSE] line run through here; the awaiting-yes add and the turn budget's
+// block write their paused entries themselves. Each caller records its own
 // decision, since the detail names the caller. Every pause clears the
 // operator line's flag, so a node a tool paused is never one a [RESUME]
-// line lifts; the line sets the flag again after its own pause.
-export function pauseGoalNode(state: AgentState, node: GoalNode, reason: string, now: number): void {
+// line lifts; the line sets the flag again after its own pause. Every pause
+// stamps pausedAt and records its releaser, the party whose act lets the
+// node move again, so no caller pauses without naming one.
+export function pauseGoalNode(state: AgentState, node: GoalNode, reason: string, now: number, releasedBy: string): void {
   node.status = "paused";
   node.blockedReason = reason;
+  node.pausedAt = now;
+  node.releasedBy = releasedBy;
   node.updatedAt = now;
   delete node.pausedByOperatorLine;
   if (state.activeGoalId === node.id) state.activeGoalId = null;
@@ -2820,12 +2896,13 @@ export interface ResumeGoalNodeOptions {
   // "" where none was awaiting.
   admittedBy: string;
   // The operator's [RESUME] line resumes the holder and then its leaf in one
-  // write. For it, an active node goes pending and is never paused: one
-  // above the target takes the shape a holder with an active leaf takes,
-  // and one elsewhere in the tree is displaced, with one
-  // operator_resume_displaced decision naming it and the target. A tool call
-  // pauses whatever else is active, as a resume of one entry displaces the
-  // other.
+  // write. On either path an active node other than the target is never
+  // paused. One below the target stays active, and the target takes the
+  // holder's shape above it. One above the target goes pending, the shape a
+  // holder with an active leaf takes, and logs nothing. One elsewhere in the
+  // tree is displaced to pending, with one decision naming it and the
+  // target: operator_resume_displaced for the line and resume_displaced for
+  // a tool call.
   fromLine: boolean;
 }
 
@@ -2834,38 +2911,47 @@ export interface ResumeGoalNodeResult {
 }
 
 // The one resume body: the target leaves paused, or the round budget's
-// block, and becomes the active entry, with every consequence goal_resume
-// carried: another active node paused with the reason naming the target, an
-// awaiting entry above it released, a round budget restarted, ancestors
+// block, and becomes the active entry, or goes pending where the active
+// entry sits below it, with every consequence goal_resume carried: another
+// active node elsewhere returned to pending, where the controller starts it
+// again in queue order once the target completes or is paused and nothing
+// above it is held, an awaiting entry above it released, a round budget restarted, ancestors
 // blocked only by "Child task blocked" freed, a blocked lead cleared and the
 // node's blocking asks lifted, and the operator line's flag on the node
 // cleared. Decisions for each land here. The caller owns the session's
 // nudge counters and the store write.
 export function resumeGoalNode(state: AgentState, target: GoalNode, opts: ResumeGoalNodeOptions): ResumeGoalNodeResult {
   const { now, admittedBy, fromLine } = opts;
-  // M9: if a different node is active, pause it first (M10: write blockedReason).
+  // M9: a different active node returns to pending first, since it waits on
+  // nobody. It keeps its sortKey and whatever reason, stamp or releaser it
+  // held, which a reader takes only from a paused or blocked node.
+  // A target above the active node is its holder instead: the active node
+  // stays, and the target goes pending above it with the active slot left
+  // where it is, the shape a holder with an active leaf takes.
+  let holdsActive = false;
   if (state.activeGoalId && state.activeGoalId !== target.id) {
     const activeNode = state.goals.find((g) => g.id === state.activeGoalId);
     if (activeNode && activeNode.status === "active") {
-      if (fromLine) {
+      if (ancestorIdsOf(state, activeNode).includes(target.id)) {
+        holdsActive = true;
+      } else {
         activeNode.status = "pending";
         activeNode.updatedAt = now;
         if (!ancestorIdsOf(state, target).includes(activeNode.id)) {
-          state.decisions.push({
-            timestamp: now,
-            loop: "goal",
-            action: "operator_resume_displaced",
-            detail: `${activeNode.id} returned to pending by the operator's [RESUME] line resuming ${target.id}`,
-          });
+          state.decisions.push(fromLine
+            ? {
+              timestamp: now,
+              loop: "goal",
+              action: "operator_resume_displaced",
+              detail: `${activeNode.id} returned to pending by the operator's [RESUME] line resuming ${target.id}`,
+            }
+            : {
+              timestamp: now,
+              loop: "goal",
+              action: "resume_displaced",
+              detail: `${activeNode.id} returned to pending (goal_resume of ${target.id})`,
+            });
         }
-      } else {
-        pauseGoalNode(state, activeNode, `Paused by goal_resume of ${target.id}`, now);
-        state.decisions.push({
-          timestamp: now,
-          loop: "goal",
-          action: "paused_by_resume",
-          detail: `${activeNode.id} paused (goal_resume of ${target.id})`,
-        });
       }
     }
   }
@@ -2886,7 +2972,7 @@ export function resumeGoalNode(state: AgentState, target: GoalNode, opts: Resume
   // Any resume lifts the operator line's pause on the node, so a later
   // [RESUME] line finds nothing of this node's left to resume.
   delete target.pausedByOperatorLine;
-  target.status = "active";
+  target.status = holdsActive ? "pending" : "active";
   // A released entry left at its maxRounds would re-block on its next
   // scored round, so its count restarts. Its scores stay.
   if (budgetRelease) target.completedRounds = 0;
@@ -2906,7 +2992,7 @@ export function resumeGoalNode(state: AgentState, target: GoalNode, opts: Resume
   const liftedLead = target.lead && target.lead.state === "blocked" ? target.lead : null;
   if (liftedLead) target.lead = null;
   target.updatedAt = now;
-  state.activeGoalId = target.id;
+  if (!holdsActive) state.activeGoalId = target.id;
   state.decisions.push({
     timestamp: now,
     loop: "goal",
@@ -2951,6 +3037,34 @@ export function resumeGoalNode(state: AgentState, target: GoalNode, opts: Resume
   }
   state.updatedAt = now;
   return { budgetRelease };
+}
+
+// The controller's plan switch, as one write: the active task it sets aside
+// returns to pending and the pending plan it takes up becomes the active
+// entry. The task keeps its sortKey and whatever reason, stamp or releaser
+// it held, which a reader takes only from a paused or blocked node. The
+// controller starts it again in queue order once the plan completes or is
+// paused and nothing above it is held. One switch_from decision names the task and the plan, and one
+// switch_to names the plan. The caller owns the model's pick, the session's
+// nudge counters and the store write.
+export function switchToPlan(state: AgentState, from: GoalNode, target: GoalNode, now: number): void {
+  from.status = "pending";
+  from.updatedAt = now;
+  state.decisions.push({
+    timestamp: now,
+    loop: "goal",
+    action: "switch_from",
+    detail: `${from.id} returned to pending (switch to ${target.id})`,
+  });
+  target.status = "active";
+  target.updatedAt = now;
+  state.activeGoalId = target.id;
+  state.decisions.push({
+    timestamp: now,
+    loop: "goal",
+    action: "switch_to",
+    detail: `${target.id} "${target.title}" activated (switch)`,
+  });
 }
 
 // The operator's two lines, read from a message's own words with the
@@ -3057,7 +3171,7 @@ export function applyOperatorLine(state: AgentState, line: OperatorLine, now: nu
       return null;
     }
     for (const { node } of steps) {
-      pauseGoalNode(state, node, line.reason, now);
+      pauseGoalNode(state, node, line.reason, now, "operator");
       node.pausedByOperatorLine = true;
     }
     state.decisions.push({

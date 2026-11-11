@@ -12,17 +12,22 @@
 import {
   bracketSafeText,
   fleetClassValue,
+  headPoints,
+  oneLine,
+  releaserOf,
   FLEET_ENTRY_PROBLEMS_KEY,
   FLEET_HEALTH,
   FLEET_ROSTER_STATE_KEY,
   LINE_TERMINATOR,
   type FleetHealth,
   type FleetHealthMemo,
+  type GoalNode,
 } from "./agent-state";
 import { commonsWinner, INBOX_DRAIN_IDLE_TICKS, type CommonsEntry, type UnionedClaim } from "./commons";
 import type { PluginHost } from "./host";
 import { personaNameProblem, quoteCarriedLines, quoteContinuationLines } from "./operator";
 import { cachePartText } from "./cache-clock";
+import { PERSONA_STORE_FILENAME, readPersonaStore } from "./store-files";
 import { boundedText, safeErrorText, stripBom } from "./text";
 
 // What the fleet reading needs from the host: the two file calls its roster
@@ -163,6 +168,15 @@ export function rosterControllerTickMs(entry: RosterEntry): number {
   return publishedCadenceMs(asNumber) ?? DEFAULT_CONTROLLER_TICK_MS;
 }
 
+// A roster entry's working directory, trimmed and with no trailing
+// separator, or null where the entry names none. The run directory and the
+// goal store are each a fixed name joined onto this one reading, so the two
+// are found the same way.
+function rosterWorkDir(entry: RosterEntry): string | null {
+  const workdir = typeof entry.workdir === "string" ? entry.workdir.trim() : "";
+  return workdir === "" ? null : workdir.replace(/[/\\]+$/, "");
+}
+
 // The directory the process keeper works in for a roster entry: the entry's
 // `rundir`, or `<workdir>/run` when it carries none, which is what
 // bin/Start-Persona.ps1 derives. Null when the entry carries neither field,
@@ -170,9 +184,8 @@ export function rosterControllerTickMs(entry: RosterEntry): number {
 export function rosterRunDir(entry: RosterEntry): string | null {
   const rundir = typeof entry.rundir === "string" ? entry.rundir.trim() : "";
   if (rundir !== "") return rundir.replace(/[/\\]+$/, "");
-  const workdir = typeof entry.workdir === "string" ? entry.workdir.trim() : "";
-  if (workdir === "") return null;
-  return `${workdir.replace(/[/\\]+$/, "")}/run`;
+  const workdir = rosterWorkDir(entry);
+  return workdir === null ? null : `${workdir}/run`;
 }
 
 // The roster file as JSON, for the fleet reading and for fleet_restart alike,
@@ -569,12 +582,17 @@ export type FleetLine = { composed: string; carried: string | null };
 // class reduction ages each row's inbox drain stamp on the tick and
 // heartbeat that row's persona runs on, read from what its commons entry
 // publishes, then the roster's tick, then the defaults.
+// `workdir` is each row's working directory as its roster entry names it,
+// null where the entry names none. It rides beside the rows, keyed by name,
+// for readFleetStalls, which the fleet_status tool calls and the watcher
+// never does.
 type FleetCadence = { controllerTickMs: number | null; heartbeatMs: number | null };
 type FleetReport = {
   roster: string | null;
   rows: FleetRow[];
   ladderDueToReset: ReadonlySet<string>;
   cadence: ReadonlyMap<string, FleetCadence>;
+  workdir: ReadonlyMap<string, string | null>;
   problem?: FleetLine;
   problems?: FleetLine[];
 };
@@ -597,7 +615,7 @@ export const readFleetRows = async (
   now: number,
 ): Promise<FleetReport> => {
   if (fleetRoster === "") {
-    return { roster: null, rows: [], ladderDueToReset: new Set(), cadence: new Map(), problem: { composed: "the plugin's fleetRoster setting names no roster file, so there is no fleet to read.", carried: null } };
+    return { roster: null, rows: [], ladderDueToReset: new Set(), cadence: new Map(), workdir: new Map(), problem: { composed: "the plugin's fleetRoster setting names no roster file, so there is no fleet to read.", carried: null } };
   }
   let roster: unknown;
   try {
@@ -618,6 +636,7 @@ export const readFleetRows = async (
       rows: [],
       ladderDueToReset: new Set(),
       cadence: new Map(),
+      workdir: new Map(),
       problem: {
         composed: `the roster '${fleetRoster}' could not be read, and the error the read returned is carried beside this sentence.`,
         carried: boundedText(safeErrorText(err)),
@@ -625,11 +644,12 @@ export const readFleetRows = async (
     };
   }
   if (!Array.isArray(roster)) {
-    return { roster: fleetRoster, rows: [], ladderDueToReset: new Set(), cadence: new Map(), problem: { composed: `the roster '${fleetRoster}' does not hold a JSON array of persona entries.`, carried: null } };
+    return { roster: fleetRoster, rows: [], ladderDueToReset: new Set(), cadence: new Map(), workdir: new Map(), problem: { composed: `the roster '${fleetRoster}' does not hold a JSON array of persona entries.`, carried: null } };
   }
   const rows: FleetRow[] = [];
   const ladderDueToReset = new Set<string>();
   const cadence = new Map<string, FleetCadence>();
+  const workdir = new Map<string, string | null>();
   const problems: FleetLine[] = [];
   // The names already given a row. A roster naming one persona twice gets one
   // row and a problem line rather than two rows: the watcher that reduces
@@ -692,6 +712,7 @@ export const readFleetRows = async (
     // stands in where the entry carries none. The heartbeat is the entry's
     // or null, and the reading fills null with its own.
     cadence.set(name, { controllerTickMs: commons.cadence.controllerTickMs ?? rosterControllerTickMs(entry), heartbeatMs: commons.cadence.heartbeatMs });
+    workdir.set(name, rosterWorkDir(entry));
     rows.push({
       name,
       enabled: entry.enabled === true,
@@ -714,7 +735,146 @@ export const readFleetRows = async (
       ...(note !== undefined ? { note } : {}),
     });
   }
-  return { roster: fleetRoster, rows, ladderDueToReset, cadence, ...(problems.length > 0 ? { problems } : {}) };
+  return { roster: fleetRoster, rows, ladderDueToReset, cadence, workdir, ...(problems.length > 0 ? { problems } : {}) };
+};
+
+// --- Stalls: one roster persona's paused and blocked goal entries ---
+
+// How many stalled entries one row lists before the rest are counted, and
+// where an entry's id, title, reason and releaser are cut. A persona's store
+// is that persona's to write, so these bounds, with the closed kind set
+// below, cap what it can put into another session's tool result. The id
+// bound holds every id the plugin writes, which runs to about 20 characters:
+// a kind word, the creation time in base 36 and four random characters. A
+// persona name has no length bound of its own, so the releaser, which
+// releaserOf admits as any name of the roster's shape, takes one here.
+const FLEET_STALLS_MAX = 12;
+const FLEET_STALL_ID_MAX = 40;
+const FLEET_STALL_TITLE_MAX = 40;
+const FLEET_STALL_REASON_MAX = 60;
+const FLEET_STALL_RELEASER_MAX = 40;
+
+// The node kinds GoalNode declares, as a set the read can test a stored value
+// against. The type check holds the keys to GoalNode's kind union, so a kind
+// added there and missing here, or one here the union lacks, fails the
+// build. A stored kind outside the set reads as FLEET_STALL_KIND_UNKNOWN.
+const FLEET_STALL_KINDS = { root: true, plan: true, task: true } satisfies Record<GoalNode["kind"], true>;
+const FLEET_STALL_KIND_UNKNOWN = "unknown";
+
+// One stalled entry of a persona's goal tree. `reason` is the node's
+// blockedReason where it holds one. `releasedBy` rides a paused entry alone,
+// and `ageMs` is read from the stamp the entry's status reads, pausedAt on a
+// paused entry and blockedAt on a blocked one, never from updatedAt, which
+// moves on later writes.
+type FleetStall = { id: string; kind: string; status: "paused" | "blocked"; title: string; reason?: string; releasedBy?: string; ageMs?: number };
+
+// What readFleetStalls adds to one row: the entries in the order the store's
+// goals array holds them, at most FLEET_STALLS_MAX of them, `stallsMore`
+// counting the rest where there are any, and `stallsNote` saying why a store
+// gave no reading. A persona whose store read whole and holds no stalled
+// entry carries an empty list and neither of the other two.
+type FleetStalls = { stalls: FleetStall[]; stallsMore?: number; stallsNote?: string };
+
+// The two file calls and the wait readPersonaStore makes.
+type FleetStallsHost = Pick<PluginHost, "readFile" | "fileExists" | "sleep">;
+
+// One store file's reading: the parsed store, or the note a persona whose
+// store it is carries in place of a list. The note is the file's and not
+// the persona's, so every persona working in one directory carries the same.
+type FleetStoreReading = { store: Record<string, unknown> } | { note: string };
+
+// The store files one fleet_status call has read, keyed by path, so personas
+// sharing a working directory, and with it one store, cost one read and one
+// parse. The caller makes one per call, and a reading is never carried into
+// the next call.
+export type FleetStoreReads = Map<string, Promise<FleetStoreReading>>;
+
+// A value from another persona's store as a text field of this session's
+// tool result: folded to one line by oneLine and its brackets turned round by
+// bracketSafeText, the pair agent-state.ts names as the guard for text the
+// plugin did not compose on its way to a model, then held to the free-text
+// bound, and the empty text for a value that is no string. The fold matters
+// because JSON.stringify writes U+0085, U+2028 and U+2029 unescaped.
+function stallText(value: unknown): string {
+  return boundedText(bracketSafeText(oneLine(typeof value === "string" ? value : "")));
+}
+
+// One store file read and parsed, with every failure a note and nothing
+// thrown. Each note is a fixed sentence carrying no path and no error text,
+// since a parse error quotes the bytes it stopped on.
+async function readFleetStore(host: FleetStallsHost, storePath: string): Promise<FleetStoreReading> {
+  // Whether the file's text came back, which tells a store that would not
+  // parse from one that would not read.
+  let textRead = false;
+  try {
+    if (!(await host.fileExists(storePath))) return { note: "this persona's goal store is absent" };
+    const store = await readPersonaStore({
+      exists: (path) => host.fileExists(path),
+      read: async (path) => {
+        const text = await host.readFile(path);
+        textRead = true;
+        return text;
+      },
+      sleep: (ms) => host.sleep(ms),
+    }, storePath);
+    return { store };
+  } catch {
+    return { note: textRead ? "this persona's goal store does not parse" : "this persona's goal store could not be read" };
+  }
+}
+
+// One roster persona's stalled entries, read from the persona store in its
+// working directory, under the entry the roster name keys. The store is the
+// persona's own file: it is read and never written, every failure lands in
+// stallsNote and nothing is thrown, and each field is taken only in its
+// shape. Text goes through stallText and is cut at its bound, a kind is kept
+// only where FLEET_STALL_KINDS holds it, a releaser goes through releaserOf,
+// the rule the store's own load holds it to, and a stamp counts only where
+// it is a finite number. `reads` is the call's FleetStoreReads, which a
+// second persona in the same directory reads the file from.
+// The nodes are read as stored, with no load pass over them: parseState is
+// the owning session's loader and repairs the tree it returns, where this
+// row reports what the file holds.
+export const readFleetStalls = async (host: FleetStallsHost, workdir: string | null, persona: string, now: number, reads: FleetStoreReads): Promise<FleetStalls> => {
+  if (workdir === null) return { stalls: [], stallsNote: "the roster entry names no working directory, so this persona has no goal store to read" };
+  const storePath = `${workdir}/${PERSONA_STORE_FILENAME}`;
+  let pending = reads.get(storePath);
+  if (pending === undefined) {
+    pending = readFleetStore(host, storePath);
+    reads.set(storePath, pending);
+  }
+  const reading = await pending;
+  if ("note" in reading) return { stalls: [], stallsNote: reading.note };
+  // An own key alone: a roster name such as "constructor" would otherwise
+  // read a member every object inherits as the persona's entry.
+  if (!Object.prototype.hasOwnProperty.call(reading.store, persona)) return { stalls: [], stallsNote: "the goal store holds no entry for this persona" };
+  const slot = reading.store[persona];
+  const goals = slot !== null && typeof slot === "object" ? (slot as { goals?: unknown }).goals : undefined;
+  if (!Array.isArray(goals)) return { stalls: [], stallsNote: "the goal store's entry for this persona does not parse as a goal tree" };
+  const stalls: FleetStall[] = [];
+  let more = 0;
+  for (const candidate of goals) {
+    if (candidate === null || typeof candidate !== "object") continue;
+    const node = candidate as Record<string, unknown>;
+    const status = node.status;
+    if (status !== "paused" && status !== "blocked") continue;
+    if (stalls.length >= FLEET_STALLS_MAX) {
+      more++;
+      continue;
+    }
+    const stamp = status === "paused" ? node.pausedAt : node.blockedAt;
+    const releaser = status === "paused" ? releaserOf(node.releasedBy) : null;
+    stalls.push({
+      id: headPoints(stallText(node.id), FLEET_STALL_ID_MAX),
+      kind: typeof node.kind === "string" && Object.prototype.hasOwnProperty.call(FLEET_STALL_KINDS, node.kind) ? node.kind : FLEET_STALL_KIND_UNKNOWN,
+      status,
+      title: headPoints(stallText(node.title), FLEET_STALL_TITLE_MAX),
+      ...(typeof node.blockedReason === "string" && node.blockedReason !== "" ? { reason: headPoints(stallText(node.blockedReason), FLEET_STALL_REASON_MAX) } : {}),
+      ...(releaser !== null ? { releasedBy: headPoints(stallText(releaser), FLEET_STALL_RELEASER_MAX) } : {}),
+      ...(typeof stamp === "number" && Number.isFinite(stamp) ? { ageMs: Math.max(0, now - stamp) } : {}),
+    });
+  }
+  return { stalls, ...(more > 0 ? { stallsMore: more } : {}) };
 };
 
 // One row's health class. The six classes and the value the watcher stores

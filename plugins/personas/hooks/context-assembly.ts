@@ -20,7 +20,7 @@
 // which contextSourcesOf in hooks/index.ts builds.
 
 import type { AgentState, AskEntry, AutonomyLevel, GoalNode, TaskItem } from "./agent-state";
-import { ASKS_OPEN_MAX, TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, headPoints, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory } from "./agent-state";
+import { ASKS_OPEN_MAX, TURN_BUDGET_REASON, bracketSafeText, envNotable, hasStartableWork, headPoints, oneLine, openAskEntries, openGoals, planHolderOf, recordShownMemory, stallPartsText } from "./agent-state";
 import { TURN_END_SOURCE } from "./follow-ups";
 import { DONE_HOLD_REASON, goalContextText } from "./goal-persona";
 import { STRETCH_SOURCE } from "./stretch-distillation";
@@ -259,7 +259,9 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
   } else {
     // With no active entry, the [GOAL QUEUE] block lists every open entry
     // in openGoals order with its status, so the model reads the whole
-    // queue rather than one entry's reason. Its last line says whether the
+    // queue rather than one entry's reason. A paused or blocked entry's
+    // line ends with its releaser and its age, where the node holds them,
+    // as stallPartsText builds them. Its last line says whether the
     // controller will start anything by itself, which hasStartableWork
     // decides from the controller's own walk.
     const open = openGoals(state);
@@ -267,7 +269,7 @@ export async function assembleContext(trigger: ContextTrigger, situation: string
       const listed = open.slice(0, GOAL_QUEUE_MAX_LINES);
       const queueLines =
         listed
-          .map((g) => `- ${g.status} ${g.kind} ${g.id} | ${headPoints(oneLine(g.title), 40)}${g.blockedReason ? ` | ${headPoints(oneLine(g.blockedReason), 60)}` : ""}\n`)
+          .map((g) => `- ${g.status} ${g.kind} ${g.id} | ${headPoints(oneLine(g.title), 40)}${g.blockedReason ? ` | ${headPoints(oneLine(g.blockedReason), 60)}` : ""}${stallPartsText(g, now)}\n`)
           .join("") +
         (open.length > listed.length ? `...and ${open.length - listed.length} more open ${open.length - listed.length === 1 ? "entry" : "entries"}.\n` : "");
       // A root the turn budget blocks holds every entry, and goal_resume

@@ -1059,6 +1059,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
               : "(kind task)";
             g.status = "blocked";
             g.blockedReason = "Max rounds reached";
+            g.blockedAt = Date.now();
             g.updatedAt = Date.now();
             sess.state.decisions.push({
               timestamp: Date.now(),
@@ -1851,10 +1852,13 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
       if (root.turnsSpent >= root.turnBudget) {
         root.status = "blocked";
         root.blockedReason = TURN_BUDGET_REASON;
+        root.blockedAt = budgetNow;
         for (const g of sess.state.goals) {
           if (g.status !== "active") continue;
           g.status = "paused";
           g.blockedReason = TURN_BUDGET_PAUSED_REASON;
+          g.pausedAt = budgetNow;
+          g.releasedBy = "operator";
           g.updatedAt = budgetNow;
         }
         sess.state.activeGoalId = null;

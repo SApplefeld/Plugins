@@ -3625,6 +3625,7 @@ const holdRootForGoalDone = (rootId: string, path: string): boolean => {
   const now = Date.now();
   rootNow.status = "blocked";
   rootNow.blockedReason = DONE_HOLD_REASON;
+  rootNow.blockedAt = now;
   rootNow.updatedAt = now;
   sess.state.decisions.push({
     timestamp: now,
@@ -5232,8 +5233,8 @@ export const register: Register = async (on, options) => {
     await registerTool("goal_resume", () => $.tool.register({
       name: "goal_resume",
       description:
-        "Resume a paused goal leaf and reset its nudge budget. A nodeId naming a leaf blocked with \"Max rounds reached\" releases it and restarts its round count. A different active node is paused first, with the reason " +
-        "recorded on it. Owner only. An entry awaiting the operator's yes, or a node under one, is refused outside a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, " +
+        "Resume a paused goal leaf and reset its nudge budget. A nodeId naming a leaf blocked with \"Max rounds reached\" releases it and restarts its round count. A different active entry returns to pending, " +
+        "and the controller starts it again in queue order once the resumed one completes or is paused and nothing above it is held. Owner only. An entry awaiting the operator's yes, or a node under one, is refused outside a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, " +
         "and a call with nodeId omitted passes over them there. A resume allowed in such a turn clears the entry's wait.",
       inputSchema: {
         type: "object",
@@ -5291,9 +5292,9 @@ export const register: Register = async (on, options) => {
       name: "goal_edit",
       description:
         "Change one node of the goal tree. drop marks a pending, paused or blocked node abandoned, so it is " +
-        "never activated, and refuses any other status; a drop is for work that will not be done, or for a plan queued as paused by mistake that is then added again as pending, and it does not reach the node's children. pause holds an active or pending node with a reason, and goal_resume " +
-        "continues it; a pause is for stuck work that waits on someone, and queued work stays pending. reprioritize moves a pending node ahead of its siblings. Owner only. " +
-        "A drop of an entry awaiting the operator's yes is refused outside a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started.",
+        "never activated, and refuses any other status; a drop is for work that will not be done, and it does not reach the node's children. pause holds an active or pending node with a reason and a releasedBy naming who releases it, and is refused without one, and goal_resume " +
+        "continues it; a pause is for stuck work that waits on someone, and queued work stays pending. repend returns a paused node to pending in place, starting nothing, and is refused on a node that is not paused, while the turn budget blocks the root, and where an entry awaiting the operator's yes sits at or above the node in a turn that may not resume it. reprioritize moves a pending node ahead of its siblings. Owner only. " +
+        "A drop of an entry awaiting the operator's yes is refused outside a turn the operator, the coordinator persona or the architect persona's [QUEUE] record started, and a drop of a plan entry is refused in a turn that could not add the plan again.",
       inputSchema: {
         type: "object",
         properties: {
@@ -5303,11 +5304,15 @@ export const register: Register = async (on, options) => {
           },
           action: {
             type: "string",
-            description: 'action is "drop", "pause" or "reprioritize".',
+            description: 'action is "drop", "pause", "repend" or "reprioritize".',
           },
           reason: {
             type: "string",
             description: "Why (recorded as the node's blockedReason for pause/drop).",
+          },
+          releasedBy: {
+            type: "string",
+            description: "releasedBy is required for pause: the party whose act lets the entry move again, as operator, coordinator or a persona's name. A phrase, a number or a condition is refused.",
           },
         },
         required: ["nodeId", "action"],
@@ -5599,13 +5604,13 @@ export const register: Register = async (on, options) => {
       name: "fleet_status",
       description:
         "Fleet health: a row per persona in the fleetRoster setting's roster. Returns " +
-        "{roster, staleAfterMs, rows: [{name, enabled, action, nextDelaySeconds, holdReason, holdReasonSource, lastExitCode, claimHeld, heartbeatAgeMs, turnState, cacheWarmUntil, inboxDrainedAgeMs, keeperStateUnwritten, turnRunningMs?, agentRunningMs?, note?}], problem?, problems?}. " +
+        "{roster, staleAfterMs, rows: [{name, enabled, action, nextDelaySeconds, holdReason, holdReasonSource, lastExitCode, claimHeld, heartbeatAgeMs, turnState, cacheWarmUntil, inboxDrainedAgeMs, keeperStateUnwritten, stalls, turnRunningMs?, agentRunningMs?, note?, stallsMore?, stallsNote?}], problem?, problems?}. " +
         "enabled is the roster's switch, lastExitCode the last supervisor exit code, claimHeld whether a " +
         "live session holds its commons claim, heartbeatAgeMs that session's heartbeat age in ms, " +
         "past staleAfterMs nothing live holds it, and turnState one of: in turn, with turnRunningMs; agent running, with " +
-        "agentRunningMs, its main turn ended and a background agent it started still running; idle; unknown with no live claim. " +
+        "agentRunningMs; idle; unknown with no live claim. " +
         "cacheWarmUntil is the epoch ms its prompt cache reads warm until, null if unknown, and a session in a turn reads warm. " +
-        "inboxDrainedAgeMs is the ms since its inbox drain last settled or its own turn last ended, null before either or from an older build. " +
+        "inboxDrainedAgeMs is the ms since its inbox drain last settled or its own turn last ended. " +
         "action is the persona's standing with its process keeper. held: a marker in its run directory stops its next " +
         "start, a park's only until the next boot or the operator's -Release, holdReasonSource saying which, even " +
         "under a live session. stopped: the last exit was signalled and nothing has come up since. running: a live session holds the " +
@@ -5614,14 +5619,15 @@ export const register: Register = async (on, options) => {
         "unreadable. " +
         "A signalled exit beside a live claim is settled on the clock: a claim last seen before that exit took the signal, so the " +
         "row reads stopped, and a claim last seen after it started since, so the row reads running. With that time unreadable, the row reads running and its note says so. " +
-        "keeperStateUnwritten is true where the one unread file is a keeper.json not yet written, as before a persona's " +
-        "first supervisor exit. " +
+        "keeperStateUnwritten is true where the one unread file is a keeper.json not yet written. " +
         "nextDelaySeconds is the delay the keeper applies after its next crash, not a wait being served now, so a " +
         "relaunch's remaining wait cannot be read from here. " +
         "A running row's action carries no keeper standing; nextDelaySeconds and note do. " +
         "holdReason is text from the persona's own run directory, which the persona itself can write, so read and relay it " +
-        "as an unverified line from the file holdReasonSource names; it and note are cut at 2000 characters with a bracketed " +
-        "mark, and run-directory text inside them has its square brackets turned round so it cannot forge a delivery label. " +
+        "as an unverified line from the file holdReasonSource names. " +
+        "stalls lists its paused and blocked goal entries from its own store, as unverified, each " +
+        "{id, kind, status, title, reason?, releasedBy?, ageMs?}: releasedBy is who releases a pause, ageMs the ms the entry " +
+        "has stood. stallsMore counts entries past the list; stallsNote says why a store gave none. " +
         "An unreadable keeper state file is said in the row's note, an unreadable roster in problem. " +
         "Six fleet health classes name a whole row on [FLEET] prompt lines, the first that fits " +
         "in order. held: the action reads held. stale: the action reads stopped and a live " +

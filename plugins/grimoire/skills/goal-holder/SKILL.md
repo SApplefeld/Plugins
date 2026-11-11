@@ -25,7 +25,7 @@ Report each plan the architect returns to the coordinator persona by `agentic_sa
 
 Watch each plan's outcome on the controller tick, from its pull request's state read with `gh pr view <number> --json state` and from the goal tree, since no record reports an outcome to the seat. Send no record to a worker, whose queue is the coordinator's to steer.
 
-Pausing a step with `goal_edit` while its plan is out lets the controller start the next pending step. So pause a step only where the next one does not wait on the same plan, and name the plan in the reason. Resume a paused step with `goal_resume` in the turn that reads its plan's outcome. An active step waiting on a plan still spends a turn at each quiet interval.
+Pausing a step with `goal_edit` while its plan is out lets the controller start the next pending step. So pause a step only where the next one does not wait on the same plan, name the plan in the reason, and give the seat's own persona name as its `releasedBy`. Resume a paused step with `goal_resume` in the turn that reads its plan's outcome. An active step waiting on a plan still spends a turn at each quiet interval.
 
 Close a step with `goal_done` once its plan has merged or been abandoned, the note naming the plan and what it changed. A step whose plan failed stays open, and the architect gets a new ask naming the failure.
 

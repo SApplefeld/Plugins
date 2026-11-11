@@ -330,7 +330,7 @@ function describe(signal: KaizenSignal, count: number, events: KaizenEvent[]): {
     case "asks_unresolved":
       return {
         title: "Kaizen: asks run out the clock",
-        objective: `${count} asks ran out their wait with no answer, each re-raised into the thread first unless askReraiseWindowMs is 0 or longer than the wait (${sample}). Where the operator was away, raise the askOperatorWaitMs plugin option or put the entry on paused, naming what it waits on. Only where a re-raise never reached the thread is the ask's path the subject. Proof: one day's decision log with no ask_timeout on that persona.`,
+        objective: `${count} asks ran out their wait with no answer, each re-raised into the thread first unless askReraiseWindowMs is 0 or longer than the wait (${sample}). Where the operator was away, raise the askOperatorWaitMs plugin option or put the entry on paused with goal_edit pause, its releasedBy naming the operator. Only where a re-raise never reached the thread is the ask's path the subject. Proof: one day's decision log with no ask_timeout on that persona.`,
         rationale: `${count} asks ran out their wait with no answer; the finding names askOperatorWaitMs and a paused entry as the remedies.`,
       };
     case "memory_quality":

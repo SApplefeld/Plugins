@@ -128,8 +128,8 @@ function driveRooted(path: string): boolean {
 // close or lift ends it. What it does clear is a blockedReason left on an active
 // entry, which only a store written by a controller that paused on an ask
 // carries, since an active entry has no reason to be blocked. A paused
-// entry keeps its reason, which the operator or a plan switch wrote and
-// goal_resume reads back.
+// entry keeps its reason, which its pause wrote and goal_resume reads
+// back.
 export const reactivateAskedEntry = (askedNode: GoalNode): void => {
   if (askedNode.status === "active" && askedNode.blockedReason !== undefined) {
     askedNode.blockedReason = undefined;

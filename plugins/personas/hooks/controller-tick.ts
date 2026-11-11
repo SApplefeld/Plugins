@@ -27,7 +27,7 @@
 // evaluates it once per process while it loads a fresh hooks/index.ts per
 // case.
 
-import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
+import { ASKS_OPEN_MAX, LINE_TERMINATOR, activateNext, bracketSafeText, closeAsk, createDefaultState, hasStartableWork, headPoints, holdOf, isPlanningDue, isRootFinished, oneLine, openAskEntries, parseState, planningCapReached, previousRoundBlocked, recordPreviousSession, rootBudgetBlocked, shouldYield, switchToPlan, TURN_BUDGET_REASON, type AgentState, type AskEntry, type EnvGit, type GoalNode, type SentFinding, type SentPlanRecord } from "./agent-state";
 import type { liveAsk as liveAskFromModule, openLedgerAsk as openLedgerAskFromModule, shadowAsk as shadowAskFromModule, shadowOutcome as shadowOutcomeFromModule, tickOpenAsk as tickOpenAskFromModule, withdrawLiftedAskBy as withdrawLiftedAskByFromModule } from "./ask-layer";
 import { stampBeat, stampSupervisorFile, type BeatHost, type HeartbeatEntry } from "./beat";
 import { cacheTick, type CacheClockState } from "./cache-clock";
@@ -2480,6 +2480,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       if (rootNow && failCount >= 3 && rootNow.status !== "blocked") {
         rootNow.status = "blocked";
         rootNow.blockedReason = `Planner failing: ${detail}`;
+        rootNow.blockedAt = Date.now();
         rootNow.updatedAt = Date.now();
         sess.state.decisions.push({
           timestamp: Date.now(),
@@ -2517,6 +2518,7 @@ export async function idleTick(ctx: TickContext): Promise<void> {
       if (capReason) {
         root!.status = "blocked";
         root!.blockedReason = capReason;
+        root!.blockedAt = Date.now();
         root!.updatedAt = Date.now();
         sess.state.decisions.push({
           timestamp: Date.now(),
@@ -3528,32 +3530,16 @@ export async function idleTick(ctx: TickContext): Promise<void> {
           if (target && skipForOpenTurn()) {
             finalDecision = "skipped";
           } else if (target) {
-            // Demote current active to paused (M10: write blockedReason).
-            g.status = "paused";
-            g.blockedReason = "Switched to another plan";
-            g.updatedAt = Date.now();
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "switch_from",
-              detail: `${g.id} demoted to paused (switch)`,
-            });
-            // Activate target.
-            target.status = "active";
-            target.updatedAt = Date.now();
-            sess.state.activeGoalId = target.id;
+            // The task returns to pending and the plan becomes the active
+            // entry, in agent-state.ts's one switch write. The nudge
+            // counters are the session's, so they reset here.
+            switchToPlan(sess.state, g, target, Date.now());
             sess.nudgedAnswersWithoutStatus = 0;
             sess.nudgeCapRefusedFor = null;
             sess.lastNudgeAt = 0;
-            sess.state.decisions.push({
-              timestamp: Date.now(),
-              loop: "goal",
-              action: "switch_to",
-              detail: `${target.id} "${target.title}" activated (switch)`,
-            });
             // The decision stays switch, which is what the tick's record
             // names. No nudge goes out on this tick: the nudge arm reads
-            // the entry the tick started on, now paused. The floor is
+            // the entry the tick started on, now pending. The floor is
             // zero, so the next idle tick nudges the new plan.
           } else {
             sess.state.decisions.push({

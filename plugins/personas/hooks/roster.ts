@@ -14,6 +14,7 @@
 // hooks/index.ts builds over `$` with hostOf, as hooks/fleet.ts does.
 
 import type { PluginHost } from "./host";
+import { PERSONA_NAME_RE } from "./agent-state";
 import { FREE_TEXT_MAX, safeErrorText } from "./text";
 
 // What the roster tools need from the host: the writes the roster write
@@ -96,12 +97,9 @@ export type RosterValidation = { ok: true; entry: WrittenRosterEntry } | { ok: f
 
 // --- The rules, each with its owning reader ---
 
-// The persona name: bin/Register-PersonaTasks.ps1 Read-PersonaRoster, the
-// strictest reader, matches `\A[A-Za-z0-9_][A-Za-z0-9_-]*\z`. A JavaScript
-// `$` with no `m` flag matches only at the end of the input, never before a
-// final line feed, so this regex refuses a name ending in a newline as the
-// PowerShell `\z` does.
-const PERSONA_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;
+// The persona name: PERSONA_NAME_RE, stated in hooks/agent-state.ts with its
+// owning reader and exported again from here.
+export { PERSONA_NAME_RE };
 
 // A role field: bin/agentic-common.sh valid_persona_name, letters, digits,
 // underscore and hyphen, with no rule on the first character.
