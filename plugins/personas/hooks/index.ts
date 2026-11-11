@@ -407,7 +407,8 @@ function contextSourcesOf(dp: any, recall?: (situation: string) => Promise<Recal
 // A prompt whose turn never runs, a typed prompt the engine drops or a
 // delivery whose submit is refused, withdraws its own ids, so they list
 // again on the next prompt and no other turn takes them. A prompt adds at
-// most the queue's FOLLOW_UPS_MAX entries, and every turn.start empties it.
+// most the queue's FOLLOW_UPS_MAX entries, and every main-loop turn.start
+// empties it.
 let followUpsOffered: { id: string; subject: string }[] = [];
 
 // Takes back the ids one prompt offered, where that prompt opened no turn.
@@ -4001,9 +4002,10 @@ export const register: Register = async (on, options) => {
   // The nudge count reads a nudged answer from that completion alone, so a
   // background subagent's completion inside the nudged turn neither spends
   // the reading nor is read as the answer, where it carries another id. The
-  // harness type states a completion carries its own turn.start's id, that a
-  // subagent's run raises no turn.start, and that its completion carries the
-  // subagent's agentId (TurnCompleteFields in .claude/types/claude-code.d.ts).
+  // harness type states a completion carries its own turn.start's id
+  // (TurnCompleteFields in .claude/types/claude-code.d.ts). A subagent's run
+  // raises its own turn.start, carrying its agentId, which the handler
+  // passes through, and its completion carries that agentId.
   // Null where no nudged turn is open, and where the nudged turn's start
   // carried no id, whose completion then moves the count by nothing.
   let nudgedTurnId: string | null = null;
@@ -4098,13 +4100,13 @@ export const register: Register = async (on, options) => {
   // carries (the operator's with no author where it took none), and the
   // expected-turn entry the turn's text matched, if any. currentGateTurnId is
   // the id that turn.start carried.
-  // Every turn.start overwrites all six. A turn.complete resets them only
-  // when it carries that same id, the closing-by-id rule openTurns uses,
-  // since a background subagent's completion reaches turn.complete while
-  // the persona's own turn is still open. A subagent's turn.start is not
-  // delivered to this hook: in the child debug logs the start count
-  // reconciles with the persona's own prompts. A record delivered into the
-  // running turn as tool context changes none of them.
+  // Every main-loop turn.start overwrites all six, and a subagent's start,
+  // which carries an agentId and is passed through, writes none of them. A
+  // turn.complete resets them only when it carries that same id, the
+  // closing-by-id rule openTurns uses, since a background subagent's
+  // completion reaches turn.complete while the persona's own turn is still
+  // open. A record delivered into the running turn as tool context changes
+  // none of them.
   let currentTurnOriginKind = "unclassified";
   let currentTurnIsPriming = false;
   let currentTurnSenderClass: ChannelSender["senderClass"] = "operator";
@@ -4441,11 +4443,13 @@ export const register: Register = async (on, options) => {
   // When the latest main-loop turn started, in Date.now() milliseconds, or 0
   // where none has. A declared role-boundary marker written before it has
   // outlived its moment: new work arrived in the main conversation, so the
-  // veto's marker read lapses it. The engine's turn.start is the main
-  // conversation's alone; a subagent's loop starts none.
+  // veto's marker read lapses it. The turn.start handler stamps it for a
+  // main-loop start alone, since a subagent's start carries an agentId and
+  // is passed through.
   let lastTurnStartAt = 0;
-  // Every turn.start this module has seen, counted up and never reset, so a
-  // completion can tell whether a newer turn started while it settled.
+  // Every main-loop turn.start this module has seen, counted up and never
+  // reset, so a completion can tell whether a newer turn started while it
+  // settled.
   // sess.state.monitor.turnCount is not that count: a state load or a new
   // tree resets it.
   let turnStartSeq = 0;
@@ -7046,6 +7050,13 @@ export const register: Register = async (on, options) => {
 
   // --- turn.start: track turn ---
   on("turn.start", async ($, e, next) => {
+    // A start in a subagent's or teammate's loop carries the loop's agentId
+    // and is passed through: it writes no value, logs no line and awaits
+    // nothing, on an off session as on an armed one. Every write below is
+    // the main loop's. A start whose agentId is absent, empty or not a string
+    // is the main loop's.
+    const loopAgentId = (e as typeof e & { agentId?: unknown }).agentId;
+    if (typeof loopAgentId === "string" && loopAgentId.length > 0) return next(e);
     // An off session stamps the moment and opens the turn, with one instant
     // for both. The stamp is the input of the compaction veto's
     // declared-marker rule, which lapses a declared boundary once a main-loop

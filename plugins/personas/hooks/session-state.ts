@@ -140,15 +140,17 @@ export interface SessionState {
   // the next turn.start writes what opened that turn as the call's
   // next_trigger outcome. Null where none is held. Session memory, as above.
   jevNextTriggerStampId: string | null;
-  // The step watch's reading of the open turn, replaced at every turn.start.
+  // The step watch's reading of the open turn, replaced at every main-loop
+  // turn.start.
   stepWatch: StepWatch;
   // The index of the open turn's first step whose answer carried an ASK:
-  // marker line, null where no step's has. Reset at every turn.start. A
-  // reading only: the ask record still opens from turn.complete's own match.
+  // marker line, null where no step's has. Reset at every main-loop
+  // turn.start. A reading only: the ask record still opens from
+  // turn.complete's own match.
   askSeenAtStep: number | null;
   // The asks the open turn's ask_open calls opened. turn.complete takes it
   // before its first await as the count the closing text's ASK: lines add
-  // to, so ASK_TURN_MAX caps both routes together. Reset at every
+  // to, so ASK_TURN_MAX caps both routes together. Reset at every main-loop
   // turn.start.
   asksOpenedThisTurn: number;
   // The plan health request's memory, per plan entry: `closingTexts` is the
