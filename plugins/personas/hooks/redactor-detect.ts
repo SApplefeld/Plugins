@@ -877,8 +877,23 @@ const KV_PASSWORD = /((?:^|[\s;&?,])-{0,2}(?:[A-Za-z0-9._-]*[_.-]|pg)?(?:passwor
 // symbol, so it is judged whole here.
 // The opening quote must follow a space, `=`, `:`, `(`, `,`, `[` or `{`, so
 // the text between two strings (`"0"=20cellpadding=3D"`) is not taken.
+// A value can hold a placeholder from an earlier pass. A placeholder's hash
+// is random per session, so it is read as one fixed spelling: the same text
+// is judged the same way in every session. Any text shaped like a
+// placeholder is read that way, whether or not this session minted it.
 const QUOTED_VALUE = /(?<=^|[\s:=(,[{])(["'])([^\s"'\\/.,;`]{12,128})\1/gm
 const PW_SYMBOL = /[!#$%&*()=+[\]{}<>:?@^~]/
+
+// The spelling every placeholder's hash is read as: a lowercase letter and a
+// digit, as most hashes hold, and no run of digits or letters that a rule of
+// looksGenerated turns on.
+const HASH_AS_READ = '1a2b3c4d'
+
+// A copy of `v` for looksGenerated alone. The value as written is what is
+// kept, minted and tested everywhere else.
+function withFixedHashes(v: string): string {
+  return v.replace(TAG, (tag) => `${tag.slice(0, -9)}${HASH_AS_READ}]`)
+}
 
 function looksGenerated(v: string): boolean {
   if (!/[A-Z]/.test(v) || !/[a-z]/.test(v) || !/[0-9]/.test(v) || !PW_SYMBOL.test(v)) return false
@@ -1585,7 +1600,7 @@ function scrubAssignments(text: string, cfg: Config): string {
   }
   if (PW_SYMBOL.test(out)) {
     out = clocked(out).replace(QUOTED_VALUE, (m, q: string, v: string, offset: number, whole: string) => {
-      if (!looksGenerated(v) || isStandIn(v) || cfg.allow.has(v)) return m
+      if (!looksGenerated(withFixedHashes(v)) || isStandIn(v) || cfg.allow.has(v)) return m
       // A MIME boundary is random by design and public.
       if (/boundary=$/i.test(whole.slice(Math.max(0, offset - 9), offset))) return m
       return q + mint('SECRET', v) + q
