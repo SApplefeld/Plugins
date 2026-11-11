@@ -1093,6 +1093,10 @@ export function fleetReadingOf(
     // and any other class ends it.
     const runStart = memo.wedgedSince ?? 0;
     const wedgedSince = wedged ? (runStart > 0 ? runStart : fleetNow) : 0;
+    // What a reading held without a line adds to the count, the one rule
+    // both holds below read. The window's hold says which readings add
+    // nothing.
+    const heldMove = memo.class === value || (memo.departed && told === value) ? 0 : 1;
     // The departed mark goes wherever this key is read again, the memo
     // being the one thing a return is compared against; the line that
     // set it has already gone out.
@@ -1105,15 +1109,19 @@ export function fleetReadingOf(
       // the previous reading back whole, and a memo shared between the
       // two readings would carry this tick's class into the one a
       // rollback restores.
-      // A memo marked departed counts nothing here, whatever its class
-      // reads. The line that set the mark reported a departure rather
-      // than a health class, so `class` still holds the last class
-      // observed while `reported` holds the last one told, and the two
-      // part whenever a change was held back before the departure. A
-      // name returning inside this window in the class it was last told
-      // in has moved nowhere the operator was not told about, and
-      // counting `class` against it there would make the key's next line
-      // claim one more unnamed change than happened.
+      // Two readings count nothing. One is a reading in the class last
+      // seen, since the key has not moved since the reading before, or,
+      // for a key back from a departure, since the move into that class
+      // was counted before it left. The other is a memo marked departed
+      // read in the class last told. The
+      // line that set the mark reported a departure rather than a health
+      // class, so `class` still holds the last class observed while
+      // `reported` holds the last one told, and the two part whenever a
+      // change was held back before the departure. A name returning in
+      // the class it was last told in has moved nowhere the operator was
+      // not told about, and counting `class` against it there would make
+      // the key's next line claim one more unnamed change than happened.
+      // A return in any other class is a move like any other and counts.
       // `reported` takes what the key reads as told, as every write that
       // changes `class` without a line does. That leaves a named key's
       // where it stood. A key no line has named is inside a window only
@@ -1126,7 +1134,7 @@ export function fleetReadingOf(
         class: value,
         reported: told,
         departed: false,
-        suppressed: memo.suppressed + (memo.departed || memo.class === value ? 0 : 1),
+        suppressed: memo.suppressed + heldMove,
         wedgedSince,
       };
       return null;
@@ -1149,12 +1157,16 @@ export function fleetReadingOf(
       // `reported` is empty and the wedge now sits there. The reading
       // that first finds the row wedged cannot tell a passing stall from
       // a frozen drain, and the lead's end can.
+      // The move is counted by the same rule as one inside the window, so
+      // a key returning wedged from a departure is counted too. A reading
+      // in the class last told never reaches this hold, so the one reading
+      // that counts nothing here is a reading in the class last seen.
       current[key] = {
         ...memo,
         class: value,
         reported: told,
         departed: false,
-        suppressed: memo.suppressed + (memo.departed || memo.class === value ? 0 : 1),
+        suppressed: memo.suppressed + heldMove,
         wedgedSince,
       };
       return null;
