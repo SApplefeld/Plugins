@@ -4309,6 +4309,22 @@ export const register: Register = async (on, options) => {
   // Whether the reply tool (channel-relay's mcp__..__reply) was called
   // anywhere during the current turn. Reset at turn.start, set by tool.call.
   let replyCalledThisTurn = false;
+  // The reply-tool calls the model made in the current turn, reset at
+  // turn.start beside the flag, and the clock of the last one the session
+  // saw, null until it has seen one. A send the plugin made raises neither.
+  // The run lines (hooks/run-lines.ts) read both.
+  let replyCallsThisTurn = 0;
+  let lastReplyCallAt: number | null = null;
+  // The plan holders whose hour line (hooks/run-lines.ts) one of its two
+  // sites, the controller's tick and the persona's own turn end, is sending
+  // now. A site sets a holder's mark before the await that stores tickAt
+  // or sends, with no await between its owed check and the set, and clears it
+  // once its send settles, and a site that finds the mark standing sends
+  // nothing, so the two never send the same hour's line. Each mark holds the
+  // time it was set: one older than RUN_LINE_MARK_STALE_MS counts as absent,
+  // and a site clears only the mark it set. Held in memory alone, so a
+  // restart drops it.
+  const hourLineInFlight = new Map<string, number>();
   // Section 5 (goal-every-turn): the text the current turn opened with, cut
   // to what the turn-disposition question's state carries as
   // this_turn_was_asked. Set at turn.start from the event's own text and read
@@ -6280,6 +6296,9 @@ export const register: Register = async (on, options) => {
       writeClaimDirect: () => writeClaimDirect($),
       yieldNow: (onDisk) => yieldNow($, onDisk),
       liveTopLevelAgentRunning: () => liveTopLevelAgentRunning($),
+      toolCall: (args) => $.tool.call(args as any),
+      lastReplyCallAt: () => lastReplyCallAt,
+      hourLineInFlight: () => hourLineInFlight,
       meterDrainStep: (now) => meterDrainStep($, now),
       appendToChannelLog: (lines) => appendToChannelLog($, lines),
       drainSupervisorMailbox: (mailboxPath, turns, skipped, turnOpen) => drainSupervisorMailbox($, mailboxPath, turns, skipped, turnOpen),
@@ -7162,6 +7181,7 @@ export const register: Register = async (on, options) => {
     const currentTurnIsExternal = lastPromptWasExternal;
     lastPromptWasExternal = false;
     replyCalledThisTurn = false;
+    replyCallsThisTurn = 0;
     // Section 5 (goal-every-turn): the turn's tool activity starts empty, and
     // the text this turn opened with is held whole for the disposition and
     // turn-score states, each of which cuts it to its own bound. The
@@ -7450,6 +7470,7 @@ export const register: Register = async (on, options) => {
         setNudgeCountWorkThisTurn: (value) => { nudgeCountWorkThisTurn = value; },
         goalDoneClosedThisTurn: () => goalDoneClosedThisTurn,
         setReplyCalledThisTurn: (value) => { replyCalledThisTurn = value; },
+        noteModelReplyCall: (at) => { replyCallsThisTurn += 1; lastReplyCallAt = at; },
         pendingCompactionBank: () => pendingCompactionBank,
         setPendingCompactionBank: (value) => { pendingCompactionBank = value; },
         currentTurnOriginKind: () => currentTurnOriginKind,
@@ -8036,6 +8057,9 @@ export const register: Register = async (on, options) => {
         turnToolRing: () => turnToolRing,
         turnWorkToolCalls: () => turnWorkToolCalls,
         replyCalledThisTurn: () => replyCalledThisTurn,
+        replyCallsThisTurn: () => replyCallsThisTurn,
+        lastReplyCallAt: () => lastReplyCallAt,
+        hourLineInFlight: () => hourLineInFlight,
         turnPlanEditedPaths: () => turnPlanEditedPaths,
         turnFollowUps: () => turnFollowUps,
         countResetSinceNudgeOpened: () => countResetSinceNudgeOpened,

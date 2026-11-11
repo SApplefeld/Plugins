@@ -142,6 +142,10 @@ export interface ToolCallContext extends SharedHandlerState {
   setNudgeCountWorkThisTurn: (value: number) => void;
   goalDoneClosedThisTurn: () => Map<string, number>;
   setReplyCalledThisTurn: (value: boolean) => void;
+  // One reply-tool call the model made, at `at`: the turn's count of them
+  // rises and the session's last reply time moves, both of which the run
+  // lines (hooks/run-lines.ts) read.
+  noteModelReplyCall: (at: number) => void;
   pendingCompactionBank: () => { turnKind: string } | null;
   setPendingCompactionBank: (value: { turnKind: string } | null) => void;
   currentTurnOriginKind: () => string;
@@ -289,7 +293,7 @@ export function routineScheduleOf(input: { cadence?: unknown; everyHours?: unkno
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -307,8 +311,14 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     }
     return offGuarded.r;
   }
-  sess.state.monitor.totalToolCalls += 1;
-  if (isWorkTool(e.tool)) setToolCallsThisTurn(toolCallsThisTurn() + 1);
+  // A reply the plugin sends through $.tool.call, an hour line the tick
+  // sends while a turn is open among them, re-enters this hook under the
+  // plugin's own origin. It is no call of the turn's, so it joins none of
+  // the turn's counts, its tool activity or its recognition windows below.
+  const isReplyTool = typeof e.tool === "string" && (e.tool.includes("__reply") || e.tool.endsWith("_reply"));
+  const pluginReply = isReplyTool && !originIsEngine();
+  if (!pluginReply) sess.state.monitor.totalToolCalls += 1;
+  if (!pluginReply && isWorkTool(e.tool)) setToolCallsThisTurn(toolCallsThisTurn() + 1);
   // Whether this call comes from a loop other than the main one: e.agentId,
   // the loop's id, is non-empty on a dispatched subagent's, a teammate's, a
   // workflow agent's or an engine fork's calls and absent on the main
@@ -317,11 +327,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // A subagent's own calls do not count as the main loop's work for the
   // nudge count: an agent dispatched in an earlier turn can still be
   // running, and its calls say nothing about whether the worker answered.
-  if (!inSubagent && isNudgeCountWork(e.tool)) setNudgeCountWorkThisTurn(nudgeCountWorkThisTurn() + 1);
+  if (!inSubagent && !pluginReply && isNudgeCountWork(e.tool)) setNudgeCountWorkThisTurn(nudgeCountWorkThisTurn() + 1);
   // Section 5 (goal-every-turn): the main loop's call joins the turn's tool
   // activity, on the same ground the nudge count excludes a subagent's.
-  if (!inSubagent && typeof e.tool === "string") noteTurnToolCall(e.tool, e as { file_path?: unknown; path?: unknown; notebook_path?: unknown; command?: unknown });
-  if (!inSubagent) skillPickTool(e);
+  if (!inSubagent && !pluginReply && typeof e.tool === "string") noteTurnToolCall(e.tool, e as { file_path?: unknown; path?: unknown; notebook_path?: unknown; command?: unknown });
+  if (!inSubagent && !pluginReply) skillPickTool(e);
   // The recall chain's outcome input: a shell command of any loop that
   // fetches a record through memq get without --no-stamp names it as acted
   // on, a subagent's fetch being the session's own as much as the main
@@ -350,11 +360,15 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // The recognition ask's outcome input: each main-loop call counts
   // against the open nudge_acted windows, since a nudge reaches the main
   // loop alone, the nudge standing down on a subagent's calls.
-  if (!inSubagent) settleRecognitionOutcomes(fetches);
-  // Steer 68/69: the reply tool ran somewhere in this turn, so the
-  // channel-reply backstop at turn.complete has nothing to backfill.
-  if (typeof e.tool === "string" && (e.tool.includes("__reply") || e.tool.endsWith("_reply"))) {
+  if (!inSubagent && !pluginReply) settleRecognitionOutcomes(fetches);
+  // Steer 68/69: the model called the reply tool somewhere in this turn, so
+  // the channel-reply backstop at turn.complete has nothing to backfill and
+  // the run lines read the turn as one that sent its own line. Only a call
+  // the model made counts, so a reply the plugin sends sets neither the
+  // flag, the run lines' count of the model's reply calls, nor their time.
+  if (isReplyTool && !pluginReply) {
     setReplyCalledThisTurn(true);
+    noteModelReplyCall(Date.now());
   }
 
   // The compaction boundary the persona's last own turn owed, taken at the
@@ -3195,7 +3209,7 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   const guarded = await guardedNext(askRecognition);
   if ("early" in guarded) return guarded.early;
   let r = guarded.r;
-  if ((r as { isError?: boolean }).isError === true) setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
+  if (!pluginReply && (r as { isError?: boolean }).isError === true) setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
 
   // The recognition ask on the after side of a main-loop call that ran:
   // awaited where the nudge's after hook started it, by then settled,
@@ -3328,8 +3342,10 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // subagent's tool result reaches a loop that cannot verify it and never
   // reaches the owner, so such a call neither reads nor advances the
   // throttle, and the record stays pending for the tick or for the
-  // owner's own next call. inSubagent is read at the top of this handler.
-  if (!inSubagent && sess.isOwner && r.deny === undefined && Date.now() - lastBreakInCheckAt() >= urgentCheckMinMs) {
+  // owner's own next call. A reply the plugin sent is skipped the same way,
+  // since its result goes back to the plugin and never to a model.
+  // inSubagent and pluginReply are read at the top of this handler.
+  if (!inSubagent && !pluginReply && sess.isOwner && r.deny === undefined && Date.now() - lastBreakInCheckAt() >= urgentCheckMinMs) {
     // One clock reading for the whole scan, so every record in it is
     // judged against the same instant.
     const scanAt = Date.now();

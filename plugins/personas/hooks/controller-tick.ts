@@ -46,6 +46,7 @@ import { PLAN_ARCHIVE_DIRS } from "./plan-record";
 import { isPlanEntry, reactivateAskedEntry, roundSummaryText } from "./plan-route";
 import { CONTROLLER_DECISION, PLAN_SWITCH, PLAN_SWITCH_NO_MATCH, controllerLabelsOf, controllerLastAnswerText, controllerStateText, kaizenLine, resolverOf, type ControllerStateFact } from "./question-catalog";
 import { routineDue, scheduleWords } from "./routines";
+import { activeLeafHolderOf, hourLineHeld, hourLineOwed, hourLineSince, hourLineText, hourLineTurnShowsWork, isWorkerSession, releaseHourLineMark, runLineTitleOf, sendHourLine, takeHourLineMark } from "./run-lines";
 import { FINDING_COOLOFF_MS, FINDING_UNROUTABLE_AFTER_MS, buildSelfReviewInput, dedupeSelfReview, evictSelfReview, isClosureTimingLesson, isSelfScoringLesson, reviewOwnRecord, shouldSelfReview } from "./self-review";
 import type { SessionState } from "./session-state";
 import { readPersonaStore } from "./store-files";
@@ -134,6 +135,15 @@ export interface TickContext extends SharedHandlerState {
   writeClaimDirect: () => Promise<void>;
   yieldNow: (onDisk: { activeSessionId: string; epoch: number }) => Promise<void>;
   liveTopLevelAgentRunning: () => Promise<boolean>;
+  // The engine's tool call, which the hour line (hooks/run-lines.ts) is
+  // sent through, and the clock of the last reply-tool call the model made
+  // in this session, null where it has made none.
+  toolCall: (args: { tool: string; message: string }) => Promise<unknown>;
+  lastReplyCallAt: () => number | null;
+  // The ids of the holders whose hour line a site is sending now, each with
+  // the time its mark was set, shared with the turn-end site, so the two
+  // never send the same hour's line.
+  hourLineInFlight: () => Map<string, number>;
   meterDrainStep: (now: number) => void;
   appendToChannelLog: (lines: string[]) => Promise<string>;
   drainSupervisorMailbox: (...args: AfterDeps<typeof drainSupervisorMailboxFromModule>) => ReturnType<typeof drainSupervisorMailboxFromModule>;
@@ -3690,10 +3700,90 @@ export async function idleTick(ctx: TickContext): Promise<void> {
   });
 }
 
-// The tick: the always part, then, where this session owns the persona
-// and no turn is open, the idle part.
+// The hour line's tick site (hooks/run-lines.ts), run on every tick of the
+// owner session in a worker session, turn open or not. A holder owes the
+// line where it is the plan holder of the tree's active leaf, its run is
+// open and RUN_LINE_HOUR_MS has passed with no line recorded. It is sent
+// only where the session shows work, a turn open for RUN_LINE_TURN_GRACE_MS
+// or a top-level agent running, so a waiting session, or one whose turn the
+// operator's message has just opened, is never said to be running, and
+// only where the tick has not tried inside the same span. The try's mark,
+// tickAt, is set and stored before the send, so
+// an overlapping tick sends nothing, and a mark the store did not take is
+// taken back with nothing sent, so a later tick tries. The mark's write is
+// an await another tick, a turn end or a reply call can land under, so the
+// owed rule is read again on a fresh clock once the mark is stored, and a
+// line no longer owed is not sent, the stored mark standing. The text
+// counts its minutes on that fresh clock. A send not taken, by a throw or
+// a returned deny or tool error, raises unsent and leaves threadAt, and the
+// stored mark holds this site while the turn-end site can still send the
+// line. The in-flight mark the two sites share (hourLineInFlight) is read
+// before tickAt is set, set before the mark's write, and cleared once the
+// send settles or the try stops short of it, so a turn end landing while
+// this send is in flight sends nothing, and a tick finding the turn end's
+// send in flight stands down with tickAt unmoved. A mark older than
+// RUN_LINE_MARK_STALE_MS counts as absent, settled as one unsent, and each
+// site clears only the mark it set. What the send left rides
+// a second store write, and one the store refuses leaves that state in
+// memory for the next write. The whole body
+// sits under one catch that logs, so nothing here throws into the tick.
+async function hourLineTick(ctx: TickContext): Promise<void> {
+  const { sess } = ctx;
+  try {
+    if (!sess.isOwner) return;
+    if (!isWorkerSession(sess.persona, ctx.coordinatorPersona, ctx.architectPersona, sess.state.goals.find((g) => g.parentId === null)?.source)) return;
+    const now = Date.now();
+    const lastReplyAt = ctx.lastReplyCallAt();
+    const leafHolder = activeLeafHolderOf(sess.state);
+    const owed = sess.state.goals.filter((g) => g.runLines !== undefined && g.planPath
+      && hourLineOwed(g === leafHolder, g.runLines, lastReplyAt, now) && !hourLineHeld(g.runLines.tickAt, now));
+    if (owed.length === 0) return;
+    if (ctx.turnIsOpen() ? !hourLineTurnShowsWork(sess.turnStartedAt, now) : !(await ctx.liveTopLevelAgentRunning())) return;
+    for (const holder of owed) {
+      const run = holder.runLines;
+      // Read again, since the agent read and an earlier holder's send are
+      // awaits another tick or a turn end can settle the line under.
+      if (run === undefined || !holder.planPath || !hourLineOwed(holder === activeLeafHolderOf(sess.state), run, ctx.lastReplyCallAt(), now) || hourLineHeld(run.tickAt, now)) continue;
+      // The turn end's send of this line is in flight: the tick stands down
+      // before it sets tickAt, so it spends none of its hour. A mark older
+      // than RUN_LINE_MARK_STALE_MS is settled as unsent and replaced by
+      // this site's own.
+      const inFlight = ctx.hourLineInFlight();
+      const markAt = takeHourLineMark(inFlight, run, holder.id, holder.chapterCount ?? 0, holder.sectionCount ?? 0, Date.now(), sess.state.decisions);
+      if (markAt === null) continue;
+      try {
+        const previousTickAt = run.tickAt;
+        run.tickAt = now;
+        let marked = false;
+        try {
+          marked = await ctx.persistOrRollBack(() => {
+            if (run.tickAt === now) run.tickAt = previousTickAt;
+          });
+        } catch { /* the store refused; the mark is taken back and a later tick tries */ }
+        if (!marked) continue;
+        const sendAt = Date.now();
+        if (!hourLineOwed(holder === activeLeafHolderOf(sess.state), run, ctx.lastReplyCallAt(), sendAt)) continue;
+        const chapters = holder.chapterCount ?? 0;
+        const sections = holder.sectionCount ?? 0;
+        const text = hourLineText(runLineTitleOf(run.title, holder.planPath), chapters, sections, hourLineSince(run, ctx.lastReplyCallAt()), sendAt);
+        sess.state.decisions.push(await sendHourLine(ctx.toolCall, run, holder.id, text, chapters, sections, () => Date.now(), () => { /* the stored tickAt is this site's hold */ }));
+      } finally {
+        releaseHourLineMark(inFlight, holder.id, markAt);
+      }
+      // Reached only once the send settled, since every exit above it
+      // continues past this write or throws to the outer catch.
+      try { await ctx.persist(); } catch { /* the store refused; the state above waits in memory */ }
+    }
+  } catch (err) {
+    try { ctx.log(`Agentic: the hour line's tick check stopped: ${safeErrorText(err)}`); } catch { /* non-fatal */ }
+  }
+}
+
+// The tick: the hour line's check, the always part, then, where this
+// session owns the persona and no turn is open, the idle part.
 export async function controllerTick(ctx: TickContext): Promise<void> {
   const { cfg, expectedTurns, turnIsOpen } = ctx;
+  await hourLineTick(ctx);
   if (!(await alwaysTick(ctx))) return;
   // 2. In-flight check: the idle part runs with no turn open.
   if (turnIsOpen()) return;

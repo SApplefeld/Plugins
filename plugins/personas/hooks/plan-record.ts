@@ -20,10 +20,11 @@ export interface PlanRecord {
   chapters: number;
   sections: number;
   next: string | null;
+  title: string | null;
 }
 
 export type PlanRecordReading =
-  | { kind: "read"; complete: boolean; status: string | null; chapters: number; sections: number; next: string | null }
+  | { kind: "read"; complete: boolean; status: string | null; chapters: number; sections: number; next: string | null; title: string | null }
   | { kind: "archived"; at: string }
   | { kind: "unreadable"; reason: string };
 
@@ -110,7 +111,16 @@ const PLAN_DIR_PREFIX = "docs/plans/";
 // Chapter or a highest Chapter with no Next: line, even where an earlier
 // Chapter carries one. The key is case-sensitive and must open the line, as
 // the contract reads it. Brackets in the value are kept as written.
+//
+// Title: the text of the first line opening "# " above the first "##"
+// heading, folded to one line through oneLine, trimmed, cut to
+// PLAN_TITLE_MAX_CHARS code points and trimmed again, so a cut after a space
+// leaves none at the end. It reads null where the header has no
+// such line or that line's text is empty. A "# " line below the first "##"
+// heading is outside the header and is never read. Brackets in the value are
+// kept as written.
 export const NEXT_LINE_MAX_CHARS = 200;
+export const PLAN_TITLE_MAX_CHARS = 80;
 
 // The two heading patterns below take a line terminator class. A line here
 // holds no LF, so the characters \s takes and "." refuses are CR (U+000D),
@@ -148,8 +158,9 @@ function nextValue(raw: string): string | null {
 
 export function parsePlanRecord(text: string): PlanRecord {
   // The split is the card's own. The LINE_TERMINATOR guard in ./agent-state
-  // governs text that leaves the parse for a reader, and the next line is the
-  // only free text here that does, so it alone is folded through oneLine.
+  // governs text that leaves the parse for a reader, and the next line and
+  // the title are the free text here that does, so each is folded through
+  // oneLine.
   // A leading byte-order mark is dropped first, as the card drops it.
   const BOM = String.fromCharCode(0xfeff);
   const lines = (text.startsWith(BOM) ? text.slice(1) : text).split(/\r?\n/);
@@ -164,6 +175,16 @@ export function parsePlanRecord(text: string): PlanRecord {
     }
   }
   const complete = status !== null && status.toLowerCase() === "complete";
+
+  let title: string | null = null;
+  for (const line of lines) {
+    if (line.startsWith("##")) break;
+    const m = /^# ([\s\S]*)$/.exec(line);
+    if (m) {
+      title = headPoints(oneLine(m[1]).trim(), PLAN_TITLE_MAX_CHARS).trim() || null;
+      break;
+    }
+  }
 
   let chapters = 0;
   let sections = 0;
@@ -210,7 +231,7 @@ export function parsePlanRecord(text: string): PlanRecord {
     }
   }
 
-  return { complete, status, chapters, sections, next: latestNext };
+  return { complete, status, chapters, sections, next: latestNext, title };
 }
 
 // The reader. The host's file functions are passed as two closures rather
@@ -247,7 +268,7 @@ export async function readPlanRecord(
         return { kind: "unreadable", reason: `document over ${PLAN_RECORD_MAX_BYTES} bytes` };
       }
       const record = parsePlanRecord(text);
-      return { kind: "read", complete: record.complete, status: record.status, chapters: record.chapters, sections: record.sections, next: record.next };
+      return { kind: "read", complete: record.complete, status: record.status, chapters: record.chapters, sections: record.sections, next: record.next, title: record.title };
     }
     for (const dir of PLAN_ARCHIVE_DIRS) {
       const archived = `${dir}/${name}`;

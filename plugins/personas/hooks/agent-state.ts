@@ -290,6 +290,33 @@ export interface GoalNode {
                       // [RESUME] line finds what it resumes by this flag,
                       // never by activeGoalId, and the resume clears it.
                       // Load drops a value that is not true.
+  runLines?: RunLines; // Plan holder only: the run lines of the plan's run,
+                      // the messages hooks/run-lines.ts decides and the
+                      // turn-end handler sends to the session's own thread.
+                      // Absent until the run opens, and the run is open
+                      // while closedAt is absent.
+}
+
+// A plan holder's run-line state. The start, section and close moments are
+// settled at the persona's own turn end in a worker session, and each
+// settled moment adds one to byTurn, byPlugin or unsent.
+export interface RunLines {
+  title?: string; // the plan document's title, written at each persona's
+                  // own turn end whose reading carries one; a line names the
+                  // plan by its planPath's file name while this is absent
+  startedAt: number; // the clock where the run opened
+  chapters: number; // the Chapter count the thread has been told of
+  closedAt?: number; // the clock where the run closed; absent while it is open
+  threadAt?: number; // the clock of the last line recorded reaching the
+                     // thread in this run, the worker's own or the plugin's
+  tickAt?: number; // the clock of the controller tick's last hour-line try
+  turnTriedAt?: number; // the clock of a turn end's last hour line not taken
+  byTurn: number; // moments at which the turn made a reply of its own
+  byPlugin: number; // start, section and close lines the thread took
+  hours: number; // hour lines the thread took
+  unsent: number; // run-line sends of any kind the thread did not take, by a
+                  // throw or a returned deny or tool error
+  replies: number; // the model's own reply-tool calls while the run was open
 }
 
 export interface EnvErrors {

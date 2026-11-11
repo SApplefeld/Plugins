@@ -31,6 +31,7 @@ import { MEMORY_KIND, MEMORY_KIND_LABELS, RECORD_OUTCOME_TURNS, SCORER_LABELS, S
 import { PROMPT_HEAD_MAX, memqKindOf } from "./recall-text";
 import type { closeTurnRecordAtTurnEnd as closeTurnRecordAtTurnEndFromModule, promotePlanTouchingRecord as promotePlanTouchingRecordFromModule } from "./records";
 import { scrubText } from "./redactor";
+import { RUN_LINE_BY_PLUGIN, RUN_LINE_BY_TURN, RUN_LINE_ERROR_MAX_CHARS, RUN_LINE_TOOL, activeLeafHolderOf, hourLineHeld, hourLineOwed, hourLineSince, hourLineText, isWorkerSession, newRunLines, releaseHourLineMark, runLineDetailOf, runLineMomentOf, runLineRefusalOf, runLineText, runLineTitleOf, runLineUnsentOf, runOpens, sendHourLine, takeHourLineMark } from "./run-lines";
 import { KAIZEN_LONG_TURN_MS } from "./self-review";
 import { skillPickSettle } from "./skill-pick";
 import { safeErrorText } from "./text";
@@ -121,6 +122,14 @@ export interface TurnCompleteContext extends SharedHandlerState {
   turnToolRing: () => readonly string[];
   turnWorkToolCalls: () => number;
   replyCalledThisTurn: () => boolean;
+  // The reply-tool calls the model made in this turn, and the clock of
+  // the last one the session saw, null where it has seen none.
+  replyCallsThisTurn: () => number;
+  lastReplyCallAt: () => number | null;
+  // The ids of the holders whose hour line a site is sending now, each with
+  // the time its mark was set, shared with the controller's tick, so the two
+  // never send the same hour's line.
+  hourLineInFlight: () => Map<string, number>;
   turnPlanEditedPaths: () => readonly string[];
   turnFollowUps: () => { turnId: string | null; hits: readonly string[] };
   countResetSinceNudgeOpened: () => boolean;
@@ -162,7 +171,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -285,6 +294,16 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // the next turn.start rewrites it, and the scorer reads it after the
   // awaits below. Its opening text is askedTextAtDelete above.
   const scoreToolsAtDelete = turnScoreToolsOf(turnToolFlags(), turnToolRing(), replyCalledThisTurn());
+  // Whether the reply tool ran in this turn, read here for the same reason:
+  // the next turn.start resets the flag, and the run lines below read it
+  // after the awaits to tell a turn that sent its own line from one that
+  // sent none.
+  const replyCalledAtDelete = replyCalledThisTurn();
+  // The model's reply calls and the work-tool calls of this turn, read here
+  // for the same reason: the run lines below add the first to the run's
+  // replies and read the second as the hour line's sign of work.
+  const replyCallsAtDelete = replyCallsThisTurn();
+  const toolCallsAtDelete = toolCallsThisTurn();
   // Section 6 (goal-every-turn): route one's own fact, read here for the same
   // reason. The plan documents this turn edited are rewritten by the next
   // turn.start too, and route one reads them after an await of its own. The
@@ -535,9 +554,15 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // completion as the channel flag does. A re-prompt answer empty after
   // trimming is the turn ending with nothing left, so nothing is sent.
   let submittedReplyBackstop = false;
+  // Whether the backstop's direct reply call returned a result carrying
+  // neither a deny nor a tool error, so this turn's answer reached the
+  // thread. The run lines below count that as a reply of the turn's own. A
+  // call that threw, or returned a deny or a tool error, leaves this false.
+  let replyBackstopSent = false;
   if (!skipped && sess.isOwner && completesGateTurn && (currentTurnIsChannelOrigin() || currentTurnIsReprompt()) && !(currentTurnIsReprompt() && answerScrubbed.trim() === "") && !replyCalledThisTurn() && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
     try {
-      await toolCall({ tool: "mcp__plugin_relay_channel-relay__reply", message: answerScrubbed });
+      const backstopResult = await toolCall({ tool: "mcp__plugin_relay_channel-relay__reply", message: answerScrubbed });
+      replyBackstopSent = runLineRefusalOf(backstopResult) === null;
       sess.state.decisions.push({
         timestamp: Date.now(),
         loop: "monitor",
@@ -1165,6 +1190,9 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // one of the two is true; an unreadable document sets neither.
   let planChapterAdvanced = false;
   let planCompletedByDocument = false;
+  // This turn end's reading of the turn's plan holder's document, for the
+  // run lines below, or null where no read ran or the read threw.
+  let planReading: PlanRecordReading | null = null;
   // Whether the checkout holding `holder`'s document, read in `planDir`,
   // holds its completion: true where git answers a branch line with no
   // upstream, a commit ahead, or any line after it. A held entry logs one
@@ -1271,6 +1299,7 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
     const holderClosed = holder.status === "complete" || holder.status === "abandoned";
     try {
       const { reading, liveDir, planDir } = await readPlanDocument(planPath);
+      planReading = reading;
       if (liveDir !== null && planDir !== null && planDir !== liveDir) {
         if (!holderClosed && !planRecordDirResolvedLogged.has(holder.id)) {
           planRecordDirResolvedLogged.add(holder.id);
@@ -1387,6 +1416,121 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
         });
       }
     }
+  }
+
+  // The run lines (hooks/run-lines.ts) for the start, section and close
+  // moments, settled only at the persona's own turn end in a worker session,
+  // after the document read above has stored the Chapter count. A subagent's
+  // completion settles none, since the worker's turn can still send its own.
+  // The told count and the close are written before the send is awaited, so
+  // a completion landing during the send finds the moment settled. A send
+  // not taken still settles its moment and never becomes a prompt.
+  //
+  // The hour line's turn-end site follows, for each open run that owed
+  // none of those moments at this turn end. It is sent where the run has
+  // gone RUN_LINE_HOUR_MS with no line recorded and the turn shows work: it
+  // called a work tool and its closing text does not open BLOCKED:. A send
+  // not taken sets turnTriedAt, which holds this site for the same span.
+  // A holder whose hour line the controller's tick is sending now gets
+  // nothing here, and the mark this site sets around its own send keeps the
+  // tick off the same line. Both the open and the hour line key on the plan
+  // holder of the tree's active leaf, never on the holder's own status.
+  // Last, the turn's own reply calls join the run's replies.
+  if (sess.isOwner && completesGateTurn && !skipped
+    && isWorkerSession(sess.persona, coordinatorPersona, architectPersona, sess.state.goals.find((g) => g.parentId === null)?.source)) {
+    // A reply of the turn's own: the reply tool ran in the turn, or the
+    // reply backstop's direct call returned for the turn's answer.
+    const repliedThisTurn = replyCalledAtDelete || replyBackstopSent;
+    const documentReadAndOpen = planReading !== null && planReading.kind === "read" && !planReading.complete;
+    let openedHolder: GoalNode | undefined;
+    let closedHolder: GoalNode | undefined;
+    const owedNoMoment: GoalNode[] = [];
+    if (planHolder && runOpens(planHolder === activeLeafHolderOf(sess.state), documentReadAndOpen, planHolder.runLines !== undefined)) {
+      planHolder.runLines = newRunLines(Date.now());
+      openedHolder = planHolder;
+    }
+    if (planHolder?.runLines && planReading !== null && planReading.kind === "read" && planReading.title !== null) {
+      planHolder.runLines.title = planReading.title;
+    }
+    for (const holder of [...sess.state.goals]) {
+      const run = holder.runLines;
+      if (run === undefined || run.closedAt !== undefined || !holder.planPath) continue;
+      const chapters = holder.chapterCount ?? 0;
+      const sections = holder.sectionCount ?? 0;
+      const moment = runLineMomentOf(holder.status, holder === openedHolder, chapters, run.chapters);
+      if (moment === null) {
+        owedNoMoment.push(holder);
+        continue;
+      }
+      if (moment === "abandoned") {
+        run.closedAt = Date.now();
+        continue;
+      }
+      run.chapters = chapters;
+      if (moment === "close") {
+        run.closedAt = Date.now();
+        closedHolder ??= holder;
+      }
+      let outcome: string;
+      if (repliedThisTurn) {
+        run.byTurn += 1;
+        run.threadAt = Date.now();
+        outcome = RUN_LINE_BY_TURN;
+      } else {
+        const text = runLineText(moment, runLineTitleOf(run.title, holder.planPath), chapters, sections, holder.nextSection);
+        try {
+          const refusal = runLineRefusalOf(await toolCall({ tool: RUN_LINE_TOOL, message: scrubText(text).text }));
+          if (refusal === null) {
+            run.byPlugin += 1;
+            run.threadAt = Date.now();
+            outcome = RUN_LINE_BY_PLUGIN;
+          } else {
+            run.unsent += 1;
+            outcome = runLineUnsentOf(headPoints(safeErrorText(refusal), RUN_LINE_ERROR_MAX_CHARS));
+          }
+        } catch (err) {
+          run.unsent += 1;
+          outcome = runLineUnsentOf(headPoints(safeErrorText(err), RUN_LINE_ERROR_MAX_CHARS));
+        }
+      }
+      sess.state.decisions.push({
+        timestamp: Date.now(),
+        loop: "goal",
+        action: "run_line",
+        detail: runLineDetailOf(holder.id, moment, chapters, sections, outcome),
+      });
+    }
+    // A reply of the turn's own is a line on the thread whether or not a
+    // moment was owed, so the stored time survives a restart.
+    if (repliedThisTurn && planHolder?.runLines && planHolder.runLines.closedAt === undefined) {
+      planHolder.runLines.threadAt = Date.now();
+    }
+    const showsWork = toolCallsAtDelete > 0 && !(statusLine !== null && statusLine.state === "blocked");
+    for (const holder of owedNoMoment) {
+      const run = holder.runLines;
+      const now = Date.now();
+      if (run === undefined || !holder.planPath || !hourLineOwed(holder === activeLeafHolderOf(sess.state), run, lastReplyCallAt(), now)) continue;
+      if (!showsWork || hourLineHeld(run.turnTriedAt, now)) continue;
+      const chapters = holder.chapterCount ?? 0;
+      const sections = holder.sectionCount ?? 0;
+      // The tick's send of this line is in flight: nothing is sent, pushed
+      // or moved, and this turn end does not retry if that send fails. A
+      // mark older than RUN_LINE_MARK_STALE_MS is settled as unsent and
+      // replaced by this site's own.
+      const markAt = takeHourLineMark(hourLineInFlight(), run, holder.id, chapters, sections, now, sess.state.decisions);
+      if (markAt === null) continue;
+      const text = hourLineText(runLineTitleOf(run.title, holder.planPath), chapters, sections, hourLineSince(run, lastReplyCallAt()), now);
+      try {
+        sess.state.decisions.push(await sendHourLine(toolCall, run, holder.id, text, chapters, sections, () => Date.now(), () => { run.turnTriedAt = now; }));
+      } finally {
+        releaseHourLineMark(hourLineInFlight(), holder.id, markAt);
+      }
+    }
+    // The holder whose close this turn end settled, else the turn's plan
+    // holder where its run is open, so the turn that opens a run counts
+    // its own reply calls.
+    const repliesRun = closedHolder?.runLines ?? (planHolder?.runLines?.closedAt === undefined ? planHolder?.runLines : undefined);
+    if (repliesRun !== undefined) repliesRun.replies += replyCallsAtDelete;
   }
 
   // The plan health request and its one outcome joiner. Everything here
