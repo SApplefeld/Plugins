@@ -37,7 +37,8 @@
 // the reader may carry a body, as the plan route's reason words and some 409s do. Nothing from a
 // header reaches the log: a refusal
 // line carries the socket's own peer address and a fixed reason.
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
@@ -210,6 +211,70 @@ export function resolveStatic(root: string, pathname: string): string | null {
   return resolved.startsWith(base + path.sep) ? resolved : null;
 }
 
+/**
+ * The page version of a static root: the first 16 hexadecimal characters, lower-case, of a SHA-256
+ * over the root's page files, or null where there is none to name. A page file is a file under
+ * the root, at any depth, whose extension `STATIC_TYPES` names, by the same lower-cased test the
+ * static handler serves by, so the version moves when a file a browser can be served changes and
+ * stays when any other file does.
+ *
+ * A link is followed to what the handler would serve, since the handler reads through one: a link
+ * to a file counts as a page file and a link to a folder is walked as a folder, each under the
+ * link's own path, wherever the target sits. A link that resolves to nothing is skipped, as the
+ * handler answers 404 for it. A folder is not entered again while the walk is already inside it,
+ * told by its real path, so a link back to a folder above it ends there and the walk cannot loop.
+ *
+ * The files are taken in the plain string order of their paths relative to the root, written with
+ * forward slashes, so the root's own place and the platform's separator are not in the value. Each
+ * feeds the hash its path, a NUL, its length in decimal, a NUL, then its bytes: the length marks
+ * where a file ends, so no two sets of files feed the same bytes. A root or a file that cannot be
+ * read, and a root holding no page file, each answer null and never throw.
+ */
+export function pageVersion(root: string): string | null {
+  const files: { name: string; file: string }[] = [];
+  const open = new Set<string>();
+  const walk = (directory: string, prefix: string): void => {
+    const real = realpathSync.native(directory);
+    if (open.has(real)) return;
+    open.add(real);
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      let kind: { isDirectory: () => boolean; isFile: () => boolean } = entry;
+      if (entry.isSymbolicLink()) {
+        try {
+          kind = statSync(file);
+        } catch (error) {
+          // A link to nothing is one the handler would answer 404, so it is not a page file. A target
+          // that is there and cannot be read is an unreadable page file, which leaves no version.
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") continue;
+          throw error;
+        }
+      }
+      if (kind.isDirectory()) {
+        walk(file, `${prefix}${entry.name}/`);
+      } else if (kind.isFile() && Object.hasOwn(STATIC_TYPES, path.extname(entry.name).toLowerCase())) {
+        files.push({ name: prefix + entry.name, file });
+      }
+    }
+    open.delete(real);
+  };
+  try {
+    walk(path.resolve(root), "");
+    if (files.length === 0) return null;
+    files.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+    const hash = createHash("sha256");
+    for (const { name, file } of files) {
+      const body = readFileSync(file);
+      hash.update(`${name}\0${String(body.length)}\0`, "utf8");
+      hash.update(body);
+    }
+    return hash.digest("hex").slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+
 /** The file a page path serves, the shell for every fixed path and every `/repo/<name>`, or null for none. */
 export function pageFor(pathname: string): string | null {
   if (PAGE_ROUTES.has(pathname)) return SHELL_PAGE;
@@ -254,6 +319,10 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
   // matches and the host's node is unknown.
   let bind = config.bind;
   const staticRoot = path.resolve(config.staticRoot);
+  // Read here, once, and held for the handler's life: the value names the page files this process
+  // started on, so a page left open learns of a new build when the broker restarts on it and not
+  // while the files change under a broker that still runs the old routes.
+  const version = pageVersion(staticRoot);
 
   /**
    * Whether a path is one the reader list admits: a JSON route under `/web/` other than the file
@@ -350,6 +419,8 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
     response.writeHead(200, {
       "content-type": STATIC_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
       "content-length": body.length,
+      // A browser keeps no copy, so each page load fetches the files the root holds then.
+      "cache-control": "no-store",
       "x-content-type-options": "nosniff",
       "content-security-policy": CONTENT_SECURITY_POLICY,
       "x-frame-options": "DENY",
@@ -364,6 +435,10 @@ export function createWebHandler(options: WebHandlerOptions): WebHandler {
     // 404 here rather than a fall-through to the static handler, so nothing under `/web/` is ever a
     // file.
     if (pathname.startsWith(ROUTE_PREFIX)) {
+      // Set before anything under `/web/` is answered and merged into whatever head is written
+      // below, so every answer to an admitted request names the page files, the table's 404 and a
+      // route's empty refusal included. An output only: no request's header of this name is read.
+      if (version !== null) response.setHeader("x-page-version", version);
       const target = routeFor(pathname);
       // GET and POST alone, so the gate's POST guard is the whole of the write check and a handler
       // never meets a method it would have to refuse itself.

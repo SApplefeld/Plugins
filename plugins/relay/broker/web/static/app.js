@@ -452,6 +452,7 @@
         body: JSON.stringify({ text }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
+      heardPageVersion(response.headers.get("x-page-version"));
     } catch (error) {
       steer.status = "The broker could not be reached, so the line is not confirmed.";
     }
@@ -673,6 +674,7 @@
       else showToast("The broker could not be reached, so the tag is not confirmed." + again);
       return;
     }
+    heardPageVersion(response.headers.get("x-page-version"));
     let answer = null;
     let readable = true;
     try {
@@ -740,6 +742,7 @@
       else showToast("The broker could not be reached, so the tag is not confirmed." + again);
       return;
     }
+    heardPageVersion(response.headers.get("x-page-version"));
     let answer = null;
     let readable = true;
     try {
@@ -2641,6 +2644,7 @@
       body: pick.file,
       signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
     });
+    heardPageVersion(response.headers.get("x-page-version"));
     if (response.status === 413) throw new Unreadable(pick.name + " is larger than this host's file limit");
     if (response.status === 404) throw new Unreadable("no live session took " + pick.name);
     if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status + " to " + pick.name);
@@ -2661,6 +2665,7 @@
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
+    heardPageVersion(response.headers.get("x-page-version"));
     if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status, response.status);
     const answer = await response.json();
     return txt(answer.status);
@@ -2847,6 +2852,7 @@
           body: JSON.stringify(Object.assign({ lineage }, body)),
           signal: AbortSignal.timeout(TIMEOUT_MS),
         });
+        heardPageVersion(response.headers.get("x-page-version"));
         if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status);
         const answer = await response.json();
         const status = txt(answer.status);
@@ -3335,6 +3341,12 @@
   const REVIEW_CHANGED_WORDS = "the pull request changed since you read it, read it again";
 
   /**
+   * Any item's `changed` on a page whose broker now names other page files: the act body this script
+   * sends is likely one the broker no longer takes, so reading the item again changes nothing.
+   */
+  const OLD_PAGE_CHANGED_WORDS = "this page is out of date, reload it";
+
+  /**
    * A Today headline is cut at this many code points, an ellipsis marking the cut, and the whole
    * text is in the item's Context. Two upstream readers cut a text with no mark before it reaches the
    * page. The broker's ledger reader keeps 1,000 code points of an ask's stored question, which is
@@ -3454,11 +3466,15 @@
     return one.kind === "review" && txt(one.entryId) !== "";
   }
 
-  /** The words beside an item once its act is answered; a status the table lacks is named as the broker said it. */
+  /**
+   * The words beside an item once its act is answered; a status the table lacks is named as the broker said it. On an old
+   * page, as `heardPageVersion` holds it, a `changed` of any kind says the page is out of date.
+   */
   function actWords(status, act, item) {
     if (status === "delivered") return DELIVERED_WORDS[act] + ", sent to " + txt(item.repo);
-    if (status === "changed" && item.kind === "blocked") return BLOCK_CHANGED_WORDS;
-    if (status === "changed" && item.kind === "review") return REVIEW_CHANGED_WORDS;
+    if (status === "changed" && item.kind === "blocked") return pageOld ? OLD_PAGE_CHANGED_WORDS : BLOCK_CHANGED_WORDS;
+    if (status === "changed" && item.kind === "review") return pageOld ? OLD_PAGE_CHANGED_WORDS : REVIEW_CHANGED_WORDS;
+    if (status === "changed" && pageOld) return OLD_PAGE_CHANGED_WORDS;
     return Object.prototype.hasOwnProperty.call(ACT_WORDS, status) ? ACT_WORDS[status] : "the broker answered " + status + ", left open";
   }
 
@@ -3485,6 +3501,7 @@
     } catch (error) {
       throw new Unreadable("the broker did not answer");
     }
+    heardPageVersion(response.headers.get("x-page-version"));
     if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status, response.status);
     try {
       return await response.json();
@@ -5423,6 +5440,8 @@
 
   const app = document.getElementById("app");
   const notice = document.getElementById("notice");
+  /** The lasting line that says the broker was updated after this page loaded, outside the patched tree; hidden while the page is current. */
+  const reloadLine = document.getElementById("reload-line");
   /** The screen drawn, by name and by its `PAGES` entry, and the list row the address selects; null before the first address is read. */
   let screen = null;
   let page = null;
@@ -5605,6 +5624,41 @@
     notice.hidden = false;
   }
 
+  /** The reload line's words. */
+  const RELOAD_WORDS = "The broker was updated after this page loaded. Reload the page.";
+
+  /** The page's own version: the first `x-page-version` an answer carried, which names the page files this script was served from; null until one arrives. */
+  let ownVersion = null;
+  /** Whether the newest version an answer carried differs from the page's own, so the broker now runs on other page files than this script's. */
+  let pageOld = false;
+
+  /**
+   * Takes the `x-page-version` of one answer from `/web/`, or null where it carried none, and shows or
+   * hides the reload line. The first value is the page's own; the page is old while the newest value
+   * differs from it, and current again once one matches it. An answer with no value changes nothing,
+   * so a broker that sends none never makes the page old. Every fetch whose answer the page reads hands
+   * its header here before reading the status or the body, so the words for a refused act already read the page as old.
+   * No draw, poll or screen change touches the line; only this does. A shell with no line still holds
+   * whether the page is old, so the words for a `changed` follow it and no fetch throws here.
+   */
+  function heardPageVersion(value) {
+    if (value === null || value === "") return;
+    if (ownVersion === null) {
+      ownVersion = value;
+      return;
+    }
+    pageOld = value !== ownVersion;
+    if (reloadLine === null) return;
+    // Shown before its words go in, so a screen reader announces the status region's first words.
+    reloadLine.hidden = !pageOld;
+    if (pageOld && reloadLine.childNodes.length === 0) {
+      const button = h("button", "reload-button", "Reload");
+      button.type = "button";
+      button.addEventListener("click", () => window.location.reload());
+      reloadLine.append(h("span", "reload-words", RELOAD_WORDS), button);
+    }
+  }
+
   /**
    * Builds `view` whole off to the side, then patches it into the page, so a live node whose key
    * persists keeps its scroll, its selection, its focus and the words typed in it. A builder that
@@ -5664,6 +5718,7 @@
     } catch (error) {
       throw new Unreadable("the broker did not answer");
     }
+    heardPageVersion(response.headers.get("x-page-version"));
     if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status, response.status);
     try {
       return await response.json();
@@ -5722,6 +5777,7 @@
         body: JSON.stringify(drawnAtOf(name, drawn)),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
+      heardPageVersion(response.headers.get("x-page-version"));
       if (!response.ok) throw new Unreadable("the broker answered HTTP " + response.status);
       if (here !== visit) return;
       const [read] = await Promise.all([fetchView(page.url()), fetchBeside()]);
@@ -6009,10 +6065,13 @@
     enter(at);
   }
 
-  // The patch and the router are the two members the script exposes, so a node test drives each
-  // on its own, as `markdown.js` exposes its renderer; the page itself reads nothing off them.
+  // The patch, the router, the version check and the act words are the members the script exposes,
+  // so a node test drives each on its own, as `markdown.js` exposes its renderer; the page itself
+  // reads nothing off them.
   window.patch = patch;
   window.route = routeOf;
+  window.heardPageVersion = heardPageVersion;
+  window.actWords = actWords;
 
   start();
 })();

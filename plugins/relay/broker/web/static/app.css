@@ -83,7 +83,10 @@ html {
   height: 100%;
 }
 
+/* The body stacks the reload line, while it shows, above the shell's frame, which takes the rest. */
 body {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   height: 100%;
   background: var(--bg);
@@ -223,13 +226,17 @@ h1,
 }
 
 /* The shell's frame: the rail and the panes fill the window, and each pane scrolls on its own. On a
-   phone the panes stack in the one column, with the rail as the tab bar across the foot. */
+   phone the panes stack in the one column, with the rail as the tab bar across the foot. The frame
+   fills the body below the reload line, and it holds the phone's sheet and its dimming, which are
+   placed within it, so neither covers the line. */
 #app {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) var(--tabs-h);
-  height: 100%;
+  flex: 1 1 0;
+  min-height: 0;
   min-width: 0;
+  contain: layout;
 }
 
 #app > .muted {
@@ -542,6 +549,52 @@ a.pill:hover {
 
 .notice[hidden] {
   display: none;
+}
+
+/* Reload line: the broker now runs on other page files than this page's script. It lasts through every
+   poll and screen change, laid as the notice is in the warn tint. It sits in the flow above the shell's
+   frame and pushes it down, so it covers no control. While it shows, the notice joins the flow above it. */
+.reload-line {
+  flex: 0 0 auto;
+  margin: 12px 12px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: 12px;
+  color: var(--warn);
+  padding: 10px 12px;
+  font-size: var(--t-md);
+  font-weight: 500;
+}
+
+.reload-line[hidden] {
+  display: none;
+}
+
+/* While the reload line shows, the notice joins the flow above it, so the two stack and push the shell's
+   frame down, and a notice that stays up through failed polls covers neither the Reload button nor any
+   control of the page. */
+body:has(> .reload-line:not([hidden])) > .notice {
+  position: static;
+  flex: 0 0 auto;
+  margin: 12px 12px 0;
+}
+
+.reload-button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn);
+  color: var(--warn-soft);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 /* Changed: a node whose text or attribute the latest poll moved, which the patch flags for a moment. The fade
