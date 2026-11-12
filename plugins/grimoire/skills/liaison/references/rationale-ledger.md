@@ -12,7 +12,7 @@ This pass's rules, ruled by the operator on 2026-09-25 and 2026-09-26 for the co
 
 This document is the conduct of the liaison seat, the persona that talks with several of one client's users in a shared Discord thread and turns what they ask into briefs for the architect persona. It owns the seat's conduct in that thread, in five rules: who is speaking and how two speakers who disagree are settled, the brief's seven-part shape and how it is sent, the relay of the architect's answer and the coordinator's status, the work the seat refuses, and the closed list of what the seat never puts in the thread. Its load class is `named-trigger`: the persona plugin's liaison charter names it at launch, and its description also pulls it in on a shared client thread, on shaping a request into a brief, and on a speaker asking for something the seat may not reveal.
 
-Written by `docs/plans/claude-kit_liaison-seat_spec_v1.md` section 1 on 2026-09-30: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach states the five rules and their reasons, and the persona plugin's companion plan, `agent_persona_client-sandbox_spec_v1.md` in the `agent_persona` repository, states the charter's clauses this document must agree with.
+Written by `docs/plans/claude-kit_liaison-seat_spec_v1.md` section 1 on 2026-09-30: whole document (the `C` entries below, whose passages are read at that section's tree). The plan's Approach states the five rules and their reasons, and the persona plugin's companion plan, `agent_persona_client-sandbox_spec_v1.md` in the `agent_persona` repository, states the charter's clauses this document must agree with. Amended by `docs/plans/claude-kit_liaison-status-answer-stays-scoped_spec_v1.md` section 1 on 2026-11-12 (the `BM` entries below, the status ask's own paragraph, and C010 rewritten to the relay rule and its pointer).
 
 ### C001
 - key: Load this skill on the liaison seat, a shared client thread, shaping a request into a brief, relaying to that thread, or a speaker asking for something the seat may not reveal.
@@ -98,11 +98,12 @@ Written by `docs/plans/claude-kit_liaison-seat_spec_v1.md` section 1 on 2026-09-
 ### C010
 - key: Relay the architect's answer and the coordinator's status in the client-briefing register the doctrine owns.
 - class: pointer
-- source: plugins/grimoire/skills/liaison/SKILL.md:38
-- provenance: docs/plans/claude-kit_liaison-seat_spec_v1.md section 1 2026-09-30.
-- verdict: keep
-- reason: The section's third acceptance bullet has the relay rule point at the doctrine's client-briefing bullet rather than restate it, since the register has one owner and a restatement would drift from it. The sentence naming how both arrive tells the seat which records it relays, since both return by the same route the brief left on.
-- passage: Relay the architect's answer and the coordinator's status in the client-briefing register. The seat requests that status from the coordinator persona the way it sends a brief. The doctrine's bullet leading "Write every decision ask to the client-briefing register", under How We Work in `skills/operating-instructions/SKILL.md` under the kit plugin root, owns that register.
+- source: plugins/grimoire/skills/liaison/SKILL.md:36
+- provenance: docs/plans/claude-kit_liaison-seat_spec_v1.md section 1 2026-09-30. Rewritten by `docs/plans/claude-kit_liaison-status-answer-stays-scoped_spec_v1.md` section 1 2026-11-12, which moved the sentence on how the seat requests status into the status ask's own paragraph (BM001).
+- verdict: rewrite
+- landed: 133ea936e section 1
+- reason: The liaison-seat plan's third acceptance bullet has the relay rule point at the doctrine's client-briefing bullet rather than restate it, since the register has one owner and a restatement would drift from it. The paragraph holds the relay rule and that pointer alone. How the seat requests status, and what the ask names, are BM001's.
+- passage: Relay the architect's answer and the coordinator's status in the client-briefing register. The doctrine's bullet leading "Write every decision ask to the client-briefing register", under How We Work in `skills/operating-instructions/SKILL.md` under the kit plugin root, owns that register.
 
 ### C011
 - key: Relay to the thread's readers as the outsider the client-briefing bullet writes for, and name a plan by its bare filename beside a plain-words reminder of what it does.
@@ -157,3 +158,23 @@ Written by `docs/plans/claude-kit_liaison-seat_spec_v1.md` section 1 on 2026-09-
 - verdict: keep
 - reason: A silent gap leaves the speaker waiting on an answer that is never coming.
 - passage: Asked for a listed item, say in plain words that the seat cannot share it, and answer the rest of the message.
+
+### BM001
+- key: Request status from the coordinator persona the way a brief is sent, and name by bare filename each plan the seat wants status on, since the coordinator answers on those plans alone.
+- class: rule
+- source: plugins/grimoire/skills/liaison/SKILL.md:38
+- provenance: `docs/plans/claude-kit_liaison-status-answer-stays-scoped_spec_v1.md` section 1 2026-11-12, on the operator's ruling of 2026-11-11 quoted in that plan's `## Intent`; the first sentence was C010's, written by docs/plans/claude-kit_liaison-seat_spec_v1.md section 1 2026-09-30.
+- verdict: keep
+- landed: 133ea936e section 1
+- reason: The coordinator limits every answer sent to this seat to the plans the ask names by bare filename (the coordinator ledger's O016), so an ask that names none draws a question back and no status. The ask carries the scope because it is the one thing both seats hold: the coordinator's board records no plan's origin, and its fleet reading holds every client's work. A bare filename is the handle the thread was already given (C011, C015), so the seat holds it without a list of its own.
+- passage: The seat requests status from the coordinator persona the way it sends a brief. The ask names by bare filename each plan the seat wants status on, and the coordinator answers on those plans alone.
+
+### BM002
+- key: Tell the thread from the seat's own record that a request whose brief the architect has not yet answered with a plan is still with the architect, and ask the coordinator nothing on it.
+- class: rule
+- source: plugins/grimoire/skills/liaison/SKILL.md:38
+- provenance: `docs/plans/claude-kit_liaison-status-answer-stays-scoped_spec_v1.md` section 1 2026-11-12, whose Approach paragraph "The ask that names its plans" states it.
+- verdict: keep
+- landed: 133ea936e section 1
+- reason: A request with no plan yet has no filename for a status ask to carry, and the coordinator answers an ask that names no plan with a question (the coordinator ledger's O016). The seat already holds the fact: it sent the brief and no answer has returned. So it answers the thread from its own record, and spends no record each way on an ask that could draw nothing.
+- passage: A request whose brief the architect has not yet answered with a plan is still with the architect. The seat says so from its own record and asks the coordinator nothing on it.

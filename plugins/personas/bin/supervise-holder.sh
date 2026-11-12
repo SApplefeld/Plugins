@@ -427,8 +427,8 @@ holder_ask_file_whole() {  # <file> <first line as read>
     if [ -n "${ARCHITECT_PERSONA:-}" ]; then
       COORDINATOR_ROLE_INSTRUCTION+="You reach the architect persona through agentic_say with the persona argument set to ${ARCHITECT_PERSONA}, its name on this fleet. "
     fi
-    # The liaison persona asks this persona for the fleet's state on behalf of
-    # the people in its thread. Its record arrives on the worker leg, so this
+    # The liaison persona asks this persona for status on behalf of the
+    # people in its thread. Its record arrives on the worker leg, so this
     # clause names that label as the liaison's status ask, and the name in the
     # label is the one the skill's answer is sent to, the same value the
     # liaison's own launch matches on. Built only where a liaison is named, and
