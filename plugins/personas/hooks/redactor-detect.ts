@@ -920,7 +920,9 @@ function looksGenerated(v: string): boolean {
 }
 
 // Things that stand in for a value without being one: a variable, a call, a
-// template, a placeholder, a type, the key's own name, a path.
+// template, a placeholder, a type, the key's own name, a path. A path is
+// told by its opening: POSIX (`/x`, `~x`, `./x`, `../x`) or a Windows drive
+// (`C:\x`, `C:/x`), one letter, a colon, then a slash or a backslash.
 // A call has to close (`getSecret("x")`), and a YAML tag is a word
 // (`!Ref DbPassword`), so a generated password that starts `ab(` or `!` is
 // not taken for one.
@@ -935,7 +937,7 @@ function isStandIn(v: string): boolean {
     REFERENCE.test(v) ||
     SELF_REF.test(v) ||
     PLACEHOLDER.test(v) ||
-    /^(?:[/~]|\.\.?\/)/.test(v) ||
+    /^(?:[/~]|\.\.?\/|[A-Za-z]:[\\/])/.test(v) ||
     /^\{[\w$.]+\}$/.test(v) ||
     // A test fixture made of words: `test-internal-key`, `fake_secret`.
     (/^(?:[a-z]+[_-])*(?:test|fake|dummy|mock|sample|example|placeholder|changeme)(?:[_-][a-z]+)*$/.test(v) && /[_-]/.test(v)) ||
