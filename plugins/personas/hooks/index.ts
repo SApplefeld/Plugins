@@ -1187,13 +1187,17 @@ async function redactedSubmitNext(dp: any, e: PromptSubmitInput, next: Next<"pro
  * part of the tool.call handler every arming tier runs. Answers `early`,
  * the result that stands in for next(e) where a guard refused the call under
  * live or the hook's budget ran out first, or `r`, next(e)'s result with the
- * guards' and after hooks' contexts leading its own. `spawnTypes` is the
+ * guards' and after hooks' contexts leading its own. `refused` rides beside
+ * an early answer and never inside it: true where a guard's deny or a
+ * guard's failure refused the call, so the tool did not run, and false at
+ * the budget's end, where the dispatch serves the tool without this hook.
+ * `spawnTypes` is the
  * register call's map of started subagents to their types, for the guard
  * context. `askRecognition`, where the handler passes one, is handed to the
  * recognition nudge's after hook. `turnLeaf` reads the entry the turn
  * started on, for the pr-ready after hook.
  */
-async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, guardsOption: GuardsOption, spawnTypes: SpawnTypes, askRecognition: (() => Promise<void>) | undefined, turnLeaf: () => string | null): Promise<{ early: ToolCallResult } | { r: ToolCallResult }> {
+async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, guardsOption: GuardsOption, spawnTypes: SpawnTypes, askRecognition: (() => Promise<void>) | undefined, turnLeaf: () => string | null): Promise<{ early: ToolCallResult; refused: boolean } | { r: ToolCallResult }> {
   // The before-tool guards, on every call whatever its loop. Each matched
   // guard's verdict is journaled; under live a deny is this call's result
   // and under shadow the call runs and each guard's verdict is set beside
@@ -1237,13 +1241,13 @@ async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, g
     }
     for (const v of guardVerdicts) await guardEvent(dp, "guard_verdict", { guard: v.guard, tool: e.tool, verdict: v.verdict, reason: v.reason, ms: v.ms });
     if (guardFailure === null && guardsOption === "live") {
-      if (typeof before.deny === "string") return { early: { deny: before.deny } };
+      if (typeof before.deny === "string") return { early: { deny: before.deny }, refused: true };
       if (Array.isArray(before.context)) guardContext = before.context;
     }
   }
   if (guardFailure !== null) {
     await guardEvent(dp, "guard_error", { guard: guardFailure.guard, phase: "before", failure: guardFailure.reason });
-    if (guardsOption === "live") return { early: { deny: guardFailure.message } };
+    if (guardsOption === "live") return { early: { deny: guardFailure.message }, refused: true };
   }
 
   // The dispatch has gone on without this hook once next.signal aborts:
@@ -1252,7 +1256,7 @@ async function guardedNext(dp: any, e: ToolCallInput, next: Next<"tool.call">, g
   // stands in for next(e), which would run the tool late or a second
   // time.
   if (next.signal.aborted) {
-    return { early: { deny: `the tool.call hook's budget ran out before the call reached its tool${beforeGuards.length > 0 ? `, with ${beforeGuards.map((g) => g.name).join(", ")} matched` : ""}, and the dispatch went on without it` } };
+    return { early: { deny: `the tool.call hook's budget ran out before the call reached its tool${beforeGuards.length > 0 ? `, with ${beforeGuards.map((g) => g.name).join(", ")} matched` : ""}, and the dispatch went on without it` }, refused: false };
   }
 
   let r = await redactedToolNext(dp, e, next);
@@ -4399,15 +4403,59 @@ export const register: Register = async (on, options) => {
     if (changed === null || !landed) return [];
     return [operatorLineSentence(line, changed)];
   };
-  // Whether the reply tool (channel-relay's mcp__..__reply) was called
-  // anywhere during the current turn. Reset at turn.start, set by tool.call.
-  let replyCalledThisTurn = false;
-  // The reply-tool calls the model made in the current turn, reset at
-  // turn.start beside the flag, and the clock of the last one the session
-  // saw, null until it has seen one. A send the plugin made raises neither.
-  // The run lines (hooks/run-lines.ts) read both.
+  // The current turn's two facts about the model's reply calls (the reply
+  // tool is channel-relay's mcp__..__reply). `answers` counts the calls not
+  // known refused, and `lines` those of them that are no noted close: the
+  // turn holds an answer, or a line, where its count is above zero. Replaced
+  // by a new object at turn.start, so a call that settles after its turn
+  // ended takes its share back from its own turn's facts.
+  let replyTurn = { answers: 0, lines: 0 };
+  // The reply-tool calls the model made in the current turn, of any kind,
+  // reset at turn.start beside the facts. A send the plugin made raises
+  // none of the three. The run lines (hooks/run-lines.ts) read the count.
   let replyCallsThisTurn = 0;
-  let lastReplyCallAt: number | null = null;
+  // The session's last reply time, which the run lines' hour line counts
+  // from: the latest time among the calls that stand as a line, null until
+  // one does. `replyLineAt` is the latest call the handler settled as a
+  // line, and `replyLinesInFlight` holds each call that may still be known
+  // refused, and stands as a line while it is there. The tool.call
+  // handler's exit settles any call its body left unsettled, a body that
+  // threw among them, as a line.
+  let replyLineAt: number | null = null;
+  const replyLinesInFlight = new Set<{ at: number }>();
+  const lastReplyCallAt = (): number | null => {
+    let last = replyLineAt;
+    for (const call of replyLinesInFlight) if (last === null || call.at > last) last = call.at;
+    return last;
+  };
+  // One reply-tool call the model made, at `at`, counted before the call is
+  // served as an answer and, where it is no noted close, as a line with a
+  // share of the last reply time. Returns the call's settle, which the
+  // tool.call handler calls once it knows the call's kind: a call known
+  // refused takes back its own share alone, so one in flight beside it
+  // stands, and any other keeps it. The settle acts once: a later call of
+  // it does nothing, so the handler's exit can settle a call as a line
+  // without undoing the kind the body already settled it as.
+  const noteModelReplyCall = (at: number, noted: boolean): ((refused: boolean) => void) => {
+    replyCallsThisTurn += 1;
+    const turn = replyTurn;
+    turn.answers += 1;
+    const line = noted ? null : { at };
+    if (line !== null) {
+      turn.lines += 1;
+      replyLinesInFlight.add(line);
+    }
+    let settled = false;
+    return (refused) => {
+      if (settled) return;
+      settled = true;
+      if (refused) turn.answers -= 1;
+      if (line === null) return;
+      replyLinesInFlight.delete(line);
+      if (refused) turn.lines -= 1;
+      else if (replyLineAt === null || at > replyLineAt) replyLineAt = at;
+    };
+  };
   // The plan holders whose hour line (hooks/run-lines.ts) one of its two
   // sites, the controller's tick and the persona's own turn end, is sending
   // now. A site sets a holder's mark before the await that stores tickAt
@@ -6395,7 +6443,7 @@ export const register: Register = async (on, options) => {
       yieldNow: (onDisk) => yieldNow($, onDisk),
       liveTopLevelAgentRunning: () => liveTopLevelAgentRunning($),
       toolCall: (args) => $.tool.call(args as any),
-      lastReplyCallAt: () => lastReplyCallAt,
+      lastReplyCallAt,
       hourLineInFlight: () => hourLineInFlight,
       meterDrainStep: (now) => meterDrainStep($, now),
       appendToChannelLog: (lines) => appendToChannelLog($, lines),
@@ -7272,13 +7320,13 @@ export const register: Register = async (on, options) => {
     goalDoneClosedThisTurn = new Map();
     // Steer 68/69: capture whether this turn opened from a channel message,
     // then clear the handoff flag so an unrelated later turn never inherits
-    // it. Reset the reply-tracking flag for the turn now starting.
+    // it. Reset the reply facts and the reply count for the turn now starting.
     currentTurnIsChannelOrigin = lastPromptWasChannelOrigin;
     currentTurnIsReprompt = false;
     lastPromptWasChannelOrigin = false;
     const currentTurnIsExternal = lastPromptWasExternal;
     lastPromptWasExternal = false;
-    replyCalledThisTurn = false;
+    replyTurn = { answers: 0, lines: 0 };
     replyCallsThisTurn = 0;
     // Section 5 (goal-every-turn): the turn's tool activity starts empty, and
     // the text this turn opened with is held whole for the disposition and
@@ -7505,6 +7553,11 @@ export const register: Register = async (on, options) => {
     // The budget this hook hands down to the calls it makes, live until
     // the handler returns; HookBudget in hooks/jev-live.ts says why the flag is cleared here.
     const hookBudget = hookBudgetOf(next);
+    // The settle of the model's reply call this body noted, where it noted
+    // one. The body settles it where it learns the call's kind, and the
+    // finally below settles it as a line on any other exit, a throw among
+    // them, so no call stays in flight past its handler.
+    const replyCall: { settle: ((refused: boolean) => void) | null } = { settle: null };
     // Every answer below leaves through servedAnswer.
     return servedAnswer($, e, next, await (async () => { try {
       // The body in hooks/tool-call.ts, over a context built for this call.
@@ -7567,8 +7620,7 @@ export const register: Register = async (on, options) => {
         nudgeCountWorkThisTurn: () => nudgeCountWorkThisTurn,
         setNudgeCountWorkThisTurn: (value) => { nudgeCountWorkThisTurn = value; },
         goalDoneClosedThisTurn: () => goalDoneClosedThisTurn,
-        setReplyCalledThisTurn: (value) => { replyCalledThisTurn = value; },
-        noteModelReplyCall: (at) => { replyCallsThisTurn += 1; lastReplyCallAt = at; },
+        noteModelReplyCall: (at, noted) => (replyCall.settle = noteModelReplyCall(at, noted)),
         pendingCompactionBank: () => pendingCompactionBank,
         setPendingCompactionBank: (value) => { pendingCompactionBank = value; },
         currentTurnOriginKind: () => currentTurnOriginKind,
@@ -7602,6 +7654,7 @@ export const register: Register = async (on, options) => {
       };
       return await serveToolCall(ctx, e);
     } finally {
+      replyCall.settle?.(false);
       hookBudget.live = false;
     } })());
   }).catch(async ($, e, next) => {
@@ -8154,9 +8207,10 @@ export const register: Register = async (on, options) => {
         turnToolFlags: () => turnToolFlags,
         turnToolRing: () => turnToolRing,
         turnWorkToolCalls: () => turnWorkToolCalls,
-        replyCalledThisTurn: () => replyCalledThisTurn,
+        replyAnsweredThisTurn: () => replyTurn.answers > 0,
+        replyLineThisTurn: () => replyTurn.lines > 0,
         replyCallsThisTurn: () => replyCallsThisTurn,
-        lastReplyCallAt: () => lastReplyCallAt,
+        lastReplyCallAt,
         hourLineInFlight: () => hourLineInFlight,
         turnPlanEditedPaths: () => turnPlanEditedPaths,
         turnFollowUps: () => turnFollowUps,

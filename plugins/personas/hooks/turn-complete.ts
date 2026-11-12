@@ -121,9 +121,14 @@ export interface TurnCompleteContext extends SharedHandlerState {
   turnToolFlags: () => TurnToolFlags;
   turnToolRing: () => readonly string[];
   turnWorkToolCalls: () => number;
-  replyCalledThisTurn: () => boolean;
-  // The reply-tool calls the model made in this turn, and the clock of
-  // the last one the session saw, null where it has seen none.
+  // The turn's two facts about the model's reply calls: whether it holds an
+  // answer, a call not known refused, and whether it holds a line, such a
+  // call that is no noted close.
+  replyAnsweredThisTurn: () => boolean;
+  replyLineThisTurn: () => boolean;
+  // The reply-tool calls the model made in this turn, of any kind, and the
+  // time of the session's last reply that stands as a line, null where none
+  // does.
   replyCallsThisTurn: () => number;
   lastReplyCallAt: () => number | null;
   // The ids of the holders whose hour line a site is sending now, each with
@@ -171,7 +176,7 @@ export interface TurnCompleteContext extends SharedHandlerState {
 // before its `next(e)`, from the delete of the turn's open entry to the
 // completion drain it fires after itself.
 export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnCompleteInput): Promise<void> {
-  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyCalledThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
+  const { log, status, toast, toolCall, classifyTurnScore, classifyMemoryKind, host, commonsStore, stampTurnEndBeat, meterTurnComplete, submitReplyBackstop, queueMidTurnReprompt, openWorkerAsk, persist, activate, runHealth, completeLeafReturningClosed, queueMemoryCheck, readPlanDocument, readPlanCheckout, closeAsksOnCompletedNodes, foldSettledPlans, liveTopLevelAgentRunning, settleExpiredDispositionStamps, promotePlanTouchingRecord, closeTurnRecordAtTurnEnd, answerMemoryCheck, followUpsAtTurnEnd, liveAsk, shadowAsk, shadowOutcome, shadowAskPlanHealth, notePairDraftsDropped, noteMemoryOwedDropped, openClosingLeafOf, turnIsOpen, deriveTurnStartedAt, compactionPass, memoryCheckTurns, planCompleteHeldLogged, planRecordDirResolvedLogged, planRecordUnreadableLogged, jevLive, hookBudget, jevTurnCalls, setJevTurnCalls, jevTurnLatencyMs, setJevTurnLatencyMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, nudgeCountWorkThisTurn, goalDoneClosedThisTurn, turnToolFlags, turnToolRing, turnWorkToolCalls, replyAnsweredThisTurn, replyLineThisTurn, replyCallsThisTurn, lastReplyCallAt, hourLineInFlight, turnPlanEditedPaths, turnFollowUps, countResetSinceNudgeOpened, currentGateTurnId, setCurrentGateTurnId, currentTurnKind, setCurrentTurnKind, currentPrompt, currentTurnAskedText, currentTurnNudged, setCurrentTurnNudged, currentTurnIsChannelOrigin, setCurrentTurnIsChannelOrigin, currentTurnIsReprompt, setCurrentTurnIsReprompt, currentTurnIsPriming, setCurrentTurnIsPriming, setCurrentTurnSenderClass, setCurrentTurnOriginKind, setCurrentTurnAuthor, setCurrentTurnEntry, isPrimingTurn, nudgedTurnId, setNudgedTurnId, turnLeafId, setTurnLeafId, turnStartSeq, setPendingCompactionBank, memoryGateDiscardPercent, drainInboxNow, openLedgerAsk, withdrawLiftedAskBy, emitKitEvent, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, jevMode, steppedTurns, unsteppedTicks, outlivedLogged, droppedTurns } = ctx;
   // The answer with its secrets hidden, scanned once here and read by
   // these copies this handler sends or stores: the reply backstop's
   // direct reply and its fallback re-prompt, the memory queue's answer head
@@ -289,16 +294,25 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // Cleared here, before the handler's first await, so a completion that
   // lands during those awaits is not read as the nudged turn's.
   if (completesGateTurn) setCurrentTurnNudged(false);
-  const activityTextAtDelete = turnToolActivityText(turnToolFlags(), turnToolRing(), turnWorkToolCalls(), replyCalledThisTurn());
+  // Whether the turn holds an answer, a reply call of the model's not known
+  // refused, read once here, before the handler's first await, for the same
+  // reason: the next turn.start resets the fact. The activity text, the
+  // scorer's summary and the reply backstop's gate below read this one value.
+  const replyAnsweredAtDelete = replyAnsweredThisTurn();
+  // The activity text's reply field reads the turn's answer, read here,
+  // before the first await below.
+  const activityTextAtDelete = turnToolActivityText(turnToolFlags(), turnToolRing(), turnWorkToolCalls(), replyAnsweredAtDelete);
   // The turn-score state's tool activity, read here for the same reason:
   // the next turn.start rewrites it, and the scorer reads it after the
-  // awaits below. Its opening text is askedTextAtDelete above.
-  const scoreToolsAtDelete = turnScoreToolsOf(turnToolFlags(), turnToolRing(), replyCalledThisTurn());
-  // Whether the reply tool ran in this turn, read here for the same reason:
-  // the next turn.start resets the flag, and the run lines below read it
+  // awaits below. Its opening text is askedTextAtDelete above. Its reply
+  // field reads the turn's answer, read here, before the first await below.
+  const scoreToolsAtDelete = turnScoreToolsOf(turnToolFlags(), turnToolRing(), replyAnsweredAtDelete);
+  // Whether the turn holds a line, a reply call of the model's that is
+  // neither known refused nor a noted close, read here for the same reason:
+  // the next turn.start resets the fact, and the run lines below read it
   // after the awaits to tell a turn that sent its own line from one that
   // sent none.
-  const replyCalledAtDelete = replyCalledThisTurn();
+  const replyLineAtDelete = replyLineThisTurn();
   // The model's reply calls and the work-tool calls of this turn, read here
   // for the same reason: the run lines below add the first to the run's
   // replies and read the second as the hour line's sign of work.
@@ -553,13 +567,17 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // answer is backfilled too, on its own flag, which survives a subagent's
   // completion as the channel flag does. A re-prompt answer empty after
   // trimming is the turn ending with nothing left, so nothing is sent.
+  // The gate reads the turn's answer, read before the handler's first
+  // await: a turn whose every reply call is known refused holds none and is
+  // backfilled as a turn that made no call, and a noted close is an answer,
+  // so a turn closed with one is not.
   let submittedReplyBackstop = false;
   // Whether the backstop's direct reply call returned a result carrying
   // neither a deny nor a tool error, so this turn's answer reached the
   // thread. The run lines below count that as a reply of the turn's own. A
   // call that threw, or returned a deny or a tool error, leaves this false.
   let replyBackstopSent = false;
-  if (!skipped && sess.isOwner && completesGateTurn && (currentTurnIsChannelOrigin() || currentTurnIsReprompt()) && !(currentTurnIsReprompt() && answerScrubbed.trim() === "") && !replyCalledThisTurn() && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
+  if (!skipped && sess.isOwner && completesGateTurn && (currentTurnIsChannelOrigin() || currentTurnIsReprompt()) && !(currentTurnIsReprompt() && answerScrubbed.trim() === "") && !replyAnsweredAtDelete && !isPrimingTurn() && !wasNudged && !completesNudgedTurn) {
     try {
       const backstopResult = await toolCall({ tool: "mcp__plugin_relay_channel-relay__reply", message: answerScrubbed });
       replyBackstopSent = runLineRefusalOf(backstopResult) === null;
@@ -1439,9 +1457,11 @@ export async function serveTurnComplete(ctx: TurnCompleteContext, e: TurnComplet
   // Last, the turn's own reply calls join the run's replies.
   if (sess.isOwner && completesGateTurn && !skipped
     && isWorkerSession(sess.persona, coordinatorPersona, architectPersona, sess.state.goals.find((g) => g.parentId === null)?.source)) {
-    // A reply of the turn's own: the reply tool ran in the turn, or the
-    // reply backstop's direct call returned for the turn's answer.
-    const repliedThisTurn = replyCalledAtDelete || replyBackstopSent;
+    // A reply of the turn's own: the turn holds a line, or the reply
+    // backstop's direct call was taken for the turn's answer. A reply known
+    // refused and a noted close are neither, so a moment owed at such a
+    // turn end is settled by the plugin's line.
+    const repliedThisTurn = replyLineAtDelete || replyBackstopSent;
     const documentReadAndOpen = planReading !== null && planReading.kind === "read" && !planReading.complete;
     let openedHolder: GoalNode | undefined;
     let closedHolder: GoalNode | undefined;

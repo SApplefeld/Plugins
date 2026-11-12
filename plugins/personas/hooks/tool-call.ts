@@ -48,6 +48,7 @@ import type { recognitionAsk as recognitionAskFromModule, settleRecognitionOutco
 import { memqGetsOf, memqTouchesOf } from "./recall-text";
 import { shellCommandOf } from "./recognition";
 import { ROUTINE_WEEKDAYS, localTimeText, newRoutineId, routineListText, routineNextDueAt, sameSchedule, scheduleWords, type Routine, type RoutineSchedule } from "./routines";
+import { runLineRefusalOf } from "./run-lines";
 import { asciiLower, rosterNameTaken, rosterPathWithin, rosterRepoTaken, validateRosterEntry, writeRoster } from "./roster";
 import type { addGoalEntry as addGoalEntryFromModule, clearChildBlockedAncestors as clearChildBlockedAncestorsFromModule, promoteOpenRecord as promoteOpenRecordFromModule } from "./records";
 import { skillPickTool } from "./skill-pick";
@@ -96,7 +97,7 @@ export interface ToolCallContext extends SharedHandlerState {
   migrateLegacyMemories: () => Promise<void>;
   completeLeafReturningClosed: (id: string, note: string, leftOpen?: Map<string, { status: string; leaf: GoalNode }>) => Promise<string[]>;
   drainPairDraftOwed: (...args: AfterDeps<typeof drainPairDraftOwedFromModule>) => ReturnType<typeof drainPairDraftOwedFromModule>;
-  guardedNext: (askRecognition?: () => Promise<void>) => Promise<{ early: ToolCallResult } | { r: ToolCallResult }>;
+  guardedNext: (askRecognition?: () => Promise<void>) => Promise<{ early: ToolCallResult; refused: boolean } | { r: ToolCallResult }>;
   originIsEngine: () => boolean;
   settleRecognitionOutcomes: (...args: AfterDeps<typeof settleRecognitionOutcomesFromModule>) => void;
   bankCompactionBoundary: (turnKind: string) => ReturnType<typeof boundaryBankCompactionBoundary>;
@@ -141,11 +142,15 @@ export interface ToolCallContext extends SharedHandlerState {
   nudgeCountWorkThisTurn: () => number;
   setNudgeCountWorkThisTurn: (value: number) => void;
   goalDoneClosedThisTurn: () => Map<string, number>;
-  setReplyCalledThisTurn: (value: boolean) => void;
-  // One reply-tool call the model made, at `at`: the turn's count of them
-  // rises and the session's last reply time moves, both of which the run
-  // lines (hooks/run-lines.ts) read.
-  noteModelReplyCall: (at: number) => void;
+  // One reply-tool call the model made, at `at`, `noted` where it is a noted
+  // close: the turn's count of them rises, the turn holds an answer and,
+  // where the call is no noted close, a line, and the session's last reply
+  // time moves with the line. Returns the call's settle, called with whether
+  // the call is known refused: a refused call takes its own share of the
+  // answer, the line and the time back, and any other keeps it. The first
+  // call of the settle decides, and the handler in hooks/index.ts settles a
+  // call this body left unsettled as a line when the body exits.
+  noteModelReplyCall: (at: number, noted: boolean) => (refused: boolean) => void;
   pendingCompactionBank: () => { turnKind: string } | null;
   setPendingCompactionBank: (value: { turnKind: string } | null) => void;
   currentTurnOriginKind: () => string;
@@ -323,7 +328,7 @@ function awaitingAdmittedByText(awaitingAbove: GoalNode | undefined, entry: Expe
 // with before the served answer's scrub, from the off-arming path to the
 // break-in scan.
 export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Promise<ToolCallResult> {
-  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, setReplyCalledThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
+  const { log, fsExists, fsRead, fsWrite, sleep, commonsStore, host, compactionPassDeps, persist, persistOrRollBack, activate, runHealth, queueMemoryCheck, writeClaimDirect, migrateLegacyMemories, completeLeafReturningClosed, drainPairDraftOwed, guardedNext, originIsEngine, settleRecognitionOutcomes, bankCompactionBoundary, appendLines, addGoalEntry, readPlanDocument, completeRootByGoalDone, closeAsksOnCompletedNodes, openWorkerAsk, writeMemoryRecord, kitInstallPathOf, recognitionAsk, pushDeliveryLine, promoteOpenRecord, workdirPathOf, notePairDraftsDropped, noteMemoryWrite, clearChildBlockedAncestors, openClosingLeafOf, noteTurnToolCall, turnMayStartEffort, turnIsOperatorsOrCoordinators, turnIsWorkersRecordToArchitect, turnIsOperators, noteStandingRefusal, hookBudget, COMPACT_HOLD_REMINDER_TEXT, urgentCheckMinMs, breakInAfterMs, toolErrorsThisTurn, setToolErrorsThisTurn, toolCallsThisTurn, setToolCallsThisTurn, nudgeCountWorkThisTurn, setNudgeCountWorkThisTurn, goalDoneClosedThisTurn, noteModelReplyCall, pendingCompactionBank, setPendingCompactionBank, currentTurnOriginKind, currentTurnAuthor, turnLeafId, currentTurnEntry, currentGateTurnId, compactionHeld, proposalLedgeredTurnId, setProposalLedgeredTurnId, compactionReminderAt, setCompactionReminderAt, lastBreakInCheckAt, setLastBreakInCheckAt, sess, cfg, expectedTurns, openTurns, coordinatorPersona, architectPersona, fleetRoster, jevMode, compactionPassOption, selfReviewLessonCount, dropDecision, commonsMeta, planningInFlight, arming, setCountResetSinceNudgeOpened } = ctx;
   // An "off" session runs the guard and after-hook region around next(e)
   // and the compaction pass's rerun watch, and nothing else: no call
   // counting, no persona tool, no constraint. The watch counts a call
@@ -391,15 +396,23 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   // against the open nudge_acted windows, since a nudge reaches the main
   // loop alone, the nudge standing down on a subagent's calls.
   if (!inSubagent && !pluginReply) settleRecognitionOutcomes(fetches);
-  // Steer 68/69: the model called the reply tool somewhere in this turn, so
-  // the channel-reply backstop at turn.complete has nothing to backfill and
-  // the run lines read the turn as one that sent its own line. Only a call
-  // the model made counts, so a reply the plugin sends sets neither the
-  // flag, the run lines' count of the model's reply calls, nor their time.
-  if (isReplyTool && !pluginReply) {
-    setReplyCalledThisTurn(true);
-    noteModelReplyCall(Date.now());
-  }
+  // Steer 68/69: a reply call the model made is one of three kinds. Known
+  // refused, where a guard denied it or failed on it, or the result read
+  // below carries a deny or a tool error: no answer and no line. A noted
+  // close, whose input carries `noted` as the boolean true and which is not
+  // known refused: an answer and no line, since it posts nothing. A line,
+  // every other call, one whose result this handler never reads among them:
+  // an answer and a line. The channel-reply backstop at turn.complete
+  // backfills a turn that holds no answer, and the run lines read a turn
+  // that holds a line as one that sent its own. The call is counted here,
+  // before it is served, so it stands where this handler never learns its
+  // result, and its settle below takes this call's share back where it is
+  // known refused. Only a call the model made counts, so a reply the plugin
+  // sends sets neither fact, the run lines' count of the model's reply
+  // calls, nor their time.
+  const settleReplyCall = isReplyTool && !pluginReply
+    ? noteModelReplyCall(Date.now(), (e as { noted?: unknown }).noted === true)
+    : null;
 
   // The compaction boundary the persona's last own turn owed, taken at the
   // first main-loop tool call after it, before this call's tool is served
@@ -3389,9 +3402,17 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
   };
 
   // The guard and after-hook region around next(e), guardedNext's.
+  // A model's reply call is settled here, the two places this handler
+  // learns its kind: an early answer a guard's refusal gave, or a result
+  // read as refused, is known refused, and the budget's early answer and
+  // any other result stand.
   const guarded = await guardedNext(askRecognition);
-  if ("early" in guarded) return guarded.early;
+  if ("early" in guarded) {
+    settleReplyCall?.(guarded.refused);
+    return guarded.early;
+  }
   let r = guarded.r;
+  settleReplyCall?.(runLineRefusalOf(r) !== null);
   if (!pluginReply && (r as { isError?: boolean }).isError === true) setToolErrorsThisTurn(toolErrorsThisTurn() + 1);
 
   // The recognition ask on the after side of a main-loop call that ran:
