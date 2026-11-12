@@ -29,16 +29,16 @@ a local group the account is a direct member of, and must reach the copied files
 files where the folder exists, and by folders and files without NoPropagateInherit where an ancestor
 was read. No deny rule for any of those that reaches the launcher may remove a read right.
 Administrators, Power Users, Account Operators, Server Operators, Print Operators, Backup Operators,
-RAS Servers, Pre-Windows 2000 Compatible Access and Network Configuration Operators count for deny
-rules alone, so an allow rule for one of them never passes the check. A limited token holds
-Administrators for deny only, and membership in any of the other eight produces a filtered token. The
-rule holds even where Windows gives the task an unfiltered token, such as with User Account Control
-off, so it can refuse a launcher root the task could read. A nested group, a domain group and a local
-group whose members cannot be listed are not consulted, and a refusal names the identities that were,
-marks each group counted for deny rules alone, names such a group whose allow rule it did not count,
-and names any group skipped. It refuses a launcher root under a
-plugins\marketplaces or plugins\cache folder, which a plugin update replaces. -LauncherRoot may
-name the folder this script runs from, in which case no file is copied onto itself: an engine
+RAS Servers, Pre-Windows 2000 Compatible Access, Network Configuration Operators and
+Cryptographic Operators count for deny rules alone, so an allow rule for one of them never passes the
+check. A limited token holds Administrators for deny only, and membership in any of the other nine
+produces a filtered token. The rule holds even where Windows gives the task an unfiltered token, such
+as with User Account Control off, so it can refuse a launcher root the task could read. A nested
+group, a domain group and a local group whose members cannot be listed are not consulted, and a
+refusal names the identities that were, marks each group counted for deny rules alone, names such a
+group whose allow rule it did not count, and names any group skipped. It refuses a launcher root
+under a plugins\marketplaces or plugins\cache folder, which a plugin update replaces. -LauncherRoot
+may name the folder this script runs from, in which case no file is copied onto itself: an engine
 checkout registers its own launcher that way.
 
 Without -WhatIf the script requires an elevated session and refuses otherwise. With -WhatIf it prints
@@ -99,9 +99,9 @@ function Resolve-AbsolutePath {
 
 # The local groups the read check counts for deny rules alone, by SID, since a group name is
 # localized and a SID is not. A limited token, such as the task's S4U logon at the Limited run level
-# gets, holds Administrators for deny only, and membership in any of the other eight produces a
+# gets, holds Administrators for deny only, and membership in any of the other nine produces a
 # filtered token. So an allow rule for one of them never passes the read check, while a deny rule for
-# one of them still binds the task and still refuses. All nine are read alike, on the refusing side.
+# one of them still binds the task and still refuses. All ten are read alike, on the refusing side.
 # The rule holds even where Windows gives the task an unfiltered token, such as with User Account
 # Control off, so it can refuse a root the task could read, and the refusal then names the group
 # whose allow rule was not counted so the account is granted by name.
@@ -114,7 +114,8 @@ $script:DenyOnlyGroupSids = @(
     'S-1-5-32-551',  # Backup Operators
     'S-1-5-32-553',  # RAS Servers
     'S-1-5-32-554',  # Pre-Windows 2000 Compatible Access
-    'S-1-5-32-556'   # Network Configuration Operators
+    'S-1-5-32-556',  # Network Configuration Operators
+    'S-1-5-32-569'   # Cryptographic Operators
 )
 
 # The identities whose access rules speak for an account, keyed by SID: the account itself, Everyone,

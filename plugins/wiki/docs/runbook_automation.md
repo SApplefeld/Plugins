@@ -176,10 +176,11 @@ this computer's account named `kbuser`. The registrar does two things:
   at the ancestor's direct children. No deny rule for any of those that reaches the
   launcher may remove a read right. Administrators, Power Users, Account
   Operators, Server Operators, Print Operators, Backup Operators, RAS
-  Servers, Pre-Windows 2000 Compatible Access and Network Configuration
-  Operators count for deny rules alone, so an allow rule for one of them
-  never passes the check. A limited token holds Administrators for deny only,
-  and membership in the other eight produces a filtered token. The rule holds
+  Servers, Pre-Windows 2000 Compatible Access, Network Configuration
+  Operators and Cryptographic Operators count for deny rules alone, so an
+  allow rule for one of them never passes the check. A limited token holds
+  Administrators for deny only, and membership in the other nine produces a
+  filtered token. The rule holds
   even where Windows gives the task an unfiltered token, such as with User
   Account Control off, so it can refuse a folder the task could read. A
   refusal marks each such group the account belongs to. Where an allow rule

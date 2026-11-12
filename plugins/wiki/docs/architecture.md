@@ -829,9 +829,9 @@ folder outside the plugin cache and registers `wiki-walk` under the task folder
 registrar requires `-LauncherRoot` and refuses unless that account can read
 the folder. It reads the answer from the folder's access rules, or its nearest
 existing ancestor's, before anything is copied or registered. The check
-counts Administrators, and eight other local groups whose membership filters
+counts Administrators, and nine other local groups whose membership filters
 the task's limited token, for deny rules alone. An allow rule for one of them
-never passes it, and a deny rule for one of them still refuses. At each start
+never passes it, and a deny rule for one of them still refuses. The launcher test holds that list equal to Windows' own answer. It reads the list from the registrar's text and asks `RtlIsElevatedRid`, a function `ntdll.dll` exports, about each built-in local group from S-1-5-32-544 to S-1-5-32-999 on the host running the test. A group Windows adds or drops fails the test, and the line under the failing check names the SID. The registrar does not call that function itself. Microsoft does not document it, and a registration that depended on it would stop on a Windows that dropped it. At each start
 the launcher reads Claude Code's
 install record for `wiki@applefeld`, copies that version's folder to
 `%LOCALAPPDATA%\llm-wiki\runtime\<version>\` where no complete copy exists,

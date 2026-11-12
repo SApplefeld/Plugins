@@ -45,7 +45,11 @@ granted folder sits under the work folder, carries its own access rules rather t
 and grants the running account full control, so the cleanup removes it. It also parses
 register-walk.ps1 and checks that every Register-ScheduledTask,
 Unregister-ScheduledTask and Copy-Item sits inside an if whose condition calls ShouldProcess, and
-runs that same check on a synthetic script with an unguarded call to show it can fail.
+runs that same check on a synthetic script with an unguarded call to show it can fail. It reads the
+registrar's list of groups counted for deny rules alone from the registrar's text and holds it equal
+to the built-in local groups in S-1-5-32-544 to S-1-5-32-999 that Windows' RtlIsElevatedRid calls
+elevated on the host running the test, and runs that same comparison on a list lacking one of those
+groups and on one with S-1-5-32-545 added to show it can fail.
 
 The test records every process it starts, and every stub process by the pid the stub wrote. A
 recorded process still alive at the end is printed as "survivor <pid>" and then stopped, and the last
@@ -361,6 +365,97 @@ function Test-CallsGuarded {
     return $true
 }
 
+# The SIDs the script text assigns to $script:DenyOnlyGroupSids, read from the parsed text, so a
+# commented-out entry is not read and the script is never run. Throws where the text does not parse
+# or does not assign it exactly once, since a second assignment or an append would change the list
+# the read check uses without changing the list read here.
+function Get-DenyOnlyListSids {
+    param([string]$ScriptText)
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($ScriptText, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) { throw 'the registrar''s text does not parse' }
+    $assignments = @($ast.FindAll({
+        param($node)
+        ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) -and (@('$script:DenyOnlyGroupSids', '$DenyOnlyGroupSids') -contains $node.Left.Extent.Text)
+    }, $true))
+    if ($assignments.Count -eq 0) { throw 'the registrar''s text assigns no $script:DenyOnlyGroupSids' }
+    if ($assignments.Count -gt 1) { throw "the registrar's text assigns `$script:DenyOnlyGroupSids $($assignments.Count) times" }
+    $assignment = $assignments[0]
+    return @($assignment.Right.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.StringConstantExpressionAst]
+    }, $true) | ForEach-Object { $_.Value })
+}
+
+# RtlIsElevatedRid is a function ntdll.dll exports that answers whether a group makes a token
+# elevated. It takes a SID_AND_ATTRIBUTES, a pointer to a SID followed by a 32-bit attributes value,
+# and returns a byte, 1 for elevated.
+$script:elevatedRidSource = @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace WalkLauncherTest
+{
+    public static class ElevatedRid
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SID_AND_ATTRIBUTES
+        {
+            public IntPtr Sid;
+            public uint Attributes;
+        }
+
+        [DllImport("ntdll.dll")]
+        private static extern byte RtlIsElevatedRid(ref SID_AND_ATTRIBUTES sidAndAttributes);
+
+        public static bool IsElevated(byte[] sid, uint attributes)
+        {
+            GCHandle pinned = GCHandle.Alloc(sid, GCHandleType.Pinned);
+            try
+            {
+                SID_AND_ATTRIBUTES entry = new SID_AND_ATTRIBUTES();
+                entry.Sid = pinned.AddrOfPinnedObject();
+                entry.Attributes = attributes;
+                return RtlIsElevatedRid(ref entry) != 0;
+            }
+            finally
+            {
+                pinned.Free();
+            }
+        }
+    }
+}
+'@
+
+# The built-in local groups that Windows calls elevated on this host, asked for every rid from 544
+# to 999, since Windows keeps rids below 1000 for its own well-known accounts and groups. Each is
+# asked as an enabled group, the attributes a token carries for a group it holds. Throws where the
+# helper does not compile or ntdll.dll does not export the function.
+function Get-ElevatedLocalGroupSids {
+    if (-not ('WalkLauncherTest.ElevatedRid' -as [type])) {
+        Add-Type -TypeDefinition $script:elevatedRidSource -Language CSharp
+    }
+    $elevated = @()
+    foreach ($rid in 544..999) {
+        $sid = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-$rid")
+        $bytes = New-Object byte[] $sid.BinaryLength
+        $sid.GetBinaryForm($bytes, 0)
+        if ([WalkLauncherTest.ElevatedRid]::IsElevated($bytes, 7)) { $elevated += $sid.Value }
+    }
+    return $elevated
+}
+
+# How a list of SIDs differs from Windows' answer as a set: the empty string where the two are equal,
+# else one line naming the SIDs the list lacks and the SIDs it holds that Windows does not name.
+function Get-SidListDifference {
+    param([string[]]$List, [string[]]$Windows)
+    $missing = @($Windows | Where-Object { $List -notcontains $_ })
+    $extra = @($List | Where-Object { $Windows -notcontains $_ })
+    if (($missing.Count -eq 0) -and ($extra.Count -eq 0)) { return '' }
+    return "missing from the list: $(if ($missing.Count -gt 0) { $missing -join ', ' } else { 'none' }); on the list and not elevated: $(if ($extra.Count -gt 0) { $extra -join ', ' } else { 'none' })"
+}
+
 $work = Join-Path ([System.IO.Path]::GetFullPath($WorkRoot)) ("walklauncher-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 $script:profileDir = Join-Path $work 'profile'
 $script:local = Join-Path $work 'local'
@@ -632,6 +727,25 @@ try {
     Test-Check 'the guard check fails on a Register-ScheduledTask in the else branch of the ShouldProcess if' (-not (Test-CallsGuarded $inElse @('Register-ScheduledTask')))
     $negated = "[CmdletBinding(SupportsShouldProcess)]`nparam()`nif (-not `$PSCmdlet.ShouldProcess('x', 'y')) { Register-ScheduledTask -TaskName t }"
     Test-Check 'the guard check fails on a Register-ScheduledTask in the body of an if whose ShouldProcess condition is negated' (-not (Test-CallsGuarded $negated @('Register-ScheduledTask')))
+
+    # --- The deny-only list: held equal to what Windows calls elevated on this host. A call that
+    # throws fails both checks, and the line under the first names what differed or what threw. No
+    # registrar run belongs to these checks, so a red prints no earlier run's exit and stderr.
+    $script:r = $null
+    $elevatedSids = @()
+    $listDifference = ''
+    try {
+        $elevatedSids = @(Get-ElevatedLocalGroupSids)
+        $listDifference = Get-SidListDifference @(Get-DenyOnlyListSids $registerText) $elevatedSids
+    } catch {
+        $elevatedSids = @()
+        $listDifference = "the comparison could not run: $($_.Exception.Message)"
+    }
+    Test-Check 'the registrar''s $script:DenyOnlyGroupSids equals the built-in local groups in S-1-5-32-544 to S-1-5-32-999 that RtlIsElevatedRid calls elevated on this host' ($listDifference -eq '')
+    if ($listDifference -ne '') { Write-Host "  deny-only list: $listDifference" }
+    $shortList = @($elevatedSids | Select-Object -Skip 1)
+    $longList = @($elevatedSids) + 'S-1-5-32-545'
+    Test-Check 'the list comparison fails on a list lacking one group Windows calls elevated and on one with S-1-5-32-545 added' (($elevatedSids.Count -gt 0) -and ((Get-SidListDifference $shortList $elevatedSids) -ne '') -and ((Get-SidListDifference $longList $elevatedSids) -ne ''))
 } finally {
     if ($null -ne $lock) { $lock.Dispose() }
 
