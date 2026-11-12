@@ -13,8 +13,9 @@
 //     inside its 10 s budget. A password flag more than 500 characters after
 //     its command word on one line is not hidden by these three patterns.
 //     test-personas/redactor-detect-test.mjs pins each over 1 MB against a
-//     linear reference regex timed beside it, and over 100 KB in
-//     milliseconds so a quadratic span fails fast.
+//     linear reference regex timed beside it, and first over 200 KB against
+//     that reference under a ratio limit of its own, so a quadratic span
+//     fails fast.
 //   - GH_SECRET and SMB_USER take the same 500-character bound on the span
 //     between their command word and the flag (`[^\n;&|]{0,500}?` and
 //     `[^\n|;&]{0,500}?`) where the source leaves it open, for the same
