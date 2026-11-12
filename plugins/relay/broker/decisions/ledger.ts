@@ -80,6 +80,9 @@ export type LedgerReading = {
 export type LedgerSeams = Pick<QueueReaderOptions, "log" | "now" | "readStore"> & {
   /** The one stat a pass makes per persona. Injected so a test can pin which store files are tried. */
   statStore?: (file: string) => PlanStat | null;
+  /** What the reader's log lines open with, naming the surface that reads the ledger. Defaults to
+   * the decisions card's label. */
+  label?: string;
 };
 
 export type LedgerReader = {
@@ -230,6 +233,7 @@ export function createLedgerReader(seams: LedgerSeams = {}): LedgerReader {
   const log = seams.log ?? ((): void => {});
   const now = seams.now ?? Date.now;
   const readFile = seams.readStore ?? readCappedFile;
+  const label = seams.label ?? "decisions card: ask ledger";
   let slots = new Map<string, HeldFile<Parsed>>();
 
   return {
@@ -244,7 +248,7 @@ export function createLedgerReader(seams: LedgerSeams = {}): LedgerReader {
         const parsed = readHeldFile(
           path.join(persona.workdir, STORE_FILE_NAME),
           slot,
-          "decisions card: ask ledger",
+          label,
           (value) => parseStore(value, persona.name),
           now,
           log,

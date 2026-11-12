@@ -9,7 +9,7 @@ import { ODD_BREAKS, fit, sliceCodePoints, visible, withoutInvisible } from "../
 // Re-exported for the callers that already read `fit` from the render site. The implementation
 // lives in `../sanitize.ts` so the storage layer can reach it without importing this module.
 export { fit } from "../sanitize.ts";
-import { MAX_PLAN_CHARS } from "../board/events.ts";
+import { MAX_PLAN_CHARS, MAX_REASON_CHARS } from "../board/events.ts";
 import { modelRank } from "../registry.ts";
 import type { BackgroundTask, ModelFallback } from "../registry.ts";
 import type { SessionView, SurfaceState } from "./state.ts";
@@ -3147,32 +3147,63 @@ export function renderModelChange(input: {
 }
 
 /**
+ * What the blocked alert says for each answer to who the run waits on: the words a reason follows
+ * after a colon, and the whole clause drawn where the event carried no reason.
+ */
+const BLOCKED_ON_OPERATOR = {
+  lead: "stopped on you",
+  bare: "stopped on you; it has a question open for you",
+};
+const BLOCKED_UNASKED = {
+  lead: "stopped, with no question filed for you",
+  bare: "stopped, with no question filed for you and no reason given",
+};
+const BLOCKED_UNPLACED = {
+  lead: "stopped",
+  bare: "stopped; the reason is in this thread",
+};
+
+/**
  * The alert a block episode posts into its session's own thread, on the alert tier with the mentions
- * that reach a phone, and without them when the volume window has gone quiet and the caller passes
- * an empty list. `renderQuestionNotice`'s pattern, and safe for its reason: the mentions are
- * composed here from the operators' own IDs, and the one untrusted field takes the full markdown
- * escape (`inertText`, over the pre-escape bound the next paragraph explains), which escapes the
- * angle brackets Discord's mention syntax lives inside, so the only mentions this message can
- * contain are the ones written on this line.
+ * that reach a phone, and without them when the caller passes an empty list. `renderQuestionNotice`'s
+ * pattern, and safe for its reason: the mentions are composed here from the operators' own IDs, and
+ * both untrusted fields take the full markdown escape (`inertText`, over the pre-escape bound the
+ * next paragraph explains), which escapes the angle brackets Discord's mention syntax lives inside,
+ * so the only mentions this message can contain are the ones written on this line.
  *
- * `plan` arrives from the kit's event stream, which anything with append access to the operator's
- * home directory can write, so it is escaped and bounded here at the render site. The bound is the
- * events reader's own `MAX_PLAN_CHARS`, imported rather than mirrored so the two cannot drift, and
- * it is measured before the escape, on the same characters the reader measured: a plan the reader
- * kept whole is drawn whole, the escape's backslashes cost none of the plan's budget, and a cut can
- * never land between a backslash and the character it escapes. A plan that neutralizes to nothing
- * drops its clause rather than drawing an empty slot, and whatever the event carried, the alert
- * composes, never a throw.
+ * `plan` and `reason` arrive from the kit's event stream, which anything with append access to the
+ * operator's home directory can write, so each is escaped and bounded here at the render site. The
+ * bounds are the events reader's own `MAX_PLAN_CHARS` and `MAX_REASON_CHARS`, imported rather than
+ * mirrored so the two sides cannot drift, and each is measured before the escape, on the same
+ * characters the reader measured: a field the reader kept whole is drawn whole, the escape's
+ * backslashes cost none of the field's budget, and a cut can never land between a backslash and the
+ * character it escapes. A plan that neutralizes to nothing drops its clause and its dash rather than
+ * drawing an empty slot. A reason that is null or neutralizes to nothing is no reason, and the
+ * state's own clause stands in for it.
+ *
+ * `state` is who the run waits on, as the caller read it: `asked` where a question is open for the
+ * operator, `unasked` where none is, and `unknown` where the caller cannot tell. It picks the words
+ * and nothing else. Whether the mentions are drawn is the list the caller hands over. Whatever the
+ * event carried, the alert composes, never a throw.
  */
 export function renderBlockedAlert(input: {
   operatorIds: readonly string[];
   plan: string;
+  reason: string | null;
+  state: "asked" | "unasked" | "unknown";
 }): string {
   const mention = mentionPrefix(input.operatorIds);
   // Neutralize, bound, then escape. `visible` runs again inside `inertText` and is idempotent, so
   // the second pass changes nothing; what the order buys is the pre-escape measurement above.
   const plan = inertText(fit(visible(input.plan), MAX_PLAN_CHARS));
-  const stopped = "the run is stopped on you; the reason is in this thread";
+  const reason = input.reason === null ? "" : inertText(fit(visible(input.reason), MAX_REASON_CHARS));
+  const words =
+    input.state === "asked"
+      ? BLOCKED_ON_OPERATOR
+      : input.state === "unasked"
+        ? BLOCKED_UNASKED
+        : BLOCKED_UNPLACED;
+  const stopped = reason === "" ? words.bare : `${words.lead}: ${reason}`;
   if (plan === "") return `${mention}${BLOCKED_ATTRIBUTION} ${SEPARATOR} ${stopped}`;
   return `${mention}${BLOCKED_ATTRIBUTION} ${SEPARATOR} ${plan} - ${stopped}`;
 }

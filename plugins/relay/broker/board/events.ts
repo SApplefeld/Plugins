@@ -70,6 +70,14 @@ export const MAX_DETAIL_CHARS = 40;
 export const MAX_PLAN_CHARS = 120;
 export const MAX_SESSION_CHARS = 120;
 
+/**
+ * The most of an event's `detail` the session fold keeps as the reason a run stopped. It is wider
+ * than `MAX_DETAIL_CHARS` because the blocked alert draws the reason on a line of its own message,
+ * where the board card and the timeline draw a detail inside a row sized for the shorter bound. The
+ * kit caps what it writes, and this bound is what holds whatever a line carries.
+ */
+export const MAX_REASON_CHARS = 200;
+
 /** Room for an ISO 8601 timestamp with fractional seconds and an offset, which runs to 29
  * characters. A longer value is not a timestamp; it is cut to this length, and the checks below
  * then refuse whatever the cut leaves unless that still ends in an offset and names an instant. */
@@ -270,11 +278,19 @@ const BOARD_KINDS: ReadonlySet<BoardEventKind> = new Set<BoardEventKind>(["goal-
  * kind is dropped whatever its detail holds, and a fold's malformed tally counts the same lines
  * whichever kinds it tracks.
  *
+ * `maxDetail` is the calling fold's own bound on `detail`, a required argument so that no fold
+ * takes another's by default: the session fold keeps a reason to `MAX_REASON_CHARS`, and the folds
+ * whose detail is drawn in a row keep `MAX_DETAIL_CHARS`.
+ *
  * `project` comes back exactly as written. It is matched against the configured roots and then
  * dropped, so bounding it would only make a real project path past the bound fail to match the root
  * it names.
  */
-function parseLine<Kind extends string>(line: string, tracked: ReadonlySet<Kind>): ParsedLine<Kind> | "malformed" | null {
+function parseLine<Kind extends string>(
+  line: string,
+  tracked: ReadonlySet<Kind>,
+  maxDetail: number,
+): ParsedLine<Kind> | "malformed" | null {
   let value: unknown;
   try {
     value = JSON.parse(line);
@@ -309,7 +325,7 @@ function parseLine<Kind extends string>(line: string, tracked: ReadonlySet<Kind>
     project,
     plan: bound(plan, MAX_PLAN_CHARS),
     session: typeof rawSession === "string" ? bound(rawSession, MAX_SESSION_CHARS) : null,
-    detail: typeof rawDetail === "string" ? bound(rawDetail, MAX_DETAIL_CHARS) : null,
+    detail: typeof rawDetail === "string" ? bound(rawDetail, maxDetail) : null,
   };
 }
 
@@ -567,7 +583,7 @@ export function readEvents(
 
   for (const line of window.lines.split("\n")) {
     if (line.trim() === "") continue;
-    const parsed = parseLine(line, BOARD_KINDS);
+    const parsed = parseLine(line, BOARD_KINDS, MAX_DETAIL_CHARS);
     if (parsed === "malformed") {
       malformed += 1;
       continue;
@@ -612,12 +628,19 @@ export function readEvents(
  *
  * `plan` rides along because the surface that draws a blocked session names the plan the run stopped
  * on, and the session fold keeps no project of its own.
+ *
+ * `reason` is the event's `detail`, which on a `goal-blocked` line is what the worker wrote for why
+ * the run stopped, bounded at `MAX_REASON_CHARS`. It is null where the line carries no detail or a
+ * null one, and an empty string where the detail is an empty string; the blocked alert draws null
+ * and an empty string alike, as no reason. Like `plan` it is text anything that can append to the
+ * stream can shape, bounded here and neutralized where it is rendered.
  */
 export type SessionGoalEvent = {
   event: BoardEventKind;
   ts: string;
   tsMs: number;
   plan: string;
+  reason: string | null;
 };
 
 /**
@@ -716,7 +739,7 @@ export function readSessionEvents(
 
   for (const line of window.lines.split("\n")) {
     if (line.trim() === "") continue;
-    const parsed = parseLine(line, BOARD_KINDS);
+    const parsed = parseLine(line, BOARD_KINDS, MAX_REASON_CHARS);
     if (parsed === "malformed") {
       malformed += 1;
       continue;
@@ -756,6 +779,7 @@ export function readSessionEvents(
       ts: parsed.ts,
       tsMs,
       plan: parsed.plan,
+      reason: parsed.detail,
     });
   }
 
@@ -901,7 +925,7 @@ export function readTimelineEvents(
 
   for (const line of window.lines.split("\n")) {
     if (line.trim() === "") continue;
-    const parsed = parseLine(line, TIMELINE_KIND_SET);
+    const parsed = parseLine(line, TIMELINE_KIND_SET, MAX_DETAIL_CHARS);
     if (parsed === "malformed") {
       malformed += 1;
       continue;

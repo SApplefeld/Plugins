@@ -43,7 +43,7 @@ import {
 } from "./discord/question-message.ts";
 import type { ActionRow } from "./discord/question-message.ts";
 import { toView, typingDeadline } from "./discord/state.ts";
-import { createBlockedDesk } from "./discord/blocked.ts";
+import { createBlockedDesk, createDeskWaitsOn } from "./discord/blocked.ts";
 import type { BlockedDesk } from "./discord/blocked.ts";
 import { loadBindings, saveBindings } from "./discord/bindings.ts";
 import { createUsageCard } from "./usage/thread.ts";
@@ -2167,11 +2167,21 @@ export async function startBroker(
     // redirects `CHANNEL_BOARD_EVENTS_PATH` redirects both folds together. Its alerts ride the
     // steering writer's alert tier, the phone-reaching write, which already ends the thread's
     // narration block on a successful post.
+    //
+    // Who a blocked run waits on comes from its persona's ask ledger, read through the desk's own
+    // roster and ledger readers (createDeskWaitsOn). The desk calls the seam only for an episode
+    // about to post or still open to its second look, so an idle tick reads neither file. With no
+    // roster configured neither reader is built and every session is `unknown`.
     const desk = createBlockedDesk({
       eventsPath: config.boardEventsPath,
       threadFor: (sessionId) => surface.threadFor(sessionId),
       alert: (threadId, text, mentionUserIds) => steeringWriter.alert(threadId, text, mentionUserIds),
       operatorIds: gate.operatorIds,
+      waitsOn: createDeskWaitsOn({
+        rosterPath: config.boardRosterPath,
+        sessions: () => registry.list(),
+        log: note,
+      }),
       now: Date.now,
       log: note,
     });
