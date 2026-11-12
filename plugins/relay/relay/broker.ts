@@ -16,8 +16,11 @@ import type { PermissionVerdict } from "./permission.ts";
  * Who wrote an inbound message, as the broker names them, how many messages the text gathers when
  * the broker's response gate delivered several as one, and the files the broker saved from those
  * messages, as absolute paths in message order. Each field is absent when the broker's event did
- * not carry it in its shape, which is how a broker that predates attribution speaks and how one
- * delivering a single message does.
+ * not carry it, which is how a broker that predates attribution speaks and how one delivering a
+ * single message does, and absent too when the event carried it in a shape the relay does not
+ * accept, such as the wrong type, a count below one or a relative path. The class
+ * alone differs: it is absent only when the event carried no class at all, and it reads
+ * `participant` where the broker sent a value that is not one of the roster's two classes.
  */
 export type Attribution = {
   author?: string;
@@ -309,12 +312,24 @@ export function createBrokerClient(options: BrokerClientOptions): BrokerClient {
     if (fields.type !== "message") return;
     if (typeof fields.text !== "string" || typeof fields.chatId !== "string") return;
     // Carried when present and left out when not, so an older broker's event, which names no
-    // author, is still delivered rather than refused. A class the roster does not have is left out
-    // too, so the envelope never names a third one.
+    // author, is still delivered rather than refused. A field the broker did not send is absent,
+    // and so is a field in a shape the relay does not accept.
     const attribution: Attribution = {};
     if (typeof fields.author === "string") attribution.author = fields.author;
+    // The class is the exception, since it alone decides the standing an event reaches the session
+    // with, and the session reads an event with no class as the operator's. Only a line with no
+    // `senderClass` key is left without one, which after the parse is a value reading `undefined`.
+    // Any other value that is not one of the roster's two classes, a null or a number among them,
+    // is a class this relay does not know, and the event is marked `participant`. The log line is
+    // the trace of that, in fixed words: the value is a peer's text and never enters it.
     if (fields.senderClass === "operator" || fields.senderClass === "participant") {
       attribution.senderClass = fields.senderClass;
+    } else if (fields.senderClass !== undefined) {
+      attribution.senderClass = "participant";
+      log(
+        "relay: the broker named a sender class this relay does not know, so the event is " +
+          "delivered as a participant's",
+      );
     }
     // A count is a whole number of messages, at least one. Anything else is left out the way a
     // non-string author is: the message is still delivered, and the envelope claims no count.
