@@ -85,7 +85,7 @@ An epic starts only after the operator has agreed its brief in the seat's thread
 
 Adding a persona is the coordinator's act, on the grounds the coordinator skill states, and a yes the operator gives in the seat's thread is not among them. So that yes starts nothing, and the seat tells the operator that the add waits on his word in the coordinator's thread.
 
-The coordinator answers the seat's record once the add is made or refused, and tells the seat when that persona's goal completes, as the coordinator skill states. The seat marks the epic `running` and names its persona on an answer that the add was made, and on a refusal leaves it `briefed` and tells the operator, with any reason the coordinator gave. It marks the epic `done` on the report that the goal completed, and records the turns the coordinator's record names. That count runs from the persona's seed or its last resume, so it is a floor on what the epic cost and not its total.
+The coordinator answers the seat's record once the add is made or refused, and tells the seat when that persona's goal completes, as the coordinator skill states. The seat marks the epic `running` and names its persona on an answer that the add was made, and on a refusal leaves it `briefed` and tells the operator, with any reason the coordinator gave. It marks the epic `done` on the report that the goal completed, and records the turns the coordinator's record names. That count runs from the persona's seed, its last resume or the start that gave its goal a budget, so it is a floor on what the epic cost.
 
 ## Changing a Running Epic
 

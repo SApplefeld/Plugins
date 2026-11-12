@@ -2345,8 +2345,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
     // [QUEUE] record started, the same turns that resume an awaiting entry
     // and the gate that decides them. The root returns to pending, never
     // active, since only a leaf is active; its count restarts against the
-    // same budget, the entries the block paused return to pending, and its
-    // blocking asks are lifted as a resumed entry's are.
+    // budget the root carries at the release, which a start that adopted a
+    // roster edit may have changed since the block, the entries the block
+    // paused return to pending, and its blocking asks are lifted as a
+    // resumed entry's are. A root whose budget such a start removed carries
+    // none, so the release writes no count and says so.
     const budgetRoot = nodeId
       ? sess.state.goals.find((g) => g.id === nodeId && g.parentId === null && g.status === "blocked" && g.blockedReason === TURN_BUDGET_REASON)
       : undefined;
@@ -2357,11 +2360,12 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         return { deny: AWAITING_YES_RESUME_REFUSED_TEXT };
       }
       const liftedAt = Date.now();
-      const budget = budgetRoot.turnBudget ?? 0;
+      const budget = budgetRoot.turnBudget;
       const spent = budgetRoot.turnsSpent ?? 0;
       budgetRoot.status = "pending";
       budgetRoot.blockedReason = undefined;
-      budgetRoot.turnsSpent = 0;
+      if (budget === undefined) delete budgetRoot.turnsSpent;
+      else budgetRoot.turnsSpent = 0;
       budgetRoot.updatedAt = liftedAt;
       let returned = 0;
       for (const g of sess.state.goals) {
@@ -2378,11 +2382,11 @@ export async function serveToolCall(ctx: ToolCallContext, e: ToolCallInput): Pro
         timestamp: liftedAt,
         loop: "goal",
         action: "resume",
-        detail: `Root ${budgetRoot.id} resumed (blocked: ${TURN_BUDGET_REASON}, ${spent} of ${budget} turns; turn budget restarted, ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending)`,
+        detail: `Root ${budgetRoot.id} resumed (blocked: ${TURN_BUDGET_REASON}, ${budget === undefined ? "the root carries no turn budget now" : `${spent} of ${budget} turns; turn budget restarted`}, ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending)`,
       });
       sess.state.updatedAt = liftedAt;
       const rootWritten = await persistAnswering(ctx, "goal_resume", budgetRoot.id);
-      const rootResumed = `Resumed root ${budgetRoot.id} "${budgetRoot.title}". Turn budget restarted: ${budget} turns again. ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending; the controller's next tick starts one.`;
+      const rootResumed = `Resumed root ${budgetRoot.id} "${budgetRoot.title}". ${budget === undefined ? "The root carries no turn budget now, so no count restarts." : `Turn budget restarted: ${budget} turns again.`} ${returned} paused ${returned === 1 ? "entry" : "entries"} returned to pending; the controller's next tick starts one.`;
       return { result: typeof rootWritten === "boolean" ? rootResumed : rootResumed + goalWriteFailedText(rootWritten.failed, false) };
     }
     // While the turn budget blocks the root, no other entry resumes, the

@@ -197,7 +197,9 @@ export interface GoalNode {
   turnBudget?: number; // root only: the completed turns the goal may spend
                        // before the root blocks with "Turn budget reached"
   turnsSpent?: number; // root only: the completed turns counted against
-                       // turnBudget since the seed or the last goal_resume
+                       // turnBudget since the seed, the last goal_resume or
+                       // the start that adopted the root's first budget
+                       // from the roster
   askedBy?: string; // root only: the author the channel envelope named on the
                     // turn goal_create ran in. Absent where the root came from
                     // any other turn or the envelope named no author. The

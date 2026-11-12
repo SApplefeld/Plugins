@@ -100,7 +100,7 @@ import {
 } from "./commons";
 import type { CommonsStore } from "./commons";
 import type { InboxRecord } from "./operator";
-import { DONE_HOLD_REASON, holdsForGoalDone, readGoalFile, retireRecordText, seedDecision, seedRootFrom } from "./goal-persona";
+import { DONE_HOLD_REASON, holdsForGoalDone, readGoalFile, retireRecordText, rosterDifference, seedDecision, seedRootFrom } from "./goal-persona";
 import {
   claimReaderRole,
   mayReachPersona,
@@ -3532,7 +3532,14 @@ const noteCompletionShape = (site: string, value: unknown): void => {
 // a finished tree copies the tree to the history file first, as
 // goal_create does, and a copy that cannot be written refuses the seed
 // and leaves the tree standing; its open asks close as superseded, the
-// way goal_create closes them.
+// way goal_create closes them. An adoption writes the file's done
+// statements and turn budget onto the open root and logs goal_adopted. It
+// keeps the count of a root that already carried a budget, starts the count
+// at zero where the file gives the root its first one, and removes both
+// fields where the file carries none, and stamps the root's updatedAt. It
+// changes nothing else: the root's status and blocked reason, the tree and
+// the asks stand, and no history line is written. Its decision carries
+// counts and budgets alone, so no roster text reaches the log.
 const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean): Promise<void> => {
   const read = await readGoalFile(hostOf(dp), goalFile);
   const now = Date.now();
@@ -3546,6 +3553,29 @@ const seedGoalFromFile = async (dp: any, goalFile: string, firstLaunch: boolean)
     return;
   }
   const decision = seedDecision(sess.state, read.block, firstLaunch);
+  const held = sess.state.goals.find((g) => g.parentId === null);
+  if (decision === "adopt" && held) {
+    const differs = rosterDifference(held, read.block);
+    const countBefore = Array.isArray(held.doneWhen) ? held.doneWhen.length : 0;
+    const budgetBefore = held.turnBudget;
+    held.doneWhen = [...read.block.done];
+    if (read.block.turns !== undefined) {
+      if (budgetBefore === undefined) held.turnsSpent = 0;
+      held.turnBudget = read.block.turns;
+    } else {
+      delete held.turnBudget;
+      delete held.turnsSpent;
+    }
+    held.updatedAt = now;
+    sess.state.updatedAt = now;
+    sess.state.decisions.push({
+      timestamp: now,
+      loop: "goal",
+      action: "goal_adopted",
+      detail: `adopt: root ${held.id} adopted from ${goalFile}: statements ${differs.statements ? "changed" : "unchanged"}, ${countBefore} before and ${held.doneWhen.length} after; budget ${differs.budget ? "changed" : "unchanged"}, ${budgetBefore ?? "none"} before and ${held.turnBudget ?? "none"} after`,
+    });
+    return;
+  }
   if (decision !== "seed" && decision !== "reseed-complete") {
     sess.state.decisions.push({
       timestamp: now,
@@ -6248,8 +6278,12 @@ export const register: Register = async (on, options) => {
     // The goal persona's seed. The owner reads goal.json at every start and
     // seedDecision says what the read does: a root planted at the
     // first-launch branch above, a finished tree replaced as goal_create
-    // replaces one, or nothing, with the reason logged: skip-same, skip-live,
-    // or skip-no-root for a later start whose stored state holds no root.
+    // replaces one, an open roster root taking the file's done statements
+    // and turn budget where its objective is the file's and either differs,
+    // logged as goal_adopted, or nothing, with the reason logged: skip-same,
+    // skip-live, or skip-no-root for a later start whose stored state holds
+    // no root. An adoption that gives the root its first budget starts its
+    // turn count at zero, and any other adoption keeps the count.
     // A reader never seeds, a file that cannot be read or that goalProblem
     // refuses seeds nothing, and no throw here reaches the start. The seed
     // opens no turn: a seeded root with no entries is a planner's root,

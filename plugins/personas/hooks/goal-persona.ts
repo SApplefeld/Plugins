@@ -90,24 +90,51 @@ function safeText(text: string): string {
 // seeds nothing, whatever left the tree empty: a roster edit onto a
 // standing persona with no tree, or a start that could not read the store
 // and saved its default state once the store healed.
-// `skip-same`: the root's objective is the file's, live or complete, since a
-// standing persona restarts after every completion and must not run the same
-// goal twice. The two are compared under the fold seedRootFrom stores, so a
-// root seeded from the file matches the file's raw text, and so does a root
-// stored raw.
+// `skip-same`: the root's objective is the file's and the root takes nothing
+// from the file: nothing an adoption would write differs, or the root is
+// complete or abandoned, or its source is not roster. A finished root stays
+// finished, since a standing persona restarts after every completion and
+// must not run the same goal twice. The two objectives are compared under
+// the fold seedRootFrom stores, so a root seeded from the file matches the
+// file's raw text, and so does a root stored raw.
+// `adopt`: the root's objective is the file's, the root is open and of
+// source roster, and the file's done statements or turn budget differ from
+// the root's, so the root takes both from the file and keeps its tree, its
+// status and any block it is under. This is how an edit of the roster
+// entry reaches a goal the persona already holds. A complete or abandoned
+// root and a root goal_create made take nothing and read skip-same. An
+// adoption that gives a root its first budget starts turnsSpent at zero,
+// the third start of that count beside the seed and goal_resume.
 // `reseed-complete`: the root is complete or abandoned and the file names
 // another goal, which replaces the finished tree as goal_create does.
-// `skip-live`: the root is open and the file differs, which the operator
-// replaces with goal_create.
-export type SeedDecision = "seed" | "reseed-complete" | "skip-live" | "skip-same" | "skip-no-root";
+// `skip-live`: the root is open and the objective differs, which the
+// operator replaces with goal_create.
+export type SeedDecision = "seed" | "reseed-complete" | "skip-live" | "skip-same" | "skip-no-root" | "adopt";
+
+// Which of the two things an adoption writes differ between the root and the
+// file. The statements are compared as stored, element by element and in
+// order, and a root with no doneWhen reads as an empty list. The budget
+// differs where the file's turns is not the root's turnBudget, a value
+// missing on either side included.
+export function rosterDifference(root: GoalNode, block: GoalBlock): { statements: boolean; budget: boolean } {
+  const stored = Array.isArray(root.doneWhen) ? root.doneWhen : [];
+  return {
+    statements: stored.length !== block.done.length || stored.some((statement, i) => statement !== block.done[i]),
+    budget: root.turnBudget !== block.turns,
+  };
+}
 
 export function seedDecision(state: AgentState, block: GoalBlock, firstLaunch: boolean): SeedDecision {
   if (firstLaunch) return "seed";
   const root = state.goals.find((g) => g.parentId === null);
   if (!root) return "skip-no-root";
-  if (safeText(root.objective) === safeText(block.objective)) return "skip-same";
-  if (root.status === "complete" || root.status === "abandoned") return "reseed-complete";
-  return "skip-live";
+  const finished = root.status === "complete" || root.status === "abandoned";
+  if (safeText(root.objective) === safeText(block.objective)) {
+    if (finished || root.source !== ROSTER_SOURCE) return "skip-same";
+    const differs = rosterDifference(root, block);
+    return differs.statements || differs.budget ? "adopt" : "skip-same";
+  }
+  return finished ? "reseed-complete" : "skip-live";
 }
 
 // The root a block seeds: the shape goal_create builds, with the statements
@@ -191,11 +218,11 @@ export function turnBudgetResumeRefusedText(rootId: string): string {
 // The record the completed root of a goal-lifetime persona sends the
 // coordinator persona, whose fleet_retire disables the entry in the roster.
 // A root carrying a turn budget ends the record on the turns it spent of that
-// budget since its seed or its last goal_resume, the sentence the coordinator
-// passes to the roadmap persona. Each goal_resume restarts the count, so the
-// figure is a floor on what the goal cost rather than its total. A root with
-// no budget adds nothing.
+// budget since its seed, its last goal_resume or the start whose adoption gave
+// it that budget, the sentence the coordinator passes to the roadmap persona.
+// Each goal_resume restarts the count, so the figure is a floor on what the
+// goal cost rather than its total. A root with no budget adds nothing.
 export function retireRecordText(persona: string, root: GoalNode): string {
-  const spent = typeof root.turnBudget === "number" ? ` It spent ${root.turnsSpent ?? 0} of ${root.turnBudget} turns since its seed or last resume.` : "";
+  const spent = typeof root.turnBudget === "number" ? ` It spent ${root.turnsSpent ?? 0} of ${root.turnBudget} turns since its seed, its last resume or the start that gave it its budget.` : "";
   return `[RETIRE] Persona '${safeText(persona)}' completed its goal "${safeText(root.objective)}" and its roster entry carries lifetime goal, so retire the entry with fleet_retire. Its store, memory and run directory stay.${spent}`;
 }

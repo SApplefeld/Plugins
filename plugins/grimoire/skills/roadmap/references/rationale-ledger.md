@@ -420,13 +420,13 @@ Written by `docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md` section 1 on 
 - passage: The coordinator answers the seat's record once the add is made or refused, and tells the seat when that persona's goal completes, as the coordinator skill states.
 
 ### C046
-- key: Mark the epic `running` and name its persona on the coordinator's answer to the add, leave it `briefed` and tell the operator, with any reason given, on a refusal, and mark it `done` and record the turns spent, a count since the seed or the last resume, on its report of a completed goal.
+- key: Mark the epic `running` and name its persona on the coordinator's answer to the add, leave it `briefed` and tell the operator, with any reason given, on a refusal, and mark it `done` and record the turns spent, a count since the seed, the last resume or the start that gave the goal a budget, on its report of a completed goal.
 - class: rule
 - source: plugins/grimoire/skills/roadmap/SKILL.md:88
-- provenance: docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md section 1 2026-11-12; Section 3 of the same plan, whose `retireRecordText` sentence names the turns spent of the budget; amended 2026-11-12 by the plan author's ruling in record DEV-GRIMOIRE-e52f2f77-9ef0-4936-9244-154fd31ddc89-17, since `goal_resume` restarts the count, so the record holds the turns since the seed or the last resume.
+- provenance: docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md section 1 2026-11-12; Section 3 of the same plan, whose `retireRecordText` sentence names the turns spent of the budget; amended 2026-11-12 by the plan author's ruling in record DEV-GRIMOIRE-e52f2f77-9ef0-4936-9244-154fd31ddc89-17, since `goal_resume` restarts the count, so the record holds the turns since the seed or the last resume; Roster Edit Reaches a Held Goal adds the budget adoption as a third start.
 - verdict: keep
 - reason: Each status moves on the event C014 names, and the turns recorded here are what the next epic's budget rests on (C038). A refused add leaves the brief agreed and the persona absent, which is the `briefed` state C014 names, and the operator hears of it, with any reason the coordinator gave, because the add was his to give.
-- passage: The seat marks the epic `running` and names its persona on an answer that the add was made, and on a refusal leaves it `briefed` and tells the operator, with any reason the coordinator gave. It marks the epic `done` on the report that the goal completed, and records the turns the coordinator's record names. That count runs from the persona's seed or its last resume, so it is a floor on what the epic cost and not its total.
+- passage: The seat marks the epic `running` and names its persona on an answer that the add was made, and on a refusal leaves it `briefed` and tells the operator, with any reason the coordinator gave. It marks the epic `done` on the report that the goal completed, and records the turns the coordinator's record names. That count runs from the persona's seed, its last resume or the start that gave its goal a budget, so it is a floor on what the epic cost.
 
 ### C047
 - key: Send a goal persona no direction.
@@ -479,7 +479,7 @@ Written by `docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md` section 1 on 
 - source: plugins/grimoire/skills/roadmap/SKILL.md:94
 - provenance: docs/plans/claude-kit_roadmap-seat-charter_spec_v1.md section 1 2026-11-12; the plan's Approach, change 3, and its Out of Scope, which leaves a roster edit that reaches a held goal to the next plan, Roster Edit Reaches a Held Goal.
 - verdict: keep
-- reason: On the trunk `seedDecision` returns `skip-same` for a held goal with an unchanged objective, so an edit of the statements alone reaches nothing, and the next plan changes that and rewrites the passage. The pointer is true before and after.
+- reason: A held goal takes an edit of its statements at the next start, and the README passage states what it reaches, so the pointer stays true.
 - passage: `plugins/personas/README.md` states under The seeded root what that edit reaches in a goal already held.
 
 ### C053
