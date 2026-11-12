@@ -8084,26 +8084,39 @@ export const register: Register = async (on, options) => {
   });
 
   // --- prompt.context, prompt.attachment: redactor work and the queued-line note, .catch fails closed ---
-  on("prompt.context", async ($, e, next) => {
-    const r = await next(e);
-    if (!redactorOn) return r;
-    const scrubbed = scrubContextBlocks(r, next.budget.remainingMs);
-    logDetectorNote($);
-    return scrubbed;
-  }).catch(async ($, e, next) => {
-    const r = await next(e);
-    return redactorOn ? withheldContextBlocks(r) : r;
-  });
-  on("prompt.attachment", async ($, e, next) => {
-    // Read before the chain, so the line is read off the text as the engine
-    // hands it, ahead of the redactor's scrub of what comes back.
-    noteQueuedOperatorLine(e);
-    const r = await next(e);
-    if (!redactorOn) return r;
-    const scrubbed = scrubAttachment(e, r, next.budget.remainingMs);
-    logDetectorNote($);
-    return scrubbed;
-  }).catch(async ($, e, next) => (redactorOn ? ATTACHMENT_WITHHELD : next(e)));
+  // Each is registered only where it has work, so a session where it has
+  // none carries no hook on the event. prompt.context runs the redactor
+  // alone, so it is registered only where the redactor is on.
+  // prompt.attachment runs the redactor and also notes an operator's queued
+  // line for the persona's owner, so it is registered where the redactor is
+  // on or the arming reads `owner`, whatever the redactor's switch reads
+  // there: only an `owner` session can own a persona, and with the redactor
+  // off the note is the hook's one piece of work. The condition reads the
+  // arming value since ownership is settled after registration and can
+  // change during the session, while the arming value is fixed here.
+  if (redactorOn) {
+    on("prompt.context", async ($, e, next) => {
+      const r = await next(e);
+      const scrubbed = scrubContextBlocks(r, next.budget.remainingMs);
+      logDetectorNote($);
+      return scrubbed;
+    }).catch(async ($, e, next) => {
+      const r = await next(e);
+      return withheldContextBlocks(r);
+    });
+  }
+  if (redactorOn || arming === "owner") {
+    on("prompt.attachment", async ($, e, next) => {
+      // Read before the chain, so the line is read off the text as the engine
+      // hands it, ahead of the redactor's scrub of what comes back.
+      noteQueuedOperatorLine(e);
+      const r = await next(e);
+      if (!redactorOn) return r;
+      const scrubbed = scrubAttachment(e, r, next.budget.remainingMs);
+      logDetectorNote($);
+      return scrubbed;
+    }).catch(async ($, e, next) => (redactorOn ? ATTACHMENT_WITHHELD : next(e)));
+  }
 
   // --- tool.check: the memq grant, under the guards option in every tier ---
   on("tool.check", async ($, e, next) => memqGrantCheck($, e, next, guardsOption));
@@ -8367,25 +8380,30 @@ export const register: Register = async (on, options) => {
   // --- The relay adapter (hooks/relay-adapter.ts) ---
   // Four classic events, posted to the Channels broker as its settings hooks
   // post them, only where the relayAdapter option reads `live` and the
-  // session carries a process token. Registered in every arming tier, since
-  // a session under the `plugin` hook owner is announced by nothing else, and
-  // each hook returns next(e) whatever its post did. `$` reaches the adapter
-  // only through hostOf, as every other module's host does.
+  // session carries a process token. Registered only where the option reads
+  // `live`, in any arming tier, since a session under the `plugin` hook owner
+  // is announced by nothing else; with the option off the adapter posts
+  // nothing, so the session carries no hook on the four events. Each hook
+  // returns next(e) whatever its post did. `$` reaches the adapter only
+  // through hostOf, as every other module's host does.
   const relayAdapter = relayAdapterOf(cfg.relayAdapter);
-  on("classic.SessionStart", async ($, e, next) => relayAdapter.hook(hostOf($), "SessionStart", e, next));
-  on("classic.UserPromptSubmit", async ($, e, next) => relayAdapter.hook(hostOf($), "UserPromptSubmit", e, next));
-  on("classic.PostToolUse", async ($, e, next) => relayAdapter.hook(hostOf($), "PostToolUse", e, next));
-  on("classic.Stop", async ($, e, next) => relayAdapter.hook(hostOf($), "Stop", e, next));
+  if (relayAdapter.option === "live") {
+    on("classic.SessionStart", async ($, e, next) => relayAdapter.hook(hostOf($), "SessionStart", e, next));
+    on("classic.UserPromptSubmit", async ($, e, next) => relayAdapter.hook(hostOf($), "UserPromptSubmit", e, next));
+    on("classic.PostToolUse", async ($, e, next) => relayAdapter.hook(hostOf($), "PostToolUse", e, next));
+    on("classic.Stop", async ($, e, next) => relayAdapter.hook(hostOf($), "Stop", e, next));
+  }
 
-  // An "off" session installs nothing past this point: fourteen hooks and
-  // one timer. The hooks are the ten module events above, session.start,
-  // session.compact, turn.start, tool.call, prompt.submit, agent.spawn,
-  // prompt.context, prompt.attachment, tool.check and turn.complete, whose
-  // off branches run the guards, the memq grant, the after hooks, the
-  // recognition block, the redactor and the compaction pass, and the relay
-  // adapter's four classic events; turn.complete's closes the turn the
-  // pass's idle test reads. The timer is the compaction pass's, started in
-  // session.start's off branch.
+  // An "off" session installs nothing past this point: its hooks and one
+  // timer. Eight hooks are installed whatever the switches read:
+  // session.start, session.compact, turn.start, tool.call, prompt.submit,
+  // agent.spawn, tool.check and turn.complete, whose off branches run the
+  // guards, the memq grant, the after hooks, the recognition block, the
+  // redactor and the compaction pass; turn.complete's closes the turn the
+  // pass's idle test reads. The redactor's switch on adds two,
+  // prompt.context and prompt.attachment, and the relayAdapter option
+  // reading `live` adds the relay adapter's four classic events. The timer
+  // is the compaction pass's, started in session.start's off branch.
   if (arming === "off") return;
 
   // A full model switch forfeits the prompt cache (hooks/cache-clock.ts). The
